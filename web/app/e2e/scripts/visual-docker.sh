@@ -44,6 +44,23 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 app_dir="web/app"
 
+# The published image (ci-image.yml) is amd64-only. On a non-amd64 host
+# (Apple Silicon) `docker run`/`docker build` would otherwise silently pick
+# whatever the daemon defaults to — an arm64 build renders fonts differently
+# than CI's amd64, reintroducing the exact baseline-diffs-that-look-like-UI-
+# regressions problem this recipe exists to avoid, or (for `docker run`
+# against the published tag) just fails outright with a "no matching
+# manifest" error. Force amd64 explicitly instead of trusting the default.
+platform_flag=()
+host_arch="$(uname -m)"
+case "$host_arch" in
+  x86_64 | amd64) ;;
+  *)
+    platform_flag=(--platform linux/amd64)
+    echo "Host arch is ${host_arch} — using --platform linux/amd64 so rendering matches CI"
+    ;;
+esac
+
 # Resolved by the same script CI uses (scripts/ci-image.sh) so the renderer
 # that produces committed baseline PNGs and the renderer that checks them in
 # CI (e2e-mock.yml's visual project) are always the same image — a mismatch
@@ -66,6 +83,7 @@ if ! docker manifest inspect "${image}" >/dev/null 2>&1; then
     build_arg_flags+=(--build-arg "$line")
   done <<<"$build_args"
   docker build \
+    "${platform_flag[@]}" \
     -f "$repo_root/docker/ci/Dockerfile" \
     --target e2e \
     "${build_arg_flags[@]}" \
@@ -86,6 +104,7 @@ echo "Using image ${image}"
 # native deps like esbuild are platform-specific and that would break the
 # host toolchain afterwards.
 docker run --rm \
+  "${platform_flag[@]}" \
   --add-host=host.docker.internal:host-gateway \
   -v "${repo_root}:/repo" \
   -v "/repo/${app_dir}/node_modules" \

@@ -97,6 +97,18 @@ if [ -n "$db_port" ] && [ "$db_port" != "$compose_port" ]; then
   warn "DB_PORT ($db_port) != compose exposed port CHATAPP_DB_EXPOSED_PORT ($compose_port)"
 fi
 
+# --- migrations ---
+# This script never connects to the database, so it cannot tell whether the
+# schema is already migrated — AUTO_MIGRATE=false is entirely normal against
+# an existing DB. It is only a trap against a *fresh* one: cmd/api-server
+# skips migrations and then dies on boot with `relation "..." does not
+# exist` instead of a clear message, which is what a first `make run-mock`
+# against a just-created `make db-up` volume hits. Warn, don't fail — this
+# script has no way to distinguish the two cases.
+if [ "$(envval AUTO_MIGRATE)" != "true" ]; then
+  warn "AUTO_MIGRATE is not \"true\" — fine against an already-migrated DB, but the first run against a fresh one (e.g. right after 'make db-up') will fail to boot with a 'relation ... does not exist' error. Set AUTO_MIGRATE=true in .env for that first run."
+fi
+
 # --- secrets ---
 # Mirrors internal/auth.ValidateSecret and datastore.ValidateTokenEncryptionSecret
 # exactly: the server hard-fails at boot on any of these conditions, so this
