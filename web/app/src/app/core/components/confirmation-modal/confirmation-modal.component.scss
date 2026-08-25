@@ -1,0 +1,41 @@
+:host {
+  display: block;
+}
+
+// The global confirmation dialog (e.g. the unsaved-changes guard) must sit
+// above every edit surface, including bespoke overlays that set a high z-index
+// of their own (mode editor uses 1200, skills editor 80). The shared `ui-modal`
+// defaults to z-50, so scope an elevated tier to this component's instance only.
+:host ::ng-deep .ui-modal {
+  z-index: 2000;
+}
+
+// Animation for modal appearance
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+:host .modal-backdrop {
+  animation: fadeIn 0.2s ease-out;
+}
+
+:host .modal-content {
+  animation: slideUp 0.2s ease-out;
+}
+

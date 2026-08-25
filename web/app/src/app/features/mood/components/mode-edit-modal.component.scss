@@ -1,0 +1,306 @@
+.mode-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 58%);
+  display: grid;
+  place-items: center;
+  z-index: 1200;
+  padding: 16px;
+}
+
+.mode-modal {
+  position: relative;
+  width: min(718px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  border: 1px solid var(--color-border-base);
+  border-radius: 12px;
+  background: var(--color-surface-card);
+  padding: 20px 24px 0;
+  display: grid;
+  gap: 18px;
+}
+
+.mode-modal__intro {
+  border-bottom: 1px solid var(--color-border-base);
+  padding-bottom: 14px;
+  padding-top: 6px;
+}
+
+.mode-modal__kicker {
+  color: var(--color-accent-config, var(--color-accent));
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+}
+
+.mode-modal__name-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.mode-modal__name-input {
+  background: transparent;
+  border-radius: 0;
+  border-width: 0 0 1px;
+  border-color: var(--color-accent-config, var(--color-accent));
+  font-size: 30px;
+  font-weight: 600;
+  height: 51px;
+  line-height: 1.1;
+  padding: 2px 0 6px;
+}
+
+.mode-modal__name-input:focus {
+  border-color: var(--color-accent-config, var(--color-accent));
+  outline: none;
+}
+
+.mode-modal__close-btn {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--color-border-base);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  width: 28px;
+}
+
+.mode-modal__close-btn:hover,
+.mode-modal__close-btn:focus-visible {
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+}
+
+.mode-modal label,
+.mode-modal h3 {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+
+.mode-modal textarea {
+  width: 100%;
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-input);
+  color: var(--color-text-primary);
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.mode-modal select {
+  width: 100%;
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-input);
+  color: var(--color-text-primary);
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.mode-modal textarea:focus {
+  border-color: var(--color-border-hover);
+  outline: 2px solid color-mix(in srgb, var(--color-focus-ring) 30%, transparent);
+  outline-offset: 1px;
+}
+
+.mode-modal select:focus {
+  border-color: var(--color-border-hover);
+  outline: 2px solid color-mix(in srgb, var(--color-focus-ring) 30%, transparent);
+  outline-offset: 1px;
+}
+
+.mode-modal__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--color-border-base);
+  margin: 0 -24px;
+  padding: 12px 22px;
+}
+
+.mode-modal__error {
+  margin: 0;
+  color: var(--color-danger);
+}
+
+.mode-modal__loading {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.mode-modal__section {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.mode-modal__section-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.mode-modal__section-count {
+  color: var(--color-accent-config, var(--color-accent));
+  font-size: 11px;
+}
+
+.mode-modal__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.mode-modal__chips > span {
+  border: 1px solid var(--color-border-base);
+  border-radius: 999px;
+  background: var(--color-surface-card);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px 4px 3px 9px;
+}
+
+.mode-modal__chips span button {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.mode-modal__chip-label {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+}
+
+.mode-modal__helper-text {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
+.mode-btn {
+  border-radius: 8px;
+  border: 1px solid var(--color-border-base);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 14px;
+}
+
+.mode-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.mode-btn--secondary {
+  background: var(--color-surface-base);
+  color: var(--color-text-secondary);
+}
+
+.mode-btn--secondary:hover,
+.mode-btn--secondary:focus-visible {
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+}
+
+.mode-btn--primary {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 60%, var(--color-border-base));
+  color: var(--color-accent);
+  font-weight: 700;
+  padding: 7px 18px;
+}
+
+.mode-btn--danger {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-danger);
+}
+
+.mode-modal__jobs-row {
+  align-items: center;
+  border: 1px solid var(--color-border-base);
+  border-radius: 8px;
+  background: var(--color-surface-card);
+  color: var(--color-text-secondary);
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 14px;
+}
+
+.mode-modal__jobs-row > span:first-child,
+.mode-modal__jobs-toggle-wrap > span {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mode-modal__jobs-toggle-wrap {
+  align-items: center;
+  display: inline-flex;
+  gap: 10px;
+}
+
+.mode-modal__toggle {
+  background: var(--color-border-base);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  height: 20px;
+  padding: 2px;
+  position: relative;
+  width: 36px;
+}
+
+.mode-modal__toggle span {
+  background: var(--color-surface-base);
+  border-radius: 50%;
+  display: block;
+  height: 16px;
+  transition: transform 160ms ease;
+  width: 16px;
+}
+
+.mode-modal__toggle--on {
+  background: var(--color-accent-config, var(--color-accent));
+}
+
+.mode-modal__toggle--on span {
+  transform: translateX(16px);
+}
+
+.mode-modal__footer-actions {
+  display: inline-flex;
+  gap: 8px;
+}

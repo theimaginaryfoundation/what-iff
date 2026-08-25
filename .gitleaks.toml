@@ -1,0 +1,38 @@
+# gitleaks config for what-iff. Extends the built-in default ruleset; the
+# local additions are content-regex allowlist entries for known-benign
+# matches (documentation example JWTs, empty-value env-var clearing in the
+# hermetic test target). Deliberately regex-only, not path-based — a
+# path-based allowlist entry would silence every future finding anywhere in
+# that file, not just the one known-benign line.
+#
+# Referenced from scripts/check-public-hygiene.sh (Layer A). Do not widen
+# this allowlist to cover a real finding — narrow the finding instead.
+#
+# Validated against gitleaks v8.30.1's default ruleset (the version pinned
+# in pr-validation.yml and expected locally). Re-check every allowlist entry
+# still matches the intended finding — not something broader the rule
+# changed to catch — when bumping the pinned gitleaks version.
+title = "what-iff"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known-benign matches: doc example JWTs, hermetic-test env clearing"
+# Default regexTarget is the captured "secret", not the full match — match
+# against the full line instead so these stay tied to their real context.
+regexTarget = "match"
+regexes = [
+  # Truncated header-only example JWTs in API docs — never a real signed
+  # token (they literally end in "...").
+  '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.\.\.''',
+  # Makefile's test-ci target blanking unused provider keys to empty string
+  # so the hermetic suite never sees a real one.
+  '''GEMINI_API_KEY= MISTRAL_API_KEY=''',
+  # scripts/mock-e2e.sh comment naming env vars that must not leak in, not
+  # a value.
+  '''DB_SECRET_ARN, OTEL/S3/Cognito''',
+  # internal/auth/secret_test.go's synthetic "this is a valid-shaped secret"
+  # fixture — asserts ValidateSecret accepts it, not a real credential.
+  '''kx8f2m9qz3vw7n4jr6bt1yc5hd0lp8se''',
+]

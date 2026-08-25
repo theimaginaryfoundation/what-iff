@@ -1,0 +1,112 @@
+---
+globs: web/app/e2e/**/*.ts
+alwaysApply: false
+---
+# Frontend E2E (Playwright)
+
+Browser-level tests against the real Angular app, in
+`web/app/e2e`. Full detail lives in
+`web/app/e2e/README.md` — this rule is a summary, not a
+duplicate. All commands run via the repo's `@playwright/test` devDependency
+(`npx playwright` / the npm scripts) — never a separately pinned or global
+Playwright install.
+
+## Layout
+
+```
+e2e/
+  poms/       # Page Object Models — locators + interactions only, no assertions, no env awareness
+  fixtures/   # test.extend fixtures (testUser, userWithPersonality, seed, apiClient); api.ts holds raw HTTP calls
+  sdk/        # openapi-typescript-generated client (npm run sdk:generate)
+  tests/
+    functional/   # per-feature specs: auth/, personality/, profile/
+    journeys/     # cross-cutting flows
+    visual/       # toHaveScreenshot specs + committed __screenshots__ baselines
+    a11y/         # axe-core scans
+  scripts/
+    visual-docker.sh   # runs tests/visual inside the Playwright Docker image
+  playwright.config.base.ts   # shared settings + the three browser projects
+  playwright.config.{mock-llm,local-llm}.ts
+```
+
+## Which config
+
+**The config/backend/tag matrix lives in one place:
+`web/app/e2e/README.md` ("Configs"), with the reasoning in
+`e2e/docs/what-runs-where.md`. Read it there — do not restate it here.**
+
+This section used to carry its own copy of that table and it drifted, which is
+the argument for the rule: it listed a retired `@no-prod` tag no config
+honours, omitted tags configs actually exclude, and gave wrong guidance on
+`E2E_BASE_URL` / `E2E_API_BASE_URL`. Anyone following it would have set
+variables that override the correct values.
+
+The one thing worth stating here because it is not in the table: there is no
+root `playwright.config.ts` — always pass `--config` (the npm scripts do).
+
+## Backend prerequisites
+
+Local configs only start the Angular dev server, not the backend:
+
+```bash
+make db-up
+make dev-up   # or: make run-mock / make run-local
+```
+
+## Writing tests
+
+- POMs (`e2e/poms/`): locators + interactions only, **no assertions, no env
+  awareness**. Grow an existing POM rather than putting a raw locator in a
+  spec.
+- Locate by `aria-label`, role, or placeholder — the app has no
+  `data-testid` attributes.
+- Use the shared fixtures from `e2e/fixtures/index.ts` (`testUser`,
+  `userWithPersonality`, `seed`, `apiClient`) instead of bare
+  `@playwright/test`.
+- `e2e/fixtures/api.ts` is the only file allowed to hand-roll HTTP; new
+  endpoint calls should go through `e2e/sdk/` (regenerate with
+  `npm run sdk:generate` after an `openapi.yaml` change).
+- Run `npm run lint:e2e` before considering e2e work done.
+
+### POM, fixture and naming conventions
+
+**These live in one place: `web/app/e2e/README.md`, section
+"POM and fixture conventions". Read it before adding or changing a POM,
+fixture or spec — do not restate the rules here.**
+
+It covers: never naming a POM member after a Playwright API member; URL
+navigation as the default (`navigateTo()`) with `AppShell.clickThroughTo()`
+as the click-path alternative; POMs coming from fixtures rather than `new`;
+fixtures naming the identity they hand back; locators as constructor-assigned
+`readonly` fields; constructors that do nothing but assign; and — the one
+that bites hardest on deployed runs — **asserting only about entities your
+own test created, never about the account's list as a whole**.
+
+Three of those are enforced rather than trusted, all in `eslint.config.mjs`:
+a bare call statement in a POM constructor is an error, a `test.fixme` whose
+reason string cites no filed GitHub issue (`#nnn`) is an error, and
+`userWithPersonality` / `authenticatedPage` are exempt from `no-unused-vars`
+because naming a fixture is what runs it.
+
+### A test that fails because the product is broken
+
+File the bug first, then park the test on it with
+`test.fixme(true, '… — see #nnn')` — never delete the test, weaken the
+assertion to match the broken behaviour, or leave it failing. The full
+procedure, including why it is `fixme` and not `skip`, is in the README
+section "Parking a test on a filed bug".
+
+## Visual regression
+
+`tests/visual/` (tagged `@visual @mock-only`, Chromium-only) covers a
+handful of deterministic screens. **Baselines are only generated/updated
+inside the Playwright Docker container** — never via `--update-snapshots`
+on a host machine, since macOS/Linux font rasterization differs from CI:
+
+```bash
+npm run e2e:mock-llm:visual:docker         # check mode — what CI effectively runs
+npm run e2e:mock-llm:visual:docker:update  # regenerate baselines — commit these
+```
+
+`npm run e2e:mock-llm:visual` / `e2e:mock-llm:visual:update` are host-only diagnostic runs;
+never commit their output.

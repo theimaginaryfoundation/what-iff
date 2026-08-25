@@ -1,0 +1,260 @@
+<div class="chat-page">
+  <main class="chat-page__center" aria-label="Conversation">
+    @if (session.thread()) {
+      <header class="chat-page__title-bar">
+        <div class="chat-page__thread-meta">
+          <div class="chat-page__thread-meta-main">
+            <div
+              class="chat-page__personality-avatar"
+              aria-hidden="true"
+              [style.--personality-accent]="selectedPersonalityAccentColor() || 'var(--color-accent)'"
+              [style.--personality-accent-surface]="selectedPersonalityAccentSurface()"
+            >
+              <span class="chat-page__personality-avatar-main">
+                @if (selectedPersonalityAvatarUrl(); as avatarUrl) {
+                  @if (avatarUrl | authImage | async; as resolvedAvatarUrl) {
+                    @if (selectedPersonalityAvatarTransform(); as avatarTransform) {
+                      <span class="chat-page__personality-avatar-frame" [style.transform]="avatarTransform">
+                        <img class="chat-page__personality-avatar-frame-image" [src]="resolvedAvatarUrl" [alt]="selectedPersonalityName() || 'Personality avatar'" />
+                      </span>
+                    } @else {
+                      <img [src]="resolvedAvatarUrl" [alt]="selectedPersonalityName() || 'Personality avatar'" />
+                    }
+                  } @else {
+                    <span class="chat-page__personality-avatar-initials">{{ selectedPersonalityInitials() }}</span>
+                  }
+                } @else {
+                  <span class="chat-page__personality-avatar-initials">{{ selectedPersonalityInitials() }}</span>
+                }
+              </span>
+              <span class="chat-page__personality-avatar-popout">
+                @if (selectedPersonalityPortraitUrl(); as portraitUrl) {
+                  @if (portraitUrl | authImage | async; as resolvedPortraitUrl) {
+                    <img [src]="resolvedPortraitUrl" [alt]="selectedPersonalityName() || 'Personality avatar'" />
+                    <span class="chat-page__personality-avatar-popout-label">{{ selectedPersonalityName() || 'Assistant' }}</span>
+                  } @else {
+                    <span class="chat-page__personality-avatar-fallback">
+                      <span class="chat-page__personality-avatar-fallback-initials">{{ selectedPersonalityInitials() }}</span>
+                      <span class="chat-page__personality-avatar-fallback-name">{{ selectedPersonalityName() || 'Assistant' }}</span>
+                    </span>
+                  }
+                } @else {
+                  <span class="chat-page__personality-avatar-fallback">
+                    <span class="chat-page__personality-avatar-fallback-initials">{{ selectedPersonalityInitials() }}</span>
+                    <span class="chat-page__personality-avatar-fallback-name">{{ selectedPersonalityName() || 'Assistant' }}</span>
+                  </span>
+                }
+              </span>
+            </div>
+
+            <div class="chat-page__thread-meta-copy">
+          @if (editingThreadName()) {
+            <input
+              class="chat-page__thread-name-input"
+              [value]="threadNameDraft()"
+              (input)="threadNameDraft.set($any($event.target).value)"
+              (blur)="commitThreadRename($any($event.target).value)"
+              (keydown.enter)="commitThreadRename($any($event.target).value)"
+              (keydown.escape)="cancelThreadRename()"
+              aria-label="Rename chat"
+              autofocus
+            />
+          } @else {
+            <button
+              type="button"
+              class="chat-page__thread-name-trigger"
+              title="Click to rename"
+              aria-label="Rename chat"
+              (click)="startThreadRename()"
+            >
+              <h1>{{ session.thread()?.name }}</h1>
+              <span class="chat-page__thread-name-icon" aria-hidden="true">
+                <ui-edit-icon [size]="12" />
+              </span>
+            </button>
+          }
+          <button
+            type="button"
+            class="chat-page__personality-trigger"
+            [style.color]="selectedPersonalityAccentColor() || 'var(--color-text-muted)'"
+            [attr.aria-label]="personalityTriggerAriaLabel()"
+            (click)="openPersonaPicker('attach')"
+          >
+            {{ threadParticipantLabel() }}
+          </button>
+            </div>
+          </div>
+        </div>
+        <div class="chat-page__title-actions">
+          <button type="button" class="chat-page__export" (click)="exportActiveChat()" aria-label="Export thread">
+            <ui-file-icon [size]="12" />
+            <span>Export</span>
+          </button>
+          <button type="button" class="chat-page__close" (click)="closeActiveChat()" aria-label="Close thread">
+            <ui-x-icon [size]="14" />
+          </button>
+          <app-context-panel-toggle class="chat-page__context-toggle" (open)="openContextPanelMobile()" />
+        </div>
+        @if (session.error()) {
+          <p class="chat-page__error" role="alert">{{ session.error() }}</p>
+        }
+        @if (copyFeedback() || exportFeedback(); as status) {
+          <p class="chat-page__status" role="status" aria-live="polite">{{ status }}</p>
+        }
+      </header>
+      @if (threadSummary(); as summary) {
+        <button type="button" class="chat-page__summary-bar" (click)="openSummaryModal()">
+          <span class="chat-page__summary-label">Summary</span>
+          <span class="chat-page__summary-content">
+            <span class="chat-page__summary-text">{{ summary }}</span>
+            <span class="chat-page__summary-icon" aria-hidden="true">
+              <ui-chev-down-icon [size]="13" />
+            </span>
+          </span>
+        </button>
+      }
+
+      <section class="chat-page__body-row" aria-label="Conversation workspace">
+        <div class="chat-page__conversation-column">
+          <nav class="chat-page__context-rail" aria-label="Conversation context shortcuts">
+            <button
+              type="button"
+              title="Scratchpad"
+              aria-label="Open scratchpad"
+              [class.chat-page__context-rail-button--active]="contextPanel.visible() && contextPanel.activeTab() === 'scratchpad'"
+              [attr.aria-current]="(contextPanel.visible() && contextPanel.activeTab() === 'scratchpad') ? 'true' : null"
+              (click)="openContextPanel('scratchpad')"
+            >
+              <ui-note-icon [size]="14" />
+            </button>
+            <button
+              type="button"
+              title="Memories"
+              aria-label="Open memories"
+              [class.chat-page__context-rail-button--active]="contextPanel.visible() && contextPanel.activeTab() === 'memories'"
+              [attr.aria-current]="(contextPanel.visible() && contextPanel.activeTab() === 'memories') ? 'true' : null"
+              (click)="openContextPanel('memories')"
+            >
+              <ui-brain-icon [size]="14" />
+            </button>
+            <button
+              type="button"
+              title="Tools"
+              aria-label="Open tools"
+              [class.chat-page__context-rail-button--active]="contextPanel.visible() && contextPanel.activeTab() === 'tools'"
+              [attr.aria-current]="(contextPanel.visible() && contextPanel.activeTab() === 'tools') ? 'true' : null"
+              (click)="openContextPanel('tools')"
+            >
+              <ui-wrench-icon [size]="14" />
+            </button>
+            <button
+              type="button"
+              title="Context"
+              aria-label="Open context breakdown"
+              [class.chat-page__context-rail-button--active]="contextPanel.visible() && contextPanel.activeTab() === 'context'"
+              [attr.aria-current]="(contextPanel.visible() && contextPanel.activeTab() === 'context') ? 'true' : null"
+              (click)="openContextPanel('context')"
+            >
+              <ui-layers-icon [size]="14" />
+            </button>
+          </nav>
+
+          <app-message-list
+            [conversationId]="session.thread()?.id ?? null"
+            [groups]="groups()"
+            [checkpointMessageId]="checkpointMessageId()"
+            [hasMoreOlder]="session.hasMoreOlderMessages()"
+            [loadingOlder]="session.loadingOlderMessages()"
+            [assistantAvatarUrl]="selectedPersonalityAvatarUrl()"
+            [assistantAccentColor]="selectedPersonalityAccentColor()"
+            [assistantAccentSurface]="selectedPersonalityAccentSurface()"
+            [assistantVisualResolver]="assistantVisualForMessage"
+            [expressionsEnabled]="selectedPersonality()?.expressions_enabled ?? true"
+            [displayResolver]="session.getDisplayMessage.bind(session)"
+            [displayRevision]="session.getDisplayRevision()"
+            (copy)="copyMessage($event)"
+            (showContext)="openContextForMessage($event)"
+            (openToolCallDetail)="openToolCall($event)"
+            (retryUserMessage)="retryUserMessageFromList($event)"
+            (loadOlder)="session.loadOlderMessages()"
+          />
+          <app-chat-send-outlet />
+          <app-chat-composer
+            [draft]="session.draft()"
+            [attachments]="pendingAttachments()"
+            [chatId]="session.thread()?.id ?? null"
+            [pendingRituals]="pendingRituals()"
+            [models]="models()"
+            [selectedModelId]="session.model()?.id ?? session.thread()?.model_id ?? null"
+            [selectedPersonalityName]="selectedPersonalityName()"
+            [personalityId]="session.thread()?.personality_id ?? null"
+            [activeMoodId]="session.thread()?.active_mood_id ?? null"
+            [isAutoMood]="session.thread()?.is_auto_mood ?? true"
+            [threadArchived]="session.thread()?.archived === true"
+            [composerPlaceholder]="sendGate.composerPlaceholder(selectedPersonalityName())"
+            [disabled]="session.composerBusy() || session.thread()?.archived === true || sendGate.blocked()"
+            [modelPickerDisabled]="session.composerBusy() || session.thread()?.archived === true"
+            [isGenerating]="session.isGenerating()"
+            [generationRetryTarget]="retryableUserTurn()"
+            (draftChange)="session.draft.set($event)"
+            (send)="send($event)"
+            (stop)="stopGeneration()"
+            (filesSelected)="onFilesSelected($event)"
+            (pendingRitualsChange)="onPendingRitualsChange($event)"
+            (galleryAttachment)="onGalleryAttachment($event)"
+            (attachmentRemoved)="onAttachmentRemoved($event)"
+            (modelSelected)="session.setModel($event)"
+            (personaButtonClicked)="openPersonaPicker('attach')"
+            (modeSelected)="session.setActiveMood($event)"
+            (retryGeneration)="onRetryGeneration()"
+          />
+        </div>
+      </section>
+    } @else {
+      <app-thread-list-panel
+        class="chat-page__thread-manager"
+        [activeThreadId]="session.thread()?.id ?? null"
+        [personalities]="personalities()"
+        [importTrigger]="importTrigger()"
+        (selectThread)="openThread($event)"
+        (newThread)="startConversation()"
+      />
+    }
+  </main>
+
+</div>
+
+<app-persona-picker-dialog
+  [open]="personaPickerOpen()"
+  [title]="personaPickerMode() === 'new-thread' ? 'New chat with personality' : 'Set chat personality'"
+  (select)="onPersonaPicked($event)"
+  (cancel)="closePersonaPicker()"
+  (create)="closePersonaPicker()"
+/>
+
+@if (selectedToolCall(); as toolCall) {
+  <app-tool-call-detail-modal
+    [toolCall]="toolCall"
+    [isOpen]="true"
+    (closeModal)="closeToolCall()"
+  />
+}
+
+@if (summaryModalOpen()) {
+  <div class="chat-page__summary-modal-backdrop" (click)="closeSummaryModal()">
+    <section class="chat-page__summary-modal fade-in" role="dialog" aria-modal="true" aria-label="Thread summary" (click)="$event.stopPropagation()">
+      <header class="chat-page__summary-modal-header">
+        <div>
+          <p class="chat-page__summary-modal-title">Summary: {{ session.thread()?.name }}</p>
+          <p class="chat-page__summary-modal-meta">1 thread summary</p>
+        </div>
+        <button type="button" class="chat-page__summary-modal-close" aria-label="Close summary" (click)="closeSummaryModal()">
+          <ui-x-icon [size]="14" />
+        </button>
+      </header>
+      <div class="chat-page__summary-modal-body">
+        {{ threadSummary() }}
+      </div>
+    </section>
+  </div>
+}

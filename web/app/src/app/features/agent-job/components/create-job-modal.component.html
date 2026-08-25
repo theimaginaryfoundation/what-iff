@@ -1,0 +1,18 @@
+@if (open()) {
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" (click)="close.emit()">
+    <section class="w-full max-w-lg rounded-2xl border border-border-base bg-surface-card p-5" (click)="$event.stopPropagation()">
+      <h3 class="text-base font-semibold text-text-primary">Create job</h3>
+      <p class="mt-2 text-sm text-text-secondary">
+        Job creation is deferred for now because the API create endpoint is not available in this phase.
+      </p>
+      <div class="mt-4 flex justify-end">
+        <button
+          type="button"
+          class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary"
+          (click)="close.emit()">
+          Close
+        </button>
+      </div>
+    </section>
+  </div>
+}

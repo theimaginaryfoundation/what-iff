@@ -1,0 +1,79 @@
+<section class="ritual-form">
+  @if (error()) {
+    <p class="ritual-form__error" role="alert">
+      {{ error() }}
+    </p>
+  }
+
+  <label class="ritual-form__label">
+    Name
+    <input
+      class="ritual-form__input"
+      placeholder="e.g., Source Analysis"
+      [disabled]="isSystem()"
+      [ngModel]="name()"
+      (ngModelChange)="name.set($event)" />
+  </label>
+
+  <label class="ritual-form__label">
+    Description
+    <input
+      class="ritual-form__input"
+      placeholder="Brief description of what this skill does"
+      [disabled]="isSystem()"
+      [ngModel]="description()"
+      (ngModelChange)="description.set($event)" />
+  </label>
+
+  <label class="ritual-form__label">
+    Content (Prompt)
+    <textarea
+      rows="6"
+      class="ritual-form__textarea"
+      placeholder="The prompt text that will be inserted into chat when this skill is called..."
+      [disabled]="isSystem()"
+      [ngModel]="content()"
+      (ngModelChange)="content.set($event)"></textarea>
+  </label>
+
+  <label class="ritual-form__label">
+    Associated Personality (optional)
+    <select
+      class="ritual-form__input"
+      [disabled]="isSystem()"
+      [ngModel]="personalityId()"
+      (ngModelChange)="personalityId.set($event)">
+      <option value="">Global (any persona)</option>
+      @for (personality of personalities(); track personality.id) {
+        <option [value]="personality.id">{{ personality.label }}</option>
+      }
+    </select>
+  </label>
+
+  <label class="ritual-form__label">
+    Hotkey (optional)
+    <app-hotkey-input
+      [placeholder]="'e.g., Ctrl+Shift+1'"
+      [disabled]="isSystem()"
+      [showHelp]="false"
+      [ngModel]="hotkeys()"
+      (ngModelChange)="hotkeys.set($event)" />
+  </label>
+
+  <footer class="ritual-form__footer">
+    <button
+      type="button"
+      class="ritual-form__button ritual-form__button--secondary"
+      [disabled]="saving() || deleting()"
+      (click)="cancel.emit()">
+      Cancel
+    </button>
+    <button
+      type="button"
+      class="ritual-form__button ritual-form__button--primary"
+      [disabled]="saving() || deleting() || !canSave() || isSystem()"
+      (click)="submit()">
+      {{ creating() ? 'Create Skill' : 'Save Changes' }}
+    </button>
+  </footer>
+</section>

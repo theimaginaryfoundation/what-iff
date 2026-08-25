@@ -1,0 +1,143 @@
+<div class="app-layout" [class.app-layout--collapsed]="nav.collapsed()">
+  <app-sidebar
+    class="app-layout__sidebar"
+    (newThread)="openPersonaPicker()"
+    (generatePersonality)="openGeneratePersonality()"
+  />
+  @if (isMobileNav() && !nav.collapsed()) {
+    <button
+      type="button"
+      class="app-layout__sidebar-backdrop"
+      aria-label="Close navigation menu"
+      (click)="closeMobileSidebar()"
+    ></button>
+  }
+  <main class="app-layout__main" id="main-content">
+    @if (isMobileNav()) {
+      <button
+        type="button"
+        class="app-layout__mobile-menu"
+        [attr.aria-label]="nav.collapsed() ? 'Open navigation menu' : 'Close navigation menu'"
+        [attr.aria-expanded]="!nav.collapsed()"
+        (click)="toggleMobileSidebar()"
+      >
+        @if (nav.collapsed()) {
+          <ui-menu-icon [size]="16" />
+        } @else {
+          <ui-x-icon [size]="16" />
+        }
+      </button>
+    }
+    <router-outlet />
+  </main>
+  @if (showRightPanel() && rightPanelService.visible()) {
+    <app-right-panel-host class="app-layout__right-panel" />
+  }
+</div>
+<app-command-palette />
+<app-profile-settings-modal-host />
+<app-help-extension-outlet />
+
+@if (showMobileSheet()) {
+  <ui-sheet
+    [open]="rightPanelContext.mobileOpen()"
+    [labelledBy]="'conversation-context-panel-title'"
+    [dismissible]="true"
+    (dismiss)="rightPanelContext.closeMobile()"
+  >
+    <app-context-panel />
+  </ui-sheet>
+}
+
+@if (generatePersonalityModal.open()) {
+  <ui-modal [open]="true" [labelledBy]="'generate-personality-modal-title'" size="lg" (dismiss)="onGenerateModalDismiss($event, generateFlow.hasUnsavedAnswers())">
+    <div modal-header>
+      <h2 id="generate-personality-modal-title" class="text-lg font-semibold text-(--color-text-primary)">Generate Personality</h2>
+    </div>
+    <app-personality-generate #generateFlow [modalMode]="true" (closeModal)="closeGeneratePersonality()" />
+    @if (!generateFlow.isLoading() && generateFlow.flow() && !generateFlow.isReviewScreen() && !generateFlow.isGenerating()) {
+      <div modal-footer class="w-full flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            (click)="generateFlow.goBack()"
+            [disabled]="!generateFlow.canGoBack() || generateFlow.isSaving() || generateFlow.isResetting()"
+            class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <svg class="-ml-1 mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+            </svg>
+            Previous
+          </button>
+          <button
+            type="button"
+            (click)="generateFlow.resetDraft()"
+            [disabled]="generateFlow.isSaving() || generateFlow.isResetting()"
+            class="inline-flex items-center px-4 py-2 border border-amber-300 dark:border-amber-700 shadow-sm text-sm font-medium rounded-md text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            @if (generateFlow.isResetting()) {
+              Resetting...
+            } @else {
+              Start Over
+            }
+          </button>
+        </div>
+
+        <div class="flex items-center gap-2">
+          @if (generateFlow.isSaving()) {
+            <span class="text-xs text-gray-400 dark:text-gray-500">Saving...</span>
+          }
+
+          @if (generateFlow.isLastPage()) {
+            <button
+              type="button"
+              (click)="generateFlow.finishAndGenerate()"
+              [disabled]="generateFlow.isSaving()"
+              class="inline-flex items-center px-5 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Generate Personality
+              <svg class="ml-2 -mr-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+              </svg>
+            </button>
+          } @else {
+            @if (generateFlow.currentStep() === 0) {
+              <button
+                type="button"
+                (click)="generateFlow.finishAndGenerate()"
+                [disabled]="generateFlow.isSaving()"
+                class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Skip to Generate
+                <svg class="ml-2 -mr-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                </svg>
+              </button>
+            }
+            <button
+              type="button"
+              (click)="generateFlow.goNext()"
+              [disabled]="generateFlow.isSaving()"
+              class="inline-flex items-center px-5 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next
+              <svg class="ml-2 -mr-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+              </svg>
+            </button>
+          }
+        </div>
+      </div>
+    }
+  </ui-modal>
+}
+
+<app-persona-picker-dialog
+  [open]="personaPickerOpen()"
+  title="Choose a Personality"
+  subtitle="Select a personality to continue"
+  pickerAppearance="rich"
+  (select)="onPersonaPicked($event)"
+  (cancel)="closePersonaPicker()"
+  (create)="onPersonaPickerCreate()"
+/>

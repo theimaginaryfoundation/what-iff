@@ -1,0 +1,142 @@
+name: CI base image
+
+# Builds and publishes the e2e workflows' base image (docker/ci/Dockerfile)
+# to GHCR, as a public package. Both targets (`e2e`, `e2e-ollama`) are tagged by an
+# input digest (scripts/ci-image.sh), not by commit SHA: a push that doesn't
+# change the Dockerfile or a pin resolves to the same tag as before, so the
+# build-if-missing check below turns it into a ~30s no-op instead of a
+# multi-minute rebuild.
+#
+# Triggers on exactly the files that can change the resolved tag, so a PR
+# bumping the Playwright or Ollama pins builds its image before its own e2e
+# jobs need it (see the `version` job guard in e2e-mock.yml / e2e-local-llm.yml).
+#
+# This workflow holds packages:write, and a pull_request run of it would
+# otherwise let anyone who can open a PR push to the shared GHCR package. The
+# `build` job below only runs on a pull_request event once a maintainer has
+# reviewed the diff and applied the `ci-image-approved` label — push (to
+# main) and workflow_dispatch are unaffected. Until that label is applied, a
+# PR that bumped one of the trigger paths above will not have its image
+# published, so its own e2e jobs (which pull that image by tag) will fail —
+# that's expected; add the label to unblock them.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docker/ci/Dockerfile'
+      - 'scripts/ci-image.sh'
+      - 'web/app/package.json'
+      - 'Makefile'
+      - '.github/workflows/ci-image.yml'
+  pull_request:
+    branches: [main]
+    # `labeled` (in addition to the default open/sync/reopen) so a maintainer
+    # applying `ci-image-approved` after review actually triggers a run — see
+    # the packages:write gate on the `build` job below.
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - 'docker/ci/Dockerfile'
+      - 'scripts/ci-image.sh'
+      - 'web/app/package.json'
+      - 'Makefile'
+      - '.github/workflows/ci-image.yml'
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: >-
+          Rebuild and overwrite the resolved tag even if it already exists in
+          GHCR. The tag is content-addressed, so this is the only way to
+          recover if a bad image ever gets published under it (nothing else
+          bumps that tag short of changing the Dockerfile/pins).
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build and push (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    # See the packages:write note above: a pull_request run only proceeds
+    # once a maintainer has applied this label after reviewing the diff.
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'ci-image-approved')
+    strategy:
+      matrix:
+        target: [e2e, e2e-ollama]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # --build-args makes ci-image.sh print the ref plus every value that
+      # went into it, so this step consumes the exact same resolution the
+      # tag was computed from rather than re-deriving the pins separately
+      # (two independent lookups of the same pins could drift out of sync).
+      - name: Resolve image ref and build args
+        id: resolve
+        shell: bash
+        run: |
+          resolved="$(scripts/ci-image.sh ${{ matrix.target }} --build-args)"
+          echo "ref=$(echo "$resolved" | head -n1)" >> "$GITHUB_OUTPUT"
+          echo "playwright_version=$(echo "$resolved" | sed -n 's/^PLAYWRIGHT_VERSION=//p')" >> "$GITHUB_OUTPUT"
+          echo "ollama_version=$(echo "$resolved" | sed -n 's/^OLLAMA_VERSION=//p')" >> "$GITHUB_OUTPUT"
+          echo "local_llm_model=$(echo "$resolved" | sed -n 's/^LOCAL_LLM_MODEL=//p')" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Skips the build entirely when this exact tag already exists — the
+      # normal case for a push that touched one of the trigger paths without
+      # actually changing the resolved Dockerfile/pins (e.g. a comment-only
+      # edit to ci-image.yml itself).
+      - name: Check whether this tag already exists
+        id: exists
+        run: |
+          if [ "${{ inputs.force_rebuild }}" = "true" ]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "🔁 force_rebuild set — rebuilding ${{ steps.resolve.outputs.ref }} even though it already exists"
+          elif docker manifest inspect "${{ steps.resolve.outputs.ref }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "✅ ${{ steps.resolve.outputs.ref }} already exists — skipping build"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.exists.outputs.exists != 'true'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push
+        if: steps.exists.outputs.exists != 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/ci/Dockerfile
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.resolve.outputs.ref }}
+          build-args: |
+            PLAYWRIGHT_VERSION=${{ steps.resolve.outputs.playwright_version }}
+            OLLAMA_VERSION=${{ steps.resolve.outputs.ollama_version }}
+            LOCAL_LLM_MODEL=${{ steps.resolve.outputs.local_llm_model }}
+          cache-from: type=gha,scope=ci-image-${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=ci-image-${{ matrix.target }}
+
+# The first push of a brand-new package creates it as private by default. It
+# has to be public for a private repo to use it for free (see the plan doc),
+# but GitHub's package-visibility API rejects the workflow's own
+# GITHUB_TOKEN no matter its permissions — it requires a personal access
+# token with the admin:packages scope, held by an org owner. So this is a
+# one-time manual step, not something this workflow can do:
+#
+#   Org → Packages → what-iff-ci → Package settings → Change visibility → Public
+#
+# It only needs doing once per package name, not once per tag.

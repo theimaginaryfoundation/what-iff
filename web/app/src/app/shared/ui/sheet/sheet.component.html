@@ -1,0 +1,13 @@
+@if (open()) {
+  <div class="ui-sheet fixed inset-0 z-50 flex items-end bg-black/60" role="presentation" (click)="requestDismiss()" (keydown)="onKeydown($event)">
+    <section #dialog class="ui-sheet__panel" role="dialog" aria-modal="true" [attr.aria-labelledby]="labelledBy()" [attr.aria-describedby]="describedBy()" (click)="onDialogClick($event)">
+      <div class="mx-auto my-3 h-1 w-12 rounded-full bg-[var(--border)]"></div>
+      <header class="ui-sheet__header">
+        <ng-content select="[sheet-header]" />
+        @if (dismissible()) { <button class="ui-sheet__close" type="button" aria-label="Close" (click)="requestDismiss()"><ui-x-icon [size]="18" /></button> }
+      </header>
+      <div class="ui-sheet__body"><ng-content /></div>
+      <footer class="ui-sheet__footer"><ng-content select="[sheet-footer]" /></footer>
+    </section>
+  </div>
+}

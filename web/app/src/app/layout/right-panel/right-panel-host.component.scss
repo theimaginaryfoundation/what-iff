@@ -1,0 +1,17 @@
+.app-right-panel {
+  display: none;
+  width: 320px;
+  max-width: 320px;
+  height: 100%;
+  border-left: 1px solid var(--color-border-base);
+  background-color: var(--color-surface-elevated, var(--color-surface-base));
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+@media (min-width: 1024px) {
+  .app-right-panel {
+    display: block;
+  }
+}

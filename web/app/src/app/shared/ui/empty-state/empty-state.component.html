@@ -1,0 +1,14 @@
+<div class="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--bg-card)] p-8 text-center text-[var(--text-secondary)]">
+  <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent-bg)] text-[var(--accent)]">
+    <ng-content select="[empty-state-icon]" />
+  </div>
+  @switch (level()) {
+    @case (1) { <h1 class="text-lg font-semibold text-[var(--text-primary)]">{{ heading() }}</h1> }
+    @case (3) { <h3 class="text-lg font-semibold text-[var(--text-primary)]">{{ heading() }}</h3> }
+    @default { <h2 class="text-lg font-semibold text-[var(--text-primary)]">{{ heading() }}</h2> }
+  }
+  @if (body()) {
+    <p class="mt-2 text-sm">{{ body() }}</p>
+  }
+  <div class="mt-5"><ng-content /></div>
+</div>

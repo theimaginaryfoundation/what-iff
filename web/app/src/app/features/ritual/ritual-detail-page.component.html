@@ -1,0 +1,76 @@
+<section class="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:p-6">
+  <header>
+    <button
+      type="button"
+      class="rounded-lg border border-border-base px-3 py-2 text-sm text-text-secondary hover:text-text-primary"
+      (click)="goBack()">
+      Back to skills
+    </button>
+  </header>
+
+  @if (loading()) {
+    <p class="rounded-2xl border border-border-base bg-surface-card p-8 text-center text-sm text-text-secondary" role="status">
+      Loading skill…
+    </p>
+  } @else if (error() && !creating()) {
+    <p class="rounded-2xl border border-danger/40 bg-danger/10 p-6 text-sm text-danger" role="alert">
+      {{ error() }}
+    </p>
+  } @else {
+    <div class="grid gap-4 lg:grid-cols-[1fr_300px]">
+      <div class="rounded-2xl border border-border-base bg-surface-card p-4">
+        <h1 class="mb-4 text-xl font-semibold text-text-primary">
+          {{ creating() ? 'Create skill' : (isSystem() ? 'System skill' : 'Edit skill') }}
+        </h1>
+
+        <app-ritual-form
+          [ritual]="ritual()"
+          [personalities]="personalities()"
+          [saving]="saving()"
+          [deleting]="deleting()"
+          [creating]="creating()"
+          [isSystem]="isSystem()"
+          [error]="error()"
+          (cancel)="goBack()"
+          (save)="save($event)" />
+      </div>
+
+      <aside class="space-y-4">
+        <section class="rounded-2xl border border-border-base bg-surface-card p-4 text-sm">
+          <h2 class="font-semibold text-text-primary">Chat preview context</h2>
+          <label class="mt-2 block text-xs text-text-secondary">
+            Chat
+            <select
+              class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+              [ngModel]="selectedChatId()"
+              (ngModelChange)="selectedChatId.set($event)">
+              @for (chat of chats(); track chat.id) {
+                <option [value]="chat.id">{{ chat.label }}</option>
+              }
+            </select>
+          </label>
+        </section>
+
+        <app-ritual-available-preview
+          [ritualId]="ritual()?.id ?? null"
+          [chatId]="selectedChatId()" />
+
+        @if (ritual() && !creating()) {
+          <section class="rounded-2xl border border-border-base bg-surface-card p-4 text-sm">
+            <h2 class="font-semibold text-text-primary">Metadata</h2>
+            <dl class="mt-2 space-y-1 text-text-secondary">
+              <div>
+                <dt class="font-medium text-text-primary">Created</dt>
+                <dd>{{ ritual()!.created_at | date:'medium' }}</dd>
+              </div>
+              <div>
+                <dt class="font-medium text-text-primary">Updated</dt>
+                <dd>{{ ritual()!.updated_at | date:'medium' }}</dd>
+              </div>
+            </dl>
+          </section>
+        }
+      </aside>
+    </div>
+  }
+</section>

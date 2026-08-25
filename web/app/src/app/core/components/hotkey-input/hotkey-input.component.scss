@@ -1,0 +1,57 @@
+:host {
+  display: block;
+}
+
+/* Focus ring animation */
+.focus-ring {
+  transition: all 0.15s ease-in-out;
+}
+
+/* Chip animations */
+.hotkey-chip {
+  transition: all 0.2s ease-in-out;
+  animation: chipAppear 0.3s ease-out;
+}
+
+@keyframes chipAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Recording indicator animation */
+.recording-dot {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Hover effects for interactive elements */
+.clear-button:hover {
+  transform: scale(1.1);
+}
+
+/* Focus outline for accessibility */
+[tabindex="0"]:focus {
+  outline: 2px solid rgb(99 102 241);
+  outline-offset: 2px;
+}
+
+/* Smooth transitions */
+* {
+  transition: background-color 0.15s ease-in-out, 
+              border-color 0.15s ease-in-out, 
+              color 0.15s ease-in-out;
+}

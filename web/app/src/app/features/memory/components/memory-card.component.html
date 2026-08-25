@@ -1,0 +1,75 @@
+<article class="memory-card" role="listitem">
+  <div class="memory-card__actions">
+    <button
+      type="button"
+      class="memory-card__icon-button"
+      aria-label="Edit memory"
+      (click)="startEdit($event)">
+      <ui-edit-icon [size]="12" />
+    </button>
+    <button
+      type="button"
+      class="memory-card__icon-button"
+      aria-label="Delete memory"
+      (click)="delete.emit(memory().id)">
+      <ui-trash-icon [size]="13" />
+    </button>
+  </div>
+
+  @if (editing()) {
+    <div class="memory-card__editor" (click)="$event.stopPropagation()">
+      @if (showPinControl()) {
+        <label class="memory-card__pin-label">
+          Pin to personality
+          <select
+            class="memory-card__pin-select"
+            [ngModel]="pinDraft()"
+            [disabled]="pinUpdating()"
+            (ngModelChange)="onPinChange($event)">
+            <option [ngValue]="null">All personalities</option>
+            @for (personality of personalities(); track personality.id) {
+              <option [ngValue]="personality.id">{{ personality.label }}</option>
+            }
+          </select>
+        </label>
+      }
+      <textarea
+        rows="2"
+        class="memory-card__textarea"
+        [ngModel]="draft()"
+        (ngModelChange)="draft.set($event)"
+      ></textarea>
+      <div class="memory-card__editor-actions">
+        <button type="button" class="memory-card__save" [disabled]="!canSave()" (click)="submitEdit($event)">Save</button>
+        <button type="button" class="memory-card__cancel" (click)="cancelEdit($event)">Cancel</button>
+      </div>
+    </div>
+  } @else {
+    <p class="memory-card__excerpt" [attr.aria-describedby]="'full-content-' + memory().id">
+      {{ memory().excerpt }}
+    </p>
+    <span [id]="'full-content-' + memory().id" class="sr-only">{{ memory().content }}</span>
+  }
+
+  <div class="memory-card__meta">
+    <div class="memory-card__meta-left">
+      @if (memory().pinnedPersonalityName; as personalityName) {
+        <div class="memory-card__personality">
+          <ui-user-icon [size]="12" />
+          <span>{{ personalityName }}</span>
+        </div>
+      } @else if (memory().chatName; as chatName) {
+        <span class="memory-card__thread-label">Thread: {{ chatName }}</span>
+      } @else {
+        <span class="memory-card__thread-label">{{ memory().levelLabel }}</span>
+      }
+    </div>
+    <div class="memory-card__meta-right">
+      @if (memory().verifiedCount; as count) {
+        <span class="memory-card__verified" title="Verified duplicate count">{{ count }}×</span>
+      }
+      <span>{{ memory().updatedAt | date:'MMM d' | uppercase }}</span>
+      <span>{{ memory().updatedAt | date:'h:mm a' }}</span>
+    </div>
+  </div>
+</article>

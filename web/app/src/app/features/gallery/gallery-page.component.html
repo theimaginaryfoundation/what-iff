@@ -1,0 +1,149 @@
+<section class="gallery-page mx-auto flex w-full max-w-none flex-col gap-3 p-4 md:p-6" aria-label="Image gallery">
+  <header class="gallery-page__header">
+    <div class="gallery-page__title-spacer" aria-hidden="true"></div>
+    <h1 class="gallery-page__title">{{ pageTitle() }}</h1>
+    <div class="gallery-page__mode-switch" role="group" aria-label="Gallery mode">
+      <button
+        type="button"
+        [attr.aria-pressed]="mode() === 'gallery'"
+        [class.gallery-page__mode-button--active]="mode() === 'gallery'"
+        (click)="setMode('gallery')"
+      >Gallery</button>
+      <button
+        type="button"
+        [attr.aria-pressed]="mode() === 'expressions'"
+        [class.gallery-page__mode-button--active]="mode() === 'expressions'"
+        (click)="setMode('expressions')"
+      >Expression Manager</button>
+    </div>
+  </header>
+
+  @if (mode() === 'expressions') {
+    <app-personality-media-job-banner />
+  }
+
+  @if (mode() === 'gallery') {
+    <div class="gallery-page__search-row">
+      <input
+        type="search"
+        aria-label="Search images"
+        [value]="view.filters().query"
+        (input)="onFilterChange({ query: $any($event.target).value })"
+        placeholder="Search names, prompts, threads…"
+      />
+    </div>
+
+    <div class="gallery-page__control-row">
+      <div class="gallery-page__segmented" role="group" aria-label="Filter by source">
+        <button
+          type="button"
+          [attr.aria-pressed]="view.filters().source === 'all'"
+          [class.gallery-page__segmented-button--active]="view.filters().source === 'all'"
+          (click)="setSourceFilter('all')"
+        >All {{ sourceCounts().all }}</button>
+        <button
+          type="button"
+          [attr.aria-pressed]="view.filters().source === 'generated'"
+          [class.gallery-page__segmented-button--active]="view.filters().source === 'generated'"
+          (click)="setSourceFilter('generated')"
+        >Generated {{ sourceCounts().generated }}</button>
+        <button
+          type="button"
+          [attr.aria-pressed]="view.filters().source === 'uploaded'"
+          [class.gallery-page__segmented-button--active]="view.filters().source === 'uploaded'"
+          (click)="setSourceFilter('uploaded')"
+        >Imported {{ sourceCounts().imported }}</button>
+      </div>
+
+      <div class="gallery-page__segmented" role="group" aria-label="Sort images">
+        <button
+          type="button"
+          title="Newest first — click to flip"
+          [attr.aria-pressed]="sort() === 'created'"
+          [class.gallery-page__segmented-button--active]="sort() === 'created'"
+          (click)="setSort('created')"
+        >Created {{ sort() === 'created' ? (sortDescending() ? '▼' : '▲') : '' }}</button>
+        <button
+          type="button"
+          title="Sort by last used"
+          [attr.aria-pressed]="sort() === 'last_used'"
+          [class.gallery-page__segmented-button--active]="sort() === 'last_used'"
+          (click)="setSort('last_used')"
+        >Last used {{ sort() === 'last_used' ? (sortDescending() ? '▼' : '▲') : '' }}</button>
+      </div>
+
+      <span class="gallery-page__results-summary" role="status">{{ tiles().length }} of {{ sourceCounts().all }} shown</span>
+    </div>
+
+    <app-gallery-grid
+      [tiles]="tiles()"
+      [loading]="view.isLoading()"
+      [loadingMore]="view.isLoadingMore()"
+      [hasMore]="view.hasMore()"
+      [error]="view.error()"
+      [assignmentEnabled]="assignmentEnabled"
+      (openImage)="onOpenImage($event)"
+      (deleteImage)="onDelete($event)"
+      (assignImage)="onRequestAssign($event)"
+      (retry)="view.refresh()"
+      (loadMore)="view.loadNextPage()" />
+  } @else {
+    <section class="gallery-page__expressions-shell">
+      @if (personalities().length === 0) {
+        <p class="gallery-page__expressions-loading">No personalities available.</p>
+      } @else if (filteredExpressionPersonalities().length === 0) {
+        <p class="gallery-page__expressions-loading">No personalities match the active filter.</p>
+      } @else {
+        @for (personality of filteredExpressionPersonalities(); track personality.id) {
+          <app-personality-expressions-manager
+            [personalityId]="personality.id"
+            [personalityName]="personality.name"
+            [personalityAvatarUrl]="expressionAvatarFor(personality)"
+            [accentColor]="expressionAccentFor(personality)"
+            [collapsedLimit]="24"
+            [expressions]="expressionsForPersonality(personality.id)"
+            [expressionsEnabled]="personality.expressions_enabled ?? true"
+            [expressionsToggleUpdating]="expressionsToggleUpdatingFor(personality.id)"
+            (expressionsChanged)="onExpressionsChanged(personality.id, $event)"
+            (expressionsEnabledChanged)="onExpressionsEnabledChanged(personality, $event)"
+          />
+          @if (expressionsLoadingFor(personality.id)) {
+            <p class="gallery-page__expressions-loading">Loading {{ personality.name }} expressions…</p>
+          }
+        }
+      }
+    </section>
+  }
+</section>
+
+<app-image-detail-modal
+  [open]="!!selectedTile()"
+  [image]="selectedTile()"
+  [hasPrev]="hasPrev()"
+  [hasNext]="hasNext()"
+  [assignmentEnabled]="assignmentEnabled"
+  (close)="onCloseDetail()"
+  (next)="view.nextDetail()"
+  (previous)="view.previousDetail()"
+  (delete)="onDelete($event)"
+  (assign)="onRequestAssign($event)"
+  (rename)="onRename($event)"
+  (addToThread)="onAddToThread($event)"
+  (startNewChat)="onStartNewChat($event)" />
+
+<app-gallery-import-modal
+  [open]="importOpen()"
+  [personalities]="importPersonalityOptions()"
+  [submitting]="importSubmitting()"
+  (close)="closeImportModal()"
+  (submitFile)="onImportFile($event)" />
+
+@if (assignmentEnabled) {
+  <app-assign-as-expression-flow
+    [open]="assignOpen()"
+    [imageId]="assignImageId()"
+    [imageUrl]="selectedTile()?.thumbnailUrl ?? null"
+    [personalities]="importPersonalityOptions()"
+    (close)="closeAssignModal()"
+    (assigned)="onAssigned()" />
+}

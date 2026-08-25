@@ -1,0 +1,6 @@
+<div class="ui-tabs">
+  <div class="ui-tabs__list" role="tablist" [attr.aria-label]="ariaLabel()">
+    <ng-content select="ui-tab" />
+  </div>
+  <ng-content select="ui-tab-panel" />
+</div>

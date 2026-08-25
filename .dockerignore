@@ -1,0 +1,16 @@
+.git
+.gitignore
+Dockerfile
+docker-compose.yml
+.env
+.env.*
+bin/
+tmp/
+node_modules/
+web/app/node_modules/
+web/app/dist/
+web/app/.angular/
+web/app/package-lock.json
+web/app/package.json
+web/app/angular.json
+web/app/tsconfig*.json

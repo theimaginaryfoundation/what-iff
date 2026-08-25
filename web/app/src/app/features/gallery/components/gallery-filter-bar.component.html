@@ -1,0 +1,62 @@
+<section class="rounded-2xl border border-border-base bg-surface-card p-3 md:p-4">
+  <div class="flex flex-col gap-3 md:flex-row md:items-center">
+    <label class="sr-only" for="gallery-filter-query">Search images</label>
+    <input
+      id="gallery-filter-query"
+      type="search"
+      class="w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary placeholder:text-text-muted md:max-w-sm"
+      [ngModel]="filters().query"
+      (ngModelChange)="onQueryChange($event)"
+      placeholder="Search by image name" />
+
+    <label class="sr-only" for="gallery-filter-source">Filter by source</label>
+    <select
+      id="gallery-filter-source"
+      class="rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+      [ngModel]="filters().source"
+      (ngModelChange)="onSourceChange($event)">
+      @for (source of availableSources(); track source) {
+        <option [value]="source">{{ source === 'all' ? 'All sources' : (source | titlecase) }}</option>
+      }
+    </select>
+
+    <label class="sr-only" for="gallery-filter-personality">Filter by personality</label>
+    <select
+      id="gallery-filter-personality"
+      class="rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+      [ngModel]="filters().personalityId"
+      (ngModelChange)="onPersonalityChange($event)">
+      <option value="all">All personalities</option>
+      @for (personality of personalities(); track personality.id) {
+        <option [value]="personality.id">{{ personality.name }}</option>
+      }
+    </select>
+
+    <label class="sr-only" for="gallery-filter-date">Filter by date</label>
+    <select
+      id="gallery-filter-date"
+      class="rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+      [ngModel]="filters().dateRange"
+      (ngModelChange)="onDateRangeChange($event)">
+      <option value="any">Any time</option>
+      <option value="7d">Last 7 days</option>
+      <option value="30d">Last 30 days</option>
+      <option value="90d">Last 90 days</option>
+    </select>
+
+    <button
+      type="button"
+      class="rounded-xl border border-border-base px-3 py-2 text-sm text-text-secondary hover:border-accent hover:text-text-primary"
+      (click)="resetFilters.emit()">
+      Reset
+    </button>
+
+    <button
+      type="button"
+      class="rounded-xl bg-accent px-3 py-2 text-sm font-medium text-white hover:opacity-90 md:ml-auto"
+      [disabled]="loading()"
+      (click)="openImport.emit()">
+      Import image
+    </button>
+  </div>
+</section>

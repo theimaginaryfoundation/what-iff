@@ -1,0 +1,33 @@
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+charset = utf-8
+
+[*.{tf,tfvars,hcl}]
+indent_style = space
+indent_size = 2
+
+[*.{yaml,yml}]
+indent_style = space
+indent_size = 2
+
+[*.{md,markdown}]
+indent_style = space
+indent_size = 4
+
+[*.{js,jsx,ts,tsx}]
+indent_style = space
+indent_size = 2
+
+[*.{json,jsonc}]
+indent_style = space
+indent_size = 2
+
+[Makefile]
+indent_style = tab
+
+[*.go]
+indent_style = tab

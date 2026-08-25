@@ -1,0 +1,43 @@
+name: Skills Symlink Check
+
+# AGENTS.md documents .agents/skills/ as the vendor-neutral source of truth,
+# with .claude/skills/ holding relative symlinks into it, and CLAUDE.md /
+# GEMINI.md as symlinks to AGENTS.md. This drifted twice with no automated
+# check catching it — this workflow is that check.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.agents/skills/**'
+      - '.claude/skills/**'
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'GEMINI.md'
+      - 'Makefile'
+      - 'scripts/check-skill-symlinks.sh'
+      - '.github/workflows/skills-check.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.agents/skills/**'
+      - '.claude/skills/**'
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'GEMINI.md'
+      - 'Makefile'
+      - 'scripts/check-skill-symlinks.sh'
+      - '.github/workflows/skills-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check skill symlinks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Verify skills tree and AGENTS.md symlinks are in sync
+        run: make check-skill-symlinks

@@ -1,0 +1,5 @@
+<section [class]="cardClass()">
+  <div class="border-b border-[var(--border)] p-4"><ng-content select="[card-header]" /></div>
+  <div class="p-4"><ng-content /></div>
+  <div class="border-t border-[var(--border)] p-4"><ng-content select="[card-footer]" /></div>
+</section>

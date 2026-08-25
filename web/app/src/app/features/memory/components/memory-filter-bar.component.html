@@ -1,0 +1,99 @@
+<section class="rounded-2xl border border-border-base bg-surface-card p-3 md:p-4">
+  <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+    <label class="text-xs text-text-secondary">
+      Search
+      <input
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        type="search"
+        [ngModel]="filters().query"
+        (ngModelChange)="filtersChanged.emit({ query: $event })"
+        placeholder="Search memories" />
+    </label>
+
+    <label class="text-xs text-text-secondary">
+      Scope
+      <select
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        [ngModel]="filters().scope"
+        (ngModelChange)="filtersChanged.emit({ scope: $event })">
+        @for (scope of scopeOptions; track scope.value) {
+          <option [value]="scope.value">{{ scope.label }}</option>
+        }
+      </select>
+    </label>
+
+    <label class="text-xs text-text-secondary">
+      Personality
+      <select
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        [ngModel]="filters().personalityId"
+        (ngModelChange)="filtersChanged.emit({ personalityId: $event })">
+        <option value="">All personalities</option>
+        @for (personality of personalities(); track personality.id) {
+          <option [value]="personality.id">{{ personality.label }}</option>
+        }
+      </select>
+    </label>
+
+    <label class="text-xs text-text-secondary">
+      Chat thread
+      <select
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        [ngModel]="filters().chatId"
+        (ngModelChange)="filtersChanged.emit({ chatId: $event })">
+        <option value="">All chats</option>
+        @for (chat of chats(); track chat.id) {
+          <option [value]="chat.id">{{ chat.label }}</option>
+        }
+      </select>
+    </label>
+
+    @if (levelEnabled()) {
+      <label class="text-xs text-text-secondary">
+        Level
+        <select
+          class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+          [ngModel]="filters().level"
+          (ngModelChange)="filtersChanged.emit({ level: $event })">
+          @for (level of levelOptions; track level.value) {
+            <option [value]="level.value">{{ level.label }}</option>
+          }
+        </select>
+      </label>
+    }
+
+    <div class="grid grid-cols-2 gap-2">
+      <label class="text-xs text-text-secondary">
+        Start date
+        <input
+          class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+          type="date"
+          [ngModel]="filters().minDate"
+          (ngModelChange)="filtersChanged.emit({ minDate: $event })" />
+      </label>
+      <label class="text-xs text-text-secondary">
+        End date
+        <input
+          class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+          type="date"
+          [ngModel]="filters().maxDate"
+          (ngModelChange)="filtersChanged.emit({ maxDate: $event })" />
+      </label>
+    </div>
+  </div>
+
+  <div class="mt-3 flex items-center justify-between gap-2">
+    <button
+      type="button"
+      class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary hover:text-text-primary"
+      (click)="clear.emit()">
+      Reset filters
+    </button>
+    <button
+      type="button"
+      class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-muted disabled:cursor-not-allowed disabled:opacity-60"
+      [disabled]="!importEnabled() || loading()">
+      Batch import (coming soon)
+    </button>
+  </div>
+</section>

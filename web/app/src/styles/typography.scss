@@ -1,0 +1,40 @@
+// Typography — fonts and type ramp.
+//
+// Outfit and Cormorant SC are loaded from Google Fonts via <link> tags in
+// src/index.html. This file only registers the families and the type ramp.
+//
+// All sizes are in `rem` so the ramp scales with the browser's root font
+// size and stays readable at 200% zoom (Phase 1 mobile / a11y guard).
+
+:root {
+  --text-2xs: 0.625rem; //  10px
+  --text-xs:  0.75rem;  //  12px
+  --text-sm:  0.875rem; //  14px
+  --text-base: 1rem;    //  16px
+  --text-md:  1.125rem; //  18px
+  --text-lg:  1.25rem;  //  20px
+  --text-xl:  1.5rem;   //  24px
+  --text-2xl: 1.875rem; //  30px
+  --text-3xl: 2.25rem;  //  36px
+
+  --leading-tight:  1.2;
+  --leading-snug:   1.35;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.7;
+}
+
+body {
+  font-family: 'Outfit', system-ui, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+}
+
+// Branded display class lifted from
+// mockups/concepts/concept-d-control-panel.html line 21.
+.mood-title {
+  font-family: 'Cormorant SC', serif;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1;
+}

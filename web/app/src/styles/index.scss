@@ -1,0 +1,17 @@
+// Phase 01 design-system barrel.
+//
+// Consumed by `src/styles.scss`. Order matters:
+//   1. `tokens`   — defines invariant fallbacks and documents the taxonomy.
+//   2. `typography` — registers fonts and the type ramp on :root + body.
+//   3. `themes`   — sets [data-theme="light"|"dark"] custom property values.
+//   4. `motion`   — keyframes and the reduced-motion guard.
+//   5. `tailwind-theme` — @theme block binding tokens to Tailwind utilities.
+//
+// Files do not export Sass symbols (only CSS at-rules), so `@use` here is
+// purely about ordering and incidental CSS injection.
+
+@use './tokens';
+@use './typography';
+@use './themes';
+@use './motion';
+@use './tailwind-theme';

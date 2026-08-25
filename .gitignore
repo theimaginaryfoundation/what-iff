@@ -1,0 +1,180 @@
+# If you prefer the allow list template instead of the deny list, see community template:
+# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
+#
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Intellij
+# Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio and Webstorm
+# Reference: https://intellij-support.jetbrains.com/hc/en-us/articles/206544839
+
+# User-specific stuff:
+.idea/**/workspace.xml
+.idea/**/tasks.xml
+.idea/dictionaries
+.idea
+.vscode
+
+# Sensitive or high-churn files:
+.idea/**/dataSources/
+.idea/**/dataSources.ids
+.idea/**/dataSources.xml
+.idea/**/dataSources.local.xml
+.idea/**/sqlDataSources.xml
+.idea/**/dynamic.xml
+.idea/**/uiDesigner.xml
+
+# macOS
+*.DS_Store
+.AppleDouble
+.LSOverride
+
+# Go workspace file
+go.work
+go.work.sum
+
+# env file
+.env
+
+# Cached authenticated browser sessions written by e2e configs that log in
+# once per run (Playwright storage state); may contain live auth tokens.
+web/app/e2e/.auth/
+
+# Lambda build artifacts
+bootstrap
+
+# Compiled binaries from cmd/. `go build ./cmd/<name>` drops the executable in
+# the directory it is run from, so these land at the repo root named after the
+# package — a 39MB platform-specific artifact that is rebuildable from source
+# and has no business in git history. Listed explicitly rather than by glob: a
+# bare `create-superuser` pattern would also ignore a future directory of that
+# name, and the set of binaries is small enough to enumerate.
+/create-superuser
+/api-server
+/generate-test-conversations
+
+# Local dev background API artifacts (make dev-up)
+.dev/
+lambda.zip
+
+# Grounding data
+grounding-data/
+
+# Compiled output
+/dist
+/tmp
+/out-tsc
+/bazel-out
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# IDEs and editors
+.idea/
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+.gomodcache/
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.history/*
+
+# Miscellaneous
+/.angular/cache
+.sass-cache/
+/connect.lock
+/coverage
+/libpeerconnection.log
+testem.log
+/typings
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Web - Build artifacts
+web/*/node_modules/
+web/*/dist/
+web/*/.angular/
+web/**/dist/
+web/**/.angular/
+
+# Web - Playwright E2E artifacts
+web/**/test-results/
+web/**/playwright-report/
+web/**/playwright/.cache/
+# Raw V8 coverage and the merged lcov/HTML from E2E_COVERAGE=1 runs. The root
+# /coverage rule above is anchored to the repo root and does not reach these.
+# Single-star on purpose: `web/**/coverage/` would also swallow the pipeline's
+# own specs in `e2e/tests/functional/coverage/`.
+web/*/coverage/
+web/*/webcov/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars.local
+terraform.tfvars.local
+crash.log
+crash.*.log
+
+# AI working files (private workspace for session continuity)
+.ghost/
+.claude/*
+# ...but track shared, versioned Claude Code skills
+!.claude/skills/
+# ...except per-bug collected artifacts (local scratch, never committed)
+.claude/skills/file-bug/artifacts/
+.cursor/*
+# ...but track shared, versioned Cursor agent rules (AGENTS.md points at these)
+!.cursor/rules/
+# ...and the project-scoped Playwright MCP definition.
+!.cursor/mcp.json
+
+# Large binaries and toolchains (should not be committed)
+/stripe
+stripe_*.tar.gz
+go*.tar.gz
+*.tar.gz
+
+mockups/
+
+# Local conversation export samples used for import testing (personal data — never commit)
+docs/conversations.json
+testdata/chat-import/large-conversations.json
+# Derived at build time by web/app/scripts/write-version.mjs
+web/app/public/version.json
+
+# Ent generated code — produced by `go generate ./ent` (the Makefile `generate`
+# target, run in CI and the Dockerfile before every build). The schema under
+# ent/schema is the source of truth and IS tracked; the generated output is not
+# checked in. Run `make generate` (or `make build`/`make test`, which depend on
+# it) after cloning or changing a schema.
+/ent/*
+!/ent/schema
+!/ent/generate.go

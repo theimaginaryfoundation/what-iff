@@ -1,0 +1,92 @@
+:host {
+  display: block;
+}
+
+.ritual-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ritual-form__error {
+  border: 1px solid color-mix(in srgb, var(--color-danger) 40%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  color: var(--color-danger);
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 10px 12px;
+}
+
+.ritual-form__label {
+  color: var(--color-text-secondary);
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.ritual-form__input,
+.ritual-form__textarea {
+  background: var(--color-surface-base);
+  border: 1px solid var(--color-border-base);
+  border-radius: 8px;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  margin-top: 4px;
+  outline: none;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.ritual-form__textarea {
+  line-height: 1.45;
+  min-height: 138px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.ritual-form__input:focus-visible,
+.ritual-form__textarea:focus-visible {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-border-base));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+.ritual-form__input:disabled,
+.ritual-form__textarea:disabled {
+  opacity: 0.65;
+}
+
+.ritual-form__footer {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.ritual-form__button {
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 9px 14px;
+}
+
+.ritual-form__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ritual-form__button--secondary {
+  background: var(--color-surface-base);
+  border: 1px solid var(--color-border-base);
+  color: var(--color-text-secondary);
+}
+
+.ritual-form__button--primary {
+  background: var(--color-accent);
+  border: 1px solid transparent;
+  color: var(--color-accent-contrast);
+}

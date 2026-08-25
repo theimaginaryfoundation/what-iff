@@ -1,0 +1,175 @@
+# Internal logging strings — not shown to end users.
+# These messages appear in structured logs (zap) and are intended for
+# operators and developers. Add customer-facing strings to en.toml instead.
+
+# Shared transaction lifecycle
+tx.start_failed = "failed to start transaction"
+tx.rollback_failed = "failed to rollback transaction"
+tx.commit_failed = "failed to commit transaction"
+
+# Shared query failure (Entity variable: "user", "chat", etc.)
+query.failed = "failed to query {{.Entity}}"
+
+# Shared CRUD failures (Entity variable: entity name or plural)
+create.failed = "failed to create {{.Entity}}"
+update.failed = "failed to update {{.Entity}}"
+delete.failed = "failed to delete {{.Entity}}"
+count.failed = "failed to count {{.Entity}}"
+list.failed = "failed to list {{.Entity}}"
+reload.failed = "failed to reload {{.Entity}}"
+
+# Job
+job.set_result_failed = "failed to set job result"
+job.owner_load_failed = "failed to load owner relationship"
+job.not_found_or_unauthorized = "job not found or user not authorized (job_id={{.JobID}}, user_id={{.UserID}})"
+
+# AgentJob
+agentjob.set_chat_failed = "failed to set agent job chat"
+agentjob.relationships_load_failed = "failed to load agent job relationships"
+agentjob.query_for_scheduler_failed = "failed to query agent jobs for scheduler"
+agentjob.record_run_failed = "failed to record agent job run"
+
+# Chat
+chat.not_found = "chat not found"
+chat.not_found_or_unauthorized = "chat not found or user not authorized (chat_id={{.ChatID}}, user_id={{.UserID}})"
+chat.owner_load_failed = "failed to load owner relationship"
+chat.checkpoint.update_failed = "failed to update chat checkpoint state"
+chat.checkpoint_response_id.update_failed = "failed to update chat checkpoint state and clear response id"
+chat.response_id.clear_failed = "failed to clear chat response ID"
+chat.personality.auto_assign_failed = "failed to auto-assign default personality to chat (chat_id={{.ChatID}}, user_id={{.UserID}})"
+chat.personality.reload_failed = "failed to reload chat after personality auto-assignment (chat_id={{.ChatID}})"
+chat.message.origin_filter.invalid = "invalid message origin filter (origin_filter={{.OriginFilter}})"
+chat.message.last_message_time_failed = "failed to update chat last_message_time"
+chat.message.tool_calls_create_failed = "failed to create tool calls, continuing with chat message save (chat_message_id={{.ChatMessageID}}, tool_call_count={{.ToolCallCount}})"
+chat.message.relationship_load_failed = "failed to load chat relationship"
+chat.message.not_found_or_unauthorized = "chat message not found or user not authorized (chat_message_id={{.ChatMessageID}}, user_id={{.UserID}})"
+
+# Billing
+billing.existence_check_failed = "Failed to check billing details existence (user_id={{.UserID}})"
+billing.already_exists = "billing details already exist for user"
+billing.create_failed = "Failed to create billing details (user_id={{.UserID}}, customer_id={{.CustomerID}})"
+billing.created = "Created billing details (user_id={{.UserID}}, customer_id={{.CustomerID}})"
+billing.load_failed = "Failed to load billing details with user"
+billing.get_failed = "Failed to get billing details (id={{.ID}})"
+billing.not_found_for_user = "billing details not found for user"
+billing.not_found_for_customer = "billing details not found for customer"
+billing.payment_method.get_failed = "Failed to get billing details for payment method update (user_id={{.UserID}})"
+billing.payment_method.update_failed = "Failed to update payment method (user_id={{.UserID}}, payment_method_id={{.PaymentMethodID}})"
+billing.payment_method.updated = "Updated payment method (user_id={{.UserID}}, payment_method_id={{.PaymentMethodID}})"
+billing.subscription.get_failed = "Failed to get billing details for subscription update (customer_id={{.CustomerID}})"
+billing.subscription.update_failed = "Failed to update subscription (customer_id={{.CustomerID}}, subscription_id={{.SubscriptionID}})"
+billing.subscription.updated = "Updated subscription (customer_id={{.CustomerID}}, subscription_id={{.SubscriptionID}}, status={{.Status}})"
+billing.subscription.cancel_get_failed = "Failed to get billing details for subscription cancellation (customer_id={{.CustomerID}})"
+billing.subscription.cancel_failed = "Failed to cancel subscription (customer_id={{.CustomerID}})"
+billing.subscription.canceled = "Canceled subscription (customer_id={{.CustomerID}})"
+billing.delete_get_failed = "Failed to get billing details for deletion (user_id={{.UserID}})"
+billing.delete_failed = "Failed to delete billing details (user_id={{.UserID}})"
+billing.deleted = "Deleted billing details (user_id={{.UserID}})"
+
+# File Chunk
+filechunk.fetch_failed = "failed to fetch file attachment for idempotency check (file_attachment_id={{.FileAttachmentID}})"
+filechunk.already_processed = "file attachment already processed, skipping (file_attachment_id={{.FileAttachmentID}}, existing_status={{.ExistingStatus}})"
+filechunk.create_failed = "failed to create file chunk (chunk_index={{.ChunkIndex}}, file_attachment_id={{.FileAttachmentID}})"
+filechunk.status_update_failed = "failed to update file attachment chunk_status (file_attachment_id={{.FileAttachmentID}})"
+filechunk.status_update_after_error_failed = "failed to update file attachment chunk_status after error (file_attachment_id={{.FileAttachmentID}}, status={{.Status}})"
+filechunk.set_status_failed = "failed to set file attachment chunk_status (file_attachment_id={{.FileAttachmentID}}, status={{.Status}})"
+filechunk.scan_failed = "failed to scan file chunk result"
+filechunk.iterate_failed = "error iterating file chunk results"
+
+# Free Tier
+free_tier.count_failed = "failed to count user messages (user_id={{.UserID}})"
+
+# Personality
+personality.not_found_or_unauthorized = "personality not found or user not authorized (personality_id={{.PersonalityID}}, user_id={{.UserID}})"
+personality.flow.update_query_failed = "failed to query flow for update"
+personality.flow.ownership_check_failed = "failed to check flow ownership"
+personality.flow.set_generated_failed = "failed to set flow generated"
+personality.flow.accept_failed = "failed to accept flow"
+
+# Ritual
+ritual.relationships_load_failed = "failed to load ritual relationships"
+ritual.not_found_or_unauthorized = "ritual not found or user not authorized (ritual_id={{.RitualID}}, user_id={{.UserID}})"
+ritual.not_all_found = "not all requested rituals were found or user not authorized (user_id={{.UserID}}, requested={{.RequestedCount}}, found={{.FoundCount}})"
+ritual.chat_not_found_or_unauthorized = "chat not found or user not authorized (chat_id={{.ChatID}}, user_id={{.UserID}})"
+
+# Role
+role.name_check_failed = "failed to check role name existence"
+role.existence_check_failed = "failed to check role existence"
+
+# System Ritual Binding
+system_binding.hotkey_check_failed = "failed to check hotkey conflict"
+system_binding.create_race_failed = "create system ritual binding failed, attempting to recover"
+system_binding.create_race_update_failed = "failed to update system ritual binding after create race"
+
+# Usage Stats
+usagestats.input_tokens_failed = "failed to sum input tokens"
+usagestats.output_tokens_failed = "failed to sum output tokens"
+
+# Chat Export
+chatexport.chat_not_found_or_unauthorized = "chat not found or user not authorized (chat_id={{.ChatID}}, user_id={{.UserID}})"
+chatexport.zip_close_failed = "failed to close zip writer"
+chatexport.chat_json_create_failed = "failed to create chat.json in zip"
+chatexport.chat_json_encode_failed = "failed to encode chat to json"
+chatexport.messages_jsonl_create_failed = "failed to create messages.jsonl in zip"
+chatexport.message_encode_failed = "failed to encode message to json"
+
+# File Attachment
+file_attachment.relationships_load_failed = "failed to load relationships"
+file_attachment.not_found_or_unauthorized = "file attachment not found or user not authorized (file_attachment_id={{.FileAttachmentID}}, user_id={{.UserID}})"
+file_attachment.update_invalid = "file attachment update requires either file_id or chat_message_id (file_attachment_id={{.FileAttachmentID}}, user_id={{.UserID}})"
+file_attachment.get_updated_failed = "failed to get updated file attachment"
+file_attachment.legacy_chat_check_failed = "failed to check for legacy chat files (chat_id={{.ChatID}}, user_id={{.UserID}})"
+file_attachment.new_chat_check_failed = "failed to check for new chat files (chat_id={{.ChatID}}, user_id={{.UserID}})"
+file_attachment.legacy_personality_check_failed = "failed to check for legacy personality files (personality_id={{.PersonalityID}})"
+file_attachment.new_personality_check_failed = "failed to check for new personality files (personality_id={{.PersonalityID}})"
+file_attachment.chat_files_check_failed = "failed to check for chat files (chat_id={{.ChatID}}, user_id={{.UserID}})"
+file_attachment.personality_files_check_failed = "failed to check for personality files (personality_id={{.PersonalityID}})"
+
+# Memory
+memory.chat_not_found_or_unauthorized = "chat not found or user not authorized (chat_id={{.ChatID}}, user_id={{.UserID}})"
+memory.personality_auto_pin_failed = "failed to get personality for auto-pin check (personality_id={{.PersonalityID}})"
+memory.not_found_or_unauthorized = "memory not found or user not authorized (memory_id={{.MemoryID}}, user_id={{.UserID}})"
+memory.pin_scope_invalid = "pinning is only supported for User-scoped memories (memory_id={{.MemoryID}}, scope={{.Scope}})"
+memory.personality_not_found_or_unauthorized = "personality not found or user not authorized (personality_id={{.PersonalityID}}, user_id={{.UserID}})"
+memory.with_chat_load_failed = "failed to load memory with chat"
+memory.zip_close_failed = "failed to close zip writer"
+memory.chat_stream_failed = "failed to stream chat memories"
+memory.user_stream_failed = "failed to stream user memories"
+memory.pinned_ids_query_failed = "failed to query distinct pinned personality IDs"
+memory.pinned_stream_failed = "failed to stream pinned memories (personality_id={{.PersonalityID}})"
+
+# User Preferences
+user_prefs.get_updated_failed = "failed to get updated user preferences"
+
+# Admin
+admin.user_get_failed = "failed to get user"
+admin.user_prefs_load_failed = "failed to load user preferences"
+admin.user_updated = "User updated by admin (user_id={{.UserID}})"
+admin.super_admin_modify_attempted = "attempted to modify super_admin user (user_id={{.UserID}})"
+
+# User
+user.not_found = "user not found (user_id={{.UserID}})"
+user.username_check_failed = "failed to check username existence"
+user.email_check_failed = "failed to check email existence"
+user.password_hash_failed = "failed to hash password"
+user.default_role_failed = "failed to get default role"
+user.load_with_role_failed = "failed to load user with role"
+user.default_model_failed = "failed to get default model (model={{.Model}})"
+user.token_generate_failed = "failed to generate tokens"
+user.last_login_update_failed = "failed to update last login time and refresh token ID"
+user.get_failed = "failed to get user"
+user.password_update_failed = "failed to update password"
+user.prefs_get_failed = "failed to get user preferences"
+user.refresh_token_update_failed = "failed to update refresh token ID"
+user.cognito_sub_query_failed = "failed to query user by cognito_sub"
+user.cognito_jit_creating = "Creating new user from Cognito sub (JIT provisioning) (cognito_sub={{.CognitoSub}}, cognito_username={{.CognitoUsername}})"
+user.cognito_email_missing = "Cognito user missing email claim and fallback candidate (cognito_sub={{.CognitoSub}}, cognito_username={{.CognitoUsername}})"
+user.cognito_username_invalid = "Cognito username invalid after normalization (cognito_sub={{.CognitoSub}}, cognito_username_raw={{.CognitoUsernameRaw}})"
+user.cognito_username_collision = "Username collision detected - existing user has different email (username={{.Username}}, cognito_sub={{.CognitoSub}})"
+user.cognito_email_collision = "Email collision - existing user already linked to different Cognito account (email={{.Email}}, existing_cognito_sub={{.ExistingCognitoSub}}, new_cognito_sub={{.NewCognitoSub}})"
+user.cognito_link_failed = "failed to link existing user to Cognito"
+user.cognito_reload_failed = "failed to reload linked user with roles"
+user.cognito_linked = "Linked existing local user to Cognito identity (user_id={{.UserID}}, email={{.Email}}, cognito_sub={{.CognitoSub}})"
+user.cognito_created = "Successfully created new Cognito user (user_id={{.UserID}}, cognito_sub={{.CognitoSub}}, username={{.Username}})"
+user.cognito_by_username_failed = "failed to fetch user by username"
+user.cognito_by_email_failed = "failed to fetch existing user by email"

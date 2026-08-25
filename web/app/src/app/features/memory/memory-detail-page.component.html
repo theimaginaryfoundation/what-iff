@@ -1,0 +1,90 @@
+<section class="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 md:p-6">
+  <header class="flex items-center justify-between gap-2">
+    <button
+      type="button"
+      class="rounded-lg border border-border-base px-3 py-2 text-sm text-text-secondary hover:text-text-primary"
+      (click)="goBack()">
+      Back to memories
+    </button>
+  </header>
+
+  @if (loading()) {
+    <p class="rounded-2xl border border-border-base bg-surface-card p-8 text-center text-sm text-text-secondary" role="status">
+      Loading memory…
+    </p>
+  } @else if (error()) {
+    <p class="rounded-2xl border border-danger/40 bg-danger/10 p-6 text-sm text-danger" role="alert">
+      {{ error() }}
+    </p>
+  } @else if (memory(); as currentMemory) {
+    <div class="grid gap-4 lg:grid-cols-[1fr_260px]">
+      <div class="rounded-2xl border border-border-base bg-surface-card p-4">
+        <app-memory-form
+          [memory]="currentMemory"
+          [personalities]="personalities()"
+          [saving]="saving()"
+          [deleting]="deleting()"
+          [pinUpdating]="pinUpdating()"
+          (save)="save($event)"
+          (pinChange)="onPinChange($event)"
+          (cancel)="goBack()"
+          (remove)="requestDelete()" />
+      </div>
+
+      <aside class="rounded-2xl border border-border-base bg-surface-card p-4 text-sm">
+        <h2 class="text-sm font-semibold text-text-primary">Metadata</h2>
+        <dl class="mt-2 space-y-2 text-text-secondary">
+          <div>
+            <dt class="font-medium text-text-primary">Level</dt>
+            <dd>{{ currentMemory.level }}</dd>
+          </div>
+          <div>
+            <dt class="font-medium text-text-primary">Type</dt>
+            <dd>{{ currentMemory.type }}</dd>
+          </div>
+          <div>
+            <dt class="font-medium text-text-primary">Confidence</dt>
+            <dd>{{ currentMemory.confidence | number:'1.2-2' }}</dd>
+          </div>
+          @if (currentMemory.chain_metadata; as chain) {
+            <div>
+              <dt class="font-medium text-text-primary">Verified count</dt>
+              <dd>{{ chain.duplicate_count }}</dd>
+            </div>
+            @if (chain.verified_timestamps_first?.length) {
+              <div>
+                <dt class="font-medium text-text-primary">First verified</dt>
+                <dd>{{ chain.verified_timestamps_first![0] | date:'medium' }}</dd>
+              </div>
+            }
+            @if (chain.verified_timestamps_last?.length) {
+              <div>
+                <dt class="font-medium text-text-primary">Last verified</dt>
+                <dd>{{ chain.verified_timestamps_last![chain.verified_timestamps_last!.length - 1] | date:'medium' }}</dd>
+              </div>
+            }
+          }
+          <div>
+            <dt class="font-medium text-text-primary">Merge log</dt>
+            <dd><a routerLink="/memories/merge-history" class="text-accent hover:underline">View history</a></dd>
+          </div>
+          <div>
+            <dt class="font-medium text-text-primary">Created</dt>
+            <dd>{{ currentMemory.created_at | date:'medium' }}</dd>
+          </div>
+          <div>
+            <dt class="font-medium text-text-primary">Updated</dt>
+            <dd>{{ currentMemory.updated_at | date:'medium' }}</dd>
+          </div>
+        </dl>
+      </aside>
+    </div>
+  }
+</section>
+
+<app-delete-memory-modal
+  [open]="deleteModalOpen()"
+  [count]="1"
+  [deleting]="deleting()"
+  (confirm)="confirmDelete()"
+  (cancel)="cancelDelete()" />

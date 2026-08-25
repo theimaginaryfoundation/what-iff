@@ -1,0 +1,177 @@
+// Per-theme token values.
+//
+// Two blocks: [data-theme="light"] (default) and [data-theme="dark"].
+// `:root` mirrors the light block so the app renders correctly even if
+// `data-theme` is briefly absent on the <html> element (FOUC guard).
+//
+// Source of truth: mockups/shared-styles.css lines 11-46 plus the Concept D
+// <style> block in mockups/concepts/concept-d-control-panel.html lines 23-51.
+
+:root,
+[data-theme="light"] {
+  // Surface
+  --bg-base: #F3F4F6;
+  --bg-card: #FFFFFF;
+  --bg-surface: #E5E7EB;
+  --bg-elevated: #FFFFFF;
+  --bg-input: #FFFFFF;
+
+  // Border
+  --border: #D1D5DB;
+  --border-hover: rgba(140, 135, 255, 0.25);
+  --focus-ring: #8C87FF;
+
+  // Text
+  --text-primary: #111827;
+  --text-secondary: #4B5563;
+  --text-muted: #6B7280;
+
+  // Shadows + scrollbar
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --card-shadow-hover: 0 8px 25px rgba(0, 0, 0, 0.14);
+  --scrollbar: #D1D5DB;
+
+  // Accent (mode-aware; shell scopes to indigo or orange in Phase 3)
+  --accent: #8C87FF;
+  --accent-light: #8C87FF;
+  --accent-bg: rgba(140, 135, 255, 0.08);
+
+  // Accent (mode-fixed)
+  --accent-app: #8C87FF;
+  --accent-config: #EA580C;
+
+  // Tool call chrome
+  --tool-bg: #E0E7FF;
+  --tool-border: rgba(140, 135, 255, 0.22);
+  --tool-text: #4B5563;
+  --tool-header-bg: rgba(140, 135, 255, 0.08);
+  --tool-result-bg: rgba(0, 0, 0, 0.04);
+
+  // System / agent system messages
+  --system-bg: rgba(140, 135, 255, 0.06);
+  --system-text: #8C87FF;
+
+  // Conversation bubbles
+  --user-bubble: #8C87FF;
+  --user-text: #111827;
+  --ai-bubble: #E5E7EB;
+  --ai-text: #111827;
+
+  // Buttons
+  --cta: #8C87FF;
+  --cta-text: #FFFFFF;
+  --cta-bg: rgba(140, 135, 255, 0.12);
+  --cta-selected-text: var(--cta);
+  --btn-secondary: #E5E7EB;
+  --btn-secondary-text: #1F2937;
+  --btn-secondary-border: #D1D5DB;
+
+  // Navigation
+  --nav-active-text: #111827;
+  --nav-active-bg: rgba(140, 135, 255, 0.10);
+  --nav-inactive-text: #6B7280;
+  --tab-active-text: #8C87FF;
+  --tab-active-border: #8C87FF;
+  --tab-inactive-text: #6B7280;
+
+  // Status
+  --danger: #EF4444;
+  --success: #10B981;
+  --warning: #F59E0B;
+  --info: #3B82F6;
+
+  // Concept D extras
+  --sidebar-gradient: linear-gradient(180deg, #FFFFFF 0%, #F8F9FF 100%);
+  --thread-active-bg: rgba(140, 135, 255, 0.08);
+  --table-header-bg: rgba(140, 135, 255, 0.14);
+  --table-row-alt-bg: rgba(140, 135, 255, 0.06);
+  --table-row-archived-bg: rgba(0, 0, 0, 0.07);
+}
+
+[data-theme="dark"] {
+  // Surface
+  --bg-base: #111827;
+  --bg-card: #1F2937;
+  --bg-surface: #374151;
+  --bg-elevated: #1F2937;
+  --bg-input: #111827;
+
+  // Border
+  --border: #374151;
+  --border-hover: rgba(140, 135, 255, 0.25);
+  --focus-ring: #8C87FF;
+
+  // Text
+  --text-primary: #F9FAFB;
+  --text-secondary: #9CA3AF;
+  --text-muted: #6B7280;
+
+  // Shadows + scrollbar
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  --card-shadow-hover: 0 8px 25px rgba(0, 0, 0, 0.35);
+  --scrollbar: #4B5563;
+
+  // Accent (mode-aware)
+  --accent: #8C87FF;
+  --accent-light: #8C87FF;
+  --accent-bg: rgba(140, 135, 255, 0.08);
+
+  // Accent (mode-fixed)
+  --accent-app: #8C87FF;
+  --accent-config: #EA580C;
+
+  // Tool call chrome
+  --tool-bg: #1A2035;
+  --tool-border: rgba(99, 102, 241, 0.30);
+  --tool-text: #9CA3AF;
+  --tool-header-bg: rgba(140, 135, 255, 0.12);
+  --tool-result-bg: rgba(0, 0, 0, 0.20);
+
+  // System / agent system messages
+  --system-bg: rgba(140, 135, 255, 0.06);
+  --system-text: #8C87FF;
+
+  // Conversation bubbles
+  --user-bubble: #4338CA;
+  --user-text: #FFFFFF;
+  --ai-bubble: #1F2937;
+  --ai-text: #F9FAFB;
+
+  // Buttons
+  --cta: #8C87FF;
+  --cta-text: #FFFFFF;
+  --cta-bg: rgba(140, 135, 255, 0.15);
+  --cta-selected-text: #FFFFFF;
+  --btn-secondary: #374151;
+  --btn-secondary-text: #D1D5DB;
+  --btn-secondary-border: #4B5563;
+
+  // Navigation
+  --nav-active-text: #F9FAFB;
+  --nav-active-bg: rgba(140, 135, 255, 0.12);
+  --nav-inactive-text: #6B7280;
+  --tab-active-text: #8C87FF;
+  --tab-active-border: #8C87FF;
+  --tab-inactive-text: #6B7280;
+
+  // Status
+  --danger: #EF4444;
+  --success: #10B981;
+  --warning: #F59E0B;
+  --info: #60A5FA;
+
+  // Concept D extras
+  --sidebar-gradient: linear-gradient(180deg, #1F2937 0%, #1A2535 100%);
+  --thread-active-bg: rgba(140, 135, 255, 0.12);
+  --table-header-bg: rgba(140, 135, 255, 0.38);
+  --table-row-alt-bg: rgba(255, 255, 255, 0.06);
+  --table-row-archived-bg: rgba(120, 120, 120, 0.13);
+}
+
+// Body baseline so token-driven colors take effect even before component
+// migration in later phases. Components currently using Tailwind utilities
+// keep their own colors until Phase 16 restyles them.
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+}

@@ -1,0 +1,76 @@
+<ui-modal [open]="open()" labelledBy="assign-expression-title" size="md" (dismiss)="close.emit()">
+  <div modal-header>
+    <h2 id="assign-expression-title" class="text-base font-semibold text-text-primary">Assign as expression</h2>
+  </div>
+
+  <div class="space-y-3 text-sm">
+    <label class="flex flex-col gap-1">
+      <span class="text-text-secondary">Personality</span>
+      <select
+        class="rounded-xl border border-border-base bg-surface-base px-3 py-2 text-text-primary"
+        [ngModel]="selectedPersonalityId()"
+        (ngModelChange)="onPersonalityChange($event)">
+        <option value="" disabled>Select personality</option>
+        @for (personality of personalities(); track personality.id) {
+          <option [value]="personality.id">{{ personality.name }}</option>
+        }
+      </select>
+    </label>
+
+    @if (loadingKeys()) {
+      <p class="text-xs text-text-muted">Loading expression slots…</p>
+    } @else if (availableExpressionKeys().length > 0) {
+      <div class="flex flex-wrap gap-1">
+        @for (key of availableExpressionKeys(); track key) {
+          <button
+            type="button"
+            class="rounded-full border border-border-base px-2 py-1 text-xs text-text-secondary hover:border-accent hover:text-text-primary"
+            (click)="chooseKey(key)">
+            {{ key }}
+          </button>
+        }
+      </div>
+    }
+
+    <label class="flex flex-col gap-1">
+      <span class="text-text-secondary">Expression key</span>
+      <input
+        type="text"
+        placeholder="happy"
+        class="rounded-xl border border-border-base bg-surface-base px-3 py-2 text-text-primary"
+        [ngModel]="expressionKey()"
+        (ngModelChange)="expressionKey.set($event)" />
+    </label>
+
+    <label class="flex flex-col gap-1">
+      <span class="text-text-secondary">Label (optional)</span>
+      <input
+        type="text"
+        placeholder="Happy"
+        class="rounded-xl border border-border-base bg-surface-base px-3 py-2 text-text-primary"
+        [ngModel]="label()"
+        (ngModelChange)="label.set($event)" />
+    </label>
+
+    @if (error()) {
+      <p class="text-xs text-danger">{{ error() }}</p>
+    }
+  </div>
+
+  <div modal-footer class="flex justify-end gap-2">
+    <button
+      type="button"
+      class="rounded-lg border border-border-base px-3 py-2 text-sm text-text-secondary"
+      [disabled]="submitting()"
+      (click)="close.emit()">
+      Cancel
+    </button>
+    <button
+      type="button"
+      class="rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+      [disabled]="submitting() || !selectedPersonalityId() || !expressionKey().trim()"
+      (click)="submit()">
+      {{ submitting() ? 'Saving…' : 'Assign image' }}
+    </button>
+  </div>
+</ui-modal>

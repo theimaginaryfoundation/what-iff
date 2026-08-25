@@ -1,0 +1,25 @@
+@if (isLoading()) {
+  <div class="mode-page__loading">Loading modes...</div>
+} @else if (cards().length === 0) {
+  <div class="mode-page__empty">{{ emptyText() }}</div>
+} @else {
+  <div class="mode-grid">
+    @for (card of cards(); track card.mood.id) {
+      <app-mode-card
+        [card]="card"
+        [isAssociationPickerOpen]="associationPickerMoodId() === card.mood.id"
+        [associationPickerQuery]="associationPickerQuery()"
+        [associationDropdownOpen]="associationDropdownOpen()"
+        [associationOptions]="associationOptionsByMoodId()[card.mood.id] ?? []"
+        (edit)="editMode.emit($event)"
+        (delete)="deleteMode.emit($event)"
+        (removeAssociation)="removeAssociation.emit($event)"
+        (openAssociationPicker)="openAssociationPicker.emit($event)"
+        (associationQueryChange)="associationQueryChange.emit($event)"
+        (associationDropdownOpenRequest)="openAssociationDropdown.emit()"
+        (associationDropdownCloseRequest)="closeAssociationDropdown.emit()"
+        (addAssociation)="addAssociation.emit($event)"
+        (closeAssociationPicker)="closeAssociationPicker.emit()" />
+    }
+  </div>
+}

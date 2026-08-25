@@ -1,0 +1,158 @@
+<section class="personalities-page flex w-full flex-1 flex-col gap-6 overflow-y-auto px-8 py-6">
+  <header class="flex flex-col items-center gap-3 text-center lg:flex-row lg:items-end lg:justify-between lg:text-left">
+    <div class="min-w-0">
+      <h1 class="text-[1.25rem] font-bold leading-tight text-(--color-text-primary)">Personalities</h1>
+      <p class="mt-1 text-[0.8125rem] text-(--color-text-secondary)">Your cast of AI personalities. Each has a unique voice, expertise, and memory.</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        class="inline-flex items-center gap-1.5 rounded-lg border border-(--btn-secondary-border) bg-(--btn-secondary) px-3.5 py-[0.4375rem] text-[0.8125rem] font-semibold text-(--btn-secondary-text) hover:bg-(--color-surface-input) focus:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)"
+        (click)="openCreate()"
+      >
+        Create Manually
+      </button>
+      <button
+        type="button"
+        class="inline-flex items-center gap-1.5 rounded-lg bg-(--cta) px-3.5 py-[0.4375rem] text-[0.8125rem] font-semibold text-(--cta-text) hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)"
+        (click)="navigateGenerate()"
+      >
+        <ui-sparkle-icon [size]="12" />
+        Generate
+      </button>
+    </div>
+  </header>
+
+  @if (isLoading()) {
+    <div class="rounded-2xl border border-(--color-border-default) bg-(--color-surface-card) p-6 text-center text-sm text-(--color-text-secondary)" role="status" aria-live="polite">
+      Loading personalities…
+    </div>
+  } @else if (hasResults()) {
+    <app-personality-card-grid
+      [personalities]="visiblePersonalities()"
+      [defaultPersonalityId]="defaultPersonalityId()"
+      (action)="onAction($event)"
+    />
+  } @else {
+    @if (needsSetup()) {
+      <div
+        class="rounded-2xl border border-(--color-accent) bg-(--color-surface-card) px-5 py-4 text-sm text-(--color-text-secondary)"
+        role="status"
+      >
+        <p class="font-semibold text-(--color-text-primary)">You need a personality to use Whatiff</p>
+        <p class="mt-1">
+          Every chat runs through a personality — its voice, memory, and avatar. Generate your own to get started.
+        </p>
+      </div>
+    }
+    <div
+      class="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-(--color-border-default) bg-(--color-surface-card) p-10 text-center"
+      role="status"
+    >
+      <h2 class="text-lg font-semibold text-(--color-text-primary)">No personalities yet</h2>
+      <p class="max-w-md text-sm text-(--color-text-secondary)">
+        Personalities shape how Whatiff talks, remembers, and shows up in chat. Generate one or create a custom personality manually.
+      </p>
+      <div class="mt-2 flex flex-wrap justify-center gap-2">
+        <button
+          type="button"
+          class="rounded-lg bg-(--color-accent) px-4 py-2 text-sm font-semibold text-white hover:brightness-95"
+          (click)="navigateGenerate()"
+        >Generate a Personality</button>
+        <button
+          type="button"
+          class="rounded-lg border border-(--color-border-default) px-4 py-2 text-sm font-medium text-(--color-text-primary) hover:bg-(--color-surface-elevated)"
+          (click)="openCreate()"
+        >Create Manually</button>
+      </div>
+    </div>
+  }
+</section>
+
+<app-personality-edit-modal
+  [open]="isEditOpen()"
+  [personality]="editingPersonality()"
+  (dismissed)="closeEditModal()"
+  (saved)="onEditSaved($event)"
+  (deleted)="onEditDeleted($event)"
+/>
+
+<ui-modal [open]="isCreateOpen()" [labelledBy]="'create-personality-title'" size="lg" (dismiss)="closeCreate()">
+  <div modal-header>
+    <h2 id="create-personality-title" class="text-lg font-semibold text-(--color-text-primary)">Create new personality</h2>
+  </div>
+
+  @if (createErrorMessage()) {
+    <div class="mb-3 rounded-md border border-red-500 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300" role="alert">
+      {{ createErrorMessage() }}
+    </div>
+  }
+
+  <div class="flex flex-col gap-4">
+    <label class="flex flex-col gap-1 text-sm">
+      <span class="font-medium text-(--color-text-primary)">Name *</span>
+      <input
+        type="text"
+        class="rounded-lg border border-(--color-border-default) bg-(--color-surface-input) px-3 py-2 text-(--color-text-primary) outline-none focus:border-(--color-accent) focus:ring-2 focus:ring-(--color-accent)"
+        placeholder="e.g. Vera Calder, Filbolt Pottsworth"
+        [value]="createForm().name"
+        (input)="setCreateName($any($event.target).value)"
+      />
+    </label>
+
+    <label class="flex flex-col gap-1 text-sm">
+      <span class="font-medium text-(--color-text-primary)">System prompt *</span>
+      <textarea
+        rows="8"
+        class="rounded-lg border border-(--color-border-default) bg-(--color-surface-input) px-3 py-2 text-(--color-text-primary) outline-none focus:border-(--color-accent) focus:ring-2 focus:ring-(--color-accent)"
+        placeholder="Describe how this personality should behave, talk, and react…"
+        [value]="createForm().system_prompt"
+        (input)="setCreateSystemPrompt($any($event.target).value)"
+      ></textarea>
+      <span
+        class="text-xs text-(--color-text-secondary)"
+        [class.text-amber-500]="createPromptIsNearLimit()"
+        [class.text-red-500]="createPromptIsOverLimit()"
+      >
+        {{ createPromptCharacterCountLabel() }} / {{ createPromptHardLimitLabel }} characters
+      </span>
+      <span class="text-xs text-(--color-text-secondary)">You can refine cover art, expressions, and prompts later from the detail page.</span>
+    </label>
+  </div>
+
+  <div modal-footer class="flex justify-end gap-2">
+    <button
+      type="button"
+      class="rounded-lg border border-(--color-border-default) px-4 py-2 text-sm font-medium text-(--color-text-primary) hover:bg-(--color-surface-elevated)"
+      (click)="closeCreate()"
+    >Cancel</button>
+    <button
+      type="button"
+      class="rounded-lg bg-(--color-accent) px-4 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
+      [disabled]="isCreating() || !createForm().name.trim() || !createForm().system_prompt.trim() || createPromptIsOverLimit()"
+      (click)="submitCreate()"
+    >{{ isCreating() ? 'Creating…' : 'Create' }}</button>
+  </div>
+</ui-modal>
+
+<ui-modal [open]="createLimitWarningOpen()" [labelledBy]="'create-limit-warning-title'" size="md" (dismiss)="createLimitWarningOpen.set(false)">
+  <div modal-header>
+    <h2 id="create-limit-warning-title" class="text-lg font-semibold text-(--color-text-primary)">Large prompt warning</h2>
+  </div>
+  <p class="text-sm text-(--color-text-secondary)">
+    This prompt is over {{ createPromptWarningLimitLabel }} characters and may reduce model quality.
+    Create personality anyway?
+  </p>
+  <div modal-footer class="flex justify-end gap-2">
+    <button
+      type="button"
+      class="rounded-lg border border-(--color-border-default) px-4 py-2 text-sm font-medium text-(--color-text-primary) hover:bg-(--color-surface-elevated)"
+      (click)="createLimitWarningOpen.set(false)"
+    >Cancel</button>
+    <button
+      type="button"
+      class="rounded-lg bg-(--color-accent) px-4 py-2 text-sm font-semibold text-white hover:brightness-95"
+      (click)="confirmCreateDespiteWarning()"
+    >Create anyway</button>
+  </div>
+</ui-modal>

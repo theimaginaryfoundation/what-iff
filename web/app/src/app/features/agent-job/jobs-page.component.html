@@ -1,0 +1,67 @@
+<section class="mx-auto flex w-full max-w-7xl flex-col gap-4 p-4 md:p-6">
+  <header class="flex flex-wrap items-center justify-between gap-2">
+    <div>
+      <h1 class="text-2xl font-semibold text-text-primary">Jobs</h1>
+      <p class="text-sm text-text-secondary">{{ totalCount() }} total jobs</p>
+    </div>
+    <button
+      type="button"
+      class="rounded-lg border border-accent-primary bg-accent-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+      (click)="onCreateJob()">
+      Create job
+    </button>
+  </header>
+
+  <app-job-filter-bar
+    [filters]="filters()"
+    [loading]="loading()"
+    (filtersChanged)="onFiltersChanged($event)"
+    (clear)="onClearFilters()"
+    (createRequested)="onCreateJob()" />
+
+  @if (loading()) {
+    <p class="rounded-2xl border border-border-base bg-surface-card p-8 text-center text-sm text-text-secondary" role="status">
+      Loading jobs…
+    </p>
+  } @else if (error()) {
+    <p class="rounded-2xl border border-danger/40 bg-danger/10 p-6 text-sm text-danger" role="alert">
+      {{ error() }}
+    </p>
+  } @else if (cardVms().length === 0) {
+    <p class="rounded-2xl border border-border-base bg-surface-card p-6 text-sm text-text-secondary">
+      No jobs match your current filters.
+    </p>
+  } @else {
+    <div class="grid gap-3 sm:grid-cols-1 lg:grid-cols-2">
+      @for (job of cardVms(); track job.id) {
+        <app-job-card
+          [job]="job"
+          [runningNow]="!!runningNowIds()[job.id]"
+          (open)="onOpen($event)"
+          (runNow)="onRunNow($event)"
+          (togglePauseResume)="onTogglePauseResume($event)"
+          (delete)="onDelete($event)" />
+      }
+    </div>
+  }
+
+  @if (!loading() && totalPages() > 1) {
+    <footer class="flex items-center justify-between">
+      <button
+        type="button"
+        class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary disabled:opacity-50"
+        [disabled]="currentPage() <= 1"
+        (click)="onPageChange(currentPage() - 1)">
+        Previous
+      </button>
+      <span class="text-xs text-text-secondary">Page {{ currentPage() }} of {{ totalPages() }}</span>
+      <button
+        type="button"
+        class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary disabled:opacity-50"
+        [disabled]="currentPage() >= totalPages()"
+        (click)="onPageChange(currentPage() + 1)">
+        Next
+      </button>
+    </footer>
+  }
+</section>

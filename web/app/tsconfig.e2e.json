@@ -1,0 +1,16 @@
+/* TypeScript project for the Playwright e2e suite. It exists so ESLint can
+   run type-aware rules (no-floating-promises et al) over e2e/ — the app's
+   tsconfig.app.json / tsconfig.spec.json deliberately don't cover it. */
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["e2e/**/*.ts"]
+}

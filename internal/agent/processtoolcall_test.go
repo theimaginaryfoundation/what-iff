@@ -1,0 +1,113 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"go.uber.org/zap"
+)
+
+func TestGetAgentToolsList_IncludesCreateJobByDefault(t *testing.T) {
+	list := getAgentToolsList(nil, false)
+	hasCreateJob := false
+	for _, tool := range list {
+		if tool.OfFunction != nil && tool.OfFunction.Name == "create_agent_job" {
+			hasCreateJob = true
+			break
+		}
+	}
+	require.True(t, hasCreateJob)
+}
+
+func TestGetAgentToolsList_IncludesGenerateImageTool(t *testing.T) {
+	list := getAgentToolsList(nil, true)
+	hasGenerateImage := false
+	for _, tool := range list {
+		if tool.OfFunction != nil && tool.OfFunction.Name == "generate_image" {
+			hasGenerateImage = true
+			break
+		}
+	}
+	require.True(t, hasGenerateImage, "expected generate_image in default tool list")
+}
+
+func TestGetAgentToolsListMatchesSharedSpecsOrder(t *testing.T) {
+	list := getAgentToolsList(nil, true)
+	specs := tools.AgentFunctionToolSpecs(true)
+	require.Len(t, list, len(specs))
+	for i, spec := range specs {
+		require.NotNil(t, list[i].OfFunction)
+		require.Equal(t, spec.Name, list[i].OfFunction.Name, "agent tool %d name", i)
+	}
+}
+
+func TestGetAvailableToolsMatchesCatalogAndLogicalTools(t *testing.T) {
+	ctx := context.Background()
+	avail := GetAvailableTools(ctx)
+	specs := tools.UserToggleableFunctionToolSpecs()
+	require.Len(t, avail, len(specs)+1, "web + user-toggleable function specs")
+
+	require.Equal(t, tools.ToolNameWebSearch, avail[0].Name)
+	require.Equal(t, tools.AvailableToolDescriptionWebSearch, avail[0].Description)
+	idx := 1
+	for _, spec := range specs {
+		require.Equal(t, spec.Name, avail[idx].Name)
+		require.Equal(t, spec.Description, avail[idx].Description, "spec %q description", spec.Name)
+		idx++
+	}
+}
+
+func TestGetAgentToolsList_IncludesSubagentDiscoveryTools(t *testing.T) {
+	list := getAgentToolsList(nil, true)
+	var hasList, hasRunSubagent bool
+	for _, tool := range list {
+		if tool.OfFunction == nil {
+			continue
+		}
+		switch tool.OfFunction.Name {
+		case "list":
+			hasList = true
+		case "run_subagent":
+			hasRunSubagent = true
+		}
+	}
+	require.True(t, hasList, "expected unified list tool in default tool list")
+	require.True(t, hasRunSubagent, "expected run_subagent in default tool list")
+}
+
+func TestExecutableCatalogToolsHaveHandlers(t *testing.T) {
+	a := &Agent{logger: zap.NewNop()}
+	handlers := a.toolHandlers(&chatContext{chat: &models.Chat{}})
+	for _, spec := range tools.ExecutableFunctionToolSpecs() {
+		require.Contains(t, handlers, spec.Name)
+	}
+}
+
+func TestDispatchToolUse_CreateAgentJobValidation_NoAttachments(t *testing.T) {
+	a := &Agent{logger: zap.NewNop()}
+	useArgs, err := json.Marshal(map[string]any{
+		"prompt": "run status check",
+	})
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	out, attachments, callErr := a.dispatchToolUse(
+		ctx,
+		&chatContext{chat: &models.Chat{UserID: uuid.New()}},
+		provider.ToolUse{
+			ID:    "tool-create-job",
+			Name:  "create_agent_job",
+			Input: useArgs,
+		},
+	)
+	require.NoError(t, callErr)
+	require.Empty(t, attachments)
+	require.Contains(t, out, `"success":false`)
+	require.Contains(t, out, `schedule_input is required`)
+}

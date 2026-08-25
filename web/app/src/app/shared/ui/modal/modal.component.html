@@ -1,0 +1,16 @@
+@if (open()) {
+  <div class="ui-modal fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="presentation" (click)="onBackdropClick()" (keydown)="onKeydown($event)">
+    <section #dialog [class]="panelClass()" role="dialog" aria-modal="true" [attr.aria-labelledby]="labelledBy()" [attr.aria-describedby]="describedBy()" (click)="onDialogClick($event)">
+      <header class="ui-modal__header">
+        <ng-content select="[modal-header]" />
+        @if (dismissible()) {
+          <button class="ui-modal__close" type="button" aria-label="Close" (click)="requestDismiss()">
+            <ui-x-icon [size]="18" />
+          </button>
+        }
+      </header>
+      <div class="ui-modal__body"><ng-content /></div>
+      <footer class="ui-modal__footer"><ng-content select="[modal-footer]" /></footer>
+    </section>
+  </div>
+}

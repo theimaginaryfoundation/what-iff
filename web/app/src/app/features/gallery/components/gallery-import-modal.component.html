@@ -1,0 +1,111 @@
+<ui-modal [open]="open()" labelledBy="gallery-import-title" size="md" (dismiss)="close.emit(); clearState()">
+  <div modal-header class="gallery-import__header">
+    <div>
+      <h2 id="gallery-import-title" class="gallery-import__title">Import</h2>
+      <p class="gallery-import__subtitle">Add image to gallery</p>
+    </div>
+  </div>
+
+  <div class="gallery-import__body">
+    <label class="gallery-import__dropzone" (dragover)="onDragOver($event)" (drop)="onDrop($event)">
+      <input #fileInput type="file" accept="image/*" class="sr-only" (change)="onFileInput($event)" />
+      @if (selectedFile(); as selected) {
+        <span>{{ selected.name }}</span>
+      } @else {
+        <span>Drop an image or click to browse</span>
+      }
+    </label>
+
+    <div class="gallery-import__field-group">
+      <label class="gallery-import__field-label">Title *</label>
+      <input
+        type="text"
+        placeholder="Name this image"
+        class="gallery-import__input"
+        [ngModel]="title()"
+        (ngModelChange)="title.set($event)"
+      />
+    </div>
+
+    <div class="gallery-import__field-group">
+      <label class="gallery-import__field-label">Description (optional)</label>
+      <textarea
+        rows="2"
+        placeholder="Prompt, caption, or any context…"
+        class="gallery-import__input gallery-import__textarea"
+        [ngModel]="description()"
+        (ngModelChange)="description.set($event)"
+      ></textarea>
+    </div>
+
+    <div class="gallery-import__field-group">
+      <label class="gallery-import__field-label">Scope</label>
+      <div class="gallery-import__scope-grid">
+        <button
+          type="button"
+          class="gallery-import__scope-card"
+          [class.gallery-import__scope-card--active]="scope() === 'global'"
+          (click)="setScope('global')"
+        >
+          <span class="gallery-import__scope-title">Global</span>
+          <span class="gallery-import__scope-subtitle">Available everywhere</span>
+        </button>
+        <button
+          type="button"
+          class="gallery-import__scope-card"
+          [class.gallery-import__scope-card--active]="scope() === 'personality'"
+          (click)="setScope('personality')"
+        >
+          <span class="gallery-import__scope-title">Pin to character</span>
+          <span class="gallery-import__scope-subtitle">Tied to one persona</span>
+        </button>
+      </div>
+      @if (scope() === 'personality') {
+        <div class="gallery-import__chips">
+          @for (personality of personalities(); track personality.id) {
+            <persona-accent-scope
+              [personality]="{ id: personality.id, name: personality.name, accent_color: personality.accentColor ?? null }"
+            >
+              <button
+                type="button"
+                class="gallery-import__chip"
+                [class.gallery-import__chip--active]="personalityId() === personality.id"
+                (click)="setPersonality(personality.id)"
+              >
+                <ui-avatar
+                  [name]="personality.name"
+                  [size]="'xxs'"
+                  [imageUrl]="personality.coverImageUrl ? ((personality.coverImageUrl | authImage | async) ?? null) : null"
+                  [accentColor]="'var(--persona-accent)'"
+                  [thumbnailCircle]="personality.thumbnailCircle"
+                />
+                <span class="gallery-import__chip-label">{{ personality.name }}</span>
+              </button>
+            </persona-accent-scope>
+          }
+        </div>
+      }
+    </div>
+
+    @if (error(); as errorMessage) {
+      <p class="gallery-import__error" role="alert">{{ errorMessage }}</p>
+    }
+  </div>
+
+  <div modal-footer class="gallery-import__footer">
+    <button
+      type="button"
+      class="gallery-import__button gallery-import__button--secondary"
+      [disabled]="submitting()"
+      (click)="close.emit(); clearState()">
+      Cancel
+    </button>
+    <button
+      type="button"
+      class="gallery-import__button gallery-import__button--primary"
+      [disabled]="submitting()"
+      (click)="onSubmitFile()">
+      {{ submitting() ? 'Importing…' : 'Import' }}
+    </button>
+  </div>
+</ui-modal>

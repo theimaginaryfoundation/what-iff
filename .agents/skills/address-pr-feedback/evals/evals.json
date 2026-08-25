@@ -1,0 +1,51 @@
+{
+  "skill_name": "address-pr-feedback",
+  "evals": [
+    {
+      "id": 0,
+      "name": "most-recent-pr-vague",
+      "prompt": "I want to start a new stream of work addressing the PR comments on my most recent PR in this repo. Set that up and tell me what actually needs doing.",
+      "expected_output": "Resolves the user's latest authored PR (#101), sets up an isolated worktree, gathers review feedback from all three GitHub comment surfaces, filters out bot/CI noise, and presents a grouped, actionable triage plan with file:line anchors. Makes no code edits.",
+      "files": [],
+      "expectations": [
+        "Correctly identifies PR #101 as the target PR",
+        "Sets up (or explicitly proposes) an isolated git worktree for the feedback work rather than working on the user's current checkout",
+        "Gathers feedback from all three comment surfaces: PR reviews, inline review-thread line comments, and issue-style conversation comments",
+        "Excludes bot/CI noise (review-bot approval boilerplate, 'LGTM', regression-test tables) from the actionable list, or explicitly labels it as dropped noise",
+        "Presents actionable items with file:line anchors (e.g. AGENTS.md:11-15)",
+        "Groups the feedback by priority/severity rather than presenting a flat undifferentiated list",
+        "Makes no code edits and no git commits — stops at a triage plan"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "explicit-pr-number",
+      "prompt": "Can you triage the review feedback on PR #101 and tell me which comments are real asks versus noise? Group them by how important they are.",
+      "expected_output": "Targets PR #101 specifically, pulls reviews + inline line comments + conversation comments, drops the review-bot approval boilerplate and regression tables, keeps the structured Minor/Nitpick findings and octavia-reviewer's human comments, flags the ambiguous ones, preserves file:line anchors.",
+      "files": [],
+      "expectations": [
+        "Targets PR #101 specifically",
+        "Explicitly classifies items as real asks versus noise",
+        "Drops the review-bot approval boilerplate and the regression-test result tables as noise",
+        "Keeps the structured review-bot Minor/Nitpick findings as actionable (e.g. make pre-commit verification, IAM policy note, symlink note)",
+        "Flags octavia-reviewer's ambiguous human comments (e.g. 'you could delete deploy.sh if you want', the pasted cursor rules) as needing a decision rather than silently dropping or auto-executing them",
+        "Preserves file:line anchors on actionable items",
+        "Groups items by importance/severity"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "casual-latest-pr",
+      "prompt": "ok can you go through the reviewer comments on my latest pull request and organize them for me? theres a bunch of bot spam in there i dont care about",
+      "expected_output": "Resolves latest PR, separates human/actionable feedback from bot spam, and produces an organized plan without starting to edit code. Bonus if it isolates the work in a worktree.",
+      "files": [],
+      "expectations": [
+        "Resolves the latest PR (#101) as the target",
+        "Separates bot spam (approval boilerplate, regression tables) from real feedback and does not list the spam as action items",
+        "Keeps the genuinely actionable findings (both the structured review-bot findings and octavia-reviewer's human comments)",
+        "Produces an organized/grouped plan rather than a flat dump",
+        "Does not start editing code — stops at organizing the feedback"
+      ]
+    }
+  ]
+}

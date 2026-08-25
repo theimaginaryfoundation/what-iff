@@ -1,0 +1,36 @@
+<div class="mode-card__association-picker" (click)="$event.stopPropagation()">
+  <div class="mode-card__association-picker-search">
+    <span class="mode-card__association-picker-search-icon" aria-hidden="true">
+      <ui-search-icon [size]="11" />
+    </span>
+    <input
+      type="text"
+      placeholder="Filter personalities..."
+      class="mode-card__association-picker-search-input"
+      [ngModel]="query()"
+      (ngModelChange)="queryChange.emit($event)"
+      (focus)="openDropdown.emit()"
+      (blur)="closeDropdown.emit()" />
+  </div>
+  @if (dropdownOpen()) {
+    <div class="mode-card__association-picker-list">
+      @for (personality of options(); track personality.id) {
+        <button type="button" class="mode-card__personality-option" (mousedown)="selectPersonality.emit(personality.id)">
+          @if (personality.coverUrl) {
+            @if (personality.coverUrl | authImage | async; as coverSrc) {
+              <img class="mode-card__personality-option-avatar-image" [src]="coverSrc" [alt]="personality.name" />
+            } @else {
+              <span class="mode-card__personality-option-avatar">{{ personality.initials }}</span>
+            }
+          } @else {
+            <span class="mode-card__personality-option-avatar">{{ personality.initials }}</span>
+          }
+          <span class="mode-card__personality-option-label" [style.color]="personality.accentColor">{{ personality.name }}</span>
+        </button>
+      } @empty {
+        <div class="mode-card__association-picker-empty">No personalities available</div>
+      }
+    </div>
+  }
+  <button type="button" class="mode-card__association-picker-close" (click)="close.emit()">Close</button>
+</div>

@@ -1,0 +1,184 @@
+:host {
+  display: block;
+}
+
+.memory-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-elevated);
+}
+
+.memory-card__actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.memory-card__icon-button {
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.memory-card__icon-button--active {
+  color: var(--color-accent);
+}
+
+.memory-card__excerpt {
+  margin: 0;
+  padding: 0 36px 0 0;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.memory-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.memory-card__meta-left {
+  min-width: 0;
+  flex: 1;
+}
+
+.memory-card__thread-label {
+  display: block;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-card__personality {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.memory-card__personality span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-card__meta-right {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.memory-card__meta-right span:first-child {
+  font-size: 11px;
+}
+
+.memory-card__meta-right span:last-child {
+  font-size: 9px;
+}
+
+.memory-card__pin-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.memory-card__pin-select {
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-base);
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--color-text-primary);
+}
+
+.memory-card__editor {
+  padding-right: 4px;
+}
+
+.memory-card__textarea {
+  width: 100%;
+  resize: vertical;
+  border-radius: 6px;
+  border: 1px solid var(--color-border-base);
+  padding: 8px;
+  background: var(--color-surface-input);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  outline: none;
+}
+
+.memory-card__editor-actions {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.memory-card__save,
+.memory-card__cancel {
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.memory-card__save {
+  border: none;
+  background: var(--color-accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.memory-card__save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.memory-card__cancel {
+  border: 1px solid var(--color-border-base);
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.memory-card__verified {
+  border-radius: 999px;
+  padding: 0 0.375rem;
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  color: var(--color-text-primary);
+  font-size: 0.625rem;
+  font-weight: 700;
+}

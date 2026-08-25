@@ -1,0 +1,3 @@
+# Generated from ../../openapi.yaml by `npm run sdk:generate` — reformatting it
+# only produces churn that the next regeneration undoes.
+e2e/sdk/schema.d.ts

@@ -1,0 +1,31 @@
+name: 'Post E2E status comment section'
+description: >-
+  Merges one E2E workflow's results into a single sticky PR comment, as a
+  section keyed by a stable id. Each e2e workflow (mock backend, local-LLM
+  backend, ...) calls this once with its own section id so they land as
+  separate parts of one comment instead of one comment per workflow.
+inputs:
+  pr:
+    description: 'Pull request number to comment on'
+    required: true
+  section:
+    description: "Stable id for this workflow's section, e.g. mock, local-llm"
+    required: true
+  order:
+    description: "Sort key controlling this section's position in the comment (lower first)"
+    required: true
+  body-file:
+    description: "Path to a markdown file containing just this section's content"
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ inputs.pr }}
+        SECTION: ${{ inputs.section }}
+        ORDER: ${{ inputs.order }}
+        BODY_FILE: ${{ inputs.body-file }}
+      run: python3 "${{ github.action_path }}/merge_comment.py"

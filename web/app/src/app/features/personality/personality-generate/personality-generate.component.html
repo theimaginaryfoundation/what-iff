@@ -1,0 +1,445 @@
+<div class="bg-gray-50 dark:bg-gray-900" [class.min-h-screen]="!modalMode()">
+  <div class="mx-auto px-4 sm:px-6 lg:px-8 py-8" [class.max-w-3xl]="!modalMode()">
+
+    @if (!modalMode()) {
+      <!-- Header -->
+      <div class="mb-6 flex items-center justify-between">
+        <div>
+          <h1 class="text-3xl font-bold text-gray-900 dark:text-white">Generate Personality</h1>
+          <p class="mt-2 text-gray-600 dark:text-gray-400">Answer a few questions and we'll build a custom personality for you.</p>
+        </div>
+        <button (click)="closeOrBack()"
+                class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
+          Back to Personalities
+        </button>
+      </div>
+    }
+
+    <!-- Error banner -->
+    @if (errorMessage()) {
+      <div class="rounded-md bg-red-50 dark:bg-red-900 p-4 mb-6">
+        <div class="flex">
+          <svg class="h-5 w-5 text-red-400 dark:text-red-300 mr-2 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          <div class="text-sm text-red-700 dark:text-red-200">{{ errorMessage() }}</div>
+        </div>
+      </div>
+    }
+
+    <!-- Loading state -->
+    @if (isLoading()) {
+      <div class="text-center py-12">
+        <div class="inline-flex items-center px-4 py-2 font-semibold leading-6 text-sm shadow rounded-md text-indigo-500 bg-indigo-100 dark:bg-indigo-900 dark:text-indigo-300">
+          <svg class="animate-spin -ml-1 mr-3 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          Loading...
+        </div>
+      </div>
+    }
+
+    <!-- Main content -->
+    @if (!isLoading() && flow()) {
+
+      <!-- Progress bar -->
+      <div class="mb-8">
+        <div class="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400 mb-2">
+          <span>
+            @if (isReviewScreen()) {
+              Review
+            } @else {
+              Step {{ currentStep() + 1 }} of {{ totalSteps }}
+            }
+          </span>
+          <span>{{ progressPercent() }}%</span>
+        </div>
+        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+          <div class="bg-indigo-600 dark:bg-indigo-500 h-2 rounded-full transition-all duration-300"
+               [style.width.%]="progressPercent()"></div>
+        </div>
+        <!-- Step dots -->
+        <div class="flex justify-between mt-3">
+          @for (page of pages; track $index) {
+            <button (click)="jumpToStep($index)"
+                    [disabled]="isReviewScreen()"
+                    class="flex flex-col items-center group"
+                    [class.cursor-pointer]="!isReviewScreen()"
+                    [class.cursor-default]="isReviewScreen()">
+              <div class="w-3 h-3 rounded-full transition-colors"
+                   [class.bg-indigo-600]="$index <= currentStep() || isReviewScreen()"
+                   [class.dark:bg-indigo-500]="$index <= currentStep() || isReviewScreen()"
+                   [class.bg-gray-300]="$index > currentStep() && !isReviewScreen()"
+                   [class.dark:bg-gray-600]="$index > currentStep() && !isReviewScreen()">
+              </div>
+              <span class="text-xs mt-1 text-gray-500 dark:text-gray-400 hidden sm:block">{{ page.title }}</span>
+            </button>
+          }
+        </div>
+      </div>
+
+      <!-- ═══════ Review Screen ═══════ -->
+      @if (isReviewScreen()) {
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 sm:p-8">
+          <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Meet Your New Personality</h2>
+          <p class="text-gray-600 dark:text-gray-400 mb-6">Here's what we came up with based on your answers. Take a look and decide if you'd like to keep it or try again.</p>
+
+          <!-- Portrait (async job after text generation, hidden when style is 'none') -->
+          @if (showPortraitSection()) {
+            <div class="mb-6">
+              <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
+                {{ portraitSectionLabel() }}
+              </h3>
+              <div class="flex min-h-48 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900">
+                @if (portraitGenerating()) {
+                  <div class="text-center text-sm text-gray-600 dark:text-gray-400">
+                    <svg class="mx-auto mb-2 h-8 w-8 animate-spin text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Generating portrait…
+                  </div>
+                } @else if (portraitImageUrl(); as url) {
+                  <img
+                    class="max-h-56 w-auto rounded-lg object-contain shadow"
+                    [src]="(url | authImage | async) ?? ''"
+                    [alt]="portraitSectionLabel()"
+                  />
+                } @else {
+                  <p class="text-sm text-gray-500 dark:text-gray-400">
+                    @if (referenceImageId()) {
+                      Your reference image will appear here once uploaded.
+                    } @else {
+                      Portrait will appear here when ready.
+                    }
+                  </p>
+                }
+              </div>
+            </div>
+          }
+
+          <!-- Name -->
+          <div class="mb-6">
+            <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">Name</h3>
+            <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+              <div class="flex items-center justify-between gap-3">
+                @if (isManualNameMode()) {
+                  <input type="text"
+                         [ngModel]="manualName()"
+                         (ngModelChange)="manualName.set($event)"
+                         placeholder="Set a custom name"
+                         class="flex-1 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm font-semibold" />
+                } @else {
+                  <span class="text-lg font-semibold text-gray-900 dark:text-white">{{ selectedName() }}</span>
+                }
+
+                <div class="flex items-center gap-2">
+                  @if (generatedNames().length > 1) {
+                    <span class="text-xs text-gray-400 dark:text-gray-500">{{ (selectedNameIndex() % generatedNames().length) + 1 }}/{{ generatedNames().length }}</span>
+                    <button (click)="prevName()"
+                            class="p-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                            title="Previous generated name">
+                      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                      </svg>
+                    </button>
+                    <button (click)="nextName()"
+                            class="p-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                            title="Next generated name">
+                      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                      </svg>
+                    </button>
+                  }
+                  <button (click)="toggleManualNameMode()"
+                          class="p-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          [title]="isManualNameMode() ? 'Use generated names' : 'Edit name manually'">
+                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                Tip: use the arrow buttons to cycle generated names, or the pen icon to set your own.
+              </p>
+            </div>
+          </div>
+
+          <!-- About Me -->
+          <div class="mb-6">
+            <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">About Me</h3>
+            <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-5 border border-gray-200 dark:border-gray-700">
+              <p class="text-gray-800 dark:text-gray-200 whitespace-pre-wrap leading-relaxed">{{ flow()!.generated_about_me }}</p>
+            </div>
+          </div>
+
+          <!-- Generated System Prompt (collapsed by default) -->
+          <details class="mb-6">
+            <summary class="cursor-pointer text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide hover:text-gray-700 dark:hover:text-gray-300">
+              System Prompt (advanced)
+            </summary>
+            <div class="mt-3 bg-gray-50 dark:bg-gray-900 rounded-lg p-5 border border-gray-200 dark:border-gray-700">
+              <p class="text-gray-800 dark:text-gray-200 whitespace-pre-wrap text-sm leading-relaxed">{{ flow()!.generated_prompt }}</p>
+            </div>
+          </details>
+
+          <!-- Actions -->
+          <div class="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
+            <div class="flex items-center gap-2">
+              <button (click)="goBackToEdit()"
+                      [disabled]="isGenerating() || isAccepting() || isResetting()"
+                      class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                Edit Answers
+              </button>
+              <button (click)="resetDraft()"
+                      [disabled]="isGenerating() || isAccepting() || isResetting()"
+                      class="inline-flex items-center px-4 py-2 border border-amber-300 dark:border-amber-700 shadow-sm text-sm font-medium rounded-md text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 disabled:opacity-50 disabled:cursor-not-allowed">
+                @if (isResetting()) {
+                  Resetting...
+                } @else {
+                  Start Over
+                }
+              </button>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <button (click)="regenerate()"
+                      [disabled]="isGenerating() || isAccepting()"
+                      class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                @if (isGenerating()) {
+                  <svg class="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Regenerating...
+                } @else {
+                  Regenerate
+                }
+              </button>
+
+              <button (click)="accept()"
+                      [disabled]="isGenerating() || isAccepting()"
+                      class="inline-flex items-center px-5 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed">
+                @if (isAccepting()) {
+                  <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Creating...
+                } @else {
+                  Accept & Create
+                }
+              </button>
+            </div>
+          </div>
+        </div>
+
+      <!-- ═══════ Generating Screen ═══════ -->
+      } @else if (isGenerating()) {
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-8 text-center">
+          <svg class="animate-spin mx-auto h-10 w-10 text-indigo-500 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">Generating your personality...</h2>
+          <p class="text-gray-600 dark:text-gray-400">This usually takes a few seconds. Hang tight!</p>
+        </div>
+
+      <!-- ═══════ Wizard Pages ═══════ -->
+      } @else {
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 sm:p-8">
+          <!-- Page header -->
+          <div class="mb-6">
+            <h2 class="text-2xl font-bold text-gray-900 dark:text-white">{{ currentPageData().title }}</h2>
+            <p class="mt-1 text-gray-600 dark:text-gray-400">{{ currentPageData().subtitle }}</p>
+          </div>
+
+          <!-- Skip-to-generate CTA (shown on optional pages past the essentials) -->
+          @if (showSkipCta()) {
+            <div class="mb-6 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div>
+                <p class="text-sm font-medium text-indigo-800 dark:text-indigo-200">You've covered the essentials!</p>
+                <p class="text-xs text-indigo-600 dark:text-indigo-400 mt-0.5">Skip ahead to generate now, or keep going for a more personalized result.</p>
+              </div>
+              <button (click)="finishAndGenerate()"
+                      [disabled]="isSaving()"
+                      class="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
+                Skip to Generate
+                <svg class="ml-2 -mr-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                </svg>
+              </button>
+            </div>
+          }
+
+          <!-- Questions -->
+          <div class="space-y-6">
+            @for (question of currentPageData().questions; track question.id) {
+              <div>
+                <label [for]="'q-' + question.id"
+                       class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  {{ question.label }}
+                </label>
+                <textarea [id]="'q-' + question.id"
+                          [ngModel]="getAnswer(question.id)"
+                          (ngModelChange)="setAnswer(question.id, $event)"
+                          [placeholder]="question.placeholder"
+                          rows="3"
+                          class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 resize-vertical text-sm"></textarea>
+              </div>
+            }
+          </div>
+
+          <!-- Page 1 extras: Image Style + Reference Image -->
+          @if (currentStep() === 0) {
+            <div class="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700 space-y-6">
+              <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Image Options</p>
+
+              <!-- Image style picker -->
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Image Style
+                </label>
+                <div class="flex flex-wrap gap-2">
+                  @for (style of imageStyles; track style.value) {
+                    <button type="button"
+                            (click)="selectImageStyle(style.value)"
+                            [ngClass]="imageStylePillClass(style)"
+                            class="px-3 py-1.5 text-xs font-medium border rounded-full transition-colors">
+                      {{ style.label }}
+                    </button>
+                  }
+                </div>
+                @if (imageStyleSelection() === 'none') {
+                  <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    No images will be generated for this personality. The image panel will be hidden in chat.
+                  </p>
+                }
+                @if (imageStyleSelection() === imageStyleOther) {
+                  <div class="mt-3">
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      Custom style hint
+                    </label>
+                    <input type="text"
+                           [ngModel]="customImageStyle()"
+                           (ngModelChange)="customImageStyle.set($event.slice(0, customImageStyleMaxLen))"
+                           [maxlength]="customImageStyleMaxLen"
+                           placeholder="e.g. cyberpunk, oil painting"
+                           class="w-full max-w-xs px-3 py-2 border border-violet-300 dark:border-violet-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-violet-500 focus:border-violet-500 text-sm" />
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Up to {{ customImageStyleMaxLen }} characters — passed through to image generation as a style hint.
+                    </p>
+                  </div>
+                }
+              </div>
+
+              <!-- Reference image upload (hidden when style is 'none') -->
+              @if (imageStyleSelection() !== 'none') {
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Reference Image <span class="font-normal text-gray-400 dark:text-gray-500">(optional)</span>
+                  </label>
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                    Upload a visual reference to use as the portrait instead of generating one. Expressions will use this image as a style guide.
+                  </p>
+
+                  @if (referenceImageId()) {
+                    <div class="flex items-center gap-3">
+                      <img [src]="(portraitImageUrl() | authImage | async) ?? ''"
+                           class="h-16 w-16 rounded-lg object-cover border border-gray-200 dark:border-gray-600"
+                           alt="Reference image preview" />
+                      <button type="button"
+                              (click)="clearReferenceImage()"
+                              class="text-sm text-red-600 dark:text-red-400 hover:underline">
+                        Remove
+                      </button>
+                    </div>
+                  } @else if (imageUploadLoading()) {
+                    <div class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                      <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Uploading...
+                    </div>
+                  } @else {
+                    <label class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+                      <svg class="-ml-1 mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                      </svg>
+                      Upload Image
+                      <input type="file" accept="image/*" class="sr-only" (change)="uploadReferenceImage($event)" />
+                    </label>
+                  }
+                </div>
+              }
+            </div>
+          }
+
+          @if (!modalMode()) {
+            <!-- Navigation -->
+            <div class="flex items-center justify-between mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+              <div class="flex items-center gap-2">
+                <button (click)="goBack()"
+                        [disabled]="!canGoBack() || isSaving() || isResetting()"
+                        class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                  <svg class="-ml-1 mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                  </svg>
+                  Previous
+                </button>
+                <button (click)="resetDraft()"
+                        [disabled]="isSaving() || isResetting()"
+                        class="inline-flex items-center px-4 py-2 border border-amber-300 dark:border-amber-700 shadow-sm text-sm font-medium rounded-md text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 disabled:opacity-50 disabled:cursor-not-allowed">
+                  @if (isResetting()) {
+                    Resetting...
+                  } @else {
+                    Start Over
+                  }
+                </button>
+              </div>
+
+              <div class="flex items-center gap-2">
+                @if (isSaving()) {
+                  <span class="text-xs text-gray-400 dark:text-gray-500">Saving...</span>
+                }
+
+                @if (isLastPage()) {
+                  <button (click)="finishAndGenerate()"
+                          [disabled]="isSaving()"
+                          class="inline-flex items-center px-5 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed">
+                    Generate Personality
+                    <svg class="ml-2 -mr-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                    </svg>
+                  </button>
+                } @else {
+                  @if (currentStep() === 0) {
+                    <button (click)="finishAndGenerate()"
+                            [disabled]="isSaving()"
+                            class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                      Skip to Generate
+                      <svg class="ml-2 -mr-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                      </svg>
+                    </button>
+                  }
+                  <button (click)="goNext()"
+                          [disabled]="isSaving()"
+                          class="inline-flex items-center px-5 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed">
+                    Next
+                    <svg class="ml-2 -mr-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                    </svg>
+                  </button>
+                }
+              </div>
+            </div>
+          }
+        </div>
+      }
+    }
+  </div>
+</div>

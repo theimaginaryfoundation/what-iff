@@ -1,0 +1,53 @@
+<article class="rounded-xl border border-border-base bg-surface-card p-3 md:p-4">
+  <div class="flex items-start justify-between gap-3">
+    <div class="flex items-start gap-2">
+      @if (!ritual().isSystem) {
+        <input
+          class="mt-1"
+          type="checkbox"
+          [checked]="selected()"
+          [attr.aria-label]="'Select ' + ritual().name"
+          (change)="toggleSelected.emit(ritual().id)" />
+      } @else {
+        <span class="mt-0.5 inline-flex rounded-md border border-border-base px-2 py-0.5 text-[11px] text-text-muted" aria-label="Read-only system skill">
+          Locked
+        </span>
+      }
+      <div class="space-y-1">
+        <div class="flex flex-wrap items-center gap-2">
+          <h4 class="text-sm font-semibold text-text-primary">{{ ritual().name }}</h4>
+          @if (ritual().hasHotkey) {
+            <span class="inline-flex items-center gap-1 rounded-md border border-accent-primary/40 px-1.5 py-0.5 text-[11px] text-accent-primary" [attr.aria-label]="'Hotkey ' + ritual().hotkeys">
+              @for (part of hotkeyParts(ritual().hotkeys); track part + $index) {
+                <span>{{ displayKey(part) }}</span>
+              }
+            </span>
+          }
+          @if (ritual().isSystem) {
+            <span class="rounded-md border border-border-base px-1.5 py-0.5 text-[11px] text-text-muted">System</span>
+          }
+        </div>
+        <p class="text-xs text-text-secondary">{{ ritual().description }}</p>
+        <p class="line-clamp-2 text-xs text-text-muted">{{ ritual().content }}</p>
+        <p class="text-[11px] text-text-muted">Updated {{ ritual().updatedAt | date:'mediumDate' }}</p>
+      </div>
+    </div>
+
+    <div class="flex shrink-0 items-center gap-1">
+      <button
+        type="button"
+        class="rounded-lg border border-border-base px-2 py-1 text-xs text-text-secondary hover:text-text-primary"
+        (click)="open.emit(ritual().id)">
+        Edit
+      </button>
+      @if (!ritual().isSystem) {
+        <button
+          type="button"
+          class="rounded-lg border border-danger/40 px-2 py-1 text-xs text-danger"
+          (click)="delete.emit(ritual().id)">
+          Delete
+        </button>
+      }
+    </div>
+  </div>
+</article>

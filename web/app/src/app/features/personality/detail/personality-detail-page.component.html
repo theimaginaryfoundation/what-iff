@@ -1,0 +1,110 @@
+@if (isLoading()) {
+  <section class="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 lg:px-8" role="status" aria-live="polite">
+    <p class="text-sm text-(--color-text-secondary)">Loading personality…</p>
+  </section>
+} @else if (errorMessage(); as message) {
+  <section class="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 lg:px-8" role="alert">
+    <div class="rounded-2xl border border-red-500 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300">{{ message }}</div>
+    <button type="button" class="mt-3 text-sm font-medium text-(--color-accent) hover:underline" (click)="goBack()">← Back to personalities</button>
+  </section>
+} @else if (personality(); as personality) {
+  <persona-accent-scope [personality]="personality">
+    <section class="personality-detail mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
+      <button
+        type="button"
+        class="self-start text-sm font-medium text-(--color-accent) hover:underline"
+        (click)="goBack()"
+      >← Back</button>
+
+      <app-personality-media-job-banner [personalityId]="personality.id" />
+
+      <header class="flex flex-col gap-4 rounded-2xl border border-(--color-border-default) bg-(--color-surface-card) p-4 sm:flex-row sm:items-center">
+        <persona-cover
+          [name]="personality.name"
+          [imageUrl]="vm()?.coverImageUrl ?? null"
+          [thumbnailCircle]="personality.thumbnail_circle"
+          size="lg"
+        />
+        <div class="flex flex-1 flex-col gap-1">
+          <h1 class="text-2xl font-bold text-(--color-text-primary)">{{ personality.name }}</h1>
+          <p class="text-sm text-(--color-text-secondary)">{{ vm()?.shortName }}</p>
+          <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-(--color-text-secondary)">
+            <span class="rounded-full bg-[var(--persona-accent-surface)] px-2 py-0.5 font-medium text-(--color-text-primary)">
+              {{ personality.stats.chat_count }} thread{{ personality.stats.chat_count === 1 ? '' : 's' }}
+            </span>
+            @if (isDefault()) {
+              <span class="rounded-full border border-[var(--persona-accent)] px-2 py-0.5 font-semibold uppercase tracking-wide text-(--color-text-primary)">
+                Default
+              </span>
+            }
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="rounded-lg bg-(--color-accent) px-3 py-2 text-sm font-semibold text-white hover:brightness-95"
+            (click)="onUseInNewChat()"
+          >Use in new chat</button>
+          @if (!isDefault()) {
+            <button
+              type="button"
+              class="rounded-lg border border-(--color-border-default) px-3 py-2 text-sm font-medium text-(--color-text-primary) hover:bg-(--color-surface-elevated)"
+              (click)="onMakeDefault()"
+            >Make default</button>
+          }
+          <button
+            type="button"
+            class="rounded-lg border border-(--color-border-default) px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-500/10"
+            (click)="onDelete()"
+          >Delete</button>
+        </div>
+      </header>
+
+      <section
+        class="flex items-start gap-3 rounded-2xl border border-(--color-border-default) bg-(--color-surface-card) p-4"
+      >
+        <span class="mt-0.5 shrink-0 text-amber-400" aria-hidden="true">
+          <ui-bell-icon [size]="18" />
+        </span>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-semibold text-(--color-text-primary)">Auto-pin new User memories</p>
+          <p class="mt-1 text-xs leading-relaxed text-(--color-text-secondary)">
+            When enabled, new User-scoped memories created while this personality is active will automatically be pinned to this personality, making them accessible only to this personality.
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          class="relative mt-1 h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50"
+          [class.bg-(--color-accent)]="personality.auto_pin_memories"
+          [class.bg-(--color-surface-input)]="!personality.auto_pin_memories"
+          [attr.aria-checked]="personality.auto_pin_memories"
+          [attr.aria-label]="'Auto-pin new User memories'"
+          [disabled]="autoPinUpdating()"
+          (click)="onAutoPinMemoriesChange(!personality.auto_pin_memories)"
+        >
+          <span
+            class="absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
+            [class.translate-x-5]="personality.auto_pin_memories"
+          ></span>
+        </button>
+      </section>
+
+      <app-personality-system-prompt-editor
+        [value]="systemPromptValue()"
+        (save)="onSavePrompt($event)"
+      />
+
+      <app-personality-expressions-manager
+        [personalityId]="personality.id"
+        [expressions]="expressions()"
+        [expressionsEnabled]="personality.expressions_enabled ?? true"
+        [expressionsToggleUpdating]="expressionsEnabledUpdating()"
+        (expressionsChanged)="onExpressionsChanged($event)"
+        (expressionsEnabledChanged)="onExpressionsEnabledChanged($event)"
+      />
+
+      <app-personality-attachments-list [personalityId]="personality.id" />
+    </section>
+  </persona-accent-scope>
+}

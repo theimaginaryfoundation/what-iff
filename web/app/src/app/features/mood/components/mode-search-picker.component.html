@@ -1,0 +1,19 @@
+<div class="mode-modal__search-picker">
+  <ui-search-icon class="mode-modal__search-icon" [size]="14" />
+  <input
+    type="text"
+    [placeholder]="placeholder()"
+    [ngModel]="query()"
+    (ngModelChange)="queryChange.emit($event)"
+    (focus)="openDropdown.emit()"
+    (blur)="closeDropdown.emit()" />
+  @if (dropdownOpen()) {
+    <div class="mode-modal__dropdown">
+      @for (option of options(); track option.id) {
+        <button type="button" class="mode-modal__dropdown-item" (mousedown)="selectOption.emit(option.id)">{{ option.label }}</button>
+      } @empty {
+        <div class="mode-modal__dropdown-empty">{{ emptyText() }}</div>
+      }
+    </div>
+  }
+</div>

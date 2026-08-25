@@ -1,0 +1,331 @@
+name: PR Validation
+
+on:
+  pull_request:
+    # `labeled` is required so adding the run-integration label actually
+    # triggers a run (default types are opened/synchronize/reopened only).
+    types: [opened, synchronize, reopened, labeled]
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'ent/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - 'docker-compose.yml'
+      - 'scripts/**'
+      - 'codecov.yml'
+      - '.github/workflows/pr-validation.yml'
+  # Main needs the same uploads, or PR comparisons have no base commit and the
+  # README badge has nothing to render. Actions does not support YAML anchors,
+  # so this filter is a literal copy of the one above — keep them in sync.
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'ent/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - 'docker-compose.yml'
+      - 'scripts/**'
+      - 'codecov.yml'
+      - '.github/workflows/pr-validation.yml'
+  # On-demand runs exist so the Go coverage totals can be regenerated against a
+  # branch without opening a pull request — the alternative is running the
+  # suites on a developer machine, where the hermetic e2e script's Postgres and
+  # the API port collide with whatever else that machine is running.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    name: Validate Go Code
+    runs-on: ubuntu-latest
+
+    # id-token is what makes the Codecov upload tokenless: the action exchanges
+    # this OIDC token for upload rights, which is the only mechanism that works
+    # from a fork PR (forks never receive repository secrets).
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # A malformed codecov.yml is silently ignored by Codecov, which would
+      # quietly drop the flag/component/ignore config. Fail here instead.
+      - name: Validate codecov.yml
+        run: |
+          echo "Validating codecov.yml..."
+          response=$(curl -sS --fail-with-body --connect-timeout 10 --max-time 30 \
+            --data-binary @codecov.yml https://api.codecov.io/validate)
+          echo "$response"
+          case "$response" in
+            Valid!*) echo "✅ codecov.yml is valid" ;;
+            *) echo "❌ codecov.yml rejected by Codecov"; exit 1 ;;
+          esac
+
+      - name: Download dependencies
+        run: |
+          echo "Downloading Go dependencies..."
+          go mod download
+
+      # Pinned version, matched to what's used locally, so a gitleaks release
+      # can't silently change what this check catches out from under CI.
+      # Checksum from the release's own gitleaks_8.30.1_checksums.txt, so a
+      # tampered or corrupted download is rejected rather than silently run.
+      - name: Install gitleaks
+        run: |
+          curl -sSL --fail \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            -o /tmp/gitleaks.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      # Ent's generated code is NOT checked in (see .gitignore) — it is produced
+      # from ent/schema here, before the checks below compile against it. Uses the
+      # same `make generate` target developers run, so the Makefile stays the
+      # single source of truth for the command itself. (Locally, `make build` /
+      # `make test` regenerate via the ent/client.go sentinel; this step is the
+      # explicit equivalent for CI.)
+      - name: Generate Ent code
+        run: |
+          echo "Generating Ent ORM code..."
+          make generate
+          echo "✅ Code generation complete"
+
+      # These mirror `make pre-commit` (fmt vet tidy build check-no-local-models
+      # check-compose-defaults check-public-hygiene) by calling the same
+      # targets, so the Makefile stays the single source of truth for what
+      # each check actually runs.
+      - name: Check formatting
+        run: make fmt
+
+      - name: Run go vet
+        run: make vet
+
+      # Generic secret/AI-attribution/absolute-path patterns only — see
+      # scripts/check-public-hygiene.sh's header. A second, private-name
+      # denylist runs outside this repo and never ships here.
+      - name: Check public hygiene
+        run: make check-public-hygiene
+
+      - name: Check go mod tidy
+        run: make tidy
+
+      - name: Audit for local-model dependencies
+        run: make check-no-local-models
+
+      - name: Check for insecure compose defaults
+        run: make check-compose-defaults
+
+      # Hermetic gate: mock LLM, dummy keys, race detector. No provider secret
+      # is available to this job by design — the default suite must pass with
+      # no real key. Real-provider tests live behind //go:build integration and
+      # run only in a separate, secret-gated job.
+      #
+      # Intentionally NOT `make test` (what `make pre-commit` runs locally):
+      # `make pre-commit` verifies the suite passes at all, while this job is
+      # the hermetic/race gate — no network, no real keys, -race enabled.
+      - name: Run tests (hermetic, mock LLM)
+        run: make test-ci
+
+      # Codecov is not active on this repository yet, so the run summary is
+      # currently the only place the number is readable. Keep this step even
+      # once it is: a total on the job page beats opening a dashboard.
+      - name: Report coverage total (go-unit)
+        run: make coverage-summary PROFILE=coverage/go-unit.out | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Tokenless (OIDC). fail_ci_if_error stays false until the pipeline has a
+      # track record — a Codecov outage should not fail the Go gate. Flipped to
+      # true in plan phase 7.
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          files: ./coverage/go-unit.out
+          flags: go-unit
+          disable_search: true
+          fail_ci_if_error: false
+
+      - name: Verify build
+        run: make build
+
+  # Hermetic backend end-to-end run (scripts/mock-e2e.sh): own isolated
+  # Postgres via docker compose, real register/login/chat/job pipeline
+  # against the mock LLM. A separate job (not a step in `validate`) so this
+  # doesn't lengthen that job's critical path — they run in parallel.
+  # Not opt-in like local-model-smoke/integration below: with carryforward,
+  # a backend PR that skipped this would show the *previous* commit's
+  # mock-e2e coverage for code the suite never actually ran against.
+  mock-e2e:
+    name: Mock E2E (hermetic, coverage)
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          # go-version-file, not a literal: setup-go exports GOTOOLCHAIN=local, so a
+          # pin below go.mod's `go` directive cannot self-upgrade and every Go step
+          # dies with "go.mod requires go >= X (running go Y; GOTOOLCHAIN=local)".
+          # That is what happened when go.mod moved to 1.27.0 and this pin stayed at
+          # 1.25.4. Every other setup-go in this repo reads the file; this was the
+          # only literal.
+          go-version-file: go.mod
+
+      - name: Generate Ent code
+        run: go generate ./ent
+
+      # MOCK_E2E_COVERAGE=1 builds the API with -cover and converts its
+      # GOCOVERDIR to coverage/go-mock-e2e.out in the script's own cleanup
+      # trap (see scripts/mock-e2e.sh) — before rm -rf'ing the workdir that
+      # held it, after the graceful-shutdown kill so counters are flushed.
+      # docker, docker compose, curl, jq, and openssl are all preinstalled on
+      # this runner image; the script manages its own isolated Postgres via
+      # `docker compose -p <unique> up -d --wait db`.
+      - name: Run hermetic mock e2e (with coverage)
+        env:
+          MOCK_E2E_COVERAGE: '1'
+        run: make mock-e2e
+
+      # The script always attempts a conversion in its cleanup trap regardless
+      # of whether the test itself passed, but a sufficiently early failure
+      # (e.g. Postgres never came up) can still leave no output file — guard
+      # the upload rather than pointing codecov-action at a missing path.
+      - name: Check coverage file exists
+        id: covcheck
+        if: always()
+        run: |
+          if [ -f coverage/go-mock-e2e.out ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Report coverage total (go-mock-e2e)
+        if: ${{ always() && steps.covcheck.outputs.exists == 'true' }}
+        run: make coverage-summary PROFILE=coverage/go-mock-e2e.out | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage to Codecov
+        if: ${{ always() && steps.covcheck.outputs.exists == 'true' }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          files: ./coverage/go-mock-e2e.out
+          flags: go-mock-e2e
+          disable_search: true
+          fail_ci_if_error: false
+
+  # Resolves the baked CI image's `e2e-ollama` target (docker/ci/Dockerfile,
+  # published by ci-image.yml), which bundles the pinned Ollama binary and
+  # model weights the smoke test below needs — same job as e2e-local-llm.yml,
+  # duplicated for the same reason: `container.image` can only reference
+  # `needs.*.outputs`, and cross-workflow job outputs don't exist.
+  version:
+    name: resolve CI image
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'run-local-model')
+    # local-model-smoke (which needs this job's output) is continue-on-error
+    # because a flaky pull shouldn't block the PR — this job must match, or a
+    # failure here (e.g. the image still building, a manifest-inspect blip)
+    # blocks the PR the downstream job was explicitly exempted from blocking.
+    continue-on-error: true
+    outputs:
+      image: ${{ steps.v.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: v
+        run: |
+          image="$(scripts/ci-image.sh e2e-ollama)"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          if ! docker manifest inspect "$image" >/dev/null 2>&1; then
+            echo "::error::CI image $image does not exist yet. It should be built by the 'CI base image' workflow (ci-image.yml) on this same commit — check its status before re-running this job."
+            exit 1
+          fi
+
+  # Real-inference smoke test against a tiny local model served by Ollama.
+  # Opt-in via the 'run-local-model' label (like 'integration' below) rather
+  # than running on every push: real-inference jobs are more failure-prone
+  # (model-pull timeouts, nondeterministic output) than the hermetic mock
+  # gate above, and installing/pulling a model on every commit is wasteful.
+  # continue-on-error stays true even when triggered, since a flaky pull
+  # shouldn't block the PR.
+  local-model-smoke:
+    name: Local Model Smoke (real inference, opt-in)
+    needs: [version]
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'run-local-model')
+    continue-on-error: true
+
+    # Ollama binary + pinned model are baked into this image; no install step
+    # needed, just a server start (below).
+    container:
+      image: ${{ needs.version.outputs.image }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Generate Ent code
+        run: make generate
+
+      - name: Start Ollama server
+        run: make local-llm-up
+
+      - name: Run local-model smoke test
+        run: make test-ci-local
+
+  # Opt-in real-provider integration tests. Runs only when the repository has
+  # an OPENAI_API_KEY secret configured AND the PR carries the
+  # 'run-integration' label — never by default, never with mock keys.
+  integration:
+    name: Integration Tests (real providers, opt-in)
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'run-integration')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run integration-tagged tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY secret not configured; skipping"
+            exit 0
+          fi
+          go test -tags integration ./internal/gate/... -v

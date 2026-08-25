@@ -1,0 +1,71 @@
+<form class="grid gap-4" (ngSubmit)="onSubmit()">
+  <label class="text-xs text-text-secondary">
+    Memory level
+    <select
+      class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+      [ngModel]="level()"
+      name="memory-level"
+      (ngModelChange)="onLevelChange($event)">
+      <option value="global">Global</option>
+      <option value="personality">Personality</option>
+      <option value="thread">Thread</option>
+      <option value="summary">Summary</option>
+    </select>
+  </label>
+
+  @if (showPinControl()) {
+    <div class="memory-form__pin rounded-xl border border-border-base bg-surface-elevated p-3">
+      <label class="flex flex-col gap-1 text-xs text-text-secondary">
+        <span class="font-semibold text-text-primary">Pin to personality</span>
+        <select
+          class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+          [ngModel]="pinnedPersonalityId()"
+          name="memory-pin-personality"
+          [disabled]="pinUpdating()"
+          (ngModelChange)="onPinnedPersonalityChange($event)">
+          <option [ngValue]="null">None (accessible by all personalities)</option>
+          @for (personality of personalities(); track personality.id) {
+            <option [ngValue]="personality.id">{{ personality.label }}</option>
+          }
+        </select>
+      </label>
+      <p class="mt-2 text-[11px] text-text-muted">
+        When pinned, this memory is only used by the selected personality. When unpinned, all personalities can access it.
+      </p>
+    </div>
+  }
+
+  <label class="text-xs text-text-secondary">
+    Content
+    <textarea
+      class="mt-1 min-h-48 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+      [ngModel]="content()"
+      name="memory-content"
+      (ngModelChange)="content.set($event)"></textarea>
+  </label>
+
+  <div class="flex items-center justify-between gap-2">
+    <button
+      type="button"
+      class="rounded-lg border border-danger/40 px-3 py-2 text-sm text-danger disabled:opacity-50"
+      [disabled]="deleting()"
+      (click)="remove.emit()">
+      {{ deleting() ? 'Deleting…' : 'Delete' }}
+    </button>
+    <div class="flex items-center gap-2">
+      <button
+        type="button"
+        class="rounded-lg border border-border-base px-3 py-2 text-sm text-text-secondary"
+        [disabled]="saving()"
+        (click)="cancel.emit()">
+        Cancel
+      </button>
+      <button
+        type="submit"
+        class="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+        [disabled]="saving() || !canSave()">
+        {{ saving() ? 'Saving…' : 'Save changes' }}
+      </button>
+    </div>
+  </div>
+</form>

@@ -1,0 +1,99 @@
+<ui-modal
+  [open]="modal.openState()"
+  size="xl"
+  labelledBy="profile-settings-title"
+  (dismiss)="close()">
+  <div modal-header class="profile-settings__header">
+    <div>
+      <h2 id="profile-settings-title">Profile &amp; Settings</h2>
+      <p>Manage your account details.</p>
+    </div>
+  </div>
+
+  <nav class="profile-settings__tabs" aria-label="Profile settings sections">
+    @for (tab of tabs; track tab.id) {
+      <button
+        type="button"
+        class="profile-settings__tab"
+        [class.profile-settings__tab--active]="modal.activeTab() === tab.id"
+        [attr.aria-selected]="modal.activeTab() === tab.id"
+        (click)="setTab(tab.id)">
+        <ui-user-icon [size]="13" />
+        {{ tab.label }}
+      </button>
+    }
+  </nav>
+
+  @if (message()) {
+    <div class="profile-settings__message" [ngClass]="'profile-settings__message--' + message()!.type">
+      {{ message()!.text }}
+    </div>
+  }
+
+  <div class="profile-settings__body">
+    <section class="profile-settings__section">
+      @if (loadingProfile()) {
+        <div class="profile-settings__empty">Loading profile...</div>
+      } @else {
+        <div class="profile-settings__identity-card">
+          <div class="profile-settings__identity-main">
+            <div class="profile-settings__avatar">{{ userInitials() }}</div>
+            <div>
+              <div class="profile-settings__identity-name">{{ displayName() }}</div>
+              <div class="profile-settings__identity-meta">
+                {{ currentUser()?.email }} · Member since {{ formatDate(currentUser()?.created_at) }}
+              </div>
+            </div>
+          </div>
+          <button class="profile-settings__button profile-settings__button--danger profile-settings__logout-button" type="button" (click)="logout()">
+            Log Out
+          </button>
+        </div>
+
+        <form class="profile-settings__form" [formGroup]="profileForm" (ngSubmit)="saveProfile()">
+          <label class="profile-settings__field">
+            <span>Email</span>
+            <input type="email" formControlName="email" autocomplete="email" />
+          </label>
+          <label class="profile-settings__field">
+            <span>First Name</span>
+            <input type="text" formControlName="first_name" autocomplete="given-name" />
+          </label>
+          <label class="profile-settings__field">
+            <span>Last Name</span>
+            <input type="text" formControlName="last_name" autocomplete="family-name" />
+          </label>
+          <label class="profile-settings__field">
+            <span>Theme</span>
+            <select [value]="themeMode()" [disabled]="loadingAction()" (change)="onThemeModeChange($any($event.target).value)">
+              <option value="system">Use system setting</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
+          <button class="profile-settings__button profile-settings__button--primary" type="submit" [disabled]="loadingAction()">
+            Save Changes
+          </button>
+        </form>
+
+        <form class="profile-settings__form profile-settings__password-form" [formGroup]="passwordForm" (ngSubmit)="savePassword()">
+          <label class="profile-settings__field">
+            <span>Change Password</span>
+            <input type="password" formControlName="current_password" placeholder="Current Password" autocomplete="current-password" />
+          </label>
+          <label class="profile-settings__field">
+            <span class="profile-settings__sr-only">New Password</span>
+            <input type="password" formControlName="new_password" placeholder="New Password" autocomplete="new-password" />
+          </label>
+          <label class="profile-settings__field">
+            <span class="profile-settings__sr-only">Confirm New Password</span>
+            <input type="password" formControlName="confirm_password" placeholder="Confirm New Password" autocomplete="new-password" />
+          </label>
+          <button class="profile-settings__button" type="submit" [disabled]="loadingAction()">
+            Update Password
+          </button>
+        </form>
+      }
+    </section>
+  </div>
+</ui-modal>

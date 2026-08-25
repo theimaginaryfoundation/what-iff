@@ -1,0 +1,143 @@
+<section class="skills-page mx-auto flex w-full max-w-4xl flex-col gap-4 p-4 md:p-6">
+  <header class="skills-page__header">
+    <h1>Skills</h1>
+    <p>Reusable prompt templates. Type / in chat to call a skill.</p>
+  </header>
+
+  <section class="skills-page__controls">
+    <div class="skills-page__search-wrap">
+      <ui-search-icon class="skills-page__search-icon" [size]="14" />
+      <input
+        type="text"
+        placeholder="Search skills..."
+        [value]="filters().query"
+        (input)="onSearch($any($event.target).value)" />
+    </div>
+    <div class="skills-page__sort-wrap">
+      <select [value]="filters().sort" (change)="onSortChanged($any($event.target).value)">
+        <option value="name_asc">Name (A-Z)</option>
+        <option value="created_desc">Created date</option>
+        <option value="updated_desc">Last updated</option>
+      </select>
+      <ui-chev-down-icon class="skills-page__sort-chevron" [size]="14" />
+    </div>
+  </section>
+
+  @if (loading()) {
+    <p class="rounded-2xl border border-border-base bg-surface-card p-8 text-center text-sm text-text-secondary" role="status">
+      Loading skills…
+    </p>
+  } @else if (error()) {
+    <p class="rounded-2xl border border-danger/40 bg-danger/10 p-6 text-sm text-danger" role="alert">
+      {{ error() }}
+    </p>
+  } @else {
+    <div class="skills-page__list">
+      @if (visibleRows().length === 0) {
+        <p class="rounded-2xl border border-border-base bg-surface-card p-6 text-sm text-text-secondary">
+          No personal skills match your filters.
+        </p>
+      } @else {
+        @for (row of visibleRows(); track row.id) {
+          <article
+            class="skills-page__card"
+            [style.--skill-accent]="rowAccent(row)"
+            [style.--skill-accent-surface]="rowAccentSurface(row)">
+            <div class="skills-page__card-persona">
+              @if (personalityFor(row.personalityId); as personality) {
+                <persona-cover
+                  size="sm"
+                  [name]="personality.name"
+                  [imageUrl]="personality.cover_image_url"
+                  [thumbnailCircle]="personality.thumbnail_circle"
+                  [style.--persona-accent]="rowAccent(row)"
+                  [style.--persona-accent-surface]="rowAccentSurface(row)" />
+              } @else {
+                <span class="skills-page__card-global-avatar">G</span>
+              }
+              <span class="skills-page__card-persona-label">{{ rowPersonaLabel(row) }}</span>
+            </div>
+
+            <div class="skills-page__card-copy">
+              <span class="skills-page__card-title">{{ row.name }}</span>
+              <div class="skills-page__card-description">{{ row.description }}</div>
+              <div class="skills-page__card-meta">
+                <div>Created <span>{{ row.isSystem ? '-' : (row.createdAt | date:'MMM d h:mm a' | uppercase) }}</span></div>
+                <div>Updated <span>{{ row.isSystem ? '-' : (row.updatedAt | date:'MMM d h:mm a' | uppercase) }}</span></div>
+              </div>
+            </div>
+
+            <div class="skills-page__card-actions">
+              <button type="button" class="skills-page__call-btn" (click)="callRitual(row)">
+                <ui-bolt-icon [size]="11" />
+                Call
+              </button>
+              <button type="button" class="skills-page__icon-btn" title="Edit" (click)="onOpen(row.id)">
+                <ui-edit-icon [size]="13" />
+              </button>
+              <button
+                type="button"
+                class="skills-page__icon-btn skills-page__icon-btn--delete"
+                title="Delete"
+                [disabled]="row.isSystem"
+                (click)="onDelete(row.id)">
+                <ui-trash-icon [size]="13" />
+              </button>
+            </div>
+          </article>
+        }
+      }
+    </div>
+  }
+
+  @if (!loading() && totalPages() > 1) {
+    <footer class="flex items-center justify-between">
+      <button
+        type="button"
+        class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary disabled:opacity-50"
+        [disabled]="currentPage() <= 1"
+        (click)="changePage(currentPage() - 1)">
+        Previous
+      </button>
+      <span class="text-xs text-text-secondary">Page {{ currentPage() }} of {{ totalPages() }}</span>
+      <button
+        type="button"
+        class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary disabled:opacity-50"
+        [disabled]="currentPage() >= totalPages()"
+        (click)="changePage(currentPage() + 1)">
+        Next
+      </button>
+    </footer>
+  }
+</section>
+
+@if (editorOpen()) {
+  <div class="skills-editor-overlay" (click)="!editorSaving() && requestCloseEditor()">
+    <div class="skills-editor-modal" (click)="$event.stopPropagation()">
+      <div class="skills-editor-modal__header">
+        <h2 id="skill-editor-title" class="skills-editor-modal__title">
+          {{ creating() ? 'Create Skill' : 'Edit Skill' }}
+        </h2>
+      </div>
+      <div class="skills-editor-modal__body">
+        <app-ritual-form
+          [ritual]="editingRitual()"
+          [personalities]="personalities()"
+          [saving]="editorSaving()"
+          [deleting]="false"
+          [creating]="creating()"
+          [isSystem]="editingSystem()"
+          [error]="editorError()"
+          (cancel)="closeEditor()"
+          (save)="onSaveFromEditor($event)" />
+      </div>
+    </div>
+  </div>
+}
+
+<app-persona-picker-dialog
+  [open]="personaPickerOpen()"
+  [title]="'New chat with personality'"
+  (select)="onPersonaPickedForCall($event)"
+  (cancel)="closePersonaPicker()"
+  (create)="closePersonaPicker()" />

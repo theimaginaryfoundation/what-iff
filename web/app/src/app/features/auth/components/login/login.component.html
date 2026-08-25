@@ -1,0 +1,119 @@
+<div class="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-md w-full space-y-8">
+    <div>
+      <div class="flex justify-center">
+        <img src="dark-favicon.ico" alt="WhatIff" class="w-12 h-12 rounded-lg object-cover" />
+      </div>
+      <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900 dark:text-white">
+        Sign in to your account
+      </h2>
+      <p class="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
+        Welcome to WhatIff
+      </p>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-md p-8">
+      @if (errorMessage()) {
+        <div class="flex items-center p-4 mb-6 text-red-800 dark:text-red-200 rounded-lg bg-red-50 dark:bg-red-900" role="alert">
+          <svg class="flex-shrink-0 w-4 h-4" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM10 15a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1-4a1 1 0 0 1-2 0V6a1 1 0 0 1 2 0v5Z"/>
+          </svg>
+          <div class="ml-3 text-sm font-medium">
+            {{ errorMessage() }}
+          </div>
+        </div>
+      }
+
+      <form class="space-y-6" [formGroup]="loginForm" (ngSubmit)="onSubmit()">
+        <div class="space-y-4">
+          <div>
+            <label for="username" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">
+              Username or Email
+            </label>
+            <input
+              type="text"
+              id="username"
+              formControlName="username"
+              class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+              [class.border-red-500]="loginForm.get('username')?.invalid && loginForm.get('username')?.touched"
+              placeholder="Enter your username or email"
+              required>
+            @if (loginForm.get('username')?.invalid && loginForm.get('username')?.touched) {
+              <div class="mt-2 text-sm text-red-600 dark:text-red-400">
+                @if (loginForm.get('username')?.hasError('required')) {
+                  <span>Username or email is required</span>
+                }
+              </div>
+            }
+          </div>
+
+          <div>
+            <label for="password" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">
+              Password
+            </label>
+            <input
+              type="password"
+              id="password"
+              formControlName="password"
+              class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+              [class.border-red-500]="loginForm.get('password')?.invalid && loginForm.get('password')?.touched"
+              placeholder="Enter your password"
+              required>
+            @if (loginForm.get('password')?.invalid && loginForm.get('password')?.touched) {
+              <div class="mt-2 text-sm text-red-600 dark:text-red-400">
+                @if (loginForm.get('password')?.hasError('required')) {
+                  <span>Password is required</span>
+                }
+                @if (loginForm.get('password')?.hasError('minlength')) {
+                  <span>Password must be at least 8 characters</span>
+                }
+              </div>
+            }
+          </div>
+
+          <div class="flex items-center justify-between">
+            <div class="flex items-start">
+              <div class="flex items-center h-5">
+                <input
+                  id="remember"
+                  type="checkbox"
+                  formControlName="remember"
+                  class="w-4 h-4 border border-gray-300 dark:border-gray-600 rounded bg-gray-50 dark:bg-gray-800 focus:ring-3 focus:ring-blue-300">
+              </div>
+              <label for="remember" class="ml-2 text-sm font-medium text-gray-900 dark:text-white">Remember me</label>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <button
+            type="submit"
+            [disabled]="loginForm.invalid || isLoading()"
+            class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed">
+            @if (isLoading()) {
+              <span class="absolute left-0 inset-y-0 flex items-center pl-3">
+                <svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </span>
+            }
+            {{ isLoading() ? 'Signing in...' : 'Sign in' }}
+          </button>
+        </div>
+
+        <div class="text-center">
+          <p class="text-sm text-gray-600 dark:text-gray-400">
+            Don't have an account?
+            <button
+              type="button"
+              (click)="navigateToRegister()"
+              class="font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 dark:hover:text-indigo-300 ml-1">
+              Sign up here
+            </button>
+          </p>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,277 @@
+<section class="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 md:p-6">
+  <header class="compaction-log-header">
+    <a routerLink="/memories" class="compaction-log-header__back">← Back to memories</a>
+    <h1>Compaction log</h1>
+    <p>
+      Every conversation checkpoint, captured like a diff: the summary and scratchpad before and after,
+      which memories were loaded into the segment, and every dedupe/merge/link action it produced.
+      Revert a summary or scratchpad to roll back to a known-good checkpoint.
+    </p>
+  </header>
+
+  @if (notice()) {
+    <p class="compaction-log-notice" role="status">{{ notice() }}</p>
+  }
+
+  <div class="compaction-log-filters">
+    <label>
+      Thread
+      <select #chatFilter [value]="selectedChatID()" (change)="updateFilters(chatFilter.value, personalityFilter.value)">
+        <option value="">All threads</option>
+        @for (chat of chats(); track chat.id) {
+          <option [value]="chat.id">{{ chat.name }}</option>
+        }
+      </select>
+    </label>
+    <label>
+      Personality
+      <select #personalityFilter [value]="selectedPersonalityID()" (change)="updateFilters(chatFilter.value, personalityFilter.value)">
+        <option value="">All personalities</option>
+        @for (personality of personalities(); track personality.id) {
+          <option [value]="personality.id">{{ personality.name }}</option>
+        }
+      </select>
+    </label>
+  </div>
+
+  @if (loading()) {
+    <p class="compaction-log-status" role="status">Loading compaction log…</p>
+  } @else if (error()) {
+    <p class="compaction-log-error" role="alert">{{ error() }}</p>
+  } @else if (events().length === 0) {
+    <p class="compaction-log-status">No compactions logged yet. They appear here after a conversation checkpoints.</p>
+  } @else {
+    <ul class="compaction-log-list" role="list">
+      @for (event of events(); track event.id) {
+        <li class="compaction-card" [class.compaction-card--expanded]="isExpanded(event)">
+          <div class="compaction-card__head">
+            <div class="compaction-card__badges">
+              @if (event.chat_name) {
+                <span class="compaction-card__badge compaction-card__badge--muted compaction-card__badge--chat" [title]="event.chat_name">
+                  <span class="compaction-card__badge-label">Thread</span>
+                  <span class="compaction-card__badge-value">{{ event.chat_name }}</span>
+                </span>
+              }
+              @if (event.reason) {
+                <span class="compaction-card__badge compaction-card__badge--muted">
+                  <span class="compaction-card__badge-label">Checkpoint</span>
+                  <span class="compaction-card__badge-value">{{ checkpointReasonLabel(event.reason) }}</span>
+                </span>
+              }
+              <span class="compaction-card__badge compaction-card__badge--muted">
+                <span class="compaction-card__badge-label">Memory changes</span>
+                <span class="compaction-card__badge-value">{{ mergeSummary(event) }}</span>
+              </span>
+            </div>
+            <div class="compaction-card__meta">
+              <span>{{ event.created_at | date:'MMM d, y' | uppercase }}</span>
+              <span>{{ event.created_at | date:'h:mm a' }}</span>
+              <button type="button" class="compaction-card__thread" (click)="openThread(event)">Open thread</button>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            class="compaction-card__toggle"
+            [attr.aria-expanded]="isExpanded(event)"
+            (click)="toggleExpanded(event)">
+            <span class="compaction-toggle__label">Details</span>
+            <span class="compaction-toggle__chevron" aria-hidden="true"></span>
+          </button>
+
+          @if (isExpanded(event)) {
+            <div class="compaction-card__body">
+
+              <button type="button" class="compaction-section-toggle" [attr.aria-expanded]="!isSectionCollapsed(event, 'summary')" (click)="toggleSection(event, 'summary')">
+                <span>Summaries</span>
+                <span class="compaction-toggle__chevron" aria-hidden="true"></span>
+              </button>
+              @if (!isSectionCollapsed(event, 'summary')) {
+              <!-- Conversation summary -->
+              <section class="diff-block">
+                <div class="diff-block__title-row">
+                  <h3 class="diff-block__title">Conversation summary</h3>
+                  @if (!summaryChanged(event)) {
+                    <span class="diff-block__unchanged">unchanged</span>
+                  }
+                </div>
+                <div class="diff-grid">
+                  <div class="diff-pane diff-pane--old">
+                    <div class="diff-pane__head">
+                      <span class="diff-pane__label">Before</span>
+                      @if (event.old_summary && summaryChanged(event)) {
+                        <button
+                          type="button"
+                          class="diff-pane__revert"
+                          [disabled]="revertingId() === event.old_summary?.id || isSnapshotReverted(event.old_summary)"
+                          (click)="revert(event.old_summary)">
+                          {{ isSnapshotReverted(event.old_summary) ? 'Restored' : (revertingId() === event.old_summary?.id ? 'Reverting…' : 'Revert to this') }}
+                        </button>
+                      }
+                    </div>
+                    <pre class="diff-pane__content">{{ event.old_summary?.content || '(empty)' }}</pre>
+                  </div>
+                  <div class="diff-pane diff-pane--new">
+                    <div class="diff-pane__head">
+                      <span class="diff-pane__label">After</span>
+                      @if (event.new_summary && summaryChanged(event)) {
+                        <button
+                          type="button"
+                          class="diff-pane__revert"
+                          [disabled]="revertingId() === event.new_summary?.id || isSnapshotReverted(event.new_summary)"
+                          (click)="revert(event.new_summary)">
+                          {{ isSnapshotReverted(event.new_summary) ? 'Restored' : (revertingId() === event.new_summary?.id ? 'Reverting…' : 'Revert to this') }}
+                        </button>
+                      }
+                    </div>
+                    <pre class="diff-pane__content">{{ event.new_summary?.content || '(empty)' }}</pre>
+                  </div>
+                </div>
+              </section>
+
+              <!-- Scratchpad -->
+              @if (event.old_scratchpad || event.new_scratchpad) {
+                <section class="diff-block">
+                  <div class="diff-block__title-row">
+                    <h3 class="diff-block__title">Scratchpad <span class="diff-block__hint">(personality-wide)</span></h3>
+                    @if (!scratchpadChanged(event)) {
+                      <span class="diff-block__unchanged">unchanged</span>
+                    }
+                  </div>
+                  <div class="diff-grid">
+                    <div class="diff-pane diff-pane--old">
+                      <div class="diff-pane__head">
+                        <span class="diff-pane__label">Before</span>
+                        @if (event.old_scratchpad && scratchpadChanged(event)) {
+                          <button
+                            type="button"
+                            class="diff-pane__revert"
+                            [disabled]="revertingId() === event.old_scratchpad?.id || isSnapshotReverted(event.old_scratchpad)"
+                            (click)="revert(event.old_scratchpad)">
+                            {{ isSnapshotReverted(event.old_scratchpad) ? 'Restored' : (revertingId() === event.old_scratchpad?.id ? 'Reverting…' : 'Revert to this') }}
+                          </button>
+                        }
+                      </div>
+                      <pre class="diff-pane__content">{{ event.old_scratchpad?.content || '(empty)' }}</pre>
+                    </div>
+                    <div class="diff-pane diff-pane--new">
+                      <div class="diff-pane__head">
+                        <span class="diff-pane__label">After</span>
+                        @if (event.new_scratchpad && scratchpadChanged(event)) {
+                          <button
+                            type="button"
+                            class="diff-pane__revert"
+                            [disabled]="revertingId() === event.new_scratchpad?.id || isSnapshotReverted(event.new_scratchpad)"
+                            (click)="revert(event.new_scratchpad)">
+                            {{ isSnapshotReverted(event.new_scratchpad) ? 'Restored' : (revertingId() === event.new_scratchpad?.id ? 'Reverting…' : 'Revert to this') }}
+                          </button>
+                        }
+                      </div>
+                      <pre class="diff-pane__content">{{ event.new_scratchpad?.content || '(empty)' }}</pre>
+                    </div>
+                  </div>
+                </section>
+              }
+              }
+
+              <button type="button" class="compaction-section-toggle" [attr.aria-expanded]="!isSectionCollapsed(event, 'memory')" (click)="toggleSection(event, 'memory')">
+                <span>Memory</span>
+                <span class="compaction-toggle__chevron" aria-hidden="true"></span>
+              </button>
+              @if (!isSectionCollapsed(event, 'memory')) {
+              <!-- Loaded memories -->
+              <section class="detail-block">
+                <button
+                  type="button"
+                  class="loaded-memories-toggle"
+                  [attr.aria-expanded]="!isLoadedMemoriesCollapsed(event)"
+                  (click)="toggleLoadedMemories(event)">
+                  <span>Loaded memories ({{ event.loaded_memories?.length ?? 0 }})</span>
+                  <span class="compaction-toggle__chevron" aria-hidden="true"></span>
+                </button>
+                @if (!isLoadedMemoriesCollapsed(event)) {
+                  @if ((event.loaded_memories?.length ?? 0) === 0) {
+                    <p class="detail-block__empty">No memories were loaded into this segment.</p>
+                  } @else {
+                    <ul class="loaded-list" role="list">
+                      @for (mem of event.loaded_memories; track $index) {
+                        <li class="loaded-item">
+                          <div class="loaded-item__head">
+                            <span class="loaded-item__scope">{{ mem.scope }}</span>
+                            @if (mem.confidence) {
+                              <span class="loaded-item__confidence">conf {{ mem.confidence | number:'1.2-2' }}</span>
+                            }
+                            @if (mem.memory_id) {
+                              <button type="button" class="loaded-item__link" (click)="openMemory(mem.memory_id)">View</button>
+                            }
+                          </div>
+                          <p class="loaded-item__content">{{ mem.content }}</p>
+                        </li>
+                      }
+                    </ul>
+                  }
+                }
+              </section>
+
+              <!-- New and updated memory operations -->
+              <section class="detail-block">
+                <h3 class="detail-block__title">New memories ({{ createdMemories(event).length }})</h3>
+                @if (createdMemories(event).length === 0) {
+                  <p class="detail-block__empty">No new memories created in this compaction.</p>
+                } @else {
+                  <ul class="merge-list" role="list">
+                    @for (mem of createdMemories(event); track mem.memory_id ?? mem.content) {
+                      <li class="merge-item">
+                        <div class="merge-item__head">
+                          <span class="merge-item__type">Created</span>
+                          @if (mem.memory_id) {
+                            <button type="button" class="merge-item__link" (click)="openMemory(mem.memory_id)">View memory</button>
+                          }
+                        </div>
+                        <p class="merge-item__content">{{ mem.content }}</p>
+                      </li>
+                    }
+                  </ul>
+                }
+              </section>
+              <section class="detail-block">
+                <h3 class="detail-block__title">Memory updates ({{ updatedMemoryEvents(event).length }})</h3>
+                @if (updatedMemoryEvents(event).length === 0) {
+                  <p class="detail-block__empty">No dedupe/merge/link actions in this compaction.</p>
+                } @else {
+                  <ul class="merge-list" role="list">
+                    @for (me of updatedMemoryEvents(event); track me.id) {
+                      <li class="merge-item">
+                        <div class="merge-item__head">
+                          <span class="merge-item__type merge-item__type--{{ me.merge_type }}">{{ mergeTypeLabel(me) }}</span>
+                          @if (me.merge_type === 'fold_live' && mergedSourceCount(me) >= 2) {
+                            <span class="merge-item__count">{{ mergedSourceCount(me) }}×</span>
+                          }
+                          @if (me.reverted_at) {
+                            <span class="merge-item__reverted">Undone</span>
+                          }
+                          <button type="button" class="merge-item__link" (click)="openMemory(me.survivor_memory_id)">View memory</button>
+                        </div>
+                        <p class="merge-item__content">{{ me.content }}</p>
+                      </li>
+                    }
+                  </ul>
+                }
+              </section>
+              }
+
+            </div>
+          }
+        </li>
+      }
+    </ul>
+
+    @if (totalPages() > 1) {
+      <nav class="compaction-log-pagination" aria-label="Compaction log pages">
+        <button type="button" [disabled]="page() <= 1" (click)="goToPage(page() - 1)">Previous</button>
+        <span>Page {{ page() }} of {{ totalPages() }}</span>
+        <button type="button" [disabled]="page() >= totalPages()" (click)="goToPage(page() + 1)">Next</button>
+      </nav>
+    }
+  }
+</section>

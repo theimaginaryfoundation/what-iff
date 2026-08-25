@@ -1,0 +1,256 @@
+<div class="min-h-screen bg-gray-50 dark:bg-gray-900 py-8 px-4">
+  <div class="max-w-7xl mx-auto">
+
+    <!-- Header -->
+    <div class="mb-8">
+      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Image Gallery</h1>
+      <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+        Your uploaded and AI-generated images
+      </p>
+    </div>
+
+    <!-- Loading skeleton -->
+    @if (isLoading()) {
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+        @for (i of [1,2,3,4,5,6,7,8,9,10,11,12]; track i) {
+          <div class="aspect-square rounded-xl bg-gray-200 dark:bg-gray-700 animate-pulse"></div>
+        }
+      </div>
+    }
+
+    <!-- Error state -->
+    @if (error() && !isLoading()) {
+      <div class="rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-6 text-center">
+        <svg class="w-12 h-12 text-red-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <p class="text-sm text-red-600 dark:text-red-400">{{ error() }}</p>
+        <button (click)="loadImages()"
+          class="mt-3 px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:underline cursor-pointer">
+          Try again
+        </button>
+      </div>
+    }
+
+    <!-- Empty state -->
+    @if (!isLoading() && !error() && images().length === 0) {
+      <div class="text-center py-20">
+        <svg class="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+        </svg>
+        <h3 class="text-lg font-medium text-gray-700 dark:text-gray-300">No images yet</h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          Images you upload or generate in chats will appear here.
+        </p>
+      </div>
+    }
+
+    <!-- Image grid -->
+    @if (!isLoading() && images().length > 0) {
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+        @for (image of images(); track image.id) {
+          @if (getThumbnailUrl(image) | authImage | async; as thumbSrc) {
+            <button
+              (click)="openModal(image)"
+              class="group relative aspect-square rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-800 ring-1 ring-gray-200 dark:ring-gray-700 hover:ring-indigo-500 dark:hover:ring-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all duration-200 cursor-pointer"
+              [attr.title]="image.name">
+              <img
+                [src]="thumbSrc"
+                [alt]="image.name"
+                class="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+                loading="lazy"/>
+              <!-- Hover overlay -->
+              <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-200 flex items-end">
+                <div class="w-full px-2 py-1.5 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                  <p class="text-xs text-white truncate leading-tight">{{ image.name }}</p>
+                  <p class="text-xs text-gray-300 leading-tight">{{ formatDate(image.created_at) }}</p>
+                </div>
+              </div>
+            </button>
+          }
+        }
+      </div>
+
+      <!-- Pagination -->
+      @if (totalPages > 1) {
+        <div class="mt-10 flex items-center justify-center gap-1">
+          <button
+            (click)="goToPage(currentPage() - 1)"
+            [disabled]="currentPage() === 1"
+            class="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+            </svg>
+          </button>
+
+          @for (page of getPages(); track $index) {
+            @if (page === -1) {
+              <span class="px-2 text-gray-400">…</span>
+            } @else {
+              <button
+                (click)="goToPage(page)"
+                [class.bg-indigo-600]="page === currentPage()"
+                [class.text-white]="page === currentPage()"
+                [class.dark:bg-indigo-500]="page === currentPage()"
+                class="w-9 h-9 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer">
+                {{ page }}
+              </button>
+            }
+          }
+
+          <button
+            (click)="goToPage(currentPage() + 1)"
+            [disabled]="currentPage() === totalPages"
+            class="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </button>
+        </div>
+      }
+    }
+
+  </div>
+</div>
+
+<!-- Full-size modal -->
+@if (selectedImage()) {
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+    (click)="closeModal()">
+
+    <div
+      class="relative max-w-5xl w-full max-h-[90vh] flex flex-col bg-gray-900 rounded-2xl p-4 shadow-2xl"
+      (click)="$event.stopPropagation()">
+
+      <!-- Modal header -->
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex-1 min-w-0 mr-3">
+          @if (isRenaming()) {
+            <div class="flex items-center gap-2" (click)="$event.stopPropagation()">
+              <input
+                type="text"
+                (keydown.enter)="submitRename(selectedImage()!)"
+                (keydown.escape)="cancelRename()"
+                class="flex-1 text-sm bg-white/10 border border-white/30 rounded-lg px-2 py-1 text-white placeholder-gray-400 focus:outline-none focus:border-white/60 min-w-0"
+                [value]="renameValue()"
+                (input)="renameValue.set($any($event.target).value)"
+                autofocus />
+              <button (click)="submitRename(selectedImage()!)" class="px-2 py-1 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer">Save</button>
+              <button (click)="cancelRename()" class="px-2 py-1 text-xs rounded-lg bg-white/10 hover:bg-white/20 text-white cursor-pointer">Cancel</button>
+            </div>
+          } @else {
+            <p class="text-sm font-medium text-white truncate">{{ selectedImage()!.name }}</p>
+            <p class="text-xs text-gray-400">{{ formatDate(selectedImage()!.created_at) }}</p>
+          }
+        </div>
+        <div class="flex items-center gap-1.5 flex-shrink-0">
+          <!-- Rename -->
+          <button
+            (click)="startRename(selectedImage()!, $event)"
+            title="Rename"
+            class="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+            </svg>
+          </button>
+          <!-- Download -->
+          <button
+            (click)="downloadImage(selectedImage()!); $event.stopPropagation()"
+            title="Download"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors cursor-pointer">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+            Download
+          </button>
+          <!-- Open in new chat -->
+          <button
+            (click)="openNewChat(selectedImage()!, $event)"
+            title="Open in new chat"
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/80 hover:bg-indigo-500 text-white text-sm transition-colors cursor-pointer">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+            </svg>
+            New chat
+          </button>
+          <!-- Add to thread -->
+          <div class="relative" (click)="$event.stopPropagation()">
+            <button
+              (click)="openThreadPicker(selectedImage()!, $event)"
+              title="Add to existing thread"
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors cursor-pointer">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+              </svg>
+              Add to thread
+            </button>
+            @if (isThreadPickerOpen()) {
+              <div class="absolute right-0 top-full mt-1 w-64 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-10 overflow-hidden">
+                <p class="text-xs text-gray-400 px-3 py-2 border-b border-gray-700">Recent threads</p>
+                @if (isLoadingThreads()) {
+                  <div class="px-3 py-4 text-center text-xs text-gray-500">Loading…</div>
+                } @else if (recentThreads().length === 0) {
+                  <div class="px-3 py-4 text-center text-xs text-gray-500">No threads found</div>
+                } @else {
+                  @for (thread of recentThreads(); track thread.id) {
+                    <button
+                      (click)="addToThread(selectedImage()!, thread)"
+                      class="w-full text-left px-3 py-2 text-sm text-white hover:bg-white/10 transition-colors cursor-pointer truncate">
+                      {{ thread.name || 'Untitled thread' }}
+                    </button>
+                  }
+                }
+              </div>
+            }
+          </div>
+          <!-- Delete -->
+          <button
+            (click)="deleteImage(selectedImage()!, $event)"
+            title="Delete image"
+            class="p-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/40 text-red-300 hover:text-red-200 transition-colors cursor-pointer">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+          </button>
+          <!-- Close -->
+          <button
+            (click)="closeModal()"
+            class="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Image container -->
+      <div class="relative flex-1 min-h-0 flex items-center justify-center rounded-xl overflow-hidden bg-gray-900">
+        @if (getFullUrl(selectedImage()!) | authImage | async; as fullSrc) {
+          @if (isModalLoading()) {
+            <div class="absolute inset-0 flex items-center justify-center">
+              <div class="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+            </div>
+          }
+          <img
+            [src]="fullSrc"
+            [alt]="selectedImage()!.name"
+            (load)="onFullImageLoad()"
+            (error)="onFullImageError()"
+            class="max-h-[80vh] max-w-full object-contain rounded-xl"
+            [class.opacity-0]="isModalLoading()"/>
+        } @else {
+          <div class="flex flex-col items-center gap-3 text-gray-500 py-12">
+            <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+            </svg>
+            <p class="text-sm">Image not available</p>
+          </div>
+        }
+      </div>
+    </div>
+  </div>
+}

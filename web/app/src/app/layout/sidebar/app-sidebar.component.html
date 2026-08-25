@@ -1,0 +1,912 @@
+<aside
+  class="app-sidebar"
+  [class.app-sidebar--collapsed]="collapsed()"
+  [attr.data-mode]="mode()"
+>
+  <app-sidebar-header [collapsed]="collapsed()" />
+
+  @if (!collapsed()) {
+    <div class="app-sidebar__top-tabs">
+      <div class="app-sidebar__tabs-scroll">
+        @if (mode() === 'config') {
+          <button
+            type="button"
+            class="app-sidebar__tab app-sidebar__tab--active app-sidebar__tab--config app-sidebar__tab--config-exit"
+            aria-label="Switch to app mode"
+            [uiTooltip]="'Exit config'"
+            placement="bottom"
+            (click)="toggleMode()"
+          >
+            <ui-arrow-left-icon [size]="12" />
+            <ui-gear-icon [size]="13" />
+          </button>
+        }
+        @for (item of items(); track item.id) {
+          @if (item.id === 'chat') {
+            <button
+              type="button"
+              class="app-sidebar__tab"
+              [class.app-sidebar__tab--active]="isChatView()"
+              [attr.aria-label]="item.label"
+              [attr.aria-pressed]="isThreadManagerView()"
+              (click)="toggleThreadManager()"
+            >
+              <ng-container *ngComponentOutlet="item.icon; inputs: { size: 14 }"></ng-container>
+              @if (mode() === 'app') {
+                <span>{{ item.label }}</span>
+              }
+            </button>
+          } @else {
+            <a
+              [routerLink]="item.route"
+              routerLinkActive="app-sidebar__tab--active"
+              class="app-sidebar__tab"
+              [attr.aria-label]="item.label"
+              [uiTooltip]="mode() === 'config' ? item.label : ''"
+              placement="bottom"
+              (click)="onItemSelected(item)"
+            >
+              <ng-container *ngComponentOutlet="item.icon; inputs: { size: 14 }"></ng-container>
+              @if (mode() === 'app') {
+                <span>{{ item.label }}</span>
+              }
+            </a>
+          }
+        }
+        @if (mode() === 'app') {
+          <button
+            type="button"
+            class="app-sidebar__tab app-sidebar__tab--config"
+            aria-label="Switch to configuration mode"
+            [uiTooltip]="'Config'"
+            placement="bottom"
+            (click)="toggleMode()"
+          >
+            <ui-gear-icon [size]="14" />
+            <span>Config</span>
+          </button>
+        }
+      </div>
+    </div>
+  } @else {
+    <div class="app-sidebar__collapsed-nav">
+      @if (mode() === 'config') {
+        <button
+          type="button"
+          class="app-sidebar__icon-btn"
+          aria-label="Exit config"
+          [uiTooltip]="'Exit config'"
+          placement="right"
+          (click)="toggleMode()"
+        >
+          ← <ui-gear-icon [size]="14" />
+        </button>
+      }
+      @for (item of items(); track item.id) {
+        @if (item.id === 'chat') {
+          <button
+            type="button"
+            class="app-sidebar__icon-link"
+            [class.app-sidebar__icon-link--active]="isChatView()"
+            [attr.aria-label]="item.label"
+            [attr.aria-pressed]="isThreadManagerView()"
+            [uiTooltip]="item.label"
+            placement="right"
+            (click)="toggleThreadManager()"
+          >
+            <ng-container *ngComponentOutlet="item.icon; inputs: { size: 16 }"></ng-container>
+          </button>
+        } @else {
+          <a
+            [routerLink]="item.route"
+            routerLinkActive="app-sidebar__icon-link--active"
+            class="app-sidebar__icon-link"
+            [attr.aria-label]="item.label"
+            [uiTooltip]="item.label"
+            placement="right"
+            (click)="onItemSelected(item)"
+          >
+            <ng-container *ngComponentOutlet="item.icon; inputs: { size: 16 }"></ng-container>
+          </a>
+        }
+      }
+      @if (mode() === 'app') {
+        <button
+          type="button"
+          class="app-sidebar__icon-btn"
+          aria-label="Configuration"
+          [uiTooltip]="'Configuration'"
+          placement="right"
+          (click)="toggleMode()"
+        >
+          <ui-gear-icon [size]="14" />
+        </button>
+      }
+    </div>
+  }
+
+  @if (!collapsed() && isChatView()) {
+    <section class="app-sidebar__chat-controls">
+      <div class="app-sidebar__chat-filters">
+        <button
+          type="button"
+          class="app-sidebar__pill app-sidebar__pill--active"
+          aria-label="All threads"
+          uiTooltip="Open Thread Manager"
+          placement="right"
+          (click)="clearPersonalityFilters(); navigateToThreadManager()"
+        >
+          All ({{ sidebarFilteredThreads().length }})
+        </button>
+        <button
+          type="button"
+          class="app-sidebar__import-btn"
+          aria-label="Import Conversations"
+          uiTooltip="Import Conversations"
+          placement="right"
+          (click)="navigateToImport()"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="2,10 2,12 12,12 12,10"/>
+            <line x1="7" y1="2" x2="7" y2="9"/>
+            <polyline points="4,6 7,9 10,6"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="app-sidebar__personality-filter-block">
+        <div class="app-sidebar__personality-picker">
+          <span class="app-sidebar__personality-search-icon" aria-hidden="true">
+            <ui-search-icon [size]="11" />
+          </span>
+          <input
+            type="text"
+            class="app-sidebar__personality-search"
+            placeholder="Add more…"
+            [value]="personalityQuery()"
+            (input)="onPersonalityQueryChange($any($event.target).value)"
+            (focus)="openPersonalityDropdown()"
+            (blur)="closePersonalityDropdown()"
+          />
+          @if (personalityDropdownOpen()) {
+            <div class="app-sidebar__personality-dropdown">
+              @for (personality of filteredPersonalityOptions(); track personality.id) {
+                <persona-accent-scope
+                  [personality]="personalityForFilter(personality.id) ?? { id: personality.id, name: personality.label, accent_color: null }"
+                >
+                  <button
+                    type="button"
+                    class="app-sidebar__personality-option"
+                    [class.app-sidebar__personality-option--active]="selectedPersonalityIds().includes(personality.id)"
+                    (mousedown)="togglePersonalityFilter(personality.id, $event)"
+                  >
+                    @if (personalityForFilter(personality.id); as personalityMeta) {
+                      <ui-avatar
+                        class="app-sidebar__personality-option-avatar"
+                        [name]="personalityMeta.name"
+                        [size]="'xxs'"
+                        [imageUrl]="personalityMeta.cover_image_url ? ((personalityMeta.cover_image_url | authImage | async) ?? null) : null"
+                        [accentColor]="'var(--persona-accent)'"
+                        [thumbnailCircle]="personalityMeta.thumbnail_circle"
+                      />
+                    } @else {
+                      <ui-avatar
+                        class="app-sidebar__personality-option-avatar"
+                        [name]="personality.label"
+                        [size]="'xxs'"
+                        [imageUrl]="null"
+                        [accentColor]="'var(--persona-accent)'"
+                      />
+                    }
+                    <span class="app-sidebar__personality-option-label">{{ personality.label }}</span>
+                  </button>
+                </persona-accent-scope>
+              } @empty {
+                <p class="app-sidebar__personality-empty">No personalities found</p>
+              }
+            </div>
+          }
+        </div>
+
+        @if (selectedPersonalityCards().length > 0) {
+          <div class="app-sidebar__personality-carousel">
+            @for (card of selectedPersonalityCards(); track card.id) {
+              <div class="app-sidebar__carousel-card">
+                <button
+                  type="button"
+                  class="app-sidebar__carousel-remove"
+                  [attr.aria-label]="'Remove ' + card.label + ' from filter'"
+                  (click)="removePersonalityFilter(card.id)"
+                >
+                  ×
+                </button>
+                @if (card.coverUrl) {
+                  @if (card.coverUrl | authImage | async; as coverSrc) {
+                    <img
+                      class="app-sidebar__carousel-image"
+                      [src]="coverSrc"
+                      [alt]="card.label"
+                    />
+                  } @else {
+                    <div
+                      class="app-sidebar__carousel-placeholder"
+                      [style.background]="card.placeholderColor"
+                      [attr.aria-label]="card.label"
+                    >
+                      <span class="app-sidebar__carousel-initials">{{ card.initials }}</span>
+                    </div>
+                  }
+                } @else {
+                  <div
+                    class="app-sidebar__carousel-placeholder"
+                    [style.background]="card.placeholderColor"
+                    [attr.aria-label]="card.label"
+                  >
+                    <span class="app-sidebar__carousel-initials">{{ card.initials }}</span>
+                  </div>
+                }
+                <span class="app-sidebar__carousel-name">{{ card.label }}</span>
+              </div>
+            }
+          </div>
+        }
+      </div>
+
+      <button
+        type="button"
+        class="app-sidebar__new-thread"
+        aria-label="New thread"
+        (click)="startNewThread()"
+      >
+        <ui-plus-icon [size]="12" />
+        New Thread
+      </button>
+    </section>
+  }
+
+  @if (!collapsed() && isPersonalityView()) {
+    <section class="app-sidebar__personality-actions">
+      <h2>ADD PERSONALITY</h2>
+      <div class="app-sidebar__personality-actions-buttons">
+        <button type="button" class="app-sidebar__personality-action app-sidebar__personality-action--generate" (click)="openGeneratePersonality()">
+          <ui-sparkle-icon [size]="12" />
+          Generate
+        </button>
+        <button type="button" class="app-sidebar__personality-action app-sidebar__personality-action--manual" (click)="openCreatePersonalityManually()">
+          <ui-plus-icon [size]="12" />
+          Create Manually
+        </button>
+      </div>
+    </section>
+  }
+
+  @if (!collapsed() && isGalleryView()) {
+    <section class="app-sidebar__gallery-controls">
+      <div class="app-sidebar__chat-filters">
+        <button
+          type="button"
+          class="app-sidebar__pill"
+          [class.app-sidebar__pill--active]="galleryFilterMode() === 'all'"
+          aria-label="Show all personalities"
+          (click)="clearGalleryPersonalityFilters()"
+        >
+          All
+        </button>
+        <button
+          type="button"
+          class="app-sidebar__pill"
+          [class.app-sidebar__pill--active]="galleryFilterMode() === 'global'"
+          [disabled]="galleryGlobalDisabled()"
+          [attr.aria-label]="galleryGlobalDisabled() ? 'Global filter unavailable in Expression Manager' : 'Show global images only'"
+          (click)="selectGlobalGalleryFilter()"
+        >
+          Global
+        </button>
+      </div>
+
+      <div class="app-sidebar__personality-filter-block">
+        <div class="app-sidebar__personality-picker">
+          <span class="app-sidebar__personality-search-icon" aria-hidden="true">
+            <ui-search-icon [size]="11" />
+          </span>
+          <input
+            type="text"
+            class="app-sidebar__personality-search"
+            placeholder="Filter by personality…"
+            [value]="galleryPersonalityQuery()"
+            (input)="onGalleryPersonalityQueryChange($any($event.target).value)"
+            (focus)="openGalleryPersonalityDropdown()"
+            (blur)="closeGalleryPersonalityDropdown()"
+          />
+          @if (galleryPersonalityDropdownOpen()) {
+            <div class="app-sidebar__personality-dropdown">
+              @for (personality of galleryFilteredPersonalityOptions(); track personality.id) {
+                <persona-accent-scope [personality]="personality">
+                  <button
+                    type="button"
+                    class="app-sidebar__personality-option"
+                    [class.app-sidebar__personality-option--active]="gallerySelectedPersonalityIds().includes(personality.id)"
+                    (mousedown)="toggleGalleryPersonalityFilter(personality.id, $event)"
+                  >
+                    <ui-avatar
+                      class="app-sidebar__personality-option-avatar"
+                      [name]="personality.name"
+                      [size]="'xxs'"
+                      [imageUrl]="personality.cover_image_url ? ((personality.cover_image_url | authImage | async) ?? null) : null"
+                      [accentColor]="'var(--persona-accent)'"
+                      [thumbnailCircle]="personality.thumbnail_circle"
+                    />
+                    <span class="app-sidebar__personality-option-label">{{ personality.name }}</span>
+                  </button>
+                </persona-accent-scope>
+              } @empty {
+                <p class="app-sidebar__personality-empty">No personalities found</p>
+              }
+            </div>
+          }
+        </div>
+
+        @if (gallerySelectedPersonalityCards().length > 0) {
+          <div class="app-sidebar__personality-carousel">
+            @for (card of gallerySelectedPersonalityCards(); track card.id) {
+              <div class="app-sidebar__carousel-card">
+                <button
+                  type="button"
+                  class="app-sidebar__carousel-remove"
+                  [attr.aria-label]="'Remove ' + card.label + ' from filter'"
+                  (click)="removeGalleryPersonalityFilter(card.id)"
+                >
+                  ×
+                </button>
+                @if (card.coverUrl) {
+                  @if (card.coverUrl | authImage | async; as coverSrc) {
+                    <img
+                      class="app-sidebar__carousel-image"
+                      [src]="coverSrc"
+                      [alt]="card.label"
+                    />
+                  } @else {
+                    <div
+                      class="app-sidebar__carousel-placeholder"
+                      [style.background]="card.placeholderColor"
+                      [attr.aria-label]="card.label"
+                    >
+                      <span class="app-sidebar__carousel-initials">{{ card.initials }}</span>
+                    </div>
+                  }
+                } @else {
+                  <div
+                    class="app-sidebar__carousel-placeholder"
+                    [style.background]="card.placeholderColor"
+                    [attr.aria-label]="card.label"
+                  >
+                    <span class="app-sidebar__carousel-initials">{{ card.initials }}</span>
+                  </div>
+                }
+                <span class="app-sidebar__carousel-name">{{ card.label }}</span>
+              </div>
+            }
+          </div>
+        }
+      </div>
+
+      <button
+        type="button"
+        class="app-sidebar__new-thread"
+        aria-label="Import image"
+        (click)="openGalleryImportModal()"
+      >
+        <ui-plus-icon [size]="12" />
+        Import Image
+      </button>
+    </section>
+  }
+
+  @if (!collapsed() && isModeView()) {
+    <section class="app-sidebar__gallery-controls">
+      <div class="app-sidebar__chat-filters">
+        <button
+          type="button"
+          class="app-sidebar__pill"
+          [class.app-sidebar__pill--active]="modeFilterMode() === 'all'"
+          aria-label="Show all modes"
+          (click)="clearModePersonalityFilters()"
+        >
+          All
+        </button>
+      </div>
+
+      <div class="app-sidebar__personality-filter-block">
+        <div class="app-sidebar__personality-picker">
+          <span class="app-sidebar__personality-search-icon" aria-hidden="true">
+            <ui-search-icon [size]="11" />
+          </span>
+          <input
+            type="text"
+            class="app-sidebar__personality-search"
+            placeholder="Filter by personality…"
+            [value]="modePersonalityQuery()"
+            (input)="onModePersonalityQueryChange($any($event.target).value)"
+            (focus)="openModePersonalityDropdown()"
+            (blur)="closeModePersonalityDropdown()"
+          />
+          @if (modePersonalityDropdownOpen()) {
+            <div class="app-sidebar__personality-dropdown">
+              @for (personality of modeFilteredPersonalityOptions(); track personality.id) {
+                <persona-accent-scope [personality]="personality">
+                  <button
+                    type="button"
+                    class="app-sidebar__personality-option"
+                    [class.app-sidebar__personality-option--active]="modeSelectedPersonalityIds().includes(personality.id)"
+                    (mousedown)="toggleModePersonalityFilter(personality.id, $event)"
+                  >
+                    <ui-avatar
+                      class="app-sidebar__personality-option-avatar"
+                      [name]="personality.name"
+                      [size]="'xxs'"
+                      [imageUrl]="personality.cover_image_url ? ((personality.cover_image_url | authImage | async) ?? null) : null"
+                      [accentColor]="'var(--persona-accent)'"
+                      [thumbnailCircle]="personality.thumbnail_circle"
+                    />
+                    <span class="app-sidebar__personality-option-label">{{ personality.name }}</span>
+                  </button>
+                </persona-accent-scope>
+              } @empty {
+                <p class="app-sidebar__personality-empty">No personalities found</p>
+              }
+            </div>
+          }
+        </div>
+
+        @if (modeSelectedPersonalityCards().length > 0) {
+          <div class="app-sidebar__personality-carousel">
+            @for (card of modeSelectedPersonalityCards(); track card.id) {
+              <div class="app-sidebar__carousel-card">
+                <button
+                  type="button"
+                  class="app-sidebar__carousel-remove"
+                  [attr.aria-label]="'Remove ' + card.label + ' from filter'"
+                  (click)="removeModePersonalityFilter(card.id)"
+                >
+                  ×
+                </button>
+                @if (card.coverUrl) {
+                  @if (card.coverUrl | authImage | async; as coverSrc) {
+                    <img
+                      class="app-sidebar__carousel-image"
+                      [src]="coverSrc"
+                      [alt]="card.label"
+                    />
+                  } @else {
+                    <div
+                      class="app-sidebar__carousel-placeholder"
+                      [style.background]="card.placeholderColor"
+                      [attr.aria-label]="card.label"
+                    >
+                      <span class="app-sidebar__carousel-initials">{{ card.initials }}</span>
+                    </div>
+                  }
+                } @else {
+                  <div
+                    class="app-sidebar__carousel-placeholder"
+                    [style.background]="card.placeholderColor"
+                    [attr.aria-label]="card.label"
+                  >
+                    <span class="app-sidebar__carousel-initials">{{ card.initials }}</span>
+                  </div>
+                }
+                <span class="app-sidebar__carousel-name">{{ card.label }}</span>
+              </div>
+            }
+          </div>
+        }
+      </div>
+
+      <button
+        type="button"
+        class="app-sidebar__new-thread"
+        aria-label="Create mode"
+        (click)="openCreateMode()"
+      >
+        <ui-plus-icon [size]="12" />
+        Create Mode
+      </button>
+    </section>
+  }
+
+  @if (!collapsed() && isMemoryView()) {
+    <section class="app-sidebar__gallery-controls">
+      <div class="app-sidebar__chat-filters">
+        <button
+          type="button"
+          class="app-sidebar__pill"
+          [class.app-sidebar__pill--active]="!memoryAssociationInactive() && memoryFilterMode() === 'all'"
+          aria-label="Show all memories"
+          (click)="clearMemoryPersonalityFilters()"
+        >
+          All
+        </button>
+        <button
+          type="button"
+          class="app-sidebar__pill"
+          [class.app-sidebar__pill--active]="!memoryAssociationInactive() && memoryFilterMode() === 'global'"
+          aria-label="Show global memories only"
+          (click)="selectGlobalMemoryFilter()"
+        >
+          Global
+        </button>
+      </div>
+
+      <div class="app-sidebar__personality-filter-block">
+        <div class="app-sidebar__personality-picker">
+          <span class="app-sidebar__personality-search-icon" aria-hidden="true">
+            <ui-search-icon [size]="11" />
+          </span>
+          <input
+            type="text"
+            class="app-sidebar__personality-search"
+            placeholder="Filter by personality…"
+            [value]="memoryPersonalityQuery()"
+            (input)="onMemoryPersonalityQueryChange($any($event.target).value)"
+            (focus)="openMemoryPersonalityDropdown()"
+            (blur)="closeMemoryPersonalityDropdown()"
+          />
+          @if (memoryPersonalityDropdownOpen()) {
+            <div class="app-sidebar__personality-dropdown">
+              @for (personality of memoryFilteredPersonalityOptions(); track personality.id) {
+                <persona-accent-scope [personality]="personality">
+                  <button
+                    type="button"
+                    class="app-sidebar__personality-option"
+                    [class.app-sidebar__personality-option--active]="memorySelectedPersonalityIds().includes(personality.id)"
+                    (mousedown)="toggleMemoryPersonalityFilter(personality.id, $event)"
+                  >
+                    <ui-avatar
+                      class="app-sidebar__personality-option-avatar"
+                      [name]="personality.name"
+                      [size]="'xxs'"
+                      [imageUrl]="personality.cover_image_url ? ((personality.cover_image_url | authImage | async) ?? null) : null"
+                      [accentColor]="'var(--persona-accent)'"
+                      [thumbnailCircle]="personality.thumbnail_circle"
+                    />
+                    <span class="app-sidebar__personality-option-label">{{ personality.name }}</span>
+                  </button>
+                </persona-accent-scope>
+              } @empty {
+                <p class="app-sidebar__personality-empty">No personalities found</p>
+              }
+            </div>
+          }
+        </div>
+
+        @if (memorySelectedPersonalityCards().length > 0) {
+          <div class="app-sidebar__personality-carousel">
+            @for (card of memorySelectedPersonalityCards(); track card.id) {
+              <div class="app-sidebar__carousel-card">
+                <button
+                  type="button"
+                  class="app-sidebar__carousel-remove"
+                  [attr.aria-label]="'Remove ' + card.label + ' from filter'"
+                  (click)="removeMemoryPersonalityFilter(card.id)"
+                >
+                  ×
+                </button>
+                @if (card.coverUrl) {
+                  @if (card.coverUrl | authImage | async; as coverSrc) {
+                    <img
+                      class="app-sidebar__carousel-image"
+                      [src]="coverSrc"
+                      [alt]="card.label"
+                    />
+                  } @else {
+                    <div
+                      class="app-sidebar__carousel-placeholder"
+                      [style.background]="card.placeholderColor"
+                      [attr.aria-label]="card.label"
+                    >
+                      <span class="app-sidebar__carousel-initials">{{ card.initials }}</span>
+                    </div>
+                  }
+                } @else {
+                  <div
+                    class="app-sidebar__carousel-placeholder"
+                    [style.background]="card.placeholderColor"
+                    [attr.aria-label]="card.label"
+                  >
+                    <span class="app-sidebar__carousel-initials">{{ card.initials }}</span>
+                  </div>
+                }
+                <span class="app-sidebar__carousel-name">{{ card.label }}</span>
+              </div>
+            }
+          </div>
+        }
+      </div>
+
+      <button
+        type="button"
+        class="app-sidebar__new-thread"
+        aria-label="Add memory"
+        (click)="openAddMemory()"
+      >
+        <ui-plus-icon [size]="12" />
+        Add Memory
+      </button>
+    </section>
+  }
+
+  @if (!collapsed() && isSkillsView()) {
+    <section class="app-sidebar__gallery-controls">
+      <div class="app-sidebar__chat-filters">
+        <button
+          type="button"
+          class="app-sidebar__pill"
+          [class.app-sidebar__pill--active]="skillFilterMode() === 'all'"
+          aria-label="Show all skills"
+          (click)="clearSkillPersonalityFilters()"
+        >
+          All
+        </button>
+        <button
+          type="button"
+          class="app-sidebar__pill"
+          [class.app-sidebar__pill--active]="skillFilterMode() === 'global'"
+          aria-label="Show global skills only"
+          (click)="selectGlobalSkillFilter()"
+        >
+          Global
+        </button>
+      </div>
+
+      <div class="app-sidebar__personality-filter-block">
+        <div class="app-sidebar__personality-picker">
+          <span class="app-sidebar__personality-search-icon" aria-hidden="true">
+            <ui-search-icon [size]="11" />
+          </span>
+          <input
+            type="text"
+            class="app-sidebar__personality-search"
+            placeholder="Filter by personality…"
+            [value]="skillPersonalityQuery()"
+            (input)="onSkillPersonalityQueryChange($any($event.target).value)"
+            (focus)="openSkillPersonalityDropdown()"
+            (blur)="closeSkillPersonalityDropdown()"
+          />
+          @if (skillPersonalityDropdownOpen()) {
+            <div class="app-sidebar__personality-dropdown">
+              @for (personality of skillFilteredPersonalityOptions(); track personality.id) {
+                <persona-accent-scope [personality]="personality">
+                  <button
+                    type="button"
+                    class="app-sidebar__personality-option"
+                    [class.app-sidebar__personality-option--active]="skillSelectedPersonalityIds().includes(personality.id)"
+                    (mousedown)="toggleSkillPersonalityFilter(personality.id, $event)"
+                  >
+                    <ui-avatar
+                      class="app-sidebar__personality-option-avatar"
+                      [name]="personality.name"
+                      [size]="'xxs'"
+                      [imageUrl]="personality.cover_image_url ? ((personality.cover_image_url | authImage | async) ?? null) : null"
+                      [accentColor]="'var(--persona-accent)'"
+                      [thumbnailCircle]="personality.thumbnail_circle"
+                    />
+                    <span class="app-sidebar__personality-option-label">{{ personality.name }}</span>
+                  </button>
+                </persona-accent-scope>
+              } @empty {
+                <p class="app-sidebar__personality-empty">No personalities found</p>
+              }
+            </div>
+          }
+        </div>
+
+        @if (skillSelectedPersonalityCards().length > 0) {
+          <div class="app-sidebar__personality-carousel">
+            @for (card of skillSelectedPersonalityCards(); track card.id) {
+              <div class="app-sidebar__carousel-card">
+                <button
+                  type="button"
+                  class="app-sidebar__carousel-remove"
+                  [attr.aria-label]="'Remove ' + card.label + ' from filter'"
+                  (click)="removeSkillPersonalityFilter(card.id)"
+                >
+                  ×
+                </button>
+                @if (card.coverUrl) {
+                  @if (card.coverUrl | authImage | async; as coverSrc) {
+                    <img
+                      class="app-sidebar__carousel-image"
+                      [src]="coverSrc"
+                      [alt]="card.label"
+                    />
+                  } @else {
+                    <div
+                      class="app-sidebar__carousel-placeholder"
+                      [style.background]="card.placeholderColor"
+                      [attr.aria-label]="card.label"
+                    >
+                      <span class="app-sidebar__carousel-initials">{{ card.initials }}</span>
+                    </div>
+                  }
+                } @else {
+                  <div
+                    class="app-sidebar__carousel-placeholder"
+                    [style.background]="card.placeholderColor"
+                    [attr.aria-label]="card.label"
+                  >
+                    <span class="app-sidebar__carousel-initials">{{ card.initials }}</span>
+                  </div>
+                }
+                <span class="app-sidebar__carousel-name">{{ card.label }}</span>
+              </div>
+            }
+          </div>
+        }
+      </div>
+
+      <button
+        type="button"
+        class="app-sidebar__new-thread"
+        aria-label="Create skill"
+        (click)="openCreateSkill()"
+      >
+        <ui-plus-icon [size]="12" />
+        Create Skill
+      </button>
+    </section>
+  }
+
+  @if (!collapsed() && isChatView()) {
+    <section class="app-sidebar__threads">
+      <section class="app-sidebar__pinned">
+        <header class="app-sidebar__pinned-header">
+          <span>Starred Threads</span>
+          @if (sidebarPinnedThreads().length > 0) {
+            <button type="button" (click)="unpinAll()">Unstar all</button>
+          } @else {
+            <span>None</span>
+          }
+        </header>
+
+        <div class="app-sidebar__pinned-list">
+          @if (sidebarPinnedThreads().length === 0) {
+            <p>Star a thread from the manager to keep it handy.</p>
+          } @else {
+            @for (thread of sidebarPinnedThreads(); track thread.id) {
+              <button
+                type="button"
+                class="app-sidebar__pinned-thread"
+                [class.app-sidebar__pinned-thread--active]="threads.activeThreadId() === thread.id"
+                (click)="openThread(thread.id)"
+              >
+                <span
+                  class="app-sidebar__thread-avatar"
+                  aria-hidden="true"
+                  [style.background]="threadAvatarBackground(thread.id)"
+                  [style.color]="threadAvatarForeground(thread.id)"
+                >
+                  @if (threadAvatarMeta(thread.id); as avatarMeta) {
+                    @if (avatarMeta.coverUrl) {
+                      @if (avatarMeta.coverUrl | authImage | async; as avatarSrc) {
+                        @if (avatarMeta.transform; as avatarTransform) {
+                          <span class="app-sidebar__thread-avatar-frame" [style.transform]="avatarTransform">
+                            <img class="app-sidebar__thread-avatar-frame-image" [src]="avatarSrc" [alt]="thread.name" />
+                          </span>
+                        } @else {
+                          <img class="app-sidebar__thread-avatar-image" [src]="avatarSrc" [alt]="thread.name" />
+                        }
+                      } @else {
+                        <ui-user-icon [size]="14" />
+                      }
+                    } @else {
+                      <ui-user-icon [size]="14" />
+                    }
+                  } @else {
+                    <ui-user-icon [size]="14" />
+                  }
+                </span>
+                <span class="app-sidebar__thread-name">{{ thread.name }}</span>
+                @if (thread.unread_count && thread.unread_count > 0) {
+                  <span class="app-sidebar__thread-badge" [attr.aria-label]="thread.unread_count + ' unread messages'">
+                    {{ thread.unread_count }}
+                  </span>
+                }
+              </button>
+            }
+          }
+        </div>
+      </section>
+
+      <section class="app-sidebar__recent">
+        <header class="app-sidebar__pinned-header">
+          <span>Recent Threads</span>
+          @if (sidebarRecentThreads().length === 0) {
+            <span>None</span>
+          }
+        </header>
+
+        <div class="app-sidebar__pinned-list">
+          @if (sidebarRecentThreads().length === 0) {
+            <p>Open a thread to see it here.</p>
+          } @else {
+            @for (thread of sidebarRecentThreads(); track thread.id) {
+              <button
+                type="button"
+                class="app-sidebar__pinned-thread"
+                [class.app-sidebar__pinned-thread--active]="threads.activeThreadId() === thread.id"
+                (click)="openThread(thread.id)"
+              >
+                <span
+                  class="app-sidebar__thread-avatar"
+                  aria-hidden="true"
+                  [style.background]="threadAvatarBackground(thread.id)"
+                  [style.color]="threadAvatarForeground(thread.id)"
+                >
+                  @if (threadAvatarMeta(thread.id); as avatarMeta) {
+                    @if (avatarMeta.coverUrl) {
+                      @if (avatarMeta.coverUrl | authImage | async; as avatarSrc) {
+                        @if (avatarMeta.transform; as avatarTransform) {
+                          <span class="app-sidebar__thread-avatar-frame" [style.transform]="avatarTransform">
+                            <img class="app-sidebar__thread-avatar-frame-image" [src]="avatarSrc" [alt]="thread.name" />
+                          </span>
+                        } @else {
+                          <img class="app-sidebar__thread-avatar-image" [src]="avatarSrc" [alt]="thread.name" />
+                        }
+                      } @else {
+                        <ui-user-icon [size]="14" />
+                      }
+                    } @else {
+                      <ui-user-icon [size]="14" />
+                    }
+                  } @else {
+                    <ui-user-icon [size]="14" />
+                  }
+                </span>
+                <span class="app-sidebar__thread-name">{{ thread.name }}</span>
+                @if (thread.unread_count && thread.unread_count > 0) {
+                  <span class="app-sidebar__thread-badge" [attr.aria-label]="thread.unread_count + ' unread messages'">
+                    {{ thread.unread_count }}
+                  </span>
+                }
+              </button>
+            }
+          }
+        </div>
+      </section>
+    </section>
+  }
+
+  @if (!collapsed()) {
+    <div class="app-sidebar__footer-search">
+      <button
+        type="button"
+        class="app-sidebar__palette-launcher"
+        aria-label="Open command palette"
+        aria-keyshortcuts="Meta+K Control+K"
+        (click)="openPalette()"
+      >
+        <ui-search-icon [size]="12" />
+        <span class="app-sidebar__palette-launcher-label">Search…</span>
+        <span class="app-sidebar__palette-launcher-shortcut" aria-hidden="true">⌘K</span>
+      </button>
+    </div>
+  }
+
+  <div class="app-sidebar__collapse-handle">
+    <button
+      type="button"
+      class="app-sidebar__icon-btn app-sidebar__edge-toggle"
+      [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
+      [attr.aria-expanded]="!collapsed()"
+      [uiTooltip]="collapsed() ? 'Expand sidebar' : ''"
+      placement="right"
+      (click)="toggleCollapsed()"
+    >
+      @if (collapsed()) {
+        <ui-arrow-right-icon [size]="14" />
+      } @else {
+        <ui-arrow-left-icon [size]="14" />
+      }
+    </button>
+  </div>
+</aside>

@@ -1,0 +1,53 @@
+<section class="rounded-2xl border border-border-base bg-surface-card p-3 md:p-4">
+  <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+    <label class="text-xs text-text-secondary">
+      Search
+      <input
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        type="search"
+        [ngModel]="filters().search"
+        (ngModelChange)="filtersChanged.emit({ search: $event })"
+        placeholder="Title, prompt, schedule" />
+    </label>
+
+    <label class="text-xs text-text-secondary">
+      Status
+      <select
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        [ngModel]="filters().status"
+        (ngModelChange)="filtersChanged.emit({ status: $event })">
+        @for (status of statuses; track status.value) {
+          <option [value]="status.value">{{ status.label }}</option>
+        }
+      </select>
+    </label>
+
+    <label class="text-xs text-text-secondary">
+      Schedule
+      <select
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        [ngModel]="filters().scheduleType"
+        (ngModelChange)="filtersChanged.emit({ scheduleType: $event })">
+        @for (schedule of scheduleTypes; track schedule.value) {
+          <option [value]="schedule.value">{{ schedule.label }}</option>
+        }
+      </select>
+    </label>
+
+    <div class="flex items-end gap-2">
+      <button
+        type="button"
+        class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary hover:text-text-primary"
+        (click)="clear.emit()">
+        Reset filters
+      </button>
+      <button
+        type="button"
+        class="rounded-lg border border-accent-primary bg-accent-primary px-3 py-2 text-xs font-medium text-white hover:opacity-90"
+        (click)="createRequested.emit()">
+        Create job
+      </button>
+    </div>
+  </div>
+  <p class="mt-2 text-xs text-text-muted">{{ loading() ? 'Refreshing jobs...' : 'Filters auto-apply' }}</p>
+</section>

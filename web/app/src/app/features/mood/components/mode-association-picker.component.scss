@@ -1,0 +1,117 @@
+.mode-card__association-picker {
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-border-base);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgb(0 0 0 / 16%);
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+}
+
+.mode-card__association-picker-search {
+  position: relative;
+}
+
+.mode-card__association-picker-search-icon {
+  color: var(--color-text-muted);
+  left: 8px;
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.mode-card__association-picker-search-input {
+  background: var(--color-surface-input);
+  border: 1px solid var(--color-border-base);
+  border-radius: 5px;
+  box-sizing: border-box;
+  color: var(--color-text-primary);
+  font-size: 11px;
+  min-height: 36px;
+  outline: none;
+  padding: 5px 8px 5px 26px;
+  width: 100%;
+}
+
+.mode-card__association-picker-search-input:focus {
+  border-color: var(--color-accent-config, var(--color-accent));
+}
+
+.mode-card__association-picker-list {
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-border-base);
+  border-radius: 7px;
+  margin-top: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  position: relative;
+  z-index: 3;
+}
+
+.mode-card__association-picker-list button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  padding: 7px 9px;
+  text-align: left;
+  width: 100%;
+}
+
+.mode-card__association-picker-list button:hover,
+.mode-card__association-picker-list button:focus-visible {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-text-primary);
+}
+
+.mode-card__personality-option-avatar {
+  align-items: center;
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  border-radius: 50%;
+  color: var(--color-accent-config, var(--color-accent));
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  height: 18px;
+  justify-content: center;
+  width: 18px;
+}
+
+.mode-card__personality-option-avatar-image {
+  border: 1px solid var(--color-border-base);
+  border-radius: 50%;
+  height: 18px;
+  object-fit: cover;
+  object-position: center top;
+  width: 18px;
+}
+
+.mode-card__personality-option-label {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mode-card__association-picker-empty {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  padding: 7px 9px;
+}
+
+.mode-card__association-picker-close {
+  background: transparent;
+  border: 1px solid var(--color-border-base);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  justify-self: end;
+  padding: 4px 8px;
+}

@@ -1,0 +1,26 @@
+<section class="rounded-2xl border border-border-base bg-surface-card p-4 text-sm">
+  <h3 class="font-semibold text-text-primary">Available in chat</h3>
+  @if (!chatId()) {
+    <p class="mt-2 text-xs text-text-secondary">Pick a chat to preview slash-menu availability.</p>
+  } @else if (loading()) {
+    <p class="mt-2 text-xs text-text-secondary" role="status">Checking available skills…</p>
+  } @else if (error()) {
+    <p class="mt-2 text-xs text-danger" role="alert">{{ error() }}</p>
+  } @else {
+    @if (availableInChat() === true) {
+      <p class="mt-2 rounded-lg border border-accent-primary/40 bg-accent-primary/10 px-2 py-1 text-xs text-accent-primary">
+        This skill is available in the selected chat.
+      </p>
+    } @else if (availableInChat() === false) {
+      <p class="mt-2 rounded-lg border border-border-base bg-surface-base px-2 py-1 text-xs text-text-secondary">
+        This skill is not currently available in the selected chat.
+      </p>
+    }
+    <p class="mt-2 text-xs text-text-secondary">Top available skills</p>
+    <ul class="mt-1 space-y-1 text-xs text-text-secondary">
+      @for (ritual of availableRituals().slice(0, 5); track ritual.id) {
+        <li>{{ ritual.name }}</li>
+      }
+    </ul>
+  }
+</section>

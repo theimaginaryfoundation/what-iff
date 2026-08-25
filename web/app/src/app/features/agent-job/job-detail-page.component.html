@@ -1,0 +1,134 @@
+<section class="mx-auto flex w-full max-w-7xl flex-col gap-4 p-4 md:p-6">
+  <header class="flex flex-wrap items-center justify-between gap-2">
+    <button
+      type="button"
+      class="rounded-lg border border-border-base px-3 py-2 text-sm text-text-secondary hover:text-text-primary"
+      (click)="goBack()">
+      Back to jobs
+    </button>
+
+    @if (job(); as current) {
+      @if (!isCreateMode()) {
+      <div class="flex flex-wrap gap-2">
+        @if (current.chat_id) {
+          <button
+            type="button"
+            class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary"
+            (click)="openChat()">
+            Open chat
+          </button>
+        }
+        <button
+          type="button"
+          class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary"
+          [disabled]="runningNow()"
+          [attr.aria-disabled]="runningNow()"
+          (click)="runNow()">
+          {{ runningNow() ? 'Running…' : 'Run now' }}
+        </button>
+        @if (current.status === 'active' || current.status === 'paused') {
+          <button
+            type="button"
+            class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary"
+            (click)="togglePauseResume()">
+            {{ current.status === 'active' ? 'Pause' : 'Resume' }}
+          </button>
+        }
+        <button
+          type="button"
+          class="rounded-lg border border-danger/40 px-3 py-2 text-xs text-danger"
+          (click)="deleteJob()">
+          Delete
+        </button>
+      </div>
+      }
+    }
+  </header>
+
+  @if (loading()) {
+    <p class="rounded-2xl border border-border-base bg-surface-card p-8 text-center text-sm text-text-secondary" role="status">
+      Loading job…
+    </p>
+  } @else if (error()) {
+    <p class="rounded-2xl border border-danger/40 bg-danger/10 p-6 text-sm text-danger" role="alert">
+      {{ error() }}
+    </p>
+  } @else if (job(); as currentJob) {
+    <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div class="space-y-4">
+        <section class="rounded-2xl border border-border-base bg-surface-card p-4">
+          <h1 class="text-xl font-semibold text-text-primary">
+            {{ isCreateMode() ? 'Create job' : (currentJob.title || 'Untitled job') }}
+          </h1>
+          @if (!isCreateMode()) {
+            <p class="mt-1 text-sm text-text-secondary">Status: {{ currentJob.status }}</p>
+          }
+
+          <div class="mt-4">
+            <app-job-form
+              [job]="currentJob"
+              [createMode]="isCreateMode()"
+              [chats]="chats()"
+              [personalities]="personalities()"
+              [models]="models()"
+              [saving]="saving()"
+              [preview]="preview()"
+              [previewLoading]="previewLoading()"
+              (save)="save($event)"
+              (previewRequested)="requestPreview($event)"
+              (scheduleEdited)="onScheduleEdited($event)" />
+          </div>
+        </section>
+
+        @if (!isCreateMode()) {
+        <section class="rounded-2xl border border-border-base bg-surface-card p-4">
+          <h2 class="text-sm font-semibold text-text-primary">Attached skills</h2>
+          <div class="mt-2 flex flex-wrap gap-2">
+            @for (ritual of attachedRituals(); track ritual.id) {
+              <span class="inline-flex items-center gap-2 rounded-full bg-accent-primary/15 px-2 py-1 text-xs text-accent-primary">
+                {{ ritual.name }}
+                <button
+                  type="button"
+                  class="text-accent-primary"
+                  (click)="removeRitual(ritual)"
+                  [attr.aria-label]="'Remove ' + ritual.name">
+                  ×
+                </button>
+              </span>
+            }
+            @if (attachedRituals().length === 0) {
+              <span class="text-xs text-text-muted">No attached skills.</span>
+            }
+          </div>
+
+          <div class="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
+            <input
+              class="rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+              type="search"
+              [ngModel]="ritualSearch()"
+              (ngModelChange)="searchRituals($event)"
+              placeholder="Search skills to attach" />
+            <span class="self-center text-xs text-text-muted">{{ ritualLoading() ? 'Loading…' : '' }}</span>
+          </div>
+          <div class="mt-2 flex flex-wrap gap-2">
+            @for (ritual of ritualOptions().slice(0, 8); track ritual.id) {
+              <button
+                type="button"
+                class="rounded-lg border border-border-base px-2 py-1 text-xs text-text-secondary"
+                (click)="addRitual(ritual)">
+                + {{ ritual.name }}
+              </button>
+            }
+          </div>
+        </section>
+        }
+      </div>
+
+      @if (!isCreateMode()) {
+      <div class="space-y-4">
+        <app-job-run-history [job]="currentJob" />
+      </div>
+      }
+    </div>
+  }
+</section>

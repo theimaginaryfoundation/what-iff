@@ -1,0 +1,58 @@
+name: Bug report
+description: Something is broken or behaves differently than documented.
+labels: [bug]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - API / backend (Go)
+        - Web app (web/app)
+        - Data layer (ent, migrations, Postgres)
+        - LLM providers / agent
+        - CI / Docker / build
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, including the exact error text or log lines.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. make run-mock
+        2. POST /v1/conversations with ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `git rev-parse --short HEAD`, or the release tag.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Go/Node versions, `docker compose` vs `make run`, LLM provider, browser (for web issues).
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Related issues, workarounds, suspected cause.

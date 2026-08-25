@@ -1,0 +1,1065 @@
+name: E2E (mock backend)
+
+# The Playwright suite against a local stack with the in-process mock LLM
+# (ADR 0x018): no provider keys, no token spend, deterministic replies.
+#
+# Sharded across machines. That is safe here and nowhere else in this repo:
+# every test registers its own account through the API and names every entity
+# with a `crypto.randomUUID()` (e2e/fixtures/unique.ts), so there is no state
+# shared between tests — and therefore none shared between shards, which
+# cannot coordinate with each other at all. The deployed configs share one
+# account and must NOT be sharded; see e2e/README.md.
+on:
+  # Per-commit (PR) runs are desktop-only — see PROJECTS below. Add the
+  # `e2e-full` label to a PR to get the mobile projects on that PR too,
+  # without waiting for the nightly. `labeled` is in the trigger list for
+  # exactly that; the job guard below keeps every *other* label from
+  # re-running the suite for no reason.
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    branches: [main]
+    paths:
+      - 'web/app/**'
+      - '.github/workflows/e2e-mock.yml'
+      # The suite drives the Go API, so backend changes can break it too.
+      - 'cmd/**'
+      - 'internal/**'
+      - 'ent/**'
+      - 'openapi.yaml'
+      - 'go.mod'
+      - 'go.sum'
+  # Merges to main run the full matrix. A PR only ever proves the suite passed
+  # against *its* merge commit; main moves underneath it, so this is the run
+  # that says main itself is green — and it is the same full run as the
+  # nightly rather than the desktop-only PR run, because a mobile regression
+  # should be caught at the merge that caused it, not up to a day later.
+  # Same paths filter as the PR trigger: a merge that touches neither the app
+  # nor the API cannot break the suite.
+  push:
+    branches: [main]
+    paths:
+      - 'web/app/**'
+      - '.github/workflows/e2e-mock.yml'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'ent/**'
+      - 'openapi.yaml'
+      - 'go.mod'
+      - 'go.sum'
+  # Nightly and on-demand runs add the mobile projects. Mobile roughly triples
+  # the work for coverage that changes far less often than the code does, so it
+  # is not worth paying for on every commit; a nightly still catches a mobile
+  # regression within a day, against the same mock backend.
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One in-flight run per pull request; a new push cancels the run its commit
+# just superseded. This suite takes ~18 minutes, which is long enough that
+# pushes routinely overlap it: on the branch that introduced this workflow, 7
+# of 22 runs were still executing when the next push landed, burning ~70
+# minutes of runner wall time on results that no longer described any commit
+# anyone would merge.
+#
+# `cancel-in-progress` is deliberately restricted to pull_request. The push,
+# schedule and workflow_dispatch runs each answer a question about one
+# specific commit — is main green, did the nightly mobile matrix pass — and a
+# later run does not make an earlier answer redundant. Grouping by PR number
+# (falling back to the ref) also keeps the main-branch runs in their own
+# group, so a merge cannot cancel the PR run behind it or vice versa.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Bump together with the matrix below: each shard is one machine, and the
+  # shard argument needs the same total. The merge job derives its expected
+  # artifact list from this value, so that half stays in step on its own.
+  SHARD_TOTAL: 4
+  # Desktop only on pull requests, unless the PR carries `e2e-full`; every
+  # project (adds Pixel 7 chromium and iPhone 15 WebKit) on the nightly, on
+  # manual dispatch, and on a labelled PR. An empty value means "no --project
+  # filter", i.e. all three.
+  FULL_RUN: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'e2e-full') }}
+  # NOTE the shape of this ternary. `cond && '' || X` cannot work: an empty
+  # string is falsy in GitHub expressions, so the `&&` branch is discarded and
+  # X always wins — which silently ran desktop-only on a labelled PR while the
+  # summary claimed otherwise. The non-empty value has to be the `&&` side.
+  PROJECTS: ${{ (github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'e2e-full')) && '--project=chromium-desktop' || '' }}
+
+jobs:
+  # Did this run touch the frontend? The visual specs compare committed PNGs
+  # of rendered Angular screens, so only a frontend change can legitimately
+  # move them — but this workflow also triggers on backend paths (the suite
+  # drives the Go API), and on those runs the visual specs are pure cost.
+  #
+  # Uses the compare API rather than `git diff` so the shard jobs can keep
+  # actions/checkout's default shallow fetch; a diff against the merge base
+  # would need the full history on every run.
+  #
+  # Fails *open* on purpose. Every unexpected path — a schedule or manual run
+  # with no previous commit to compare against, a force-push whose `before` is
+  # the null SHA, an API call that errors — reports `true` and runs the visual
+  # specs. A missed visual regression is worse than a wasted couple of minutes.
+  changes:
+    name: detect frontend changes
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.f.outputs.frontend }}
+    steps:
+      - id: f
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -uo pipefail
+
+          emit() { echo "frontend=$1" >> "$GITHUB_OUTPUT"; echo "frontend changed: $1 ($2)"; exit 0; }
+
+          case "$EVENT" in
+            pull_request|push) ;;
+            *) emit true "$EVENT run — no base to compare against" ;;
+          esac
+
+          # A new branch or a force-push reports the null SHA as `before`.
+          case "$BASE" in
+            ''|0000000000000000000000000000000000000000) emit true "no usable base SHA" ;;
+          esac
+
+          if ! gh api "repos/${{ github.repository }}/compare/$BASE...$HEAD" \
+                > /tmp/compare.json 2>/tmp/compare.err; then
+            cat /tmp/compare.err
+            emit true "compare API failed — assuming frontend changed"
+          fi
+
+          # The compare endpoint caps `files` at 300 and does not say so in the
+          # payload. At the cap the list is a prefix of the real diff, so a
+          # frontend path may simply be missing from it — treat that as changed
+          # rather than trusting a truncated answer.
+          if [ "$(jq '.files | length' /tmp/compare.json)" -ge 300 ]; then
+            emit true "diff hit the 300-file compare cap — cannot rule it out"
+          fi
+
+          # openapi.yaml counts as frontend-affecting. It is the contract the
+          # app renders from, so a server-supplied field or string can change
+          # a screenshot without a single file under web/ moving — the one
+          # backend path that plausibly moves a baseline on its own.
+          FILES=$(jq -r '.files[].filename' /tmp/compare.json)
+          echo "$FILES" | sed 's/^/  /'
+          if echo "$FILES" | grep -qE '^(web/app/|openapi\.yaml$|\.github/workflows/e2e-mock\.yml$)'; then
+            emit true "matched a frontend or contract path"
+          fi
+          emit false "backend/infra paths only"
+
+  # Resolves the baked CI image (docker/ci/Dockerfile, published by
+  # ci-image.yml) that both this workflow and visual-docker.sh use, so the
+  # renderer that produces a CI screenshot is the same one that produced the
+  # committed baseline. This has to be its own job: `container.image` is
+  # evaluated before a job's steps run, so it can only reference
+  # `needs.*.outputs`, never a step in the same job.
+  #
+  # Guards against the tag not existing yet: a PR that bumps a pin resolves a
+  # new tag whose image ci-image.yml builds in a separate job of its own, so a
+  # slow/failed build there would otherwise surface here as an opaque "manifest
+  # unknown" pull failure deep into the test job instead of a clear message.
+  #
+  # On a pull_request run, ci-image.yml's build job only publishes once a
+  # maintainer applies the `ci-image-approved` label (packages:write guard,
+  # see that workflow's header comment) — so a PR that just bumped a pin is
+  # expected to hit this guard until that label is added, not a sign of a
+  # broken build.
+  version:
+    name: resolve CI image
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.v.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: v
+        run: |
+          image="$(scripts/ci-image.sh e2e)"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          if ! docker manifest inspect "$image" >/dev/null 2>&1; then
+            echo "::error::CI image $image does not exist yet. It should be built by the 'CI base image' workflow (ci-image.yml) on this same commit — check its status before re-running this job. If this PR bumped the Playwright/Ollama pins, a maintainer must apply the 'ci-image-approved' label to ci-image.yml before it will publish."
+            exit 1
+          fi
+
+  # Builds the API binary once (in the same container image the shards run
+  # in, so it's compatible) and hands it to every shard as a download instead
+  # of each of the 5 matrix entries independently running `go build`.
+  build-api:
+    name: build API binary
+    needs: [version]
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.version.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      # -buildvcs=false because the container user does not own the checkout,
+      # so the `git` call Go makes to stamp VCS metadata trips "dubious
+      # ownership" and exits 128. A throwaway test binary has no use for that
+      # stamp; the alternative (marking the workspace a safe.directory) grants
+      # more than this needs.
+      - name: Generate Ent code
+        run: go generate ./ent
+      - name: Build API
+        run: go build -cover -buildvcs=false -o /tmp/api-server ./cmd/api-server
+      - uses: actions/upload-artifact@v7
+        with:
+          name: api-server-binary
+          path: /tmp/api-server
+          retention-days: 1
+
+  test:
+    # NOTE the ternary shape here, for the reason spelled out on PROJECTS
+    # above: the non-empty value has to sit on the `&&` side.
+    name: ${{ matrix.visual && 'visual' || format('shard {0}/4', matrix.shard) }}
+    # A `labeled` event fires for *any* label. Only re-run the suite when the
+    # label added was the one that changes what runs; opened/synchronize/
+    # reopened and the non-PR triggers always proceed.
+    if: ${{ github.event.action != 'labeled' || github.event.label.name == 'e2e-full' }}
+    needs: [changes, version, build-api]
+    runs-on: ubuntu-latest
+    # The same image e2e/scripts/visual-docker.sh uses to *generate* the
+    # visual baselines, so the renderer that produces a screenshot here is the
+    # renderer that produced the committed PNG. That is the whole reason the
+    # visual specs can run in CI at all — on a bare runner they compare
+    # against baselines this environment never made.
+    #
+    # Resolved by scripts/ci-image.sh, which embeds the Playwright version
+    # (see the `version` job above): a mismatch between the container's
+    # bundled browsers and the client driving them is what Playwright rejects
+    # outright, so the two can never drift apart.
+    #
+    # Runs as root (no `options: --user`), matching visual-docker.sh — the
+    # baselines were produced that way, and the image supports it.
+    container:
+      image: ${{ needs.version.outputs.image }}
+    strategy:
+      # One shard failing shouldn't cancel the others — a partial result set
+      # still merges, and seeing which shards failed is diagnostic.
+      fail-fast: false
+      matrix:
+        # Sharding splits test *instances*, not test files: on a PR that is
+        # 40 desktop tests, on the nightly 120 (the same 40 across three
+        # browser projects). Mobile is therefore interleaved through both
+        # shards on nightly runs rather than being a job of its own.
+        #
+        # Playwright shards along project boundaries, so an uneven split can
+        # put all of one slow engine (e.g. WebKit) on a single shard. In
+        # practice, shard timings from real runs have come back balanced
+        # within a couple percent even at low shard counts — if that changes,
+        # raising the count further evens it out.
+        #
+        # The visual specs are a third entry rather than a step on shard 1.
+        # They took ~2.5 minutes and ran only on shard 1, which put the whole
+        # run's critical path on that machine — shard 1 finished 2.5 minutes
+        # after shard 2 on every full run, and since `merge` waits for both,
+        # that time was the run's, not just shard 1's. As their own entry they
+        # run beside the shards instead of after one of them. It costs one
+        # extra machine's setup (~2 minutes billed) to take roughly that much
+        # off the wall clock, and it reuses the steps below rather than
+        # duplicating the container, service and API build into a second job.
+        include:
+          - shard: 1
+          - shard: 2
+          - shard: 3
+          - shard: 4
+          - visual: true
+
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: chatapp
+          POSTGRES_PASSWORD: chatapp
+          POSTGRES_DB: chatapp
+        # Port mapping is moot for a container job — the service is reached
+        # over the job network by its alias (`db`), not through the host. See
+        # DB_HOST below, which changes from 127.0.0.1 for exactly this reason.
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chatapp"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: 'web/app/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: web/app
+        run: npm ci
+
+      # No browser install step, and no browser env var: the container ships
+      # browsers matching its own Playwright version, which is the point of
+      # using it.
+
+      # docker-compose mounts docker/initdb/ into the db container, which is
+      # where the local stack gets this. A GitHub service container takes no
+      # volume mounts, so the extension has to be created explicitly or the
+      # first migration dies on `type "vector" does not exist`.
+      #
+      # This is a bandage. The step is only here to run one statement,
+      # CREATE EXTENSION IF NOT EXISTS vector, against a database that could
+      # create it itself at startup — remove this step once that's fixed.
+      - name: Enable pgvector extension
+        run: PGPASSWORD=chatapp psql -h db -U chatapp -d chatapp -f docker/initdb/001_create_vector.sql
+
+      # -buildvcs=false because the container user does not own the checkout,
+      # so the `git` call Go makes to stamp VCS metadata trips "dubious
+      # ownership" and exits 128. A throwaway test binary has no use for that
+      # stamp; the alternative (marking the workspace a safe.directory) grants
+      # more than this needs.
+      # Runs before the build, unconditionally (no `if`, so a later build or
+      # start failure still leaves GOCOVERDIR set) — the Stop API and Upload
+      # raw Go coverage steps below run on always() and need $GOCOVERDIR to
+      # point somewhere valid (even if empty) regardless of what failed above
+      # them, or the artifact upload's `path` input would be an empty string.
+      - name: Prepare coverage dir
+        run: |
+          mkdir -p "$RUNNER_TEMP/gocov"
+          echo "GOCOVERDIR=$RUNNER_TEMP/gocov" >> "$GITHUB_ENV"
+
+      # -cover: the binary emits raw coverage counters to $GOCOVERDIR on exit
+      # (or on SIGTERM — see the Stop API step). No -coverpkg needed: `go help
+      # build` says a `-cover` build on a main package instruments every
+      # main-module package linked into that binary.
+      # The shared "build API binary" job builds with -cover; download that
+      # instrumented binary here (this container job has no Go toolchain), so
+      # its counters land in the GOCOVERDIR prepared above.
+      - name: Download API binary
+        uses: actions/download-artifact@v8
+        with:
+          name: api-server-binary
+          path: /tmp
+      - run: chmod +x /tmp/api-server
+
+      # Mirrors scripts/mock-e2e.sh: explicit env only, mock LLM, throwaway
+      # secrets. `-env /dev/null` stops the binary loading a repo .env on top.
+      #
+      # GOCOVERDIR must exist before the binary launches, or Go logs "coverage
+      # meta-data emit failed" and writes nothing — already created by the
+      # Prepare coverage dir step above. The pid goes to a file, not a shell
+      # variable, because step-local shell state including `$!` does not
+      # survive an Actions step boundary, and the Stop API step (a later,
+      # separate step) is what needs it.
+      - name: Start API (mock LLM)
+        run: |
+          mkdir -p /tmp/files
+          ENV=test \
+          LLM_BACKEND=mock \
+          MOCK_LLM_MODE=echo \
+          MOCK_LLM_STREAM_DELAY_MS=150 \
+          SERVER_HOST=127.0.0.1 \
+          SERVER_PORT=8080 \
+          DB_TYPE=postgres DB_HOST=db DB_PORT=5432 \
+          DB_USER=chatapp DB_PASSWORD=chatapp DB_NAME=chatapp \
+          DB_SSL_MODE=disable \
+          AUTO_MIGRATE=true \
+          JWT_SECRET=$(openssl rand -hex 32) \
+          JWT_REFRESH_SECRET=$(openssl rand -hex 32) \
+          TOKEN_ENCRYPTION_SECRET=$(openssl rand -hex 32) \
+          OPENAI_API_KEY=dummy-mock-key \
+          LOCAL_FILE_STORE_DIR=/tmp/files \
+          GOCOVERDIR="$RUNNER_TEMP/gocov" \
+          /tmp/api-server -env /dev/null > /tmp/api.log 2>&1 &
+          echo $! > "$RUNNER_TEMP/api.pid"
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8080/api/health >/dev/null; then
+              echo "✅ API healthy after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "❌ API did not become healthy"; tail -50 /tmp/api.log; exit 1
+
+      # Playwright starts the Angular dev server itself (webServer in
+      # playwright.config.mock-llm.ts); each shard machine gets its own.
+      - name: Run Playwright shard
+        if: ${{ !matrix.visual }}
+        working-directory: web/app
+        # --reporter=blob overrides the config's `list`; blob is the only
+        # reporter that can be merged across shards, and without this override
+        # the merge job would find no artifacts to combine.
+        #
+        # This config excludes @visual; the step below runs those. Both write
+        # blobs into the same directory, so the merge job combines them into
+        # one report.
+        run: npx playwright test --config e2e/playwright.config.mock-llm.ts --shard=${{ matrix.shard }}/${{ env.SHARD_TOTAL }} --reporter=blob ${{ env.PROJECTS }}
+        env:
+          PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
+          # Frontend V8 coverage, collected per test into
+          # coverage/web-e2e/{raw,sources} and merged in the `merge` job. Costs
+          # roughly 10% wall clock and is Chromium-only; inert without this.
+          # Not set on the visual entry below: coverage adds work on every
+          # navigation, and screenshot baselines are the one place in this suite
+          # where extra timing jitter turns into false failures.
+          E2E_COVERAGE: '1'
+
+      # The visual specs, which this job can run at all only because it runs in
+      # the same image that rendered their baselines. Unsharded, on their own
+      # matrix entry: there are a dozen of them and they are Chromium-only, so
+      # splitting them across machines would cost more in setup than it saves.
+      # PROJECTS still applies, so a desktop-only PR run checks the
+      # chromium-desktop baselines and a full run adds chromium-mobile.
+      #
+      # Skipped when nothing under web/app/ changed: a baseline
+      # is a picture of the Angular app, and a backend-only commit cannot move
+      # one without also changing the frontend that renders it. See the
+      # `changes` job, which fails open.
+      # `!cancelled()` rather than the implicit `success()` a step with no `if`
+      # would get: a functional failure in the step above says nothing about
+      # whether the baselines still match, and skipping the visual specs
+      # because of it is how a screenshot regression rides along unnoticed
+      # behind an unrelated red test. Same reasoning as the blob upload below.
+      #
+      # A backend-only run still starts this matrix entry and then skips this
+      # step, since a job-level `if` cannot see `matrix`. That costs the
+      # entry's setup (~2 billed minutes) for no tests on those runs — the
+      # price of not duplicating the whole container/service/API block into a
+      # standalone job. On the frontend runs, where the visual specs actually
+      # execute, the entry pays for itself in wall clock.
+      - name: Run visual specs
+        if: ${{ !cancelled() && matrix.visual && needs.changes.outputs.frontend == 'true' }}
+        working-directory: web/app
+        # A distinct filename: `merge-multiple` flattens every shard's blobs
+        # into one directory, so two entries writing the default name would
+        # collide there and the loser would vanish silently.
+        run: npx playwright test --config e2e/playwright.config.mock-llm.visual.ts --reporter=blob ${{ env.PROJECTS }}
+        env:
+          PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
+          PLAYWRIGHT_BLOB_OUTPUT_FILE: blob-report/visual.zip
+
+      - name: Upload blob report
+        # Must run for failed shards too, or the merged report silently omits
+        # exactly the shard you need to look at.
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          # Artifact names must be unique across the matrix; the visual entry
+          # has no shard number of its own.
+          name: blob-report-${{ matrix.visual && 'visual' || matrix.shard }}
+          path: web/app/blob-report
+          retention-days: 3
+          # A shard that fails before Playwright starts (bad service, failed
+          # build) writes no blob. Warn rather than add a second, misleading
+          # failure on top of the real one.
+          if-no-files-found: warn
+
+      # Collection is Chromium-only, and a full run shards across three
+      # projects, so a shard can legitimately finish with nothing to upload —
+      # a shard that drew only webkit-mobile tests. Without a file the artifact
+      # is never created, and the merge job cannot tell that shard apart from
+      # one that died before it collected anything. The marker makes the
+      # artifact unconditional so the missing-shard check keeps its meaning.
+      - name: Mark frontend coverage collection
+        if: ${{ !cancelled() && !matrix.visual }}
+        run: |
+          dir=web/app/coverage/web-e2e
+          mkdir -p "$dir"
+          if [ -d "$dir/raw" ] && [ -n "$(ls -A "$dir/raw" 2>/dev/null)" ]; then
+            echo "collected" > "$dir/shard-status.txt"
+          else
+            echo "empty: no Chromium tests ran in this shard" > "$dir/shard-status.txt"
+          fi
+
+      # Raw V8 coverage, not a report: `merge-coverage.mjs` in the merge job
+      # turns every shard's collection into one lcov. Uploaded per shard for
+      # the same reason as the blobs — there is no way to combine them on the
+      # machine that produced only half of them.
+      - name: Upload raw frontend coverage
+        if: ${{ !cancelled() && !matrix.visual }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: webcov-${{ matrix.shard }}
+          path: web/app/coverage/web-e2e
+          retention-days: 1
+          # The marker step above guarantees at least one file, so nothing to
+          # upload means the step order broke, not an empty shard.
+          if-no-files-found: error
+
+      # SIGTERM (not SIGKILL) so main.go's signal handler runs the graceful
+      # shutdown path and the coverage runtime flushes counters on exit — a
+      # `-cover` binary only writes $GOCOVERDIR when it exits cleanly. `wait`
+      # cannot be used here: the process was started by an earlier, separate
+      # step, so this shell never had it as a child. Runs on `always()` so a
+      # failed shard still stops the server and still gets a chance to upload
+      # whatever coverage was collected before the failure.
+      #
+      # Liveness after the kill is checked by process *state*, not by plain
+      # `kill -0`. This container image runs with no init process reaping
+      # orphans, so once the original parent shell (the Start API step) has
+      # exited, api-server is reparented as an orphan with nothing to reap it
+      # on exit — it becomes, and stays, a zombie. A zombie's PID still exists
+      # and `kill -0` on it keeps reporting success forever, even though the
+      # process is fully dead and any coverage flush already happened before
+      # it went zombie. Observed once already: signal delivered and "Server
+      # gracefully stopped" logged within ~70ms, but a bare `kill -0` loop
+      # still failed the job after burning the full 30s. `''`/`Z*` from
+      # `ps -o stat=` (not present / zombie) both count as exited; anything
+      # else (R, S, D, T, ...) means it is still genuinely running.
+      - name: Stop API
+        if: always()
+        run: |
+          : "${GOCOVERDIR:?GOCOVERDIR must be set by the Prepare coverage dir step}"
+          if [ ! -f "$RUNNER_TEMP/api.pid" ]; then
+            echo "no api.pid — API never started; nothing to stop"; exit 0
+          fi
+          pid=$(cat "$RUNNER_TEMP/api.pid")
+          if ! ps -p "$pid" -o comm= 2>/dev/null | grep -qE '(^|/)api-server$'; then
+            echo "⚠️  pid $pid is not an api-server process; not killing"
+            exit 0
+          fi
+          kill -TERM "$pid"
+          for i in $(seq 1 30); do
+            state=$(ps -o stat= -p "$pid" 2>/dev/null | tr -d '[:space:]')
+            case "$state" in
+              ''|Z*) echo "✅ API (pid $pid) exited after ${i}s"; break ;;
+            esac
+            sleep 1
+          done
+          state=$(ps -o stat= -p "$pid" 2>/dev/null | tr -d '[:space:]')
+          case "$state" in
+            ''|Z*) ;;
+            *)
+              echo "❌ API (pid $pid) did not exit within 30s after SIGTERM (state: $state)"
+              exit 1
+              ;;
+          esac
+          if [ -z "$(ls -A "$GOCOVERDIR" 2>/dev/null)" ]; then
+            echo "❌ GOCOVERDIR ($GOCOVERDIR) is empty after a clean shutdown"
+            exit 1
+          fi
+
+      - name: Upload raw Go coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gocov-${{ matrix.visual && 'visual' || matrix.shard }}
+          path: ${{ env.GOCOVERDIR }}
+          retention-days: 3
+          # A shard that never started the API (bad build, service failure)
+          # has no GOCOVERDIR contents; warn rather than add a second,
+          # misleading failure on top of the real one — same rationale as the
+          # blob-report upload above.
+          if-no-files-found: warn
+
+      - name: API log on failure
+        if: failure()
+        run: tail -100 /tmp/api.log
+
+  api:
+    name: api suite
+    if: ${{ github.event.action != 'labeled' || github.event.label.name == 'e2e-full' }}
+    runs-on: ubuntu-latest
+    # No browser is ever launched (e2e/api-tests/ never touches Playwright's
+    # `page` fixture — see playwright.config.mock-llm.api.ts), so this runs on
+    # a bare runner rather than the Playwright container the `test` job needs
+    # for matching browser baselines.
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: chatapp
+          POSTGRES_PASSWORD: chatapp
+          POSTGRES_DB: chatapp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chatapp"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'web/app/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: web/app
+        run: npm ci
+
+      # Bare runner (not the Playwright container), so there is no bundled
+      # postgres client — same reasoning as the `test` job's "Install psql".
+      - name: Install psql
+        run: |
+          for attempt in 1 2 3; do
+            if sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends postgresql-client; then
+              exit 0
+            fi
+            echo "attempt ${attempt} failed; retrying in $((attempt * 10))s"
+            sleep $((attempt * 10))
+          done
+          echo "could not install postgresql-client after 3 attempts"
+          exit 1
+
+      # A bare runner reaches the service over 127.0.0.1 via the published
+      # port, unlike the container job above which uses the `db` network alias.
+      - name: Enable pgvector extension
+        run: PGPASSWORD=chatapp psql -h 127.0.0.1 -U chatapp -d chatapp -f docker/initdb/001_create_vector.sql
+
+      - name: Prepare coverage dir
+        run: |
+          mkdir -p "$RUNNER_TEMP/gocov"
+          echo "GOCOVERDIR=$RUNNER_TEMP/gocov" >> "$GITHUB_ENV"
+
+      - name: Generate Ent code
+        run: go generate ./ent
+      - name: Build API
+        run: go build -cover -buildvcs=false -o /tmp/api-server ./cmd/api-server
+
+      # Same pattern as the `test` job's "Start API (mock LLM)", but DB_HOST
+      # is 127.0.0.1: a bare runner, not a container job, reaches the service
+      # over its published port rather than a network alias.
+      - name: Start API (mock LLM)
+        run: |
+          mkdir -p /tmp/files
+          ENV=test \
+          LLM_BACKEND=mock \
+          MOCK_LLM_MODE=echo \
+          SERVER_HOST=127.0.0.1 \
+          SERVER_PORT=8080 \
+          DB_TYPE=postgres DB_HOST=127.0.0.1 DB_PORT=5432 \
+          DB_USER=chatapp DB_PASSWORD=chatapp DB_NAME=chatapp \
+          DB_SSL_MODE=disable \
+          AUTO_MIGRATE=true \
+          JWT_SECRET=$(openssl rand -hex 32) \
+          JWT_REFRESH_SECRET=$(openssl rand -hex 32) \
+          TOKEN_ENCRYPTION_SECRET=$(openssl rand -hex 32) \
+          OPENAI_API_KEY=dummy-mock-key \
+          LOCAL_FILE_STORE_DIR=/tmp/files \
+          GOCOVERDIR="$RUNNER_TEMP/gocov" \
+          /tmp/api-server -env /dev/null > /tmp/api.log 2>&1 &
+          echo $! > "$RUNNER_TEMP/api.pid"
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8080/api/health >/dev/null; then
+              echo "✅ API healthy after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "❌ API did not become healthy"; tail -50 /tmp/api.log; exit 1
+
+      # `--reporter=list` (the config's own default), not `blob`: this suite's
+      # results are not part of the browser HTML report the `merge` job
+      # builds from `blob-report-*` — a blob here would get swept into that
+      # pattern and merged into a report about browser projects this job
+      # never ran. Failures are visible in this job's own log instead.
+      - name: Run Playwright API suite
+        working-directory: web/app
+        run: npx playwright test --config e2e/playwright.config.mock-llm.api.ts
+        env:
+          E2E_API_BASE_URL: http://127.0.0.1:8080/api
+
+      # Bare runner, not the container image the `test` job needs: no zombie
+      # concern here (a normal runner's init reaps orphans), but the same
+      # SIGTERM-then-poll shape is kept for consistency and because a clean
+      # shutdown is still what flushes the -cover counters.
+      - name: Stop API
+        if: always()
+        run: |
+          : "${GOCOVERDIR:?GOCOVERDIR must be set by the Prepare coverage dir step}"
+          if [ ! -f "$RUNNER_TEMP/api.pid" ]; then
+            echo "no api.pid — API never started; nothing to stop"; exit 0
+          fi
+          pid=$(cat "$RUNNER_TEMP/api.pid")
+          if ! ps -p "$pid" -o comm= 2>/dev/null | grep -qE '(^|/)api-server$'; then
+            echo "⚠️  pid $pid is not an api-server process; not killing"
+            exit 0
+          fi
+          kill -TERM "$pid"
+          for i in $(seq 1 30); do
+            if ! kill -0 "$pid" 2>/dev/null; then
+              echo "✅ API (pid $pid) exited after ${i}s"; break
+            fi
+            sleep 1
+          done
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "❌ API (pid $pid) did not exit within 30s after SIGTERM"
+            exit 1
+          fi
+          if [ -z "$(ls -A "$GOCOVERDIR" 2>/dev/null)" ]; then
+            echo "❌ GOCOVERDIR ($GOCOVERDIR) is empty after a clean shutdown"
+            exit 1
+          fi
+
+      - name: Upload raw Go coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gocov-api
+          path: ${{ env.GOCOVERDIR }}
+          retention-days: 3
+          if-no-files-found: warn
+
+      - name: API log on failure
+        if: failure()
+        run: tail -100 /tmp/api.log
+
+  merge:
+    name: merge reports
+    if: ${{ !cancelled() }}
+    needs: [changes, version, test, api]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Needed to post/update the results comment. Scoped to this job so the
+      # shard jobs — which run the actual test code — keep a read-only token.
+      pull-requests: write
+      # OIDC token for the tokenless Codecov upload — see codecov.yml and
+      # pr-validation.yml for the same pattern.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: 'web/app/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: web/app
+        run: npm ci
+
+      - name: Download shard blobs
+        uses: actions/download-artifact@v8
+        with:
+          path: web/app/all-blobs
+          pattern: blob-report-*
+          merge-multiple: true
+
+      # Every matrix entry — shard 1, shard 2, and the visual entry — builds
+      # and starts the `-cover` API regardless of whether the visual entry's
+      # Playwright step actually ran (see the "Run visual specs" step's `if`),
+      # so all three gocov-* artifacts are expected on every run where the
+      # `test` job ran at all. The `api` job builds and starts its own,
+      # separate `-cover` API and contributes gocov-api, merged and uploaded
+      # under its own `go-api` flag below rather than folded into `go-e2e` —
+      # they are different coverage *sources* per codecov.yml, even though
+      # both come out of this workflow. The only legitimate absence of a
+      # gocov-1/2/visual artifact is the whole `test` job having been skipped
+      # outright (the labeled-event guard above, an unrelated label on the
+      # PR) — that is a distinct, job-level skip, not a per-shard one, and is
+      # tolerated explicitly below rather than silently.
+      - name: Download raw Go coverage
+        uses: actions/download-artifact@v8
+        with:
+          path: gocov
+          pattern: gocov-*
+
+      - name: Merge and convert Go coverage (browser e2e)
+        id: gocov
+        run: |
+          mkdir -p coverage merged-gocov
+          missing=""
+          for name in gocov-1 gocov-2 gocov-visual; do
+            [ -d "gocov/$name" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            if [ "${{ needs.test.result }}" = "skipped" ]; then
+              echo "test job was skipped entirely (unrelated label event) — nothing to merge"
+              echo "merged=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "❌ missing expected Go coverage artifact(s):$missing"
+            exit 1
+          fi
+          go tool covdata merge -i=gocov/gocov-1,gocov/gocov-2,gocov/gocov-visual -o merged-gocov
+          go tool covdata textfmt -i=merged-gocov -o coverage/go-e2e.out
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+
+      # Codecov is not active on this repository yet, so the run summary is
+      # currently the only place the number is readable. Keep this step even
+      # once it is: a total on the job page beats opening a dashboard.
+      - name: Report coverage total (go-e2e)
+        if: ${{ steps.gocov.outputs.merged == 'true' }}
+        run: make coverage-summary PROFILE=coverage/go-e2e.out | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Go coverage to Codecov (go-e2e)
+        if: ${{ steps.gocov.outputs.merged == 'true' }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          files: ./coverage/go-e2e.out
+          flags: go-e2e
+          disable_search: true
+          fail_ci_if_error: false
+
+      # Same shape as the go-e2e merge above, but for the api job's own
+      # gocov-api artifact — kept as a separate flag (see codecov.yml)
+      # because it is a distinct coverage source, not more browser e2e.
+      - name: Merge and convert Go coverage (api suite)
+        id: gocov_api
+        run: |
+          mkdir -p coverage merged-gocov-api
+          if [ ! -d gocov/gocov-api ]; then
+            if [ "${{ needs.api.result }}" = "skipped" ]; then
+              echo "api job was skipped entirely (unrelated label event) — nothing to merge"
+              echo "merged=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "❌ missing expected Go coverage artifact: gocov-api"
+            exit 1
+          fi
+          go tool covdata merge -i=gocov/gocov-api -o merged-gocov-api
+          go tool covdata textfmt -i=merged-gocov-api -o coverage/go-api.out
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+
+      - name: Report coverage total (go-api)
+        if: ${{ steps.gocov_api.outputs.merged == 'true' }}
+        run: make coverage-summary PROFILE=coverage/go-api.out | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Go coverage to Codecov (go-api)
+        if: ${{ steps.gocov_api.outputs.merged == 'true' }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          files: ./coverage/go-api.out
+          flags: go-api
+          disable_search: true
+          fail_ci_if_error: false
+
+      # Raw V8 coverage from the functional shards. The visual entry does not
+      # collect it (see the `E2E_COVERAGE` comment on the shard step), so one
+      # artifact per shard is what the merge below expects.
+      - name: Download raw frontend coverage
+        uses: actions/download-artifact@v8
+        with:
+          path: web/app/webcov
+          pattern: webcov-*
+
+      # One merge, one upload: per-shard lcov would make Codecov reconcile
+      # partial line hits across uploads, and the raw V8 data merges cleanly
+      # here instead. `check-coverage.mjs` then asserts the properties of the
+      # merged report that no single test can — see its header for what each
+      # check catches.
+      - name: Merge frontend coverage
+        id: webcov
+        working-directory: web/app
+        run: |
+          # Without this, `node ... | tee` reports tee's exit status and a
+          # failing merge or acceptance check passes the job silently.
+          set -o pipefail
+          # Derived from SHARD_TOTAL rather than hardcoded. Adding a shard
+          # otherwise means updating the matrix, the shard argument, *and*
+          # this list — and forgetting the last one silently drops that
+          # shard's coverage, which reads as a real drop in the number.
+          missing=""
+          dirs=""
+          for i in $(seq 1 "$SHARD_TOTAL"); do
+            name="webcov-$i"
+            if [ -d "webcov/$name" ]; then
+              dirs="$dirs webcov/$name"
+            else
+              missing="$missing $name"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            if [ "${{ needs.test.result }}" = "skipped" ]; then
+              echo "test job was skipped entirely (unrelated label event) — nothing to merge"
+              echo "merged=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "❌ missing expected frontend coverage artifact(s):$missing"
+            exit 1
+          fi
+          # A shard that drew only non-Chromium tests uploads its marker and
+          # no counts. That is expected, but it should be visible: an empty
+          # shard for an unexpected reason looks identical in the total.
+          empty=""
+          for dir in $dirs; do
+            if grep -q '^empty' "$dir/shard-status.txt" 2>/dev/null; then
+              empty="$empty ${dir#webcov/}"
+            fi
+          done
+          if [ -n "$empty" ]; then
+            echo "shards with no Chromium coverage:$empty" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          node e2e/scripts/merge-coverage.mjs $dirs | tee merge-coverage.log
+          node e2e/scripts/check-coverage.mjs | tee check-coverage.log
+          grep '^check-coverage: total' check-coverage.log >> "$GITHUB_STEP_SUMMARY"
+          # Surfaced next to the total because it qualifies it: a non-zero count
+          # means navigations replaced a document before the fixture banked its
+          # coverage, so the total above is an undercount rather than a result.
+          lost=$(sed -n 's/^merge-coverage: lost navigations: //p' merge-coverage.log)
+          if [ -n "$lost" ] && [ "$lost" != "0" ]; then
+            echo "unharvested navigations: $lost (coverage total is an undercount)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+
+      # Two flags, not one, because the two runs measure different things and
+      # mixing them makes both unreadable. A pull_request run is desktop-only
+      # (`PROJECTS` above); the nightly, a manual dispatch, and a PR labelled
+      # `e2e-full` add Pixel 7 chromium and iPhone 15 WebKit, so they exercise
+      # responsive branches the PR run never reaches.
+      #
+      # Under one flag those alternate every few hours, and Codecov reads the
+      # difference as a coverage swing: every nightly is a jump, every PR after
+      # it a drop, and the flag's trend line is a sawtooth that says nothing
+      # about the code. Split, each flag compares like with like — a PR is
+      # measured against the last PR, the nightly against the last nightly —
+      # and phase 7 can put a threshold on `web-e2e-pr` (the one that runs on
+      # every change) without the nightly's wider coverage setting a target no
+      # PR run can meet.
+      #
+      # Both still land in the combined number: Codecov merges flags by
+      # file/line, so a line covered only by the mobile projects still counts
+      # as covered overall.
+      - name: Upload frontend coverage to Codecov
+        if: ${{ steps.webcov.outputs.merged == 'true' }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          files: ./web/app/coverage/web-e2e/report/lcov.info
+          flags: ${{ env.FULL_RUN == 'true' && 'web-e2e-nightly' || 'web-e2e-pr' }}
+          disable_search: true
+          fail_ci_if_error: false
+
+      # Guarded: when every shard died before running tests there is nothing
+      # to merge, and `merge-reports` exits non-zero on a missing directory —
+      # a second red job that says nothing the shard failure didn't already.
+      - name: Merge into one HTML report
+        id: merge
+        working-directory: web/app
+        run: |
+          if [ -z "$(ls -A ./all-blobs 2>/dev/null)" ]; then
+            echo "No blob reports were produced — every shard failed before running tests."
+            echo "See the shard jobs for the real error; nothing to merge here."
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          npx playwright merge-reports --reporter=html,list ./all-blobs
+          # Second pass for machine-readable numbers. Cheap (it re-reads the
+          # same blobs) and keeps the human report and the comment data from
+          # drifting apart, since both come from one set of blobs.
+          npx playwright merge-reports --reporter=json ./all-blobs > merged.json
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build PR comment
+        id: comment
+        if: ${{ github.event_name == 'pull_request' }}
+        working-directory: web/app
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          FULL_RUN: ${{ env.FULL_RUN }}
+          MERGED: ${{ steps.merge.outputs.merged }}
+          FRONTEND: ${{ needs.changes.outputs.frontend }}
+        run: |
+          {
+            echo '### E2E (mock backend)'
+            echo
+
+            if [ "$MERGED" != "true" ]; then
+              echo '🚨 **No results** — every shard failed before running any test.'
+              echo
+              echo "[View run]($RUN_URL)"
+            else
+
+            EXPECTED=$(jq -r '.stats.expected' merged.json)
+            UNEXPECTED=$(jq -r '.stats.unexpected' merged.json)
+            FLAKY=$(jq -r '.stats.flaky' merged.json)
+            SKIPPED=$(jq -r '.stats.skipped' merged.json)
+            DURATION=$(jq -r '(.stats.duration / 1000 | floor)' merged.json)
+
+            if [ "$UNEXPECTED" -gt 0 ]; then
+              echo "❌ **$UNEXPECTED failed**, $EXPECTED passed, $FLAKY flaky, $SKIPPED skipped — ${DURATION}s"
+            elif [ "$FLAKY" -gt 0 ]; then
+              echo "⚠️ **$FLAKY flaky**, $EXPECTED passed, $SKIPPED skipped — ${DURATION}s"
+            else
+              echo "✅ **$EXPECTED passed**, $SKIPPED skipped — ${DURATION}s"
+            fi
+            echo
+
+            if [ "$FULL_RUN" = "true" ]; then
+              echo '**Scope:** all projects (desktop + mobile) — `e2e-full`'
+            else
+              echo '**Scope:** `chromium-desktop` only. Add the **`e2e-full`** label for mobile.'
+            fi
+
+            # Say so explicitly. A skipped visual run that goes unmentioned
+            # reads as a passing one.
+            if [ "$FRONTEND" != "true" ]; then
+              echo '**Visual:** skipped — no changes under `web/app/` or `openapi.yaml`.'
+            fi
+            echo
+
+            echo '| Project | Passed |'
+            echo '|---|---|'
+            jq -r '[.. | objects | select(has("projectName") and has("results"))
+                    | {p: .projectName, s: (.results[-1].status // "unknown")}]
+                   | group_by(.p)[]
+                   | "| \(.[0].p) | \([.[] | select(.s == "passed")] | length)/\(length) |"' merged.json
+            echo
+
+            if [ "$UNEXPECTED" -gt 0 ]; then
+              echo '<details><summary>Failed tests</summary>'
+              echo
+              jq -r '[.. | objects | select(has("ok") and has("title") and has("tests"))
+                      | select(.ok == false) | .title] | .[]' merged.json \
+                | sed 's/^/- /'
+              echo
+              echo '</details>'
+              echo
+            fi
+
+            echo "[Full HTML report]($RUN_URL#artifacts) · [View run]($RUN_URL)"
+            fi
+          } > /tmp/comment-section.md
+          cat /tmp/comment-section.md
+
+      # Sticky: this workflow's section of the shared comment updates in
+      # place rather than adding one per push, so a long-lived PR doesn't
+      # accumulate a wall of near-identical reports. Other e2e workflows
+      # (e.g. e2e-local-llm.yml) post their own section of the same comment —
+      # see .github/actions/e2e-status-comment.
+      #
+      # Skipped for forks on purpose. This workflow is `pull_request`, so a
+      # fork PR gets a read-only token and posting would fail; the fix is NOT
+      # `pull_request_target`, which would run fork code with a write token.
+      # Fork contributors read the run instead.
+      - name: Post or update PR comment
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: ./.github/actions/e2e-status-comment
+        with:
+          pr: ${{ github.event.pull_request.number }}
+          section: mock
+          order: 10
+          body-file: /tmp/comment-section.md
+
+      - name: Upload merged report
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: web/app/playwright-report
+          retention-days: 7
+          if-no-files-found: ignore

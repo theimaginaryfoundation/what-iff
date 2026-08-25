@@ -1,0 +1,32 @@
+:host {
+  display: block;
+}
+
+/* Ensure proper textarea resizing */
+textarea.resize-vertical {
+  resize: vertical;
+  min-height: 300px;
+}
+
+/* Custom scrollbar for modal content */
+.modal-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.modal-content::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.modal-content::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+.modal-content::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Smooth transitions for edit mode */
+.edit-transition {
+  transition: all 0.2s ease-in-out;
+}

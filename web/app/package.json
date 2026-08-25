@@ -1,0 +1,95 @@
+{
+  "name": "what-iff",
+  "version": "0.0.0",
+  "scripts": {
+    "ng": "ng",
+    "prestart": "node scripts/write-version.mjs",
+    "start": "ng serve",
+    "preserve:coverage": "node scripts/write-version.mjs",
+    "serve:coverage": "ng serve --live-reload=false --hmr=false",
+    "prebuild": "node scripts/write-version.mjs",
+    "build": "ng build",
+    "prebuild:prod": "node scripts/write-version.mjs",
+    "build:prod": "ng build --configuration=production",
+    "prebuild:docker": "node scripts/write-version.mjs",
+    "build:docker": "ng build --configuration=docker",
+    "prewatch": "node scripts/write-version.mjs",
+    "watch": "ng build --watch --configuration development",
+    "test": "ng test",
+    "test:coverage": "ng test --watch=false --coverage",
+    "e2e": "playwright test --config e2e/playwright.config.mock-llm.ts",
+    "e2e:mock-llm": "playwright test --config e2e/playwright.config.mock-llm.ts",
+    "e2e:mock-llm:serial": "playwright test --config e2e/playwright.config.mock-llm.serial.ts",
+    "e2e:local-llm": "playwright test --config e2e/playwright.config.local-llm.ts",
+    "e2e:local-llm:serial": "playwright test --config e2e/playwright.config.local-llm.serial.ts",
+    "e2e:api": "playwright test --config e2e/playwright.config.mock-llm.api.ts",
+    "e2e:mock-llm:visual": "playwright test --config e2e/playwright.config.mock-llm.visual.ts",
+    "e2e:mock-llm:visual:update": "playwright test --config e2e/playwright.config.mock-llm.visual.ts --update-snapshots",
+    "e2e:mock-llm:visual:docker": "bash e2e/scripts/visual-docker.sh",
+    "e2e:mock-llm:visual:docker:update": "bash e2e/scripts/visual-docker.sh --update",
+    "e2e:check-configs": "bash e2e/scripts/check-config-selection.sh",
+    "sdk:generate": "openapi-typescript ../../openapi.yaml -o e2e/sdk/schema.d.ts",
+    "lint:e2e": "eslint e2e --max-warnings=0"
+  },
+  "prettier": {
+    "printWidth": 140,
+    "arrowParens": "avoid",
+    "overrides": [
+      {
+        "files": "*.html",
+        "options": {
+          "parser": "angular"
+        }
+      }
+    ]
+  },
+  "private": true,
+  "overrides": {
+    "openapi-typescript": {
+      "typescript": "$typescript"
+    }
+  },
+  "dependencies": {
+    "@angular/common": "^22.1.3",
+    "@angular/compiler": "^22.1.3",
+    "@angular/core": "^22.1.3",
+    "@angular/forms": "^22.1.3",
+    "@angular/platform-browser": "^22.1.3",
+    "@angular/router": "^22.1.3",
+    "@ctrl/ngx-emoji-mart": "^9.3.0",
+    "@tailwindcss/postcss": "^4.3.3",
+    "aws-amplify": "^6.20.0",
+    "clipboard": "^2.0.11",
+    "dompurify": "^3.4.14",
+    "flowbite": "^4.0.2",
+    "jszip": "^3.10.1",
+    "katex": "^0.16.47",
+    "marked": "^18.0.10",
+    "marked-katex-extension": "^5.1.12",
+    "ngx-markdown": "^22.0.0",
+    "postcss": "^8.5.26",
+    "rxjs": "~7.8.0",
+    "tailwindcss": "^4.3.3",
+    "tslib": "^2.3.0"
+  },
+  "devDependencies": {
+    "@angular/build": "^22.1.5",
+    "@angular/cli": "^22.1.5",
+    "@angular/compiler-cli": "^22.1.3",
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/typography": "^0.5.20",
+    "@vitest/coverage-v8": "^4.1.11",
+    "dotenv": "^17.4.2",
+    "esbuild": "^0.28.1",
+    "eslint": "^10.9.0",
+    "eslint-plugin-playwright": "^2.11.0",
+    "istanbul-lib-instrument": "^6.0.3",
+    "jsdom": "^30.0.1",
+    "monocart-coverage-reports": "^2.13.0",
+    "openapi-fetch": "^0.17.0",
+    "openapi-typescript": "^7.13.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.11"
+  }
+}

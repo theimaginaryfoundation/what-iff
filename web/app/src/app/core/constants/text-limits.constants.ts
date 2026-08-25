@@ -1,0 +1,2 @@
+export const TEXT_LIMIT_WARNING_THRESHOLD = 20_000;
+export const TEXT_LIMIT_HARD_MAX = 25_000;

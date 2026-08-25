@@ -1,0 +1,138 @@
+name: Frontend PR Validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'web/app/**'
+      - '.github/workflows/frontend-pr-validation.yml'
+      # e2e/sdk/schema.d.ts is generated from the root spec, so a PR touching
+      # only openapi.yaml is exactly the one that can introduce drift. Without
+      # this path it would be the one PR that skips the drift check below.
+      - 'openapi.yaml'
+      # A PR that only edits flag or component config still needs the uploads
+      # that config governs to re-run, or the change lands unverified.
+      - 'codecov.yml'
+
+  # Main needs the same uploads, or PR comparisons have no base commit and the
+  # README badge has nothing to render. Actions does not support YAML anchors,
+  # so this filter is a literal copy of the one above — keep them in sync.
+  push:
+    branches: [main]
+    paths:
+      - 'web/app/**'
+      - '.github/workflows/frontend-pr-validation.yml'
+      # e2e/sdk/schema.d.ts is generated from the root spec, so a PR touching
+      # only openapi.yaml is exactly the one that can introduce drift. Without
+      # this path it would be the one PR that skips the drift check below.
+      - 'openapi.yaml'
+      # A PR that only edits flag or component config still needs the uploads
+      # that config governs to re-run, or the change lands unverified.
+      - 'codecov.yml'
+
+permissions:
+  contents: read
+  pull-requests: read
+  # Tokenless Codecov upload via OIDC. Forks never receive repo secrets, so a
+  # CODECOV_TOKEN would silently skip coverage on exactly the PRs that most
+  # need review.
+  id-token: write
+
+jobs:
+  validate:
+    name: Validate Frontend Code
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: 'web/app/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: web/app
+        run: |
+          echo "Installing dependencies..."
+          npm ci
+          echo "✅ Dependencies installed"
+
+      # The e2e suite's typed SDK only guarantees that a spec/API mismatch is a
+      # compile error while the committed schema matches openapi.yaml. Nothing
+      # else enforces that, so regenerate and fail on any difference rather
+      # than relying on contributors to remember the command.
+      - name: Check e2e SDK schema is up to date with openapi.yaml
+        working-directory: web/app
+        run: |
+          echo "Regenerating e2e SDK schema from openapi.yaml..."
+          npm run sdk:generate
+          if ! git diff --exit-code -- e2e/sdk/schema.d.ts; then
+            echo ""
+            echo "❌ e2e/sdk/schema.d.ts is out of date with openapi.yaml."
+            echo "   Run this from web/app and commit the result:"
+            echo ""
+            echo "     npm run sdk:generate"
+            echo ""
+            exit 1
+          fi
+          echo "✅ e2e SDK schema is in sync"
+
+      # The e2e suite ships its own ESLint config; without this it never runs
+      # on a PR, so the rules it defines enforce nothing. Static only —
+      # executing the suite needs a backend and a database, which is a separate
+      # job still to be added. A full `tsc -p tsconfig.e2e.json` is deliberately
+      # not run here yet: it currently reports pre-existing errors (optional
+      # fields in the generated schema reaching non-optional POM parameters),
+      # so adding it would land red. The type-aware ESLint rules in
+      # eslint.config.mjs already cover the highest-value case, unawaited
+      # promises.
+      - name: Lint the e2e suite
+        working-directory: web/app
+        run: |
+          echo "Linting e2e suite..."
+          npm run lint:e2e
+          echo "✅ e2e lint passed"
+
+      # What each config SELECTS, which nothing else checks: a config whose
+      # filters exclude everything, or one that drops its login setup, still
+      # exits 0 and reads as a clean run. Both have happened. Needs no browsers
+      # and no backend — it only asks Playwright to enumerate tests.
+      - name: Check e2e config selection invariants
+        working-directory: web/app
+        run: npm run e2e:check-configs
+
+      - name: TypeScript type checking
+        working-directory: web/app
+        run: |
+          echo "Running TypeScript compiler..."
+          npx tsc --noEmit -p tsconfig.app.json
+          echo "✅ Type checking passed"
+
+      - name: Run tests
+        run: |
+          echo "Running tests with coverage..."
+          make web-unit-coverage
+          echo "✅ All tests passed"
+
+      - name: Report coverage total (web-unit)
+        run: make lcov-summary LCOV=web/app/coverage/what-iff/lcov.info | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          files: ./web/app/coverage/what-iff/lcov.info
+          flags: web-unit
+          disable_search: true
+          fail_ci_if_error: false
+
+      - name: Verify production build
+        working-directory: web/app
+        run: |
+          echo "Verifying production build..."
+          npm run build:prod
+          echo "✅ Production build successful"

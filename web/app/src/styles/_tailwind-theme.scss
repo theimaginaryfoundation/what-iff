@@ -1,0 +1,41 @@
+// Tailwind v4 token bridge.
+//
+// In Tailwind v4 the canonical way to extend the theme is the @theme directive
+// in CSS. The `inline` flag tells Tailwind to keep the `var(...)` reference at
+// runtime so utility classes pick up `data-theme` overrides without the values
+// being baked at build time.
+//
+// Each `--color-*` here produces a Tailwind utility (e.g. `bg-surface-base`,
+// `text-text-primary`, `border-border-base`). Tailwind's default palette is
+// preserved alongside these so legacy components keep rendering until Phase 16
+// migrates them.
+
+@theme inline {
+  --color-surface-base:     var(--bg-base);
+  --color-surface-card:     var(--bg-card);
+  --color-surface-soft:     var(--bg-surface);
+  --color-surface-elevated: var(--bg-elevated);
+  --color-surface-input:    var(--bg-input);
+
+  --color-border-base:    var(--border);
+  --color-border-hover:   var(--border-hover);
+  --color-focus-ring:     var(--focus-ring);
+
+  --color-text-primary:   var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted:     var(--text-muted);
+
+  --color-accent:        var(--accent);
+  --color-accent-light:  var(--accent-light);
+  --color-accent-bg:     var(--accent-bg);
+  --color-accent-app:    var(--accent-app);
+  --color-accent-config: var(--accent-config);
+
+  --color-danger:  var(--danger);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info:    var(--info);
+
+  --font-sans:    'Outfit', system-ui, sans-serif;
+  --font-display: 'Cormorant SC', serif;
+}

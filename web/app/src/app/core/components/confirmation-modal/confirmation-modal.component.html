@@ -1,0 +1,52 @@
+<ui-modal
+  [open]="confirmationService.isOpen()"
+  [dismissible]="!confirmationService.isLoading()"
+  labelledBy="confirmation-modal-title"
+  describedBy="confirmation-modal-message"
+  size="md"
+  (dismiss)="onCancel()">
+  <div modal-header class="flex items-start justify-between">
+    <div class="flex items-center gap-4 flex-1">
+      <!-- Icon -->
+      <div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full" [ngClass]="getIconBgClass()">
+        <svg class="h-6 w-6" [ngClass]="getIconColorClass()" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" [attr.d]="getIconPath()"></path>
+        </svg>
+      </div>
+      <h3 id="confirmation-modal-title" class="text-xl font-semibold text-gray-900 dark:text-white">
+        {{ confirmationService.title() }}
+      </h3>
+    </div>
+  </div>
+
+  <div>
+    <p id="confirmation-modal-message" class="text-sm text-gray-500 dark:text-gray-400 whitespace-pre-wrap">
+      {{ confirmationService.message() }}
+    </p>
+  </div>
+
+  <div modal-footer class="flex items-center justify-end gap-3">
+    @if (confirmationService.cancelText()) {
+      <button (click)="onCancel()"
+              [disabled]="confirmationService.isLoading()"
+              type="button"
+              class="text-gray-500 bg-white hover:bg-gray-100 focus:ring-4 focus:outline-none focus:ring-gray-300 rounded-lg border border-gray-200 text-sm font-medium px-5 py-2.5 hover:text-gray-900 focus:z-10 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-500 dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-gray-600 disabled:opacity-50 disabled:cursor-not-allowed">
+        {{ confirmationService.cancelText() }}
+      </button>
+    }
+    <button (click)="onConfirm()"
+            [disabled]="confirmationService.isLoading()"
+            type="button"
+            class="text-white focus:ring-4 focus:outline-none focus:ring-opacity-50 rounded-lg text-sm font-medium px-5 py-2.5 focus:z-10 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+            [ngClass]="getConfirmButtonClass()">
+      @if (confirmationService.isLoading()) {
+        <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+      }
+      {{ confirmationService.isLoading() && confirmationService.loadingText() ? confirmationService.loadingText() : confirmationService.confirmText() }}
+    </button>
+  </div>
+</ui-modal>
+

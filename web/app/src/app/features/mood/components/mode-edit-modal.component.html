@@ -1,0 +1,108 @@
+@if (state().open) {
+  <div class="mode-modal-backdrop" (click)="dismissRequested.emit()">
+    <div class="mode-modal" (click)="$event.stopPropagation()">
+      <button type="button" class="mode-modal__close-btn" aria-label="Close modal" (click)="close.emit()">
+        <ui-x-icon [size]="16" />
+      </button>
+      @if (state().loading) {
+        <div class="mode-modal__loading">Loading mode...</div>
+      } @else {
+        @if (state().error) {
+          <p class="mode-modal__error">{{ state().error }}</p>
+        }
+
+        <section class="mode-modal__intro">
+          <div class="mode-modal__kicker">{{ state().mode === 'create' ? 'CREATE MODE' : 'EDIT MODE' }}</div>
+          <div class="mode-modal__name-row">
+            <input class="mode-modal__name-input" type="text" placeholder="Mode name" [ngModel]="state().name" (ngModelChange)="nameChange.emit($event)" />
+          </div>
+        </section>
+
+        <section class="mode-modal__section">
+          <label>DESCRIPTION</label>
+          <textarea rows="2" placeholder="How should this mode feel? e.g. Concise, direct, no filler." [ngModel]="state().description" (ngModelChange)="descriptionChange.emit($event)"></textarea>
+        </section>
+
+        <section class="mode-modal__section">
+          <label>PROMPT SNIPPET</label>
+          <textarea
+            rows="4"
+            placeholder="Text injected into the system prompt when this mode is active."
+            [ngModel]="state().promptSnippet"
+            (ngModelChange)="promptSnippetChange.emit($event)"></textarea>
+        </section>
+
+        <section class="mode-modal__section">
+          <div class="mode-modal__section-head">
+            <h3>DEFAULT MODEL</h3>
+          </div>
+          <select [ngModel]="state().recommendedModel" (ngModelChange)="recommendedModelChange.emit($event)">
+            <option value="">Auto / no recommendation</option>
+            @for (model of modelOptions(); track model.id) {
+              <option [value]="model.id">{{ model.label }}</option>
+            }
+          </select>
+          <p class="mode-modal__helper-text">
+            If set, chat will switch to this model when the mode becomes active (tools can still override).
+          </p>
+        </section>
+
+        <section class="mode-modal__section">
+          <div class="mode-modal__section-head">
+            <h3>ATTACHED SKILLS</h3>
+            <span class="mode-modal__section-count">{{ attachedSkillsCountLabel() }}</span>
+          </div>
+          <app-mode-search-picker
+            [placeholder]="'Search a skill to attach...'"
+            [query]="skillQuery()"
+            [dropdownOpen]="skillDropdownOpen()"
+            [options]="skillPickerOptions()"
+            [emptyText]="'No matching skills'"
+            (queryChange)="skillQueryChange.emit($event)"
+            (openDropdown)="openSkillDropdown.emit()"
+            (closeDropdown)="closeSkillDropdown.emit()"
+            (selectOption)="addAttachedSkill.emit($event)" />
+          <div class="mode-modal__chips">
+            @if (state().attachedSkills.length === 0) {
+              <span>No skills attached</span>
+            } @else {
+              @for (skill of state().attachedSkills; track skill.id) {
+                <span><span class="mode-modal__chip-label">{{ skill.label }}</span> <button type="button" (click)="removeAttachedSkill.emit(skill.id)">×</button></span>
+              }
+            }
+          </div>
+        </section>
+
+        <section class="mode-modal__section">
+          <div class="mode-modal__section-head">
+            <h3>ATTACHED MCP SERVERS</h3>
+            <span class="mode-modal__section-count">{{ attachedMcpCountLabel() }}</span>
+          </div>
+          <p class="mode-modal__helper-text">
+            MCP servers are activated via attached skills.
+          </p>
+          <div class="mode-modal__chips">
+            @if (state().attachedMCPServers.length === 0) {
+              <span>No MCP servers attached</span>
+            } @else {
+              @for (mcp of state().attachedMCPServers; track mcp.id) {
+                <span><span class="mode-modal__chip-label">{{ mcp.label }}</span></span>
+              }
+            }
+          </div>
+        </section>
+      }
+      <footer class="mode-modal__footer">
+        @if (state().mode === 'edit') {
+          <button type="button" class="mode-btn mode-btn--danger" (click)="deleteMode.emit()">Delete</button>
+        } @else {
+          <span></span>
+        }
+        <div class="mode-modal__footer-actions">
+          <button type="button" class="mode-btn mode-btn--secondary" (click)="close.emit()">Cancel</button>
+          <button type="button" class="mode-btn mode-btn--primary" (click)="save.emit()" [disabled]="state().saving">{{ state().saving ? 'Saving...' : 'Save' }}</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+}

@@ -1,0 +1,25 @@
+<ul class="app-nav-list" role="list">
+  @for (item of items(); track item.id) {
+    <li class="app-nav-list__row">
+      <a
+        [routerLink]="item.route"
+        routerLinkActive="app-nav-list__link--active"
+        [routerLinkActiveOptions]="{ exact: false }"
+        ariaCurrentWhenActive="page"
+        class="app-nav-list__link"
+        [class.app-nav-list__link--collapsed]="collapsed()"
+        [attr.aria-label]="collapsed() ? item.label : null"
+        [uiTooltip]="collapsed() ? item.label : ''"
+        placement="right"
+        (click)="onSelect(item)"
+      >
+        <span class="app-nav-list__icon" aria-hidden="true">
+          <ng-container *ngComponentOutlet="item.icon; inputs: { size: 18 }"></ng-container>
+        </span>
+        @if (!collapsed()) {
+          <span class="app-nav-list__label">{{ item.label }}</span>
+        }
+      </a>
+    </li>
+  }
+</ul>

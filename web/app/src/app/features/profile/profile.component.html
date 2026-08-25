@@ -1,0 +1,621 @@
+<div class="min-h-screen bg-gray-50 dark:bg-gray-900">
+  <div class="max-w-2xl mx-auto">
+    <!-- Header -->
+    <div class="text-center mb-8 mt-4">
+      <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900 dark:text-white">
+        Profile Settings
+      </h2>
+      <p class="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
+        Update your personal information
+      </p>
+    </div>
+
+    <!-- Loading State -->
+    @if (isLoading() && !profileForm.dirty) {
+      <div class="flex justify-center items-center py-12">
+        <svg class="animate-spin h-8 w-8 text-indigo-600 dark:text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+      </div>
+    }
+
+    <!-- Form -->
+    @if (!isLoading() || profileForm.dirty) {
+      <div class="bg-white dark:bg-gray-800 shadow-sm rounded-lg p-6">
+        <form [formGroup]="profileForm" (ngSubmit)="onSubmit()" class="space-y-6">
+          <!-- Success Alert -->
+          @if (successMessage()) {
+            <div class="flex items-center p-4 mb-4 text-green-800 dark:text-green-200 rounded-lg bg-green-50 dark:bg-green-900" role="alert">
+              <svg class="flex-shrink-0 w-4 h-4" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5Zm3.707 8.207-4 4a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L9 10.586l3.293-3.293a1 1 0 0 1 1.414 1.414Z"/>
+              </svg>
+              <div class="ml-3 text-sm font-medium">
+                {{ successMessage() }}
+              </div>
+            </div>
+          }
+          <!-- Error Alert -->
+          @if (errorMessage()) {
+            <div class="flex items-center p-4 mb-4 text-red-800 dark:text-red-200 rounded-lg bg-red-50 dark:bg-red-900" role="alert">
+              <svg class="flex-shrink-0 w-4 h-4" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM10 15a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1-4a1 1 0 0 1-2 0V6a1 1 0 0 1 2 0v5Z"/>
+              </svg>
+              <div class="ml-3 text-sm font-medium">
+                {{ errorMessage() }}
+              </div>
+            </div>
+          }
+          <!-- User Info Display -->
+          @if (currentUser()) {
+            <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
+              <div class="flex items-center space-x-4">
+                <div class="w-16 h-16 bg-indigo-600 dark:bg-indigo-500 rounded-full flex items-center justify-center">
+                  <span class="text-white text-xl font-bold">{{ getUserInitials() }}</span>
+                </div>
+                <div>
+                  <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ getDisplayName() }}</h3>
+                  <p class="text-sm text-gray-600 dark:text-gray-400">@{{ currentUser()?.username }}</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-500">Member since {{ $safeNavigationMigration(currentUser()?.created_at) | date:'mediumDate' }}</p>
+                </div>
+              </div>
+            </div>
+          }
+          <!-- Form Fields -->
+          <div class="space-y-4">
+            <div>
+              <label for="email" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">
+                Email Address *
+              </label>
+              <input
+                type="email"
+                id="email"
+                formControlName="email"
+                class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                [class.border-red-500]="profileForm.get('email')?.invalid && profileForm.get('email')?.touched"
+                placeholder="Enter your email address"
+                required>
+              @if (profileForm.get('email')?.invalid && profileForm.get('email')?.touched) {
+                <div
+                  class="mt-2 text-sm text-red-600 dark:text-red-400">
+                  @if (profileForm.get('email')?.hasError('required')) {
+                    <span>Email is required</span>
+                  }
+                  @if (profileForm.get('email')?.hasError('email')) {
+                    <span>Please enter a valid email address</span>
+                  }
+                  @if (profileForm.get('email')?.hasError('maxlength')) {
+                    <span>Email must be no more than 255 characters</span>
+                  }
+                </div>
+              }
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label for="firstName" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">
+                  First Name
+                </label>
+                <input
+                  type="text"
+                  id="firstName"
+                  formControlName="first_name"
+                  class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                  [class.border-red-500]="profileForm.get('first_name')?.invalid && profileForm.get('first_name')?.touched"
+                  placeholder="Enter your first name">
+                @if (profileForm.get('first_name')?.invalid && profileForm.get('first_name')?.touched) {
+                  <div
+                    class="mt-2 text-sm text-red-600 dark:text-red-400">
+                    @if (profileForm.get('first_name')?.hasError('maxlength')) {
+                      <span>First name must be no more than 50 characters</span>
+                    }
+                  </div>
+                }
+              </div>
+              <div>
+                <label for="lastName" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">
+                  Last Name
+                </label>
+                <input
+                  type="text"
+                  id="lastName"
+                  formControlName="last_name"
+                  class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                  [class.border-red-500]="profileForm.get('last_name')?.invalid && profileForm.get('last_name')?.touched"
+                  placeholder="Enter your last name">
+                @if (profileForm.get('last_name')?.invalid && profileForm.get('last_name')?.touched) {
+                  <div
+                    class="mt-2 text-sm text-red-600 dark:text-red-400">
+                    @if (profileForm.get('last_name')?.hasError('maxlength')) {
+                      <span>Last name must be no more than 50 characters</span>
+                    }
+                  </div>
+                }
+              </div>
+            </div>
+            <div #timezoneCombobox class="relative">
+              <label for="timezone" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">
+                Timezone
+              </label>
+              <div class="relative">
+                <input
+                  type="text"
+                  id="timezone"
+                  autocomplete="off"
+                  role="combobox"
+                  [attr.aria-expanded]="timezoneComboboxOpen()"
+                  aria-haspopup="listbox"
+                  aria-controls="timezone-listbox"
+                  [attr.aria-activedescendant]="timezoneComboboxOpen() ? 'timezone-option-' + timezoneHighlightedIndex() : null"
+                  [value]="getTimezoneDisplayValue()"
+                  (input)="onTimezoneSearchInput($any($event.target).value)"
+                  (focus)="openTimezoneCombobox()"
+                  (keydown)="onTimezoneInputKeydown($event)"
+                  placeholder="Search or select timezone..."
+                  class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-10"
+                  [class.border-red-500]="profileForm.get('timezone')?.invalid && profileForm.get('timezone')?.touched">
+                <span class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 dark:text-gray-500">
+                  <svg class="h-4 w-4 transition-transform" [class.rotate-180]="timezoneComboboxOpen()" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  </svg>
+                </span>
+              </div>
+              @if (timezoneComboboxOpen()) {
+                <ul
+                  id="timezone-listbox"
+                  role="listbox"
+                  class="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 py-1 shadow-lg focus:outline-none">
+                  @for (tz of filteredTimezones(); track tz; let i = $index) {
+                    <li
+                      role="option"
+                      [id]="'timezone-option-' + i"
+                      [attr.aria-selected]="i === timezoneHighlightedIndex()"
+                      (click)="selectTimezone(tz)"
+                      [class.bg-indigo-50]="i === timezoneHighlightedIndex()"
+                      [class.dark:bg-indigo-900/30]="i === timezoneHighlightedIndex()"
+                      class="cursor-pointer px-3 py-2 text-sm text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700">
+                      {{ tz }}
+                    </li>
+                  }
+                  @if (filteredTimezones().length === 0) {
+                    <li class="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                      No timezones match. Try a different search.
+                    </li>
+                  }
+                  @if (timezoneHasMoreMatches()) {
+                    <li class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-100 dark:border-gray-700">
+                      Keep typing to narrow down (showing first 100 matches).
+                    </li>
+                  }
+                </ul>
+              }
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Used for scheduling (e.g. &quot;at 8 PM&quot;, &quot;every day at 7 AM&quot;) so the agent runs in your local time.
+              </p>
+              @if (profileForm.get('timezone')?.invalid && profileForm.get('timezone')?.touched) {
+                <div
+                  class="mt-2 text-sm text-red-600 dark:text-red-400">
+                  @if (profileForm.get('timezone')?.hasError('maxlength')) {
+                    <span>Timezone must be no more than 64 characters</span>
+                  }
+                </div>
+              }
+            </div>
+          </div>
+          <!-- Action Buttons -->
+          <div class="flex flex-col sm:flex-row gap-4 pt-6 border-t border-gray-200 dark:border-gray-700">
+            <button
+              type="submit"
+              [disabled]="profileForm.invalid || isLoading() || !profileForm.dirty"
+              class="flex-1 sm:flex-none px-6 py-2 text-sm font-medium text-white bg-indigo-600 dark:bg-indigo-500 rounded-lg hover:bg-indigo-700 dark:hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center">
+              @if (isLoading()) {
+                <span class="mr-2">
+                  <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                </span>
+              }
+              {{ isLoading() ? 'Updating...' : 'Update Profile' }}
+            </button>
+            <button
+              type="button"
+              (click)="navigateToDashboard()"
+              class="flex-1 sm:flex-none px-6 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    }
+
+    <!-- Chat Preferences Section -->
+    <div class="bg-white dark:bg-gray-800 shadow-sm rounded-lg p-6 mt-6">
+      <div class="border-b border-gray-200 dark:border-gray-700 pb-4 mb-6">
+        <h3 class="text-lg font-medium text-gray-900 dark:text-white">Chat Preferences</h3>
+        <p class="text-sm text-gray-600 dark:text-gray-400">Configure your chat settings</p>
+      </div>
+
+      <form [formGroup]="preferencesForm" (ngSubmit)="onPreferencesSubmit()" class="space-y-6">
+
+        <!-- Preferences Success Alert -->
+        @if (preferencesSuccessMessage()) {
+          <div class="flex items-center p-4 mb-4 text-green-800 dark:text-green-200 rounded-lg bg-green-50 dark:bg-green-900" role="alert">
+            <svg class="flex-shrink-0 w-4 h-4" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5Zm3.707 8.207-4 4a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L9 10.586l3.293-3.293a1 1 0 0 1 1.414 1.414Z"/>
+            </svg>
+            <div class="ml-3 text-sm font-medium">
+              {{ preferencesSuccessMessage() }}
+            </div>
+          </div>
+        }
+
+        <!-- Preferences Error Alert -->
+        @if (preferencesErrorMessage()) {
+          <div class="flex items-center p-4 mb-4 text-red-800 dark:text-red-200 rounded-lg bg-red-50 dark:bg-red-900" role="alert">
+            <svg class="flex-shrink-0 w-4 h-4" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM10 15a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1-4a1 1 0 0 1-2 0V6a1 1 0 0 1 2 0v5Z"/>
+            </svg>
+            <div class="ml-3 text-sm font-medium">
+              {{ preferencesErrorMessage() }}
+            </div>
+          </div>
+        }
+
+        <!-- Current Preferences Display -->
+        @if (currentPreferences()) {
+          <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
+            <h4 class="text-sm font-medium text-gray-900 dark:text-white mb-2">Current Settings</h4>
+            <div class="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+              <p><span class="font-medium">Default Model:</span> {{ getModelDisplayName($safeNavigationMigration(currentPreferences()?.default_model_id)) }}</p>
+              <p><span class="font-medium">Default Personality:</span> {{ getPersonalityDisplayName($safeNavigationMigration(currentPreferences()?.default_personality_id)) }}</p>
+            </div>
+          </div>
+        }
+
+        <!-- Preferences Form Fields -->
+        <div class="space-y-4">
+          <div>
+            <label for="defaultModel" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">
+              Default AI Model *
+            </label>
+            <select
+              id="defaultModel"
+              formControlName="default_model_id"
+              class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+              [class.border-red-500]="preferencesForm.get('default_model_id')?.invalid && preferencesForm.get('default_model_id')?.touched"
+              required>
+              <option value="">Select a default model for new chats</option>
+              @for (model of models(); track trackByModelId($index, model)) {
+                <option [value]="model.id">
+                  {{ model.display_name }}
+                </option>
+              }
+            </select>
+            @if (preferencesForm.get('default_model_id')?.invalid && preferencesForm.get('default_model_id')?.touched) {
+              <div
+                class="mt-2 text-sm text-red-600 dark:text-red-400">
+                @if (preferencesForm.get('default_model_id')?.hasError('required')) {
+                  <span>Please select a default model</span>
+                }
+              </div>
+            }
+
+            <!-- Model Description -->
+            @if (preferencesForm.get('default_model_id')?.value) {
+              <div class="mt-2">
+                @for (model of models(); track trackByModelId($index, model)) {
+                  <div>
+                    @if (model.id === preferencesForm.get('default_model_id')?.value) {
+                      <div
+                        class="text-xs text-gray-600 dark:text-gray-300 p-2 bg-gray-50 dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600">
+                        {{ model.description }}
+                        @if (model.tool_support) {
+                          <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300 ml-2">
+                            Tool Support
+                          </span>
+                        }
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            }
+          </div>
+
+          <div>
+            <label for="defaultPersonality" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">
+              Default AI Personality
+            </label>
+            <select
+              id="defaultPersonality"
+              formControlName="default_personality_id"
+              class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+              @for (personality of getPersonalitiesWithDefault(); track trackByPersonalityId($index, personality)) {
+                <option [value]="personality.id">
+                  {{ personality.name }}
+                </option>
+              }
+            </select>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Choose a default personality for new chats. This defines how the AI will behave and respond.
+            </p>
+          </div>
+
+          <div>
+            <label for="theme" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">
+              Theme
+            </label>
+            <select
+              id="theme"
+              formControlName="theme"
+              class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+              <option value="system">System</option>
+            </select>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Choose your preferred visual theme. &quot;System&quot; follows your operating system's color-scheme preference.
+            </p>
+          </div>
+        </div>
+
+        <!-- Preferences Action Buttons -->
+        <div class="flex flex-col sm:flex-row gap-4 pt-6 border-t border-gray-200 dark:border-gray-700">
+          <button
+            type="submit"
+            [disabled]="preferencesForm.invalid || isPreferencesLoading() || !preferencesForm.dirty"
+            class="flex-1 sm:flex-none px-6 py-2 text-sm font-medium text-white bg-indigo-600 dark:bg-indigo-500 rounded-lg hover:bg-indigo-700 dark:hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center">
+            @if (isPreferencesLoading()) {
+              <span class="mr-2">
+                <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </span>
+            }
+            {{ isPreferencesLoading() ? 'Updating...' : 'Update Preferences' }}
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Password Change Section -->
+    <div class="bg-white dark:bg-gray-800 shadow-sm rounded-lg p-6 mt-6">
+      <div class="border-b border-gray-200 dark:border-gray-700 pb-4 mb-6">
+        <h3 class="text-lg font-medium text-gray-900 dark:text-white">Change Password</h3>
+        <p class="text-sm text-gray-600 dark:text-gray-400">Update your password to keep your account secure</p>
+      </div>
+
+      <form [formGroup]="passwordForm" (ngSubmit)="onPasswordSubmit()" class="space-y-6">
+
+        <!-- Password Success Alert -->
+        @if (passwordSuccessMessage()) {
+          <div class="flex items-center p-4 mb-4 text-green-800 dark:text-green-200 rounded-lg bg-green-50 dark:bg-green-900" role="alert">
+            <svg class="flex-shrink-0 w-4 h-4" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5Zm3.707 8.207-4 4a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L9 10.586l3.293-3.293a1 1 0 0 1 1.414 1.414Z"/>
+            </svg>
+            <div class="ml-3 text-sm font-medium">
+              {{ passwordSuccessMessage() }}
+            </div>
+          </div>
+        }
+
+        <!-- Password Error Alert -->
+        @if (passwordErrorMessage()) {
+          <div class="flex items-center p-4 mb-4 text-red-800 dark:text-red-200 rounded-lg bg-red-50 dark:bg-red-900" role="alert">
+            <svg class="flex-shrink-0 w-4 h-4" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM10 15a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1-4a1 1 0 0 1-2 0V6a1 1 0 0 1 2 0v5Z"/>
+            </svg>
+            <div class="ml-3 text-sm font-medium">
+              {{ passwordErrorMessage() }}
+            </div>
+          </div>
+        }
+
+        <!-- Password Form Fields -->
+        <div class="space-y-4">
+          <div>
+            <label for="currentPassword" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">
+              Current Password *
+            </label>
+            <input
+              type="password"
+              id="currentPassword"
+              formControlName="current_password"
+              class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+              [class.border-red-500]="passwordForm.get('current_password')?.invalid && passwordForm.get('current_password')?.touched"
+              placeholder="Enter your current password"
+              required>
+            @if (passwordForm.get('current_password')?.invalid && passwordForm.get('current_password')?.touched) {
+              <div
+                class="mt-2 text-sm text-red-600 dark:text-red-400">
+                @if (passwordForm.get('current_password')?.hasError('required')) {
+                  <span>Current password is required</span>
+                }
+              </div>
+            }
+          </div>
+
+          <div>
+            <label for="newPassword" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">
+              New Password *
+            </label>
+            <input
+              type="password"
+              id="newPassword"
+              formControlName="new_password"
+              class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+              [class.border-red-500]="passwordForm.get('new_password')?.invalid && passwordForm.get('new_password')?.touched"
+              placeholder="Enter your new password"
+              required>
+            @if (passwordForm.get('new_password')?.invalid && passwordForm.get('new_password')?.touched) {
+              <div
+                class="mt-2 text-sm text-red-600 dark:text-red-400">
+                @if (passwordForm.get('new_password')?.hasError('required')) {
+                  <span>New password is required</span>
+                }
+                @if (passwordForm.get('new_password')?.hasError('minlength')) {
+                  <span>Password must be at least 8 characters</span>
+                }
+              </div>
+            }
+          </div>
+
+          <div>
+            <label for="confirmPassword" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">
+              Confirm New Password *
+            </label>
+            <input
+              type="password"
+              id="confirmPassword"
+              formControlName="confirm_password"
+              class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+              [class.border-red-500]="passwordForm.get('confirm_password')?.invalid && passwordForm.get('confirm_password')?.touched"
+              placeholder="Confirm your new password"
+              required>
+            @if (passwordForm.get('confirm_password')?.invalid && passwordForm.get('confirm_password')?.touched) {
+              <div
+                class="mt-2 text-sm text-red-600 dark:text-red-400">
+                @if (passwordForm.get('confirm_password')?.hasError('required')) {
+                  <span>Please confirm your new password</span>
+                }
+                @if (passwordForm.get('confirm_password')?.hasError('passwordMismatch')) {
+                  <span>Passwords do not match</span>
+                }
+              </div>
+            }
+          </div>
+        </div>
+
+        <!-- Password Action Buttons -->
+        <div class="flex flex-col sm:flex-row gap-4 pt-6 border-t border-gray-200 dark:border-gray-700">
+          <button
+            type="submit"
+            [disabled]="passwordForm.invalid || isPasswordLoading()"
+            class="flex-1 sm:flex-none px-6 py-2 text-sm font-medium text-white bg-red-600 dark:bg-red-500 rounded-lg hover:bg-red-700 dark:hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center">
+            @if (isPasswordLoading()) {
+              <span class="mr-2">
+                <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </span>
+            }
+            {{ isPasswordLoading() ? 'Updating...' : 'Change Password' }}
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Data Export/Import Section -->
+    <div class="bg-white dark:bg-gray-800 shadow-sm rounded-lg p-6 mt-6 mb-8">
+      <div class="border-b border-gray-200 dark:border-gray-700 pb-4 mb-6">
+        <h3 class="text-lg font-medium text-gray-900 dark:text-white">Memory Portability</h3>
+        <p class="text-sm text-gray-600 dark:text-gray-400">Export and import memories across environments</p>
+      </div>
+
+      <!-- Privacy warning -->
+      <div class="flex items-start gap-3 p-4 mb-6 rounded-lg bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700">
+        <svg class="flex-shrink-0 w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM10 15a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1-4a1 1 0 0 1-2 0V6a1 1 0 0 1 2 0v5Z"/>
+        </svg>
+        <p class="text-sm text-amber-800 dark:text-amber-200">
+          <span class="font-semibold">Note:</span> This file may contain personal sensitive data; store carefully.
+        </p>
+      </div>
+
+      <!-- Export error -->
+      @if (exportError()) {
+        <div class="flex items-center p-4 mb-4 text-red-800 dark:text-red-200 rounded-lg bg-red-50 dark:bg-red-900" role="alert">
+          <svg class="flex-shrink-0 w-4 h-4" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM10 15a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1-4a1 1 0 0 1-2 0V6a1 1 0 0 1 2 0v5Z"/>
+          </svg>
+          <div class="ml-3 text-sm font-medium">{{ exportError() }}</div>
+        </div>
+      }
+
+      <!-- Import status -->
+      @if (importError()) {
+        <div class="flex items-center p-4 mb-4 text-red-800 dark:text-red-200 rounded-lg bg-red-50 dark:bg-red-900" role="alert">
+          <svg class="flex-shrink-0 w-4 h-4" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5ZM10 15a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1-4a1 1 0 0 1-2 0V6a1 1 0 0 1 2 0v5Z"/>
+          </svg>
+          <div class="ml-3 text-sm font-medium">{{ importError() }}</div>
+        </div>
+      }
+
+      @if (importSuccess()) {
+        <div class="flex items-center p-4 mb-4 text-green-800 dark:text-green-200 rounded-lg bg-green-50 dark:bg-green-900" role="alert">
+          <svg class="flex-shrink-0 w-4 h-4" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M10 .5a9.5 9.5 0 1 0 9.5 9.5A9.51 9.51 0 0 0 10 .5Zm3.707 8.207-4 4a1 1 0 0 1-1.414 0l-2-2a1 1 0 0 1 1.414-1.414L9 10.586l3.293-3.293a1 1 0 0 1 1.414 1.414Z"/>
+          </svg>
+          <div class="ml-3 text-sm font-medium">{{ importSuccess() }}</div>
+        </div>
+      }
+
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-900 dark:text-white">Memories</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">All your chat-derived, user, and personality-pinned memories as a ZIP archive</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <input
+            #memoryImportInput
+            type="file"
+            accept=".zip,application/zip"
+            class="hidden"
+            (change)="onMemoryImportFileSelected($event)">
+          <button
+            type="button"
+            (click)="openMemoryImportFilePicker()"
+            [disabled]="isImportingMemories() || isExportingMemories()"
+            class="flex items-center gap-2 px-4 py-2 text-sm font-medium text-indigo-700 dark:text-indigo-200 bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-300 dark:border-indigo-700 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed">
+            @if (isImportingMemories()) {
+              <span>
+                <svg class="animate-spin h-4 w-4 text-indigo-700 dark:text-indigo-200" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </span>
+            }
+            {{ isImportingMemories() ? 'Importing...' : 'Import Memories' }}
+          </button>
+          <button
+            type="button"
+            (click)="exportMemories()"
+            [disabled]="isExportingMemories() || isImportingMemories()"
+            class="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 dark:bg-indigo-500 rounded-lg hover:bg-indigo-700 dark:hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed">
+            @if (isExportingMemories()) {
+              <span>
+                <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </span>
+            }
+            @if (!isExportingMemories()) {
+              <svg class="w-4 h-4" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+            }
+            {{ isExportingMemories() ? 'Exporting...' : 'Export Memories' }}
+          </button>
+        </div>
+      </div>
+
+      <section class="mt-8 border-t border-gray-200 dark:border-gray-700 pt-6">
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Account</h3>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Sign out of this device. You can sign back in anytime.
+        </p>
+        <button
+          type="button"
+          (click)="logout()"
+          class="px-4 py-2 text-sm font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+          >
+          Sign out
+        </button>
+      </section>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,50 @@
+<div class="min-h-screen bg-gray-50 dark:bg-gray-900">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="mb-6 text-center lg:text-left">
+      <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">Integrations</h1>
+      <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+        Configure connectors and webhook tokens available to your agent.
+      </p>
+    </div>
+
+    @if (hasAccess()) {
+      <div class="mb-4 border-b border-gray-200 dark:border-gray-700">
+        <nav class="-mb-px flex gap-6">
+          <button
+            (click)="setActiveTab('connectors')"
+            class="border-b-2 px-1 py-3 text-sm font-medium"
+          [ngClass]="activeTab() === 'connectors'
+            ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
+            : 'border-transparent text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'">
+            Connectors
+          </button>
+          <button
+            (click)="setActiveTab('webhooks')"
+            class="border-b-2 px-1 py-3 text-sm font-medium"
+          [ngClass]="activeTab() === 'webhooks'
+            ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
+            : 'border-transparent text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'">
+            Webhooks
+          </button>
+        </nav>
+      </div>
+    }
+
+    @if (hasAccess() && activeTab() === 'connectors') {
+      <app-integrations-connectors-tab></app-integrations-connectors-tab>
+    }
+    @if (hasAccess() && activeTab() === 'webhooks') {
+      <app-integrations-webhooks-tab></app-integrations-webhooks-tab>
+    }
+
+    @if (!hasAccess()) {
+      <div
+        class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 text-sm text-gray-700 dark:text-gray-300"
+        role="status"
+        >
+        Integrations are unavailable for this account. Enable billing access to configure connectors and webhooks.
+      </div>
+    }
+  </div>
+</div>
+

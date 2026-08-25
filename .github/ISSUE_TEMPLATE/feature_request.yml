@@ -1,0 +1,41 @@
+name: Feature request
+description: Propose new behavior or an improvement.
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - API / backend (Go)
+        - Web app (web/app)
+        - Data layer (ent, migrations, Postgres)
+        - LLM providers / agent
+        - CI / Docker / build
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is hard or impossible today, and who runs into it.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should change. Sketch API/UI/config shape if you have one.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, prior art, whether you are willing to implement it.

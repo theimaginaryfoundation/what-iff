@@ -1,0 +1,378 @@
+<div class="min-h-screen bg-gray-50 dark:bg-gray-900">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <button (click)="goBack()" class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline mb-2">
+          ← Back to Agent Jobs
+        </button>
+        <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">
+          {{ job()?.title || 'Agent Job' }}
+        </h1>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+          Status: <span class="font-medium">{{ job()?.status }}</span>
+        </p>
+      </div>
+
+      <div class="flex gap-2">
+        @if (job()?.chat_id) {
+          <button
+            (click)="openChat()"
+            class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg focus:ring-4 focus:ring-indigo-300 dark:focus:ring-indigo-800"
+            >
+            Open chat
+          </button>
+        }
+        @if (canRunNow()) {
+          <button
+            (click)="runNow()"
+            [disabled]="isRunningNow()"
+            class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50"
+            >
+            {{ isRunningNow() ? 'Running…' : 'Run Now' }}
+          </button>
+        }
+        @if (job()?.status === 'active' || job()?.status === 'paused') {
+          <button
+            (click)="togglePause()"
+            class="px-4 py-2 text-sm font-medium text-white rounded-lg"
+            [ngClass]="job()?.status === 'active' ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'"
+            >
+            {{ job()?.status === 'active' ? 'Pause' : 'Resume' }}
+          </button>
+        }
+        <button
+          (click)="deleteJob()"
+          class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg"
+          >
+          Delete
+        </button>
+      </div>
+    </div>
+
+    @if (isLoading()) {
+      <div class="text-sm text-gray-600 dark:text-gray-400">Loading…</div>
+    }
+
+    @if (errorMessage()) {
+      <div class="mb-4 p-4 rounded-lg bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-300 text-sm">
+        {{ errorMessage() }}
+      </div>
+    }
+    @if (successMessage()) {
+      <div class="mb-4 p-4 rounded-lg bg-green-50 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-sm">
+        {{ successMessage() }}
+      </div>
+    }
+
+    @if (job()) {
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:items-start">
+        <!-- Left: details, chat, overrides -->
+        <div class="space-y-6 min-w-0">
+          <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Details</h2>
+            <div class="space-y-3 text-sm">
+              <div class="flex justify-between gap-4">
+                <span class="text-gray-500 dark:text-gray-400">ID</span>
+                <span class="text-gray-900 dark:text-white font-mono break-all">{{ job()?.id }}</span>
+              </div>
+              <div class="flex justify-between gap-4">
+                <span class="text-gray-500 dark:text-gray-400">Schedule type</span>
+                <span class="text-gray-900 dark:text-white">{{ job()?.schedule_type }}</span>
+              </div>
+              <div class="flex justify-between gap-4">
+                <span class="text-gray-500 dark:text-gray-400">Timezone</span>
+                <span class="text-gray-900 dark:text-white">{{ job()?.timezone }}</span>
+              </div>
+              <div class="flex justify-between gap-4">
+                <span class="text-gray-500 dark:text-gray-400">Next run</span>
+                <span class="text-gray-900 dark:text-white">{{ formatDate($safeNavigationMigration(job()?.next_run_at)) }}</span>
+              </div>
+              <div class="flex justify-between gap-4">
+                <span class="text-gray-500 dark:text-gray-400">Last run</span>
+                <span class="text-gray-900 dark:text-white">{{ formatDate($safeNavigationMigration(job()?.last_run_at)) }}</span>
+              </div>
+              <div class="flex justify-between gap-4">
+                <span class="text-gray-500 dark:text-gray-400">Run count</span>
+                <span class="text-gray-900 dark:text-white">{{ job()?.run_count }}</span>
+              </div>
+              @if (job()?.last_error) {
+                <div class="mt-3 p-3 rounded-lg bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-300">
+                  <div class="font-medium mb-1">Last error</div>
+                  <div class="whitespace-pre-wrap break-words">{{ job()?.last_error }}</div>
+                </div>
+              }
+            </div>
+          </div>
+          <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Associated chat</h2>
+            <div class="relative" (click)="$event.stopPropagation()">
+              <button
+                type="button"
+                (click)="toggleChatDropdown()"
+                class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-left text-sm text-gray-900 dark:text-white px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                {{ getSelectedChatLabel() }}
+              </button>
+              @if (isChatDropdownOpen()) {
+                <div
+                  class="absolute z-20 mt-2 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg p-2"
+                  >
+                  <input
+                    [ngModel]="chatSearch()"
+                    (ngModelChange)="onChatSearchInput($event)"
+                    type="text"
+                    class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                    placeholder="Search chats (min 3 chars)"
+                    />
+                  @if (showChatSearchHint()) {
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mt-2 px-1">
+                      Type at least 3 characters to search.
+                    </div>
+                  }
+                  @if (isLoadingChats()) {
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mt-2 px-1">
+                      Loading chats…
+                    </div>
+                  }
+                  <ul class="max-h-56 overflow-auto mt-2 space-y-1">
+                    @for (chat of chatOptions(); track chat) {
+                      <li>
+                        <button
+                          type="button"
+                          (click)="selectChatOption(chat)"
+                          class="w-full text-left px-2 py-1.5 rounded text-sm text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700"
+                          >
+                          {{ chat.name }}
+                        </button>
+                      </li>
+                    }
+                  </ul>
+                  <div class="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                    <button
+                      type="button"
+                      (click)="selectChatOption(null)"
+                      class="w-full text-left px-2 py-1.5 rounded text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                      >
+                      Clear selection
+                    </button>
+                  </div>
+                </div>
+              }
+            </div>
+            <div class="mt-4 flex flex-col items-end gap-1">
+              <button
+                (click)="saveChatAssociation()"
+                [disabled]="isSavingChatAssociation()"
+                class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50"
+                >
+                {{ isSavingChatAssociation() ? 'Saving…' : 'Save chat association' }}
+              </button>
+              @if (chatSaveFeedback()) {
+                <span class="text-sm text-green-600 dark:text-green-400">{{ chatSaveFeedback() }}</span>
+              }
+            </div>
+          </div>
+          <!-- Attached Skills (Rituals) -->
+          <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Attached Skills</h2>
+            <!-- Attached chips -->
+            <div class="flex flex-wrap gap-2 mb-3">
+              @for (r of attachedRituals(); track r) {
+                <span
+                  class="inline-flex items-center gap-1 bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200 text-sm px-2 py-1 rounded-full">
+                  {{ r.name }}
+                  <button type="button" (click)="removeRitual(r)"
+                    class="ml-1 text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300 focus:outline-none">
+                    &times;
+                  </button>
+                </span>
+              }
+              @if (attachedRituals().length === 0) {
+                <span class="text-sm text-gray-500 dark:text-gray-400">No skills attached.</span>
+              }
+            </div>
+            <!-- Add skill dropdown -->
+            <div class="relative" (click)="$event.stopPropagation()">
+              <button type="button" (click)="toggleRitualDropdown()"
+                class="px-3 py-1.5 text-sm text-indigo-600 dark:text-indigo-400 border border-indigo-300 dark:border-indigo-600 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900">
+                + Add skill
+              </button>
+              @if (isRitualDropdownOpen()) {
+                <div
+                  class="absolute z-20 mt-2 w-72 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg p-2">
+                  <input [ngModel]="ritualSearch()"
+                    (ngModelChange)="onRitualSearchChange($event)"
+                    type="text"
+                    class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                    placeholder="Search skills…"/>
+                  @if (isLoadingRituals()) {
+                    <div class="text-xs text-gray-500 mt-2 px-1">Loading…</div>
+                  }
+                  <ul class="max-h-48 overflow-auto mt-2 space-y-1">
+                    @for (r of ritualOptions(); track r) {
+                      <li>
+                        <button type="button" (click)="addRitual(r)"
+                          class="w-full text-left px-2 py-1.5 rounded text-sm text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700">
+                          {{ r.name }}
+                        </button>
+                      </li>
+                    }
+                    @if (!isLoadingRituals() && ritualOptions().length === 0) {
+                      <li
+                      class="text-xs text-gray-500 dark:text-gray-400 px-2 py-1.5">No results</li>
+                    }
+                  </ul>
+                </div>
+              }
+            </div>
+            @if (isRitualDropdownOpen()) {
+              <div class="fixed inset-0 z-10" (click)="closeRitualDropdown()"></div>
+            }
+            @if (ritualAddError()) {
+              <p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ ritualAddError() }}</p>
+            }
+          </div>
+          <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Associated personality and model</h2>
+            <div class="space-y-3">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Personality override</label>
+                <select
+                  [ngModel]="editPersonalityId()"
+                  (ngModelChange)="editPersonalityId.set($event)"
+                  class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                  <option value="">Use chat default</option>
+                  @for (p of personalities(); track p) {
+                    <option [value]="p.id">{{ p.name }}</option>
+                  }
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Model override</label>
+                <select
+                  [ngModel]="editModelId()"
+                  (ngModelChange)="editModelId.set($event)"
+                  class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                  <option value="">Use chat default</option>
+                  @for (m of models(); track m) {
+                    <option [value]="m.id">{{ m.display_name }}</option>
+                  }
+                </select>
+              </div>
+            </div>
+            <div class="mt-4 flex flex-col items-end gap-1">
+              <button
+                (click)="saveOverrides()"
+                [disabled]="isSavingOverrides()"
+                class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50"
+                >
+                {{ isSavingOverrides() ? 'Saving…' : 'Save overrides' }}
+              </button>
+              @if (overridesSaveFeedback()) {
+                <span class="text-sm text-green-600 dark:text-green-400">{{ overridesSaveFeedback() }}</span>
+              }
+            </div>
+          </div>
+        </div>
+        <!-- Right: title, prompt, schedule -->
+        <div class="space-y-6 min-w-0 lg:sticky lg:top-6">
+          <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Edit title</h2>
+            <div class="flex gap-2">
+              <input
+                [ngModel]="editTitle()"
+                (ngModelChange)="editTitle.set($event)"
+                type="text"
+                class="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="Optional title"
+                />
+              <button
+                (click)="saveTitle()"
+                [disabled]="isSavingTitle()"
+                class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50"
+                >
+                {{ isSavingTitle() ? 'Saving…' : 'Save' }}
+              </button>
+            </div>
+          </div>
+          <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Edit prompt</h2>
+            <textarea
+              [ngModel]="editPrompt()"
+              (ngModelChange)="editPrompt.set($event)"
+              rows="8"
+              class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="Enter the prompt this agent job should run"
+            ></textarea>
+            <div class="mt-4 flex flex-col items-end gap-1">
+              <button
+                (click)="savePrompt()"
+                [disabled]="isSavingPrompt()"
+                class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50"
+                >
+                {{ isSavingPrompt() ? 'Saving…' : 'Save prompt' }}
+              </button>
+              @if (promptSaveFeedback()) {
+                <span class="text-sm text-green-600 dark:text-green-400">{{ promptSaveFeedback() }}</span>
+              }
+            </div>
+          </div>
+          <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Edit schedule</h2>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Schedule input</label>
+            <input
+              [ngModel]="editScheduleInput()"
+              (ngModelChange)="editScheduleInput.set($event)"
+              type="text"
+              class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="e.g. every day at 8 AM"
+              />
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mt-4 mb-1">Timezone</label>
+            <input
+              [ngModel]="editTimezone()"
+              (ngModelChange)="editTimezone.set($event)"
+              type="text"
+              class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+              placeholder="e.g. America/Los_Angeles"
+              />
+            <div class="flex gap-2 mt-4">
+              <button
+                (click)="previewSchedule()"
+                [disabled]="isPreviewing()"
+                class="px-4 py-2 text-sm font-medium text-gray-900 bg-white hover:bg-gray-50 rounded-lg border border-gray-300 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-600 dark:hover:bg-gray-700 disabled:opacity-50"
+                >
+                {{ isPreviewing() ? 'Previewing…' : 'Preview' }}
+              </button>
+              <button
+                (click)="saveSchedule()"
+                [disabled]="isSavingSchedule()"
+                class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50"
+                >
+                {{ isSavingSchedule() ? 'Saving…' : 'Save schedule' }}
+              </button>
+            </div>
+            @if (preview()) {
+              <div class="mt-4 p-4 rounded-lg bg-gray-50 dark:bg-gray-700/40">
+                <div class="text-sm font-medium text-gray-900 dark:text-white">Preview</div>
+                <div class="text-sm text-gray-700 dark:text-gray-300 mt-1">{{ preview()?.human_summary }}</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                  type: {{ preview()?.schedule_type }} · tz: {{ preview()?.timezone }}
+                </div>
+                <div class="mt-3">
+                  <div class="text-xs font-medium text-gray-700 dark:text-gray-300">Next runs</div>
+                  <ul class="text-xs text-gray-600 dark:text-gray-400 mt-1 space-y-1">
+                    @for (t of preview()?.next_runs; track t) {
+                      <li>{{ t }}</li>
+                    }
+                  </ul>
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+      </div>
+    }
+  </div>
+</div>

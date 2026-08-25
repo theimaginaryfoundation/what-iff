@@ -1,0 +1,5 @@
+@if (isSelected()) {
+  <section class="ui-tab-panel" role="tabpanel" [id]="id()" [attr.aria-labelledby]="labelledBy()" tabindex="0">
+    <ng-content />
+  </section>
+}

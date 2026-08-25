@@ -1,0 +1,24 @@
+:host {
+  display: block;
+}
+
+.section-toggle {
+  align-items: center;
+  background: var(--color-surface-muted);
+  color: var(--color-text-primary);
+  display: flex;
+  font-weight: 600;
+  justify-content: space-between;
+  padding: 0.875rem 1rem;
+  width: 100%;
+}
+
+.section-body {
+  background: var(--color-surface-base);
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  margin: 0;
+  overflow-x: auto;
+  padding: 1rem;
+  white-space: pre-wrap;
+}

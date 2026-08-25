@@ -1,0 +1,26 @@
+:host { display: inline-flex; }
+
+.ui-badge--neutral {
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+}
+
+.ui-badge--info {
+  background: color-mix(in srgb, var(--info) 14%, transparent);
+  color: var(--info);
+}
+
+.ui-badge--success {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: var(--success);
+}
+
+.ui-badge--warning {
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  color: var(--warning);
+}
+
+.ui-badge--danger {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}

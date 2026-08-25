@@ -1,0 +1,67 @@
+.mode-modal__search-picker {
+  position: relative;
+}
+
+.mode-modal__search-icon {
+  color: var(--color-text-muted);
+  left: 10px;
+  pointer-events: none;
+  position: absolute;
+  top: 9px;
+}
+
+.mode-modal__search-picker input {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-input);
+  color: var(--color-text-primary);
+  border-radius: 7px;
+  padding: 8px 10px 8px 30px;
+  font-size: 13px;
+}
+
+.mode-modal__search-picker input:focus {
+  border-color: var(--color-border-hover);
+  outline: 2px solid color-mix(in srgb, var(--color-focus-ring) 30%, transparent);
+  outline-offset: 1px;
+}
+
+.mode-modal__dropdown {
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-border-base);
+  border-radius: 7px;
+  box-shadow: 0 8px 20px rgb(0 0 0 / 16%);
+  left: 0;
+  margin-top: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 5;
+}
+
+.mode-modal__dropdown-item {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: block;
+  font-size: 12px;
+  padding: 7px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.mode-modal__dropdown-item:hover,
+.mode-modal__dropdown-item:focus-visible {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-text-primary);
+}
+
+.mode-modal__dropdown-empty {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  padding: 7px 10px;
+}

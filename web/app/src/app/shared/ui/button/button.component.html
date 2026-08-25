@@ -1,0 +1,8 @@
+<button [attr.type]="type()" [disabled]="isDisabled()" [class]="buttonClass()" (click)="onClick($event)" (keydown)="onKeydown($event)">
+  @if (loading()) {
+    <ui-spinner [size]="16" ariaLabel="Loading" />
+  }
+  <ng-content select="[button-leading]" />
+  <span class="inline-flex items-center"><ng-content /></span>
+  <ng-content select="[button-trailing]" />
+</button>

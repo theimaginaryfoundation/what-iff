@@ -1,0 +1,16 @@
+<span class="ui-avatar inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold text-white shadow-sm" [class]="sizeClass()" [attr.aria-label]="name()">
+  @if (imageUrl()) {
+    <img
+      class="h-full w-full object-cover"
+      [src]="imageUrl()"
+      [alt]="name()"
+      [style.object-position]="thumbnailStyle()?.objectPosition"
+      [style.transform]="thumbnailStyle()?.transform"
+      style="transform-origin: center center;"
+    />
+  } @else {
+    <span class="ui-avatar__fallback flex h-full w-full items-center justify-center" [style.background]="accentColor() || 'var(--persona-accent)'">
+      {{ initials() }}
+    </span>
+  }
+</span>

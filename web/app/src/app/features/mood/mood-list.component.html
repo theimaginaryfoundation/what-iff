@@ -1,0 +1,47 @@
+<section class="mode-page mx-auto flex w-full max-w-4xl flex-col gap-4 p-4 md:p-6">
+  <header class="mode-page__header">
+    <div>
+      <h1>{{ vm.modePlural }}</h1>
+      <p>Modes define prompt behavior, attached skills, MCP reach, and optional default model preferences.</p>
+    </div>
+  </header>
+  <app-mode-grid
+    [cards]="vm.modeCards()"
+    [isLoading]="vm.isLoading()"
+    [emptyText]="'No ' + vm.modePlural.toLowerCase() + ' match the current filters.'"
+    [associationPickerMoodId]="vm.associationPickerMoodId()"
+    [associationPickerQuery]="vm.associationPickerQuery()"
+    [associationDropdownOpen]="vm.associationDropdownOpen()"
+    [associationOptionsByMoodId]="vm.associationOptionsByMoodId()"
+    (editMode)="vm.openEditMood($event, true)"
+    (deleteMode)="vm.handleDeleteMode($event)"
+    (removeAssociation)="vm.handleRemoveAssociation($event)"
+    (openAssociationPicker)="vm.openAssociationPicker($event.moodId, $event.event)"
+    (associationQueryChange)="vm.setAssociationPickerQuery($event)"
+    (openAssociationDropdown)="vm.openAssociationDropdown()"
+    (closeAssociationDropdown)="vm.closeAssociationDropdown()"
+    (addAssociation)="vm.handleAddAssociation($event)"
+    (closeAssociationPicker)="vm.closeAssociationPicker()" />
+</section>
+
+<app-mode-edit-modal
+  [state]="vm.modalState()"
+  [modelOptions]="vm.modelOptions()"
+  [skillPickerOptions]="vm.skillPickerOptions()"
+  [skillQuery]="vm.skillSearchQuery()"
+  [skillDropdownOpen]="vm.skillDropdownOpen()"
+  [attachedSkillsCountLabel]="vm.attachedSkillsCountLabel()"
+  [attachedMcpCountLabel]="vm.attachedMcpCountLabel()"
+  (close)="vm.closeModalFromOverlay()"
+  (dismissRequested)="vm.requestCloseModeModal()"
+  (save)="vm.saveEditMood()"
+  (deleteMode)="vm.deleteEditingMood()"
+  (nameChange)="vm.setFormName($event)"
+  (descriptionChange)="vm.setFormDescription($event)"
+  (promptSnippetChange)="vm.setFormPromptSnippet($event)"
+  (recommendedModelChange)="vm.setFormRecommendedModel($event)"
+  (skillQueryChange)="vm.setSkillSearchQuery($event)"
+  (openSkillDropdown)="vm.openSkillDropdown()"
+  (closeSkillDropdown)="vm.closeSkillDropdown()"
+  (addAttachedSkill)="vm.addAttachedSkill($event)"
+  (removeAttachedSkill)="vm.removeAttachedSkill($event)" />

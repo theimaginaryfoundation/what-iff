@@ -1,0 +1,215 @@
+.mode-card {
+  border: 1px solid var(--color-border-base);
+  border-radius: 12px;
+  background: var(--color-surface-card);
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+
+.mode-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mode-card__title-group h3 {
+  margin: 0;
+  font-size: 28px;
+  color: var(--color-text-primary);
+}
+
+.mode-card__title-group p {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+}
+
+.mode-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.mode-card__chips span {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--color-text-secondary);
+  border-radius: 999px;
+  font-size: 12px;
+  padding: 4px 11px;
+}
+
+.mode-card__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.mode-card__actions button {
+  border: 1px solid var(--color-border-base);
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  align-items: center;
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.mode-card__actions button:hover,
+.mode-card__actions button:focus-visible {
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+}
+
+.mode-card__action--danger {
+  border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border-base));
+  color: var(--color-danger);
+}
+
+.mode-card__action--danger:hover,
+.mode-card__action--danger:focus-visible {
+  border-color: color-mix(in srgb, var(--color-danger) 65%, var(--color-border-base));
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  color: var(--color-danger);
+}
+
+.mode-card__footer {
+  display: block;
+}
+
+.mode-card__associations {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+}
+
+.mode-card__association-carousel {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.mode-card__carousel-card {
+  position: relative;
+  width: 92px;
+  min-width: 92px;
+  height: 123px;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 28%);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 24%, var(--color-border-base));
+}
+
+.mode-card__carousel-image,
+.mode-card__carousel-placeholder {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.mode-card__carousel-image {
+  object-fit: cover;
+  object-position: center top;
+}
+
+.mode-card__carousel-placeholder {
+  align-items: center;
+  color: #fff;
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 18px;
+}
+
+.mode-card__carousel-initials {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.mode-card__carousel-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 999px;
+  background: rgb(220 38 38 / 95%);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  z-index: 1;
+  transition: opacity 120ms ease;
+}
+
+.mode-card__carousel-card:hover .mode-card__carousel-remove,
+.mode-card__carousel-card:focus-within .mode-card__carousel-remove {
+  opacity: 1;
+}
+
+.mode-card__carousel-name {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 22px 6px 5px;
+  background: linear-gradient(to top, rgb(0 0 0 / 72%), transparent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mode-card__carousel-add-card {
+  width: 92px;
+  min-width: 92px;
+  height: 123px;
+  border-radius: 6px;
+  border: 1px dashed var(--color-accent-config, var(--color-accent));
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+  color: var(--color-accent-config, var(--color-accent));
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 11px;
+}
+
+.mode-card__carousel-add-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed currentcolor;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.mode-card__carousel-add-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.mode-card__empty-personality {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}

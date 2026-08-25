@@ -1,0 +1,30 @@
+<article class="tile group" role="listitem">
+  <button
+    type="button"
+    class="tile__delete"
+    [attr.aria-label]="'Delete image ' + tile().name"
+    (click)="$event.stopPropagation(); delete.emit(tile().id)">
+    ×
+  </button>
+
+  @if (tile().thumbnailUrl | authImage | async; as src) {
+    <button
+      type="button"
+      class="tile__button"
+      [attr.aria-label]="'Open image ' + tile().name + (tile().personalityName ? ' for ' + tile().personalityName : '')"
+      (click)="open.emit(tile().id)">
+      <img [src]="src" [alt]="tile().name" class="tile__image" loading="lazy" />
+    </button>
+  } @else {
+    <button
+      type="button"
+      class="tile__button tile__button--empty"
+      (click)="open.emit(tile().id)">
+      Preview unavailable
+    </button>
+  }
+
+  <div class="tile__overlay">
+    <p class="tile__overlay-title">{{ tile().name }}</p>
+  </div>
+</article>

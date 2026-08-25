@@ -1,0 +1,45 @@
+@if (loading()) {
+  <p class="rounded-2xl border border-border-base bg-surface-card p-8 text-center text-sm text-text-secondary" role="status">
+    Loading memories…
+  </p>
+} @else if (error()) {
+  <p class="rounded-2xl border border-danger/40 bg-danger/10 p-6 text-sm text-danger" role="alert">
+    {{ error() }}
+  </p>
+} @else if (memories().length === 0) {
+  <p class="rounded-2xl border border-border-base bg-surface-card p-8 text-center text-sm text-text-secondary">
+    No memories found.
+  </p>
+} @else {
+  <section class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3" role="list" aria-label="Memories">
+    @for (memory of memories(); track memory.id) {
+      <app-memory-card
+        [memory]="memory"
+        [personalities]="personalities()"
+        [pinUpdating]="pinUpdatingId() === memory.id"
+        (save)="save.emit($event)"
+        (pinChange)="pinChange.emit($event)"
+        (delete)="delete.emit($event)" />
+    }
+  </section>
+}
+
+@if (totalPages() > 1) {
+  <div class="mt-4 flex items-center justify-center gap-2">
+    <button
+      type="button"
+      class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary disabled:opacity-50"
+      [disabled]="page() <= 1"
+      (click)="pageChange.emit(page() - 1)">
+      Previous
+    </button>
+    <span class="text-xs text-text-muted">Page {{ page() }} of {{ totalPages() }}</span>
+    <button
+      type="button"
+      class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary disabled:opacity-50"
+      [disabled]="page() >= totalPages()"
+      (click)="pageChange.emit(page() + 1)">
+      Next
+    </button>
+  </div>
+}

@@ -1,0 +1,3 @@
+<button type="button" [class]="tagClass()" [disabled]="disabled()" [attr.aria-pressed]="selected()" (click)="onActivate($event)" (keydown)="onKeydown($event)">
+  <ng-content />
+</button>

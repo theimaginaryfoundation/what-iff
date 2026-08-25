@@ -1,0 +1,13 @@
+:host {
+  display: block;
+}
+
+.gallery-grid {
+  background: var(--color-surface-elevated, var(--color-surface-card));
+  border: 1px solid var(--color-border-base);
+  border-radius: 0.625rem;
+  display: grid;
+  gap: 0;
+  grid-template-columns: repeat(auto-fill, minmax(7.8125rem, 1fr));
+  overflow: hidden;
+}

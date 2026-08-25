@@ -1,0 +1,5 @@
+package tools
+
+const CreateMemoryDescription = `Create a new memory to persist important information. Use this to record significant facts, preferences, or context about the user or conversation that you want to remember for future interactions. Memories can be scoped to either the current chat (chat-specific context) or to the user globally (information that applies across all conversations). This complements the automatic memory extraction that happens periodically.`
+
+const UpdateScratchpadDescription = `Update the current personality's scratchpad with new content. The scratchpad is your personal memory space that defines your tone, behavior, quirks, and stores key memories about your interactions with the user. Use this to record important information about the user, update your understanding of your relationship, or evolve your personality traits based on conversations. This memory persists across all future conversations with this personality.`

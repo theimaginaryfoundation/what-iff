@@ -1,0 +1,32 @@
+<header class="app-sidebar-header" [class.app-sidebar-header--collapsed]="collapsed()">
+  @if (!collapsed()) {
+    <img
+      class="app-sidebar-header__logo"
+      src="/dark-favicon.ico"
+      alt="WhatIff"
+    />
+    <span class="app-sidebar-header__brand" aria-label="WhatIff">WhatIff</span>
+  }
+  <div class="app-sidebar-header__actions">
+    <button
+      type="button"
+      class="app-sidebar-header__help-trigger"
+      aria-label="Help and feedback"
+      uiTooltip="Help & feedback"
+      placement="right"
+      (click)="openHelp()"
+    >
+      <ui-circle-help-icon [size]="15" />
+    </button>
+    <button
+      type="button"
+      class="app-sidebar-header__profile-trigger"
+      [attr.aria-label]="'Open profile for ' + displayName()"
+      [uiTooltip]="collapsed() ? displayName() : ''"
+      placement="right"
+      (click)="openProfile()"
+    >
+      <ui-user-icon [size]="15" />
+    </button>
+  </div>
+</header>

@@ -1,0 +1,87 @@
+# Package: `internal/agent`
+
+## Role
+
+Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execution loops, memories, rituals, scratchpads, checkpoints, file/MCP context, and background agent jobs.
+
+## Responsibilities
+
+- **`Agent`** (`NewAgent`): central service constructed with datastore, telemetry, OpenAI key, optional Anthropic key, and S3 file store.
+- **Chat turns:** `HandleUserMessage` and related paths build `provider.ModelContext` via `messageContextBuilder` / `buildModelContextForChatMessage`, attach tools, run the model (`openAIResponseParamsForChat` → `ModelContext.BuildOpenAIResponseParams`), and execute tool rounds (`agentloop`).
+- **Context:** History, carry-over after checkpoints, token budgeting, memories (including **rehydrated** `ChatMessage.additional_context` from prior user turns plus this turn’s prefetch), attachments, personality files, MCP tools, timezone-aware user lines. **`messageContextBuilder`** attaches image **`file_id`**s to the final user segment for OpenAI; **`loadImageBytesForClaude`** fills **`RawBytes`** for Claude multimodal turns when bytes are available (see `internal/agent/provider` package summary).
+- **Tools:** Build a shared per-turn tool policy (`tools.go`), derive provider tool lists from the `internal/agent/tools` catalog, dispatch tool calls through a registered handler map, and support delegated subagent calls (`list_models`, `list_personalities`, `run_subagent`).
+- **Mode tools/context:** agent-facing tools `list_modes` + `change_mode` map to internal mood records (`active_mood_id` / `is_auto_mood`), with active-mood resolution/reconciliation and mood prompt text as **`SegmentKindMood`** appended inside **`messageContextBuilder.build`** after merged additional context and before expression continuity and the final user turn (same segment order for OpenAI and Claude).
+- **Remote MCP parity:** Chat/ritual MCP server selection is shared across providers; OpenAI uses Responses MCP tools and Claude uses Anthropic Beta MCP client mood when MCP servers are present.
+- **Maintenance prompts:** Chat naming, personality generation, conversation summaries, memory extraction, scratchpad summarize/update (often **manual** `ResponseNewParams` — see architecture doc). **Archival** checkpoint scratchpad update and memory extraction use fixed small models (`archivalOpenAIModel` / `archivalClaudeModel` in `archival_models.go`); **checkpoint conversation summary always uses `archivalOpenAIModel` (`gpt-5-mini`)** for both OpenAI and Claude chats via unified `summarizeConversationForCheckpoint` (OpenAI threads `PreviousResponseID`; Claude renders explicit input items from inference `ModelContext`). Persona `archival_model` and custom memory read/write prompts are deprecated and ignored; optional `scratchpad_update_prompt` is still used for checkpoint scratchpad updates.
+- **Rituals:** User and system rituals, image ritual flow, registry of built-in system rituals.
+- **Jobs:** Running scheduled/async agent work (`agentjob_run.go`, `agentjob_schedule.go`) and tools that create jobs.
+- **Thread rehydration (`thread_rehydration.go`):** Lazy summarization of **imported** threads. `EnqueueThreadRehydration` (called from the chat handler when an imported thread is unarchived) marks `Chat.rehydration_state=pending`, creates a `JobTypeThreadRehydration` job, and runs `summarizeImportedThread` in a detached goroutine: it loads the full transcript, keeps the last `rehydrationKeepTurns` (5) user turns live, and summarizes everything before that — single-pass for normal threads, **map-reduce** chunked (`chunkMessagesByChars`) for very long (100+ turn) ones — via the fixed `archivalOpenAIModel` + `checkpointConversationSummaryInstructions`. It persists summary + window pointer atomically (`SetImportedThreadRehydrated`, `last_checkpoint_at` = sent_at of the n-5 turn) and flips state to `ready`. After the state is `ready` (so the inference gate is already released), it also **seeds long-term memories** via `extractAndStoreImportedMemories`: mines up to `importMemoryMaxPerThread` (20) durable memories from the full transcript using the live memory-extraction prompt **minus** the scratchpad delta (`importMemoryExtractionInstructions` + `memoryExtractionSchema`), chunked for long threads, and stores each as an embedded `Memory` tied to the chat (best-effort; never fails the job). This runs for both the summarized and short-thread paths so an import leaves the user with ~10-20 memories per rehydrated thread. **`WaitForThreadRehydration`** is the inference gate: `handleUserMessage`/`handleEphemeralPrompt` call it to stall a turn (bounded by `rehydrationWaitTimeout`, graceful degrade on timeout) until an in-flight summary settles.
+- **Post-processing:** Checkpoint policy, message sync helpers.
+
+## Key types and entry points
+
+| Symbol | Notes |
+|--------|--------|
+| `Agent` | Main struct; datastore, clients, file store, logger, telemetry, shared **`tokenCounter`** (segment token estimates). Optional **`testHooks`** (`agent_hooks.go`) is for unit tests only; production paths assert hooks are unset. |
+| `HandleUserMessage` | Primary path from HTTP into a full model turn + persistence. |
+| `messageContextBuilder` | Builds `ModelContext` segments (history, memories, user message, **`userMessageImagesFromAttachments`** for OpenAI `file_id` vision, etc.). |
+| `buildModelContextForChatMessage` | Shared path for chat turns so user-segment handling stays consistent. |
+| `openAIResponseParamsForChat` | Tools + personality file enrichment + `BuildOpenAIResponseParams`. |
+| `HandleAgentLoop` / `ExecuteToolUseWithRecovery` | Multi-round tool execution with panic recovery (`agentloop.go`). |
+| `buildTurnToolPolicy` / `getChatTools` / `dispatchToolUse` | Shared tool policy, provider-specific tool assembly, and handler routing (`tools.go`, `processtoolcall.go`). |
+
+Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool implementations), `embedding/`, `filechunker/`.
+
+## Dependencies
+
+- **Inbound:** `internal/handlers/chat` (and other handlers that invoke the agent), `internal/agentjobs/scheduler`.
+- **Outbound:** `internal/datastore`, `internal/models`, `internal/metering`, `internal/agent/provider`, `internal/storage`, `internal/telemetry`, OpenAI and Anthropic SDKs; not `internal/gate` on the live chat path today (gate is separate — see `internal/gate`).
+
+## Non-obvious decisions
+
+- **LLM backends (ADR 0x018):** `AgentConfig.LLMBackend` selects assistant generation. `mock` builds a per-request `provider.MockAdapter`; `local` uses `generateAssistantForMessageLocal` with a real local OpenAI-compatible `provider.LocalAdapter`, always targeting `LocalLLMModel` rather than a per-chat vendor model. **`runGeneration`** is the shared draft-buffer → `handleAgentLoop` → tool-call-merge → `saveAgentResponse` pipeline for OpenAI, Claude, Gemini, OpenAI-compatible, mock, and local paths, so their save/stream invariants cannot drift. `LocalProvider` deliberately uses its own real HTTP client while `AgentConfig.HTTPClient` (deny transport) covers every other provider. Image rituals persist an embedded fixture PNG (`mock_fixture.go`) through `saveImageRitualResult` under both non-vendor backends. Downstream consumers key off `Agent.nonVendorLLM()` (mock **or** local) for deliberate skip/fake behavior — memory enrichment no-ops (`getMemoriesForEnrichment`), chat naming uses `mockChatName`, and checkpoint evaluation (`postMessageProcessing`) plus expression classification (`applyExpressionPhase`) are skipped — so nothing unexpectedly reaches the deny transport.
+- **`saveImageRitualResult`** attaches the created PNG attachment to the returned assistant message (previously discarded, leaving `Attachments` empty on the return value); shared by real and mock ritual paths.
+- **Streamed generation failures:** `runGeneration` persists text deltas on the job as they arrive. If the agent loop subsequently fails, `setJobStatusFailedWithPartial` atomically promotes those deltas to an assistant message through `datastore.FinalizeFailedChatJobWithPartial`, then keeps the failure on the triggering user message for the existing UI banner. Cancellation follows the analogous `FinalizeCancelledChatJobWithPartial` path.
+- **Context X-ray capture:** `generateAssistantForMessage` (`message.go`) is a thin wrapper: it runs telemetry + `dispatchAssistantGeneration` (the provider branch), then on success calls **`persistContextBreakdown`** — one funnel so every provider path (mock/local/image-ritual/OpenAI/Claude/Gemini/Chat-Completions) captures the same per-turn snapshot. **`buildContextBreakdown`** maps `ModelContext.SegmentBreakdown` into `models.ContextBreakdown` (segment/token rows, the checkpoint policy's `checkpointMaxLastInputTokens` display budget, model+provider), and the value is persisted on the assistant message via `datastore.SetChatMessageContextBreakdown` (best-effort: logged, never fails the turn) **and** set in-memory. Read back by the frontend "Context" panel tab. Estimates are cl100k text-token estimates, exclude image-token usage, and are not billed usage. It is deliberately **not** stored as a `ChatMessageContextItem` — `appendMergedAdditionalContext` re-injects every non-MEMORY item type back into the model context, which would feed the breakdown JSON back to the model; a dedicated `chat_message.context_breakdown` column avoids that.
+- **`HandleAgentJobPrompt`** (`agentjob_run.go`) applies model/personality overrides only in-memory on `chatContext`; `UpdateChat` receives a copy with the **persisted** chat `ModelID` / `PersonalityID` so scheduled-job overrides never overwrite the chat row.
+- **Model context rules** (segment ordering, caching prefix, when **not** to hand-build `ResponseNewParams`) are documented in [architecture summary](../../docs/ARCHITECTURE_SUMMARY.md) under **Model context and providers** and **When to build `ResponseNewParams` by hand**.
+- **`messageContextBuilder.build`** requires non-nil telemetry with a non-nil logger (see architecture doc).
+- **Prefetched memories** for a user turn are persisted on that user message (`additional_context` with type `MEMORY`) in **`persistInferencePhase`** (`job_phase.go`) so later turns can merge them with history; **`mergeAdditionalContextItems`** dedupes by type+content and **`appendMergedAdditionalContext`** emits `SegmentKindMemoryContext` (and `SegmentKindDeveloperContext` for other types).
+- **Prior-turn expression continuity:** When history/carry-over loads **`generation_expression`** on the latest assistant message, **`appendPriorTurnExpressionContinuity`** (`message_context_builder.go`) adds developer-oriented user/context segments (`The previous *assistant* message was classified with the expression: "<key>"` plus optional **`(usage hint: …)`** and **` Rationale: …`** when classifier reasoning was saved) **after** memories and mood in the segment list so the main model aligns with the last portrait choice while keeping a durable cache prefix for Claude.
+- **Default expression grid:** `GenerateDefaultExpressionGrid` (`expression_grid_generation.go`) — nano likeness from `SystemPrompt` + one medium `gpt-image-1.5` 3×3 grid, splice **nine** cells (`SlicePNGGrid3x3`: after outer trim, width/height need not be multiples of 3; remainder pixels go on the last column/row so cells may differ by 1px), gallery upload + `UpsertPersonalityExpression` for `ExpressionGridKeys`. Not quota-metered. Partial runs can leave a mix of set keys; safe to retry (upsert per key). Exposed via personality HTTP + expressions UI; create/accept flows do not auto-call.
+- **Expression portrait picker:** **`PickGenerationExpression`** forks the inference **`ModelContext`**, appends the assistant reply and task **user** turn, and uses **strict JSON schema** output (`expression_key` + `reasoning`) with **`GenerateSchema`**, **`Text.Format`**, and **`ProcessResponseOutput`**. On failure or unknown key, **no** portrait is selected (no default first slot). **`generation_expression_reasoning`** is persisted when set; continuity echoes it. Minimal standalone prompt when context is nil.
+- **Claude + user images:** Chat turns call **`loadImageBytesForClaude`** before building `ModelContext` so **`UserMessageImage.RawBytes`** can be set; **`renderClaudeContext`** then emits image blocks. OpenAI still uses **`file_id`** for vision. Details in `provider/_PACKAGE_SUMMARY.md`.
+- **Claude checkpoint context isolation:** `runCheckpointClaude` (`message.go`) runs scratchpad → memory on a **clone** of inference context because `updateScratchpadClaude` / `extractMemoriesWithScratchpadDeltaClaude` **mutate** the context they receive (scratchpad-update / memory-extraction prompt turns). **`checkpointArchivalContext`** appends the just-completed assistant reply before cloning (inference `ModelContext` predates that turn; OpenAI gets it via `PreviousResponseID`). The summarizer uses the **pristine** original `ModelContext` plus explicit `AssistantReply` through unified `summarizeConversationForCheckpoint` (gpt-5-mini, same prompt as OpenAI); it must not reuse the scratchpad clone. OpenAI summarizer threads off assistant `ResponseID`; Claude has no OpenAI thread ID.
+- **Compaction throttle:** `decideCheckpoint` (`postprocessing_policy.go`) gates the **token-based** triggers behind `MinTurnsBetweenCheckpoints` (`checkpointMinTurnsBetweenCheckpoints` = 5) so a burst of tool-heavy turns (agent job runs with large web-search/tool results) cannot force compaction every turn. The scheduled turn-count trigger (`MinAssistantMessagesSinceCheckpoint`) is exempt.
+- **Inference `call_path`:** New top-level flows that call the model should use **`Agent.withCallPath(ctx, path)`** (or ensure nested calls set `telemetry.WithCallPath`) so provider token metrics are labeled; see architecture doc.
+- **Delegated subagent path:** `run_subagent` uses a minimal context builder (`base+personality system prompt`, optional scratchpad, provided message only), explicitly excludes history/checkpoint/memory segments, and calls providers directly to avoid post-turn side effects.
+- **Metering boundary:** The agent gates each billable turn through
+  `metering.Meter.Check` and returns its opaque `Decision` to `Record` after
+  completion. It owns neither quota math nor billing behavior: a private
+  metering implementation may be linked to enforce usage limits and record
+  usage, while builds without one fall back to `metering.NoopMeter` (allow
+  all, record nothing). See `internal/metering`.
+
+## Testing
+
+- `agent_hooks.go` — `agentTestHooks` groups test-only seams (memory/history overrides, image ritual fakes). `assertNoTestHooksInProduction` runs under `NewAgent`, `handleUserMessage`, and `HandleAgentJobPrompt` when not inside `go test`.
+- `agentloop_test.go` — tool loop and adapter append behavior.
+- `context_rebuild_test.go` — model switch / async job input shapes; persisted additional context from history.
+- `context_breakdown_test.go` — `buildContextBreakdown` totals/budget/model stamping and nil-input guards for the Context X-ray.
+- `message_context_builder_test.go` — builder ordering; `mergeAdditionalContextItems` dedupe.
+- `expression_generation_test.go` — expression picker JSON / markdown-fence parsing helpers.
+- `expression_grid_generation_test.go` — 3×3 PNG grid splice (`SlicePNGGrid3x3`).
+- `message_context_builder_expression_test.go` — prior-turn expression snapshot selection for continuity text.
+- `conversation_summary_test.go`, `scratchpad_test.go`, `memory_test.go`, `postprocessing_policy_test.go` — maintenance prompts and checkpoints.
+- `thread_rehydration_test.go` — imported-thread split at n-5 turns, assistant counting, char-budget chunking, and transcript rendering.
+- `message_test.go`, `message_timezone_test.go` — attachment labels, memories, tool-call context, timezone formatting.
+- `mcp_tools_test.go` — MCP tool wiring (OpenAI + Claude MCP config mapping).
+- `processtoolcall_test.go` — catalog-derived tool list and dispatch handler registration (including `list_models`, `list_personalities`, `run_subagent`).
+- `subagent_tools_test.go` — minimal subagent context composition and argument validation behavior.
+- `testsupport_test.go` — shared datastore and agent constructors for unit tests.
+- `rituals_test.go`, `system_rituals_test.go` — ritual registry and system IDs.
+- `tools_test.go` — native web-search registration and logical-toggle coverage.
+
+## Related documentation
+
+- [Architecture summary](../../docs/ARCHITECTURE_SUMMARY.md) — **Agent layer**, **Model context and providers**, **When to build `ResponseNewParams` by hand**.

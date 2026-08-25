@@ -1,0 +1,304 @@
+<div class="min-h-screen bg-gray-50 dark:bg-gray-900">
+  <!-- Main Content -->
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <!-- Page Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-8">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Memories</h1>
+        <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+          Manage your stored memories and insights
+        </p>
+      </div>
+      <div class="mt-4 sm:mt-0">
+        <span class="text-sm text-gray-500 dark:text-gray-400">
+          {{ totalCount() }} total memories
+        </span>
+      </div>
+    </div>
+
+    <!-- Search and Filters -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
+      <form (ngSubmit)="onSearch()" class="space-y-4">
+        <!-- Search Input -->
+        <div class="flex flex-col sm:flex-row gap-4">
+          <div class="flex-1">
+            <label for="search" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Search memories
+            </label>
+            <input
+              type="text"
+              id="search"
+              [(ngModel)]="searchQuery"
+              name="searchQuery"
+              placeholder="Search in memory content..."
+              class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5"
+              />
+          </div>
+          <div class="flex gap-2 items-end">
+            <button
+              type="submit"
+              class="text-white bg-indigo-700 dark:bg-indigo-600 hover:bg-indigo-800 dark:hover:bg-indigo-700 focus:ring-4 focus:ring-indigo-300 dark:focus:ring-indigo-800 font-medium rounded-lg text-sm px-4 py-2.5 transition-colors"
+              >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+              </svg>
+            </button>
+            <button
+              type="button"
+              (click)="clearFilters()"
+              class="text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 focus:ring-4 focus:ring-gray-300 dark:focus:ring-gray-600 font-medium rounded-lg text-sm px-4 py-2.5 border border-gray-200 dark:border-gray-600 transition-colors"
+              >
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <!-- Filters Row -->
+        <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <!-- Level Filter -->
+          <div>
+            <label for="level" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Level
+            </label>
+            <select
+              id="level"
+              [(ngModel)]="selectedLevel"
+              name="selectedLevel"
+              (change)="onSearch()"
+              class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5"
+              >
+              <option value="">All levels</option>
+              <option value="global">Global</option>
+              <option value="personality">Personality</option>
+              <option value="thread">Thread</option>
+              <option value="summary">Summary</option>
+            </select>
+          </div>
+
+          <!-- Start Date Filter -->
+          <div>
+            <label for="startDate" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Start Date
+            </label>
+            <input
+              type="date"
+              id="startDate"
+              [(ngModel)]="startDate"
+              name="startDate"
+              (change)="onSearch()"
+              class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5"
+              />
+          </div>
+
+          <!-- Personality Filter -->
+          <div>
+            <label for="personalityId" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Personality ID
+            </label>
+            <input
+              type="text"
+              id="personalityId"
+              [(ngModel)]="selectedPersonalityId"
+              name="selectedPersonalityId"
+              (change)="onSearch()"
+              placeholder="UUID"
+              class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5"
+              />
+          </div>
+
+          <!-- End Date Filter -->
+          <div>
+            <label for="endDate" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              End Date
+            </label>
+            <input
+              type="date"
+              id="endDate"
+              [(ngModel)]="endDate"
+              name="endDate"
+              (change)="onSearch()"
+              class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5"
+              />
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <!-- Loading State -->
+    @if (loading()) {
+      <div class="text-center py-12">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 dark:border-indigo-400"></div>
+        <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">Loading memories...</p>
+      </div>
+    }
+
+    <!-- Error State -->
+    @if (error() && !loading()) {
+      <div class="flex items-center p-4 mb-4 text-red-800 dark:text-red-200 rounded-lg bg-red-50 dark:bg-red-900" role="alert">
+        <svg class="flex-shrink-0 w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+        </svg>
+        <span class="sr-only">Error</span>
+        <div class="ml-3 text-sm font-medium">
+          Error loading memories: {{ error() }}
+        </div>
+      </div>
+    }
+
+    <!-- Empty State -->
+    @if (!hasMemories() && !loading() && !error()) {
+      <div class="text-center py-12">
+        <svg class="w-16 h-16 text-gray-400 dark:text-gray-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+        </svg>
+        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">No memories found</h3>
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          {{ searchQuery() ? 'Try adjusting your search criteria' : 'Start chatting to create memories' }}
+        </p>
+      </div>
+    }
+
+    <!-- Memory Cards -->
+    @if (hasMemories() && !loading()) {
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        @for (memory of memories(); track trackByMemoryId($index, memory)) {
+          <div
+            class="p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer"
+            (click)="viewMemory(memory)"
+            >
+            <!-- Memory Header -->
+            <div class="flex items-start justify-between mb-3">
+              <div class="flex items-center space-x-3 flex-wrap">
+                <!-- Level Badge -->
+                <span
+                  class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                  [ngClass]="getLevelBadgeClass(memory.level)"
+                  >
+                  {{ memory.level }}
+                </span>
+                <!-- Pinned Badge (personality level only) -->
+                @if (memory.level === 'personality' && memory.pinned_personality_id) {
+                  <span
+                    class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200"
+                    title="Pinned to specific personality"
+                    >
+                    <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z"></path>
+                    </svg>
+                    Pinned
+                  </span>
+                }
+                <!-- Chat Name (if applicable) -->
+                @if (memory.chat_name) {
+                  <span
+                    class="text-sm text-gray-600 dark:text-gray-400"
+                    >
+                    {{ memory.chat_name }}
+                  </span>
+                }
+              </div>
+            </div>
+            <!-- Memory Content Preview -->
+            <div class="mb-4">
+              <p class="text-gray-700 dark:text-gray-300 leading-relaxed">
+                {{ truncateContent(memory.content) }}
+              </p>
+            </div>
+            <!-- Memory Footer -->
+            <div class="flex items-center justify-between">
+              <div class="flex items-center text-sm text-gray-500 dark:text-gray-400">
+                <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"></path>
+                </svg>
+                {{ formatDate(memory.created_at) }}
+              </div>
+              <span class="inline-flex items-center px-3 py-2 text-sm font-medium text-center text-white bg-indigo-700 dark:bg-indigo-600 rounded-lg hover:bg-indigo-800 dark:hover:bg-indigo-700 focus:ring-4 focus:outline-none focus:ring-indigo-300 dark:focus:ring-indigo-800 transition-colors">
+                View details
+                <svg class="w-3.5 h-3.5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                </svg>
+              </span>
+            </div>
+          </div>
+        }
+      </div>
+    }
+
+    <!-- Pagination -->
+    @if (hasMemories() && !loading() && totalPages() > 1) {
+      <div class="mt-8">
+        <nav class="flex items-center justify-between border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3 rounded-lg">
+          <div class="flex flex-1 justify-between sm:hidden">
+            <button
+              (click)="previousPage()"
+              [disabled]="isFirstPage()"
+              class="relative inline-flex items-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+              Previous
+            </button>
+            <button
+              (click)="nextPage()"
+              [disabled]="isLastPage()"
+              class="relative ml-3 inline-flex items-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+              Next
+            </button>
+          </div>
+          <div class="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+            <div>
+              <p class="text-sm text-gray-700 dark:text-gray-300">
+                Showing
+                <span class="font-medium">{{ getPaginationFrom() }}</span>
+                to
+                <span class="font-medium">{{ getPaginationTo() }}</span>
+                of
+                <span class="font-medium">{{ totalCount() }}</span>
+                results
+              </p>
+            </div>
+            <div>
+              <nav class="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
+                <!-- Previous Button -->
+                <button
+                  (click)="previousPage()"
+                  [disabled]="isFirstPage()"
+                  class="relative inline-flex items-center rounded-l-md px-2 py-2 text-gray-400 dark:text-gray-500 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                  <span class="sr-only">Previous</span>
+                  <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clip-rule="evenodd" />
+                  </svg>
+                </button>
+                <!-- Page Numbers -->
+                @for (page of pageNumbers(); track page) {
+                  <button
+                    (click)="goToPage(page)"
+                    [class.bg-indigo-600]="page === currentPage()"
+                    [class.dark:bg-indigo-500]="page === currentPage()"
+                    [class.text-white]="page === currentPage()"
+                    [class.text-gray-900]="page !== currentPage()"
+                    [class.dark:text-white]="page !== currentPage()"
+                    class="relative inline-flex items-center px-4 py-2 text-sm font-semibold ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 focus:z-20 focus:outline-offset-0"
+                    >
+                    {{ page }}
+                  </button>
+                }
+                <!-- Next Button -->
+                <button
+                  (click)="nextPage()"
+                  [disabled]="isLastPage()"
+                  class="relative inline-flex items-center rounded-r-md px-2 py-2 text-gray-400 dark:text-gray-500 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                  <span class="sr-only">Next</span>
+                  <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" />
+                  </svg>
+                </button>
+              </nav>
+            </div>
+          </div>
+        </nav>
+      </div>
+    }
+  </div>
+</div>

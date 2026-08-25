@@ -1,0 +1,265 @@
+name: E2E (local LLM backend)
+
+# The frontend Playwright suite against a real (small) local model served by
+# Ollama, rather than the in-process mock LLM e2e-mock.yml uses. This is the
+# only way the suite exercises real inference end to end — real prompts, real
+# non-deterministic replies, real latency — instead of the mock's
+# deterministic echo responses.
+#
+# Opt-in via the 'run-local-model' label, the same label the backend-only Go
+# smoke test in pr-validation.yml already uses for its opt-in real-inference
+# job. Real inference is slower and more failure-prone (model pull, output
+# variance) than the hermetic mock suite, so this does not run on every push.
+#
+# Unsharded, single project. Runs in the same pinned Playwright container
+# e2e-mock.yml uses — not for baseline rendering (this suite has no visual
+# specs), but so the browsers driving it come from the image rather than a
+# fresh `playwright install` download on every run, and so a future container
+# version bump only has to happen in one place.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    branches: [main]
+    paths:
+      - 'web/app/**'
+      - '.github/workflows/e2e-local-llm.yml'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'ent/**'
+      - 'openapi.yaml'
+      - 'go.mod'
+      - 'go.sum'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Resolves the baked CI image (docker/ci/Dockerfile, published by
+  # ci-image.yml) — the `e2e-ollama` target, which layers the pinned Ollama
+  # binary and model weights on top of the `e2e` target this workflow's
+  # sibling uses. Same job as the one in e2e-mock.yml, duplicated here because
+  # `container.image` is evaluated before a job's steps run, so it can only
+  # reference `needs.*.outputs` — a cross-workflow job output isn't available
+  # at all.
+  #
+  # On a pull_request run, ci-image.yml's build job only publishes once a
+  # maintainer applies the `ci-image-approved` label (packages:write guard,
+  # see that workflow's header comment) — so a PR that just bumped a pin is
+  # expected to hit this guard until that label is added, not a sign of a
+  # broken build.
+  version:
+    name: resolve CI image
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.v.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: v
+        run: |
+          image="$(scripts/ci-image.sh e2e-ollama)"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          if ! docker manifest inspect "$image" >/dev/null 2>&1; then
+            echo "::error::CI image $image does not exist yet. It should be built by the 'CI base image' workflow (ci-image.yml) on this same commit — check its status before re-running this job. If this PR bumped the Playwright/Ollama pins, a maintainer must apply the 'ci-image-approved' label to ci-image.yml before it will publish."
+            exit 1
+          fi
+
+  test:
+    name: E2E (local LLM, opt-in)
+    needs: [version]
+    runs-on: ubuntu-latest
+    # Mirrors the opt-in gating pr-validation.yml uses for 'run-integration'
+    # and 'run-local-model': plain label-presence check, no special handling
+    # for which label triggered the `labeled` event. An unrelated label added
+    # to a PR that already carries 'run-local-model' does cause an extra run
+    # here (as it does for that job too) — accepted as the cost of a simple
+    # condition over a more precise but harder-to-read one.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run-local-model')
+    continue-on-error: true
+
+    # Job-level permissions replace, not add to, the workflow-level block —
+    # contents: read has to be repeated here. pull-requests: write is only
+    # needed to post this job's section of the shared status comment.
+    permissions:
+      contents: read
+      pull-requests: write
+
+    # Runs as root, matching e2e-mock.yml's use of the same image family.
+    container:
+      image: ${{ needs.version.outputs.image }}
+
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: chatapp
+          POSTGRES_PASSWORD: chatapp
+          POSTGRES_DB: chatapp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chatapp"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: 'web/app/package-lock.json'
+
+      - name: Install frontend dependencies
+        working-directory: web/app
+        run: npm ci
+
+      # make, zstd, psql, jq, python3, and the Ollama binary + model weights
+      # are all baked into the e2e-ollama image (docker/ci/Dockerfile) — this
+      # only has to start the already-installed server.
+      - name: Start Ollama server
+        run: make local-llm-up
+
+      # Container job: DB_HOST is the `db` service alias, not the host
+      # loopback address — matches e2e-mock.yml's container job.
+      - name: Enable pgvector extension
+        run: PGPASSWORD=chatapp psql -h db -U chatapp -d chatapp -f docker/initdb/001_create_vector.sql
+
+      # -buildvcs=false because the container user does not own the checkout,
+      # so the `git` call Go makes to stamp VCS metadata trips "dubious
+      # ownership" and exits 128 — same fix as e2e-mock.yml's Build API step.
+      - name: Generate Ent code
+        run: go generate ./ent
+      - name: Build API
+        run: go build -buildvcs=false -o /tmp/api-server ./cmd/api-server
+
+      - name: Start API (local LLM)
+        run: |
+          mkdir -p /tmp/files
+          ENV=test \
+          LLM_BACKEND=local \
+          LOCAL_LLM_MODEL=qwen2.5:0.5b \
+          LOCAL_LLM_BASE_URL=http://localhost:11434/v1 \
+          SERVER_HOST=127.0.0.1 \
+          SERVER_PORT=8080 \
+          DB_TYPE=postgres DB_HOST=db DB_PORT=5432 \
+          DB_USER=chatapp DB_PASSWORD=chatapp DB_NAME=chatapp \
+          DB_SSL_MODE=disable \
+          AUTO_MIGRATE=true \
+          JWT_SECRET=$(openssl rand -hex 32) \
+          JWT_REFRESH_SECRET=$(openssl rand -hex 32) \
+          TOKEN_ENCRYPTION_SECRET=$(openssl rand -hex 32) \
+          OPENAI_API_KEY=dummy-local-key \
+          LOCAL_FILE_STORE_DIR=/tmp/files \
+          /tmp/api-server -env /dev/null > /tmp/api.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8080/api/health >/dev/null; then
+              echo "✅ API healthy after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "❌ API did not become healthy"; tail -50 /tmp/api.log; exit 1
+
+      # Playwright starts the Angular dev server itself (webServer in
+      # playwright.config.local-llm.ts).
+      #
+      # --reporter=html overrides the config's `list`: list prints to the
+      # console only and writes nothing to playwright-report/, so the Upload
+      # report step below was silently archiving an empty directory and every
+      # trace/video/screenshot this config's `retain-on-failure` settings
+      # captured was lost the moment the job ended. Unsharded single project
+      # here (unlike e2e-mock.yml), so html can be written directly — no
+      # blob/merge step needed. `json` alongside it gives the PR comment step
+      # below machine-readable pass/fail counts from the same run, the same
+      # way e2e-mock.yml's merge job reads counts out of its merged.json.
+      - name: Run Playwright (local LLM, chromium-desktop)
+        working-directory: web/app
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: results.json
+        run: npx playwright test --config e2e/playwright.config.local-llm.ts --project=chromium-desktop --reporter=html,json
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-local-llm
+          path: web/app/playwright-report
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # This job's section of the shared status comment — see
+      # .github/actions/e2e-status-comment. e2e-mock.yml posts the `mock`
+      # section of the same comment; this is `local-llm`, ordered after it.
+      - name: Build PR comment section
+        id: comment
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        working-directory: web/app
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo '### E2E (local LLM backend, opt-in)'
+            echo
+
+            if [ ! -f results.json ]; then
+              echo '🚨 **No results** — the job failed before Playwright produced a report.'
+              echo
+              echo "[View run]($RUN_URL)"
+            else
+              EXPECTED=$(jq -r '.stats.expected' results.json)
+              UNEXPECTED=$(jq -r '.stats.unexpected' results.json)
+              FLAKY=$(jq -r '.stats.flaky' results.json)
+              SKIPPED=$(jq -r '.stats.skipped' results.json)
+              DURATION=$(jq -r '(.stats.duration / 1000 | floor)' results.json)
+
+              if [ "$UNEXPECTED" -gt 0 ]; then
+                echo "❌ **$UNEXPECTED failed**, $EXPECTED passed, $FLAKY flaky, $SKIPPED skipped — ${DURATION}s"
+              elif [ "$FLAKY" -gt 0 ]; then
+                echo "⚠️ **$FLAKY flaky**, $EXPECTED passed, $SKIPPED skipped — ${DURATION}s"
+              else
+                echo "✅ **$EXPECTED passed**, $SKIPPED skipped — ${DURATION}s"
+              fi
+              echo
+
+              if [ "$UNEXPECTED" -gt 0 ]; then
+                echo '<details><summary>Failed tests</summary>'
+                echo
+                jq -r '[.. | objects | select(has("ok") and has("title") and has("tests"))
+                        | select(.ok == false) | .title] | .[]' results.json \
+                  | sed 's/^/- /'
+                echo
+                echo '</details>'
+                echo
+              fi
+
+              echo "[Full HTML report]($RUN_URL#artifacts) · [View run]($RUN_URL)"
+            fi
+          } > /tmp/comment-section.md
+          cat /tmp/comment-section.md
+
+      # Skipped for forks — same reasoning as e2e-mock.yml's identically-named
+      # step: fork PRs get a read-only token here, and pull_request_target
+      # would run fork code with a write one instead.
+      - name: Post or update PR comment
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: ./.github/actions/e2e-status-comment
+        with:
+          pr: ${{ github.event.pull_request.number }}
+          section: local-llm
+          order: 20
+          body-file: /tmp/comment-section.md
+
+      - name: API log on failure
+        if: failure()
+        run: tail -100 /tmp/api.log

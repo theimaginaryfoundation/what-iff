@@ -1,0 +1,65 @@
+@if (isOpen()) {
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Tool call details"
+    (click)="onBackdropClick()"
+  >
+    <div
+      class="flex max-h-[calc(90vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border-base bg-surface-base shadow-xl"
+      (click)="onModalContentClick($event)"
+    >
+      <header class="flex items-start justify-between border-b border-border-base p-6">
+        <div>
+          <h3 class="text-xl font-semibold text-text-primary">Tool Call Details</h3>
+          <p class="mt-1 text-sm text-text-muted">{{ formatDateTime(toolCall().created_at) }}</p>
+        </div>
+        <button
+          type="button"
+          class="rounded-lg px-3 py-2 text-sm text-text-muted hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)]"
+          (click)="closeModal.emit()"
+        >
+          Close
+        </button>
+      </header>
+
+      <div class="flex-1 space-y-4 overflow-y-auto p-6">
+        <section class="border-b border-border-base pb-4">
+          <h4 class="mb-1 text-sm font-medium text-text-muted">Tool Name</h4>
+          <p class="font-mono text-lg font-semibold text-text-primary">{{ toolCall().tool_name }}</p>
+        </section>
+
+        <section class="overflow-hidden rounded-lg border border-border-base">
+          <button type="button" class="section-toggle" (click)="toggleInputSection()">
+            <span>Input Arguments</span>
+            <span aria-hidden="true">{{ isInputExpanded() ? '−' : '+' }}</span>
+          </button>
+          @if (isInputExpanded()) {
+            <pre class="section-body">{{ parsedInput.isJson ? (parsedInput.jsonPairs | json) : parsedInput.value }}</pre>
+          }
+        </section>
+
+        <section class="overflow-hidden rounded-lg border border-border-base">
+          <button type="button" class="section-toggle" (click)="toggleOutputSection()">
+            <span>Output</span>
+            <span aria-hidden="true">{{ isOutputExpanded() ? '−' : '+' }}</span>
+          </button>
+          @if (isOutputExpanded()) {
+            <pre class="section-body">{{ parsedOutput.isJson ? (parsedOutput.jsonPairs | json) : parsedOutput.value }}</pre>
+          }
+        </section>
+
+        <section class="overflow-hidden rounded-lg border border-border-base">
+          <button type="button" class="section-toggle" (click)="toggleErrorSection()">
+            <span>Error</span>
+            <span aria-hidden="true">{{ isErrorExpanded() ? '−' : '+' }}</span>
+          </button>
+          @if (isErrorExpanded()) {
+            <pre class="section-body">{{ parsedError.isJson ? (parsedError.jsonPairs | json) : parsedError.value }}</pre>
+          }
+        </section>
+      </div>
+    </div>
+  </div>
+}

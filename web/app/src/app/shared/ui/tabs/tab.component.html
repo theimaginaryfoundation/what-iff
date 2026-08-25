@@ -1,0 +1,3 @@
+<button class="ui-tab" type="button" role="tab" [id]="id()" [attr.aria-controls]="controls()" [attr.aria-selected]="isSelected()" [tabIndex]="isSelected() ? 0 : -1" [disabled]="disabled()" (click)="activate()" (keydown)="onKeydown($event)">
+  <ng-content />
+</button>

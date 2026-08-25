@@ -1,0 +1,24 @@
+:host {
+  display: block;
+}
+
+.mode-page__header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--color-text-primary);
+}
+
+.mode-page__header p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+}
+
+@media (max-width: 1023px) {
+  .mode-page__header {
+    text-align: center;
+  }
+}

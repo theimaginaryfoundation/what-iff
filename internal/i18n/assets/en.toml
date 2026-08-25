@@ -1,0 +1,2 @@
+# Customer-facing strings — shown directly to end users (API responses, UI messages, emails, etc.).
+# Internal logging strings belong in en-internal.toml instead.

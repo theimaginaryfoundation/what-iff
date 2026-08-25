@@ -1,0 +1,67 @@
+<section class="rounded-2xl border border-border-base bg-surface-card p-3 md:p-4">
+  <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+    <label class="text-xs text-text-secondary">
+      Search skills
+      <input
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        type="search"
+        [ngModel]="filters().query"
+        (ngModelChange)="filterChanged.emit({ query: $event })"
+        placeholder="Name or content" />
+    </label>
+
+    <label class="text-xs text-text-secondary">
+      Affinity
+      <select
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        [ngModel]="filters().personalityId"
+        (ngModelChange)="filterChanged.emit({ personalityId: $event })">
+        <option value="">All affinities</option>
+        @for (personality of personalities(); track personality.id) {
+          <option [value]="personality.id">{{ personality.label }}</option>
+        }
+      </select>
+    </label>
+
+    <label class="text-xs text-text-secondary">
+      Hotkeys
+      <select
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        [ngModel]="filters().hasHotkey"
+        (ngModelChange)="filterChanged.emit({ hasHotkey: $event })">
+        @for (option of hotkeyOptions; track option.value) {
+          <option [value]="option.value">{{ option.label }}</option>
+        }
+      </select>
+    </label>
+
+    <div class="grid grid-cols-2 gap-2">
+      <label class="text-xs text-text-secondary">
+        Start date
+        <input
+          class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+          type="date"
+          [ngModel]="filters().minDate"
+          (ngModelChange)="filterChanged.emit({ minDate: $event })" />
+      </label>
+      <label class="text-xs text-text-secondary">
+        End date
+        <input
+          class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+          type="date"
+          [ngModel]="filters().maxDate"
+          (ngModelChange)="filterChanged.emit({ maxDate: $event })" />
+      </label>
+    </div>
+  </div>
+
+  <div class="mt-3 flex items-center justify-between gap-2">
+    <button
+      type="button"
+      class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary hover:text-text-primary"
+      (click)="clear.emit()">
+      Reset filters
+    </button>
+    <span class="text-xs text-text-muted">{{ loading() ? 'Refreshing skills...' : 'Filters auto-apply' }}</span>
+  </div>
+</section>

@@ -1,0 +1,116 @@
+# Codecov configuration.
+#
+# Coverage arrives from several independent producers, each under its own flag,
+# and Codecov merges them by file/line into one combined number. Statuses are
+# deliberately informational until a few weeks of baseline data exist
+# (plan phase 7), so nothing here can block a merge yet.
+#
+# Uploads are tokenless (OIDC). Do not add a CODECOV_TOKEN: forks never receive
+# repository secrets, and the action ignores a token when OIDC is selected.
+
+codecov:
+  require_ci_to_pass: false
+
+coverage:
+  precision: 2
+  round: down
+  range: '50...90'
+
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+comment:
+  layout: 'reach, diff, flags, components, files'
+  behavior: default
+  require_changes: false
+
+# One flag per *how* coverage was produced, not per package — flags answer
+# "which runner regressed". Every producing workflow is path-filtered, so any
+# flag can legitimately be absent from a given commit; carryforward keeps the
+# combined number meaningful. (Carryforward only applies when the commit has at
+# least one upload; a docs-only commit gets no Codecov build at all.)
+flag_management:
+  individual_flags:
+    - name: go-unit
+      carryforward: true
+    - name: go-e2e
+      carryforward: true
+    - name: go-api
+      carryforward: true
+    - name: go-mock-e2e
+      carryforward: true
+    - name: web-unit
+      carryforward: true
+    # Split by run type on purpose. The Playwright suite runs desktop-only on a
+    # pull request and adds the two mobile projects on the nightly, so one flag
+    # would alternate between two different measurements and read as a sawtooth
+    # rather than a trend. See the upload step in `.github/workflows/e2e-mock.yml`.
+    - name: web-e2e-pr
+      carryforward: true
+    # Carryforward matters more here than anywhere else: the nightly uploads at
+    # most once a day, so most commits have no upload of their own and would
+    # otherwise drop this flag out of the combined number entirely.
+    - name: web-e2e-nightly
+      carryforward: true
+
+component_management:
+  individual_components:
+    - component_id: backend
+      name: backend
+      paths:
+        - cmd/**
+        - internal/**
+        - ent/schema/**
+    - component_id: frontend
+      name: frontend
+      paths:
+        - web/app/src/**
+
+# Codecov `ignore` has no reliable negation, so the generated Ent output is
+# enumerated rather than written as `ent/**` + `!ent/schema/**`. `ent/schema/**`
+# is hand-written (schemas, validators, tests) and stays covered.
+ignore:
+  - 'ent/*.go'
+  - 'ent/agentjob/**'
+  - 'ent/auditlog/**'
+  - 'ent/billingdetails/**'
+  - 'ent/chat/**'
+  - 'ent/chatmessage/**'
+  - 'ent/chatmessagecontextitem/**'
+  - 'ent/checkpointsnapshot/**'
+  - 'ent/compactionevent/**'
+  - 'ent/embedding/**'
+  - 'ent/enttest/**'
+  - 'ent/fileattachment/**'
+  - 'ent/filechunk/**'
+  - 'ent/hook/**'
+  - 'ent/job/**'
+  - 'ent/mcpserver/**'
+  - 'ent/memory/**'
+  - 'ent/memorymergeevent/**'
+  - 'ent/migrate/**'
+  - 'ent/model/**'
+  - 'ent/mood/**'
+  - 'ent/personality/**'
+  - 'ent/personalityexpression/**'
+  - 'ent/personalitygenflow/**'
+  - 'ent/predicate/**'
+  - 'ent/quotabucket/**'
+  - 'ent/ritual/**'
+  - 'ent/role/**'
+  - 'ent/runtime/**'
+  - 'ent/safetyviolationevent/**'
+  - 'ent/systemritualbinding/**'
+  - 'ent/toolcall/**'
+  - 'ent/usageevent/**'
+  - 'ent/user/**'
+  - 'ent/userpreference/**'
+  - 'ent/webhooktoken/**'
+  - '**/*_test.go'
+  - '**/*.spec.ts'
+  - 'web/**/e2e/**'

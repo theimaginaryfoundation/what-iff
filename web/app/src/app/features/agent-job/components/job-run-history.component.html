@@ -1,0 +1,23 @@
+<section class="rounded-2xl border border-border-base bg-surface-card p-4 text-sm">
+  <h3 class="text-sm font-semibold text-text-primary">Run history</h3>
+  <dl class="mt-2 space-y-2 text-text-secondary">
+    <div>
+      <dt class="font-medium text-text-primary">Last run</dt>
+      <dd>{{ fmt(job().last_run_at) }}</dd>
+    </div>
+    <div>
+      <dt class="font-medium text-text-primary">Next run</dt>
+      <dd>{{ fmt(job().next_run_at) }}</dd>
+    </div>
+    <div>
+      <dt class="font-medium text-text-primary">Run count</dt>
+      <dd>{{ job().run_count }}</dd>
+    </div>
+  </dl>
+
+  @if (job().last_error) {
+    <p class="mt-3 rounded-lg border border-danger/40 bg-danger/10 p-2 text-xs text-danger">
+      {{ job().last_error }}
+    </p>
+  }
+</section>

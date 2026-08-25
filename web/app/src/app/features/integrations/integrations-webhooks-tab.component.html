@@ -1,0 +1,103 @@
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+  <div class="lg:col-span-2 space-y-4">
+    @if (justCreatedToken()) {
+      <div class="rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-700/60 dark:bg-amber-900/20">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h3 class="text-sm font-semibold text-amber-900 dark:text-amber-200">Copy your new API token now</h3>
+            <p class="mt-1 text-xs text-amber-800 dark:text-amber-300">
+              This token is only shown once. Store it securely before closing this notice.
+            </p>
+            <p class="mt-2 rounded-md bg-white px-2 py-1 text-xs font-mono break-all text-amber-900 dark:bg-gray-900 dark:text-amber-200">
+              {{ justCreatedToken() }}
+            </p>
+          </div>
+          <button
+            (click)="dismissJustCreatedToken()"
+            class="rounded-lg px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900/30">
+            Dismiss
+          </button>
+        </div>
+        <div class="mt-3 flex gap-2">
+          <button
+            (click)="copyJustCreatedToken()"
+            class="px-3 py-2 text-xs font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-lg">
+            Copy Token
+          </button>
+        </div>
+      </div>
+    }
+
+    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+      @if (webhookTokensLoading()) {
+        <div class="p-6 text-sm text-gray-600 dark:text-gray-400">Loading webhook tokens...</div>
+      }
+      @if (!webhookTokensLoading() && webhookTokens().length === 0) {
+        <div class="p-6 text-sm text-gray-600 dark:text-gray-400">
+          No webhook API tokens created yet.
+        </div>
+      }
+
+      @if (!webhookTokensLoading() && webhookTokens().length > 0) {
+        <div class="divide-y divide-gray-200 dark:divide-gray-700">
+          @for (token of webhookTokens(); track trackByWebhookTokenId($index, token)) {
+            <div class="p-4" data-testid="webhook-token-row">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ token.name }}</h3>
+                  <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    <span class="inline-flex items-center rounded-full px-2 py-0.5 font-medium"
+                  [ngClass]="token.status === 'active'
+                    ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                    : 'bg-gray-100 text-gray-700 dark:bg-gray-900/40 dark:text-gray-300'">
+                      {{ token.status === 'active' ? 'Active' : 'Revoked' }}
+                    </span>
+                    <span>Created {{ token.created_at | date:'medium' }}</span>
+                    @if (token.last_used_at) {
+                      <span>Last used {{ token.last_used_at | date:'medium' }}</span>
+                    }
+                  </div>
+                </div>
+                <div>
+                  <button
+                    (click)="revokeWebhookToken(token)"
+                    [disabled]="token.status !== 'active'"
+                    class="px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                    Revoke
+                  </button>
+                </div>
+              </div>
+            </div>
+          }
+        </div>
+      }
+    </div>
+  </div>
+
+  <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 h-fit">
+    <h2 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Create Webhook API Token</h2>
+    <p class="text-xs text-gray-600 dark:text-gray-400 mb-4">
+      Use this token with <span class="font-mono">Authorization: Bearer &lt;token&gt;</span> when calling webhook endpoints.
+    </p>
+    <div class="space-y-3">
+      <div>
+        <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Token name</label>
+        <input
+          [ngModel]="webhookTokenName()"
+          (ngModelChange)="webhookTokenName.set($event)"
+          type="text"
+          placeholder="e.g. Slack trigger"
+          class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
+      </div>
+    </div>
+
+    <div class="mt-4">
+      <button
+        (click)="createWebhookToken()"
+        [disabled]="!canCreateWebhookToken()"
+        class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50">
+        {{ webhookTokenSaving() ? 'Creating...' : 'Create Token' }}
+      </button>
+    </div>
+  </div>
+</div>

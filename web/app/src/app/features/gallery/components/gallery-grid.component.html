@@ -1,0 +1,44 @@
+@if (loading() && tiles().length === 0) {
+  <div class="gallery-grid" role="status" aria-label="Loading gallery">
+    @for (slot of [1,2,3,4,5,6,7,8,9,10]; track slot) {
+      <div class="h-[7.8125rem] animate-pulse rounded-lg border border-border-base bg-surface-card"></div>
+    }
+  </div>
+} @else if (error()) {
+  <div class="rounded-2xl border border-danger/40 bg-danger/10 p-6 text-center">
+    <p class="text-sm text-danger">{{ error() }}</p>
+    <button
+      type="button"
+      class="mt-3 rounded-xl border border-danger/50 px-3 py-2 text-sm text-danger hover:opacity-90"
+      (click)="retry.emit()">
+      Try again
+    </button>
+  </div>
+} @else if (tiles().length === 0) {
+  <div class="rounded-2xl border border-border-base bg-surface-card p-10 text-center">
+    <p class="text-sm text-text-secondary">No images match these filters yet.</p>
+  </div>
+} @else {
+  <div class="gallery-grid" role="list" aria-label="Gallery images">
+    @for (tile of tiles(); track tile.id) {
+      <app-gallery-tile
+        [tile]="tile"
+        [assignmentEnabled]="assignmentEnabled()"
+        (open)="openImage.emit($event)"
+        (delete)="deleteImage.emit($event)"
+        (assign)="assignImage.emit($event)" />
+    }
+  </div>
+
+  @if (hasMore()) {
+    <div class="mt-5 flex justify-center">
+      <button
+        type="button"
+        class="rounded-xl border border-border-base bg-surface-card px-4 py-2 text-sm text-text-primary hover:border-accent disabled:opacity-50"
+        [disabled]="loadingMore()"
+        (click)="loadMore.emit()">
+        {{ loadingMore() ? 'Loading…' : 'Load more' }}
+      </button>
+    </div>
+  }
+}

@@ -1,0 +1,97 @@
+:host {
+  display: block;
+}
+
+.tile {
+  overflow: hidden;
+  position: relative;
+}
+
+.tile__delete {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 999px;
+  background: rgb(220 38 38 / 95%);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  z-index: 2;
+  transition: opacity 120ms ease;
+}
+
+.tile:hover .tile__delete,
+.tile:focus-within .tile__delete {
+  opacity: 1;
+}
+
+.tile__delete:focus-visible {
+  opacity: 1;
+  outline: 2px solid color-mix(in srgb, #fff 70%, transparent);
+  outline-offset: 1px;
+}
+
+.tile__button {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  display: block;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.tile__button--empty {
+  align-items: center;
+  aspect-ratio: 1;
+  background: var(--color-surface-base);
+  color: var(--color-text-muted);
+  display: flex;
+  font-size: 0.75rem;
+  justify-content: center;
+}
+
+.tile__image {
+  aspect-ratio: 1;
+  display: block;
+  height: auto;
+  object-fit: cover;
+  width: 100%;
+}
+
+.tile__overlay {
+  align-items: flex-end;
+  background: linear-gradient(to top, rgb(0 0 0 / 0.78), rgb(0 0 0 / 0) 55%);
+  bottom: 0;
+  display: flex;
+  inset-inline: 0;
+  opacity: 0;
+  padding: 0.5rem;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  transition: opacity 150ms ease;
+}
+
+.tile:hover .tile__overlay,
+.tile:focus-within .tile__overlay {
+  opacity: 1;
+}
+
+.tile__overlay-title {
+  color: #fff;
+  font-size: 0.6875rem;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}

@@ -1,0 +1,160 @@
+<ui-modal [open]="open()" labelledBy="gallery-image-detail-title" size="lg" (dismiss)="close.emit()">
+  <div modal-header class="image-detail-modal__header">
+    <div class="image-detail-modal__title-block min-w-0 flex-1">
+      @if (isRenaming()) {
+        <div class="image-detail-modal__rename-row" (click)="$event.stopPropagation()">
+          <input
+            type="text"
+            class="image-detail-modal__rename-input"
+            [value]="renameDraft()"
+            (input)="renameDraft.set($any($event.target).value)"
+            (keydown.enter)="submitRename()"
+            (keydown.escape)="cancelRename()"
+            aria-label="Image name"
+            autofocus
+          />
+          <button type="button" class="image-detail-modal__rename-save" (click)="submitRename()">Save</button>
+          <button type="button" class="image-detail-modal__rename-cancel" (click)="cancelRename()">Cancel</button>
+        </div>
+      } @else {
+        <h2 id="gallery-image-detail-title" class="image-detail-modal__title truncate">
+          {{ displayTitle() }}
+        </h2>
+        <p class="image-detail-modal__subtitle truncate">{{ image()?.sourceLabel ?? '' }}</p>
+      }
+    </div>
+
+    <div class="image-detail-modal__header-actions">
+      @if (!isRenaming()) {
+        <button
+          type="button"
+          class="image-detail-modal__icon-btn"
+          title="Rename"
+          aria-label="Rename image"
+          [disabled]="!image()"
+          (click)="startRename()"
+        >
+          <ui-edit-icon [size]="14" />
+        </button>
+        <button
+          type="button"
+          class="image-detail-modal__icon-btn"
+          title="Download"
+          aria-label="Download image"
+          [disabled]="!image()"
+          (click)="download()"
+        >
+          <ui-download-icon [size]="14" />
+        </button>
+      }
+      <button
+        type="button"
+        class="image-detail-modal__nav-btn"
+        [disabled]="!hasPrev()"
+        (click)="previous.emit()"
+      >
+        Prev
+      </button>
+      <button
+        type="button"
+        class="image-detail-modal__nav-btn"
+        [disabled]="!hasNext()"
+        (click)="next.emit()"
+      >
+        Next
+      </button>
+    </div>
+  </div>
+
+  <div class="image-detail-modal__body grid gap-3 md:grid-cols-[1fr_200px]">
+    <div class="image-detail-modal__preview overflow-hidden rounded-2xl border border-border-base bg-surface-base">
+      @if ($safeNavigationMigration(image()?.fullUrl) | authImage | async; as fullSrc) {
+        <img [src]="fullSrc" [alt]="image()?.name ?? 'Gallery image'" class="max-h-[70vh] w-full object-contain" />
+      } @else {
+        <div class="flex h-80 items-center justify-center text-sm text-text-muted">Image unavailable</div>
+      }
+    </div>
+
+    <aside class="image-detail-modal__sidebar flex flex-col gap-3">
+      <div class="image-detail-modal__meta rounded-2xl border border-border-base bg-surface-base p-3 text-sm">
+        <p class="text-xs uppercase tracking-wide text-text-muted">Details</p>
+        <dl class="mt-2 space-y-2 text-text-secondary">
+          <div>
+            <dt class="font-medium text-text-primary">Personalities</dt>
+            <dd>
+              @if ((image()?.personalityNames?.length ?? 0) > 0) {
+                {{ image()?.personalityNames?.join(', ') }}
+              } @else {
+                Unassigned
+              }
+            </dd>
+          </div>
+          <div>
+            <dt class="font-medium text-text-primary">Created</dt>
+            <dd>{{ $safeNavigationMigration(image()?.createdAt) | date:'medium' }}</dd>
+          </div>
+        </dl>
+      </div>
+
+      <div class="image-detail-modal__chat-actions flex flex-col gap-2">
+        <button
+          type="button"
+          class="image-detail-modal__chat-btn image-detail-modal__chat-btn--primary"
+          [disabled]="!image()"
+          (click)="onStartNewChat()"
+        >
+          Start new thread
+        </button>
+        <div class="relative">
+          <button
+            type="button"
+            class="image-detail-modal__chat-btn"
+            [disabled]="!image()"
+            (click)="openThreadPicker()"
+          >
+            Add to existing thread
+          </button>
+          @if (threadPickerOpen()) {
+            <div class="image-detail-modal__thread-picker" role="listbox" aria-label="Recent threads">
+              <p class="image-detail-modal__thread-picker-label">Recent threads</p>
+              @if (threadsLoading()) {
+                <p class="image-detail-modal__thread-picker-empty">Loading…</p>
+              } @else if (threadsLoadError()) {
+                <p class="image-detail-modal__thread-picker-empty">Could not load threads</p>
+              } @else if (recentThreads().length === 0) {
+                <p class="image-detail-modal__thread-picker-empty">No threads found</p>
+              } @else {
+                @for (thread of recentThreads(); track thread.id) {
+                  <button type="button" class="image-detail-modal__thread-row" role="option" (click)="pickThread(thread)">
+                    {{ thread.name }}
+                  </button>
+                }
+              }
+            </div>
+          }
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <div modal-footer class="flex items-center justify-between gap-2">
+    <button
+      type="button"
+      class="rounded-lg border border-danger/40 px-3 py-2 text-sm text-danger hover:bg-danger/10"
+      [disabled]="!image()"
+      (click)="image() && delete.emit(image()!.id)"
+    >
+      Delete
+    </button>
+    @if (assignmentEnabled()) {
+      <button
+        type="button"
+        class="rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:opacity-90"
+        [disabled]="!image()"
+        (click)="image() && assign.emit(image()!.id)"
+      >
+        Assign as expression
+      </button>
+    }
+  </div>
+</ui-modal>

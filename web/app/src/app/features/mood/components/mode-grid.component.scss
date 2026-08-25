@@ -1,0 +1,15 @@
+.mode-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.mode-page__loading,
+.mode-page__empty {
+  border: 1px solid var(--color-border-base);
+  border-radius: 12px;
+  background: var(--color-surface-card);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  padding: 22px;
+}

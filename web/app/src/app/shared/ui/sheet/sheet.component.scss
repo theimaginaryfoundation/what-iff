@@ -1,0 +1,8 @@
+:host { display: contents; }
+.ui-sheet__panel { width: 100%; max-height: min(90dvh, calc(100dvh - 0.5rem)); overflow: auto; border-radius: 1.25rem 1.25rem 0 0; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary); outline: none; padding-bottom: env(safe-area-inset-bottom); }
+.ui-sheet__header, .ui-sheet__footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem; }
+.ui-sheet__header { border-bottom: 1px solid var(--border); }
+.ui-sheet__footer { border-top: 1px solid var(--border); justify-content: flex-end; }
+.ui-sheet__body { padding: 1rem; }
+.ui-sheet__close { display: inline-flex; min-height: 2.75rem; min-width: 2.75rem; align-items: center; justify-content: center; border-radius: .75rem; color: var(--text-secondary); }
+.ui-sheet__close:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }

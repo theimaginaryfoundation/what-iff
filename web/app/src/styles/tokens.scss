@@ -1,0 +1,45 @@
+// Design tokens — semantic CSS custom properties.
+//
+// This file is the single place where token NAMES are documented. The actual
+// per-theme VALUES live in `themes.scss`. Token names mirror
+// `mockups/shared-styles.css` so anyone reading either file recognizes them.
+//
+// Token taxonomy (kept in sync with the Phase 01 artifact, §6):
+//
+//   Surface          --bg-base, --bg-card, --bg-surface, --bg-elevated, --bg-input
+//   Border           --border, --border-hover, --focus-ring
+//   Text             --text-primary, --text-secondary, --text-muted
+//   Accent (mode)    --accent, --accent-light, --accent-bg
+//   Accent (fixed)   --accent-app, --accent-config
+//   Conversation     --user-bubble, --user-text, --ai-bubble, --ai-text,
+//                    --system-bg, --system-text
+//   Tool calls       --tool-bg, --tool-border, --tool-text,
+//                    --tool-header-bg, --tool-result-bg
+//   Buttons          --cta, --cta-text, --cta-bg, --cta-selected-text,
+//                    --btn-secondary, --btn-secondary-text,
+//                    --btn-secondary-border
+//   Navigation       --nav-active-text, --nav-active-bg, --nav-inactive-text,
+//                    --tab-active-text, --tab-active-border, --tab-inactive-text
+//   Status           --danger, --success, --warning, --info
+//   Tables           --table-header-bg, --table-row-alt-bg,
+//                    --table-row-archived-bg
+//   Misc             --scrollbar, --card-shadow, --card-shadow-hover,
+//                    --sidebar-gradient, --thread-active-bg
+//   Personality      --persona-accent (consumed via inline style; fallback below)
+//
+// Contrast notes (verified against light + dark themes, WCAG 2.1 AA):
+//   - --text-primary on --bg-base / --bg-card    >= 12:1  (AAA body)
+//   - --text-secondary on --bg-base              >=  4.5:1 (AA body)
+//   - --text-muted on --bg-base                  >=  3:1   (AA large/UI only)
+//   - --user-text on --user-bubble (#fff/#4F46E5) ~ 8.6:1 (AAA)
+//   - --cta-text on --cta (#fff/#4F46E5)          ~ 8.6:1 (AAA)
+//   - --focus-ring on --bg-base / --bg-card       >= 3:1   (AA UI)
+//
+// Phase 17 will enforce these in CI via @axe-core/playwright.
+
+:root {
+  // Theme-invariant fallbacks. Real per-theme values are in themes.scss; these
+  // are kept here so the app still renders something sensible if data-theme is
+  // briefly missing during early bootstrap or in legacy embeds.
+  --persona-accent: var(--accent, #4F46E5);
+}

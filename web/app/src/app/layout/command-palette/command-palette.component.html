@@ -1,0 +1,125 @@
+@if (service.visible()) {
+  <div class="cmd-palette-backdrop" (click)="onBackdropClick()" (keydown)="onKeydown($event)">
+    <div
+      #dialog
+      class="cmd-palette"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Command palette"
+      (click)="onDialogClick($event)"
+    >
+      <div class="cmd-palette__input-row">
+        <input
+          #input
+          type="search"
+          class="cmd-palette__input"
+          role="combobox"
+          aria-controls="cmd-palette-results"
+          aria-expanded="true"
+          [attr.aria-activedescendant]="activeRowId() || null"
+          aria-autocomplete="list"
+          placeholder="Search threads, personalities, skills, memories..."
+          [value]="service.query()"
+          (input)="onInput($event)"
+        />
+        <span class="cmd-palette__shortcut" aria-hidden="true">esc</span>
+      </div>
+
+      <div
+        id="cmd-palette-results"
+        class="cmd-palette__results"
+        role="listbox"
+        aria-label="Search results"
+      >
+        @if (service.commandResults().length > 0) {
+          <div class="cmd-palette__section" role="group" aria-label="Commands">
+            <div class="cmd-palette__section-title">Commands</div>
+            @for (row of rows(); track row.id; let i = $index) {
+              @if (row.kind === 'command') {
+                <button
+                  type="button"
+                  class="cmd-palette__row"
+                  [class.cmd-palette__row--active]="i === selectedIndex()"
+                  role="option"
+                  [id]="row.id"
+                  [attr.aria-selected]="i === selectedIndex()"
+                  (click)="onRowClick(row)"
+                  (mouseenter)="onRowHover(i)"
+                >
+                  <span class="cmd-palette__row-icon" aria-hidden="true">
+                    <ng-container *ngComponentOutlet="row.icon; inputs: { size: 16 }"></ng-container>
+                  </span>
+                  <span class="cmd-palette__row-content">
+                    <span class="cmd-palette__row-label">{{ row.label }}</span>
+                    @if (row.description) {
+                      <span class="cmd-palette__row-description">{{ row.description }}</span>
+                    }
+                  </span>
+                </button>
+              }
+            }
+          </div>
+        }
+
+        @for (section of service.sections(); track section.type) {
+          @if (section.results.length > 0) {
+            <div
+              class="cmd-palette__section"
+              role="group"
+              [attr.aria-label]="sectionLabel(section.type)"
+            >
+              <div class="cmd-palette__section-title">{{ sectionLabel(section.type) }}</div>
+              @for (row of rows(); track row.id; let i = $index) {
+                @if (row.kind === 'result' && row.result?.icon_type === section.type) {
+                  <button
+                    type="button"
+                    class="cmd-palette__row"
+                    [class.cmd-palette__row--active]="i === selectedIndex()"
+                    role="option"
+                    [id]="row.id"
+                    [attr.aria-selected]="i === selectedIndex()"
+                    (click)="onRowClick(row)"
+                    (mouseenter)="onRowHover(i)"
+                  >
+                    <span class="cmd-palette__row-icon" aria-hidden="true">
+                      <ng-container *ngComponentOutlet="row.icon; inputs: { size: 16 }"></ng-container>
+                    </span>
+                    <span class="cmd-palette__row-content">
+                      <span class="cmd-palette__row-label">{{ row.label }}</span>
+                      @if (row.description) {
+                        <span class="cmd-palette__row-description">{{ row.description }}</span>
+                      }
+                      @if (row.result?.snippet) {
+                        <span class="cmd-palette__row-snippet">{{ row.result?.snippet }}</span>
+                      }
+                    </span>
+                  </button>
+                }
+              }
+            </div>
+          }
+        }
+
+        @if (rows().length === 0 && !service.loading()) {
+          <div class="cmd-palette__empty">
+            @if (service.query()) {
+              No results for "{{ service.query() }}"
+            } @else {
+              Type to search threads, personalities, skills, memories.
+            }
+          </div>
+        }
+
+        @if (service.loading()) {
+          <div class="cmd-palette__empty">Searching…</div>
+        }
+      </div>
+
+      <footer class="cmd-palette__footer">
+        <span aria-hidden="true">↑↓ navigate</span>
+        <span aria-hidden="true">↵ select</span>
+        <span aria-hidden="true">esc close</span>
+      </footer>
+    </div>
+  </div>
+}

@@ -1,0 +1,4 @@
+:host { display: inline-flex; }
+.ui-tab { min-height: 2.75rem; border-bottom: 2px solid transparent; padding: .625rem .875rem; color: var(--tab-inactive-text); font-size: .875rem; font-weight: 600; }
+.ui-tab[aria-selected='true'] { border-bottom-color: var(--tab-active-border); color: var(--tab-active-text); }
+.ui-tab:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }

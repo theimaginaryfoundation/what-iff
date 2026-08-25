@@ -1,0 +1,86 @@
+<section class="mx-auto flex w-full max-w-7xl flex-col gap-4 p-4 md:p-6">
+  <header class="memories-header">
+    <div class="memories-header__copy">
+      <h1>Memories</h1>
+      <p>Saved context that informs your conversations.</p>
+    </div>
+    <div class="memories-header__actions">
+      <a routerLink="/memories/merge-history" class="memories-header__merge-history">
+        Merge history
+      </a>
+      <a routerLink="/memories/compaction-log" class="memories-header__merge-history">
+        Compaction log
+      </a>
+      <button type="button" class="memories-header__batch-import" disabled>
+      <ui-upload-icon [size]="12" />
+      Batch Import
+    </button>
+    </div>
+  </header>
+
+  <section class="memories-toolbar">
+    <div class="memories-toolbar__filters" role="tablist" aria-label="Memory filters">
+      <button
+        type="button"
+        [class.memories-toolbar__filter--active]="!isLevelSelectionActive() && memoryAssociationMode() === 'all'"
+        (click)="selectAssociationFilter('all')">
+        All
+      </button>
+      <button
+        type="button"
+        [class.memories-toolbar__filter--active]="!isLevelSelectionActive() && memoryAssociationMode() === 'global'"
+        (click)="selectAssociationFilter('global')">
+        Global
+      </button>
+      <button
+        type="button"
+        [class.memories-toolbar__filter--active]="memoryLevelFilter() === 'personality'"
+        (click)="selectLevelFilter('personality')">
+        Personality
+      </button>
+      <button
+        type="button"
+        [class.memories-toolbar__filter--active]="memoryLevelFilter() === 'thread'"
+        (click)="selectLevelFilter('thread')">
+        Thread
+      </button>
+      <button
+        type="button"
+        [class.memories-toolbar__filter--active]="memoryLevelFilter() === 'summary'"
+        (click)="selectLevelFilter('summary')">
+        Summary
+      </button>
+    </div>
+    <div class="memories-toolbar__sort">
+      <span>Sort:</span>
+      <div class="memories-toolbar__sort-select-wrap">
+        <select [value]="filters().sort" (change)="setSort($any($event.target).value)">
+          <option value="created_desc">Created (newest)</option>
+          <option value="created_asc">Created (oldest)</option>
+          <option value="updated_desc">Last updated</option>
+        </select>
+        <ui-chev-down-icon [size]="12" />
+      </div>
+    </div>
+  </section>
+
+  <app-memory-card-grid
+    [memories]="memories()"
+    [personalities]="personalities()"
+    [pinUpdatingId]="pinUpdatingId()"
+    [loading]="loading()"
+    [error]="error()"
+    [totalPages]="totalPages()"
+    [page]="currentPage()"
+    (save)="onInlineSaveMemory($event)"
+    (pinChange)="onMemoryPinChange($event)"
+    (delete)="onDeleteSingle($event)"
+    (pageChange)="goToPage($event)" />
+</section>
+
+<app-delete-memory-modal
+  [open]="deleteModalOpen()"
+  [count]="deleteTargetIds().length"
+  [deleting]="deleting()"
+  (confirm)="confirmDelete()"
+  (cancel)="closeDeleteModal()" />

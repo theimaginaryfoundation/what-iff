@@ -1,0 +1,500 @@
+<div class="min-h-screen bg-gray-50 dark:bg-gray-900 overflow-x-hidden">
+  <!-- Main Content -->
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    <!-- Header -->
+    <div class="mb-8">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div class="min-w-0">
+          <h1 class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Skills</h1>
+          <p class="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">Manage your reusable prompt snippets and templates</p>
+        </div>
+        <button (click)="openCreateForm()"
+          class="inline-flex items-center px-3 py-2 sm:px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 shrink-0">
+          <svg class="-ml-1 mr-1.5 sm:mr-2 h-5 w-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+          </svg>
+          Create Skill
+        </button>
+      </div>
+    </div>
+
+    <!-- System Skills (read-only) -->
+    @if (systemRituals().length > 0) {
+      <div class="bg-white dark:bg-gray-800 rounded-lg shadow mb-6">
+        <div class="px-4 py-4 sm:px-6 border-b border-gray-200 dark:border-gray-700">
+          <h3 class="text-lg font-medium text-gray-900 dark:text-white">System skills</h3>
+          <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+            Built-in skills are global and read-only. They are not stored in your account.
+          </p>
+        </div>
+        <div class="divide-y divide-gray-200 dark:divide-gray-700">
+          @for (ritual of systemRituals(); track ritual.id) {
+            <div class="px-4 py-4 sm:px-6 sm:py-5 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+              <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div class="flex-1 min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h3 class="text-lg font-medium text-gray-900 dark:text-white">
+                      {{ ritual.name }}
+                    </h3>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200">
+                      System
+                    </span>
+                  </div>
+                  <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                    {{ ritual.description }}
+                  </p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 sm:ml-4 sm:shrink-0">
+                  @if (ritual.hotkeys) {
+                    <div class="inline-flex items-center gap-1 mr-2">
+                      @for (key of parseHotkeys(ritual.hotkeys); track $index) {
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium"
+                          [class.bg-indigo-100]="isModifierKey(key)"
+                          [class.dark:bg-indigo-900]="isModifierKey(key)"
+                          [class.text-indigo-800]="isModifierKey(key)"
+                          [class.dark:text-indigo-200]="isModifierKey(key)"
+                          [class.bg-gray-100]="!isModifierKey(key)"
+                          [class.dark:bg-gray-700]="!isModifierKey(key)"
+                          [class.text-gray-700]="!isModifierKey(key)"
+                          [class.dark:text-gray-300]="!isModifierKey(key)">
+                          {{ formatKeyDisplay(key) }}
+                        </span>
+                      }
+                    </div>
+                  }
+                  <button (click)="openBindingModal(ritual)"
+                    class="inline-flex items-center px-2.5 py-1.5 sm:px-3 sm:py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-xs sm:text-sm leading-4 font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    <svg class="-ml-0.5 mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                    </svg>
+                    Shortcut
+                  </button>
+                </div>
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+    }
+
+    <!-- Create Skill Modal -->
+    @if (isCreateFormOpen()) {
+      <div class="fixed inset-0 bg-gray-900/50 z-50 flex justify-center items-start sm:items-center p-4 overflow-y-auto" (click)="closeCreateForm()">
+        <div class="relative w-full max-w-2xl max-h-[85vh] sm:max-h-[calc(90vh-2rem)] my-4 sm:my-0 bg-white dark:bg-gray-800 rounded-lg shadow-xl flex flex-col overflow-hidden" (click)="$event.stopPropagation()">
+
+          <!-- Modal Header -->
+          <div class="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+            <h3 class="text-lg font-medium text-gray-900 dark:text-white">Create New Skill</h3>
+            <button (click)="closeCreateForm()" class="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 focus:outline-none">
+              <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Modal Body - Scrollable -->
+          <div class="flex-1 min-h-0 px-4 py-4 sm:px-6 modal-content">
+            <!-- Error Message -->
+            @if (createErrorMessage()) {
+              <div class="mb-4 bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-200 px-4 py-3 rounded relative" role="alert">
+                <span class="block sm:inline">{{ createErrorMessage() }}</span>
+              </div>
+            }
+
+            <div class="space-y-4 text-left">
+              <!-- Name Field -->
+              <div>
+                <label for="ritualName" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Name *
+                </label>
+                <input type="text"
+                  id="ritualName"
+                  [(ngModel)]="createForm().name"
+                  placeholder="e.g., Email Greeting, Code Review, Meeting Notes"
+                  class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+              </div>
+
+              <!-- Description Field -->
+              <div>
+                <label for="ritualDescription" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Description *
+                </label>
+                <input type="text"
+                  id="ritualDescription"
+                  [(ngModel)]="createForm().description"
+                  placeholder="Brief description of what this skill does"
+                  class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+              </div>
+
+              <!-- Content Field -->
+              <div>
+                <label for="ritualContent" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Content *
+                </label>
+                <textarea id="ritualContent"
+                  [(ngModel)]="createForm().content"
+                  rows="8"
+                  placeholder="The actual prompt content or template text that will be used..."
+                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 resize-vertical font-mono text-sm"></textarea>
+                <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                  This is the main content that will be used when the skill is applied.
+                </p>
+              </div>
+
+              <!-- Hotkeys Field -->
+              <div>
+                <label for="ritualHotkeys" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Hotkeys (Optional)
+                </label>
+                <app-hotkey-input
+                  [(ngModel)]="createForm().hotkeys"
+                  placeholder="Click to set keyboard shortcut"
+                  [showHelp]="true">
+                </app-hotkey-input>
+              </div>
+
+              <!-- Personality Field -->
+              @if (personalities().length > 0) {
+                <div>
+                  <label for="ritualPersonality" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Associated Personality (Optional)
+                  </label>
+                  <select id="ritualPersonality"
+                    [(ngModel)]="createForm().personality_id"
+                    class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    <option value="">None (Global Skill)</option>
+                    @for (personality of personalities(); track personality.id) {
+                      <option [value]="personality.id">{{ personality.name }}</option>
+                    }
+                  </select>
+                  <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                    Associate this skill with a specific personality, or leave empty to make it globally available.
+                  </p>
+                </div>
+              }
+            </div>
+          </div>
+
+          <!-- Modal Footer -->
+          <div class="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-0 p-4 sm:p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex-shrink-0 sm:space-x-3">
+            <button (click)="closeCreateForm()" type="button" class="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+              Cancel
+            </button>
+            <button (click)="createRitual()" [disabled]="isCreating() || !createForm().name.trim() || !createForm().description.trim() || !createForm().content.trim()" type="button" class="px-4 py-2 bg-indigo-600 dark:bg-indigo-500 border border-transparent rounded-md shadow-sm text-sm font-medium text-white hover:bg-indigo-700 dark:hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
+              @if (isCreating()) {
+                <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              }
+              {{ isCreating() ? 'Creating...' : 'Create Skill' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    }
+
+    <!-- Binding Modal -->
+    @if (isBindingModalOpen()) {
+      <app-add-hotkey-modal
+        [bindingValue]="bindingValue()"
+        [bindingError]="bindingError()"
+        [isSaving]="isBindingSaving()"
+        (close)="closeBindingModal()"
+        (save)="saveBinding()"
+        (bindingValueChange)="bindingValue.set($event)">
+      </app-add-hotkey-modal>
+    }
+
+    <!-- Filters -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow mb-6">
+      <div class="px-4 py-4 sm:px-6">
+        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Filters</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          <!-- Name Filter -->
+          <div>
+            <label for="nameFilter" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Name
+            </label>
+            <input type="text"
+              id="nameFilter"
+              [(ngModel)]="nameFilter"
+              (input)="onFiltersApplied()"
+              placeholder="Filter by name..."
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm">
+          </div>
+
+          <!-- Search Filter -->
+          <div>
+            <label for="searchFilter" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Search Content
+            </label>
+            <input type="text"
+              id="searchFilter"
+              [(ngModel)]="searchFilter"
+              (input)="onFiltersApplied()"
+              placeholder="Search in content..."
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm">
+          </div>
+
+          <!-- Personality Filter -->
+          @if (personalities().length > 0) {
+            <div>
+              <label for="personalityFilter" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Personality
+              </label>
+              <select id="personalityFilter"
+                [(ngModel)]="personalityFilter"
+                (change)="onFiltersApplied()"
+                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm">
+                <option value="">All Personalities</option>
+                <option value="global">Global Only</option>
+                @for (personality of personalities(); track personality.id) {
+                  <option [value]="personality.id">{{ personality.name }}</option>
+                }
+              </select>
+            </div>
+          }
+
+          <!-- Date Filters -->
+          <div>
+            <label for="minDate" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              From Date
+            </label>
+            <input type="date"
+              id="minDate"
+              [(ngModel)]="minDateFilter"
+              (change)="onFiltersApplied()"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm">
+          </div>
+
+          <div>
+            <label for="maxDate" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              To Date
+            </label>
+            <input type="date"
+              id="maxDate"
+              [(ngModel)]="maxDateFilter"
+              (change)="onFiltersApplied()"
+              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm">
+          </div>
+        </div>
+
+        <!-- Clear Filters -->
+        <div class="mt-4">
+          <button (click)="clearFilters()"
+            class="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 dark:hover:text-indigo-300 font-medium">
+            Clear all filters
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ritual List -->
+    <div class="bg-white dark:bg-gray-800 shadow rounded-lg">
+      <!-- Results Count -->
+      <div class="px-4 py-4 sm:px-6 border-b border-gray-200 dark:border-gray-700">
+        <div class="flex items-center justify-between min-w-0">
+          <p class="text-sm text-gray-700 dark:text-gray-300 truncate">
+            @if (totalCount() > 0) {
+              Showing {{ getPaginationFrom() }} to {{ getPaginationTo() }} of {{ totalCount() }} skills
+            } @else {
+              No skills found
+            }
+          </p>
+        </div>
+      </div>
+
+      <!-- Loading State -->
+      @if (isLoading()) {
+        <div class="px-4 py-12 sm:px-6 text-center">
+          <div class="inline-flex items-center px-4 py-2 font-semibold leading-6 text-sm shadow rounded-md text-indigo-500 bg-indigo-100">
+            <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Loading skills...
+          </div>
+        </div>
+      }
+
+      <!-- Ritual Cards -->
+      @if (!isLoading() && rituals().length > 0) {
+        <div class="divide-y divide-gray-200 dark:divide-gray-700">
+          @for (ritual of rituals(); track trackByRitualId($index, ritual)) {
+            <div class="px-4 py-4 sm:px-6 sm:py-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+              <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div class="flex-1 min-w-0 cursor-pointer" (click)="viewRitual(ritual)">
+                  <div class="flex items-center space-x-3">
+                    <!-- Ritual Icon -->
+                    <div class="flex-shrink-0">
+                      <div class="h-10 w-10 rounded-lg bg-gradient-to-br from-purple-400 to-purple-600 flex items-center justify-center">
+                        <svg class="h-6 w-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+                        </svg>
+                      </div>
+                    </div>
+
+                    <!-- Ritual Info -->
+                    <div class="flex-1 min-w-0">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                          {{ ritual.name }}
+                        </h3>
+                        @if (ritual.hotkeys) {
+                          <div class="inline-flex items-center gap-1">
+                            @for (key of parseHotkeys(ritual.hotkeys); track $index) {
+                              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium"
+                                [class.bg-indigo-100]="isModifierKey(key)"
+                                [class.dark:bg-indigo-900]="isModifierKey(key)"
+                                [class.text-indigo-800]="isModifierKey(key)"
+                                [class.dark:text-indigo-200]="isModifierKey(key)"
+                                [class.bg-gray-100]="!isModifierKey(key)"
+                                [class.dark:bg-gray-700]="!isModifierKey(key)"
+                                [class.text-gray-700]="!isModifierKey(key)"
+                                [class.dark:text-gray-300]="!isModifierKey(key)">
+                                {{ formatKeyDisplay(key) }}
+                              </span>
+                            }
+                          </div>
+                        }
+                        @if (getPersonalityName(ritual.personality_id)) {
+                          <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200">
+                            {{ getPersonalityName(ritual.personality_id) }}
+                          </span>
+                        } @else {
+                          <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">
+                            Global
+                          </span>
+                        }
+                      </div>
+                      <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                        {{ ritual.description }}
+                      </p>
+                      <p class="text-sm text-gray-500 dark:text-gray-500 mt-1 line-clamp-2 font-mono">
+                        {{ ritual.content }}
+                      </p>
+                      <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-gray-500 dark:text-gray-400">
+                        <span>Created {{ formatDate(ritual.created_at) }}</span>
+                        @if (ritual.updated_at !== ritual.created_at) {
+                          <span>Updated {{ formatDate(ritual.updated_at) }}</span>
+                        }
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="flex flex-wrap items-center gap-2 sm:ml-4 sm:shrink-0">
+                  <button (click)="copyToClipboard(ritual.content)"
+                    class="inline-flex items-center px-2.5 py-1.5 sm:px-3 sm:py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-xs sm:text-sm leading-4 font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    <svg class="-ml-0.5 mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                    </svg>
+                    Copy
+                  </button>
+                  <button (click)="viewRitual(ritual)"
+                    class="inline-flex items-center px-2.5 py-1.5 sm:px-3 sm:py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-xs sm:text-sm leading-4 font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    <svg class="-ml-0.5 mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
+                    </svg>
+                    Edit
+                  </button>
+                  <button (click)="deleteRitual(ritual)"
+                    class="inline-flex items-center px-2.5 py-1.5 sm:px-3 sm:py-2 border border-red-300 dark:border-red-700 shadow-sm text-xs sm:text-sm leading-4 font-medium rounded-md text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900 hover:bg-red-100 dark:hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">
+                    <svg class="-ml-0.5 mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                    </svg>
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          }
+        </div>
+      }
+
+      <!-- Empty State -->
+      @if (!isLoading() && rituals().length === 0) {
+        <div class="px-4 py-12 sm:px-6 text-center">
+          <svg class="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+          </svg>
+          <h3 class="mt-2 text-sm font-medium text-gray-900 dark:text-white">No skills</h3>
+          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Get started by creating your first reusable prompt skill.</p>
+          <div class="mt-6">
+            <button (click)="openCreateForm()"
+              class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 dark:bg-indigo-500 hover:bg-indigo-700 dark:hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+              <svg class="-ml-1 mr-2 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+              </svg>
+              Create Skill
+            </button>
+          </div>
+        </div>
+      }
+
+      <!-- Pagination -->
+      @if (!isLoading() && rituals().length > 0 && getTotalPages() > 1) {
+        <div class="bg-white dark:bg-gray-800 px-4 py-3 flex items-center justify-between border-t border-gray-200 dark:border-gray-700 sm:px-6">
+          <div class="flex-1 flex justify-between items-center gap-2 min-w-0">
+            <button (click)="onPageChange(currentPage() - 1)"
+              [disabled]="currentPage() <= 1"
+              class="relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed">
+              Previous
+            </button>
+
+            <div class="hidden md:flex space-x-2">
+              @for (page of [].constructor(getTotalPages()); track $index) {
+                <button (click)="onPageChange($index + 1)"
+                  class="relative inline-flex items-center px-4 py-2 border text-sm font-medium rounded-md transition-colors"
+                  [class.border-indigo-500]="currentPage() === $index + 1"
+                  [class.bg-indigo-50]="currentPage() === $index + 1"
+                  [class.dark:bg-indigo-900]="currentPage() === $index + 1"
+                  [class.text-indigo-600]="currentPage() === $index + 1"
+                  [class.dark:text-indigo-300]="currentPage() === $index + 1"
+                  [class.border-gray-300]="currentPage() !== $index + 1"
+                  [class.dark:border-gray-600]="currentPage() !== $index + 1"
+                  [class.text-gray-700]="currentPage() !== $index + 1"
+                  [class.dark:text-gray-300]="currentPage() !== $index + 1"
+                  [class.bg-white]="currentPage() !== $index + 1"
+                  [class.dark:bg-gray-700]="currentPage() !== $index + 1"
+                  [class.hover:bg-gray-50]="currentPage() !== $index + 1"
+                  [class.dark:hover:bg-gray-600]="currentPage() !== $index + 1">
+                  {{ $index + 1 }}
+                </button>
+              }
+            </div>
+
+            <button (click)="onPageChange(currentPage() + 1)"
+              [disabled]="currentPage() >= getTotalPages()"
+              class="relative inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed">
+              Next
+            </button>
+          </div>
+        </div>
+      }
+    </div>
+
+    <!-- Success Message -->
+    @if (successMessage()) {
+      <div class="fixed top-4 right-4 z-50">
+        <div class="bg-green-50 dark:bg-green-900 border border-green-200 dark:border-green-700 rounded-md p-4 shadow-lg">
+          <div class="flex">
+            <div class="flex-shrink-0">
+              <svg class="h-5 w-5 text-green-400 dark:text-green-300" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+              </svg>
+            </div>
+            <div class="ml-3">
+              <div class="text-sm text-green-700 dark:text-green-200">
+                {{ successMessage() }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    }
+  </div>
+</div>

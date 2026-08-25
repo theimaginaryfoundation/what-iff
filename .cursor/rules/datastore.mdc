@@ -1,0 +1,598 @@
+---
+description: Rules for persistent datastore logic
+globs: internal/datastore/*.go
+alwaysApply: false
+---
+# Datastore Implementation Guidelines
+
+## Overview
+Our datastore layer uses [Ent](mdc:https:/entgo.io) as the ORM and follows consistent patterns for data access. This document outlines the key patterns and best practices to follow when working with the datastore package.
+
+## General Architecture
+
+- **Package**: All datastore code lives in the `internal/datastore` package
+- **Models**: We use models from the `internal/models` package for input/output, never exposing Ent types directly
+- **Client**: The datastore uses an Ent client for database operations
+- **Logging**: We use `zap.Logger` for structured logging throughout the datastore
+
+```go
+// Base Datastore struct
+type Datastore struct {
+    dbClient *ent.Client
+    logger   *zap.Logger
+}
+
+func NewDatastore(dbClient *ent.Client, logger *zap.Logger) *Datastore {
+    return &Datastore{
+        dbClient: dbClient,
+        logger:   logger,
+    }
+}
+```
+
+## File Organization
+
+Each entity type should have its own file in the datastore package. For example:
+- `content_idea.go` - Content idea based on trending news and posts related to a niche
+- `content_brief.go` - A content development brief including SEO plan
+- `interview_question.go` - An interview question and the user's response for content development
+
+## Standard Methods
+
+Each entity type should implement the following standard methods:
+
+1. **Model Conversion Function**: Convert from Ent type to model type
+```go
+// Convert from Ent entity to model
+func toContentIdeaModel(e *ent.ContentIdea) *models.ContentIdea {
+    return &models.ContentIdea{
+        ID:        e.ID,
+        ProjectID: e.Edges.Project.ID,
+        Title:     e.Title,
+        Summary:   e.Summary,
+        SourceURL: e.SourceURL,
+        Approved:  e.Approved,
+        CreatedAt: e.CreatedAt,
+        UpdatedAt: e.UpdatedAt,
+    }
+}
+```
+
+2. **Create Method**: Single entity creation with transaction and authorization
+```go
+func (d *Datastore) CreateContentIdea(ctx context.Context, userID uuid.UUID, contentIdea models.ContentIdea) (*models.ContentIdea, error) {
+    // Start transaction
+    tx, err := d.dbClient.Tx(ctx)
+    if err != nil {
+        d.logger.Error("failed to start transaction", zap.Error(err))
+        return nil, err
+    }
+
+    // Rollback in case of error
+    defer func() {
+        if v := recover(); v != nil {
+            tx.Rollback()
+            panic(v)
+        }
+    }()
+
+    // Check if project exists and belongs to the user
+    projectExists, err := tx.Project.Query().
+        Where(
+            project.ID(contentIdea.ProjectID),
+            project.HasOwnerWith(
+                user.ID(userID),
+            ),
+        ).
+        Exist(ctx)
+
+    if err != nil {
+        d.logger.Error("failed to query project", zap.Error(err))
+        if rerr := tx.Rollback(); rerr != nil {
+            d.logger.Error("failed to rollback transaction", zap.Error(rerr))
+        }
+        return nil, err
+    }
+
+    if !projectExists {
+        d.logger.Error("project not found or user not authorized",
+            zap.String("project_id", contentIdea.ProjectID.String()),
+            zap.String("user_id", userID.String()))
+        if rerr := tx.Rollback(); rerr != nil {
+            d.logger.Error("failed to rollback transaction", zap.Error(rerr))
+        }
+        return nil, ErrProjectNotFound
+    }
+
+    // Create entity
+    entContentIdea, err := tx.ContentIdea.Create().
+        SetTitle(contentIdea.Title).
+        SetSummary(contentIdea.Summary).
+        SetSourceURL(contentIdea.SourceURL).
+        SetApproved(contentIdea.Approved).
+        SetProjectID(contentIdea.ProjectID).
+        Save(ctx)
+        
+    if err != nil {
+        d.logger.Error("failed to create content idea", zap.Error(err))
+        if rerr := tx.Rollback(); rerr != nil {
+            d.logger.Error("failed to rollback transaction", zap.Error(rerr))
+        }
+        return nil, err
+    }
+    
+    // Load relationships needed for model conversion
+    entContentIdea, err = tx.ContentIdea.Query().
+        Where(contentidea.ID(entContentIdea.ID)).
+        WithProject().
+        Only(ctx)
+
+    if err != nil {
+        d.logger.Error("failed to load project relationship", zap.Error(err))
+        if rerr := tx.Rollback(); rerr != nil {
+            d.logger.Error("failed to rollback transaction", zap.Error(rerr))
+        }
+        return nil, err
+    }
+    
+    // Commit transaction
+    if err := tx.Commit(); err != nil {
+        d.logger.Error("failed to commit transaction", zap.Error(err))
+        return nil, err
+    }
+    
+    // Return model
+    return toContentIdeaModel(entContentIdea), nil
+}
+```
+
+3. **Query Methods**: Methods to retrieve data with flexible filtering and pagination
+```go
+func (d *Datastore) ListContentIdeas(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.ContentIdeaFilters) (*models.PaginatedResponse, error) {
+    // Start transaction
+    tx, err := d.dbClient.Tx(ctx)
+    if err != nil {
+        d.logger.Error("failed to start transaction", zap.Error(err))
+        return nil, err
+    }
+
+    // Rollback in case of error
+    defer func() {
+        if v := recover(); v != nil {
+            tx.Rollback()
+            panic(v)
+        }
+    }()
+
+    // Build query with user authorization
+    query := tx.ContentIdea.Query().
+        Where(
+            contentidea.HasProjectWith(
+                project.HasOwnerWith(
+                    user.ID(userID),
+                ),
+            ),
+        ).
+        WithProject()
+
+    // Apply filters if provided
+    if filters.ProjectID != nil {
+        query = query.Where(contentidea.HasProjectWith(project.ID(*filters.ProjectID)))
+    }
+    
+    if filters.Approved != nil {
+        query = query.Where(contentidea.ApprovedEQ(*filters.Approved))
+    }
+    
+    if filters.Title != nil && *filters.Title != "" {
+        query = query.Where(contentidea.TitleContainsFold(*filters.Title))
+    }
+
+    // Get total count
+    totalCount, err := query.Count(ctx)
+    if err != nil {
+        d.logger.Error("failed to count content ideas", zap.Error(err))
+        if rerr := tx.Rollback(); rerr != nil {
+            d.logger.Error("failed to rollback transaction", zap.Error(rerr))
+        }
+        return nil, err
+    }
+
+    // Apply pagination
+    if pageNum < 1 {
+        pageNum = 1
+    }
+    if pageSize < 1 {
+        pageSize = 10
+    }
+    
+    offset := (pageNum - 1) * pageSize
+    query = query.
+        Offset(offset).
+        Limit(pageSize).
+        Order(ent.Desc(contentidea.FieldCreatedAt))
+
+    // Execute query
+    entContentIdeas, err := query.All(ctx)
+    if err != nil {
+        d.logger.Error("failed to query content ideas", zap.Error(err))
+        if rerr := tx.Rollback(); rerr != nil {
+            d.logger.Error("failed to rollback transaction", zap.Error(rerr))
+        }
+        return nil, err
+    }
+
+    // Convert to model types
+    contentIdeasModels := make([]any, len(entContentIdeas))
+    for i, entContentIdea := range entContentIdeas {
+        contentIdeasModels[i] = toContentIdeaModel(entContentIdea)
+    }
+
+    // Commit transaction
+    if err := tx.Commit(); err != nil {
+        d.logger.Error("failed to commit transaction", zap.Error(err))
+        return nil, err
+    }
+
+    return &models.PaginatedResponse{
+        Results:    contentIdeasModels,
+        TotalCount: totalCount,
+        Page:       pageNum,
+    }, nil
+}
+```
+
+4. **Get By ID Method**: Retrieve a single entity with authorization check
+```go
+func (d *Datastore) GetContentIdea(ctx context.Context, userID, id uuid.UUID) (*models.ContentIdea, error) {
+    // Start transaction
+    tx, err := d.dbClient.Tx(ctx)
+    if err != nil {
+        d.logger.Error("failed to start transaction", zap.Error(err))
+        return nil, err
+    }
+
+    // Rollback in case of error
+    defer func() {
+        if v := recover(); v != nil {
+            tx.Rollback()
+            panic(v)
+        }
+    }()
+
+    // Query content idea with authorization check
+    entContentIdea, err := tx.ContentIdea.Query().
+        Where(
+            contentidea.ID(id),
+            contentidea.HasProjectWith(
+                project.HasOwnerWith(
+                    user.ID(userID),
+                ),
+            ),
+        ).
+        WithProject().
+        Only(ctx)
+
+    if err != nil {
+        if ent.IsNotFound(err) {
+            d.logger.Error("content idea not found or user not authorized",
+                zap.String("content_idea_id", id.String()),
+                zap.String("user_id", userID.String()))
+            if rerr := tx.Rollback(); rerr != nil {
+                d.logger.Error("failed to rollback transaction", zap.Error(rerr))
+            }
+            return nil, ErrContentIdeaNotFound
+        }
+        
+        d.logger.Error("failed to query content idea", zap.Error(err))
+        if rerr := tx.Rollback(); rerr != nil {
+            d.logger.Error("failed to rollback transaction", zap.Error(rerr))
+        }
+        return nil, err
+    }
+
+    // Commit transaction
+    if err := tx.Commit(); err != nil {
+        d.logger.Error("failed to commit transaction", zap.Error(err))
+        return nil, err
+    }
+
+    return toContentIdeaModel(entContentIdea), nil
+}
+```
+
+5. **Update Method**: Update an entity with authorization check
+```go
+func (d *Datastore) UpdateContentIdea(ctx context.Context, userID uuid.UUID, contentIdea models.ContentIdea) (*models.ContentIdea, error) {
+    // Start transaction
+    tx, err := d.dbClient.Tx(ctx)
+    if err != nil {
+        d.logger.Error("failed to start transaction", zap.Error(err))
+        return nil, err
+    }
+
+    // Rollback in case of error
+    defer func() {
+        if v := recover(); v != nil {
+            tx.Rollback()
+            panic(v)
+        }
+    }()
+
+    // Check if content idea exists and belongs to the user
+    exists, err := tx.ContentIdea.Query().
+        Where(
+            contentidea.ID(contentIdea.ID),
+            contentidea.HasProjectWith(
+                project.HasOwnerWith(
+                    user.ID(userID),
+                ),
+            ),
+        ).
+        Exist(ctx)
+
+    if err != nil {
+        d.logger.Error("failed to query content idea", zap.Error(err))
+        if rerr := tx.Rollback(); rerr != nil {
+            d.logger.Error("failed to rollback transaction", zap.Error(rerr))
+        }
+        return nil, err
+    }
+
+    if !exists {
+        d.logger.Error("content idea not found or user not authorized",
+            zap.String("content_idea_id", contentIdea.ID.String()),
+            zap.String("user_id", userID.String()))
+        if rerr := tx.Rollback(); rerr != nil {
+            d.logger.Error("failed to rollback transaction", zap.Error(rerr))
+        }
+        return nil, ErrContentIdeaNotFound
+    }
+
+    // Update content idea
+    entContentIdea, err := tx.ContentIdea.UpdateOneID(contentIdea.ID).
+        SetTitle(contentIdea.Title).
+        SetSummary(contentIdea.Summary).
+        SetSourceURL(contentIdea.SourceURL).
+        SetApproved(contentIdea.Approved).
+        Save(ctx)
+
+    if err != nil {
+        d.logger.Error("failed to update content idea", zap.Error(err))
+        if rerr := tx.Rollback(); rerr != nil {
+            d.logger.Error("failed to rollback transaction", zap.Error(rerr))
+        }
+        return nil, err
+    }
+
+    // Load the project relationship
+    entContentIdea, err = tx.ContentIdea.Query().
+        Where(contentidea.ID(entContentIdea.ID)).
+        WithProject().
+        Only(ctx)
+
+    if err != nil {
+        d.logger.Error("failed to load project relationship", zap.Error(err))
+        if rerr := tx.Rollback(); rerr != nil {
+            d.logger.Error("failed to rollback transaction", zap.Error(rerr))
+        }
+        return nil, err
+    }
+
+    // Commit transaction
+    if err := tx.Commit(); err != nil {
+        d.logger.Error("failed to commit transaction", zap.Error(err))
+        return nil, err
+    }
+
+    return toContentIdeaModel(entContentIdea), nil
+}
+```
+
+6. **Delete Method**: Delete an entity with authorization check
+```go
+func (d *Datastore) DeleteContentIdea(ctx context.Context, userID, id uuid.UUID) error {
+    // Start transaction
+    tx, err := d.dbClient.Tx(ctx)
+    if err != nil {
+        d.logger.Error("failed to start transaction", zap.Error(err))
+        return err
+    }
+
+    // Rollback in case of error
+    defer func() {
+        if v := recover(); v != nil {
+            tx.Rollback()
+            panic(v)
+        }
+    }()
+
+    // Check if content idea exists and belongs to the user
+    exists, err := tx.ContentIdea.Query().
+        Where(
+            contentidea.ID(id),
+            contentidea.HasProjectWith(
+                project.HasOwnerWith(
+                    user.ID(userID),
+                ),
+            ),
+        ).
+        Exist(ctx)
+
+    if err != nil {
+        d.logger.Error("failed to query content idea", zap.Error(err))
+        if rerr := tx.Rollback(); rerr != nil {
+            d.logger.Error("failed to rollback transaction", zap.Error(rerr))
+        }
+        return err
+    }
+
+    if !exists {
+        d.logger.Error("content idea not found or user not authorized",
+            zap.String("content_idea_id", id.String()),
+            zap.String("user_id", userID.String()))
+        if rerr := tx.Rollback(); rerr != nil {
+            d.logger.Error("failed to rollback transaction", zap.Error(rerr))
+        }
+        return ErrContentIdeaNotFound
+    }
+
+    // Delete content idea
+    err = tx.ContentIdea.DeleteOneID(id).Exec(ctx)
+    if err != nil {
+        d.logger.Error("failed to delete content idea", zap.Error(err))
+        if rerr := tx.Rollback(); rerr != nil {
+            d.logger.Error("failed to rollback transaction", zap.Error(rerr))
+        }
+        return err
+    }
+
+    // Commit transaction
+    if err := tx.Commit(); err != nil {
+        d.logger.Error("failed to commit transaction", zap.Error(err))
+        return err
+    }
+
+    return nil
+}
+```
+
+## Error Handling
+
+- Define common errors in `errors.go`
+- Always log errors with context information
+- Use specific error types for common error conditions
+- Properly handle transaction rollbacks
+
+```go
+// In errors.go
+var (
+    ErrContentIdeaNotFound = errors.New("content idea not found")
+    ErrProjectNotFound     = errors.New("project not found")
+    ErrUnauthorized        = errors.New("user not authorized for this operation")
+)
+
+// Usage in methods
+if !exists {
+    d.logger.Error("content idea not found or user not authorized",
+        zap.String("content_idea_id", id.String()),
+        zap.String("user_id", userID.String()))
+    if rerr := tx.Rollback(); rerr != nil {
+        d.logger.Error("failed to rollback transaction", zap.Error(rerr))
+    }
+    return ErrContentIdeaNotFound
+}
+```
+
+## Authorization Patterns
+
+Always ensure that users can only access their own data through the appropriate ownership relationship. Use Ent's edge predicates to enforce this:
+
+```go
+// Check ownership via project relationship
+contentidea.HasProjectWith(
+    project.HasOwnerWith(
+        user.ID(userID),
+    ),
+)
+```
+
+## Pagination and Filtering
+
+Implement standard pagination with offset and limit:
+
+```go
+// Apply pagination
+if pageNum < 1 {
+    pageNum = 1
+}
+if pageSize < 1 {
+    pageSize = 10
+}
+
+offset := (pageNum - 1) * pageSize
+query = query.
+    Offset(offset).
+    Limit(pageSize).
+    Order(ent.Desc(contentidea.FieldCreatedAt))
+```
+
+Return paginated results using the standard `models.PaginatedResponse` type:
+
+```go
+return &models.PaginatedResponse{
+    Results:    contentIdeasModels,
+    TotalCount: totalCount,
+    Page:       pageNum,
+}, nil
+```
+
+Apply filters conditionally when provided:
+
+```go
+// Apply filters if provided
+if filters.ProjectID != nil {
+    query = query.Where(contentidea.HasProjectWith(project.ID(*filters.ProjectID)))
+}
+
+if filters.Approved != nil {
+    query = query.Where(contentidea.ApprovedEQ(*filters.Approved))
+}
+
+if filters.Title != nil && *filters.Title != "" {
+    query = query.Where(contentidea.TitleContainsFold(*filters.Title))
+}
+```
+
+## Testing
+
+Write unit tests for complex logic:
+
+1. **Table-Driven Tests**: Use table-driven tests for functions with multiple test cases
+```go
+func TestGetMatchingAgeGroups(t *testing.T) {
+    tests := []struct {
+        name     string
+        minAge   int
+        maxAge   int
+        expected []string
+    }{
+        {
+            name:   "Single age group - exact match",
+            minAge: 25,
+            maxAge: 29,
+            expected: []string{
+                "25 to 29",
+            },
+        },
+        // ... more test cases
+    }
+    
+    for _, tc := range tests {
+        t.Run(tc.name, func(t *testing.T) {
+            result := getMatchingAgeGroups(tc.minAge, tc.maxAge)
+            
+            // Sort both slices for comparison
+            sort.Strings(result)
+            sort.Strings(tc.expected)
+            
+            if !reflect.DeepEqual(result, tc.expected) {
+                t.Errorf("Expected %v, got %v", tc.expected, result)
+            }
+        })
+    }
+}
+```
+
+2. **Mock Database**: For integration tests, consider using a mock database or SQLite in-memory database
+
+## Best Practices
+
+1. **Transactions**: Always use transactions for data modifications
+2. **Input Validation**: Validate required parameters before executing database operations
+3. **Consistent Logging**: Log errors with appropriate context
+4. **Model Conversion**: Keep entity-to-model conversion functions consistent
+5. **Error Handling**: Handle all database errors and transaction rollbacks properly
+6. **Query Optimization**: Use appropriate Ent predicates for efficient queries
+7. **Authorization**: Always check that the user is authorized to access/modify the requested data
+8. **Edge Loading**: Always load required edges for model conversion

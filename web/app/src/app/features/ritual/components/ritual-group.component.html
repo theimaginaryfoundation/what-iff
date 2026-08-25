@@ -1,0 +1,13 @@
+<section class="space-y-2">
+  <h3 class="text-sm font-semibold text-text-primary">{{ group().label }}</h3>
+  <div class="space-y-2">
+    @for (ritual of group().rituals; track ritual.id) {
+      <app-ritual-row
+        [ritual]="ritual"
+        [selected]="isSelected(ritual.id)"
+        (open)="open.emit($event)"
+        (delete)="delete.emit($event)"
+        (toggleSelected)="toggleSelected.emit($event)" />
+    }
+  </div>
+</section>

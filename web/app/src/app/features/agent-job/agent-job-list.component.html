@@ -1,0 +1,223 @@
+<div class="min-h-screen bg-gray-50 dark:bg-gray-900">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">Agent Jobs</h1>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+          Manage scheduled tasks created from your chats.
+        </p>
+      </div>
+    </div>
+
+    @if (errorMessage()) {
+      <div class="mb-4 p-4 rounded-lg bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-300 text-sm">
+        {{ errorMessage() }}
+      </div>
+    }
+    @if (successMessage()) {
+      <div class="mb-4 p-4 rounded-lg bg-green-50 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-sm">
+        {{ successMessage() }}
+      </div>
+    }
+
+    <!-- Filters -->
+    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-6">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Search</label>
+          <input
+            [ngModel]="searchFilter()"
+            (ngModelChange)="searchFilter.set($event)"
+            (keyup.enter)="onFiltersApplied()"
+            type="text"
+            placeholder="Title, prompt, schedule..."
+            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+            />
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
+          <select
+            [ngModel]="statusFilter()"
+            (ngModelChange)="statusFilter.set($event)"
+            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+            >
+            <option value="">All</option>
+            <option value="active">Active</option>
+            <option value="paused">Paused</option>
+            <option value="complete">Complete</option>
+            <option value="failed">Failed</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Schedule type</label>
+          <select
+            [ngModel]="scheduleTypeFilter()"
+            (ngModelChange)="scheduleTypeFilter.set($event)"
+            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm focus:ring-indigo-500 focus:border-indigo-500"
+            >
+            <option value="">All</option>
+            <option value="at">One-off</option>
+            <option value="cron">Recurring</option>
+          </select>
+        </div>
+
+        <div class="flex items-end gap-2">
+          <button
+            (click)="onFiltersApplied()"
+            class="w-full md:w-auto px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg focus:ring-4 focus:ring-indigo-300 dark:focus:ring-indigo-800"
+            >
+            Apply
+          </button>
+          <button
+            (click)="clearFilters()"
+            class="w-full md:w-auto px-4 py-2 text-sm font-medium text-gray-900 bg-white hover:bg-gray-50 rounded-lg border border-gray-300 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-600 dark:hover:bg-gray-700"
+            >
+            Clear
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+      @if (isLoading()) {
+        <div class="p-6 text-sm text-gray-600 dark:text-gray-400">Loading…</div>
+      }
+
+      @if (!isLoading() && jobs().length === 0) {
+        <div class="p-6 text-sm text-gray-600 dark:text-gray-400">
+          No jobs found.
+        </div>
+      }
+
+      @if (!isLoading() && jobs().length > 0) {
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm text-left text-gray-600 dark:text-gray-300">
+            <thead class="text-xs uppercase bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+              <tr>
+                <th class="px-4 py-3">Title</th>
+                <th class="px-4 py-3">Status</th>
+                <th class="px-4 py-3">Schedule</th>
+                <th class="px-4 py-3">Next run</th>
+                <th class="px-4 py-3">Chat</th>
+                <th class="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (job of jobs(); track trackByJobId($index, job)) {
+                <tr class="border-t border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                  <td class="px-4 py-3">
+                    <div class="font-medium text-gray-900 dark:text-white">{{ job.title || 'Untitled' }}</div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ job.schedule_input }}</div>
+                  </td>
+                  <td class="px-4 py-3">
+                    <span class="px-2 py-1 rounded-full text-xs font-medium"
+                [ngClass]="{
+                  'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300': job.status === 'active',
+                  'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300': job.status === 'paused',
+                  'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300': job.status === 'complete',
+                  'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300': job.status === 'failed'
+                }"
+                      >
+                      {{ job.status }}
+                    </span>
+                  </td>
+                  <td class="px-4 py-3">
+                    <div class="text-xs">
+                      <span class="font-medium">{{ job.schedule_type }}</span>
+                      <span class="text-gray-500 dark:text-gray-400"> · {{ job.timezone }}</span>
+                    </div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      @if (job.schedule_type === 'cron') {
+                        <span>cron: {{ job.schedule || '—' }}</span>
+                      }
+                      @if (job.schedule_type === 'at') {
+                        <span>run_at: {{ job.run_at || '—' }}</span>
+                      }
+                    </div>
+                  </td>
+                  <td class="px-4 py-3">{{ formatDate(job.next_run_at) }}</td>
+                  <td class="px-4 py-3">
+                    @if (job.chat_id) {
+                      <button
+                        (click)="openChat(job)"
+                        class="text-indigo-600 dark:text-indigo-400 hover:underline"
+                        >
+                        Open
+                      </button>
+                    }
+                    @if (!job.chat_id) {
+                      <span class="text-gray-500 dark:text-gray-400">—</span>
+                    }
+                  </td>
+                  <td class="px-4 py-3 text-right">
+                    <div class="inline-flex gap-2">
+                      <button
+                        (click)="viewJob(job)"
+                        class="px-3 py-1.5 text-xs font-medium text-gray-900 bg-white hover:bg-gray-50 rounded-lg border border-gray-300 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-600 dark:hover:bg-gray-700"
+                        >
+                        View
+                      </button>
+                      @if (canRunNow(job)) {
+                        <button
+                          (click)="runNow(job)"
+                          [disabled]="isRunningNow(job.id)"
+                          class="px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50"
+                          >
+                          {{ isRunningNow(job.id) ? 'Running…' : 'Run Now' }}
+                        </button>
+                      }
+                      @if (job.status === 'active' || job.status === 'paused') {
+                        <button
+                          (click)="togglePause(job)"
+                          class="px-3 py-1.5 text-xs font-medium text-white rounded-lg"
+                          [ngClass]="job.status === 'active' ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'"
+                          >
+                          {{ job.status === 'active' ? 'Pause' : 'Resume' }}
+                        </button>
+                      }
+                      <button
+                        (click)="deleteJob(job)"
+                        class="px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg"
+                        >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </div>
+
+    <!-- Pagination -->
+    @if (!isLoading() && totalCount() > pageSize()) {
+      <div class="flex items-center justify-between mt-4 text-sm text-gray-600 dark:text-gray-400">
+        <div>
+          Page {{ currentPage() }} of {{ getTotalPages() }}
+        </div>
+        <div class="flex gap-2">
+          <button
+            [disabled]="currentPage() <= 1"
+            (click)="onPageChange(currentPage() - 1)"
+            class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 disabled:opacity-50"
+            >
+            Prev
+          </button>
+          <button
+            [disabled]="currentPage() >= getTotalPages()"
+            (click)="onPageChange(currentPage() + 1)"
+            class="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 disabled:opacity-50"
+            >
+            Next
+          </button>
+        </div>
+      </div>
+    }
+  </div>
+</div>
+

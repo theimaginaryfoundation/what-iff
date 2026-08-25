@@ -1,0 +1,68 @@
+/* Global stylesheet — Tailwind v4 entrypoint.
+ *
+ * This project is fully on Tailwind v4 (see `package.json` `tailwindcss` and
+ * `@tailwindcss/postcss`). There is intentionally NO `tailwind.config.js`:
+ * everything Tailwind needs (theme, plugins, sources, dark variant) is
+ * declared in CSS below or in the design-system files under `./styles/`.
+ *
+ *   theme tokens   → src/styles/_tailwind-theme.scss (`@theme inline { ... }`)
+ *   plugins        → `@plugin` lines in this file
+ *   content scan   → `@source` lines in this file (plus v4 auto-detection
+ *                    from the directory containing this CSS file, which
+ *                    already covers `src/**`)
+ *   dark variant   → `@custom-variant dark` line below
+ */
+@import "tailwindcss";
+
+/* Make content scanning explicit so future readers can see what utilities
+ * are generated against. v4 auto-detects sources beneath this CSS file's
+ * directory; the extra entries below cover assets that live outside it. */
+@source "./";
+@source "../node_modules/flowbite";
+
+/* Plugins (v4 imports plugins from CSS via `@plugin`, not via tailwind.config.js). */
+@plugin "flowbite/plugin";
+@plugin "@tailwindcss/typography";
+
+/* Dark variant: Concept D uses `data-theme="dark"` on <html>. The `:where()`
+ * keeps specificity at 0 so user/component selectors still win when needed. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* Flowbite default theme tokens (legacy CSS @import; still required for
+ * Flowbite's own component styles — Phase 16 will revisit Flowbite usage). */
+@import "flowbite/src/themes/default";
+
+/* Phase 01 design-system: tokens, typography, themes, motion, Tailwind bridge. */
+@import "./styles/index";
+
+.ui-tooltip {
+  background: color-mix(in srgb, var(--color-surface-inverse, #0f172a) 94%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border-base, #334155) 70%, transparent);
+  border-radius: 0.5rem;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.22);
+  color: var(--color-text-on-inverse, #f8fafc);
+  font-size: 0.75rem;
+  line-height: 1.25;
+  max-width: min(22rem, calc(100vw - 1rem));
+  padding: 0.35rem 0.5rem;
+  pointer-events: none;
+  position: fixed;
+  white-space: nowrap;
+  z-index: 1200;
+}
+
+.ui-tooltip--top {
+  transform: translate(-50%, -100%);
+}
+
+.ui-tooltip--bottom {
+  transform: translate(-50%, 0);
+}
+
+.ui-tooltip--left {
+  transform: translate(-100%, -50%);
+}
+
+.ui-tooltip--right {
+  transform: translate(0, -50%);
+}

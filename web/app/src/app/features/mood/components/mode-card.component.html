@@ -1,0 +1,77 @@
+<article class="mode-card">
+  <div class="mode-card__header">
+    <div class="mode-card__title-group">
+      <h3>{{ card().title }}</h3>
+      <p>{{ card().description }}</p>
+      <div class="mode-card__chips">
+        <span>{{ card().toolsSilencedLabel }}</span>
+        <span>{{ card().skillsLabel }}</span>
+        <span>{{ card().jobsLabel }}</span>
+      </div>
+    </div>
+    <div class="mode-card__actions">
+      <button type="button" title="Edit mode basics" aria-label="Edit mode basics" (click)="edit.emit(card().mood.id)">
+        <ui-edit-icon [size]="12" />
+      </button>
+      <button
+        type="button"
+        class="mode-card__action--danger"
+        title="Delete"
+        aria-label="Delete mode"
+        (click)="delete.emit({ moodId: card().mood.id, event: $event })">
+        <ui-trash-icon [size]="12" />
+      </button>
+    </div>
+  </div>
+  <div class="mode-card__footer">
+    <div class="mode-card__associations">
+      <div class="mode-card__association-carousel">
+        @for (personality of card().personalities; track personality.id) {
+          <div class="mode-card__carousel-card">
+            <button
+              type="button"
+              class="mode-card__carousel-remove"
+              [attr.aria-label]="'Remove ' + personality.name + ' from mode'"
+              (click)="removeAssociation.emit({ moodId: card().mood.id, personalityId: personality.id, event: $event })">
+              ×
+            </button>
+            @if (personality.coverUrl) {
+              @if (personality.coverUrl | authImage | async; as src) {
+                <img class="mode-card__carousel-image" [src]="src" [alt]="personality.name" />
+              } @else {
+                <div class="mode-card__carousel-placeholder" [style.background]="personality.accentColor">
+                  <span class="mode-card__carousel-initials">{{ personality.initials }}</span>
+                </div>
+              }
+            } @else {
+              <div class="mode-card__carousel-placeholder" [style.background]="personality.accentColor">
+                <span class="mode-card__carousel-initials">{{ personality.initials }}</span>
+              </div>
+            }
+            <span class="mode-card__carousel-name">{{ personality.name }}</span>
+          </div>
+        } @empty {
+          <span class="mode-card__empty-personality">Add personality</span>
+        }
+        <button
+          type="button"
+          class="mode-card__carousel-add-card"
+          (click)="openAssociationPicker.emit({ moodId: card().mood.id, event: $event })">
+          <span class="mode-card__carousel-add-avatar">+</span>
+          <span class="mode-card__carousel-add-label">Add personality</span>
+        </button>
+      </div>
+      @if (isAssociationPickerOpen()) {
+        <app-mode-association-picker
+          [query]="associationPickerQuery()"
+          [dropdownOpen]="associationDropdownOpen()"
+          [options]="associationOptions()"
+          (queryChange)="associationQueryChange.emit($event)"
+          (openDropdown)="associationDropdownOpenRequest.emit()"
+          (closeDropdown)="associationDropdownCloseRequest.emit()"
+          (selectPersonality)="addAssociation.emit({ moodId: card().mood.id, personalityId: $event })"
+          (close)="closeAssociationPicker.emit()" />
+      }
+    </div>
+  </div>
+</article>

@@ -1,0 +1,122 @@
+<form class="space-y-4" (ngSubmit)="submit()">
+  <label class="block text-sm text-text-secondary">
+    Title
+    <input
+      class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+      [ngModel]="title()"
+      (ngModelChange)="title.set($event)"
+      name="title" />
+  </label>
+
+  <label class="block text-sm text-text-secondary">
+    Prompt
+    <textarea
+      class="mt-1 min-h-36 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+      [ngModel]="prompt()"
+      (ngModelChange)="prompt.set($event)"
+      name="prompt"></textarea>
+  </label>
+
+  <div class="grid gap-3 md:grid-cols-2">
+    <label class="text-sm text-text-secondary">
+      Chat
+      <select
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        [ngModel]="chatId()"
+        (ngModelChange)="chatId.set($event)"
+        name="chatId">
+        <option value="">No chat association</option>
+        @for (chat of chats(); track chat.id) {
+          <option [value]="chat.id">{{ chat.name || 'Untitled chat' }}</option>
+        }
+      </select>
+    </label>
+
+    <label class="text-sm text-text-secondary">
+      Personality override
+      <select
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        [ngModel]="personalityId()"
+        (ngModelChange)="personalityId.set($event)"
+        name="personalityId">
+        <option value="">Use chat default</option>
+        @for (personality of personalities(); track personality.id) {
+          <option [value]="personality.id">{{ personality.name }}</option>
+        }
+      </select>
+    </label>
+
+    <label class="text-sm text-text-secondary">
+      Model override
+      <select
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        [ngModel]="modelId()"
+        (ngModelChange)="modelId.set($event)"
+        name="modelId">
+        <option value="">Use chat default</option>
+        @for (model of models(); track model.id) {
+          <option [value]="model.id">{{ model.display_name }}</option>
+        }
+      </select>
+    </label>
+  </div>
+
+  <label class="block text-sm text-text-secondary">
+    Schedule input
+    <input
+      id="schedule-input"
+      class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+      [ngModel]="scheduleInput()"
+      (ngModelChange)="onScheduleChange($event)"
+      [attr.aria-describedby]="'schedule-parse-help schedule-parse-preview'"
+      name="scheduleInput" />
+  </label>
+  <p id="schedule-parse-help" class="text-xs text-text-muted">
+    Enter natural language or cron text. Parsing preview updates as you type.
+  </p>
+
+  <div class="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+    <label class="block text-sm text-text-secondary">
+      Timezone
+      <input
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        [ngModel]="timezone()"
+        (ngModelChange)="onTimezoneChange($event)"
+        name="timezone" />
+    </label>
+    <button
+      type="button"
+      class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary"
+      [disabled]="previewLoading()"
+      (click)="requestPreview()">
+      {{ previewLoading() ? 'Previewing…' : 'Preview schedule' }}
+    </button>
+  </div>
+
+  <div id="schedule-parse-preview" class="rounded-xl border border-border-base bg-surface-base p-3 text-xs">
+    @if (preview()) {
+      <p class="font-medium text-text-primary">{{ preview()!.human_summary }}</p>
+      <ul class="mt-2 space-y-1 text-text-secondary">
+        @for (run of preview()!.next_runs; track run) {
+          <li>{{ run }}</li>
+        }
+      </ul>
+    } @else {
+      <p class="text-text-muted">No preview yet.</p>
+    }
+  </div>
+
+  <div class="flex justify-end">
+    <div class="flex items-center gap-2">
+      @if (hasUnsavedEdits()) {
+        <span class="text-xs text-amber-600 dark:text-amber-400">Unsaved edits</span>
+      }
+      <button
+        type="submit"
+        class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-primary disabled:opacity-50"
+        [disabled]="saving() || !prompt().trim() || !scheduleInput().trim()">
+        {{ saving() ? (createMode() ? 'Creating…' : 'Saving…') : (createMode() ? 'Create job' : 'Save changes') }}
+      </button>
+    </div>
+  </div>
+</form>
