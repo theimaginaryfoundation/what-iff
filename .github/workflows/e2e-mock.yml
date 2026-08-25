@@ -741,6 +741,13 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # The downloaded -cover profiles reference source paths under generated
+      # Ent code. Without this, `go tool cover -func` dies on the first
+      # generated file it can't find and `coverage-summary` reports that
+      # failure as a false 94.6%-style total instead of the real one.
+      - name: Generate Ent code
+        run: go generate ./ent
+
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
@@ -781,10 +788,26 @@ jobs:
         id: gocov
         run: |
           mkdir -p coverage merged-gocov
+          # Derived from SHARD_TOTAL rather than hardcoded, the same way the
+          # frontend merge below builds its `dirs` list — otherwise adding a
+          # shard means updating the matrix, the shard argument, *and* this
+          # list, and forgetting the last one silently drops that shard's
+          # coverage (a failed shard 3 or 4 previously went unnoticed here).
           missing=""
-          for name in gocov-1 gocov-2 gocov-visual; do
-            [ -d "gocov/$name" ] || missing="$missing $name"
+          dirs=""
+          for i in $(seq 1 "$SHARD_TOTAL"); do
+            name="gocov-$i"
+            if [ -d "gocov/$name" ]; then
+              dirs="$dirs gocov/$name"
+            else
+              missing="$missing $name"
+            fi
           done
+          if [ -d "gocov/gocov-visual" ]; then
+            dirs="$dirs gocov/gocov-visual"
+          else
+            missing="$missing gocov-visual"
+          fi
           if [ -n "$missing" ]; then
             if [ "${{ needs.test.result }}" = "skipped" ]; then
               echo "test job was skipped entirely (unrelated label event) — nothing to merge"
@@ -794,7 +817,7 @@ jobs:
             echo "❌ missing expected Go coverage artifact(s):$missing"
             exit 1
           fi
-          go tool covdata merge -i=gocov/gocov-1,gocov/gocov-2,gocov/gocov-visual -o merged-gocov
+          go tool covdata merge -i="$(echo $dirs | tr ' ' ',')" -o merged-gocov
           go tool covdata textfmt -i=merged-gocov -o coverage/go-e2e.out
           echo "merged=true" >> "$GITHUB_OUTPUT"
 

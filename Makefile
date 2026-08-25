@@ -354,8 +354,21 @@ coverage-summary: ## Print a Go coverage profile's total (PROFILE=coverage/go-un
 	@test -f "$(PROFILE)" || { echo "❌ no such coverage profile: $(PROFILE)"; exit 1; }
 	@# `go tool cover -func` is the only correct reader here: a -coverpkg
 	@# profile repeats each block once per test binary, so summing the file
-	@# arithmetically undercounts badly.
-	@go tool cover -func="$(PROFILE)" | tail -1 | awk '{print "$(PROFILE): " $$NF}'
+	@# arithmetically undercounts badly. It streams one line per function and
+	@# exits 2 on the first source file it can't find (e.g. generated Ent
+	@# code that was never regenerated) — piping straight to `tail -1`
+	@# silently prints that last function's percentage as if it were the
+	@# total, with the failing exit code thrown away. Capture output and
+	@# status instead, and require the last line to actually start with
+	@# `total:`.
+	@output=$$(go tool cover -func="$(PROFILE)" 2>&1); status=$$?; \
+	last=$$(printf '%s\n' "$$output" | tail -1); \
+	if [ $$status -ne 0 ] || [ "$${last#total:}" = "$$last" ]; then \
+		echo "❌ go tool cover -func failed for $(PROFILE):"; \
+		printf '%s\n' "$$output" | tail -5; \
+		exit 1; \
+	fi; \
+	printf '%s: %s\n' "$(PROFILE)" "$$(printf '%s\n' "$$last" | awk '{print $$NF}')"
 
 .PHONY: test-ci-local
 test-ci-local: ## Real-inference smoke test against a local model server (CI opt-in job)
