@@ -63,7 +63,7 @@
     "dompurify": "^3.4.14",
     "flowbite": "^4.0.2",
     "jszip": "^3.10.1",
-    "katex": "^0.16.47",
+    "katex": "^0.18.4",
     "marked": "^18.0.10",
     "marked-katex-extension": "^5.1.12",
     "ngx-markdown": "^22.0.0",
@@ -88,7 +88,7 @@
     "monocart-coverage-reports": "^2.13.0",
     "openapi-fetch": "^0.17.0",
     "openapi-typescript": "^7.13.0",
-    "typescript": "~6.0.3",
+    "typescript": "~7.0.2",
     "typescript-eslint": "^8.67.0",
     "vitest": "^4.1.11"
   }
