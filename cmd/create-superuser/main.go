@@ -11,8 +11,10 @@ package main
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -41,6 +43,34 @@ var localDBHosts = map[string]bool{
 	"host.docker.internal": true,
 }
 
+// deps bundles create-superuser's external dependencies behind seams so run
+// can be driven end-to-end in tests without a TTY, environment, or a real
+// database. defaultDeps wires them to the real world; main is a thin
+// exit-code wrapper around run.
+type deps struct {
+	getenv        func(string) string
+	isTerminal    func() bool
+	stdin         io.Reader
+	stdout        io.Writer
+	readPassword  func() ([]byte, error)
+	newLogger     func() (*zap.Logger, error)
+	newDBClient   func(*zap.Logger) (*ent.Client, *sql.DB, error)
+	migrateSchema func(context.Context, *ent.Client) error
+}
+
+func defaultDeps() deps {
+	return deps{
+		getenv:        os.Getenv,
+		isTerminal:    func() bool { return term.IsTerminal(int(os.Stdin.Fd())) },
+		stdin:         os.Stdin,
+		stdout:        os.Stdout,
+		readPassword:  func() ([]byte, error) { return term.ReadPassword(int(os.Stdin.Fd())) },
+		newLogger:     logging.NewLogger,
+		newDBClient:   database.NewClient,
+		migrateSchema: func(ctx context.Context, c *ent.Client) error { return c.Schema.Create(ctx) },
+	}
+}
+
 func main() {
 	var envFile string
 	flag.StringVar(&envFile, "env", ".env", "env file path")
@@ -50,46 +80,62 @@ func main() {
 		log.Printf("Warning: Error loading .env file: %v", err)
 	}
 
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		log.Fatal("create-superuser is interactive-only and requires a TTY; there is intentionally no -password flag or credential env var")
+	if err := run(defaultDeps()); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// run holds all of create-superuser's actual logic. It returns an error
+// instead of calling log.Fatal/os.Exit directly so tests can drive every
+// guard clause and branch without terminating the test process; main is the
+// only place that turns a non-nil error into a process exit.
+func run(d deps) error {
+	if !d.isTerminal() {
+		return fmt.Errorf("create-superuser is interactive-only and requires a TTY; there is intentionally no -password flag or credential env var")
 	}
 
 	// Local-DB safeguards: refuse non-local targets even when the shell is
 	// misconfigured to point elsewhere.
-	if arn := strings.TrimSpace(os.Getenv("DB_SECRET_ARN")); arn != "" {
-		log.Fatal("DB_SECRET_ARN is set (Secrets-Manager-managed database); refusing to run against a non-local database")
+	if arn := strings.TrimSpace(d.getenv("DB_SECRET_ARN")); arn != "" {
+		return fmt.Errorf("DB_SECRET_ARN is set (Secrets-Manager-managed database); refusing to run against a non-local database")
 	}
-	dbHost := strings.ToLower(strings.TrimSpace(os.Getenv("DB_HOST")))
+	dbHost := strings.ToLower(strings.TrimSpace(d.getenv("DB_HOST")))
 	if !localDBHosts[dbHost] {
-		log.Fatalf("DB_HOST=%q is not a local database host (allowed: localhost, 127.0.0.1, ::1, db, host.docker.internal); refusing", dbHost)
+		return fmt.Errorf("DB_HOST=%q is not a local database host (allowed: localhost, 127.0.0.1, ::1, db, host.docker.internal); refusing", dbHost)
 	}
+
 	// The host allowlist checks a label, not a destination: a tunnel or proxy
 	// on localhost can still terminate remotely. Surface the exact target and
 	// require explicit confirmation so an operator with a forwarded port sees
 	// what they are about to modify.
-	dbPort := strings.TrimSpace(os.Getenv("DB_PORT"))
-	dbName := strings.TrimSpace(os.Getenv("DB_NAME"))
-	fmt.Printf("Target database: %s:%s/%s\n", dbHost, dbPort, dbName)
-	fmt.Println("⚠️  Ensure this is a genuinely local database — port forwards/tunnels to remote databases also appear as localhost.")
-	startupReader := bufio.NewReader(os.Stdin)
-	proceed, err := confirm(startupReader, "Proceed against this database? [y/N]: ")
+	dbPort := strings.TrimSpace(d.getenv("DB_PORT"))
+	dbName := strings.TrimSpace(d.getenv("DB_NAME"))
+	fmt.Fprintf(d.stdout, "Target database: %s:%s/%s\n", dbHost, dbPort, dbName)
+	fmt.Fprintln(d.stdout, "⚠️  Ensure this is a genuinely local database — port forwards/tunnels to remote databases also appear as localhost.")
+
+	// One shared reader for the whole run: two independent bufio.Readers over
+	// the same underlying stdin can each buffer ahead past what they consume,
+	// silently dropping input the other reader was meant to see.
+	reader := bufio.NewReader(d.stdin)
+
+	proceed, err := confirm(d.stdout, reader, "Proceed against this database? [y/N]: ")
 	if err != nil {
-		log.Fatalf("failed to read confirmation: %v", err)
+		return fmt.Errorf("failed to read confirmation: %w", err)
 	}
 	if !proceed {
-		fmt.Println("Aborted.")
-		return
+		fmt.Fprintln(d.stdout, "Aborted.")
+		return nil
 	}
 
-	logger, err := logging.NewLogger()
+	logger, err := d.newLogger()
 	if err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
+		return fmt.Errorf("failed to initialize logger: %w", err)
 	}
 	defer logger.Sync()
 
-	client, sqlDB, err := database.NewClient(logger)
+	client, sqlDB, err := d.newDBClient(logger)
 	if err != nil {
-		logger.Fatal("Failed to connect to database", zap.Error(err))
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 	defer client.Close()
 	defer sqlDB.Close()
@@ -98,20 +144,19 @@ func main() {
 
 	// A fresh `make db-up` has no tables yet: run schema migration and seed
 	// reference data (roles, models) before provisioning the admin.
-	if err := client.Schema.Create(ctx); err != nil {
-		logger.Fatal("Failed to run database migrations", zap.Error(err))
+	if err := d.migrateSchema(ctx, client); err != nil {
+		return fmt.Errorf("failed to run database migrations: %w", err)
 	}
 	if err := database.EnsureSeedData(ctx, client, logger); err != nil {
-		logger.Fatal("Failed to seed database", zap.Error(err))
+		return fmt.Errorf("failed to seed database: %w", err)
 	}
 
-	reader := bufio.NewReader(os.Stdin)
-	email, err := promptLine(reader, "Admin email: ")
+	email, err := promptLine(d.stdout, reader, "Admin email: ")
 	if err != nil {
-		log.Fatalf("failed to read email: %v", err)
+		return fmt.Errorf("failed to read email: %w", err)
 	}
 	if email == "" || !strings.Contains(email, "@") {
-		log.Fatalf("invalid email %q", email)
+		return fmt.Errorf("invalid email %q", email)
 	}
 
 	// Explicit create / promote / password-reset semantics: inspect first and
@@ -123,38 +168,39 @@ func main() {
 	switch {
 	case err == nil:
 		if hasAdminRole(existing) {
-			fmt.Printf("User %s already has the admin role; nothing to do.\n", email)
-			return
+			fmt.Fprintf(d.stdout, "User %s already has the admin role; nothing to do.\n", email)
+			return nil
 		}
-		fmt.Printf("User %s exists without the admin role.\n", email)
-		promote, err := confirm(reader, "Promote to admin and reset their password? [y/N]: ")
+		fmt.Fprintf(d.stdout, "User %s exists without the admin role.\n", email)
+		promote, err := confirm(d.stdout, reader, "Promote to admin and reset their password? [y/N]: ")
 		if err != nil {
-			log.Fatalf("failed to read confirmation: %v", err)
+			return fmt.Errorf("failed to read confirmation: %w", err)
 		}
 		if !promote {
-			fmt.Println("Aborted.")
-			return
+			fmt.Fprintln(d.stdout, "Aborted.")
+			return nil
 		}
 	case ent.IsNotFound(err):
-		fmt.Printf("User %s does not exist; a new admin user will be created.\n", email)
+		fmt.Fprintf(d.stdout, "User %s does not exist; a new admin user will be created.\n", email)
 	default:
-		logger.Fatal("Failed to look up user", zap.Error(err))
+		return fmt.Errorf("failed to look up user: %w", err)
 	}
 
-	password, err := promptPassword()
+	password, err := promptPassword(d.stdout, d.readPassword)
 	if err != nil {
-		log.Fatalf("failed to read password: %v", err)
+		return fmt.Errorf("failed to read password: %w", err)
 	}
 
 	result, err := database.CreateOrPromoteAdmin(ctx, client, logger, email, password)
 	if err != nil {
-		logger.Fatal("Failed to provision admin", zap.Error(err))
+		return fmt.Errorf("failed to provision admin: %w", err)
 	}
-	fmt.Printf("Done: %s (%s)\n", email, result)
+	fmt.Fprintf(d.stdout, "Done: %s (%s)\n", email, result)
+	return nil
 }
 
-func promptLine(reader *bufio.Reader, prompt string) (string, error) {
-	fmt.Print(prompt)
+func promptLine(stdout io.Writer, reader *bufio.Reader, prompt string) (string, error) {
+	fmt.Fprint(stdout, prompt)
 	line, err := reader.ReadString('\n')
 	if err != nil {
 		return "", err
@@ -162,34 +208,34 @@ func promptLine(reader *bufio.Reader, prompt string) (string, error) {
 	return strings.TrimSpace(line), nil
 }
 
-func promptPassword() (string, error) {
+func promptPassword(stdout io.Writer, readPassword func() ([]byte, error)) (string, error) {
 	for {
-		fmt.Print("Password: ")
-		first, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Println()
+		fmt.Fprint(stdout, "Password: ")
+		first, err := readPassword()
+		fmt.Fprintln(stdout)
 		if err != nil {
 			return "", err
 		}
 		if len(first) < minPasswordLength {
-			fmt.Printf("Password must be at least %d characters.\n", minPasswordLength)
+			fmt.Fprintf(stdout, "Password must be at least %d characters.\n", minPasswordLength)
 			continue
 		}
-		fmt.Print("Confirm password: ")
-		second, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Println()
+		fmt.Fprint(stdout, "Confirm password: ")
+		second, err := readPassword()
+		fmt.Fprintln(stdout)
 		if err != nil {
 			return "", err
 		}
 		if string(first) != string(second) {
-			fmt.Println("Passwords do not match; try again.")
+			fmt.Fprintln(stdout, "Passwords do not match; try again.")
 			continue
 		}
 		return string(first), nil
 	}
 }
 
-func confirm(reader *bufio.Reader, prompt string) (bool, error) {
-	line, err := promptLine(reader, prompt)
+func confirm(stdout io.Writer, reader *bufio.Reader, prompt string) (bool, error) {
+	line, err := promptLine(stdout, reader, prompt)
 	if err != nil {
 		return false, err
 	}
