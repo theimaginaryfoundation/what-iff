@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
 func TestUnmarshalClaudeTextJSON(t *testing.T) {
@@ -247,4 +249,49 @@ func TestCallClaudeWithRetry_StopsRetryAfterDeltaEmission(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Equal(t, 1, attempts, "must not retry once any delta has been emitted")
+}
+
+func TestAnthropicStreamUsage_ApplyBeta(t *testing.T) {
+	t.Parallel()
+
+	// Native usage already populated: stream-observed fallback values must not override it.
+	usage := anthropic.BetaUsage{InputTokens: 1200, CacheReadInputTokens: 800, OutputTokens: 50}
+	anthropicStreamUsage{inputTokens: 9999, outputTokens: 300}.applyBeta(&usage)
+	require.Equal(t, int64(2000), anthropicBetaUsageInputTokens(usage))
+	require.Equal(t, int64(50), anthropicBetaUsageOutputTokens(usage))
+
+	// Zero native usage: stream-observed fallback fills both fields.
+	var empty anthropic.BetaUsage
+	anthropicStreamUsage{inputTokens: 4200, outputTokens: 900}.applyBeta(&empty)
+	require.Equal(t, int64(4200), anthropicBetaUsageInputTokens(empty))
+	require.Equal(t, int64(900), anthropicBetaUsageOutputTokens(empty))
+
+	// Nil usage must not panic.
+	require.NotPanics(t, func() {
+		anthropicStreamUsage{inputTokens: 1, outputTokens: 1}.applyBeta(nil)
+	})
+}
+
+func TestClaudeProvider_CountTokens(t *testing.T) {
+	t.Parallel()
+
+	c := NewClaudeProviderWithBaseURL("test-key", "http://127.0.0.1:0", nil, nil)
+	n, err := c.CountTokens("hello world")
+	require.NoError(t, err)
+	require.Positive(t, n)
+}
+
+func TestClaudeProvider_SelectCarryOverTurns(t *testing.T) {
+	t.Parallel()
+
+	c := NewClaudeProviderWithBaseURL("test-key", "http://127.0.0.1:0", nil, nil)
+	now := time.Now()
+	recent := []*models.ChatMessage{
+		{Origin: models.MessageOriginAssistant, Message: "reply", SentAt: now},
+		{Origin: models.MessageOriginUser, Message: "question", SentAt: now.Add(-time.Second)},
+	}
+	turns := c.SelectCarryOverTurns(recent, 5, 1000)
+	require.Len(t, turns, 1)
+	require.Equal(t, "question", turns[0][0].Message)
+	require.Equal(t, "reply", turns[0][1].Message)
 }

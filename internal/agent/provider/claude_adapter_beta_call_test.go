@@ -75,6 +75,36 @@ func TestClaudeAdapter_BetaMode_Call_APIErrorIsWrapped(t *testing.T) {
 	require.Nil(t, toolUses)
 }
 
+// TestClaudeAdapter_BetaMode_StreamingTextResponse exercises betaMessagesNewStreaming and
+// CallBetaWithRetryStreaming end to end via the SSE path (claudeSSEServer), which the plain
+// (non-beta) TestClaudeAdapter_SetTextDeltaHandlerEnablesStreaming test already covers for the
+// non-beta message stream.
+func TestClaudeAdapter_BetaMode_StreamingTextResponse(t *testing.T) {
+	events := []struct{ event, data string }{
+		{"message_start", `{"type":"message_start","message":{"id":"bmsg_stream","type":"message","role":"assistant","model":"test-model","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":0}}}`},
+		{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+		{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}`},
+		{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" beta"}}`},
+		{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+		{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5}}`},
+		{"message_stop", `{"type":"message_stop"}`},
+	}
+	srv := claudeSSEServer(t, events)
+	defer srv.Close()
+
+	a := newTestClaudeMCPAdapter(srv.URL)
+	var deltas []string
+	a.SetTextDeltaHandler(func(d string) { deltas = append(deltas, d) })
+
+	resp, toolUses, err := a.Call(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, toolUses)
+	require.Equal(t, []string{"Hi", " beta"}, deltas)
+	require.Equal(t, "Hi beta", resp.Text)
+	require.Equal(t, int64(10), resp.InputTokens)
+	require.Equal(t, int64(5), resp.OutputTokens)
+}
+
 func TestClaudeAdapter_BetaMode_AppendToolResults_FoldsIntoNextCall(t *testing.T) {
 	var lastBody string
 	callCount := 0
