@@ -550,17 +550,13 @@ func TestFindActivePersonalityMediaJob_ReturnsSoleActiveJob(t *testing.T) {
 	require.Equal(t, createdNewer.ID, got.ID)
 }
 
-// TestFindActivePersonalityMediaJob_MultipleActiveJobsErrors documents a real bug: the doc
-// comment on FindActivePersonalityMediaJob (job.go) promises "the newest non-terminal
-// personality background job," and it does apply an Order-by-created_at-desc, but the query
-// terminates with .Only(ctx) rather than .First(ctx)/.Limit(1). ent's Only() errors whenever
-// more than one row matches the filter, regardless of Order — it does not fall back to picking
-// the first (newest) row. Since the job_type filter here is an IN-list across three distinct
-// job types (expression_grid, personality_portrait, personality_generation), it is entirely
-// possible for a user to have two of those active concurrently (e.g. an expression_grid job and
-// a personality_portrait job both mid-flight), and this call then returns an "ent: job not
-// singular" error instead of the newest one as documented.
-func TestFindActivePersonalityMediaJob_MultipleActiveJobsErrors(t *testing.T) {
+// TestFindActivePersonalityMediaJob_MultipleActiveJobsReturnsNewest exercises the case where a
+// user has two concurrently-active jobs of different types under FindActivePersonalityMediaJob's
+// job_type IN-list (expression_grid, personality_portrait, personality_generation) — e.g. an
+// expression_grid job and a personality_portrait job both mid-flight. The doc comment promises
+// "the newest non-terminal personality background job," which requires falling back to the first
+// row after ordering rather than erroring when more than one row matches.
+func TestFindActivePersonalityMediaJob_MultipleActiveJobsReturnsNewest(t *testing.T) {
 	ds, cleanup := newJobTestDatastore(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -577,12 +573,13 @@ func TestFindActivePersonalityMediaJob_MultipleActiveJobsErrors(t *testing.T) {
 	newer.JobType = "personality_portrait"
 	newer.Reference = "newer"
 	newer.Status = models.JobStatusProcessing
-	_, err = ds.CreateJob(ctx, userID, newer)
+	createdNewer, err := ds.CreateJob(ctx, userID, newer)
 	require.NoError(t, err)
 
-	_, err = ds.FindActivePersonalityMediaJob(ctx, userID)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not singular")
+	got, err := ds.FindActivePersonalityMediaJob(ctx, userID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, createdNewer.ID, got.ID)
 }
 
 func TestFindActivePersonalityMediaJob_IgnoresTerminalAndOtherTypes(t *testing.T) {

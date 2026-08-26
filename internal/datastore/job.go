@@ -870,7 +870,7 @@ func (d *Datastore) FindActivePersonalityMediaJob(ctx context.Context, userID uu
 		).
 		Order(job.ByCreatedAt(sql.OrderDesc())).
 		WithOwner().
-		Only(ctx)
+		First(ctx)
 	if ent.IsNotFound(err) {
 		return nil, nil
 	}
