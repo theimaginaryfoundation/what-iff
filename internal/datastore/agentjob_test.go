@@ -783,21 +783,15 @@ func TestSetAgentJobOverrides_HappyPath(t *testing.T) {
 	require.NotNil(t, got.ModelID)
 	require.Equal(t, modelID, *got.ModelID)
 
-	// NOTE: despite the SetAgentJobOverridesPatch doc comment saying a nil ID with the
-	// Update flag set "clears" the override, the implementation calls SetNillablePersonalityID /
-	// SetNillableModelID, which are no-ops when the pointer is nil (see ent's generated
-	// AgentJobUpdate.SetNillableModelID). So passing UpdatePersonality/UpdateModel = true with a
-	// nil ID currently leaves the existing override untouched rather than clearing it. This test
-	// documents that actual (likely unintended) behavior rather than the doc comment's contract.
+	// Per the SetAgentJobOverridesPatch doc comment, the Update flag set with a nil ID clears
+	// the override rather than leaving the existing value untouched.
 	got, err = ds.SetAgentJobOverrides(ctx, userID, created.ID, models.SetAgentJobOverridesPatch{
 		UpdatePersonality: true,
 		UpdateModel:       true,
 	})
 	require.NoError(t, err)
-	require.NotNil(t, got.PersonalityID)
-	require.Equal(t, personalityID, *got.PersonalityID)
-	require.NotNil(t, got.ModelID)
-	require.Equal(t, modelID, *got.ModelID)
+	require.Nil(t, got.PersonalityID)
+	require.Nil(t, got.ModelID)
 }
 
 func TestSetAgentJobOverrides_InvalidPersonality(t *testing.T) {
