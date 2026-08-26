@@ -2,12 +2,16 @@ package provider
 
 import (
 	"crypto/md5"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/openai/openai-go/v3/responses"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
 // Test helper functions for processResponseOutput
@@ -361,4 +365,65 @@ The future of AI development looks promising with continued investment and resea
 	for i := 0; i < b.N; i++ {
 		testProcessResponseOutput(content)
 	}
+}
+
+// responseWithOutputText builds a *responses.Response whose OutputText() returns text, so
+// ProcessResponseOutput (and therefore dedupeParagraphs) can be exercised directly instead of via
+// the standalone testProcessResponseOutput reimplementation above.
+func responseWithOutputText(t *testing.T, text string) *responses.Response {
+	t.Helper()
+	quoted, err := json.Marshal(text)
+	require.NoError(t, err)
+	raw := `{"id":"resp_1","object":"response","created_at":1,"model":"test","status":"completed",` +
+		`"output":[{"type":"message","id":"m1","role":"assistant","status":"completed","content":[{"type":"output_text","text":` + string(quoted) + `}]}]}`
+	var resp responses.Response
+	require.NoError(t, json.Unmarshal([]byte(raw), &resp))
+	return &resp
+}
+
+// TestProcessResponseOutput_RealResponse_Dedupes exercises the actual ProcessResponseOutput /
+// dedupeParagraphs path (not the standalone reimplementation used by the other tests in this
+// file) against a real *responses.Response, so the production dedup logic itself is covered.
+func TestProcessResponseOutput_RealResponse_Dedupes(t *testing.T) {
+	t.Parallel()
+	content := "This is a unique paragraph about artificial intelligence, long enough to pass the short-message threshold.\n\n" +
+		"This is a unique paragraph about artificial intelligence, long enough to pass the short-message threshold.\n\n" +
+		"This is a second, different paragraph that is also long enough to matter for the test."
+	resp := responseWithOutputText(t, content)
+
+	got := ProcessResponseOutput(resp)
+	require.Equal(t, 1, strings.Count(got, "artificial intelligence"), "exact duplicate paragraph must be folded to one copy")
+	require.Contains(t, got, "second, different paragraph")
+}
+
+func TestProcessResponseOutput_RealResponse_ShortContentPassesThrough(t *testing.T) {
+	t.Parallel()
+	resp := responseWithOutputText(t, "short")
+	require.Equal(t, "short", ProcessResponseOutput(resp))
+}
+
+func TestDedupeParagraphs_PreservesEmptyParagraphsAndDedupes(t *testing.T) {
+	t.Parallel()
+	in := []string{"Same content here.", "", "Same   content  here.", "Different."}
+	out := dedupeParagraphs(in)
+	require.Equal(t, []string{"Same content here.", "", "Different."}, out)
+}
+
+func TestDedupeParagraphs_Empty(t *testing.T) {
+	t.Parallel()
+	require.Nil(t, dedupeParagraphs(nil))
+}
+
+func TestOpenAIProvider_SelectCarryOverTurns(t *testing.T) {
+	t.Parallel()
+	c := &OpenAIProvider{tokenCounter: NewTokenCounter()}
+	now := time.Now()
+	recent := []*models.ChatMessage{
+		{Origin: models.MessageOriginAssistant, Message: "reply", SentAt: now},
+		{Origin: models.MessageOriginUser, Message: "question", SentAt: now.Add(-time.Second)},
+	}
+	turns := c.SelectCarryOverTurns(recent, 5, 1000)
+	require.Len(t, turns, 1)
+	require.Equal(t, "question", turns[0][0].Message)
+	require.Equal(t, "reply", turns[0][1].Message)
 }
