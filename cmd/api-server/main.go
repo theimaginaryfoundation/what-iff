@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -35,14 +36,6 @@ const (
 	gracefulShutdownTimeout = 15 * time.Second
 )
 
-var (
-	srv    *server.Server
-	logger *zap.Logger
-	client *ent.Client
-	sqlDB  *sql.DB
-	tel    *telemetry.Telemetry
-)
-
 func envBool(name string) (bool, bool) {
 	value, ok := os.LookupEnv(name)
 	if !ok {
@@ -57,21 +50,58 @@ func envBool(name string) (bool, bool) {
 	return parsed, true
 }
 
-func init() {
-	var err error
+// deps bundles api-server's external dependencies behind seams so setup can
+// be driven end-to-end in tests without a real logger, telemetry backend, or
+// database. defaultDeps wires them to the real world; main is a thin
+// exit-code wrapper around setup plus the serve loop.
+//
+// config itself is not seamed: server.NewConfig reads straight from the
+// process environment, so tests drive it the same way production does (via
+// os.Setenv/t.Setenv) rather than re-mocking its internals.
+type deps struct {
+	newLogger      func() (*zap.Logger, error)
+	initTelemetry  func(context.Context, *zap.Logger) (*telemetry.Telemetry, error)
+	newDBClient    func(*zap.Logger) (*ent.Client, *sql.DB, error)
+	migrateSchema  func(context.Context, *ent.Client, ...schema.MigrateOption) error
+	ensureSeedData func(context.Context, *ent.Client, *zap.Logger) error
+	newServer      func(*server.Config, *zap.Logger, *telemetry.Telemetry, *ent.Client, *sql.DB) *server.Server
+}
 
-	var envFile string
-	flag.StringVar(&envFile, "env", ".env", "env file path")
-	flag.Parse()
-
-	if err := godotenv.Load(envFile); err != nil {
-		log.Printf("Warning: Error loading .env file: %v", err)
+func defaultDeps() deps {
+	return deps{
+		newLogger:     logging.NewLogger,
+		initTelemetry: telemetry.Init,
+		newDBClient:   database.NewClient,
+		migrateSchema: func(ctx context.Context, c *ent.Client, opts ...schema.MigrateOption) error {
+			return c.Schema.Create(ctx, opts...)
+		},
+		ensureSeedData: database.EnsureSeedData,
+		newServer:      server.NewServer,
 	}
+}
 
-	// Initialize logger
-	logger, err = logging.NewLogger()
+// apiServerRuntime holds everything main's serve loop needs once setup has
+// completed successfully. It replaces the package-level srv/logger/client/
+// sqlDB/tel vars that init() used to populate.
+type apiServerRuntime struct {
+	srv    *server.Server
+	logger *zap.Logger
+	client *ent.Client
+	sqlDB  *sql.DB
+	tel    *telemetry.Telemetry
+}
+
+// setup performs all of api-server's startup validation and wiring: flag/env
+// already loaded by main, config validation gates, telemetry, database
+// connection, optional auto-migration, and seed data, finishing with a
+// constructed *server.Server. It returns an error instead of calling
+// logger.Fatal directly so tests can drive every guard clause and branch
+// without terminating the test process; main is the only place that turns a
+// non-nil error into a process exit.
+func setup(d deps) (*apiServerRuntime, error) {
+	logger, err := d.newLogger()
 	if err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
+		return nil, fmt.Errorf("failed to initialize logger: %w", err)
 	}
 
 	// Create server config and fail fast on required secrets before expensive setup.
@@ -80,9 +110,7 @@ func init() {
 	// Environment safety gates. ENV is canonical and ENVIRONMENT a legacy alias;
 	// ambiguous configuration fails loudly instead of picking a side silently.
 	if config.EnvironmentConflict {
-		logger.Fatal("ENV and ENVIRONMENT are both set and disagree; set only ENV",
-			zap.String("resolved_environment", config.Environment),
-		)
+		return nil, fmt.Errorf("ENV and ENVIRONMENT are both set and disagree; set only ENV (resolved_environment=%s)", config.Environment)
 	}
 	// An unrecognized LLM_BACKEND value is a fatal misconfiguration: silently
 	// falling back to real providers while the operator believes they are
@@ -90,26 +118,25 @@ func init() {
 	switch config.LLMBackend {
 	case "vendor", "mock", "local":
 	default:
-		logger.Fatal("LLM_BACKEND has an invalid value; use vendor, mock, or local", zap.String("value", config.LLMBackend))
+		return nil, fmt.Errorf("LLM_BACKEND has an invalid value; use vendor, mock, or local (value=%s)", config.LLMBackend)
 	}
 	// Scripted mode is test-only injection (no script can be supplied via env);
 	// accepting it here would fail every chat turn with a cryptic error.
 	if config.LLMBackend == "mock" && config.MockLLMMode != "echo" && config.MockLLMMode != "fixed" {
-		logger.Fatal("MOCK_LLM_MODE must be echo or fixed", zap.String("value", config.MockLLMMode))
+		return nil, fmt.Errorf("MOCK_LLM_MODE must be echo or fixed (value=%s)", config.MockLLMMode)
 	}
 	// A local backend with no model configured would fail every chat turn with
 	// a cryptic provider error instead of a clear startup message.
 	if config.LLMBackend == "local" && config.LocalLLMModel == "" {
-		logger.Fatal("LOCAL_LLM_MODEL is required when LLM_BACKEND=local")
+		return nil, fmt.Errorf("LOCAL_LLM_MODEL is required when LLM_BACKEND=local")
 	}
 	// mock/local are fail-closed: honored only when ENV was explicitly set to a
 	// local/test environment. The parsed Environment value defaults to
 	// "development" when unset, so gating on it alone would be fail-open.
 	if config.LLMBackend != "vendor" && !config.IsExplicitLocalEnv() {
-		logger.Fatal("LLM_BACKEND=mock/local requires ENV explicitly set to development, test, or local",
-			zap.String("llm_backend", config.LLMBackend),
-			zap.String("environment", config.Environment),
-			zap.Bool("environment_explicit", config.EnvironmentExplicit),
+		return nil, fmt.Errorf(
+			"LLM_BACKEND=mock/local requires ENV explicitly set to development, test, or local (llm_backend=%s, environment=%s, environment_explicit=%t)",
+			config.LLMBackend, config.Environment, config.EnvironmentExplicit,
 		)
 	}
 	if config.LLMBackend == "mock" {
@@ -130,18 +157,16 @@ func init() {
 	// doing what was intended. (The migration block below re-parses the flag for
 	// its own warnings.)
 	if destructive, ok := envBool("DESTRUCTIVE_MIGRATION"); ok && destructive && !config.IsExplicitLocalEnv() {
-		logger.Fatal("DESTRUCTIVE_MIGRATION=true requires ENV explicitly set to development, test, or local",
-			zap.String("environment", config.Environment),
-			zap.Bool("environment_explicit", config.EnvironmentExplicit),
+		return nil, fmt.Errorf(
+			"DESTRUCTIVE_MIGRATION=true requires ENV explicitly set to development, test, or local (environment=%s, environment_explicit=%t)",
+			config.Environment, config.EnvironmentExplicit,
 		)
 	}
 
 	if _, err := datastore.ValidateTokenEncryptionSecret(config.TokenEncryptionSecret); err != nil {
-		logger.Fatal(
-			"Invalid TOKEN_ENCRYPTION_SECRET",
-			zap.Error(err),
-			zap.Int("minimum_length", datastore.MinTokenEncryptionSecretLen),
-			zap.String("requirements", "must be raw secret value (not ARN/reference) and at least minimum_length characters"),
+		return nil, fmt.Errorf(
+			"invalid TOKEN_ENCRYPTION_SECRET: %w (must be raw secret value (not ARN/reference) and at least %d characters)",
+			err, datastore.MinTokenEncryptionSecretLen,
 		)
 	}
 
@@ -150,25 +175,25 @@ func init() {
 	// above), so they're validated the same way: read here with os.Getenv, not
 	// config.*, to match what internal/auth actually consumes at request time.
 	if err := auth.ValidateSecret("JWT_SECRET", os.Getenv("JWT_SECRET")); err != nil {
-		logger.Fatal("Invalid JWT_SECRET", zap.Error(err), zap.Int("minimum_length", auth.MinSecretLen))
+		return nil, fmt.Errorf("invalid JWT_SECRET: %w (minimum_length=%d)", err, auth.MinSecretLen)
 	}
 	if err := auth.ValidateSecret("JWT_REFRESH_SECRET", os.Getenv("JWT_REFRESH_SECRET")); err != nil {
-		logger.Fatal("Invalid JWT_REFRESH_SECRET", zap.Error(err), zap.Int("minimum_length", auth.MinSecretLen))
+		return nil, fmt.Errorf("invalid JWT_REFRESH_SECRET: %w (minimum_length=%d)", err, auth.MinSecretLen)
 	}
 
 	// Initialize telemetry (if configured)
-	tel, err = telemetry.Init(context.Background(), logger)
+	tel, err := d.initTelemetry(context.Background(), logger)
 	if err != nil {
-		logger.Fatal("Failed to initialize telemetry", zap.Error(err))
+		return nil, fmt.Errorf("failed to initialize telemetry: %w", err)
 	}
 	if err := tel.Metrics.InitStartupMetrics(context.Background()); err != nil {
-		logger.Fatal("Failed to initialize startup metrics", zap.Error(err))
+		return nil, fmt.Errorf("failed to initialize startup metrics: %w", err)
 	}
 
 	// Initialize database connection
-	client, sqlDB, err = database.NewClient(logger)
+	client, sqlDB, err := d.newDBClient(logger)
 	if err != nil {
-		logger.Fatal("Failed to connect to database", zap.Error(err))
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
 	// Best-effort patch so models.subscription_tier accepts "ultra" (Ent does not widen CHECKs on its own).
@@ -197,30 +222,52 @@ func init() {
 			logger.Warn("Running destructive database migration options (drop column/index) because DESTRUCTIVE_MIGRATION=true")
 		}
 
-		if err := client.Schema.Create(context.Background(), migrationOptions...); err != nil {
-			logger.Fatal("Failed to run database migrations", zap.Error(err))
+		if err := d.migrateSchema(context.Background(), client, migrationOptions...); err != nil {
+			return nil, fmt.Errorf("failed to run database migrations: %w", err)
 		}
 		logger.Debug("Database migrations applied", zap.Bool("destructive_migration", destructiveMigration))
 	}
 
 	// Ensure seed data exists before serving requests
-	if err := database.EnsureSeedData(context.Background(), client, logger); err != nil {
-		logger.Fatal("Failed to seed database", zap.Error(err))
+	if err := d.ensureSeedData(context.Background(), client, logger); err != nil {
+		return nil, fmt.Errorf("failed to seed database: %w", err)
 	}
 
 	// Create and configure server
-	srv = server.NewServer(config, logger, tel, client, sqlDB)
+	srv := d.newServer(config, logger, tel, client, sqlDB)
+
+	return &apiServerRuntime{
+		srv:    srv,
+		logger: logger,
+		client: client,
+		sqlDB:  sqlDB,
+		tel:    tel,
+	}, nil
 }
 
 func main() {
+	var envFile string
+	flag.StringVar(&envFile, "env", ".env", "env file path")
+	flag.Parse()
+
+	if err := godotenv.Load(envFile); err != nil {
+		log.Printf("Warning: Error loading .env file: %v", err)
+	}
+
+	rt, err := setup(defaultDeps())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	logger := rt.logger
 	defer logger.Sync()
 
 	// Local: start HTTP server with graceful shutdown
-	defer client.Close()
+	defer rt.client.Close()
 
 	// Run server in a goroutine so it doesn't block
 	go func() {
-		if err := srv.Start(); err != nil {
+		if err := rt.srv.Start(); err != nil {
 			logger.Fatal("Server failed", zap.Error(err))
 		}
 	}()
@@ -236,13 +283,13 @@ func main() {
 	defer cancel()
 
 	// Gracefully shutdown the server
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := rt.srv.Shutdown(ctx); err != nil {
 		logger.Fatal("Server forced to shutdown", zap.Error(err))
 	}
 
 	// Shutdown telemetry
-	if tel != nil {
-		if err := tel.Shutdown(ctx); err != nil {
+	if rt.tel != nil {
+		if err := rt.tel.Shutdown(ctx); err != nil {
 			logger.Error("Failed to shutdown telemetry", zap.Error(err))
 		}
 	}
