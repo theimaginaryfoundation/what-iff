@@ -6,9 +6,9 @@ Include reproduction steps, impact, and affected versions. We will acknowledge r
 
 ## gosec baseline
 
-`gosec ./...` is not yet wired into CI, but if you are adding that gate, run it
-at `-severity=medium`, not the default severity. At default severity gosec
-reports 261 G104 ("errors unhandled") findings, 255 of them in
+CI runs `gosec -severity=medium ./...` on relevant pull requests and pushes to `main`.
+The gate intentionally starts at MEDIUM severity rather than the default severity.
+At default severity gosec reports 261 G104 ("errors unhandled") findings, 255 of them in
 `internal/datastore` — nearly all of it one idiom, `tx.Rollback()` inside a
 `recover()` block or on a `return nil, err` path, where there is nothing
 meaningful to do with the rollback error because the transaction is already
