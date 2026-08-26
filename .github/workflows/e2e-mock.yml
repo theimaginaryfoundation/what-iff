@@ -1096,9 +1096,9 @@ jobs:
 
       # Sticky: this workflow's section of the shared comment updates in
       # place rather than adding one per push, so a long-lived PR doesn't
-      # accumulate a wall of near-identical reports. Other e2e workflows
-      # (e.g. e2e-local-llm.yml) post their own section of the same comment —
-      # see .github/actions/e2e-status-comment.
+      # accumulate a wall of near-identical reports. e2e-local-llm.yml posts
+      # a separate sticky comment of its own (distinct comment-key) since it
+      # is opt-in and label-triggered — see .github/actions/e2e-status-comment.
       #
       # Skipped for forks on purpose. This workflow is `pull_request`, so a
       # fork PR gets a read-only token and posting would fail; the fix is NOT

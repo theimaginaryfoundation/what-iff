@@ -256,9 +256,9 @@ jobs:
           echo "baseline: $url"
           echo "file=/tmp/baseline/e2e-summary.json" >> "$GITHUB_OUTPUT"
 
-      # This job's section of the shared status comment — see
-      # .github/actions/e2e-status-comment. e2e-mock.yml posts the `mock`
-      # section of the same comment; this is `local-llm`, ordered after it.
+      # This workflow's own sticky status comment — see
+      # .github/actions/e2e-status-comment. Separate from e2e-mock.yml's
+      # comment (distinct comment-key below) because this run is opt-in.
       - name: Build PR comment section
         id: comment
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
@@ -295,6 +295,10 @@ jobs:
         uses: ./.github/actions/e2e-status-comment
         with:
           pr: ${{ github.event.pull_request.number }}
+          # Its own sticky comment, not a section of the mock suite's: this
+          # run is opt-in and label-triggered, so it appears and updates on
+          # its own cadence rather than inside the per-push mock comment.
+          comment-key: e2e-status-local-llm
           section: local-llm
           order: 20
           body-file: /tmp/comment-section.md
