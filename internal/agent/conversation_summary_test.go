@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -132,4 +133,15 @@ func TestBuildCheckpointSummaryParams_RequiresSource(t *testing.T) {
 
 	_, err := buildCheckpointSummaryParams(uuid.New(), "", checkpointSummarySource{})
 	require.Error(t, err)
+}
+
+// summarizeConversationForCheckpoint's cheapest branch is its own nil-provider
+// guard, which fires before chatCtx is dereferenced.
+func TestSummarizeConversationForCheckpoint_NilProviderReturnsError(t *testing.T) {
+	t.Parallel()
+
+	a := &Agent{}
+	_, err := a.summarizeConversationForCheckpoint(context.Background(), uuid.New(), nil, checkpointSummarySource{})
+	require.Error(t, err)
+	require.ErrorContains(t, err, "OpenAIProvider is nil")
 }
