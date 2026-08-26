@@ -1,0 +1,54 @@
+name: Security
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'ent/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/security.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'ent/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/security.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gosec:
+    name: gosec (MEDIUM+)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Generate Ent code
+        run: make generate
+
+      # Keep the scanner version reproducible instead of floating with latest.
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
+
+      # LOW findings such as the known G104 rollback pattern are intentionally
+      # outside the blocking baseline. See SECURITY.md for the rationale.
+      - name: Run gosec
+        run: gosec -severity=medium ./...
