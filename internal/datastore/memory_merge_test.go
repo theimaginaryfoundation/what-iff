@@ -6,18 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"entgo.io/ent/dialect"
-	entsql "entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-	"github.com/theimaginaryfoundation/what-iff/ent"
 	entmemory "github.com/theimaginaryfoundation/what-iff/ent/memory"
 	entmerge "github.com/theimaginaryfoundation/what-iff/ent/memorymergeevent"
 	"github.com/theimaginaryfoundation/what-iff/internal/memoryutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
-	"go.uber.org/zap"
-
-	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestMergeLiveExtractedMemory_BatchCreateAndFoldLive(t *testing.T) {
@@ -221,26 +215,9 @@ func TestPersistMemoryLinkGroup_LinksAndUndo(t *testing.T) {
 
 func newMemoryMergeTestDatastore(t *testing.T) (*Datastore, func()) {
 	t.Helper()
-
-	db, err := sql.Open("sqlite3", "file:"+uuid.NewString()+"?mode=memory&cache=shared&_fk=1")
-	require.NoError(t, err)
-
 	// compaction_events must exist before memory_merge_events: the merge table holds an FK to it
 	// (ON DELETE SET NULL), matching ent/migrate.MemoryMergeEventsTable.
-	createMemoryImportTestSchema(t, db)
-	createCompactionEventTestSchema(t, db)
-	createMemoryMergeEventTestSchema(t, db)
-
-	drv := entsql.OpenDB(dialect.SQLite, db)
-	client := ent.NewClient(ent.Driver(drv))
-	ds, err := NewDatastore(client, db, zap.NewNop(), "12345678901234567890123456789012", nil)
-	require.NoError(t, err)
-
-	cleanup := func() {
-		_ = client.Close()
-		_ = db.Close()
-	}
-	return ds, cleanup
+	return newTestDatastore(t, createMemoryImportTestSchema, createCompactionEventTestSchema, createMemoryMergeEventTestSchema)
 }
 
 // createMemoryMergeEventTestSchema mirrors ent MemoryMergeEventsTable, including the nullable FK to
