@@ -731,6 +731,9 @@ jobs:
       # Needed to post/update the results comment. Scoped to this job so the
       # shard jobs — which run the actual test code — keep a read-only token.
       pull-requests: write
+      # Needed to download the `e2e-summary` artifact from the latest main
+      # run of this workflow — the "vs main" baseline in the PR comment.
+      actions: read
       # OIDC token for the tokenless Codecov upload — see codecov.yml and
       # pr-validation.yml for the same pattern.
       id-token: write
@@ -988,6 +991,73 @@ jobs:
           npx playwright merge-reports --reporter=json ./all-blobs > merged.json
           echo "merged=true" >> "$GITHUB_OUTPUT"
 
+      # Uploaded before the comment is built so the comment can link the
+      # artifact's real download URL (`artifact-url` output) instead of the
+      # run page's #artifacts anchor, which lands on the wrong tab for runs
+      # with many jobs.
+      - name: Upload merged report
+        id: report
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: web/app/playwright-report
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # The per-suite summary the comment renders and the baseline mechanism
+      # ships: chrome / mobile / visual pass counts plus the SHA and run URL,
+      # produced from the same merged.json as the HTML report.
+      - name: Summarize results
+        if: ${{ steps.merge.outputs.merged == 'true' }}
+        working-directory: web/app
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT: ${{ github.event_name }}
+        run: node e2e/scripts/report-summary.mjs summary merged.json > e2e-summary.json
+
+      # Main runs (merge to main, the nightly, manual dispatch) publish their
+      # summary as the baseline PR runs compare against. Retention outlives
+      # the nightly cadence by a wide margin, so a paused schedule doesn't
+      # immediately cost PRs their "vs main" column.
+      - name: Upload main baseline summary
+        if: ${{ github.event_name != 'pull_request' && steps.merge.outputs.merged == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          # Workflow-specific name: the baseline fetch below queries artifacts
+          # repo-wide by name, and e2e-local-llm.yml publishes its own summary
+          # the same way.
+          name: e2e-summary-mock
+          path: web/app/e2e-summary.json
+          retention-days: 14
+
+      # PR runs fetch the newest main-run summary of this same workflow.
+      # Plain curl+jq+python3 rather than `gh` so the identical step works in
+      # e2e-local-llm.yml's container job, where gh is not installed. Fails
+      # open: no baseline just drops the "vs main" column from the comment,
+      # it never fails the job.
+      - name: Fetch main baseline
+        id: baseline
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API: ${{ github.api_url }}/repos/${{ github.repository }}
+          NAME: e2e-summary-mock
+        run: |
+          url=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
+              "$API/actions/artifacts?name=$NAME&per_page=50" \
+            | jq -r '[.artifacts[]
+                      | select(.expired == false and .workflow_run.head_branch == "main")
+                     ][0].archive_download_url // empty')
+          if [ -z "$url" ]; then
+            echo "no main baseline found — comment will omit the vs-main column"
+            exit 0
+          fi
+          curl -sfL -H "Authorization: Bearer $GH_TOKEN" "$url" -o /tmp/baseline.zip
+          python3 -c "import zipfile; zipfile.ZipFile('/tmp/baseline.zip').extractall('/tmp/baseline')"
+          echo "baseline: $url"
+          echo "file=/tmp/baseline/e2e-summary.json" >> "$GITHUB_OUTPUT"
+
       - name: Build PR comment
         id: comment
         if: ${{ github.event_name == 'pull_request' }}
@@ -997,67 +1067,31 @@ jobs:
           FULL_RUN: ${{ env.FULL_RUN }}
           MERGED: ${{ steps.merge.outputs.merged }}
           FRONTEND: ${{ needs.changes.outputs.frontend }}
+          TITLE: 'E2E · mock LLM'
+          SHA: ${{ github.event.pull_request.head.sha }}
+          SHA_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.event.pull_request.head.sha }}
+          REPORT_URL: ${{ steps.report.outputs.artifact-url }}
+          BASELINE_FILE: ${{ steps.baseline.outputs.file }}
         run: |
-          {
-            echo '### E2E (mock backend)'
-            echo
-
-            if [ "$MERGED" != "true" ]; then
-              echo '🚨 **No results** — every shard failed before running any test.'
+          if [ "$MERGED" != "true" ]; then
+            {
+              echo '### E2E · mock LLM 🚨'
+              echo
+              echo '**No results** — every shard failed before running any test.'
               echo
               echo "[View run]($RUN_URL)"
-            else
-
-            EXPECTED=$(jq -r '.stats.expected' merged.json)
-            UNEXPECTED=$(jq -r '.stats.unexpected' merged.json)
-            FLAKY=$(jq -r '.stats.flaky' merged.json)
-            SKIPPED=$(jq -r '.stats.skipped' merged.json)
-            DURATION=$(jq -r '(.stats.duration / 1000 | floor)' merged.json)
-
-            if [ "$UNEXPECTED" -gt 0 ]; then
-              echo "❌ **$UNEXPECTED failed**, $EXPECTED passed, $FLAKY flaky, $SKIPPED skipped — ${DURATION}s"
-            elif [ "$FLAKY" -gt 0 ]; then
-              echo "⚠️ **$FLAKY flaky**, $EXPECTED passed, $SKIPPED skipped — ${DURATION}s"
-            else
-              echo "✅ **$EXPECTED passed**, $SKIPPED skipped — ${DURATION}s"
+            } > /tmp/comment-section.md
+          else
+            # Row notes for suites this run legitimately didn't execute; a
+            # skipped visual run that goes unmentioned reads as a passing one.
+            if [ "$FULL_RUN" != "true" ]; then
+              export NOTE_MOBILE='add the `e2e-full` label'
             fi
-            echo
-
-            if [ "$FULL_RUN" = "true" ]; then
-              echo '**Scope:** all projects (desktop + mobile) — `e2e-full`'
-            else
-              echo '**Scope:** `chromium-desktop` only. Add the **`e2e-full`** label for mobile.'
-            fi
-
-            # Say so explicitly. A skipped visual run that goes unmentioned
-            # reads as a passing one.
             if [ "$FRONTEND" != "true" ]; then
-              echo '**Visual:** skipped — no changes under `web/app/` or `openapi.yaml`.'
+              export NOTE_VISUAL='skipped — no changes under `web/app/` or `openapi.yaml`'
             fi
-            echo
-
-            echo '| Project | Passed |'
-            echo '|---|---|'
-            jq -r '[.. | objects | select(has("projectName") and has("results"))
-                    | {p: .projectName, s: (.results[-1].status // "unknown")}]
-                   | group_by(.p)[]
-                   | "| \(.[0].p) | \([.[] | select(.s == "passed")] | length)/\(length) |"' merged.json
-            echo
-
-            if [ "$UNEXPECTED" -gt 0 ]; then
-              echo '<details><summary>Failed tests</summary>'
-              echo
-              jq -r '[.. | objects | select(has("ok") and has("title") and has("tests"))
-                      | select(.ok == false) | .title] | .[]' merged.json \
-                | sed 's/^/- /'
-              echo
-              echo '</details>'
-              echo
-            fi
-
-            echo "[Full HTML report]($RUN_URL#artifacts) · [View run]($RUN_URL)"
-            fi
-          } > /tmp/comment-section.md
+            node e2e/scripts/report-summary.mjs comment merged.json > /tmp/comment-section.md
+          fi
           cat /tmp/comment-section.md
 
       # Sticky: this workflow's section of the shared comment updates in
@@ -1078,11 +1112,3 @@ jobs:
           section: mock
           order: 10
           body-file: /tmp/comment-section.md
-
-      - name: Upload merged report
-        uses: actions/upload-artifact@v7
-        with:
-          name: playwright-report
-          path: web/app/playwright-report
-          retention-days: 7
-          if-no-files-found: ignore
