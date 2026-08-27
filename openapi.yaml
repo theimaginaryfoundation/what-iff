@@ -3886,6 +3886,89 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /chat/{chatId}/chat-message/{messageId}/bookmark:
+    patch:
+      summary: Set or clear a message bookmark
+      description: Toggles the user's bookmark flag on a message (either origin) for long-thread navigation. Returns the updated message.
+      tags: [Chat Messages]
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bookmarked:
+                  type: boolean
+                  description: Desired bookmark state.
+              required: [bookmarked]
+      responses:
+        '200':
+          description: Updated message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessage'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Message not found or not owned by the user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chat/{chatId}/bookmarks:
+    get:
+      summary: List bookmarked messages in a chat
+      description: Returns every bookmarked message in the chat as lightweight snippets, in thread order. Complete regardless of message-list pagination so the navigator can jump to bookmarks not yet loaded client-side.
+      tags: [Chat Messages]
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Bookmarks in thread order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChatMessageBookmark'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /chat/{chatId}/chat-message/{messageId}/retry:
     post:
       summary: Retry generation for a user message
@@ -5839,6 +5922,24 @@ components:
       enum: [read, unread]
       example: "read"
 
+    ChatMessageBookmark:
+      type: object
+      description: Lightweight bookmark entry for the thread navigator — enough to label and jump to a message.
+      properties:
+        id:
+          type: string
+          format: uuid
+        origin:
+          type: string
+          enum: [User, Assistant]
+        snippet:
+          type: string
+          description: Single-line, length-bounded preview of the bookmarked message.
+        sent_at:
+          type: string
+          format: date-time
+      required: [id, origin, snippet, sent_at]
+
     ChatMessage:
       type: object
       properties:
@@ -5917,6 +6018,9 @@ components:
             Per-turn snapshot of the model-context composition captured at generation time
             (segment-by-segment estimated tokens + budget) for the "Context X-ray" UI. Set on
             assistant messages when captured; absent on user messages and older assistant messages.
+        bookmarked:
+          type: boolean
+          description: Whether the user has bookmarked this message for long-thread navigation.
       example:
         id: "123e4567-e89b-12d3-a456-426614174000"
         chat_id: "123e4567-e89b-12d3-a456-426614174001"

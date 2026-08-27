@@ -1,5 +1,5 @@
 import { CommonModule, DOCUMENT } from '@angular/common';
-import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
 import { filter } from 'rxjs/operators';
@@ -12,7 +12,7 @@ import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { ModelService } from '../../core/services/model.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { RitualService } from '../../core/services/ritual.service';
-import { ChatMessage } from '../../core/models/message.model';
+import { ChatMessage, MessageBookmark } from '../../core/models/message.model';
 import {
   createPendingFileAttachment,
   FileAttachment,
@@ -23,6 +23,8 @@ import { Personality, PersonalityExpression } from '../../core/models/personalit
 import { ToolCall } from '../../core/models/toolcall.model';
 import { ChatComposerComponent } from './components/chat-composer/chat-composer.component';
 import { MessageListComponent } from './components/message-list/message-list.component';
+import { ThreadBookmarksComponent } from './components/thread-bookmarks/thread-bookmarks.component';
+import { MessageService } from '../../core/services/message.service';
 import { PersonaPickerDialogComponent } from '../personality/picker/persona-picker-dialog.component';
 import { personalityCoverUrl } from '../personality/helpers/cover-image.helpers';
 import { AuthImagePipe } from '../../core/pipes/auth-image.pipe';
@@ -64,6 +66,7 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
     ChatSendOutletComponent,
     ChatComposerComponent,
     MessageListComponent,
+    ThreadBookmarksComponent,
     PersonaPickerDialogComponent,
     ToolCallDetailModalComponent,
     AuthImagePipe,
@@ -92,6 +95,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   private readonly modelService = inject(ModelService);
   private readonly personalityService = inject(PersonalityService);
   private readonly ritualService = inject(RitualService);
+  private readonly messageService = inject(MessageService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly document = inject(DOCUMENT);
@@ -129,6 +133,9 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   readonly loadedToolCalls = computed(() =>
     this.session.messages().flatMap(message => message.tool_calls ?? []),
   );
+  /** Complete bookmark list for the active thread (for the navigator), loaded from the API. */
+  readonly bookmarks = signal<MessageBookmark[]>([]);
+  private readonly messageList = viewChild(MessageListComponent);
   /** Most recent assistant message that captured a Context X-ray, or null. */
   readonly latestContextMessage = computed(() => {
     const messages = this.session.messages();
@@ -242,7 +249,10 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     const now = Date.now();
     if (now - this.lastThreadRefreshAt < ChatPageComponent.THREAD_REFRESH_THROTTLE_MS) return;
     this.lastThreadRefreshAt = now;
-    this.session.reloadActiveThread();
+    // Only follow the conversation to the present when the user is already at the bottom; if
+    // they've scrolled up to read history, the sync preserves their position and loaded pages.
+    const nearBottom = this.messageList()?.isNearBottom() ?? true;
+    this.session.syncActiveThread(nearBottom);
   };
   private readonly activeHotkeyListeners = new Map<string, (event: KeyboardEvent) => void>();
   private readonly hotkeySequenceState = new Map<string, { keys: string[]; currentIndex: number; timeout?: ReturnType<typeof setTimeout> }>();
@@ -268,6 +278,15 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   private readonly syncContextPanelBreakdown = effect(() => {
     const message = this.latestContextMessage();
     this.contextPanel.setLatestBreakdown(message?.context_breakdown ?? null, message?.id ?? null);
+  });
+  // Load the complete bookmark list whenever the active thread changes.
+  private lastBookmarksThreadId: string | null = null;
+  private readonly loadBookmarksOnThread = effect(() => {
+    const threadId = this.session.thread()?.id ?? null;
+    if (threadId === this.lastBookmarksThreadId) return;
+    this.lastBookmarksThreadId = threadId;
+    this.bookmarks.set([]);
+    if (threadId) this.refreshBookmarks(threadId);
   });
   private readonly syncActiveModel = effect(() => {
     const modelId = this.session.model()?.id ?? this.session.thread()?.model_id ?? null;
@@ -670,6 +689,39 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     if (this.isMobileViewport()) {
       this.contextPanel.openMobile();
     }
+  }
+
+  private refreshBookmarks(chatId: string): void {
+    this.subscriptions.add(
+      this.messageService.listBookmarks(chatId).subscribe({
+        next: bookmarks => {
+          if (this.session.thread()?.id === chatId) this.bookmarks.set(bookmarks);
+        },
+        error: () => {
+          /* best-effort: navigator just stays empty */
+        },
+      }),
+    );
+  }
+
+  // Toggle a message's bookmark (star button in its hover row). The message list updates
+  // optimistically in MessageService; we refresh the navigator list on success.
+  toggleBookmarkFromList(message: ChatMessage): void {
+    const chatId = this.session.thread()?.id;
+    if (!chatId) return;
+    const next = !message.bookmarked;
+    this.subscriptions.add(
+      this.messageService.setBookmark(chatId, message.id, next).subscribe({
+        next: () => this.refreshBookmarks(chatId),
+        error: () => this.refreshBookmarks(chatId),
+      }),
+    );
+  }
+
+  // Jump to a bookmark from the navigator: load older pages until it's present, then scroll.
+  async jumpToBookmark(bookmark: MessageBookmark): Promise<void> {
+    await this.session.loadOlderMessagesUntil(bookmark.id);
+    this.messageList()?.scrollToMessage(bookmark.id);
   }
 
   exportActiveChat(): void {

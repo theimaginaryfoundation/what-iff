@@ -263,6 +263,16 @@ func (t *RecallTool) fetch(ctx context.Context, chat *models.Chat, a recallArgs)
 		}, []*models.Memory{mem}, nil)
 	}
 
+	// Explicit bookmark:<conversation-id>:<message-id> tokens return one pinned message's raw text. Keeping this
+	// separate from bookmarks mode means agents can scan compact labels before paying for a body.
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(target)), recallBookmarkTargetPrefix) {
+		chatID, messageID, err := parseBookmarkFetchTarget(target)
+		if err != nil {
+			return t.fail(recallModeFetch, err.Error())
+		}
+		return t.fetchBookmark(ctx, chat.UserID, chatID, messageID)
+	}
+
 	// Explicit summary:<conversation-id> tokens resolve only as a conversation's checkpoint summary.
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(target)), recallSummaryTargetPrefix) {
 		idStr := strings.TrimSpace(target[len(recallSummaryTargetPrefix):])
@@ -319,6 +329,42 @@ func summaryChunkResult(sum *models.Memory, chatID uuid.UUID) recallResult {
 		Mode:   recallModeFetch,
 		Chunks: []recallChunk{{SourceType: "summary", Name: sum.ChatName, ConversationID: chatID.String(), Text: sum.Content}},
 	}
+}
+
+func (t *RecallTool) fetchBookmark(ctx context.Context, userID, chatID, messageID uuid.UUID) (string, []*models.Memory, []*models.FileAttachment, error) {
+	message, err := t.store.GetChatMessage(ctx, userID, messageID)
+	if err != nil {
+		t.logger.Warn("recall: fetch bookmark failed", zap.Error(err))
+		return t.fail(recallModeFetch, "failed to load bookmark")
+	}
+	if message == nil || !message.Bookmarked || message.ChatID != chatID {
+		return t.fail(recallModeFetch, "no bookmarked message found for that conversation")
+	}
+	return t.ok(recallResult{
+		Mode: recallModeFetch,
+		Chunks: []recallChunk{{
+			SourceType:     "conversation",
+			Name:           "bookmark",
+			ConversationID: message.ChatID.String(),
+			Text:           message.Message,
+		}},
+	}, nil, nil)
+}
+
+func parseBookmarkFetchTarget(target string) (uuid.UUID, uuid.UUID, error) {
+	parts := strings.Split(strings.TrimSpace(target[len(recallBookmarkTargetPrefix):]), ":")
+	if len(parts) != 2 {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("target must be bookmark:<conversation-uuid>:<message-uuid>")
+	}
+	chatID, err := uuid.Parse(parts[0])
+	if err != nil {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("target must be bookmark:<conversation-uuid>:<message-uuid>")
+	}
+	messageID, err := uuid.Parse(parts[1])
+	if err != nil {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("target must be bookmark:<conversation-uuid>:<message-uuid>")
+	}
+	return chatID, messageID, nil
 }
 
 // fetchSummary resolves fetch mode for an explicit summary:<conversation-id> target.
@@ -548,20 +594,9 @@ func (t *RecallTool) conversation(ctx context.Context, chat *models.Chat, a reca
 		page = 1
 	}
 
-	// Resolve the target conversation: explicit conversation ID or the current_conversation
-	// sentinel (case-insensitive), else default to the current conversation.
-	chatID := chat.ID
-	if tgt := strings.TrimSpace(a.Target); tgt != "" {
-		switch strings.ToLower(tgt) {
-		case recallTargetCurrentConversation:
-			// Sentinel for "current conversation" — chatID already defaults to chat.ID.
-		default:
-			id, perr := uuid.Parse(tgt)
-			if perr != nil {
-				return t.fail(recallModeConversation, "target must be a valid conversation ID")
-			}
-			chatID = id
-		}
+	chatID, err := recallConversationTarget(chat.ID, a.Target)
+	if err != nil {
+		return t.fail(recallModeConversation, err.Error())
 	}
 
 	if cur.ConversationID != "" && cur.ConversationID != chatID.String() {
@@ -603,6 +638,74 @@ func (t *RecallTool) conversation(ctx context.Context, chat *models.Chat, a reca
 		}
 	}
 	return t.ok(res, nil, nil)
+}
+
+// bookmarks lists compact pinned-message markers for one conversation. The labels intentionally
+// exclude full message bodies; agents fetch a selected bookmark:<conversation-id>:<message-id>
+// on demand.
+func (t *RecallTool) bookmarks(ctx context.Context, chat *models.Chat, a recallArgs) (string, []*models.Memory, []*models.FileAttachment, error) {
+	pageSize := t.maxChunks(a.MaxChunks, models.BookmarkPageDefault)
+	cur, err := decodeCursor(a.NextPageToken)
+	if err != nil {
+		return t.fail(recallModeBookmarks, err.Error())
+	}
+	page := cur.Page
+	if page < 1 {
+		page = 1
+	}
+	chatID, err := recallConversationTarget(chat.ID, a.Target)
+	if err != nil {
+		return t.fail(recallModeBookmarks, err.Error())
+	}
+	rows, err := t.store.ListChatMessageBookmarksPage(ctx, chat.UserID, chatID, page, pageSize)
+	if err != nil {
+		t.logger.Warn("recall: list bookmarks failed", zap.Error(err))
+		return t.fail(recallModeBookmarks, "failed to list bookmarks")
+	}
+	bookmarks := make([]recallBookmark, 0)
+	total := 0
+	if rows != nil {
+		total = rows.TotalCount
+	}
+	if rows != nil {
+		for _, item := range rows.Results {
+			message, ok := item.(*models.ChatMessage)
+			if !ok || message == nil {
+				continue
+			}
+			bookmarks = append(bookmarks, recallBookmark{
+				MessageID:   message.ID.String(),
+				Origin:      string(message.Origin),
+				SentAt:      message.SentAt.UTC().Format(time.RFC3339),
+				Snippet:     models.BookmarkSnippet(message.Message),
+				FetchTarget: bookmarkFetchTarget(chatID, message.ID),
+			})
+		}
+	}
+	res := recallResult{Mode: recallModeBookmarks, Bookmarks: bookmarks}
+	res.setPageCursor(page, pageSize, total)
+	if len(bookmarks) == 0 {
+		res.Note = "No bookmarks found for that conversation."
+	} else if res.HasMore {
+		res.Note = "More bookmarks available — pass next_page_token for the next page."
+	}
+	return t.ok(res, nil, nil)
+}
+
+func recallConversationTarget(currentChatID uuid.UUID, target string) (uuid.UUID, error) {
+	target = strings.TrimSpace(target)
+	if target == "" || strings.EqualFold(target, recallTargetCurrentConversation) {
+		return currentChatID, nil
+	}
+	id, err := uuid.Parse(target)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("target must be a valid conversation ID")
+	}
+	return id, nil
+}
+
+func bookmarkFetchTarget(chatID, messageID uuid.UUID) string {
+	return recallBookmarkTargetPrefix + chatID.String() + ":" + messageID.String()
 }
 
 // conversationWindow freezes resolved time bounds into the cursor. A relative scope such as

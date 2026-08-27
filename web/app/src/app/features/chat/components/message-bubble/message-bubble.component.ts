@@ -4,17 +4,19 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
 import { ChatMessage } from '../../../../core/models/message.model';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../../chat.constants';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
+import { StarIconComponent } from '../../../../shared/ui/icons/icons';
 import { MessageContentComponent } from '../message-content/message-content.component';
 
 @Component({
   selector: 'app-message-bubble',
   standalone: true,
-  imports: [MessageContentComponent, TooltipDirective],
+  imports: [MessageContentComponent, TooltipDirective, StarIconComponent],
   template: `
     <article
       class="bubble"
       [class.bubble--user]="message().origin === 'User'"
       [class.bubble--pending]="showPendingDots()"
+      [class.bubble--bookmarked]="message().bookmarked && !isPendingPlaceholder()"
       [attr.aria-label]="ariaLabel()"
     >
       <div class="bubble__body">
@@ -45,6 +47,17 @@ import { MessageContentComponent } from '../message-content/message-content.comp
               <span>{{ shortTime(message().sent_at) }}</span>
             </time>
             <button type="button" class="bubble__copy" (click)="copy.emit(message())">Copy</button>
+            <button
+              type="button"
+              class="bubble__bookmark"
+              [class.bubble__bookmark--active]="message().bookmarked"
+              [attr.aria-pressed]="!!message().bookmarked"
+              (click)="toggleBookmark.emit(message())"
+              [title]="message().bookmarked ? 'Remove bookmark' : 'Bookmark this message'"
+            >
+              <ui-star-icon [size]="12" [filled]="!!message().bookmarked" />
+              <span>{{ message().bookmarked ? 'Saved' : 'Save' }}</span>
+            </button>
           </div>
           <div class="bubble__meta-end">
             @if (hasContextBreakdown()) {
@@ -68,6 +81,8 @@ import { MessageContentComponent } from '../message-content/message-content.comp
       display: block;
       max-width: 100%;
       min-width: 0;
+      /* Bookmark accent; a warm gold that reads on both light and dark surfaces. */
+      --bookmark-gold: #e0a53a;
     }
 
     .bubble {
@@ -217,6 +232,36 @@ import { MessageContentComponent } from '../message-content/message-content.comp
       opacity: 1;
     }
 
+    .bubble__bookmark {
+      align-items: center;
+      border: 1px solid var(--color-border-base);
+      border-radius: 999px;
+      color: var(--color-text-muted);
+      display: inline-flex;
+      flex-shrink: 0;
+      gap: 0.2rem;
+      opacity: 0.8;
+      padding: 0.125rem 0.375rem;
+      transition: background 150ms ease, color 150ms ease, opacity 150ms ease;
+    }
+
+    .bubble__bookmark:hover,
+    .bubble__bookmark:focus-visible { opacity: 1; }
+
+    .bubble__bookmark--active {
+      border-color: color-mix(in srgb, var(--bookmark-gold) 50%, var(--color-border-base));
+      color: var(--bookmark-gold);
+      opacity: 1;
+    }
+
+    /* Always-visible gold bar so bookmarks are spottable while scrolling (layout-safe inset). */
+    .bubble--bookmarked .bubble__body {
+      box-shadow: inset 3px 0 0 0 var(--bookmark-gold);
+    }
+    .bubble--bookmarked.bubble--user .bubble__body {
+      box-shadow: inset -3px 0 0 0 var(--bookmark-gold);
+    }
+
     .bubble--user .bubble__meta {
       justify-content: flex-end;
     }
@@ -259,6 +304,20 @@ import { MessageContentComponent } from '../message-content/message-content.comp
       0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
       30% { opacity: 1; transform: translateY(-0.125rem); }
     }
+
+    /* Applied by message-list.scrollToMessage when jumping to a message (e.g. a bookmark). */
+    :host(.message-flash) .bubble__body {
+      animation: bubble-flash 1.8s ease;
+    }
+
+    @keyframes bubble-flash {
+      0%, 100% { box-shadow: 0 0 0 0 transparent; }
+      15% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bookmark-gold) 60%, transparent); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      :host(.message-flash) .bubble__body { animation: none; }
+    }
   `],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -266,6 +325,7 @@ export class MessageBubbleComponent {
   readonly message = input.required<ChatMessage>();
   readonly displayContent = input('');
   readonly copy = output<ChatMessage>();
+  readonly toggleBookmark = output<ChatMessage>();
   readonly showContext = output<ChatMessage>();
 
   /** True for assistant replies that captured a Context X-ray snapshot. */

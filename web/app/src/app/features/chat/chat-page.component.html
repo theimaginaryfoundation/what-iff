@@ -86,6 +86,7 @@
           </div>
         </div>
         <div class="chat-page__title-actions">
+          <app-thread-bookmarks [bookmarks]="bookmarks()" (jump)="jumpToBookmark($event)" />
           <button type="button" class="chat-page__export" (click)="exportActiveChat()" aria-label="Export thread">
             <ui-file-icon [size]="12" />
             <span>Export</span>
@@ -174,6 +175,7 @@
             [displayRevision]="session.getDisplayRevision()"
             (copy)="copyMessage($event)"
             (showContext)="openContextForMessage($event)"
+            (toggleBookmark)="toggleBookmarkFromList($event)"
             (openToolCallDetail)="openToolCall($event)"
             (retryUserMessage)="retryUserMessageFromList($event)"
             (loadOlder)="session.loadOlderMessages()"

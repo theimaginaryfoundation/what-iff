@@ -9,6 +9,8 @@ import { ToolCallGroupComponent } from '../tool-call-group/tool-call-group.compo
 
 const AUTO_SCROLL_BOTTOM_EPSILON_PX = 8;
 const STREAM_FOLLOW_SCROLL_MIN_INTERVAL_MS = 220;
+// Start loading the next older page this far from the top so it lands before the user hits it.
+const OLDER_LOAD_THRESHOLD_PX = 600;
 
 interface AssistantVisual {
   avatarUrl: string | null;
@@ -51,6 +53,7 @@ interface AssistantVisual {
                 [displayResolver]="displayResolver()"
                 (copy)="copy.emit($event)"
                 (showContext)="showContext.emit($event)"
+                (toggleBookmark)="toggleBookmark.emit($event)"
                 (retryUserMessage)="retryUserMessage.emit($event)"
               />
             }
@@ -200,6 +203,7 @@ export class MessageListComponent {
   readonly loadOlder = output<void>();
   readonly copy = output<ChatMessage>();
   readonly showContext = output<ChatMessage>();
+  readonly toggleBookmark = output<ChatMessage>();
   readonly openToolCallDetail = output<ToolCall>();
   readonly retryUserMessage = output<ChatMessage>();
   readonly scrollToBottomRequested = output<void>();
@@ -217,7 +221,12 @@ export class MessageListComponent {
   private lastAppliedScrollDigest = '';
   private lastAutoScrollTailId: string | null = null;
   private lastAutoScrollAtMs = 0;
-  private scrollHeightBeforePrepend: number | null = null;
+  // Anchor for restoring scroll after an older page prepends (element id + its viewport top).
+  private pendingPrependAnchor: { id: string; top: number } | null = null;
+  // Guards against firing multiple older-page loads for one scroll gesture.
+  private prependInFlight = false;
+  // Last observed scrollTop, to detect scroll direction (only auto-load older when going up).
+  private lastScrollTop = 0;
   private lastCheckpointMessageId: string | null = null;
   private readonly groupsLengthForScrollRestore = computed(() => this.groups().length);
 
@@ -250,22 +259,23 @@ export class MessageListComponent {
       this.scheduleScrollToBottom();
     });
 
+    // Preserve the reading position when older messages prepend. Anchoring to a specific
+    // element (not a raw scrollHeight delta) survives asynchronously-sized content above the
+    // fold (avatars, expression portraits) that would otherwise shove the view as it loads.
     effect(() => {
       const length = this.groupsLengthForScrollRestore();
-      const prevHeight = this.scrollHeightBeforePrepend;
-      if (prevHeight === null) {
-        return;
-      }
       void length;
-      queueMicrotask(() => {
-        const container = this.scrollContainer()?.nativeElement;
-        if (!container) {
-          this.scrollHeightBeforePrepend = null;
-          return;
-        }
-        container.scrollTop += container.scrollHeight - prevHeight;
-        this.scrollHeightBeforePrepend = null;
-      });
+      const anchor = this.pendingPrependAnchor;
+      if (!anchor) return;
+      this.pendingPrependAnchor = null;
+      this.restoreToAnchor(anchor);
+    });
+
+    // Release the in-flight guard once the parent finishes loading an older page.
+    effect(() => {
+      if (!this.loadingOlder()) {
+        this.prependInFlight = false;
+      }
     });
 
     effect(() => {
@@ -295,19 +305,112 @@ export class MessageListComponent {
     });
   }
 
+  /**
+   * Scroll a message into view and briefly flash it. Retries across a few animation frames so
+   * it works whether the target is already rendered or was just loaded (e.g. jumping to a
+   * bookmark on an older page). No-op if the message never renders within the window.
+   */
+  scrollToMessage(messageId: string): void {
+    let attempts = 0;
+    const tryScroll = (): void => {
+      const container = this.scrollContainer()?.nativeElement;
+      const target = container?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
+      if (container && target) {
+        this.stickyToBottom.set(false);
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.add('message-flash');
+        setTimeout(() => target.classList.remove('message-flash'), 1800);
+        return;
+      }
+      if (attempts++ < 30) {
+        requestAnimationFrame(tryScroll);
+      }
+    };
+    requestAnimationFrame(tryScroll);
+  }
+
   requestLoadOlder(): void {
-    const container = this.scrollContainer()?.nativeElement;
-    if (container) {
-      this.scrollHeightBeforePrepend = container.scrollHeight;
+    if (!this.hasMoreOlder() || this.loadingOlder() || this.prependInFlight) {
+      return;
     }
+    this.prependInFlight = true;
+    this.captureAnchor();
     this.loadOlder.emit();
   }
 
   onScroll(event: Event): void {
     const target = event.target as HTMLElement;
-    const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+    const scrollTop = target.scrollTop;
+    const distanceFromBottom = target.scrollHeight - scrollTop - target.clientHeight;
     this.isNearBottom.set(distanceFromBottom < 96);
     this.stickyToBottom.set(distanceFromBottom <= AUTO_SCROLL_BOTTOM_EPSILON_PX);
+    // Infinite scroll-up: pull older history as the user nears the top so scrolling back
+    // through a long thread is continuous instead of a button-click-per-page grind. Only when
+    // actively scrolling *up* — otherwise the initial auto-scroll-to-bottom (and the anchor
+    // re-pin after a prepend), which both increase scrollTop through the top region, would
+    // trigger spurious loads.
+    const scrollingUp = scrollTop < this.lastScrollTop;
+    this.lastScrollTop = scrollTop;
+    if (scrollingUp && scrollTop <= OLDER_LOAD_THRESHOLD_PX) {
+      this.requestLoadOlder();
+    }
+  }
+
+  /** Record the first message currently in view and its viewport position, to re-pin after prepend. */
+  private captureAnchor(): void {
+    const container = this.scrollContainer()?.nativeElement;
+    if (!container) return;
+    const containerTop = container.getBoundingClientRect().top;
+    const elements = container.querySelectorAll<HTMLElement>('[data-message-id]');
+    for (const el of Array.from(elements)) {
+      const top = el.getBoundingClientRect().top;
+      if (top - containerTop >= 0) {
+        this.pendingPrependAnchor = { id: el.getAttribute('data-message-id') ?? '', top };
+        return;
+      }
+    }
+    const first = elements[0];
+    if (first) {
+      this.pendingPrependAnchor = { id: first.getAttribute('data-message-id') ?? '', top: first.getBoundingClientRect().top };
+    }
+  }
+
+  /**
+   * Keep the anchored message pinned to its previous viewport position after a prepend. The first
+   * correction must happen in this render turn: delaying it until requestAnimationFrame lets the
+   * reader see the newly-prepended page shove their viewport. Follow-up frames only absorb
+   * late-sizing content (avatars and portraits) above the anchor.
+   */
+  private restoreToAnchor(anchor: { id: string; top: number }): void {
+    const container = this.scrollContainer()?.nativeElement;
+    if (!container || !anchor.id) return;
+    // Effects observing groups() run after Angular has rendered the updated list, so pin now
+    // before the browser can paint the prepended page at the wrong visual position.
+    this.pinToAnchor(container, anchor);
+
+    let frames = 0;
+    const settleLateLayout = (): void => {
+      this.pinToAnchor(container, anchor);
+      if (frames++ < 6) {
+        requestAnimationFrame(settleLateLayout);
+      }
+    };
+    requestAnimationFrame(settleLateLayout);
+  }
+
+  /** Apply one instant anchor correction; scheduling late layout passes stays in restoreToAnchor. */
+  private pinToAnchor(container: HTMLElement, anchor: { id: string; top: number }): void {
+    const el = container.querySelector<HTMLElement>(`[data-message-id="${anchor.id}"]`);
+    if (!el) return;
+    const delta = el.getBoundingClientRect().top - anchor.top;
+    if (Math.abs(delta) <= 0.5) return;
+
+    // The list defaults to smooth scrolling for explicit navigation. An anchor correction is
+    // layout preservation, not navigation — smooth behavior here creates a visible wobble.
+    const priorBehavior = container.style.scrollBehavior;
+    container.style.scrollBehavior = 'auto';
+    container.scrollTop += delta;
+    container.style.scrollBehavior = priorBehavior;
   }
 
   scrollToBottom(behavior: ScrollBehavior = 'smooth', emit = true): void {
