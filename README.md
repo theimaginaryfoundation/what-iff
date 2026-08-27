@@ -4,9 +4,9 @@
 
 # WhatIff
 
-**An open-source, self-hostable AI assistant with memory, personalities, agents, and tools.**
+**An open-source, self-hostable AI assistant where your continuity and memory are not tied to a single model provider.**
 
-Chat across many model providers, give the assistant a long-term memory, shape how it thinks with custom personalities, let it run tools and scheduled agents — all on infrastructure you control.
+WhatIff keeps the persistent AI state in your stack: conversations, long-term memory, personalities, tools, and scheduled agents. The model that generates the next response is interchangeable, so you can move between supported providers without making any one of them the owner of your AI's continuity.
 
 [![Website](https://img.shields.io/badge/Website-whatiff.chat-6D5AE6)](https://whatiff.chat)
 [![Blog](https://img.shields.io/badge/Blog-Imagination_Foundry-FF6719?logo=substack&logoColor=white)](https://imaginationfoundry.substack.com/)
@@ -21,7 +21,7 @@ Chat across many model providers, give the assistant a long-term memory, shape h
 
 ---
 
-WhatIff is the open-source core that powers [whatiff.chat](https://whatiff.chat) — a Go API server and an Angular web app you can run yourself. It pairs a multi-provider chat interface with a semantic memory, a personality system, a tool-using agent, and a scheduler for background/recurring work, backed by PostgreSQL + pgvector. Bring your own model API keys and host the whole thing on your own infrastructure.
+WhatIff is the open-source core that powers [whatiff.chat](https://whatiff.chat), a Go API server and an Angular web app you can run yourself. It owns the continuity layer independently of the model provider: semantic memory, personalities, conversation state, tools, and recurring work stay with the WhatIff deployment while supported models can be selected per user and per chat. Bring your own model API keys and host the whole thing on your own infrastructure.
 
 Want the story behind it? Read the [Imagination Foundry blog](https://imaginationfoundry.substack.com/).
 
