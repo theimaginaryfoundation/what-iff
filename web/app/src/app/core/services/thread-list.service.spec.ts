@@ -2,7 +2,7 @@ import type { MockedObject } from "vitest";
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { signal } from '@angular/core';
-import { of, throwError } from 'rxjs';
+import { of, Subject, throwError } from 'rxjs';
 
 import { ChatService } from './chat.service';
 import { ThreadListService } from './thread-list.service';
@@ -54,6 +54,25 @@ describe('ThreadListService', () => {
         expect(chatService.listAllChats).not.toHaveBeenCalled();
         await new Promise(resolve => setTimeout(resolve, 240));
         expect(chatService.listAllChats).toHaveBeenCalled();
+    });
+
+    it('keeps the newest refresh result when an earlier request resolves last', async () => {
+        const older = new Subject<{ chats: Chat[]; truncated: boolean }>();
+        const newer = new Subject<{ chats: Chat[]; truncated: boolean }>();
+        chatService.listAllChats.mockReturnValueOnce(older).mockReturnValueOnce(newer);
+
+        const olderRefresh = service.refresh();
+        const newerRefresh = service.refresh();
+        newer.next({ chats: [makeChat({ id: 'new', name: 'New result' })], truncated: false });
+        newer.complete();
+        await newerRefresh;
+
+        older.next({ chats: [makeChat({ id: 'old', name: 'Stale result' })], truncated: false });
+        older.complete();
+        await olderRefresh;
+
+        expect(service.filteredThreads().map(thread => thread.id)).toEqual(['new']);
+        expect(service.loading()).toBe(false);
     });
 
     it('optimistically toggles pin and keeps server value', async () => {
