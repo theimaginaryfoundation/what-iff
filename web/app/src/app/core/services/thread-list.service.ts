@@ -51,6 +51,8 @@ export class ThreadListService implements OnDestroy {
   readonly selectedCount = computed(() => this.selectedIds().size);
 
   private queryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Monotonically increases so a slow prior list request cannot overwrite a newer filter result. */
+  private refreshGeneration = 0;
 
   readonly tags = computed(() => uniqueTags(this.allThreads()));
   readonly personalities = computed<PersonalityOption[]>(() => uniquePersonalityOptions(this.allThreads()));
@@ -159,7 +161,12 @@ export class ThreadListService implements OnDestroy {
     }
   }
 
+  /**
+   * Reloads threads for the current filters. Older in-flight requests are
+   * discarded so slower responses cannot replace newer filter results.
+   */
   async refresh(): Promise<void> {
+    const generation = ++this.refreshGeneration;
     this.clearSelection();
     this.loading.set(true);
     this.error.set(null);
@@ -174,12 +181,14 @@ export class ThreadListService implements OnDestroy {
       const response = await firstValueFrom(
         this.chatService.listAllChats(LIST_PAGE_SIZE, Object.keys(filters).length ? filters : undefined),
       );
+      if (generation !== this.refreshGeneration) return;
       this.allThreads.set(response.chats);
       this.listTruncated.set(response.truncated);
     } catch (error) {
+      if (generation !== this.refreshGeneration) return;
       this.error.set(apiErrorMessage(error, 'Failed to load threads'));
     } finally {
-      this.loading.set(false);
+      if (generation === this.refreshGeneration) this.loading.set(false);
     }
   }
 

@@ -91,7 +91,19 @@ export class ThreadListPanel {
    * `row(name)`.
    */
   async narrowTo(name: string): Promise<void> {
+    const response = this.page.waitForResponse(
+      candidate => {
+        if (candidate.request().method() !== 'GET') return false;
+        const url = new URL(candidate.url());
+        return url.pathname === '/api/chat' && url.searchParams.get('search') === name;
+      },
+      { timeout: MUTATION_ACK_TIMEOUT },
+    );
     await this.search(name);
+    const completed = await response;
+    if (!completed.ok()) {
+      throw new Error(`Thread search rejected: GET ${new URL(completed.url()).pathname} returned ${completed.status()}`);
+    }
   }
 
   /** Filters the table by personality (the `<select>` in the PERSONALITY header). */
