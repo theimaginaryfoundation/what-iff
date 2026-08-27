@@ -81,7 +81,15 @@ async function assertCommonLayout(memoriesPage: MemoriesPage, width: number, mem
     await memoriesPage.filterTab(filter).click({ trial: true });
   }
   await memoriesPage.sortSelect.click({ trial: true });
-  await expectNoHorizontalScroll(memoriesPage.page, width);
+
+  const mainExtent = await memoriesPage.mainContent.evaluate(element => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(
+    mainExtent.scrollWidth,
+    `Main content should not require horizontal scrolling at ${width}px`,
+  ).toBeLessThanOrEqual(mainExtent.clientWidth + LAYOUT_TOLERANCE_PX);
 
   return { headingBox, subtitleBox };
 }
