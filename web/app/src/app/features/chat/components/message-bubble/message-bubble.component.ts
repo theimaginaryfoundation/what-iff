@@ -52,6 +52,7 @@ import { MessageContentComponent } from '../message-content/message-content.comp
               class="bubble__bookmark"
               [class.bubble__bookmark--active]="message().bookmarked"
               [attr.aria-pressed]="!!message().bookmarked"
+              [attr.aria-label]="message().bookmarked ? 'Remove bookmark' : 'Bookmark this message'"
               (click)="toggleBookmark.emit(message())"
               [title]="message().bookmarked ? 'Remove bookmark' : 'Bookmark this message'"
             >

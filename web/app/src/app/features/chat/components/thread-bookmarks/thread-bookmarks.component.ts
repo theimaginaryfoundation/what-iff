@@ -21,6 +21,7 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
           class="tb__btn"
           [class.tb__btn--open]="open()"
           [attr.aria-expanded]="open()"
+          aria-label="Jump to a bookmark"
           aria-haspopup="menu"
           aria-controls="thread-bookmarks-menu"
           (click)="toggle()"
