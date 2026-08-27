@@ -93,6 +93,7 @@ interface AssistantVisual {
             [displayContent]="displayMessage(message)"
             (copy)="copy.emit($event)"
             (showContext)="showContext.emit($event)"
+            (toggleBookmark)="toggleBookmark.emit($event)"
           />
         }
         @if (userGenerationError(); as errInfo) {
@@ -418,6 +419,7 @@ export class MessageGroupComponent {
   readonly displayResolver = input<(message: ChatMessage) => string>((message) => message.message);
   readonly copy = output<ChatMessage>();
   readonly showContext = output<ChatMessage>();
+  readonly toggleBookmark = output<ChatMessage>();
   readonly retryUserMessage = output<ChatMessage>();
 
   /** When false, hide the entire assistant image column (expression, portrait, thinking). */

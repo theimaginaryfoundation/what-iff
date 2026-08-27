@@ -65,6 +65,9 @@ func (ChatMessage) Fields() []ent.Field {
 		field.JSON("context_breakdown", &modeltypes.ContextBreakdown{}).
 			Optional().
 			Comment("jsonb snapshot (modeltypes.ContextBreakdown) of the model-context segment/token composition captured at generation time for this assistant message; used by the Context X-ray UI. jsonb (not text) keeps DB-side JSON queries open; a version field inside guards shape evolution."),
+		field.Bool("bookmarked").
+			Default(false).
+			Comment("User-flagged bookmark for navigating long threads; either origin can be bookmarked."),
 	}
 }
 
@@ -103,5 +106,7 @@ func (ChatMessage) Indexes() []ent.Index {
 		index.Fields("response_id"),
 		index.Edges("chat").Fields("sent_at"),
 		index.Edges("chat").Fields("origin", "read_status"),
+		// Serves the per-chat bookmarks listing (WHERE chat=? AND bookmarked=true).
+		index.Edges("chat").Fields("bookmarked"),
 	}
 }

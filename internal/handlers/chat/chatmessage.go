@@ -212,6 +212,77 @@ func (h *Handler) GetChatMessage(w http.ResponseWriter, r *http.Request) {
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, respMessage)
 }
 
+// SetChatMessageBookmark toggles the bookmark flag on a message (PATCH
+// /chat/{chatId}/chat-message/{messageId}/bookmark, body {"bookmarked": bool}) and returns
+// the updated message. Ownership is enforced in the datastore via the chat→owner edge.
+func (h *Handler) SetChatMessageBookmark(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		handlerutils.RespondWithError(w, h.logger, http.StatusUnauthorized, handlerutils.CodeNotSet, "Unauthorized", nil)
+		return
+	}
+
+	messageID, err := uuid.Parse(mux.Vars(r)["messageId"])
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid chat message ID", err)
+		return
+	}
+
+	var req models.ChatMessageBookmarkRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid request body", err)
+		return
+	}
+
+	updated, err := h.ds.SetChatMessageBookmarked(r.Context(), userID, messageID, req.Bookmarked)
+	if errors.Is(err, datastore.ErrChatMessageNotFound) || ent.IsNotFound(err) {
+		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Chat message not found", err)
+		return
+	} else if err != nil {
+		h.logger.Error("failed to set message bookmark", zap.String("user_id", userID.String()), zap.Error(err))
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "failed to update bookmark", err)
+		return
+	}
+
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, updated)
+}
+
+// GetChatMessageBookmarks returns every bookmarked message in a chat as lightweight snippets
+// (GET /chat/{chatId}/bookmarks), in thread order. The complete set is returned regardless of
+// message-list pagination so the navigator can jump to bookmarks not yet loaded in the client.
+func (h *Handler) GetChatMessageBookmarks(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		handlerutils.RespondWithError(w, h.logger, http.StatusUnauthorized, handlerutils.CodeNotSet, "Unauthorized", nil)
+		return
+	}
+
+	chatID, err := uuid.Parse(mux.Vars(r)["chatId"])
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid chat ID", err)
+		return
+	}
+
+	messages, err := h.ds.ListChatMessageBookmarks(r.Context(), userID, chatID)
+	if err != nil {
+		h.logger.Error("failed to list message bookmarks", zap.String("user_id", userID.String()), zap.Error(err))
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "failed to list bookmarks", err)
+		return
+	}
+
+	bookmarks := make([]models.ChatMessageBookmark, 0, len(messages))
+	for _, m := range messages {
+		bookmarks = append(bookmarks, models.ChatMessageBookmark{
+			ID:      m.ID,
+			Origin:  m.Origin,
+			Snippet: models.BookmarkSnippet(m.Message),
+			SentAt:  m.SentAt,
+		})
+	}
+
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, bookmarks)
+}
+
 // GetChatMessages handler function for GET /chat-message
 func (h *Handler) GetChatMessages(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserIDFromContext(r.Context())

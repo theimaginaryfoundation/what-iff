@@ -31,7 +31,9 @@ const (
 	recallModeRelated      = "related"
 	recallModeOrigin       = "origin"
 	recallModeConversation = "conversation"
-	recallModeThreadAlias  = "thread"
+	// recallModeBookmarks lists user-pinned navigation markers for one conversation.
+	recallModeBookmarks   = "bookmarks"
+	recallModeThreadAlias = "thread"
 	// recallModeLifecycleEvents lists memory fold/link (and related) audit rows — a paginated
 	// inspectability surface, not semantic search.
 	recallModeLifecycleEvents = "lifecycle_events"
@@ -57,6 +59,9 @@ const (
 // recallSummaryTargetPrefix resolves a fetch target of the form "summary:<conversation-uuid>" to
 // that conversation's checkpoint summary, mirroring the "memory:" prefix convention.
 const recallSummaryTargetPrefix = "summary:"
+
+// recallBookmarkTargetPrefix resolves an explicitly pinned message into its full raw text.
+const recallBookmarkTargetPrefix = "bookmark:"
 
 // recallTargetCurrentConversation is the sentinel `target` value conversation mode resolves to
 // the current chat, alongside the default of an empty target. Case-insensitive.
@@ -90,6 +95,7 @@ Modes:
 - related: memory ID -> similar memories. Accepts a full UUID, memory:<uuid>, or a unique short hex prefix from sources (e.g. memory:df3e519d).
 - origin: Have a memory ID and want where it came from? Pass it as target — returns that memory plus the last ~5 turns of its source conversation ending at the memory's creation time. Same ID shapes as related. Page with next_page_token for progressively older turns; forward paging is not available.
 - conversation (alias: thread): one conversation's history from its beginning forward -> pass a conversation ID, or omit it (or pass "current_conversation") for the current conversation; filter with time_scope. Also returns that conversation's checkpoint summary, if one exists. Follow next_page_token to continue toward the end. Use to recover what was said, and when.
+- bookmarks: pinned message index for one conversation (target or current), oldest first. Returns small labels and fetch targets only; use its bookmark:<conversation-id>:<message-id> target to read one pinned message's full text.
 - lifecycle_events (alias: merge_history): paginated audit list of memory lifecycle events (fold/link and related merge-audit rows — not semantic search). Filter with query (content substring), target (a survivor memory ID), and time_scope. Responses include page, total_count, has_more, and next_page_token when more pages exist.
 
 Modifiers: time_scope ("last 7 days", "before 2025-01-01", "between A and B"), source_type (memories|files|conversations|summaries|all), current_conversation (scopes search/investigate to this conversation), next_page_token (page large results — fetch, conversation, origin, and lifecycle_events), max_chunks (depth; origin defaults to 5 turns; lifecycle_events defaults to 20 events per page).
@@ -105,8 +111,8 @@ var RecallToolSpec = FunctionToolSpec{
 	Properties: map[string]interface{}{
 		"mode": map[string]interface{}{
 			"type":        "string",
-			"enum":        []string{recallModeInvestigate, recallModeSearch, recallModeFetch, recallModeRelated, recallModeOrigin, recallModeConversation, recallModeThreadAlias, recallModeLifecycleEvents, recallModeMergeHistoryAlias},
-			"description": "Access mode. Optional — defaults to 'investigate' when omitted. investigate: ask a question, get a compressed sourced answer. search: semantic search returning raw chunks. fetch: retrieve a specific file, memory, or conversation summary by name/ID (images attach directly to your context instead of returning chunks). related: memories similar to a given memory ID. origin: memory ID -> last ~5 source-conversation turns ending at that memory's creation time (page for more). conversation: one conversation's history from its beginning forward (target or current) by time range, including its checkpoint summary. 'thread' is accepted as a legacy alias for 'conversation'. lifecycle_events: paginated audit list of memory lifecycle events (fold/link); 'merge_history' is accepted as a legacy alias.",
+			"enum":        []string{recallModeInvestigate, recallModeSearch, recallModeFetch, recallModeRelated, recallModeOrigin, recallModeConversation, recallModeBookmarks, recallModeThreadAlias, recallModeLifecycleEvents, recallModeMergeHistoryAlias},
+			"description": "Access mode. Optional — defaults to 'investigate' when omitted. investigate: ask a question, get a compressed sourced answer. search: semantic search returning raw chunks. fetch: retrieve a specific file, memory, conversation summary, or a bookmark fetch target returned by bookmarks mode (images attach directly to your context instead of returning chunks). related: memories similar to a given memory ID. origin: memory ID -> last ~5 source-conversation turns ending at that memory's creation time (page for more). conversation: one conversation's history from its beginning forward (target or current) by time range, including its checkpoint summary. bookmarks: compact pinned-message index for a conversation; use a returned fetch_target for the selected message. 'thread' is accepted as a legacy alias for 'conversation'. lifecycle_events: paginated audit list of memory lifecycle events (fold/link); 'merge_history' is accepted as a legacy alias.",
 		},
 		"query": map[string]interface{}{
 			"type":        "string",
@@ -114,7 +120,7 @@ var RecallToolSpec = FunctionToolSpec{
 		},
 		"target": map[string]interface{}{
 			"type":        "string",
-			"description": "Filename, memory ID, or conversation ID depending on mode. fetch: filename, memory/file ID, a conversation ID (returns its checkpoint summary), or summary:<conversation-id>. related/origin: memory UUID, memory:<uuid>, or unique short hex prefix from investigate.sources. conversation: conversation ID, or \"current_conversation\" (or omit) for the current conversation. lifecycle_events: a survivor memory ID to filter to that memory's lifecycle events.",
+			"description": "Filename, memory ID, or conversation ID depending on mode. fetch: filename, memory/file ID, a conversation ID (returns its checkpoint summary), summary:<conversation-id>, or bookmark:<conversation-id>:<message-id>. related/origin: memory UUID, memory:<uuid>, or unique short hex prefix from investigate.sources. conversation/bookmarks: conversation ID, or \"current_conversation\" (or omit) for the current conversation. lifecycle_events: a survivor memory ID to filter to that memory's lifecycle events.",
 		},
 		"time_scope": map[string]interface{}{
 			"type":        "string",
@@ -158,7 +164,9 @@ type recallStore interface {
 	ListFileChunksForAttachment(ctx context.Context, fileAttachmentID uuid.UUID, limit int) ([]datastore.FileChunkResult, error)
 	ListFileAttachments(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.FileAttachmentFilters) (*models.PaginatedResponse, error)
 	GetFileAttachment(ctx context.Context, userID, id uuid.UUID) (*models.FileAttachment, error)
+	GetChatMessage(ctx context.Context, userID, id uuid.UUID) (*models.ChatMessage, error)
 	ListChatMessages(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
+	ListChatMessageBookmarksPage(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int) (*models.PaginatedResponse, error)
 	// ListChatMessagesAfter returns an ascending (sent_at, id) page strictly after the supplied
 	// keyset position. Zero values select the conversation's first message.
 	ListChatMessagesAfter(ctx context.Context, userID, chatID uuid.UUID, afterSentAt time.Time, afterID uuid.UUID, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
@@ -239,6 +247,15 @@ type recallMessage struct {
 	sentAt time.Time
 }
 
+// recallBookmark is a compact navigation row. Full content is returned only by its FetchTarget.
+type recallBookmark struct {
+	MessageID   string `json:"message_id"`
+	Origin      string `json:"origin"`
+	SentAt      string `json:"sent_at"`
+	Snippet     string `json:"snippet"`
+	FetchTarget string `json:"fetch_target"`
+}
+
 type recallConversation struct {
 	ConversationID   string          `json:"conversation_id"`
 	ConversationName string          `json:"conversation_name,omitempty"`
@@ -269,6 +286,7 @@ type recallResult struct {
 	Memories        []string               `json:"memories,omitempty"`
 	Chunks          []recallChunk          `json:"chunks,omitempty"`
 	Conversations   []recallConversation   `json:"conversations,omitempty"`
+	Bookmarks       []recallBookmark       `json:"bookmarks,omitempty"`
 	LifecycleEvents []recallLifecycleEvent `json:"lifecycle_events,omitempty"`
 	Sources         []string               `json:"sources,omitempty"`
 	TimeScope       *recallTimeScope       `json:"time_scope,omitempty"`
@@ -441,10 +459,12 @@ func (t *RecallTool) Recall(ctx context.Context, chat *models.Chat, args []byte)
 		return t.origin(ctx, chat, a)
 	case recallModeConversation:
 		return t.conversation(ctx, chat, a)
+	case recallModeBookmarks:
+		return t.bookmarks(ctx, chat, a)
 	case recallModeLifecycleEvents:
 		return t.lifecycleEvents(ctx, chat, a)
 	default:
-		return t.fail(mode, fmt.Sprintf("unknown mode %q; expected one of investigate, search, fetch, related, origin, conversation, lifecycle_events", a.Mode))
+		return t.fail(mode, fmt.Sprintf("unknown mode %q; expected one of investigate, search, fetch, related, origin, conversation, bookmarks, lifecycle_events", a.Mode))
 	}
 }
 
