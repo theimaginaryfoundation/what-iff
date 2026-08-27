@@ -508,6 +508,33 @@ export async function listChatMessages(client: ApiClient, chatId: string, params
   return data.results ?? [];
 }
 
+// --- Chat message bookmarks ------------------------------------------------
+
+export type ChatMessageBookmark = components['schemas']['ChatMessageBookmark'];
+
+/** Sets or clears a bookmark on one chat message. Returns the updated message. */
+export async function setMessageBookmark(client: ApiClient, chatId: string, messageId: string, bookmarked: boolean): Promise<ChatMessage> {
+  const { data, error, response } = await client.PATCH('/chat/{chatId}/chat-message/{messageId}/bookmark', {
+    params: { path: { chatId, messageId } },
+    body: { bookmarked },
+  });
+  if (error || !data) {
+    fail('set message bookmark', response.status, error);
+  }
+  return data;
+}
+
+/** Lists all bookmarked messages in a chat as lightweight snippets. */
+export async function listChatBookmarks(client: ApiClient, chatId: string): Promise<ChatMessageBookmark[]> {
+  const { data, error, response } = await client.GET('/chat/{chatId}/bookmarks', {
+    params: { path: { chatId } },
+  });
+  if (error || !data) {
+    fail('list chat bookmarks', response.status, error);
+  }
+  return data;
+}
+
 // --- Chat context ----------------------------------------------------------
 
 /** Reads the scratchpad and checkpoint summary backing a chat session. */

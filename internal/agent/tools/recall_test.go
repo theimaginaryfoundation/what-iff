@@ -242,6 +242,17 @@ func (f *fakeRecallStore) GetFileAttachment(_ context.Context, _, id uuid.UUID) 
 	}
 	return nil, nil
 }
+func (f *fakeRecallStore) GetChatMessage(_ context.Context, _, id uuid.UUID) (*models.ChatMessage, error) {
+	for _, m := range f.messages {
+		if m.ID == id {
+			return m, nil
+		}
+	}
+	return nil, nil
+}
+func (f *fakeRecallStore) ListChatMessageBookmarksPage(_ context.Context, _, _ uuid.UUID, _, _ int) (*models.PaginatedResponse, error) {
+	return &models.PaginatedResponse{Results: []any{}, TotalCount: 0, Page: 1}, nil
+}
 func (f *fakeRecallStore) ListChatMessages(_ context.Context, _, chatID uuid.UUID, pageNum, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error) {
 	f.lastMsgChatID = chatID
 	f.lastMsgFilters = filters
