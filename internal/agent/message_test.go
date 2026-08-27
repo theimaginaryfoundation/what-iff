@@ -9,10 +9,39 @@ import (
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
+
+// TestRecoverAsyncMessageJob_ContainsPanic locks in the pod-crash guard: a panic in the
+// async chat-message goroutine must be contained to its job, not propagated (which would
+// take down the process). It must stay contained even when recording the failed status
+// fails — here the datastore call errors because no expectation is registered.
+func TestRecoverAsyncMessageJob_ContainsPanic(t *testing.T) {
+	ds, _, cleanup := newTestDatastore(t)
+	defer cleanup()
+	a := newTestAgent(ds)
+
+	require.NotPanics(t, func() {
+		defer a.recoverAsyncMessageJob(context.Background(), uuid.New(), uuid.New(), uuid.New())
+		panic("boom in post-inference checkpoint")
+	})
+}
+
+// TestRecoverAsyncMessageJob_NoPanicIsNoop verifies the guard is inert on the happy path:
+// with no panic in flight it must not touch the datastore (no sqlmock expectations set).
+func TestRecoverAsyncMessageJob_NoPanicIsNoop(t *testing.T) {
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+	a := newTestAgent(ds)
+
+	require.NotPanics(t, func() {
+		defer a.recoverAsyncMessageJob(context.Background(), uuid.New(), uuid.New(), uuid.New())
+	})
+	require.NoError(t, mock.ExpectationsWereMet())
+}
 
 // Test buildAttachmentLabels function
 func TestBuildAttachmentLabels_EmptyAttachments(t *testing.T) {
