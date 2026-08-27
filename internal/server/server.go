@@ -217,14 +217,15 @@ func (s *Server) setupRoutes() {
 	jobHandler := job.NewHandlerWithCanceller(dataStore, agent, s.logger)
 	memoryHandler := memory.NewHandler(dataStore, s.logger, s.config.OpenAIKey, providerHTTPClient)
 
-	// Account export: async export runs in-process here in the main app; the download link is
-	// delivered ONLY by email (a deliberate control — app access alone cannot exfiltrate the account).
-	// SES is used when EXPORT_FROM_EMAIL is set; otherwise a noop sender logs the link (local dev).
+	// Account export: async export runs in-process here in the main app; the bundle lands in the
+	// file store and its download link is delivered ONLY out-of-band (a deliberate control — app
+	// access alone cannot exfiltrate the account). The concrete email transport is provided by
+	// email.New, which a private implementation registers via a blank import in cmd/api-server and
+	// which reads its own configuration from the environment. When that package is absent (e.g. the
+	// open-source build), email.New is nil and we fall back to email.NoopSender, which logs the link.
 	var exportSender email.Sender = email.NoopSender{Logger: s.logger}
-	if s.config.ExportFromEmail != "" {
-		if snd, err := email.NewSESSender(context.Background(), s.config.AWSRegion, s.config.ExportFromEmail, s.logger); err != nil {
-			s.logger.Warn("account export: SES sender init failed; using noop (links will be logged)", zap.Error(err))
-		} else {
+	if email.New != nil {
+		if snd := email.New(s.logger); snd != nil {
 			exportSender = snd
 		}
 	}
