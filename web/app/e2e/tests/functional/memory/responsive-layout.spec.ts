@@ -32,10 +32,14 @@ function expectInsideViewport(box: Rect, viewportWidth: number, label: string): 
 
 async function expectNoHorizontalScroll(page: Page, width: number): Promise<void> {
   const main = page.locator('#main-content');
-  const mainExtent = await main.evaluate(element => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
-  expect(mainExtent.scrollWidth, `Main content should not require horizontal scrolling at ${width}px`).toBeLessThanOrEqual(
-    mainExtent.clientWidth + LAYOUT_TOLERANCE_PX,
-  );
+  const mainExtent = await main.evaluate(element => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(
+    mainExtent.scrollWidth,
+    `Main content should not require horizontal scrolling at ${width}px`,
+  ).toBeLessThanOrEqual(mainExtent.clientWidth + LAYOUT_TOLERANCE_PX);
 }
 
 async function assertCommonLayout(memoriesPage: MemoriesPage, width: number, memoryContent: string): Promise<{
@@ -129,12 +133,10 @@ test.describe('memories responsive layout contract', () => {
 
 test.describe('jobs responsive layout contract', () => {
   test('keeps the mobile navigation clear of the Jobs header across narrow widths', async ({ page, userWithPersonality }) => {
-    await page.setViewportSize({ width: MOBILE_WIDTHS[0], height: VIEWPORT_HEIGHT });
-    await page.goto('/agent-jobs');
-
     for (const width of MOBILE_WIDTHS) {
       await test.step(`${width}px viewport`, async () => {
         await page.setViewportSize({ width, height: VIEWPORT_HEIGHT });
+        await page.goto('/agent-jobs');
 
         const heading = page.getByRole('heading', { name: 'Jobs', level: 1 });
         const createJobButton = page.getByRole('button', { name: 'Create job' }).first();
