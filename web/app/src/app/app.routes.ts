@@ -189,6 +189,12 @@ export const routes: Routes = [
           .then(m => m.GalleryPageComponent)
       },
       {
+        // Deliberately unlinked: pre-release features are available only by direct URL.
+        path: 'experimental',
+        loadComponent: () => import('./features/experimental/experimental-page.component')
+          .then(m => m.ExperimentalPageComponent)
+      },
+      {
         path: 'image-gallery',
         redirectTo: '/gallery',
         pathMatch: 'full'

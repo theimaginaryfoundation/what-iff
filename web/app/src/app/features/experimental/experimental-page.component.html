@@ -1,0 +1,50 @@
+<main class="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 overflow-y-auto px-6 py-8">
+  <section
+    class="rounded-xl border-2 border-amber-500 bg-amber-50 p-6 text-amber-950 dark:bg-amber-950/40 dark:text-amber-100"
+    role="alert"
+  >
+    <h1 class="text-xl font-bold">If you found this, beware!</h1>
+    <p class="mt-2 text-sm leading-6">
+      These are pre-release features that could cause significant breakage. Use them only for testing, and keep a separate backup of
+      anything important.
+    </p>
+  </section>
+
+  <section class="rounded-xl border border-(--color-border-default) bg-(--color-surface-card) p-6">
+    <h2 class="text-lg font-semibold text-(--color-text-primary)">Experimental account portability</h2>
+    <p class="mt-1 text-sm text-(--color-text-secondary)">
+      Export or restore conversations, personalities, and memories between Whatiff accounts. Uploaded file contents are not included in
+      account exports.
+    </p>
+
+    <div class="mt-5 flex flex-wrap gap-3">
+      <button
+        type="button"
+        class="rounded-lg bg-(--cta) px-4 py-2 text-sm font-semibold text-(--cta-text) disabled:cursor-not-allowed disabled:opacity-50"
+        [disabled]="accountExporting()"
+        (click)="requestAccountExport()"
+      >
+        {{ accountExporting() ? "Exporting…" : "Export account data" }}
+      </button>
+      <input #accountImportInput class="sr-only" type="file" accept=".zip,application/zip" (change)="importAccountFile($event)" />
+      <button
+        type="button"
+        class="rounded-lg border border-(--btn-secondary-border) bg-(--btn-secondary) px-4 py-2 text-sm font-semibold text-(--btn-secondary-text) disabled:cursor-not-allowed disabled:opacity-50"
+        [disabled]="accountImporting()"
+        (click)="openAccountImportPicker()"
+      >
+        {{ accountImporting() ? "Importing…" : "Import Whatiff ZIP" }}
+      </button>
+    </div>
+
+    @if (accountExportStatus()) {
+      <p class="mt-4 text-sm text-(--color-text-secondary)" role="status">{{ accountExportStatus() }}</p>
+    }
+    @if (accountImportStatus()) {
+      <p class="mt-4 text-sm text-(--color-text-secondary)" role="status">{{ accountImportStatus() }}</p>
+    }
+    <p class="mt-4 text-xs text-(--color-text-secondary)">
+      Imports are additive: existing matching conversations, personalities, and memories are skipped.
+    </p>
+  </section>
+</main>

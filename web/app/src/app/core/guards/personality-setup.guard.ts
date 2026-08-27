@@ -12,6 +12,8 @@ const EXEMPT_PATH_PREFIXES = [
   '/subscription',
   '/billing',
   '/usage',
+  // Account restoration must be available before a user has a personality.
+  '/experimental',
 ];
 
 function isExemptPath(url: string | undefined | null): boolean {

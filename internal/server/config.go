@@ -89,6 +89,11 @@ type Config struct {
 	S3FileBucket string
 	AWSRegion    string
 
+	// ExportFromEmail is the verified SES From address for account-export "your export is ready"
+	// emails. The download link is delivered ONLY by email (a deliberate security control: app access
+	// alone cannot exfiltrate a full account). Empty disables sending (dev logs the link instead).
+	ExportFromEmail string
+
 	// RunMigrations controls whether startup migrations and data backfills run.
 	RunMigrations bool
 }
@@ -296,6 +301,7 @@ func NewConfig() *Config {
 		RegressionMode:                      regressionMode,
 		S3FileBucket:                        s3FileBucket,
 		AWSRegion:                           awsRegion,
+		ExportFromEmail:                     strings.TrimSpace(os.Getenv("EXPORT_FROM_EMAIL")),
 		RunMigrations:                       strings.TrimSpace(os.Getenv("AUTO_MIGRATE")) == "true",
 	}
 }

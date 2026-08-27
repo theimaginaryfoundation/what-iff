@@ -4163,6 +4163,280 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/account/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enqueue a full-account export
+         * @description Enqueues an asynchronous full-account export for the authenticated user, built in-process. The
+         *     export is a **ZIP** containing conversations (in the round-trippable Claude `conversations.json`
+         *     shape), personalities (with scratchpads), memories (as a nested `memories.zip`), a
+         *     `files/manifest.json` inventory of the user's uploaded files, and a `manifest.json`.
+         *
+         *     Returns `202` with a Job; poll `GET /account/export/{id}` for the phase. **The download link is
+         *     delivered only by email — never in the API response.** This is a deliberate security control:
+         *     access to the app account alone cannot exfiltrate the full account, since the download also
+         *     requires access to the user's mailbox.
+         *
+         *     Rate limited to one export per user per 10 minutes.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Export enqueued */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Job"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description An export was requested too recently */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/account/export/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get account export status
+         * @description Returns the export Job. Its `progress` field is a JSON-encoded `AccountExportProgress`
+         *     (`phase` of queued/building/uploading/complete/failed, section `counts`, and a user-safe
+         *     `message`). It never contains the download link — that is emailed.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Export job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Job"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Export not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/account/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enqueue an account export ZIP import
+         * @description Restores conversations, memories, and personalities from an export ZIP (produced by
+         *     `/account/export`). Additive and id-stripped: conversations dedupe by import hash,
+         *     personalities dedupe by name, and everything is created fresh under the importing user, so an
+         *     export loads into any account without key collisions. Whatiff metadata in `conversations.json`
+         *     preserves checkpoint context and personality associations; source chat/personality references are
+         *     remapped before memories import. Summarized threads are immediately resumable, while threads
+         *     without a summary remain archived for lazy rehydration. The upload is staged to a temporary
+         *     file, then restored by a bounded in-process worker. Returns `202` with a Job; poll
+         *     `GET /account/import/{id}` until terminal status. Its JSON-encoded `progress` contains phase,
+         *     section counts, warnings, and the final result. Memory import requires the server to have an
+         *     OpenAI key (embeddings are regenerated); when unavailable, memories are skipped.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /**
+                         * Format: binary
+                         * @description The export ZIP.
+                         */
+                        file?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Import enqueued */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Job"];
+                    };
+                };
+                /** @description Missing or invalid ZIP */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Import file too large */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/account/import/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get account import status and results
+         * @description Returns the account-import Job. Parse its JSON-encoded `progress` as `AccountImportProgress`;
+         *     terminal successful jobs include the per-section result and warnings.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Account import job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Job"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Import not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/import": {
         parameters: {
             query?: never;
@@ -4204,6 +4478,13 @@ export interface paths {
                             imported_count?: number;
                             duplicate_count?: number;
                             invalid_record_count?: number;
+                            invalid_reasons?: {
+                                malformed_json?: number;
+                                missing_id?: number;
+                                empty_content?: number;
+                                missing_created_at?: number;
+                                missing_chat_id?: number;
+                            };
                             skipped_missing_chat_count?: number;
                             skipped_missing_personality_count?: number;
                         };
@@ -7499,7 +7780,9 @@ export interface components {
             draft_deltas?: string[];
             /**
              * @description Optional JSON-encoded progress payload for long-running jobs. Opaque to clients except per
-             *     job_type. For `chat_import` it is `{phase, source, total, imported, skipped}`.
+             *     job_type. For `chat_import` it is `{phase, source, total, imported, skipped}`; for
+             *     `account_import` it is `{phase, message, counts, conversations, personalities, memories,
+             *     warnings, result}`, where `result` is present on terminal success.
              */
             progress?: string;
             /** Format: date-time */

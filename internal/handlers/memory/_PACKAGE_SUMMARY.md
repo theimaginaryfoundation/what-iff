@@ -7,7 +7,7 @@ HTTP API for **semantic memories** — CRUD, search, plus export/import portabil
 ## Responsibilities
 
 - **`Handler`:** Memory routes wired in `handler.go`; uses datastore memory layer and vector search.
-- **Import/export:** `export.go` streams memory ZIP downloads; `import.go` accepts a ZIP upload and triggers UUID-deduped import with embedding regeneration.
+- **Import/export:** `export.go` streams memory ZIP downloads; `import.go` accepts a ZIP upload and triggers UUID-deduped import with bounded OpenAI embedding batches and bulk persistence.
 
 ## Dependencies
 

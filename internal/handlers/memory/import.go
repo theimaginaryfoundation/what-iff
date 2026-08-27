@@ -62,7 +62,7 @@ func (h *Handler) ImportMemories(w http.ResponseWriter, r *http.Request) {
 		zap.String("user_id", userID.String()),
 		zap.Int("zip_entries", len(zr.File)))
 
-	result, err := h.ds.ImportMemories(r.Context(), userID, zr, h.createEmbedding)
+	result, err := h.ds.ImportMemoriesWithBatchEmbeddings(r.Context(), userID, zr, h.createEmbedding, h.createEmbeddings)
 	if err != nil {
 		h.logger.Error("failed to import memories",
 			zap.String("user_id", userID.String()),

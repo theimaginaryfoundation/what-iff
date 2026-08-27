@@ -18,7 +18,9 @@ import (
 	agentjobscheduler "github.com/theimaginaryfoundation/what-iff/internal/agentjobs/scheduler"
 	"github.com/theimaginaryfoundation/what-iff/internal/buildinfo"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/email"
 	"github.com/theimaginaryfoundation/what-iff/internal/featuregate"
+	"github.com/theimaginaryfoundation/what-iff/internal/handlers/accountexport"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/agentjob"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/chat"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/fileattachment"
@@ -214,6 +216,19 @@ func (s *Server) setupRoutes() {
 	userHandler := user.NewHandler(dataStore, s.logger, s.config.AllowedEmails, s.config.Environment)
 	jobHandler := job.NewHandlerWithCanceller(dataStore, agent, s.logger)
 	memoryHandler := memory.NewHandler(dataStore, s.logger, s.config.OpenAIKey, providerHTTPClient)
+
+	// Account export: async export runs in-process here in the main app; the download link is
+	// delivered ONLY by email (a deliberate control — app access alone cannot exfiltrate the account).
+	// SES is used when EXPORT_FROM_EMAIL is set; otherwise a noop sender logs the link (local dev).
+	var exportSender email.Sender = email.NoopSender{Logger: s.logger}
+	if s.config.ExportFromEmail != "" {
+		if snd, err := email.NewSESSender(context.Background(), s.config.AWSRegion, s.config.ExportFromEmail, s.logger); err != nil {
+			s.logger.Warn("account export: SES sender init failed; using noop (links will be logged)", zap.Error(err))
+		} else {
+			exportSender = snd
+		}
+	}
+	accountExportHandler := accountexport.NewHandler(dataStore, s.logger, fileStore, exportSender, s.config.OpenAIKey)
 	mcpServerHandler := mcpserver.NewHandler(dataStore, s.logger)
 	modelHandler := model.NewHandler(dataStore, s.logger)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)
@@ -274,6 +289,7 @@ func (s *Server) setupRoutes() {
 	chatHandler.RegisterRoutes(authRouter)
 	agentJobHandler.RegisterRoutes(authRouter)
 	memoryHandler.RegisterRoutes(authRouter)
+	accountExportHandler.RegisterRoutes(authRouter)
 	mcpServerHandler.RegisterRoutes(authRouter)
 	modelRouter := apiRouter.PathPrefix("/model").Subrouter()
 	modelRouter.Use(middleware.OptionalAuthMiddleware(s.db, dataStore, s.logger))
