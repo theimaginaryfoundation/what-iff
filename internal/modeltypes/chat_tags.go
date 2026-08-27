@@ -20,6 +20,12 @@ const (
 //
 // Callers that need PATCH semantics should check nil before deciding whether to write.
 func NormalizeAndValidateChatTags(tags []string) ([]string, error) {
+	// make([]string, 0) below is non-nil, so nil input must be special-cased
+	// to actually return nil — otherwise the documented nil-in/nil-out PATCH
+	// contract silently never holds.
+	if tags == nil {
+		return nil, nil
+	}
 	if len(tags) > MaxChatTags {
 		return nil, fmt.Errorf("chat can have at most %d tags", MaxChatTags)
 	}
