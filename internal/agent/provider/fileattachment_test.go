@@ -360,3 +360,18 @@ This completes the analysis.`
 		assert.Equal(t, expected, result, "Complex markdown with multiple newlines should be fully preserved")
 	})
 }
+
+func TestNormalizeUploadFileNameExtension(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"photo.JPG":       "photo.jpg",
+		"photo.jpg":       "photo.jpg",
+		"doc.PNG":         "doc.png",
+		"archive.tar.GZ":  "archive.tar.gz",
+		"NoExtension":     "NoExtension",
+		"UPPER.name.WEBP": "UPPER.name.webp",
+	}
+	for in, want := range cases {
+		require.Equal(t, want, normalizeUploadFileNameExtension(in), "input %q", in)
+	}
+}

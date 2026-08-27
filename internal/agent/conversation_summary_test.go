@@ -85,6 +85,48 @@ func TestBuildCheckpointSummaryParams_ExplicitMode(t *testing.T) {
 	require.Len(t, items, 4) // history user, current user, assistant reply, update prompt
 }
 
+// TestBuildCheckpointSummaryParams_StripsOpenAIUnsafeImages reproduces the checkpoint
+// summary crash: a Claude-chat turn carried an image whose OpenAI file_id has an uppercase
+// ".JPG" extension (rejected case-sensitively) plus a media type OpenAI does not support,
+// which returned a 400 from the summarizer. The built params must never surface a file_id
+// image or an unsupported media type.
+func TestBuildCheckpointSummaryParams_StripsOpenAIUnsafeImages(t *testing.T) {
+	t.Parallel()
+
+	mc := &provider.ModelContext{}
+	// Supported type carrying both a file_id (the ".JPG" landmine) and raw bytes: kept, but
+	// must render as a data URL, never as the file_id reference.
+	mc.AppendHistoryTurn(provider.RoleUser, "look at this", []provider.UserMessageImage{
+		{FileID: "file-photo-JPG", MediaType: "image/jpeg", RawBytes: []byte{1, 2, 3}},
+	}, false)
+	// Unsupported type from another vendor's turn: must be dropped, its text kept.
+	mc.AppendHistoryTurn(provider.RoleUser, "and this heic", []provider.UserMessageImage{
+		{MediaType: "image/heic", RawBytes: []byte{4, 5}},
+	}, false)
+
+	params, err := buildCheckpointSummaryParams(uuid.New(), "", checkpointSummarySource{ModelContext: mc})
+	require.NoError(t, err)
+
+	sawImage := false
+	for _, item := range params.Input.OfInputItemList {
+		if item.OfMessage == nil {
+			continue
+		}
+		for _, part := range item.OfMessage.Content.OfInputItemContentList {
+			if part.OfInputImage == nil {
+				continue
+			}
+			sawImage = true
+			require.False(t, part.OfInputImage.FileID.Valid(),
+				"summarizer image must not use a file_id (OpenAI validates its stored filename case-sensitively)")
+			require.True(t, part.OfInputImage.ImageURL.Valid(), "kept image should render as a data URL")
+			require.True(t, strings.HasPrefix(part.OfInputImage.ImageURL.Value, "data:image/jpeg;base64,"),
+				"data URL should carry a normalized, supported media type")
+		}
+	}
+	require.True(t, sawImage, "the supported jpeg image should survive sanitization")
+}
+
 func TestBuildCheckpointSummaryParams_RequiresSource(t *testing.T) {
 	t.Parallel()
 

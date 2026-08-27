@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -503,6 +504,12 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 	go func() {
 		defer cancel()
 		defer a.unregisterRunningJobCancel(newJob.ID)
+		// An unrecovered panic in any goroutine takes down the whole process (and so the
+		// pod). Recover here so a failure while processing one message fails just that job
+		// instead — e.g. a post-inference checkpoint summary that a provider rejects must
+		// not crash every other in-flight chat. Registered after cancel/unregister so it
+		// runs first (LIFO) and UpdateJobStatus still sees a live runCtx.
+		defer a.recoverAsyncMessageJob(runCtx, userID, newJob.ID, chatMessage.ID)
 		_, err := a.handleUserMessage(runCtx, newJob, chatMessage)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -526,6 +533,31 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 		JobID: newJob.ID.String(),
 		Type:  JobTypeChatMessage,
 	}, nil
+}
+
+// recoverAsyncMessageJob is the deferred panic guard for async chat-message processing.
+// A panic in the background goroutine would otherwise crash the whole process (the pod);
+// here it is contained to the single job, which is marked failed and logged with its stack.
+// Failing to record the failed status is itself logged and swallowed — recovery must never
+// re-panic. runCtx must still be live (call before its cancel runs).
+func (a *Agent) recoverAsyncMessageJob(runCtx context.Context, userID, jobID, chatMessageID uuid.UUID) {
+	recovered := recover()
+	if recovered == nil {
+		return
+	}
+	panicMessage := fmt.Sprintf("panic: %v", recovered)
+	if _, failErr := a.ds.UpdateJobStatus(runCtx, userID, jobID, models.JobStatusFailed, panicMessage); failErr != nil {
+		a.logger.Error("failed to mark async agent message job failed after panic",
+			zap.String("job_id", jobID.String()),
+			zap.Error(failErr),
+		)
+	}
+	a.logger.Error("panic recovered in async agent message processing",
+		zap.String("job_id", jobID.String()),
+		zap.String("chat_message_id", chatMessageID.String()),
+		zap.Any("panic", recovered),
+		zap.ByteString("stack_trace", debug.Stack()),
+	)
 }
 
 // RetryUserChatMessage enqueues another chat_message job for an existing user turn.

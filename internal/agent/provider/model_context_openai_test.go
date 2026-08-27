@@ -191,3 +191,48 @@ func TestBuildOpenAIResponseParams_ModelAndInputItemList(t *testing.T) {
 	require.NotNil(t, p.Input.OfInputItemList)
 	require.GreaterOrEqual(t, len(p.Input.OfInputItemList), 1)
 }
+
+func TestSanitizeImagesForOpenAIInput(t *testing.T) {
+	t.Parallel()
+
+	ctx := &ModelContext{}
+	// Supported type with bytes: kept, but FileID cleared so it renders as a data URL.
+	ctx.AppendUserMessage(RoleUser, "keep me", []UserMessageImage{
+		{FileID: "file-jpg", MediaType: "image/jpeg", RawBytes: []byte{1, 2, 3}},
+	}, false)
+	// Unsupported media type (e.g. from another vendor's turn): dropped, text kept.
+	ctx.AppendUserMessage(RoleUser, "heic here", []UserMessageImage{
+		{MediaType: "image/heic", RawBytes: []byte{4, 5}},
+	}, false)
+	// file_id only, no bytes: cannot verify the stored filename extension, so dropped.
+	ctx.AppendUserMessage(RoleUser, "fileid only", []UserMessageImage{
+		{FileID: "file-JPG", MediaType: "image/jpeg"},
+	}, false)
+	// Image-only turn whose sole image is unsupported: whole segment removed.
+	ctx.AppendUserMessage(RoleUser, "", []UserMessageImage{
+		{MediaType: "image/bmp", RawBytes: []byte{6}},
+	}, false)
+
+	got := SanitizeImagesForOpenAIInput(ctx)
+
+	require.Len(t, got.Segments, 3, "image-only unsupported turn should be dropped")
+
+	require.Len(t, got.Segments[0].UserImages, 1)
+	require.Empty(t, got.Segments[0].UserImages[0].FileID, "FileID must be cleared to force the data-URL path")
+	require.Equal(t, []byte{1, 2, 3}, got.Segments[0].UserImages[0].RawBytes)
+
+	require.Equal(t, "heic here", got.Segments[1].Content)
+	require.Empty(t, got.Segments[1].UserImages)
+
+	require.Equal(t, "fileid only", got.Segments[2].Content)
+	require.Empty(t, got.Segments[2].UserImages)
+
+	// Original context must be untouched (sanitizer works on a clone).
+	require.Equal(t, "file-jpg", ctx.Segments[0].UserImages[0].FileID)
+	require.Len(t, ctx.Segments, 4)
+}
+
+func TestSanitizeImagesForOpenAIInput_NilSafe(t *testing.T) {
+	t.Parallel()
+	require.Nil(t, SanitizeImagesForOpenAIInput(nil))
+}
