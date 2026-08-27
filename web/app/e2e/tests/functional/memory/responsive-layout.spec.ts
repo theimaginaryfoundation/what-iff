@@ -30,6 +30,18 @@ function expectInsideViewport(box: Rect, viewportWidth: number, label: string): 
   );
 }
 
+async function expectNoHorizontalScroll(page: Page, width: number): Promise<void> {
+  const main = page.locator('#main-content');
+  const mainExtent = await main.evaluate(element => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(
+    mainExtent.scrollWidth,
+    `Main content should not require horizontal scrolling at ${width}px`,
+  ).toBeLessThanOrEqual(mainExtent.clientWidth + LAYOUT_TOLERANCE_PX);
+}
+
 async function assertCommonLayout(memoriesPage: MemoriesPage, width: number, memoryContent: string): Promise<{
   headingBox: Rect;
   subtitleBox: Rect;
@@ -69,15 +81,7 @@ async function assertCommonLayout(memoriesPage: MemoriesPage, width: number, mem
     await memoriesPage.filterTab(filter).click({ trial: true });
   }
   await memoriesPage.sortSelect.click({ trial: true });
-
-  const mainExtent = await memoriesPage.mainContent.evaluate(element => ({
-    clientWidth: element.clientWidth,
-    scrollWidth: element.scrollWidth,
-  }));
-  expect(
-    mainExtent.scrollWidth,
-    `Main content should not require horizontal scrolling at ${width}px`,
-  ).toBeLessThanOrEqual(mainExtent.clientWidth + LAYOUT_TOLERANCE_PX);
+  await expectNoHorizontalScroll(memoriesPage.page, width);
 
   return { headingBox, subtitleBox };
 }
@@ -121,5 +125,36 @@ test.describe('memories responsive layout contract', () => {
     await prepareViewport(page, memoriesPage, DESKTOP_BREAKPOINT_WIDTH);
     await assertCommonLayout(memoriesPage, DESKTOP_BREAKPOINT_WIDTH, memory.content as string);
     await expect(memoriesPage.mobileMenuButton).toBeHidden();
+  });
+});
+
+test.describe('jobs responsive layout contract', () => {
+  test('keeps the mobile navigation clear of the Jobs header across narrow widths', async ({ page, userWithPersonality }) => {
+    for (const width of MOBILE_WIDTHS) {
+      await test.step(`${width}px viewport`, async () => {
+        await page.setViewportSize({ width, height: VIEWPORT_HEIGHT });
+        await page.goto('/agent-jobs');
+
+        const heading = page.getByRole('heading', { name: 'Jobs', level: 1 });
+        const createJobButton = page.getByRole('button', { name: 'Create job' }).first();
+        const mobileMenuButton = page.getByRole('button', { name: 'Open navigation menu' });
+
+        await expect(heading).toBeVisible();
+        await expect(createJobButton).toBeVisible();
+        await expect(mobileMenuButton).toBeVisible();
+
+        const headingBox = await rect(heading, 'Jobs heading');
+        const createJobBox = await rect(createJobButton, 'Create job button');
+        const menuBox = await rect(mobileMenuButton, 'Mobile navigation button');
+
+        expectInsideViewport(headingBox, width, 'Jobs heading');
+        expectInsideViewport(createJobBox, width, 'Create job button');
+        expectInsideViewport(menuBox, width, 'Mobile navigation button');
+        expectNoOverlap(menuBox, headingBox, 'Mobile navigation button must not cover the Jobs heading');
+        expectNoOverlap(menuBox, createJobBox, 'Mobile navigation button must not cover the Create job button');
+        await createJobButton.click({ trial: true });
+        await expectNoHorizontalScroll(page, width);
+      });
+    }
   });
 });
