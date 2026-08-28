@@ -35,4 +35,8 @@ regexes = [
   # internal/auth/secret_test.go's synthetic "this is a valid-shaped secret"
   # fixture — asserts ValidateSecret accepts it, not a real credential.
   '''kx8f2m9qz3vw7n4jr6bt1yc5hd0lp8se''',
+  # cmd/api-server/main_test.go's synthetic JWT_SECRET fixture used to drive
+  # setup()'s happy path in tests — self-describing as fake, not a real
+  # credential.
+  '''this-is-a-valid-jwt-secret-at-least-32-chars''',
 ]
