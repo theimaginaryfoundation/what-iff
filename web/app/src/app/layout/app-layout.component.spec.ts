@@ -206,6 +206,37 @@ describe('AppLayoutComponent', () => {
         expect(nav.setCollapsed).not.toHaveBeenCalled();
     });
 
+    it('collapses the mobile drawer when navigating to an existing thread', async () => {
+        vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => fakeMediaQueryList(query, false));
+        const fixture = TestBed.createComponent(AppLayoutComponent);
+        const router = TestBed.inject(Router);
+        fixture.detectChanges();
+
+        const nav = TestBed.inject(NavService) as MockedObject<NavService>;
+        // Clear the initial mobile-load collapse so we only assert on the navigation.
+        nav.setCollapsed.mockClear();
+
+        await router.navigateByUrl('/chat/ba83002b-fa33-4bff-a13a-6399376fc798');
+        fixture.detectChanges();
+
+        expect(nav.setCollapsed).toHaveBeenCalledWith(true);
+    });
+
+    it('does not collapse the sidebar on navigation on desktop', async () => {
+        vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => fakeMediaQueryList(query, true));
+        const fixture = TestBed.createComponent(AppLayoutComponent);
+        const router = TestBed.inject(Router);
+        fixture.detectChanges();
+
+        const nav = TestBed.inject(NavService) as MockedObject<NavService>;
+        nav.setCollapsed.mockClear();
+
+        await router.navigateByUrl('/chat/ba83002b-fa33-4bff-a13a-6399376fc798');
+        fixture.detectChanges();
+
+        expect(nav.setCollapsed).not.toHaveBeenCalled();
+    });
+
     it('disposes shortcut + handler + commands on destroy', () => {
         const fixture = TestBed.createComponent(AppLayoutComponent);
         fixture.detectChanges();
