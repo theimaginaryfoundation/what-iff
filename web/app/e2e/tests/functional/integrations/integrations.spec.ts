@@ -6,6 +6,15 @@
  * test out of deployed runs — would need config changes and silently drop the
  * coverage instead. */
 import { test, expect, seedName } from '../../../fixtures';
+import {
+  DEFAULT_VIEWPORT_HEIGHT,
+  RESPONSIVE_WIDTHS,
+  expectBalancedHorizontalInsets,
+  expectHorizontallyInside,
+  expectInsideViewport,
+  expectNoHorizontalScroll,
+  rect,
+} from '../../../helpers/responsive-layout';
 
 /**
  * Integrations smoke coverage for the IntegrationsPage POM.
@@ -52,9 +61,6 @@ test('creates and revokes a webhook API token', async ({ integrationsPage, userW
 });
 
 test('copies the newly created token and shows an empty state once none remain', { tag: '@serial' }, async ({ integrationsPage, userWithPersonality }, testInfo) => {
-  // navigator.clipboard.writeText rejects without this permission grant —
-  // WebKit doesn't support programmatic grants at all, so this is skipped
-  // there rather than asserting the "couldn't copy" fallback path instead.
   /* eslint-disable-next-line playwright/no-skipped-test -- a conditional, per-project skip; the rule can't tell it from a blanket skip. */
   test.skip(testInfo.project.name === 'webkit-mobile', 'WebKit does not support the clipboard-write permission grant.');
   await userWithPersonality.page.context().grantPermissions(['clipboard-write']);
@@ -67,10 +73,6 @@ test('copies the newly created token and shows an empty state once none remain',
   }
 
   await integrationsPage.openWebhooks();
-  // @serial: this is genuinely a "zero tokens on the whole account" claim —
-  // on a deployed run tokens are only ever revoked, never deleted (see the
-  // POM's own doc comment), so a shared account accumulates rows across every
-  // past run and this would never be empty there next to any other test.
   await expect(integrationsPage.emptyTokensMessage).toBeVisible();
 
   const name = seedName('webhook');
@@ -78,12 +80,6 @@ test('copies the newly created token and shows an empty state once none remain',
   await expect(integrationsPage.newTokenBanner).toBeVisible();
 
   await integrationsPage.copyToken();
-
-  // Copy success is reported through the shared ConfirmationService `alert()`
-  // (integrations-webhooks-tab.component.ts), the same dialog Revoke's
-  // confirmation uses — so it's asserted and dismissed through that POM
-  // rather than the real OS clipboard, which isn't reliably readable across
-  // browser projects/CI sandboxes.
   await expect(integrationsPage.confirmation.message).toHaveText('API token copied to clipboard.');
   await integrationsPage.confirmation.confirm('OK');
 
@@ -95,8 +91,6 @@ test('copies the newly created token and shows an empty state once none remain',
 
 test('shows the connectors tab by default', async ({ integrationsPage, userWithPersonality }) => {
   await integrationsPage.navigateTo();
-
-  // Same reasoning as above: let the billing gate settle before branching.
   await expect(integrationsPage.unavailableNotice.or(integrationsPage.connectorsTab)).toBeVisible();
 
   if (await integrationsPage.unavailableNotice.isVisible()) {
@@ -106,4 +100,46 @@ test('shows the connectors tab by default', async ({ integrationsPage, userWithP
 
   await expect(integrationsPage.connectorsTab).toBeVisible();
   await expect(integrationsPage.webhooksTab).toBeVisible();
+});
+
+test('keeps the connector search controls contained and centered across responsive widths', async ({
+  integrationsPage,
+  page,
+  userWithPersonality,
+}) => {
+  const widths = [...RESPONSIVE_WIDTHS, 1024] as const;
+
+  await page.setViewportSize({ width: widths[0], height: DEFAULT_VIEWPORT_HEIGHT });
+  await integrationsPage.navigateTo();
+  await expect(integrationsPage.unavailableNotice.or(integrationsPage.connectorsTab)).toBeVisible();
+
+  if (await integrationsPage.unavailableNotice.isVisible()) {
+    return;
+  }
+
+  for (const width of widths) {
+    await test.step(`${width}px viewport`, async () => {
+      await page.setViewportSize({ width, height: DEFAULT_VIEWPORT_HEIGHT });
+
+      const searchInput = page.getByPlaceholder('Search by name or description');
+      const searchButton = page.getByRole('button', { name: 'Search', exact: true });
+      const searchRow = searchInput.locator('..');
+
+      await expect(searchInput).toBeVisible();
+      await expect(searchButton).toBeVisible();
+
+      const rowBox = await rect(searchRow, 'Connector search row');
+      const inputBox = await rect(searchInput, 'Connector search input');
+      const buttonBox = await rect(searchButton, 'Connector Search button');
+
+      expectInsideViewport(rowBox, width, 'Connector search row');
+      expectHorizontallyInside(rowBox, inputBox, 'Connector search input');
+      expectHorizontallyInside(rowBox, buttonBox, 'Connector Search button');
+      expectBalancedHorizontalInsets(rowBox, inputBox, buttonBox, 'Connector search controls');
+
+      await searchInput.fill('connector search pressure test with a deliberately long query');
+      await searchButton.click({ trial: true });
+      await expectNoHorizontalScroll(page, width);
+    });
+  }
 });
