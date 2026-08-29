@@ -109,12 +109,17 @@ var UpdateScratchpadToolSpec = FunctionToolSpec{
 	Name:        "update_scratchpad",
 	Description: UpdateScratchpadDescription,
 	Properties: map[string]interface{}{
+		"operation": map[string]interface{}{
+			"type":        "string",
+			"description": "Use 'append' to add only new context without repeating the existing scratchpad. Use 'replace' only when intentionally rewriting the scratchpad as a whole.",
+			"enum":        []string{"replace", "append"},
+		},
 		"content": map[string]interface{}{
 			"type":        "string",
-			"description": "The new content for the scratchpad. This will completely replace the existing scratchpad content, so include everything you want to remember.",
+			"description": "For append, provide only the new content to add. For replace, provide the complete new scratchpad content.",
 		},
 	},
-	Required: []string{"content"},
+	Required: []string{"operation", "content"},
 }
 
 var CreateMemoryToolSpec = FunctionToolSpec{
