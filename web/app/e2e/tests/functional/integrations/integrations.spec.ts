@@ -6,6 +6,15 @@
  * test out of deployed runs — would need config changes and silently drop the
  * coverage instead. */
 import { test, expect, seedName } from '../../../fixtures';
+import {
+  DEFAULT_VIEWPORT_HEIGHT,
+  RESPONSIVE_WIDTHS,
+  expectBalancedHorizontalInsets,
+  expectHorizontallyInside,
+  expectInsideViewport,
+  expectNoHorizontalScroll,
+  rect,
+} from '../../../helpers/responsive-layout';
 
 /**
  * Integrations smoke coverage for the IntegrationsPage POM.
@@ -106,4 +115,44 @@ test('shows the connectors tab by default', async ({ integrationsPage, userWithP
 
   await expect(integrationsPage.connectorsTab).toBeVisible();
   await expect(integrationsPage.webhooksTab).toBeVisible();
+});
+
+test('keeps the connector search controls contained and centered across responsive widths', async ({
+  integrationsPage,
+  page,
+  userWithPersonality,
+}) => {
+  const widths = [...RESPONSIVE_WIDTHS, 1024] as const;
+
+  for (const width of widths) {
+    await test.step(`${width}px viewport`, async () => {
+      await page.setViewportSize({ width, height: DEFAULT_VIEWPORT_HEIGHT });
+      await integrationsPage.navigateTo();
+      await expect(integrationsPage.unavailableNotice.or(integrationsPage.connectorsTab)).toBeVisible();
+
+      if (await integrationsPage.unavailableNotice.isVisible()) {
+        return;
+      }
+
+      const searchInput = page.getByPlaceholder('Search by name or description');
+      const searchButton = page.getByRole('button', { name: 'Search', exact: true });
+      const searchRow = searchInput.locator('..');
+
+      await expect(searchInput).toBeVisible();
+      await expect(searchButton).toBeVisible();
+
+      const rowBox = await rect(searchRow, 'Connector search row');
+      const inputBox = await rect(searchInput, 'Connector search input');
+      const buttonBox = await rect(searchButton, 'Connector Search button');
+
+      expectInsideViewport(rowBox, width, 'Connector search row');
+      expectHorizontallyInside(rowBox, inputBox, 'Connector search input');
+      expectHorizontallyInside(rowBox, buttonBox, 'Connector Search button');
+      expectBalancedHorizontalInsets(rowBox, inputBox, buttonBox, 'Connector search controls');
+
+      await searchInput.fill('connector search pressure test with a deliberately long query');
+      await searchButton.click({ trial: true });
+      await expectNoHorizontalScroll(page, width);
+    });
+  }
 });
