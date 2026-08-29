@@ -12,6 +12,7 @@
   position: relative;
   width: min(718px, 100%);
   max-height: 90vh;
+  max-height: min(90vh, calc(100dvh - 32px));
   overflow: auto;
   border: 1px solid var(--color-border-base);
   border-radius: 12px;
@@ -41,6 +42,7 @@
   display: flex;
   gap: 8px;
   margin-top: 10px;
+  min-width: 0;
 }
 
 .mode-modal__name-input {
@@ -52,6 +54,9 @@
   font-weight: 600;
   height: 51px;
   line-height: 1.1;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
   padding: 2px 0 6px;
 }
 
@@ -95,6 +100,8 @@
 
 .mode-modal textarea {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--color-border-base);
   background: var(--color-surface-input);
   color: var(--color-text-primary);
@@ -106,6 +113,8 @@
 
 .mode-modal select {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--color-border-base);
   background: var(--color-surface-input);
   color: var(--color-text-primary);
@@ -150,6 +159,7 @@
   border: none;
   border-radius: 0;
   background: transparent;
+  min-width: 0;
   padding: 0;
 }
 
@@ -182,6 +192,7 @@
   align-items: center;
   display: inline-flex;
   gap: 4px;
+  max-width: 100%;
   padding: 3px 4px 3px 9px;
 }
 
@@ -199,6 +210,8 @@
   border-radius: 0;
   background: transparent;
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 0;
 }
 
@@ -303,4 +316,30 @@
 .mode-modal__footer-actions {
   display: inline-flex;
   gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .mode-modal-backdrop {
+    padding: 12px;
+  }
+
+  .mode-modal {
+    gap: 14px;
+    max-height: calc(100dvh - 24px);
+    padding: 16px 16px 0;
+  }
+
+  .mode-modal__name-input {
+    font-size: clamp(24px, 8vw, 30px);
+  }
+
+  .mode-modal__footer {
+    flex-wrap: wrap;
+    margin: 0 -16px;
+    padding: 12px 14px;
+  }
+
+  .mode-modal__footer-actions {
+    margin-left: auto;
+  }
 }
