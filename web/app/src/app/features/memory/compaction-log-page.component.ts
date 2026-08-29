@@ -15,6 +15,13 @@ import { ConfirmationService } from '../../core/services/confirmation.service';
 import { MemoryService } from '../../core/services/memory.service';
 import { PersonalityService } from '../../core/services/personality.service';
 
+type ChangeDetail = {
+  title: string;
+  explanation: string;
+  before?: CheckpointSnapshot | null;
+  after?: CheckpointSnapshot | null;
+};
+
 @Component({
   selector: 'app-compaction-log-page',
   standalone: true,
@@ -47,6 +54,7 @@ export class CompactionLogPageComponent implements OnInit {
   readonly page = signal(1);
   readonly totalCount = signal(0);
   readonly totalPages = signal(1);
+  readonly changeDetail = signal<ChangeDetail | null>(null);
 
   private static readonly PAGE_SIZE = 20;
 
@@ -91,17 +99,11 @@ export class CompactionLogPageComponent implements OnInit {
     return raw || 'Checkpoint created';
   }
 
-  isExpanded(event: CompactionEvent): boolean {
-    return this.expandedIds().has(event.id);
-  }
+  isExpanded(event: CompactionEvent): boolean { return this.expandedIds().has(event.id); }
 
   toggleExpanded(event: CompactionEvent): void {
     const next = new Set(this.expandedIds());
-    if (next.has(event.id)) {
-      next.delete(event.id);
-    } else {
-      next.add(event.id);
-    }
+    next.has(event.id) ? next.delete(event.id) : next.add(event.id);
     this.expandedIds.set(next);
   }
 
@@ -117,9 +119,7 @@ export class CompactionLogPageComponent implements OnInit {
     else this.collapsedMemoryIds.set(next);
   }
 
-  isLoadedMemoriesCollapsed(event: CompactionEvent): boolean {
-    return this.collapsedLoadedMemoryIds().has(event.id);
-  }
+  isLoadedMemoriesCollapsed(event: CompactionEvent): boolean { return this.collapsedLoadedMemoryIds().has(event.id); }
 
   toggleLoadedMemories(event: CompactionEvent): void {
     const next = new Set(this.collapsedLoadedMemoryIds());
@@ -135,16 +135,29 @@ export class CompactionLogPageComponent implements OnInit {
     return (event.old_scratchpad?.content ?? '') !== (event.new_scratchpad?.content ?? '');
   }
 
+  changeExplanation(event: CompactionEvent, kind: 'summary' | 'scratchpad'): string {
+    if (kind === 'summary') {
+      if (!this.summaryChanged(event)) return 'No change.';
+      return event.summary_explanation?.trim() || 'Conversation summary changed. Open the full change to inspect the before and after states.';
+    }
+    if (!this.scratchpadChanged(event)) return 'No change.';
+    return event.scratchpad_explanation?.trim() || 'Personality scratchpad changed. Open the full change to inspect the before and after states.';
+  }
+
+  openChangeDetail(event: CompactionEvent, kind: 'summary' | 'scratchpad'): void {
+    this.changeDetail.set(kind === 'summary'
+      ? { title: 'Conversation summary change', explanation: this.changeExplanation(event, kind), before: event.old_summary, after: event.new_summary }
+      : { title: 'Scratchpad change', explanation: this.changeExplanation(event, kind), before: event.old_scratchpad, after: event.new_scratchpad });
+  }
+
+  closeChangeDetail(): void { this.changeDetail.set(null); }
+
   mergeSummary(event: CompactionEvent): string {
     const created = event.created_memories?.length ?? 0;
     const updates = this.updatedMemoryEvents(event);
-    if (created === 0 && updates.length === 0) {
-      return 'No memory changes';
-    }
+    if (created === 0 && updates.length === 0) return 'No memory changes';
     const counts = { fold_live: 0, link: 0 } as Record<string, number>;
-    for (const me of updates) {
-      counts[me.merge_type] = (counts[me.merge_type] ?? 0) + 1;
-    }
+    for (const me of updates) counts[me.merge_type] = (counts[me.merge_type] ?? 0) + 1;
     const parts: string[] = [];
     if (created) parts.push(`${created} created`);
     if (counts['fold_live']) parts.push(`${counts['fold_live']} merged`);
@@ -154,95 +167,55 @@ export class CompactionLogPageComponent implements OnInit {
 
   mergeTypeLabel(event: MemoryMergeEvent): string {
     switch (event.merge_type) {
-      case 'link':
-        return 'Linked';
-      case 'fold_live':
-        return 'Memories Merged';
-      default:
-        return 'Updated';
+      case 'link': return 'Linked';
+      case 'fold_live': return 'Memories Merged';
+      default: return 'Updated';
     }
   }
 
-  /** Source memories that went into a fold (stored duplicates_folded is absorb-count = n-1). */
   mergedSourceCount(event: MemoryMergeEvent): number {
     const fromMembers = event.source_members?.length ?? 0;
-    if (fromMembers > 0) {
-      return fromMembers;
-    }
+    if (fromMembers > 0) return fromMembers;
     return Math.max(event.duplicates_folded + 1, 0);
   }
 
-  createdMemories(event: CompactionEvent): CompactionLoadedMemory[] {
-    return event.created_memories ?? [];
-  }
-
-  updatedMemoryEvents(event: CompactionEvent): MemoryMergeEvent[] {
-    // Legacy create-type merge rows may still exist; new creates live on created_memories.
-    return (event.merge_events ?? []).filter(item => item.merge_type !== 'create');
-  }
-
-  isSnapshotReverted(snapshot: CheckpointSnapshot | null | undefined): boolean {
-    return !!snapshot && this.revertedIds().has(snapshot.id);
-  }
+  createdMemories(event: CompactionEvent): CompactionLoadedMemory[] { return event.created_memories ?? []; }
+  updatedMemoryEvents(event: CompactionEvent): MemoryMergeEvent[] { return (event.merge_events ?? []).filter(item => item.merge_type !== 'create'); }
+  isSnapshotReverted(snapshot: CheckpointSnapshot | null | undefined): boolean { return !!snapshot && this.revertedIds().has(snapshot.id); }
 
   async revert(snapshot: CheckpointSnapshot | null | undefined): Promise<void> {
-    if (!snapshot || this.revertingId()) {
-      return;
-    }
-
+    if (!snapshot || this.revertingId()) return;
     const isScratchpad = snapshot.kind === 'scratchpad';
     const confirmed = await this.confirmation.confirm({
       title: isScratchpad ? 'Restore personality scratchpad?' : 'Restore conversation summary?',
       message: isScratchpad
         ? 'This restores the scratchpad for every chat using this personality. Continue?'
         : 'This restores this conversation to the selected checkpoint summary. Continue?',
-      type: 'warning',
-      confirmText: 'Restore',
-      cancelText: 'Cancel',
+      type: 'warning', confirmText: 'Restore', cancelText: 'Cancel',
     });
-    if (!confirmed) {
-      return;
-    }
-
+    if (!confirmed) return;
     const label = snapshot.kind === 'scratchpad' ? 'scratchpad' : 'summary';
-    this.revertingId.set(snapshot.id);
-    this.notice.set(null);
+    this.revertingId.set(snapshot.id); this.notice.set(null);
     this.memoryService.revertSnapshot(snapshot.id).subscribe({
       next: () => {
         this.revertingId.set(null);
-        const next = new Set(this.revertedIds());
-        next.add(snapshot.id);
-        this.revertedIds.set(next);
-        this.notice.set(
-          snapshot.kind === 'scratchpad'
-            ? 'Scratchpad restored for this personality (shared across its chats).'
-            : 'Conversation summary restored for this thread.',
-        );
+        const next = new Set(this.revertedIds()); next.add(snapshot.id); this.revertedIds.set(next);
+        this.notice.set(snapshot.kind === 'scratchpad'
+          ? 'Scratchpad restored for this personality (shared across its chats).'
+          : 'Conversation summary restored for this thread.');
       },
-      error: err => {
-        this.revertingId.set(null);
-        this.error.set(err instanceof Error ? err.message : `Failed to revert ${label}`);
-      },
+      error: err => { this.revertingId.set(null); this.error.set(err instanceof Error ? err.message : `Failed to revert ${label}`); },
     });
   }
 
-  openMemory(memoryId: string | null | undefined): void {
-    if (!memoryId) {
-      return;
-    }
-    void this.router.navigate(['/memories', memoryId]);
-  }
+  openMemory(memoryId: string | null | undefined): void { if (memoryId) void this.router.navigate(['/memories', memoryId]); }
 
   openThread(event: CompactionEvent): void {
-    void this.router.navigate(['/chat', event.chat_id], {
-      queryParams: event.assistant_message_id ? { checkpoint: event.assistant_message_id } : undefined,
-    });
+    void this.router.navigate(['/chat', event.chat_id], { queryParams: event.assistant_message_id ? { checkpoint: event.assistant_message_id } : undefined });
   }
 
   goToPage(page: number): void {
-    if (page < 1 || page > this.totalPages()) {
-      return;
-    }
+    if (page < 1 || page > this.totalPages()) return;
     this.load(page);
   }
 }
