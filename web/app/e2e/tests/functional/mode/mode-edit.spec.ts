@@ -1,4 +1,11 @@
 import { test, expect, seedName } from '../../../fixtures';
+import {
+  DEFAULT_VIEWPORT_HEIGHT,
+  RESPONSIVE_WIDTHS,
+  expectHorizontallyInside,
+  expectInsideViewport,
+  rect,
+} from '../../../helpers/responsive-layout';
 
 /** Mode/mood editor (`/mode`) coverage for the ModeEditModalPage POM. */
 
@@ -56,4 +63,66 @@ test('closes after a successful save', async ({ modeEditModalPage, userWithPerso
   await modeEditModalPage.save();
 
   await expect(modeEditModalPage.panel).toBeHidden();
+});
+
+test('keeps the create modal and its controls contained across mobile widths', async ({
+  modeEditModalPage,
+  page,
+  userWithPersonality,
+}) => {
+  for (const width of RESPONSIVE_WIDTHS) {
+    await test.step(`${width}px viewport`, async () => {
+      await page.setViewportSize({ width, height: DEFAULT_VIEWPORT_HEIGHT });
+      await modeEditModalPage.navigateTo();
+      await modeEditModalPage.openCreate();
+      await expect(modeEditModalPage.panel).toBeVisible();
+
+      const panelBox = await rect(modeEditModalPage.panel, 'Mode create dialog');
+      expectInsideViewport(panelBox, width, 'Mode create dialog', DEFAULT_VIEWPORT_HEIGHT);
+
+      const controls = modeEditModalPage.panel.locator('input, textarea, select, button');
+      const controlCount = await controls.count();
+      for (let index = 0; index < controlCount; index += 1) {
+        const control = controls.nth(index);
+        if (!(await control.isVisible())) {
+          continue;
+        }
+        const controlBox = await rect(control, `Mode dialog control ${index + 1}`);
+        expectHorizontallyInside(panelBox, controlBox, `Mode dialog control ${index + 1}`);
+        expectInsideViewport(controlBox, width, `Mode dialog control ${index + 1}`);
+      }
+
+      await modeEditModalPage.closeButton.click({ trial: true });
+    });
+  }
+});
+
+test('keeps the create modal usable when mobile viewport height is constrained', async ({
+  modeEditModalPage,
+  page,
+  userWithPersonality,
+}) => {
+  const width = 390;
+  const height = 560;
+
+  await page.setViewportSize({ width, height });
+  await modeEditModalPage.navigateTo();
+  await modeEditModalPage.openCreate();
+  await expect(modeEditModalPage.panel).toBeVisible();
+  await modeEditModalPage.descriptionInput.focus();
+
+  const panelBox = await rect(modeEditModalPage.panel, 'Mode create dialog');
+  expectInsideViewport(panelBox, width, 'Mode create dialog', height);
+
+  // A constrained viewport should make the dialog itself scroll rather than
+  // letting its content force the overlay outside the visible screen.
+  const overflow = await modeEditModalPage.panel.evaluate(element => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    overflowY: getComputedStyle(element).overflowY,
+  }));
+  expect(overflow.scrollHeight).toBeGreaterThan(overflow.clientHeight);
+  expect(['auto', 'scroll']).toContain(overflow.overflowY);
+  await modeEditModalPage.saveButton.scrollIntoViewIfNeeded();
+  await modeEditModalPage.saveButton.click({ trial: true });
 });
