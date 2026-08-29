@@ -7,6 +7,7 @@ import { Router, provideRouter } from '@angular/router';
 import { BehaviorSubject, of } from 'rxjs';
 
 import { AuthService } from '../core/services/auth.service';
+import { ChatService } from '../core/services/chat.service';
 import { CommandPaletteService } from '../core/services/command-palette.service';
 import { KeyboardShortcutService } from '../core/services/keyboard-shortcut.service';
 import { NavService } from '../core/services/nav.service';
@@ -164,6 +165,44 @@ describe('AppLayoutComponent', () => {
         newChatCommand?.run();
 
         expect(fixture.componentInstance.personaPickerOpen()).toBe(true);
+    });
+
+    it('collapses the mobile sidebar after a successful New chat creation', async () => {
+        vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => fakeMediaQueryList(query, false));
+        const fixture = TestBed.createComponent(AppLayoutComponent);
+        const router = TestBed.inject(Router);
+        const nav = TestBed.inject(NavService) as MockedObject<NavService>;
+        const chatService = TestBed.inject(ChatService);
+        fixture.detectChanges();
+        vi.mocked(nav.setCollapsed).mockClear();
+        vi.spyOn(chatService, 'createChat').mockReturnValue(of({
+            id: 'ba83002b-fa33-4bff-a13a-6399376fc798',
+            name: 'New Chat',
+            personality_id: 'personality-1',
+        } as any));
+
+        await fixture.componentInstance.onPersonaPicked({ id: 'personality-1' } as any);
+
+        expect(router.url).toBe('/chat/ba83002b-fa33-4bff-a13a-6399376fc798');
+        expect(nav.setCollapsed).toHaveBeenCalledWith(true);
+    });
+
+    it('does not collapse the desktop sidebar after a successful New chat creation', async () => {
+        vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => fakeMediaQueryList(query, true));
+        const fixture = TestBed.createComponent(AppLayoutComponent);
+        const nav = TestBed.inject(NavService) as MockedObject<NavService>;
+        const chatService = TestBed.inject(ChatService);
+        fixture.detectChanges();
+        vi.mocked(nav.setCollapsed).mockClear();
+        vi.spyOn(chatService, 'createChat').mockReturnValue(of({
+            id: 'ba83002b-fa33-4bff-a13a-6399376fc798',
+            name: 'New Chat',
+            personality_id: 'personality-1',
+        } as any));
+
+        await fixture.componentInstance.onPersonaPicked({ id: 'personality-1' } as any);
+
+        expect(nav.setCollapsed).not.toHaveBeenCalled();
     });
 
     it('disposes shortcut + handler + commands on destroy', () => {
