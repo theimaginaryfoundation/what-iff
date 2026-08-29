@@ -35,6 +35,7 @@ export class ModalComponent implements OnDestroy {
   readonly describedBy = input<string | null>(null);
   readonly dismissible = input(true);
   readonly size = input<ModalSize>('md');
+  readonly fullscreen = input(false);
   readonly dismiss = output<ModalDismissReason>();
 
   readonly dialog = viewChild<ElementRef<HTMLElement>>('dialog');
@@ -60,7 +61,16 @@ export class ModalComponent implements OnDestroy {
   }
 
   panelClass(): string {
+    if (this.fullscreen()) {
+      return 'ui-modal__panel ui-modal__panel--fullscreen w-full';
+    }
     return `ui-modal__panel w-full ${SIZE_CLASSES[this.size()]}`;
+  }
+
+  backdropClass(): string {
+    return this.fullscreen()
+      ? 'ui-modal fixed inset-0 z-50 flex bg-black/60'
+      : 'ui-modal fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4';
   }
 
   onBackdropClick(): void {
