@@ -100,6 +100,13 @@ describe('PersonalityEditModalComponent', () => {
         expect(component.draft()?.thumbnail_circle?.r).toBeCloseTo(0.34, 5);
     });
 
+    it('offers an explicit full-screen editing affordance', () => {
+        const buttons = Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[];
+        const fullScreenButton = buttons.find(button => /full.?screen|expand/i.test(button.textContent ?? ''));
+
+        expect(fullScreenButton).toBeTruthy();
+    });
+
     it('emits dismissed on cancel', () => {
         vi.spyOn(component.dismissed, 'emit').mockReturnValue(undefined);
         component.cancel();
