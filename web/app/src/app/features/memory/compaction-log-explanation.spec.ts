@@ -13,7 +13,7 @@ import { CompactionLogPageComponent } from './compaction-log-page.component';
 describe('CompactionLogPageComponent explanation snippets', () => {
   let fixture: ComponentFixture<CompactionLogPageComponent>;
 
-  const event = {
+  const event: CompactionEvent = {
     id: 'checkpoint-explanation',
     chat_id: 'chat-1',
     chat_name: 'Project thread',
@@ -49,9 +49,6 @@ describe('CompactionLogPageComponent explanation snippets', () => {
     },
     created_at: '2026-08-29T13:00:00Z',
     updated_at: '2026-08-29T13:00:00Z',
-  } as CompactionEvent & {
-    summary_explanation: string;
-    scratchpad_explanation: string;
   };
 
   beforeEach(async () => {
@@ -89,5 +86,22 @@ describe('CompactionLogPageComponent explanation snippets', () => {
 
     expect(text).toContain(event.summary_explanation);
     expect(text).toContain(event.scratchpad_explanation);
+  });
+
+  it('keeps full before/after text out of the page until the user opens the change', () => {
+    const initialText = fixture.nativeElement.textContent as string;
+    expect(initialText).not.toContain(event.old_summary?.content);
+    expect(initialText).not.toContain(event.new_summary?.content);
+
+    const openButtons = fixture.nativeElement.querySelectorAll('.change-summary__open') as NodeListOf<HTMLButtonElement>;
+    expect(openButtons.length).toBe(2);
+    openButtons[0].click();
+    fixture.detectChanges();
+
+    const dialog = fixture.nativeElement.querySelector('[role="dialog"]') as HTMLElement | null;
+    expect(dialog).not.toBeNull();
+    expect(dialog?.textContent).toContain(event.old_summary?.content);
+    expect(dialog?.textContent).toContain(event.new_summary?.content);
+    expect(dialog?.textContent).toContain(event.summary_explanation);
   });
 });
