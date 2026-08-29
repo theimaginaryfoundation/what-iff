@@ -10,7 +10,7 @@ import (
 	"image"
 	_ "image/gif" // register GIF decoder
 	"image/jpeg"
-	_ "image/png" // register PNG decoder
+	"image/png"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
@@ -18,11 +18,54 @@ import (
 	xdraw "golang.org/x/image/draw"
 )
 
-const DefaultThumbnailMaxPx = 256
+const (
+	DefaultThumbnailMaxPx   = 256
+	DefaultUploadImageMaxPx = 2048
+)
+
+// NormalizeForUpload decodes an accepted image, scales it down when its longest
+// edge exceeds maxPx, and encodes the result as PNG. Images that already fit
+// keep their original dimensions; normalization never upscales.
+func NormalizeForUpload(data []byte, maxPx int) ([]byte, error) {
+	if maxPx <= 0 {
+		maxPx = DefaultUploadImageMaxPx
+	}
+
+	src, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("decode image for upload: %w", err)
+	}
+
+	bounds := src.Bounds()
+	srcW, srcH := bounds.Dx(), bounds.Dy()
+	if srcW == 0 || srcH == 0 {
+		return nil, fmt.Errorf("image has zero dimension (%dx%d)", srcW, srcH)
+	}
+
+	dst := src
+	if srcW > maxPx || srcH > maxPx {
+		dstW, dstH := scaledDimensions(srcW, srcH, maxPx)
+		resized := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
+		xdraw.BiLinear.Scale(resized, resized.Bounds(), src, bounds, xdraw.Over, nil)
+		dst = resized
+	}
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, dst); err != nil {
+		return nil, fmt.Errorf("encode upload image as PNG: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+func scaledDimensions(srcW, srcH, maxPx int) (int, int) {
+	if srcW >= srcH {
+		return maxPx, max(1, srcH*maxPx/srcW)
+	}
+	return max(1, srcW*maxPx/srcH), maxPx
+}
 
 // GenerateThumbnail decodes data as an image, scales it so the longest edge is
 // at most maxPx pixels (aspect ratio preserved), and returns JPEG-encoded bytes.
-// The original is returned unchanged when both dimensions already fit within maxPx.
 func GenerateThumbnail(data []byte, maxPx int) ([]byte, error) {
 	if maxPx <= 0 {
 		maxPx = DefaultThumbnailMaxPx
@@ -41,13 +84,7 @@ func GenerateThumbnail(data []byte, maxPx int) ([]byte, error) {
 
 	dstW, dstH := srcW, srcH
 	if srcW > maxPx || srcH > maxPx {
-		if srcW >= srcH {
-			dstW = maxPx
-			dstH = max(1, srcH*maxPx/srcW)
-		} else {
-			dstH = maxPx
-			dstW = max(1, srcW*maxPx/srcH)
-		}
+		dstW, dstH = scaledDimensions(srcW, srcH, maxPx)
 	}
 
 	dst := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
