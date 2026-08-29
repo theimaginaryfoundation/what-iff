@@ -23,3 +23,37 @@ func TestUpdateScratchpadTool_InvalidArgsReturnsErrorResult(t *testing.T) {
 	require.Contains(t, out, "invalid arguments")
 	require.Contains(t, out, `"success":false`)
 }
+
+func TestScratchpadContentForOperation_AppendOnlyAddsDelta(t *testing.T) {
+	t.Parallel()
+
+	got, err := scratchpadContentForOperation(scratchpadOperationAppend, "existing context", "new context")
+	require.NoError(t, err)
+	require.Equal(t, "existing context\nnew context", got)
+}
+
+func TestScratchpadContentForOperation_AppendToEmptyScratchpad(t *testing.T) {
+	t.Parallel()
+
+	got, err := scratchpadContentForOperation(scratchpadOperationAppend, "", "new context")
+	require.NoError(t, err)
+	require.Equal(t, "new context", got)
+}
+
+func TestScratchpadContentForOperation_ReplaceAndLegacyDefault(t *testing.T) {
+	t.Parallel()
+
+	for _, operation := range []string{scratchpadOperationReplace, ""} {
+		got, err := scratchpadContentForOperation(operation, "old", "replacement")
+		require.NoError(t, err)
+		require.Equal(t, "replacement", got)
+	}
+}
+
+func TestScratchpadContentForOperation_RejectsUnknownOperation(t *testing.T) {
+	t.Parallel()
+
+	_, err := scratchpadContentForOperation("merge", "old", "new")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unsupported scratchpad operation")
+}
