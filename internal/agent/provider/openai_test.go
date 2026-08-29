@@ -95,10 +95,11 @@ This is a paragraph with normal spacing.
 
 This is a paragraph with normal spacing.`
 
-	// Expected: Duplicate paragraphs should be removed, regardless of minor whitespace differences
+	// The production pipeline deduplicates paragraphs and then StripOpenAIFileLinks normalizes
+	// repeated spaces/tabs, so the surviving unique paragraph uses single internal spaces.
 	expectedResult := `This is a paragraph with normal spacing.
 
-This   is   a   paragraph   with   extra   spaces.`
+This is a paragraph with extra spaces.`
 
 	result := testProcessResponseOutput(content)
 	assert.Equal(t, expectedResult, result, "Duplicate paragraphs should be deduplicated")
