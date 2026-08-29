@@ -48,6 +48,18 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     expect(component.tabs.map(t => t.id)).toEqual(['profile']);
   });
 
+  it('renders default model and default personality settings', async () => {
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    const component = fixture.componentInstance;
+    component.modal.open('profile');
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const text = fixture.nativeElement.textContent ?? '';
+    expect(text).toContain('Default model');
+    expect(text).toContain('Default personality');
+  });
+
   it('loads the profile when the modal opens', async () => {
     const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
     const component = fixture.componentInstance;
