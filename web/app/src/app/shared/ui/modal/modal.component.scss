@@ -22,6 +22,7 @@
 .ui-modal__header, .ui-modal__footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem; }
 .ui-modal__header { border-bottom: 1px solid var(--border); }
 .ui-modal__footer { border-top: 1px solid var(--border); justify-content: flex-end; }
+.ui-modal__header-actions { display: flex; align-items: center; gap: .5rem; }
 .ui-modal__body {
   min-height: 0;
   overflow: auto;
@@ -32,6 +33,21 @@
   margin: 0 auto;
   padding: 1.5rem;
 }
+.ui-modal__fullscreen {
+  display: inline-flex;
+  min-height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: .65rem;
+  padding: .35rem .7rem;
+  color: var(--text-secondary);
+  font-size: .75rem;
+  font-weight: 600;
+  transition: background-color .15s ease, color .15s ease;
+}
+.ui-modal__fullscreen:hover { background: var(--accent-bg); color: var(--text-primary); }
+.ui-modal__fullscreen:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .ui-modal__close { display: inline-flex; min-height: 2.75rem; min-width: 2.75rem; align-items: center; justify-content: center; border-radius: .75rem; color: var(--text-secondary); transition: background-color .15s ease, color .15s ease; }
 .ui-modal__close:hover { background: var(--accent-bg); color: var(--text-primary); }
 .ui-modal__close:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
