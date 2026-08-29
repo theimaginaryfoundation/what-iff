@@ -18,6 +18,14 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     updateUserPreferences: ReturnType<typeof vi.fn>;
   };
 
+  async function openAndWaitForProfile(fixture: ReturnType<typeof TestBed.createComponent<ProfileSettingsModalComponent>>): Promise<void> {
+    const component = fixture.componentInstance;
+    component.modal.open('profile');
+    fixture.detectChanges();
+    await vi.waitFor(() => expect(component.loadingProfile()).toBe(false));
+    fixture.detectChanges();
+  }
+
   beforeEach(async () => {
     const user = {
       id: 'user-1',
@@ -86,11 +94,7 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
 
   it('renders default model and default personality settings', async () => {
     const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
-    const component = fixture.componentInstance;
-    component.modal.open('profile');
-    fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
+    await openAndWaitForProfile(fixture);
 
     const text = fixture.nativeElement.textContent ?? '';
     expect(text).toContain('Default model');
@@ -102,9 +106,7 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
   it('persists a changed default model without dropping other preferences', async () => {
     const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
     const component = fixture.componentInstance;
-    component.modal.open('profile');
-    fixture.detectChanges();
-    await fixture.whenStable();
+    await openAndWaitForProfile(fixture);
 
     await component.onDefaultModelChange('model-2');
 
@@ -119,9 +121,7 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
   it('loads the profile when the modal opens', async () => {
     const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
     const component = fixture.componentInstance;
-    component.modal.open('profile');
-    fixture.detectChanges();
-    await fixture.whenStable();
+    await openAndWaitForProfile(fixture);
     expect(component.currentUser()?.email).toBe('testuser@example.com');
   });
 });
