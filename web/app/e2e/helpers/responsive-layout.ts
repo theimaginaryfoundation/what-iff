@@ -32,13 +32,17 @@ export function expectInsideViewport(
   }
 }
 
-export function expectInside(container: Rect, child: Rect, label: string): void {
+export function expectHorizontallyInside(container: Rect, child: Rect, label: string): void {
   expect(child.x, `${label} should stay inside its container on the left`).toBeGreaterThanOrEqual(
     container.x - LAYOUT_TOLERANCE_PX,
   );
   expect(child.x + child.width, `${label} should stay inside its container on the right`).toBeLessThanOrEqual(
     container.x + container.width + LAYOUT_TOLERANCE_PX,
   );
+}
+
+export function expectInside(container: Rect, child: Rect, label: string): void {
+  expectHorizontallyInside(container, child, label);
   expect(child.y, `${label} should stay inside its container at the top`).toBeGreaterThanOrEqual(
     container.y - LAYOUT_TOLERANCE_PX,
   );
