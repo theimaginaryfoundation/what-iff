@@ -216,6 +216,11 @@ export class AppLayoutComponent implements OnInit, OnDestroy {
 
   async onPersonaPicked(personality: Personality): Promise<void> {
     this.personaPickerOpen.set(false);
+    // On mobile the sidebar is an overlay drawer. Collapse it so the freshly
+    // created thread isn't left hidden behind an open drawer (issue #36).
+    if (this.isMobileNav()) {
+      this.nav.setCollapsed(true);
+    }
     try {
       const chat = await firstValueFrom(
         this.chatService.createChat({

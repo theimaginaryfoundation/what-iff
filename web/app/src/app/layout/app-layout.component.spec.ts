@@ -7,12 +7,15 @@ import { Router, provideRouter } from '@angular/router';
 import { BehaviorSubject, of } from 'rxjs';
 
 import { AuthService } from '../core/services/auth.service';
+import { ChatService } from '../core/services/chat.service';
 import { CommandPaletteService } from '../core/services/command-palette.service';
 import { KeyboardShortcutService } from '../core/services/keyboard-shortcut.service';
 import { NavService } from '../core/services/nav.service';
 import { ThemeService } from '../core/services/theme.service';
 import { AppLayoutComponent } from './app-layout.component';
 import { RightPanelService } from '../core/services/right-panel.service';
+import type { Chat } from '../core/models/chat.model';
+import type { Personality } from '../core/models/personality.model';
 
 @Component({ selector: 'noop', standalone: true, changeDetection: ChangeDetectionStrategy.Eager,
     template: '' })
@@ -164,6 +167,43 @@ describe('AppLayoutComponent', () => {
         newChatCommand?.run();
 
         expect(fixture.componentInstance.personaPickerOpen()).toBe(true);
+    });
+
+    it('collapses the mobile sidebar drawer when a new thread is created', async () => {
+        vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => fakeMediaQueryList(query, false));
+        const fixture = TestBed.createComponent(AppLayoutComponent);
+        const chatService = TestBed.inject(ChatService);
+        vi.spyOn(chatService, 'createChat').mockReturnValue(
+            of({ id: 'ba83002b-fa33-4bff-a13a-6399376fc798', name: 'New Chat' } as Chat),
+        );
+        vi.spyOn(chatService, 'setLastChatId').mockImplementation(() => undefined);
+        fixture.detectChanges();
+
+        const nav = TestBed.inject(NavService) as MockedObject<NavService>;
+        // Clear the initial mobile-load collapse so we only assert on the new-thread flow.
+        nav.setCollapsed.mockClear();
+
+        await fixture.componentInstance.onPersonaPicked({ id: 'p1', name: 'Persona' } as Personality);
+
+        expect(nav.setCollapsed).toHaveBeenCalledWith(true);
+    });
+
+    it('does not collapse the sidebar on desktop when a new thread is created', async () => {
+        vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => fakeMediaQueryList(query, true));
+        const fixture = TestBed.createComponent(AppLayoutComponent);
+        const chatService = TestBed.inject(ChatService);
+        vi.spyOn(chatService, 'createChat').mockReturnValue(
+            of({ id: 'ba83002b-fa33-4bff-a13a-6399376fc798', name: 'New Chat' } as Chat),
+        );
+        vi.spyOn(chatService, 'setLastChatId').mockImplementation(() => undefined);
+        fixture.detectChanges();
+
+        const nav = TestBed.inject(NavService) as MockedObject<NavService>;
+        nav.setCollapsed.mockClear();
+
+        await fixture.componentInstance.onPersonaPicked({ id: 'p1', name: 'Persona' } as Personality);
+
+        expect(nav.setCollapsed).not.toHaveBeenCalled();
     });
 
     it('disposes shortcut + handler + commands on destroy', () => {
