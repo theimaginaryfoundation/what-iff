@@ -53,6 +53,12 @@ func (CompactionEvent) Fields() []ent.Field {
 		field.String("reason").
 			Optional().
 			Comment("Checkpoint decision reason (token budget / message count / etc.)"),
+		field.Text("summary_explanation").
+			Optional().
+			Comment("Short model-generated explanation of what changed in the conversation summary"),
+		field.Text("scratchpad_explanation").
+			Optional().
+			Comment("Short model-generated explanation of what changed in the personality scratchpad"),
 		// FK columns to CheckpointSnapshot, surfaced through the edges below.
 		field.UUID("old_summary_id", uuid.UUID{}).Optional().Nillable(),
 		field.UUID("new_summary_id", uuid.UUID{}).Optional().Nillable(),
