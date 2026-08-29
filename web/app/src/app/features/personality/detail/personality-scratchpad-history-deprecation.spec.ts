@@ -38,7 +38,12 @@ describe('personality scratchpad history deprecation', () => {
     const personalityService = {
       updatePersonality: vi.fn().mockReturnValue(of(personality)),
       deletePersonality: vi.fn().mockReturnValue(of(void 0)),
-    } as unknown as Pick<MockedObject<PersonalityService>, 'updatePersonality' | 'deletePersonality'>;
+      getPromptDefaults: vi.fn().mockReturnValue(of({
+        scratchpad_update_prompt: 'Default scratchpad update prompt',
+        memory_query_prompt: 'Default memory query prompt',
+        memory_extraction_prompt: 'Default memory extraction prompt',
+      })),
+    } as unknown as Pick<MockedObject<PersonalityService>, 'updatePersonality' | 'deletePersonality' | 'getPromptDefaults'>;
 
     await TestBed.configureTestingModule({
       imports: [PersonalityEditModalComponent],
