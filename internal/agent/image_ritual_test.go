@@ -265,3 +265,15 @@ func TestHandleImageGenerateRitual_MockMode_PersistsFixturePNG(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, cfg.Width, 0)
 }
+
+// persistImageRitualAttachment's cheapest branch is its own
+// file-store-not-configured guard, which fires before any base64 decode or
+// datastore call.
+func TestPersistImageRitualAttachment_NilFileStoreReturnsError(t *testing.T) {
+	t.Parallel()
+
+	a := &Agent{}
+	attachment := &models.FileAttachment{ID: uuid.New(), Name: "image.png", FileType: "image/png"}
+	err := a.persistImageRitualAttachment(context.Background(), uuid.New(), attachment, "irrelevant")
+	require.ErrorContains(t, err, "file store is not configured")
+}

@@ -260,3 +260,20 @@ func TestMessageContextBuilder_LoadHistoryOverride_UsedAndNotReversed(t *testing
 	require.Equal(t, "first", msgs[0].Message)
 	require.Equal(t, "second", msgs[1].Message)
 }
+
+// fetchRecentMessages is best-effort: a datastore error must not propagate,
+// it must surface as an empty slice so callers can keep composing context.
+func TestFetchRecentMessages_DatastoreErrorReturnsEmptySlice(t *testing.T) {
+	t.Parallel()
+
+	ds, _, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	b := &messageContextBuilder{ds: ds, telemetry: &telemetry.Telemetry{Logger: zap.NewNop()}}
+
+	// No sqlmock expectations are configured, so the underlying query fails
+	// immediately, exercising the error/best-effort-empty-slice branch.
+	msgs := b.fetchRecentMessages(context.Background(), uuid.New(), uuid.New(), nil, 10, models.ChatMessageFilters{}, "test")
+	require.NotNil(t, msgs)
+	require.Empty(t, msgs)
+}

@@ -709,10 +709,18 @@ func (d *Datastore) SetAgentJobOverrides(ctx context.Context, userID, id uuid.UU
 	update := tx.AgentJob.Update().
 		Where(agentjob.ID(id), agentjob.HasOwnerWith(user.ID(userID)))
 	if patch.UpdatePersonality {
-		update.SetNillablePersonalityID(patch.PersonalityID)
+		if patch.PersonalityID != nil {
+			update.SetPersonalityID(*patch.PersonalityID)
+		} else {
+			update.ClearPersonalityID()
+		}
 	}
 	if patch.UpdateModel {
-		update.SetNillableModelID(patch.ModelID)
+		if patch.ModelID != nil {
+			update.SetModelID(*patch.ModelID)
+		} else {
+			update.ClearModelID()
+		}
 	}
 
 	affected, err := update.Save(ctx)
