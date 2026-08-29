@@ -35,15 +35,27 @@ func (a *Agent) beginCompactionEvent(
 		return nil
 	}
 
+	scratchpadExplanation := ""
+	if hasScratchpad {
+		if explanation, err := a.explainCheckpointChange(ctx, userID, "personality scratchpad", chatCtx.chat.Scratchpad, newScratchpad); err != nil {
+			a.logger.Warn("failed to explain scratchpad checkpoint change; continuing without explanation",
+				zap.String("chat_id", chatID.String()),
+				zap.Error(err))
+		} else {
+			scratchpadExplanation = explanation
+		}
+	}
+
 	input := models.CompactionEventInput{
-		ChatID:         chatID,
-		Provider:       providerName,
-		Reason:         reason,
-		OldSummary:     chatCtx.chat.CheckpointSummary,
-		OldScratchpad:  chatCtx.chat.Scratchpad,
-		NewScratchpad:  newScratchpad,
-		HasScratchpad:  hasScratchpad,
-		LoadedMemories: loadedMemoriesSnapshot(inferenceModelContext, chatCtx.liveMemories),
+		ChatID:                chatID,
+		Provider:              providerName,
+		Reason:                reason,
+		OldSummary:            chatCtx.chat.CheckpointSummary,
+		OldScratchpad:         chatCtx.chat.Scratchpad,
+		NewScratchpad:         newScratchpad,
+		ScratchpadExplanation: scratchpadExplanation,
+		HasScratchpad:         hasScratchpad,
+		LoadedMemories:        loadedMemoriesSnapshot(inferenceModelContext, chatCtx.liveMemories),
 	}
 	if chatCtx.chat.PersonalityID != uuid.Nil {
 		pid := chatCtx.chat.PersonalityID
@@ -65,22 +77,35 @@ func (a *Agent) beginCompactionEvent(
 	return &id
 }
 
-// finishCompactionEvent attaches the post-checkpoint summary to an open compaction event. No-op when
-// eventID is nil (compaction was not being logged).
+// finishCompactionEvent attaches the post-checkpoint summary and a best-effort transition
+// explanation to an open compaction event. No-op when eventID is nil.
 func (a *Agent) finishCompactionEvent(ctx context.Context, userID uuid.UUID, eventID *uuid.UUID, newSummary string) {
 	if eventID == nil {
 		return
 	}
-	if err := a.ds.SetCompactionEventNewSummary(ctx, userID, *eventID, newSummary); err != nil {
+
+	summaryExplanation := ""
+	if event, err := a.ds.GetCompactionEvent(ctx, userID, *eventID); err != nil {
+		a.logger.Warn("failed to load compaction event for summary explanation; continuing without explanation",
+			zap.String("compaction_event_id", eventID.String()),
+			zap.Error(err))
+	} else if event.OldSummary != nil {
+		if explanation, err := a.explainCheckpointChange(ctx, userID, "conversation summary", event.OldSummary.Content, newSummary); err != nil {
+			a.logger.Warn("failed to explain summary checkpoint change; continuing without explanation",
+				zap.String("compaction_event_id", eventID.String()),
+				zap.Error(err))
+		} else {
+			summaryExplanation = explanation
+		}
+	}
+
+	if err := a.ds.SetCompactionEventNewSummary(ctx, userID, *eventID, newSummary, summaryExplanation); err != nil {
 		a.logger.Warn("failed to attach new summary to compaction event",
 			zap.String("compaction_event_id", eventID.String()),
 			zap.Error(err))
 	}
 }
 
-// loadedMemoriesSnapshot flattens the same segment-wide loaded set used by the memory merger into
-// the audit shape. ModelContext.MemoryRefs carries prior turns' persisted additional_context;
-// liveMemories adds current-turn prefetch and tool-loaded rows that are not in that frozen snapshot.
 func loadedMemoriesSnapshot(modelContext *provider.ModelContext, liveMemories []*models.Memory) []models.CompactionLoadedMemory {
 	candidates := buildMemoryMergeCandidates(modelContext, liveMemories, nil)
 	if len(candidates) == 0 {
