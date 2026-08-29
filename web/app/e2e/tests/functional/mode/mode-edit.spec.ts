@@ -80,14 +80,10 @@ test('keeps the create modal and its controls contained across mobile widths', a
       const panelBox = await rect(modeEditModalPage.panel, 'Mode create dialog');
       expectInsideViewport(panelBox, width, 'Mode create dialog', DEFAULT_VIEWPORT_HEIGHT);
 
-      const controls = modeEditModalPage.panel.locator('input, textarea, select, button');
+      const controls = modeEditModalPage.panel.locator('input:visible, textarea:visible, select:visible, button:visible');
       const controlCount = await controls.count();
       for (let index = 0; index < controlCount; index += 1) {
-        const control = controls.nth(index);
-        if (!(await control.isVisible())) {
-          continue;
-        }
-        const controlBox = await rect(control, `Mode dialog control ${index + 1}`);
+        const controlBox = await rect(controls.nth(index), `Mode dialog control ${index + 1}`);
         expectHorizontallyInside(panelBox, controlBox, `Mode dialog control ${index + 1}`);
         expectInsideViewport(controlBox, width, `Mode dialog control ${index + 1}`);
       }
