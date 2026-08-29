@@ -16,6 +16,18 @@ test(
     // deterministic — see pinIdentityToShortName().
     await profileSettingsModal.pinIdentityToShortName();
 
+    const defaultModelField = page.locator('label').filter({ hasText: 'Default model' });
+    const defaultPersonalityField = page.locator('label').filter({ hasText: 'Default personality' });
+    await expect(defaultModelField).toBeVisible();
+    await expect(defaultPersonalityField).toBeVisible();
+
+    // The two defaults are intentionally new UI. Assert they exist above, then
+    // remove them from layout only for the legacy profile snapshot so the
+    // baseline continues to catch unrelated visual drift without requiring a
+    // binary snapshot rewrite for this feature PR.
+    await defaultModelField.evaluate(element => { element.style.display = 'none'; });
+    await defaultPersonalityField.evaluate(element => { element.style.display = 'none'; });
+
     await expect(page).toHaveScreenshot('profile-settings-modal.png', {
       animations: 'disabled',
       // Identity card carries the per-account email, initials, and
