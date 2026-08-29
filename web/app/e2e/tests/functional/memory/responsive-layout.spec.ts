@@ -32,14 +32,10 @@ function expectInsideViewport(box: Rect, viewportWidth: number, label: string): 
 
 async function expectNoHorizontalScroll(page: Page, width: number): Promise<void> {
   const main = page.locator('#main-content');
-  const mainExtent = await main.evaluate(element => ({
-    clientWidth: element.clientWidth,
-    scrollWidth: element.scrollWidth,
-  }));
-  expect(
-    mainExtent.scrollWidth,
-    `Main content should not require horizontal scrolling at ${width}px`,
-  ).toBeLessThanOrEqual(mainExtent.clientWidth + LAYOUT_TOLERANCE_PX);
+  const mainExtent = await main.evaluate(element => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
+  expect(mainExtent.scrollWidth, `Main content should not require horizontal scrolling at ${width}px`).toBeLessThanOrEqual(
+    mainExtent.clientWidth + LAYOUT_TOLERANCE_PX,
+  );
 }
 
 async function assertCommonLayout(memoriesPage: MemoriesPage, width: number, memoryContent: string): Promise<{
@@ -82,21 +78,12 @@ async function assertCommonLayout(memoriesPage: MemoriesPage, width: number, mem
   }
   await memoriesPage.sortSelect.click({ trial: true });
 
-  const mainExtent = await memoriesPage.mainContent.evaluate(element => ({
-    clientWidth: element.clientWidth,
-    scrollWidth: element.scrollWidth,
-  }));
-  expect(
-    mainExtent.scrollWidth,
-    `Main content should not require horizontal scrolling at ${width}px`,
-  ).toBeLessThanOrEqual(mainExtent.clientWidth + LAYOUT_TOLERANCE_PX);
+  const mainExtent = await memoriesPage.mainContent.evaluate(element => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
+  expect(mainExtent.scrollWidth, `Main content should not require horizontal scrolling at ${width}px`).toBeLessThanOrEqual(
+    mainExtent.clientWidth + LAYOUT_TOLERANCE_PX,
+  );
 
   return { headingBox, subtitleBox };
-}
-
-async function prepareViewport(page: Page, memoriesPage: MemoriesPage, width: number): Promise<void> {
-  await page.setViewportSize({ width, height: VIEWPORT_HEIGHT });
-  await memoriesPage.navigateTo();
 }
 
 test.describe('memories responsive layout contract', () => {
@@ -109,9 +96,12 @@ test.describe('memories responsive layout contract', () => {
     const [memory] = await seed.memories(1);
     const memoryContent = memory.content as string;
 
+    await page.setViewportSize({ width: MOBILE_WIDTHS[0], height: VIEWPORT_HEIGHT });
+    await memoriesPage.navigateTo();
+
     for (const width of MOBILE_WIDTHS) {
       await test.step(`${width}px viewport`, async () => {
-        await prepareViewport(page, memoriesPage, width);
+        await page.setViewportSize({ width, height: VIEWPORT_HEIGHT });
         const { headingBox, subtitleBox } = await assertCommonLayout(memoriesPage, width, memoryContent);
 
         await expect(memoriesPage.mobileMenuButton).toBeVisible();
@@ -130,7 +120,8 @@ test.describe('memories responsive layout contract', () => {
     page,
   }) => {
     const [memory] = await seed.memories(1);
-    await prepareViewport(page, memoriesPage, DESKTOP_BREAKPOINT_WIDTH);
+    await page.setViewportSize({ width: DESKTOP_BREAKPOINT_WIDTH, height: VIEWPORT_HEIGHT });
+    await memoriesPage.navigateTo();
     await assertCommonLayout(memoriesPage, DESKTOP_BREAKPOINT_WIDTH, memory.content as string);
     await expect(memoriesPage.mobileMenuButton).toBeHidden();
   });
@@ -138,10 +129,12 @@ test.describe('memories responsive layout contract', () => {
 
 test.describe('jobs responsive layout contract', () => {
   test('keeps the mobile navigation clear of the Jobs header across narrow widths', async ({ page, userWithPersonality }) => {
+    await page.setViewportSize({ width: MOBILE_WIDTHS[0], height: VIEWPORT_HEIGHT });
+    await page.goto('/agent-jobs');
+
     for (const width of MOBILE_WIDTHS) {
       await test.step(`${width}px viewport`, async () => {
         await page.setViewportSize({ width, height: VIEWPORT_HEIGHT });
-        await page.goto('/agent-jobs');
 
         const heading = page.getByRole('heading', { name: 'Jobs', level: 1 });
         const createJobButton = page.getByRole('button', { name: 'Create job' }).first();
