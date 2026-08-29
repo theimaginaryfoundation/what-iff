@@ -23,6 +23,9 @@ func (a *Agent) explainCheckpointChange(ctx context.Context, userID uuid.UUID, k
 	if before == after {
 		return "No change.", nil
 	}
+	if a == nil || a.OpenAIProvider == nil {
+		return "", fmt.Errorf("checkpoint explanation provider unavailable")
+	}
 
 	prompt := fmt.Sprintf(`Explain the meaningful change between the BEFORE and AFTER %s states in one short sentence for the user.
 Focus on what information was added, removed, clarified, consolidated, or reprioritized.
