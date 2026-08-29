@@ -6,8 +6,6 @@ export interface Memory {
   level: 'global' | 'personality' | 'thread' | 'summary';
   type: 'Context';
   status: 'active' | 'inactive';
-  // Stored confidence is a float in [0,1] (LLM buckets map to anchors 0.3/0.6/0.9; other signals
-  // can refine it). Create/patch still accept the coarse buckets below.
   confidence: number;
   chain_metadata?: {
     duplicate_count: number;
@@ -15,7 +13,6 @@ export interface Memory {
     verified_timestamps_last?: string[];
     merged_from_memory_ids?: string[];
   } | null;
-  /** Set when this memory is cross-referenced with related-but-distinct memories (link, not merge). */
   link_group_id?: string | null;
   starred: boolean;
   pinned_personality_id?: string | null;
@@ -56,13 +53,8 @@ export interface CreateMemoryInput {
   confidence?: 'low' | 'medium' | 'high';
 }
 
-export interface BatchCreateMemoryInput {
-  memories: CreateMemoryInput[];
-}
-
-export interface BatchCreateMemoryResponse {
-  memories: Memory[];
-}
+export interface BatchCreateMemoryInput { memories: CreateMemoryInput[]; }
+export interface BatchCreateMemoryResponse { memories: Memory[]; }
 
 export interface MemoryPatch {
   content?: string;
@@ -98,9 +90,7 @@ export interface MemoryMergeEvent {
   merge_type: MemoryMergeType;
   content: string;
   duplicates_folded: number;
-  /** Set for link events: the shared id assigned to the cross-referenced members. */
   link_group_id?: string | null;
-  /** The compaction (checkpoint) that produced this merge event, if any. */
   compaction_event_id?: string | null;
   source_members?: MemoryMergeSourceMember[];
   reverted_at?: string | null;
@@ -116,7 +106,6 @@ export interface PaginatedMemoryMergeEventResponse {
 
 export type CheckpointSnapshotKind = 'summary' | 'scratchpad';
 
-/** A content-addressed capture of a conversation summary or personality scratchpad. */
 export interface CheckpointSnapshot {
   id: string;
   kind: CheckpointSnapshotKind;
@@ -126,7 +115,6 @@ export interface CheckpointSnapshot {
   created_at: string;
 }
 
-/** One memory that was live in the compacted segment. */
 export interface CompactionLoadedMemory {
   memory_id?: string | null;
   content: string;
@@ -134,7 +122,6 @@ export interface CompactionLoadedMemory {
   confidence?: number;
 }
 
-/** The audit record for one conversation checkpoint ("compaction"). */
 export interface CompactionEvent {
   id: string;
   chat_id: string;
@@ -143,6 +130,8 @@ export interface CompactionEvent {
   assistant_message_id?: string | null;
   provider?: string;
   reason?: string;
+  summary_explanation?: string;
+  scratchpad_explanation?: string;
   old_summary?: CheckpointSnapshot | null;
   new_summary?: CheckpointSnapshot | null;
   old_scratchpad?: CheckpointSnapshot | null;
