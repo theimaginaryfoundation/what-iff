@@ -30,7 +30,16 @@ func (Model) Fields() []ent.Field {
 			Comment("Provider backing this model"),
 		field.Bool("tool_support").
 			Default(false).
-			Comment("Whether the model supports tool calling"),
+			Comment("Whether the model supports function/tool calling"),
+		field.Bool("vision_support").
+			Default(false).
+			Comment("Whether the model supports image/vision input"),
+		field.Bool("mcp_support").
+			Default(false).
+			Comment("Whether the model may receive MCP tools/configuration"),
+		field.Strings("supported_tools").
+			Optional().
+			Comment("Explicit built-in tool allowlist for this model; nil/empty preserves legacy all-tools behavior when tool_support is true"),
 		field.Int64("base_credits_per_slab").
 			Default(1).
 			Comment("Credits charged per token slab for chat/job turns using this model"),
