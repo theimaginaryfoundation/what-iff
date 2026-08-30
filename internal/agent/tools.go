@@ -66,28 +66,34 @@ func (a *Agent) buildTurnToolPolicy(ctx context.Context, chatCtx *chatContext, u
 		showMoodTools: a.shouldExposeMoodTools(ctx, userID, chatCtx.chat),
 		ritualIDs:     mergedRitualIDsForTools(chatMessage, chatCtx.activeMood),
 	}
+	applyModelCapabilitiesToToolPolicy(&policy, a.modelForToolPolicy(ctx, chatCtx))
+	return policy
+}
 
-	model := a.modelForToolPolicy(ctx, chatCtx)
-	if model != nil {
-		caps := models.DeriveModelCapabilities(model, nil)
-		if !caps.ToolCalling {
-			policy.toolsEnabled = false
-			for _, spec := range agenttools.AgentFunctionToolSpecs(true) {
-				policy.disabledTools[spec.Name] = true
-			}
-			policy.disabledTools[agenttools.ToolNameWebSearch] = true
-			return policy
-		}
-
-		// Native web search is only wired on the OpenAI Responses and native
-		// Anthropic paths. Other providers should not advertise a tool they cannot run.
-		provider := models.ProviderForModel(model.Provider, model.Name)
-		if provider != models.ModelProviderOpenAI && provider != models.ModelProviderAnthropic {
-			policy.disabledTools[agenttools.ToolNameWebSearch] = true
-		}
+func applyModelCapabilitiesToToolPolicy(policy *turnToolPolicy, model *models.Model) {
+	if policy == nil || model == nil {
+		return
+	}
+	if policy.disabledTools == nil {
+		policy.disabledTools = map[string]bool{}
 	}
 
-	return policy
+	caps := models.DeriveModelCapabilities(model, nil)
+	if !caps.ToolCalling {
+		policy.toolsEnabled = false
+		for _, spec := range agenttools.AgentFunctionToolSpecs(true) {
+			policy.disabledTools[spec.Name] = true
+		}
+		policy.disabledTools[agenttools.ToolNameWebSearch] = true
+		return
+	}
+
+	// Native web search is only wired on the OpenAI Responses and native
+	// Anthropic paths. Other providers should not advertise a tool they cannot run.
+	provider := models.ProviderForModel(model.Provider, model.Name)
+	if provider != models.ModelProviderOpenAI && provider != models.ModelProviderAnthropic {
+		policy.disabledTools[agenttools.ToolNameWebSearch] = true
+	}
 }
 
 func (a *Agent) modelForToolPolicy(ctx context.Context, chatCtx *chatContext) *models.Model {
