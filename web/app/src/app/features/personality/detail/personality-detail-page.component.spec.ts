@@ -12,6 +12,7 @@ import { FileAttachmentService } from '../../../core/services/file-attachment.se
 import { PersonalityService } from '../../../core/services/personality.service';
 import { UserPreferencesService } from '../../../core/services/user-preferences.service';
 import { Chat } from '../../../core/models/chat.model';
+import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { Personality } from '../../../core/models/personality.model';
 import { UserPreferences } from '../../../core/models/user.model';
 import { PersonalityDetailPageComponent } from './personality-detail-page.component';
@@ -44,6 +45,12 @@ describe('PersonalityDetailPageComponent', () => {
     let fixture: ComponentFixture<PersonalityDetailPageComponent>;
     let chatService: Pick<MockedObject<ChatService>, 'createChat' | 'setLastChatId'>;
     let personalityService: Pick<MockedObject<PersonalityService>, 'getPersonality' | 'listExpressions' | 'updatePersonality' | 'deletePersonality'>;
+    let fileAttachmentService: {
+        listFileAttachments: ReturnType<typeof vi.fn>;
+        getFileAttachmentContent: ReturnType<typeof vi.fn>;
+        uploadPersonalityFileAttachment: ReturnType<typeof vi.fn>;
+        deleteFileAttachment: ReturnType<typeof vi.fn>;
+    };
     let router: Pick<MockedObject<Router>, 'navigate'>;
 
     const preferences: UserPreferences = {
@@ -86,12 +93,14 @@ describe('PersonalityDetailPageComponent', () => {
         };
         userPreferencesService.getUserPreferences.mockReturnValue(of(preferences));
 
-        const fileAttachmentService = {
+        fileAttachmentService = {
             listFileAttachments: vi.fn().mockName("FileAttachmentService.listFileAttachments"),
+            getFileAttachmentContent: vi.fn().mockName("FileAttachmentService.getFileAttachmentContent"),
             uploadPersonalityFileAttachment: vi.fn().mockName("FileAttachmentService.uploadPersonalityFileAttachment"),
             deleteFileAttachment: vi.fn().mockName("FileAttachmentService.deleteFileAttachment")
         };
         fileAttachmentService.listFileAttachments.mockReturnValue(of({ results: [], total_count: 0, page: 1 }));
+        fileAttachmentService.getFileAttachmentContent.mockReturnValue(of({ id: 'file-1', name: 'notes.txt', content: 'stored text' }));
 
         const confirmation = {
             confirm: vi.fn().mockName("ConfirmationService.confirm"),
@@ -157,5 +166,38 @@ describe('PersonalityDetailPageComponent', () => {
         expect(request.memory_write_prompt).toBe('Write memories like this');
         expect(request.image_style).toBe('auto');
         expect(request.expressions_enabled).toBe(true);
+    });
+
+    it('lets the user fetch and read stored personality attachment text', async () => {
+        const attachment: FileAttachment = {
+            id: 'file-1',
+            user_id: 'u-1',
+            name: 'notes.txt',
+            file_type: 'text/plain',
+            personality_id: 'p-1',
+            created_at: '2026-08-30T00:00:00Z',
+        };
+        fileAttachmentService.listFileAttachments.mockReturnValue(of({ results: [attachment], total_count: 1, page: 1 }));
+        fileAttachmentService.getFileAttachmentContent.mockReturnValue(of({
+            id: 'file-1',
+            name: 'notes.txt',
+            content: '<b>literal user text</b>\nsecond line',
+        }));
+
+        fixture.detectChanges();
+        await fixture.whenStable();
+        fixture.detectChanges();
+
+        const readButton = fixture.nativeElement.querySelector('button[aria-label="Read notes.txt"]') as HTMLButtonElement;
+        expect(readButton).toBeTruthy();
+        readButton.click();
+        await fixture.whenStable();
+        fixture.detectChanges();
+
+        expect(fileAttachmentService.getFileAttachmentContent).toHaveBeenCalledWith('file-1');
+        const dialog = fixture.nativeElement.querySelector('[role="dialog"]') as HTMLElement;
+        expect(dialog).toBeTruthy();
+        expect(dialog.textContent).toContain('<b>literal user text</b>');
+        expect(dialog.querySelector('b')).toBeNull();
     });
 });
