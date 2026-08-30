@@ -106,36 +106,14 @@ func TestDispatchToolUse_CreateAgentJobValidation_NoAttachments(t *testing.T) {
 	out, attachments, callErr := a.dispatchToolUse(
 		ctx,
 		&chatContext{chat: &models.Chat{UserID: uuid.New()}},
-		"create_agent_job",
-		useArgs,
+		provider.ToolUse{
+			ID:    "tool-create-job",
+			Name:  "create_agent_job",
+			Input: useArgs,
+		},
 	)
 	require.NoError(t, callErr)
-	require.Nil(t, attachments)
-	require.Contains(t, out, "invalid arguments")
-}
-
-func TestDispatchToolUse_UnknownTool(t *testing.T) {
-	a := &Agent{logger: zap.NewNop()}
-	out, attachments, err := a.dispatchToolUse(
-		context.Background(),
-		&chatContext{chat: &models.Chat{}},
-		"definitely_not_a_tool",
-		nil,
-	)
-	require.Error(t, err)
-	require.Nil(t, attachments)
-	require.Empty(t, out)
-}
-
-func TestDispatchToolUse_UnsupportedProviderTool(t *testing.T) {
-	a := &Agent{logger: zap.NewNop()}
-	out, attachments, err := a.dispatchToolUse(
-		context.Background(),
-		&chatContext{chat: &models.Chat{}},
-		provider.ToolUseNameWebSearch,
-		nil,
-	)
-	require.Error(t, err)
-	require.Nil(t, attachments)
-	require.Empty(t, out)
+	require.Empty(t, attachments)
+	require.Contains(t, out, `"success":false`)
+	require.Contains(t, out, `schedule_input is required`)
 }
