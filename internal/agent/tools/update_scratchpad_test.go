@@ -11,9 +11,9 @@ import (
 )
 
 type fakeScratchpadDatastore struct {
-	personality      *models.Personality
-	updated          models.Personality
-	getPersonalityN  int
+	personality       *models.Personality
+	updated           models.Personality
+	getPersonalityN   int
 	updateScratchpadN int
 }
 
