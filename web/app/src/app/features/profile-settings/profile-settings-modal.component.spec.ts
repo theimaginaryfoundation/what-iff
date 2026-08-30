@@ -103,6 +103,19 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     expect(text).toContain('Vera');
   });
 
+  it('groups model and personality as chat defaults and explains their scope', async () => {
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    await openAndWaitForProfile(fixture);
+
+    const defaults = fixture.nativeElement.querySelector('[data-testid="chat-defaults"]') as HTMLElement | null;
+    expect(defaults).not.toBeNull();
+    expect(defaults?.textContent).toContain('Chat defaults');
+    expect(defaults?.textContent).toContain('Choose what new chats start with.');
+    expect(defaults?.textContent).toContain('Default model');
+    expect(defaults?.textContent).toContain('Default personality');
+    expect(defaults?.textContent).toContain('No default personality');
+  });
+
   it('persists a changed default model without dropping other preferences', async () => {
     const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
     const component = fixture.componentInstance;
@@ -116,6 +129,22 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
       default_personality_id: 'personality-1',
       favorite_model_ids: [],
     }));
+  });
+
+  it('clears the default personality by omitting it from the serialized update', async () => {
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    const component = fixture.componentInstance;
+    await openAndWaitForProfile(fixture);
+
+    await component.onDefaultPersonalityChange('');
+
+    const update = preferencesService.updateUserPreferences.mock.calls.at(-1)?.[0];
+    expect(update).toEqual(expect.objectContaining({
+      user_id: 'user-1',
+      default_model_id: 'model-1',
+      favorite_model_ids: [],
+    }));
+    expect(JSON.stringify(update)).not.toContain('default_personality_id');
   });
 
   it('loads the profile when the modal opens', async () => {
