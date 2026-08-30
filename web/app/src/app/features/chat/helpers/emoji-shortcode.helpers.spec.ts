@@ -10,7 +10,9 @@ describe('emoji shortcode helpers', () => {
   it('finds only the completed shortcode immediately before the caret', () => {
     expect(completedEmojiShortcode('Hello :fox: friend', 11)).toEqual({ query: 'fox', start: 6, end: 11 });
     expect(completedEmojiShortcode('Hello :fox: friend', 18)).toBeNull();
-    expect(completedEmojiShortcode('https://example.test/:fox:', 25)).toBeNull();
+
+    const url = 'https://example.test/:fox:';
+    expect(completedEmojiShortcode(url, url.length)).toBeNull();
   });
 
   it('prefers exact short names over fuzzy search order', () => {
