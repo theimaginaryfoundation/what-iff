@@ -58,6 +58,19 @@ describe('ContextBreakdownTabComponent', () => {
         expect(fixture.componentInstance.overBudget()).toBe(false);
     });
 
+    it('shows the authoritative charged credit cost near the token gauge', () => {
+        const breakdownWithCost = {
+            ...sampleBreakdown,
+            charged_credits: 1.25,
+        } as ContextBreakdown & { charged_credits: number };
+
+        fixture.componentRef.setInput('breakdown', breakdownWithCost);
+        fixture.detectChanges();
+
+        const gauge = fixture.nativeElement.querySelector('.gauge') as HTMLElement;
+        expect(gauge.textContent ?? '').toContain('1.25 credits');
+    });
+
     it('never lets the denominator fall below usage and flags over-budget', () => {
         fixture.componentRef.setInput('breakdown', {
             ...sampleBreakdown,
