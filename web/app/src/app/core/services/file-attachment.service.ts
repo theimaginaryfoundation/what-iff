@@ -5,6 +5,12 @@ import { environment } from '../../../environments/environment';
 import { FileAttachment, FileAttachmentFilters } from '../models/file-attachment.model';
 import { PaginatedResponse } from '../models/common.model';
 
+export interface FileAttachmentContent {
+  id: string;
+  name: string;
+  content: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -50,6 +56,11 @@ export class FileAttachmentService {
     return this.http.get<PaginatedResponse<FileAttachment>>(`${this.apiUrl}/file-attachment`, { params });
   }
 
+  /** Fetch readable text for an attachment owned by the current user. */
+  getFileAttachmentContent(attachmentId: string): Observable<FileAttachmentContent> {
+    return this.http.get<FileAttachmentContent>(`${this.apiUrl}/file-attachment/${attachmentId}/content`);
+  }
+
   /**
    * Upload a file attachment to a specific personality
    * @param personalityId The ID of the personality to attach the file to
@@ -82,4 +93,3 @@ export class FileAttachmentService {
     return this.http.delete(`${this.apiUrl}/file-attachment/${attachmentId}`);
   }
 }
-
