@@ -121,9 +121,9 @@ func TestGetRelatedFileChunks_WithResults(t *testing.T) {
 
 	// Expect the SELECT query with JOINs (no transaction for read-only query)
 	chunkCreatedAt := time.Now().UTC().Truncate(time.Second)
-	rows := sqlmock.NewRows([]string{"content", "name", "sequence", "score", "created_at"}).
-		AddRow("relevant chunk content", "document.pdf", 0, 0.85, chunkCreatedAt).
-		AddRow("another relevant chunk", "notes.txt", 1, 0.92, chunkCreatedAt)
+	rows := sqlmock.NewRows([]string{"content", "name", "id", "sequence", "score", "created_at"}).
+		AddRow("relevant chunk content", "document.pdf", uuid.New(), 0, 0.85, chunkCreatedAt).
+		AddRow("another relevant chunk", "notes.txt", uuid.New(), 1, 0.92, chunkCreatedAt)
 
 	mock.ExpectQuery("SELECT.*file_chunks.*").
 		WithArgs(sqlmock.AnyArg(), userID, personalityID, chatID, FileChunkRelevanceThreshold, 10).
@@ -157,7 +157,7 @@ func TestGetRelatedFileChunks_NoResults(t *testing.T) {
 	queryEmbedding := []float32{0.1, 0.2, 0.3}
 
 	// Expect the SELECT query returning no rows (no transaction for read-only query)
-	rows := sqlmock.NewRows([]string{"content", "name", "sequence", "score", "created_at"})
+	rows := sqlmock.NewRows([]string{"content", "name", "id", "sequence", "score", "created_at"})
 
 	mock.ExpectQuery("SELECT.*file_chunks.*").
 		WithArgs(sqlmock.AnyArg(), userID, personalityID, chatID, FileChunkRelevanceThreshold, 10).
@@ -179,8 +179,8 @@ func TestGetRelatedFileChunks_PersonalityOnly(t *testing.T) {
 	queryEmbedding := []float32{0.1, 0.2, 0.3}
 
 	// Expect the SELECT query with only personality filter (no chat subquery, no transaction)
-	rows := sqlmock.NewRows([]string{"content", "name", "sequence", "score", "created_at"}).
-		AddRow("personality chunk", "persona-doc.pdf", 0, 0.75, time.Now())
+	rows := sqlmock.NewRows([]string{"content", "name", "id", "sequence", "score", "created_at"}).
+		AddRow("personality chunk", "persona-doc.pdf", uuid.New(), 0, 0.75, time.Now())
 
 	mock.ExpectQuery("SELECT.*file_chunks.*").
 		WithArgs(sqlmock.AnyArg(), userID, personalityID, FileChunkRelevanceThreshold, 5).
@@ -207,8 +207,8 @@ func TestGetRelatedFileChunks_ChatOnly(t *testing.T) {
 	queryEmbedding := []float32{0.1, 0.2, 0.3}
 
 	// Expect the SELECT query with only chat filter (no personality filter, no transaction)
-	rows := sqlmock.NewRows([]string{"content", "name", "sequence", "score", "created_at"}).
-		AddRow("chat chunk", "uploaded-file.txt", 2, 0.60, time.Now())
+	rows := sqlmock.NewRows([]string{"content", "name", "id", "sequence", "score", "created_at"}).
+		AddRow("chat chunk", "uploaded-file.txt", uuid.New(), 2, 0.60, time.Now())
 
 	mock.ExpectQuery("SELECT.*file_chunks.*").
 		WithArgs(sqlmock.AnyArg(), userID, chatID, FileChunkRelevanceThreshold, 5).

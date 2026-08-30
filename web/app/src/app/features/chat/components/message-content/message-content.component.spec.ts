@@ -28,6 +28,7 @@ describe('MessageContentComponent', () => {
     });
 
     afterEach(() => {
+        vi.restoreAllMocks();
         httpMock.verify();
     });
 
