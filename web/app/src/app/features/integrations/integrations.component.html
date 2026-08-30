@@ -1,33 +1,74 @@
 <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
     <div class="mb-6 text-center lg:text-left">
-      <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">Integrations</h1>
+      <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">Tools &amp; integrations</h1>
       <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
-        Configure connectors and webhook tokens available to your agent.
+        See the built-in tools your agent can use and configure external connectors and webhook tokens.
       </p>
     </div>
 
-    @if (hasAccess()) {
-      <div class="mb-4 border-b border-gray-200 dark:border-gray-700">
-        <nav class="-mb-px flex gap-6">
-          <button
-            (click)="setActiveTab('connectors')"
-            class="border-b-2 px-1 py-3 text-sm font-medium"
-          [ngClass]="activeTab() === 'connectors'
+    <div class="mb-4 border-b border-gray-200 dark:border-gray-700">
+      <nav class="-mb-px flex gap-6" aria-label="Tools and integrations">
+        <button
+          type="button"
+          (click)="setActiveTab('tools')"
+          class="border-b-2 px-1 py-3 text-sm font-medium"
+          [ngClass]="activeTab() === 'tools'
             ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
             : 'border-transparent text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'">
+          Built-in tools
+        </button>
+        @if (hasAccess()) {
+          <button
+            type="button"
+            (click)="setActiveTab('connectors')"
+            class="border-b-2 px-1 py-3 text-sm font-medium"
+            [ngClass]="activeTab() === 'connectors'
+              ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
+              : 'border-transparent text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'">
             Connectors
           </button>
           <button
+            type="button"
             (click)="setActiveTab('webhooks')"
             class="border-b-2 px-1 py-3 text-sm font-medium"
-          [ngClass]="activeTab() === 'webhooks'
-            ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
-            : 'border-transparent text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'">
+            [ngClass]="activeTab() === 'webhooks'
+              ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
+              : 'border-transparent text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'">
             Webhooks
           </button>
-        </nav>
-      </div>
+        }
+      </nav>
+    </div>
+
+    @if (activeTab() === 'tools') {
+      <section aria-labelledby="built-in-tools-title">
+        <div class="mb-4">
+          <h2 id="built-in-tools-title" class="text-lg font-semibold text-gray-900 dark:text-white">Built-in tools</h2>
+          <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+            These descriptions are written for people. The longer agent instructions stay internal to tool execution.
+          </p>
+        </div>
+
+        @if (toolsLoading()) {
+          <p class="text-sm text-gray-600 dark:text-gray-400" role="status">Loading tools…</p>
+        } @else if (toolsError()) {
+          <div class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200" role="alert">
+            Built-in tools could not be loaded.
+          </div>
+        } @else {
+          <div class="grid gap-3 md:grid-cols-2" data-testid="built-in-tools-list">
+            @for (tool of tools(); track tool.name) {
+              <article class="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+                <h3 class="font-medium text-gray-900 dark:text-white">{{ tool.name }}</h3>
+                <p class="mt-1 text-sm leading-6 text-gray-600 dark:text-gray-300">{{ tool.description }}</p>
+              </article>
+            } @empty {
+              <p class="text-sm text-gray-600 dark:text-gray-400">No built-in tools are available.</p>
+            }
+          </div>
+        }
+      </section>
     }
 
     @if (hasAccess() && activeTab() === 'connectors') {
@@ -37,14 +78,12 @@
       <app-integrations-webhooks-tab></app-integrations-webhooks-tab>
     }
 
-    @if (!hasAccess()) {
+    @if (!hasAccess() && activeTab() !== 'tools') {
       <div
         class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 text-sm text-gray-700 dark:text-gray-300"
-        role="status"
-        >
-        Integrations are unavailable for this account. Enable billing access to configure connectors and webhooks.
+        role="status">
+        External integrations are unavailable for this account. Enable billing access to configure connectors and webhooks.
       </div>
     }
   </div>
 </div>
-
