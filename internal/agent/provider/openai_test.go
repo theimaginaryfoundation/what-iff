@@ -319,7 +319,7 @@ Final paragraph.`
 
 // Benchmark test to ensure performance is acceptable
 func BenchmarkProcessResponseOutput(b *testing.B) {
-	// Create a realistic content scenario with some duplicates
+	// Create a realistic content scenario with some duplicates.
 	content := `This is a research summary about artificial intelligence and its applications.
 
 Key findings from multiple sources indicate significant growth in AI adoption across industries.
@@ -336,9 +336,22 @@ Robotics integration with AI is creating new opportunities in manufacturing and 
 
 The future of AI development looks promising with continued investment and research breakthroughs.`
 
+	// Build the SDK response fixture once. The benchmark is intended to measure
+	// ProcessResponseOutput, not JSON marshaling/unmarshaling in the test adapter.
+	quoted, err := json.Marshal(content)
+	if err != nil {
+		b.Fatal(err)
+	}
+	raw := `{"id":"resp_bench","object":"response","created_at":1,"model":"test","status":"completed",` +
+		`"output":[{"type":"message","id":"m1","role":"assistant","status":"completed","content":[{"type":"output_text","text":` + string(quoted) + `}]}]}`
+	var resp responses.Response
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		b.Fatal(err)
+	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		testProcessResponseOutput(content)
+		ProcessResponseOutput(&resp)
 	}
 }
 
