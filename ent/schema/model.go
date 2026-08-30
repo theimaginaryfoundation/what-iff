@@ -4,7 +4,6 @@ import (
 	"entgo.io/ent"
 	"entgo.io/ent/schema/field"
 	"github.com/google/uuid"
-	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 )
 
 // Model holds the schema definition for the Model entity.
@@ -31,10 +30,7 @@ func (Model) Fields() []ent.Field {
 			Comment("Provider backing this model"),
 		field.Bool("tool_support").
 			Default(false).
-			Comment("Legacy coarse flag indicating whether the model supports tool calling"),
-		field.JSON("capabilities", modeltypes.ModelCapabilities{}).
-			Default(modeltypes.ModelCapabilities{}).
-			Comment("Fine-grained model capabilities used for UI presentation and runtime tool exposure"),
+			Comment("Whether the model supports tool calling"),
 		field.Int64("base_credits_per_slab").
 			Default(1).
 			Comment("Credits charged per token slab for chat/job turns using this model"),
