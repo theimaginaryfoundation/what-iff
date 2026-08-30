@@ -123,6 +123,18 @@ describe('MessageContentComponent', () => {
         expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:file-download');
     });
 
+    it('treats uppercase image MIME types as image attachments', () => {
+        fixture.componentRef.setInput('attachments', [fileAttachment('img-1', 'cover.PNG', 'IMAGE/PNG')]);
+        fixture.detectChanges();
+
+        const previewCards = fixture.nativeElement.querySelectorAll('.message-images__card');
+        expect(previewCards.length).toBe(1);
+        expect(fixture.nativeElement.querySelector('button.rounded-full')).toBeNull();
+
+        httpMock.expectOne(req => req.urlWithParams.includes('/image-gallery/img-1?size=thumbnail'))
+            .flush(new Blob(['thumb'], { type: 'image/png' }));
+    });
+
     it('copies sanitized html and preserves list markers in plain text', () => {
         fixture.detectChanges();
         const setData = vi.fn().mockName('setData');

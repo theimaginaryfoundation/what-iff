@@ -274,3 +274,21 @@ func TestGetRelatedFileChunks_NoContext(t *testing.T) {
 func TestFileChunkRelevanceThreshold(t *testing.T) {
 	assert.Equal(t, 1.2, FileChunkRelevanceThreshold)
 }
+
+func TestSetFileChunkStatus_Success(t *testing.T) {
+	ds, mock, cleanup := newMockDatastore(t)
+	defer cleanup()
+
+	fileAttachmentID := uuid.New()
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE .*file_attachments.*").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT.*file_attachments.*").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "file_id", "name", "file_type", "file_content", "chunk_status", "created_at"}).
+			AddRow(fileAttachmentID, "file-123", "test.pdf", "application/pdf", nil, "chunked", time.Now()))
+	mock.ExpectCommit()
+
+	err := ds.SetFileChunkStatus(context.Background(), fileAttachmentID, "chunked")
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}

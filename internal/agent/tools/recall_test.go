@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
@@ -1372,4 +1373,31 @@ func TestTimeScopeReceiptLastN(t *testing.T) {
 	if r.NormalizedEnd != now.Format(time.RFC3339) {
 		t.Fatalf("unexpected end: %+v", r)
 	}
+}
+
+func TestParseBookmarkFetchTargetAndBuilder(t *testing.T) {
+	chatID := uuid.New()
+	messageID := uuid.New()
+	target := bookmarkFetchTarget(chatID, messageID)
+
+	gotChatID, gotMessageID, err := parseBookmarkFetchTarget(target)
+	require.NoError(t, err)
+	require.Equal(t, chatID, gotChatID)
+	require.Equal(t, messageID, gotMessageID)
+
+	_, _, err = parseBookmarkFetchTarget("bookmark:not-a-uuid")
+	require.Error(t, err)
+}
+
+func TestConversationWindow_UsesCursorBounds(t *testing.T) {
+	now := time.Now().UTC()
+	min := now.Add(-2 * time.Hour).Format(time.RFC3339Nano)
+	max := now.Add(-1 * time.Hour).Format(time.RFC3339Nano)
+
+	window, err := conversationWindow("last 7 days", recallCursor{MinSentAt: min, MaxSentAt: max}, now)
+	require.NoError(t, err)
+	require.NotNil(t, window.Min)
+	require.NotNil(t, window.Max)
+	require.Equal(t, min, window.Min.UTC().Format(time.RFC3339Nano))
+	require.Equal(t, max, window.Max.UTC().Format(time.RFC3339Nano))
 }

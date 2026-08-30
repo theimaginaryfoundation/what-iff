@@ -413,6 +413,14 @@ func (a *Agent) DataStore() *datastore.Datastore { return a.ds }
 // Logger returns the agent logger for extension seams.
 func (a *Agent) Logger() *zap.Logger { return a.logger }
 
+// DeleteProviderFileAttachment deletes a provider-managed file by provider file ID.
+func (a *Agent) DeleteProviderFileAttachment(ctx context.Context, fileID string) error {
+	if a == nil || a.OpenAIProvider == nil {
+		return fmt.Errorf("openai provider is not configured")
+	}
+	return a.OpenAIProvider.DeleteFileAttachment(ctx, fileID)
+}
+
 // RecordFileUpload emits a counter for a file-attachment upload attempt.
 // status should be "success" or "failure".
 func (a *Agent) RecordFileUpload(ctx context.Context, fileType, status string) {

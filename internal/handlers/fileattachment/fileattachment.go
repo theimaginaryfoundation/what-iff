@@ -122,7 +122,7 @@ func (h *Handler) DeleteFileAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if fileAttachment.FileID != nil {
-		err = h.agent.OpenAIProvider.DeleteFileAttachment(r.Context(), *fileAttachment.FileID)
+		err = h.agent.DeleteProviderFileAttachment(r.Context(), *fileAttachment.FileID)
 		if err != nil {
 			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Error deleting file attachment", err)
 			return
