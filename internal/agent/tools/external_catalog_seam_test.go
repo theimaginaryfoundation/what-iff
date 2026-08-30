@@ -7,7 +7,6 @@ import (
 )
 
 func TestMergedFunctionToolCatalog_DefaultOnly(t *testing.T) {
-	t.Parallel()
 	prev := AdditionalFunctionToolCatalog
 	t.Cleanup(func() { AdditionalFunctionToolCatalog = prev })
 	AdditionalFunctionToolCatalog = nil
@@ -18,7 +17,6 @@ func TestMergedFunctionToolCatalog_DefaultOnly(t *testing.T) {
 }
 
 func TestMergedFunctionToolCatalog_AppendsExtras(t *testing.T) {
-	t.Parallel()
 	prev := AdditionalFunctionToolCatalog
 	t.Cleanup(func() { AdditionalFunctionToolCatalog = prev })
 
