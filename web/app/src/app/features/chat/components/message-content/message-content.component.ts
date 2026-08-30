@@ -1,8 +1,10 @@
 import { DOCUMENT } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { MarkdownModule } from 'ngx-markdown';
 
 import { FileAttachment } from '../../../../core/models/file-attachment.model';
+import { environment } from '../../../../../environments/environment';
 import { buildClipboardPayload } from '../../helpers/html-clipboard.helpers';
 import { extractImages } from '../../helpers/message-content.helpers';
 import { MessageImageAttachmentsComponent } from './message-image-attachments.component';
@@ -34,11 +36,13 @@ import { MessageImageAttachmentsComponent } from './message-image-attachments.co
     @if (nonImageAttachments().length) {
       <div class="mt-3 flex flex-wrap gap-2">
         @for (attachment of nonImageAttachments(); track attachment.id) {
-          <span
+          <button
+            type="button"
+            (click)="downloadAttachment(attachment)"
             class="rounded-full border border-border-base bg-surface-muted px-3 py-1 text-xs text-text-secondary hover:text-text-primary"
           >
             {{ attachment.name }}
-          </span>
+          </button>
         }
       </div>
     }
@@ -86,6 +90,8 @@ import { MessageImageAttachmentsComponent } from './message-image-attachments.co
 })
 export class MessageContentComponent {
   private readonly document = inject(DOCUMENT);
+  private readonly http = inject(HttpClient);
+  private readonly apiUrl = `${environment.apiUrl}/file-attachment`;
 
   readonly content = input('');
   readonly attachments = input<readonly FileAttachment[]>([]);
@@ -112,6 +118,17 @@ export class MessageContentComponent {
     if (payload.html) {
       clipboard.setData('text/html', payload.html);
     }
+  }
+
+  downloadAttachment(attachment: FileAttachment): void {
+    this.http.get(`${this.apiUrl}/${attachment.id}`, { responseType: 'blob' }).subscribe(blob => {
+      const url = URL.createObjectURL(blob);
+      const anchor = this.document.createElement('a');
+      anchor.href = url;
+      anchor.download = attachment.name || `attachment-${attachment.id}`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    });
   }
 }
 

@@ -4938,6 +4938,50 @@ paths:
                 $ref: '#/components/schemas/Error'
 
   /file-attachment/{id}:
+    get:
+      summary: Download file attachment
+      description: Downloads the binary content for a single file attachment owned by the authenticated user.
+      tags: [File Attachments]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: File attachment ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: File attachment content
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid attachment ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: File attachment not found or content unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error while downloading the file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
     delete:
       summary: Delete file attachment
       description: Permanently deletes a file attachment and removes it from storage

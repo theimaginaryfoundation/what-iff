@@ -116,6 +116,25 @@ func TestChunkPipelineAndFileStore_ReturnConfiguredFields(t *testing.T) {
 	require.Nil(t, a.FileStore())
 }
 
+func TestDataStoreAndLogger_ReturnConfiguredFields(t *testing.T) {
+	t.Parallel()
+	ds, _, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	logger := zap.NewNop()
+	a := &Agent{ds: ds, logger: logger}
+
+	require.Same(t, ds, a.DataStore())
+	require.Same(t, logger, a.Logger())
+}
+
+func TestDeleteProviderFileAttachment_NoProviderConfigured(t *testing.T) {
+	t.Parallel()
+	a := &Agent{logger: zap.NewNop()}
+	err := a.DeleteProviderFileAttachment(context.Background(), "file_123")
+	require.ErrorContains(t, err, "openai provider is not configured")
+}
+
 // --- RecordFileUpload / recordCounter / recordTime / recordCountHistogram no-telemetry guards ---
 
 func TestRecordFileUpload_NoopWithNilTelemetry(t *testing.T) {
@@ -253,11 +272,11 @@ func TestMaxTurnsBeforeCheckpoint(t *testing.T) {
 func TestNewJobDraftDeltaBuffer_NilInputsReturnEmptyBuffer(t *testing.T) {
 	t.Parallel()
 
-	b := newJobDraftDeltaBuffer(nil, nil, zap.NewNop(), nil, 96, time.Second)
+	b := newJobDraftDeltaBuffer(context.TODO(), nil, zap.NewNop(), nil, 96, time.Second)
 	require.Nil(t, b.ds)
 
 	job := &models.Job{ID: uuid.New(), UserID: uuid.New()}
-	b2 := newJobDraftDeltaBuffer(nil, nil, zap.NewNop(), job, 96, time.Second)
+	b2 := newJobDraftDeltaBuffer(context.TODO(), nil, zap.NewNop(), job, 96, time.Second)
 	require.Nil(t, b2.ds, "nil datastore keeps buffer inert even with a valid job")
 }
 
@@ -268,7 +287,7 @@ func TestNewJobDraftDeltaBuffer_DefaultsInvalidConfig(t *testing.T) {
 	defer cleanup()
 
 	job := &models.Job{ID: uuid.New(), UserID: uuid.New()}
-	b := newJobDraftDeltaBuffer(nil, ds, zap.NewNop(), job, 0, 0)
+	b := newJobDraftDeltaBuffer(context.TODO(), ds, zap.NewNop(), job, 0, 0)
 	require.NotNil(t, b.ds)
 	require.Equal(t, 1, b.minChunkChars)
 	require.Equal(t, 250*time.Millisecond, b.maxWait)
