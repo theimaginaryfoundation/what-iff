@@ -92,11 +92,9 @@ test('long mobile thread names do not overlap bookmark actions', async ({
   await sendChatMessage(apiClient, thread.id!, 'mobile bookmark layout target');
   await chatPage.navigateTo(thread.id!);
 
-  const renameButton = page.getByRole('button', { name: 'Rename chat' });
-  await renameButton.click();
-  const renameInput = page.getByRole('textbox', { name: 'Rename chat' });
-  await renameInput.fill('A very long thread name that must yield space to bookmark controls on a narrow mobile viewport');
-  await renameInput.press('Enter');
+  await chatPage.renameButton.click();
+  await chatPage.renameInput.fill('A very long thread name that must yield space to bookmark controls on a narrow mobile viewport');
+  await chatPage.renameInput.press('Enter');
 
   const bubble = chatPage.messageText('mobile bookmark layout target');
   await expect(bubble).toBeVisible({ timeout: UI_REACTION_TIMEOUT });
@@ -106,13 +104,13 @@ test('long mobile thread names do not overlap bookmark actions', async ({
   const navigatorPill = page.getByRole('button', { name: 'Jump to a bookmark' });
   await expect(navigatorPill).toBeVisible({ timeout: UI_REACTION_TIMEOUT });
 
-  const metaBox = await rect(page.locator('.chat-page__thread-meta'), 'thread metadata');
-  const actionsBox = await rect(page.locator('.chat-page__title-actions'), 'thread title actions');
+  const titleBox = await rect(chatPage.renameButton, 'thread title');
+  const bookmarkBox = await rect(navigatorPill, 'bookmark navigator');
 
   expect(
-    metaBox.x + metaBox.width,
-    'thread metadata should yield horizontal space before bookmark/action controls',
-  ).toBeLessThanOrEqual(actionsBox.x + 1);
+    titleBox.x + titleBox.width,
+    'thread title should yield horizontal space before bookmark controls',
+  ).toBeLessThanOrEqual(bookmarkBox.x + 1);
 });
 
 test('un-starring a message removes it from the navigator', async ({
