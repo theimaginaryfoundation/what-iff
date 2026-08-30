@@ -33,14 +33,12 @@ type ToolMeta struct {
 // GetAvailableTools returns metadata for tools the user can toggle via disabled_tools.
 func GetAvailableTools(ctx context.Context) []ToolMeta {
 	_ = ctx
-	definitions := agenttools.FunctionToolCatalog()
-	out := make([]ToolMeta, 0, len(definitions)+1)
+	specs := agenttools.UserToggleableFunctionToolSpecs()
+	cap := len(specs) + 1 // web + function tools
+	out := make([]ToolMeta, 0, cap)
 	out = append(out, ToolMeta{Name: agenttools.ToolNameWebSearch, Description: agenttools.AvailableToolDescriptionWebSearch})
-	for _, def := range definitions {
-		if !def.UserToggleable {
-			continue
-		}
-		out = append(out, ToolMeta{Name: def.Spec.Name, Description: def.HumanDescription})
+	for _, spec := range specs {
+		out = append(out, ToolMeta{Name: spec.Name, Description: spec.Description})
 	}
 	return out
 }
