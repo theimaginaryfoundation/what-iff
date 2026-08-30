@@ -20,12 +20,10 @@ test(
     await expect(chatDefaults.getByText('Default model', { exact: true })).toBeVisible();
     await expect(chatDefaults.getByText('Default personality', { exact: true })).toBeVisible();
 
-    // pinIdentityToShortName() clicks Save Changes. Once chat defaults made the
-    // form taller, Playwright scrolls that focused button into view. If we then
-    // remove the added fieldset while the button still owns focus, Chromium can
-    // re-anchor the modal body around that control after an explicit scroll reset.
-    // Release focus before changing layout so this legacy snapshot can compare
-    // the pre-existing profile/password geometry deterministically.
+    // pinIdentityToShortName() clicks Save Changes. The profile content has its
+    // own overflow container inside the shared modal body, and the taller form
+    // causes that inner container to scroll the button into view. Hide the new
+    // fieldset for this legacy snapshot, then normalize both scroll owners.
     await page.evaluate(() => {
       const active = document.activeElement;
       if (active instanceof HTMLElement) active.blur();
@@ -33,14 +31,18 @@ test(
     await chatDefaults.evaluate(element => { element.style.display = 'none'; });
 
     const modalBody = page.locator('.ui-modal__body');
+    const profileBody = page.locator('.profile-settings__body');
     await modalBody.evaluate(element => { element.scrollTop = 0; });
+    await profileBody.evaluate(element => { element.scrollTop = 0; });
     await page.evaluate(() => new Promise<void>(resolve => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     }));
 
-    // This is the state the screenshot depends on. Keep it explicit so a future
-    // focus/scroll regression fails at the cause rather than as a huge pixel diff.
+    // Assert the exact state the screenshot depends on. The previous regression
+    // passed the outer-body assertion while the nested profile body remained
+    // scrolled, so keep both explicit.
     await expect.poll(() => modalBody.evaluate(element => element.scrollTop)).toBe(0);
+    await expect.poll(() => profileBody.evaluate(element => element.scrollTop)).toBe(0);
 
     await expect(page).toHaveScreenshot('profile-settings-modal.png', {
       animations: 'disabled',
