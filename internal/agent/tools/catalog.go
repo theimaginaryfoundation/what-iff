@@ -25,14 +25,16 @@ var functionToolCatalog = []FunctionToolDefinition{
 }
 
 func FunctionToolCatalog() []FunctionToolDefinition {
-	out := make([]FunctionToolDefinition, len(functionToolCatalog))
-	copy(out, functionToolCatalog)
+	catalog := mergedFunctionToolCatalog()
+	out := make([]FunctionToolDefinition, len(catalog))
+	copy(out, catalog)
 	return out
 }
 
 func AgentFunctionToolSpecs(includeMoodTools bool) []FunctionToolSpec {
-	specs := make([]FunctionToolSpec, 0, len(functionToolCatalog))
-	for _, def := range functionToolCatalog {
+	catalog := mergedFunctionToolCatalog()
+	specs := make([]FunctionToolSpec, 0, len(catalog))
+	for _, def := range catalog {
 		if !def.AgentDefault {
 			continue
 		}
@@ -45,8 +47,9 @@ func AgentFunctionToolSpecs(includeMoodTools bool) []FunctionToolSpec {
 }
 
 func UserToggleableFunctionToolSpecs() []FunctionToolSpec {
-	specs := make([]FunctionToolSpec, 0, len(functionToolCatalog))
-	for _, def := range functionToolCatalog {
+	catalog := mergedFunctionToolCatalog()
+	specs := make([]FunctionToolSpec, 0, len(catalog))
+	for _, def := range catalog {
 		if def.UserToggleable {
 			specs = append(specs, def.Spec)
 		}
@@ -55,8 +58,9 @@ func UserToggleableFunctionToolSpecs() []FunctionToolSpec {
 }
 
 func ExecutableFunctionToolSpecs() []FunctionToolSpec {
-	specs := make([]FunctionToolSpec, 0, len(functionToolCatalog))
-	for _, def := range functionToolCatalog {
+	catalog := mergedFunctionToolCatalog()
+	specs := make([]FunctionToolSpec, 0, len(catalog))
+	for _, def := range catalog {
 		specs = append(specs, def.Spec)
 	}
 	return specs

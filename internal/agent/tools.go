@@ -72,6 +72,13 @@ func (a *Agent) buildTurnToolPolicy(ctx context.Context, chatCtx *chatContext, u
 	if !policy.toolsEnabled {
 		return policy
 	}
+	if additionalDisabledToolsForChat != nil {
+		for name, disabled := range additionalDisabledToolsForChat(a, chatCtx.chat) {
+			if disabled {
+				policy.disabledTools[name] = true
+			}
+		}
+	}
 
 	return policy
 }

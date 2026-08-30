@@ -25,6 +25,15 @@ func TestGetAgentToolsList_IncludesCreateJobByDefault(t *testing.T) {
 	require.True(t, hasCreateJob)
 }
 
+func TestGetAgentToolsList_RespectsDisabledTools(t *testing.T) {
+	list := getAgentToolsList(map[string]bool{"create_agent_job": true}, false)
+	for _, tool := range list {
+		if tool.OfFunction != nil && tool.OfFunction.Name == "create_agent_job" {
+			t.Fatalf("create_agent_job should have been filtered out")
+		}
+	}
+}
+
 func TestGetAgentToolsList_IncludesGenerateImageTool(t *testing.T) {
 	list := getAgentToolsList(nil, true)
 	hasGenerateImage := false
@@ -93,6 +102,28 @@ func TestExecutableCatalogToolsHaveHandlers(t *testing.T) {
 	for _, spec := range tools.ExecutableFunctionToolSpecs() {
 		require.Contains(t, handlers, spec.Name)
 	}
+}
+
+func TestToolHandlers_ExtraHandlersOverrideDefaults(t *testing.T) {
+	prev := extraToolHandlersForChat
+	t.Cleanup(func() { extraToolHandlersForChat = prev })
+
+	extraToolHandlersForChat = func(_ *Agent, _ *models.Chat) map[string]ExtraToolHandler {
+		return map[string]ExtraToolHandler{
+			"list": func(context.Context, []byte) (string, []*models.FileAttachment, error) {
+				return `{"source":"extra"}`, nil, nil
+			},
+		}
+	}
+
+	a := &Agent{logger: zap.NewNop()}
+	out, _, err := a.dispatchToolUse(context.Background(), &chatContext{chat: &models.Chat{}}, provider.ToolUse{
+		ID:    "override-list",
+		Name:  "list",
+		Input: []byte(`{}`),
+	})
+	require.NoError(t, err)
+	require.Contains(t, out, `"source":"extra"`)
 }
 
 func TestDispatchToolUse_CreateAgentJobValidation_NoAttachments(t *testing.T) {

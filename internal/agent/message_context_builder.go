@@ -64,8 +64,9 @@ type messageContextBuildRequest struct {
 	// OpenAI path; the OpenAI renderer uses FileID and ignores RawBytes entirely.
 	ImageBytes map[uuid.UUID][]byte
 
-	ExpressionsEnabled       bool
-	IncludeAttachmentContext bool
+	ExpressionsEnabled         bool
+	IncludeAttachmentContext   bool
+	AdditionalDeveloperContext string
 	// LoadHistoryImageBytes controls whether prior-turn image attachments are loaded
 	// as raw bytes for Claude vision. OpenAI uses FileID from attachment records.
 	LoadHistoryImageBytes bool
@@ -92,6 +93,9 @@ func (b *messageContextBuilder) build(ctx context.Context, req messageContextBui
 	})
 	if req.ExpressionsEnabled {
 		b.appendPriorTurnExpressionContinuity(ctx, req.UserID, modelCtx, carryOver, history)
+	}
+	if extra := strings.TrimSpace(req.AdditionalDeveloperContext); extra != "" {
+		modelCtx.Append(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, extra, false)
 	}
 	modelCtx.AppendUserMessage(provider.RoleUser, req.UserPrompt, userMessageImagesFromAttachments(req.Attachments, req.ImageBytes), false)
 	return modelCtx, nil
