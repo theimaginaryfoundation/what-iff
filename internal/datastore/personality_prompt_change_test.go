@@ -103,7 +103,7 @@ func TestRevertPersonalityPromptChangeRestoresPromptAndAppendsAuditEvent(t *test
 
 	revert, err := ds.RevertPersonalityPromptChange(ctx, userID, personalityID, originalID)
 	require.NoError(t, err)
-	require.Equal(t, personalitypromptchange.ActionRevert.String(), string(revert.Action))
+	require.Equal(t, string(personalitypromptchange.ActionRevert), string(revert.Action))
 	require.Equal(t, "prompt v2", revert.OldPrompt)
 	require.Equal(t, "prompt v1", revert.NewPrompt)
 	require.NotNil(t, revert.RevertedChangeID)
