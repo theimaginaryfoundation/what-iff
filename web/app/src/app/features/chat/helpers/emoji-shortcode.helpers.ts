@@ -82,7 +82,8 @@ export function installComposerEmojiShortcodes(emojiSearch: EmojiSearch): void {
     const shortcode = completedEmojiShortcode(textarea.value, start);
     if (!shortcode) return;
 
-    const emoji = resolveEmojiSearchResult(shortcode.query, emojiSearch.search(shortcode.query));
+    const results = emojiSearch.search(shortcode.query) ?? [];
+    const emoji = resolveEmojiSearchResult(shortcode.query, results);
     const native = emoji ? emojiChar(emoji) : '';
     if (!native) return;
 
