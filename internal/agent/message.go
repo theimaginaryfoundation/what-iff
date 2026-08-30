@@ -407,6 +407,12 @@ func (a *Agent) ChunkPipeline() *filechunker.FileChunkPipeline { return a.chunkP
 // FileStore returns the file store for S3 archival.
 func (a *Agent) FileStore() storage.FileStore { return a.fileStore }
 
+// DataStore returns the agent datastore for extension seams.
+func (a *Agent) DataStore() *datastore.Datastore { return a.ds }
+
+// Logger returns the agent logger for extension seams.
+func (a *Agent) Logger() *zap.Logger { return a.logger }
+
 // RecordFileUpload emits a counter for a file-attachment upload attempt.
 // status should be "success" or "failure".
 func (a *Agent) RecordFileUpload(ctx context.Context, fileType, status string) {
@@ -438,22 +444,27 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 	}
 	// Attachment labels are only injected when tools are enabled, matching the
 	// previous behavior for OpenAI chat turns.
+	additionalDevContext := ""
+	if additionalDeveloperContextForChat != nil {
+		additionalDevContext = additionalDeveloperContextForChat(a, chatCtx.chat)
+	}
 	return b.build(ctx, messageContextBuildRequest{
-		UserID:                   userID,
-		Chat:                     chatCtx.chat,
-		UserPrompt:               userPrompt,
-		CurrentMessage:           chatMessage,
-		Memories:                 chatCtx.memories,
-		LiveMemories:             chatCtx.liveMemories,
-		ActiveMood:               chatCtx.activeMood,
-		ActiveMoodRituals:        chatCtx.activeMoodRituals,
-		IsAutoMood:               chatCtx.chat.IsAutoMood,
-		MoodToolsAvailable:       a.shouldExposeMoodTools(ctx, userID, chatCtx.chat),
-		Attachments:              chatMessage.Attachments,
-		ImageBytes:               imageBytes,
-		ExpressionsEnabled:       chatCtx.expressionsEnabled,
-		IncludeAttachmentContext: chatCtx.chat.ToolsEnabled,
-		LoadHistoryImageBytes:    models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model),
+		UserID:                     userID,
+		Chat:                       chatCtx.chat,
+		UserPrompt:                 userPrompt,
+		CurrentMessage:             chatMessage,
+		Memories:                   chatCtx.memories,
+		LiveMemories:               chatCtx.liveMemories,
+		ActiveMood:                 chatCtx.activeMood,
+		ActiveMoodRituals:          chatCtx.activeMoodRituals,
+		IsAutoMood:                 chatCtx.chat.IsAutoMood,
+		MoodToolsAvailable:         a.shouldExposeMoodTools(ctx, userID, chatCtx.chat),
+		Attachments:                chatMessage.Attachments,
+		ImageBytes:                 imageBytes,
+		ExpressionsEnabled:         chatCtx.expressionsEnabled,
+		IncludeAttachmentContext:   chatCtx.chat.ToolsEnabled,
+		AdditionalDeveloperContext: additionalDevContext,
+		LoadHistoryImageBytes:      models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model),
 	})
 }
 
@@ -1947,21 +1958,42 @@ func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID,
 		}
 		persistSuccesses++
 
-		// Best-effort: upload to S3/local images/ path so the gallery and Claude can
-		// access the image.
-		if created != nil && strings.HasPrefix(fileType, models.ImageMIMEPrefix) {
-			rawBytes, decodeErr := base64.StdEncoding.DecodeString(content)
-			if decodeErr == nil && len(rawBytes) > 0 {
-				imageutil.UploadBytesToGalleryPath(ctx, a.fileStore, a.logger, userID, created.ID, name, fileType, rawBytes)
-				// Persist the S3 key so delete/rename can resolve it without re-deriving.
-				imgKey := storage.FileKeyForImage(userID, created.ID, name)
-				if err := a.ds.SetFileAttachmentS3Key(ctx, userID, created.ID, imgKey); err != nil {
-					a.logger.Warn("failed to persist attachment s3_key after tool-generated image save",
-						zap.String("attachment_id", created.ID.String()),
-						zap.String("s3_key", imgKey),
-						zap.Error(err))
-				}
+		rawBytes, decodeErr := base64.StdEncoding.DecodeString(content)
+		if decodeErr != nil || len(rawBytes) == 0 {
+			a.logger.Warn("failed to decode tool-generated attachment content",
+				zap.String("chat_message_id", agentMessage.ID.String()),
+				zap.String("attachment_id", created.ID.String()),
+				zap.String("name", name),
+				zap.Error(decodeErr),
+			)
+			continue
+		}
+
+		var s3Key string
+		if strings.HasPrefix(fileType, models.ImageMIMEPrefix) {
+			// Keep generated images on the canonical gallery path (full-size + thumb).
+			imageutil.UploadBytesToGalleryPath(ctx, a.fileStore, a.logger, userID, created.ID, name, fileType, rawBytes)
+			s3Key = storage.FileKeyForImage(userID, created.ID, name)
+		} else {
+			chatIDRef := agentMessage.ChatID
+			s3Key = storage.FileKeyForAttachment(userID, created.ID, name, fileType, &chatIDRef, nil)
+			if uploadErr := a.fileStore.UploadFile(ctx, s3Key, rawBytes, fileType); uploadErr != nil {
+				a.logger.Error("failed to upload tool-generated attachment",
+					zap.String("chat_message_id", agentMessage.ID.String()),
+					zap.String("attachment_id", created.ID.String()),
+					zap.String("name", name),
+					zap.String("s3_key", s3Key),
+					zap.Error(uploadErr),
+				)
+				continue
 			}
+		}
+
+		if err := a.ds.SetFileAttachmentS3Key(ctx, userID, created.ID, s3Key); err != nil {
+			a.logger.Warn("failed to persist attachment s3_key after tool-generated attachment save",
+				zap.String("attachment_id", created.ID.String()),
+				zap.String("s3_key", s3Key),
+				zap.Error(err))
 		}
 	}
 

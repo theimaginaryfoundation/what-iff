@@ -25,5 +25,6 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	fileAttachmentRouter := router.PathPrefix("/file-attachment").Subrouter()
 
 	fileAttachmentRouter.HandleFunc("", h.ListFileAttachments).Methods("GET")
+	fileAttachmentRouter.HandleFunc("/{id}", h.GetFileAttachmentContent).Methods("GET")
 	fileAttachmentRouter.HandleFunc("/{id}", h.DeleteFileAttachment).Methods("DELETE")
 }

@@ -96,6 +96,32 @@ describe('MessageContentComponent', () => {
         expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:download');
     });
 
+    it('downloads a non-image attachment from the pill click', () => {
+        vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:file-download');
+        vi.spyOn(URL, 'revokeObjectURL').mockReturnValue(undefined);
+        const click = vi.fn().mockName('click');
+        const anchor = document.createElement('a');
+        const createElement = document.createElement.bind(document);
+        vi.spyOn(anchor, 'click').mockImplementation(click);
+        vi.spyOn(document, 'createElement').mockImplementation(((tagName: string) => {
+            return tagName === 'a' ? anchor : createElement(tagName);
+        }) as typeof document.createElement);
+
+        fixture.componentRef.setInput('attachments', [fileAttachment('doc-1', 'notes.txt', 'text/plain')]);
+        fixture.detectChanges();
+
+        const button = fixture.nativeElement.querySelector('button.rounded-full') as HTMLButtonElement;
+        button.click();
+
+        httpMock.expectOne(req => req.urlWithParams.includes('/file-attachment/doc-1'))
+            .flush(new Blob(['notes'], { type: 'text/plain' }));
+
+        expect(anchor.download).toBe('notes.txt');
+        expect(anchor.href).toBe('blob:file-download');
+        expect(click).toHaveBeenCalled();
+        expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:file-download');
+    });
+
     it('copies sanitized html and preserves list markers in plain text', () => {
         fixture.detectChanges();
         const setData = vi.fn().mockName('setData');
@@ -184,11 +210,15 @@ describe('MessageContentComponent', () => {
 });
 
 function imageAttachment(id: string, name: string) {
+    return fileAttachment(id, name, 'image/png');
+}
+
+function fileAttachment(id: string, name: string, fileType: string) {
     return {
         id,
         user_id: 'user-1',
         name,
-        file_type: 'image/png',
+        file_type: fileType,
         created_at: '',
     };
 }

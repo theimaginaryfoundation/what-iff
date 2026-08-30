@@ -1,15 +1,20 @@
 package fileattachment
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"go.uber.org/zap"
 )
 
@@ -131,4 +136,89 @@ func (h *Handler) DeleteFileAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, nil)
+}
+
+// GetFileAttachmentContent returns attachment bytes for the authenticated user.
+func (h *Handler) GetFileAttachmentContent(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		handlerutils.RespondWithError(w, h.logger, http.StatusUnauthorized, handlerutils.CodeNotSet, "Unauthorized", nil)
+		return
+	}
+
+	idStr := mux.Vars(r)["id"]
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid attachment ID", err)
+		return
+	}
+
+	attachment, err := h.ds.GetFileAttachment(r.Context(), userID, id)
+	if err != nil {
+		if errors.Is(err, datastore.ErrFileAttachmentNotFound) {
+			handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "File attachment not found", nil)
+		} else {
+			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to fetch file attachment", err)
+		}
+		return
+	}
+
+	fileStore := h.agent.FileStore()
+	if fileStore == nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "File storage not configured", nil)
+		return
+	}
+
+	keys := make([]string, 0, 2)
+	if k := strings.TrimSpace(attachment.S3Key); k != "" {
+		keys = append(keys, k)
+	}
+	keys = append(keys, storage.FileKeyForAttachment(
+		userID,
+		attachment.ID,
+		attachment.Name,
+		attachment.FileType,
+		attachment.ChatMessageID,
+		attachment.PersonalityID,
+	))
+
+	var data []byte
+	for _, key := range keys {
+		blob, downloadErr := fileStore.DownloadFile(r.Context(), key)
+		if downloadErr != nil {
+			handlerutils.RespondWithError(
+				w,
+				h.logger,
+				http.StatusInternalServerError,
+				handlerutils.CodeNotSet,
+				fmt.Sprintf("Failed to download file attachment %q", attachment.Name),
+				downloadErr,
+			)
+			return
+		}
+		if len(blob) != 0 {
+			data = blob
+			break
+		}
+	}
+	if len(data) == 0 {
+		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "File content not available", nil)
+		return
+	}
+
+	contentType := strings.TrimSpace(attachment.FileType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	filename := strings.TrimSpace(attachment.Name)
+	if filename == "" {
+		filename = attachment.ID.String()
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }

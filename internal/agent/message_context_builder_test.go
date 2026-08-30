@@ -224,6 +224,40 @@ func TestMessageContextBuilder_Build_InjectsPersistedToolResults(t *testing.T) {
 	require.Contains(t, joined, tools.RecallToolSpec.Name)
 }
 
+func TestMessageContextBuilder_Build_AppendsAdditionalDeveloperContextBeforeUser(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	userID := uuid.New()
+	chat := &models.Chat{ID: uuid.New(), SystemPrompt: "be helpful"}
+	tel := &telemetry.Telemetry{Logger: zap.NewNop()}
+	b, err := newMessageContextBuilder(nil, tel, nil, func(_ context.Context, _, _ uuid.UUID, _ uuid.UUID, _ int, _ *time.Time, _ string) []*models.ChatMessage {
+		return nil
+	}, nil)
+	require.NoError(t, err)
+
+	mc, err := b.build(ctx, messageContextBuildRequest{
+		UserID:                     userID,
+		Chat:                       chat,
+		UserPrompt:                 "final user text",
+		AdditionalDeveloperContext: "extra shell guidance",
+	})
+	require.NoError(t, err)
+
+	var devIdx, userIdx int
+	devIdx, userIdx = -1, -1
+	for i, s := range mc.Segments {
+		if s.Kind == provider.SegmentKindDeveloperContext && s.Content == "extra shell guidance" {
+			devIdx = i
+		}
+		if s.Kind == provider.SegmentKindUserMessage {
+			userIdx = i
+		}
+	}
+	require.GreaterOrEqual(t, devIdx, 0, "expected injected developer context segment")
+	require.GreaterOrEqual(t, userIdx, 0, "expected user message segment")
+	require.Less(t, devIdx, userIdx, "developer guidance must be placed before user message")
+}
+
 func TestMessageContextBuilder_SelectCarryOverTurns_InvalidMax(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
