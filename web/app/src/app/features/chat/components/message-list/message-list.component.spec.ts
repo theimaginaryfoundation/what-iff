@@ -75,6 +75,20 @@ describe('MessageListComponent', () => {
         expect(fixture.componentInstance.isNearBottom()).toBe(true);
     });
 
+    it('positions an opened conversation at the bottom in the same render turn', () => {
+        fixture.componentRef.setInput('conversationId', 'chat-1');
+        fixture.componentRef.setInput('groups', []);
+        fixture.detectChanges();
+        const log = fixture.nativeElement.querySelector('[role="log"]') as HTMLElement;
+        const scrollSpy = vi.spyOn(log, 'scrollTo').mockReturnValue(undefined);
+        Object.defineProperty(log, 'scrollHeight', { configurable: true, value: 900 });
+
+        fixture.componentRef.setInput('groups', [messageGroup()]);
+        fixture.detectChanges();
+
+        expect(scrollSpy).toHaveBeenCalledWith({ top: 900, behavior: 'auto' });
+    });
+
     it('scrolls to the latest message after initial messages render', async () => {
         fixture.componentRef.setInput('conversationId', 'chat-1');
         fixture.componentRef.setInput('groups', []);
