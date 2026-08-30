@@ -1,3 +1,4 @@
+import { EmojiSearch } from '@ctrl/ngx-emoji-mart';
 import { EmojiData } from '@ctrl/ngx-emoji-mart/ngx-emoji';
 
 export interface CompletedEmojiShortcode {
@@ -57,6 +58,42 @@ export function resolveEmojiSearchResult(query: string, results: readonly EmojiD
   return wordMatches.length === 1 ? wordMatches[0] : null;
 }
 
+/**
+ * Install the editor-local shortcode behavior before Angular's textarea input
+ * listener runs. The capture listener is intentionally scoped to the one chat
+ * composer textarea, so transport/persistence code never rewrites user text.
+ *
+ * The listener mutates the textarea value in the capture phase; the original
+ * input event then reaches ChatComposerComponent.onInput(), which emits the
+ * already-expanded draft through the normal controlled-input path.
+ */
+export function installComposerEmojiShortcodes(emojiSearch: EmojiSearch): void {
+  if (typeof document === 'undefined' || composerShortcodesInstalled) return;
+  composerShortcodesInstalled = true;
+
+  document.addEventListener('input', event => {
+    const textarea = event.target;
+    if (!(textarea instanceof HTMLTextAreaElement) || textarea.id !== 'chat-composer-input') return;
+
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? start;
+    if (start !== end) return;
+
+    const shortcode = completedEmojiShortcode(textarea.value, start);
+    if (!shortcode) return;
+
+    const emoji = resolveEmojiSearchResult(shortcode.query, emojiSearch.search(shortcode.query));
+    const native = emoji ? emojiChar(emoji) : '';
+    if (!native) return;
+
+    textarea.value = textarea.value.slice(0, shortcode.start) + native + textarea.value.slice(shortcode.end);
+    const caret = shortcode.start + native.length;
+    textarea.setSelectionRange(caret, caret);
+  }, true);
+}
+
+let composerShortcodesInstalled = false;
+
 function emojiNames(emoji: SearchableEmoji): string[] {
   return [emoji.id ?? '', ...(emoji.shortNames ?? [])]
     .map(name => name.trim().toLowerCase())
@@ -69,4 +106,17 @@ function emojiWords(emoji: SearchableEmoji): Set<string> {
     .flatMap(field => field.toLowerCase().split(/[^a-z0-9+\-]+/))
     .filter(Boolean);
   return new Set(words);
+}
+
+function emojiChar(emoji: EmojiData): string {
+  if (emoji.native) return emoji.native;
+  if (!emoji.unified) return '';
+  try {
+    return emoji.unified
+      .split('-')
+      .map(hex => String.fromCodePoint(parseInt(hex, 16)))
+      .join('');
+  } catch {
+    return '';
+  }
 }
