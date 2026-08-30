@@ -23,11 +23,18 @@ test(
 
     // The defaults are intentional additions. Assert them above, then remove
     // only those additions from layout for the legacy profile snapshot. The
-    // visibility assertions may scroll the modal body to reach these lower
-    // fields, so restore the actual scroll owner before capturing the baseline.
+    // visibility assertions can scroll either the modal body or the document
+    // viewport while bringing lower fields into view, so reset both and let
+    // layout settle before capturing the baseline.
     await defaultModelField.evaluate(element => { element.style.display = 'none'; });
     await defaultPersonalityField.evaluate(element => { element.style.display = 'none'; });
     await page.locator('.ui-modal__body').evaluate(element => { element.scrollTop = 0; });
+    await page.evaluate(() => {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    });
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
 
     await expect(page).toHaveScreenshot('profile-settings-modal.png', {
       animations: 'disabled',
