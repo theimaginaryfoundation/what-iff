@@ -102,7 +102,16 @@ func (t *RecallTool) gather(ctx context.Context, chat *models.Chat, query, src s
 			if !withinWindow(c.CreatedAt, window) {
 				continue
 			}
-			r.chunks = append(r.chunks, recallChunk{SourceType: "file", Name: c.FileName, Index: c.Sequence, Text: c.Content})
+			chunk := recallChunk{
+				SourceType: "file",
+				Name:       c.FileName,
+				Index:      c.Sequence,
+				Text:       c.Content,
+			}
+			if c.FileAttachmentID != uuid.Nil {
+				chunk.AttachmentID = c.FileAttachmentID.String()
+			}
+			r.chunks = append(r.chunks, chunk)
 			if added++; added >= maxChunks {
 				break
 			}
@@ -437,7 +446,16 @@ func (t *RecallTool) fetchFileChunks(ctx context.Context, faID uuid.UUID, name, 
 	chunks := make([]recallChunk, 0, end-start)
 	for i := start; i < end; i++ {
 		c := rows[i]
-		chunks = append(chunks, recallChunk{SourceType: "file", Name: c.FileName, Index: c.Sequence, Text: c.Content})
+		chunk := recallChunk{
+			SourceType: "file",
+			Name:       c.FileName,
+			Index:      c.Sequence,
+			Text:       c.Content,
+		}
+		if c.FileAttachmentID != uuid.Nil {
+			chunk.AttachmentID = c.FileAttachmentID.String()
+		}
+		chunks = append(chunks, chunk)
 	}
 
 	res := recallResult{Mode: recallModeFetch, Chunks: chunks}

@@ -44,6 +44,8 @@ func GetAvailableTools(ctx context.Context) []ToolMeta {
 }
 
 // disabledToolsSet converts a string slice of tool names into a fast-lookup map.
+// Returns nil (not an empty map) when the slice is empty, so callers can use a nil check
+// as "use all defaults".
 func disabledToolsSet(names []string) map[string]bool {
 	m := make(map[string]bool, len(names))
 	for _, n := range names {
@@ -65,6 +67,17 @@ func (a *Agent) buildTurnToolPolicy(ctx context.Context, chatCtx *chatContext, u
 		ritualIDs:     mergedRitualIDsForTools(chatMessage, chatCtx.activeMood),
 	}
 	applyModelCapabilitiesToToolPolicy(&policy, a.modelForToolPolicy(ctx, chatCtx))
+	if !policy.toolsEnabled {
+		return policy
+	}
+	if additionalDisabledToolsForChat != nil {
+		for name, disabled := range additionalDisabledToolsForChat(a, chatCtx.chat) {
+			if disabled {
+				policy.disabledTools[name] = true
+			}
+		}
+	}
+
 	return policy
 }
 
