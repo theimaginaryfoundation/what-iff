@@ -16,18 +16,15 @@ test(
     // deterministic — see pinIdentityToShortName().
     await profileSettingsModal.pinIdentityToShortName();
 
-    const defaultModelField = page.locator('label').filter({ hasText: 'Default model' });
-    const defaultPersonalityField = page.locator('label').filter({ hasText: 'Default personality' });
-    await expect(defaultModelField).toBeVisible();
-    await expect(defaultPersonalityField).toBeVisible();
+    const chatDefaults = page.getByTestId('chat-defaults');
+    await expect(chatDefaults.getByText('Default model', { exact: true })).toBeVisible();
+    await expect(chatDefaults.getByText('Default personality', { exact: true })).toBeVisible();
 
-    // The defaults are intentional additions. Assert them above, then remove
-    // only those additions from layout for the legacy profile snapshot. The
-    // visibility assertions can scroll either the modal body or the document
-    // viewport while bringing lower fields into view, so reset both and let
-    // layout settle before capturing the baseline.
-    await defaultModelField.evaluate(element => { element.style.display = 'none'; });
-    await defaultPersonalityField.evaluate(element => { element.style.display = 'none'; });
+    // Chat defaults are an intentional addition covered by the assertions
+    // above. Remove the entire added fieldset from layout, rather than only
+    // its two labels, so this legacy profile snapshot still compares the
+    // pre-existing profile/password UI at the same geometry.
+    await chatDefaults.evaluate(element => { element.style.display = 'none'; });
     await page.locator('.ui-modal__body').evaluate(element => { element.scrollTop = 0; });
     await page.evaluate(() => {
       window.scrollTo(0, 0);
