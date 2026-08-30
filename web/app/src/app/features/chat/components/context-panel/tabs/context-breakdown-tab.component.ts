@@ -63,6 +63,9 @@ interface BreakdownRow {
             <div class="gauge__top">
               <span class="gauge__total">{{ format(total()) }}</span>
               <span class="gauge__budget">/ {{ format(displayBudget()) }} tokens</span>
+              @if (b.charged_credits !== undefined && b.charged_credits !== null) {
+                <span class="gauge__cost">{{ b.charged_credits | number: '1.0-4' }} credits</span>
+              }
             </div>
             <div
               class="gauge__track"
@@ -163,6 +166,7 @@ interface BreakdownRow {
     .gauge__top { align-items: baseline; display: flex; gap: 0.35rem; }
     .gauge__total { color: var(--color-text-primary); font-size: 1.35rem; font-weight: 700; }
     .gauge__budget { color: var(--color-text-muted); font-size: 0.8rem; }
+    .gauge__cost { color: var(--color-text-secondary); font-size: 0.8rem; font-weight: 600; margin-left: auto; }
 
     .gauge__track {
       background: var(--color-surface-base);
