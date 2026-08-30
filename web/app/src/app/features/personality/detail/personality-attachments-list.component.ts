@@ -11,7 +11,7 @@ import {
 
 import { ConfirmationService } from '../../../core/services/confirmation.service';
 import { FileAttachment, PendingFileAttachment } from '../../../core/models/file-attachment.model';
-import { FileAttachmentService } from '../../../core/services/file-attachment.service';
+import { FileAttachmentContent, FileAttachmentService } from '../../../core/services/file-attachment.service';
 
 const SUPPORTED_FILE_TYPES = [
   '.c', '.cpp', '.cs', '.css', '.doc', '.docx', '.go', '.html',
@@ -23,7 +23,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 /**
  * Manages personality-scoped file attachments. The component owns its own
- * upload + delete logic but delegates network calls to `FileAttachmentService`.
+ * upload + delete + read logic but delegates network calls to `FileAttachmentService`.
  * The parent provides the personality ID and is otherwise hands-off.
  */
 @Component({
@@ -76,12 +76,21 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
                 <p class="truncate text-sm font-medium text-(--color-text-primary)" [title]="attachment.name">{{ attachment.name }}</p>
                 <p class="text-xs text-(--color-text-secondary)">{{ attachment.file_type || 'file' }}</p>
               </div>
-              <button
-                type="button"
-                class="rounded-lg p-1.5 text-(--color-text-secondary) outline-none hover:bg-red-500/10 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-red-500"
-                [attr.aria-label]="'Delete ' + attachment.name"
-                (click)="onDelete(attachment)"
-              >✕</button>
+              <div class="flex items-center gap-1">
+                <button
+                  type="button"
+                  class="rounded-lg border border-border-base px-2 py-1 text-xs font-medium text-(--color-text-primary) hover:bg-(--color-surface-elevated) disabled:cursor-wait disabled:opacity-60"
+                  [disabled]="loadingContentId() === attachment.id"
+                  [attr.aria-label]="'Read ' + attachment.name"
+                  (click)="onRead(attachment)"
+                >{{ loadingContentId() === attachment.id ? 'Loading…' : 'Read' }}</button>
+                <button
+                  type="button"
+                  class="rounded-lg p-1.5 text-(--color-text-secondary) outline-none hover:bg-red-500/10 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-red-500"
+                  [attr.aria-label]="'Delete ' + attachment.name"
+                  (click)="onDelete(attachment)"
+                >✕</button>
+              </div>
             </li>
           }
           @for (item of pending(); track $index) {
@@ -116,6 +125,35 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
         </ul>
       }
     </section>
+
+    @if (contentViewer(); as viewer) {
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+        role="dialog"
+        aria-modal="true"
+        [attr.aria-label]="'Contents of ' + viewer.name"
+        (click)="closeContentViewer()"
+      >
+        <section
+          class="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border-base bg-(--color-surface-card) shadow-xl"
+          (click)="$event.stopPropagation()"
+        >
+          <header class="flex items-center justify-between gap-3 border-b border-border-base px-4 py-3">
+            <div class="min-w-0">
+              <h3 class="truncate text-base font-semibold text-(--color-text-primary)">{{ viewer.name }}</h3>
+              <p class="text-xs text-(--color-text-secondary)">Stored text content</p>
+            </div>
+            <button
+              type="button"
+              class="rounded-lg px-2 py-1 text-sm text-(--color-text-secondary) hover:bg-(--color-surface-elevated)"
+              aria-label="Close attachment contents"
+              (click)="closeContentViewer()"
+            >Close</button>
+          </header>
+          <pre class="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-4 text-sm text-(--color-text-primary)">{{ viewer.content }}</pre>
+        </section>
+      </div>
+    }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -130,6 +168,8 @@ export class PersonalityAttachmentsListComponent implements OnChanges {
   readonly pending = signal<PendingFileAttachment[]>([]);
   readonly isLoading = signal(false);
   readonly errorMessage = signal<string | null>(null);
+  readonly loadingContentId = signal<string | null>(null);
+  readonly contentViewer = signal<FileAttachmentContent | null>(null);
 
   readonly maxFiles = MAX_FILES;
   readonly remaining = computed(() => this.maxFiles - (this.attachments().length + this.pending().length));
@@ -146,6 +186,8 @@ export class PersonalityAttachmentsListComponent implements OnChanges {
       this.attachments.set([]);
       this.pending.set([]);
       this.errorMessage.set(null);
+      this.contentViewer.set(null);
+      this.loadingContentId.set(null);
       if (id) this.loadAttachments(id);
     }
   }
@@ -163,6 +205,25 @@ export class PersonalityAttachmentsListComponent implements OnChanges {
         this.flashError('Failed to load attachments. Please try again.');
       },
     });
+  }
+
+  onRead(attachment: FileAttachment): void {
+    this.loadingContentId.set(attachment.id);
+    this.fileAttachmentService.getFileAttachmentContent(attachment.id).subscribe({
+      next: content => {
+        this.loadingContentId.set(null);
+        this.contentViewer.set(content);
+      },
+      error: err => {
+        console.error('Failed to read attachment', err);
+        this.loadingContentId.set(null);
+        this.flashError(`Failed to read "${attachment.name}". The file may not contain readable stored text.`);
+      },
+    });
+  }
+
+  closeContentViewer(): void {
+    this.contentViewer.set(null);
   }
 
   onFilesSelected(event: Event): void {
@@ -242,6 +303,7 @@ export class PersonalityAttachmentsListComponent implements OnChanges {
     this.fileAttachmentService.deleteFileAttachment(attachment.id).subscribe({
       next: () => {
         this.attachments.update(current => current.filter(a => a.id !== attachment.id));
+        if (this.contentViewer()?.id === attachment.id) this.contentViewer.set(null);
       },
       error: err => {
         console.error('Failed to delete attachment', err);
