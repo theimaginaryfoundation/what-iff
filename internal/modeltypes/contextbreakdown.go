@@ -41,4 +41,8 @@ type ContextBreakdown struct {
 	Model        string               `json:"model,omitempty"`
 	Provider     string               `json:"provider,omitempty"`
 	CapturedAt   time.Time            `json:"captured_at"`
+	// ChargedCredits is the authoritative settled credit charge for this turn when a
+	// metering implementation supplies it. Nil means no settled charge is available;
+	// callers must not estimate a replacement from token counts or model pricing.
+	ChargedCredits *float64 `json:"charged_credits,omitempty"`
 }
