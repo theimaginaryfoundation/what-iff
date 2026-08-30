@@ -33,19 +33,19 @@ type ToolMeta struct {
 // GetAvailableTools returns metadata for tools the user can toggle via disabled_tools.
 func GetAvailableTools(ctx context.Context) []ToolMeta {
 	_ = ctx
-	specs := agenttools.UserToggleableFunctionToolSpecs()
-	cap := len(specs) + 1 // web + function tools
-	out := make([]ToolMeta, 0, cap)
+	definitions := agenttools.FunctionToolCatalog()
+	out := make([]ToolMeta, 0, len(definitions)+1)
 	out = append(out, ToolMeta{Name: agenttools.ToolNameWebSearch, Description: agenttools.AvailableToolDescriptionWebSearch})
-	for _, spec := range specs {
-		out = append(out, ToolMeta{Name: spec.Name, Description: spec.Description})
+	for _, def := range definitions {
+		if !def.UserToggleable {
+			continue
+		}
+		out = append(out, ToolMeta{Name: def.Spec.Name, Description: def.HumanDescription})
 	}
 	return out
 }
 
 // disabledToolsSet converts a string slice of tool names into a fast-lookup map.
-// Returns nil (not an empty map) when the slice is empty, so callers can use a nil check
-// as "use all defaults".
 func disabledToolsSet(names []string) map[string]bool {
 	m := make(map[string]bool, len(names))
 	for _, n := range names {
@@ -66,15 +66,49 @@ func (a *Agent) buildTurnToolPolicy(ctx context.Context, chatCtx *chatContext, u
 		showMoodTools: a.shouldExposeMoodTools(ctx, userID, chatCtx.chat),
 		ritualIDs:     mergedRitualIDsForTools(chatMessage, chatCtx.activeMood),
 	}
-	if !policy.toolsEnabled {
-		return policy
+
+	model := a.modelForToolPolicy(ctx, chatCtx)
+	if model != nil {
+		caps := models.DeriveModelCapabilities(model, nil)
+		if !caps.ToolCalling {
+			policy.toolsEnabled = false
+			for _, spec := range agenttools.AgentFunctionToolSpecs(true) {
+				policy.disabledTools[spec.Name] = true
+			}
+			policy.disabledTools[agenttools.ToolNameWebSearch] = true
+			return policy
+		}
+
+		// Native web search is only wired on the OpenAI Responses and native
+		// Anthropic paths. Other providers should not advertise a tool they cannot run.
+		provider := models.ProviderForModel(model.Provider, model.Name)
+		if provider != models.ModelProviderOpenAI && provider != models.ModelProviderAnthropic {
+			policy.disabledTools[agenttools.ToolNameWebSearch] = true
+		}
 	}
 
 	return policy
 }
 
+func (a *Agent) modelForToolPolicy(ctx context.Context, chatCtx *chatContext) *models.Model {
+	if a == nil || a.ds == nil || chatCtx == nil || chatCtx.chat == nil {
+		return nil
+	}
+	if chatCtx.chat.ModelID != uuid.Nil {
+		if model, err := a.ds.GetModel(ctx, chatCtx.chat.ModelID); err == nil {
+			return model
+		}
+	}
+	if chatCtx.model != "" {
+		if model, err := a.ds.GetModelByName(ctx, chatCtx.model); err == nil {
+			return model
+		}
+	}
+	return nil
+}
+
 func getChatTools(config ToolConfig) []responses.ToolUnionParam {
-	// Always include web search.
+	// Always include web search when the effective model/policy supports it.
 	//
 	// NOTE: We intentionally do NOT include OpenAI native image_generation here. Many models that
 	// otherwise support tool calling do not support image_generation as a native tool, and we
