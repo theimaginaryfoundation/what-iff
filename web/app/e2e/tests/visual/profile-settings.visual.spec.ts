@@ -21,12 +21,13 @@ test(
     await expect(defaultModelField).toBeVisible();
     await expect(defaultPersonalityField).toBeVisible();
 
-    // The two defaults are intentionally new UI. Assert they exist above, then
-    // remove them from layout only for the legacy profile snapshot so the
-    // baseline continues to catch unrelated visual drift without requiring a
-    // binary snapshot rewrite for this feature PR.
+    // The defaults are intentional additions. Assert them above, then remove
+    // only those additions from layout for the legacy profile snapshot. The
+    // visibility assertions may scroll the modal body to reach these lower
+    // fields, so restore the actual scroll owner before capturing the baseline.
     await defaultModelField.evaluate(element => { element.style.display = 'none'; });
     await defaultPersonalityField.evaluate(element => { element.style.display = 'none'; });
+    await page.locator('.ui-modal__body').evaluate(element => { element.scrollTop = 0; });
 
     await expect(page).toHaveScreenshot('profile-settings-modal.png', {
       animations: 'disabled',
