@@ -41,7 +41,7 @@ func TestUpdateScratchpadTool_InvalidArgsReturnsErrorResult(t *testing.T) {
 	out, err := tool.UpdateScratchpadTool(context.Background(), chat, []byte(`not json`))
 	require.NoError(t, err)
 	require.Contains(t, out, "invalid arguments")
-	require.Contains(t, out, "\\\"success\\\":false")
+	require.Contains(t, out, "\"success\":false")
 }
 
 func TestUpdateScratchpadTool_AppendLoadsCurrentAndPersistsCombinedContent(t *testing.T) {
@@ -54,7 +54,7 @@ func TestUpdateScratchpadTool_AppendLoadsCurrentAndPersistsCombinedContent(t *te
 
 	out, err := tool.UpdateScratchpadTool(context.Background(), chat, []byte("{\"operation\":\"append\",\"content\":\"new context\"}"))
 	require.NoError(t, err)
-	require.Contains(t, out, "\\\"success\\\":true")
+	require.Contains(t, out, "\"success\":true")
 	require.Equal(t, 1, store.getPersonalityN)
 	require.Equal(t, 1, store.updateScratchpadN)
 	require.Equal(t, "existing context\nnew context", store.updated.Scratchpad)
@@ -70,7 +70,7 @@ func TestUpdateScratchpadTool_ReplaceDoesNotLoadCurrentScratchpad(t *testing.T) 
 
 	out, err := tool.UpdateScratchpadTool(context.Background(), chat, []byte("{\"operation\":\"replace\",\"content\":\"replacement\"}"))
 	require.NoError(t, err)
-	require.Contains(t, out, "\\\"success\\\":true")
+	require.Contains(t, out, "\"success\":true")
 	require.Zero(t, store.getPersonalityN)
 	require.Equal(t, 1, store.updateScratchpadN)
 	require.Equal(t, "replacement", store.updated.Scratchpad)
