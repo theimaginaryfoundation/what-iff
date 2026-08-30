@@ -59,16 +59,24 @@ describe('ContextBreakdownTabComponent', () => {
     });
 
     it('shows the authoritative charged credit cost near the token gauge', () => {
-        const breakdownWithCost = {
+        const breakdownWithCost: ContextBreakdown = {
             ...sampleBreakdown,
             charged_credits: 1.25,
-        } as ContextBreakdown & { charged_credits: number };
+        };
 
         fixture.componentRef.setInput('breakdown', breakdownWithCost);
         fixture.detectChanges();
 
         const gauge = fixture.nativeElement.querySelector('.gauge') as HTMLElement;
         expect(gauge.textContent ?? '').toContain('1.25 credits');
+    });
+
+    it('does not invent a charged cost when settlement data is absent', () => {
+        fixture.componentRef.setInput('breakdown', sampleBreakdown);
+        fixture.detectChanges();
+
+        const gauge = fixture.nativeElement.querySelector('.gauge') as HTMLElement;
+        expect(gauge.querySelector('.gauge__cost')).toBeNull();
     });
 
     it('never lets the denominator fall below usage and flags over-budget', () => {
