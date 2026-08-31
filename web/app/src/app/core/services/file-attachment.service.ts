@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { FileAttachment, FileAttachmentFilters } from '../models/file-attachment.model';
 import { PaginatedResponse } from '../models/common.model';
@@ -56,9 +56,22 @@ export class FileAttachmentService {
     return this.http.get<PaginatedResponse<FileAttachment>>(`${this.apiUrl}/file-attachment`, { params });
   }
 
-  /** Fetch readable text for an attachment owned by the current user. */
+  /** Fetch attachment bytes as text through the authenticated current-main content endpoint. */
   getFileAttachmentContent(attachmentId: string): Observable<FileAttachmentContent> {
-    return this.http.get<FileAttachmentContent>(`${this.apiUrl}/file-attachment/${attachmentId}/content`);
+    return this.http.get(`${this.apiUrl}/file-attachment/${attachmentId}`, {
+      observe: 'response',
+      responseType: 'text',
+    }).pipe(
+      map(response => {
+        const disposition = response.headers.get('content-disposition') ?? '';
+        const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+        return {
+          id: attachmentId,
+          name: filenameMatch?.[1] ?? attachmentId,
+          content: response.body ?? '',
+        };
+      }),
+    );
   }
 
   /**
