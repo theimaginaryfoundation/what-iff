@@ -3,6 +3,7 @@ package datastore
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/ent"
@@ -47,7 +48,8 @@ func createPersonalityPromptChangeTx(
 		SetPersonalityID(personalityID).
 		SetOldPrompt(oldPrompt).
 		SetNewPrompt(newPrompt).
-		SetAction(action)
+		SetAction(action).
+		SetCreatedAt(time.Now().UTC())
 	if revertedChangeID != nil {
 		create = create.SetRevertedChangeID(*revertedChangeID)
 	}

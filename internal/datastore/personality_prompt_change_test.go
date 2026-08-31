@@ -99,7 +99,7 @@ func TestRevertPersonalityPromptChangeRestoresPromptAndAppendsAuditEvent(t *test
 
 	_, err := ds.dbClient.Personality.UpdateOneID(personalityID).SetSystemPrompt("prompt v2").Save(ctx)
 	require.NoError(t, err)
-	originalID := insertPromptChangeTestRow(t, ds, userID, personalityID, "prompt v1", "prompt v2", time.Now().UTC())
+	originalID := insertPromptChangeTestRow(t, ds, userID, personalityID, "prompt v1", "prompt v2", time.Now().UTC().Add(-time.Minute))
 
 	revert, err := ds.RevertPersonalityPromptChange(ctx, userID, personalityID, originalID)
 	require.NoError(t, err)
