@@ -34,63 +34,72 @@
   </div>
 
   <section aria-labelledby="prompt-change-heading" class="flex flex-col gap-3">
-    <div>
-      <h2 id="prompt-change-heading" class="text-base font-semibold">Personality prompt changes</h2>
-      <p class="text-sm text-(--color-text-secondary)">Prompt edits and restores are append-only audit entries.</p>
-    </div>
-    @if (promptChangesLoading()) {
-      <p class="compaction-log-status" role="status">Loading personality prompt changes…</p>
-    } @else if (promptChangesError()) {
-      <p class="compaction-log-error" role="alert">{{ promptChangesError() }}</p>
-    } @else if (promptChanges().length === 0) {
-      <p class="compaction-log-status">No personality prompt changes logged yet.</p>
-    } @else {
-      <ul class="compaction-log-list" role="list" aria-label="Personality prompt changes">
-        @for (change of promptChanges(); track change.id) {
-          <li class="compaction-card">
-            <div class="compaction-card__head">
-              <div class="compaction-card__badges">
-                <span class="compaction-card__badge compaction-card__badge--muted">
-                  <span class="compaction-card__badge-label">Personality</span>
-                  <span class="compaction-card__badge-value">{{ change.personality_name }}</span>
-                </span>
-                <span class="compaction-card__badge compaction-card__badge--muted">
-                  <span class="compaction-card__badge-label">Prompt</span>
-                  <span class="compaction-card__badge-value">{{ change.action === 'revert' ? 'Restored' : 'Edited' }}</span>
-                </span>
-              </div>
-              <div class="compaction-card__meta">
-                <span>{{ change.created_at | date:'MMM d, y' | uppercase }}</span>
-                <span>{{ change.created_at | date:'h:mm a' }}</span>
-              </div>
-            </div>
-            <div class="compaction-card__body">
-              <section class="diff-block">
-                <div class="diff-block__title-row">
-                  <h3 class="diff-block__title">System prompt</h3>
-                  <button
-                    type="button"
-                    class="diff-pane__revert"
-                    [disabled]="revertingPromptChangeId() === change.id"
-                    (click)="revertPromptChange(change)">
-                    {{ revertingPromptChangeId() === change.id ? 'Restoring…' : 'Restore previous' }}
-                  </button>
+    <button
+      type="button"
+      class="compaction-section-toggle"
+      data-testid="prompt-change-toggle"
+      [attr.aria-expanded]="promptChangesExpanded()"
+      (click)="togglePromptChanges()">
+      <span id="prompt-change-heading">Personality prompt changes</span>
+      <span class="compaction-toggle__chevron" aria-hidden="true"></span>
+    </button>
+    <p class="text-sm text-(--color-text-secondary)">Prompt edits and restores are append-only audit entries.</p>
+
+    @if (promptChangesExpanded()) {
+      @if (promptChangesLoading()) {
+        <p class="compaction-log-status" role="status">Loading personality prompt changes…</p>
+      } @else if (promptChangesError()) {
+        <p class="compaction-log-error" role="alert">{{ promptChangesError() }}</p>
+      } @else if (promptChanges().length === 0) {
+        <p class="compaction-log-status">No personality prompt changes logged yet.</p>
+      } @else {
+        <ul class="compaction-log-list" role="list" aria-label="Personality prompt changes">
+          @for (change of promptChanges(); track change.id) {
+            <li class="compaction-card">
+              <div class="compaction-card__head">
+                <div class="compaction-card__badges">
+                  <span class="compaction-card__badge compaction-card__badge--muted">
+                    <span class="compaction-card__badge-label">Personality</span>
+                    <span class="compaction-card__badge-value">{{ change.personality_name }}</span>
+                  </span>
+                  <span class="compaction-card__badge compaction-card__badge--muted">
+                    <span class="compaction-card__badge-label">Prompt</span>
+                    <span class="compaction-card__badge-value">{{ change.action === 'revert' ? 'Restored' : 'Edited' }}</span>
+                  </span>
                 </div>
-                <div class="diff-grid">
-                  <div class="diff-pane diff-pane--old">
-                    <div class="diff-pane__head"><span class="diff-pane__label">Before</span></div>
-                    <pre class="diff-pane__content">{{ change.old_prompt || '(empty)' }}</pre>
-                  </div>
-                  <div class="diff-pane diff-pane--new">
-                    <div class="diff-pane__head"><span class="diff-pane__label">After</span></div>
-                    <pre class="diff-pane__content">{{ change.new_prompt || '(empty)' }}</pre>
-                  </div>
+                <div class="compaction-card__meta">
+                  <span>{{ change.created_at | date:'MMM d, y' | uppercase }}</span>
+                  <span>{{ change.created_at | date:'h:mm a' }}</span>
                 </div>
-              </section>
-            </div>
-          </li>
-        }
-      </ul>
+              </div>
+              <div class="compaction-card__body">
+                <section class="diff-block">
+                  <div class="diff-block__title-row">
+                    <h3 class="diff-block__title">System prompt</h3>
+                    <button
+                      type="button"
+                      class="diff-pane__revert"
+                      [disabled]="revertingPromptChangeId() === change.id"
+                      (click)="revertPromptChange(change)">
+                      {{ revertingPromptChangeId() === change.id ? 'Restoring…' : 'Restore previous' }}
+                    </button>
+                  </div>
+                  <div class="diff-grid">
+                    <div class="diff-pane diff-pane--old">
+                      <div class="diff-pane__head"><span class="diff-pane__label">Before</span></div>
+                      <pre class="diff-pane__content">{{ change.old_prompt || '(empty)' }}</pre>
+                    </div>
+                    <div class="diff-pane diff-pane--new">
+                      <div class="diff-pane__head"><span class="diff-pane__label">After</span></div>
+                      <pre class="diff-pane__content">{{ change.new_prompt || '(empty)' }}</pre>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </li>
+          }
+        </ul>
+      }
     }
   </section>
 
