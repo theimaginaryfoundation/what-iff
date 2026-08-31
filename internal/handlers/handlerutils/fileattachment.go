@@ -113,22 +113,42 @@ func UploadFileAttachment(w http.ResponseWriter, r *http.Request, logger *zap.Lo
 	}
 
 	if strings.HasPrefix(fileTypeInfo.ContentType, models.ImageMIMEPrefix) {
-		imageBytes, err := os.ReadFile(tempFilePath)
+		normalizedTempFile, err := os.CreateTemp(filepath.Dir(tempFilePath), "chat-app-upload-normalized-*")
 		if err != nil {
 			_ = os.Remove(tempFilePath)
-			RespondWithError(w, logger, http.StatusInternalServerError, CodeNotSet, "Error reading image upload", err)
+			RespondWithError(w, logger, http.StatusInternalServerError, CodeNotSet, "Error creating normalized image buffer", err)
+			return models.FileAttachment{}, "", err
+		}
+		normalizedTempFilePath := normalizedTempFile.Name()
+
+		imageFile, err := os.Open(tempFilePath)
+		if err != nil {
+			_ = normalizedTempFile.Close()
+			_ = os.Remove(normalizedTempFilePath)
+			_ = os.Remove(tempFilePath)
+			RespondWithError(w, logger, http.StatusInternalServerError, CodeNotSet, "Error opening image upload", err)
 			return models.FileAttachment{}, "", err
 		}
 
-		normalized, err := imageutil.NormalizeForUpload(imageBytes, imageutil.DefaultUploadImageMaxPx)
+		// The upload cap bounds disk usage; stream image data between temp files
+		// so the raw upload is not also buffered in application memory.
+		err = imageutil.NormalizeForUpload(imageFile, normalizedTempFile, imageutil.DefaultUploadImageMaxPx)
+		if closeErr := imageFile.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+		if closeErr := normalizedTempFile.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
 		if err != nil {
+			_ = os.Remove(normalizedTempFilePath)
 			_ = os.Remove(tempFilePath)
 			RespondWithError(w, logger, http.StatusBadRequest, CodeNotSet, "Invalid image", err)
 			return models.FileAttachment{}, "", err
 		}
-		if err := os.WriteFile(tempFilePath, normalized, 0o600); err != nil {
+		if err := os.Rename(normalizedTempFilePath, tempFilePath); err != nil {
+			_ = os.Remove(normalizedTempFilePath)
 			_ = os.Remove(tempFilePath)
-			RespondWithError(w, logger, http.StatusInternalServerError, CodeNotSet, "Error normalizing image", err)
+			RespondWithError(w, logger, http.StatusInternalServerError, CodeNotSet, "Error replacing normalized image", err)
 			return models.FileAttachment{}, "", err
 		}
 

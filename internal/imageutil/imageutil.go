@@ -11,6 +11,7 @@ import (
 	_ "image/gif" // register GIF decoder
 	"image/jpeg"
 	"image/png"
+	"io"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
@@ -23,23 +24,24 @@ const (
 	DefaultUploadImageMaxPx = 2048
 )
 
-// NormalizeForUpload decodes an accepted image, scales it down when its longest
-// edge exceeds maxPx, and encodes the result as PNG. Images that already fit
-// keep their original dimensions; normalization never upscales.
-func NormalizeForUpload(data []byte, maxPx int) ([]byte, error) {
+// NormalizeForUpload decodes an accepted image from input, scales it down when
+// its longest edge exceeds maxPx, and encodes the result as PNG to output.
+// Images that already fit keep their original dimensions; normalization never
+// upscales. Callers must update the stored filename and content type to PNG.
+func NormalizeForUpload(input io.Reader, output io.Writer, maxPx int) error {
 	if maxPx <= 0 {
 		maxPx = DefaultUploadImageMaxPx
 	}
 
-	src, _, err := image.Decode(bytes.NewReader(data))
+	src, _, err := image.Decode(input)
 	if err != nil {
-		return nil, fmt.Errorf("decode image for upload: %w", err)
+		return fmt.Errorf("decode image for upload: %w", err)
 	}
 
 	bounds := src.Bounds()
 	srcW, srcH := bounds.Dx(), bounds.Dy()
 	if srcW == 0 || srcH == 0 {
-		return nil, fmt.Errorf("image has zero dimension (%dx%d)", srcW, srcH)
+		return fmt.Errorf("image has zero dimension (%dx%d)", srcW, srcH)
 	}
 
 	dst := src
@@ -50,11 +52,10 @@ func NormalizeForUpload(data []byte, maxPx int) ([]byte, error) {
 		dst = resized
 	}
 
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, dst); err != nil {
-		return nil, fmt.Errorf("encode upload image as PNG: %w", err)
+	if err := png.Encode(output, dst); err != nil {
+		return fmt.Errorf("encode upload image as PNG: %w", err)
 	}
-	return buf.Bytes(), nil
+	return nil
 }
 
 func scaledDimensions(srcW, srcH, maxPx int) (int, int) {
