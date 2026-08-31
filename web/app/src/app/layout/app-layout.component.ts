@@ -225,6 +225,9 @@ export class AppLayoutComponent implements OnInit, OnDestroy {
       );
       this.chatService.setLastChatId(chat.id);
       await this.router.navigate(['/chat', chat.id]);
+      if (this.isMobileNav()) {
+        this.closeMobileSidebar();
+      }
     } catch (error) {
       console.error('Failed to start chat with personality', error);
     }
