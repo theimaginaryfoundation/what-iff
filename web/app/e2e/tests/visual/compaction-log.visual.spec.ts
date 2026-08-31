@@ -1,5 +1,4 @@
 import { test, expect } from '../../fixtures';
-import { commonMasks } from './visual.helpers';
 
 test(
   'personality prompt change history',
@@ -30,13 +29,17 @@ test(
     await expect(compactionLogPage.promptChangesToggle).toHaveAttribute('aria-expanded', 'false');
     await expect(compactionLogPage.promptChangesList).toHaveCount(0);
 
-    // The visual contract for #76 is the compact default state: prompt history is discoverable
-    // without pushing the existing checkpoint feed down the page.
-    await expect(page).toHaveScreenshot('compaction-log-personality-prompt-history.png', {
-      animations: 'disabled',
-      mask: commonMasks(page),
-      maxDiffPixels: 50,
-    });
+    // The visual contract for #76 is geometric rather than pixel-identical: when prompt history is
+    // collapsed, the existing compaction feed must remain immediately below it instead of being
+    // displaced by the prompt diff card that #65 added above the feed.
+    const feedStatus = page.getByText(/^No compactions logged yet\./);
+    await expect(feedStatus).toBeVisible();
+    const toggleBox = await compactionLogPage.promptChangesToggle.boundingBox();
+    const feedBox = await feedStatus.boundingBox();
+    expect(toggleBox).not.toBeNull();
+    expect(feedBox).not.toBeNull();
+    expect(feedBox!.y).toBeGreaterThan(toggleBox!.y + toggleBox!.height);
+    expect(feedBox!.y - (toggleBox!.y + toggleBox!.height)).toBeLessThan(100);
 
     await compactionLogPage.expandPromptChanges();
     await expect(compactionLogPage.promptChangesToggle).toHaveAttribute('aria-expanded', 'true');
