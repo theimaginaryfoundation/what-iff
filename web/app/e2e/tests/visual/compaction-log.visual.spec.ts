@@ -26,18 +26,23 @@ test(
     await compactionLogPage.navigateTo();
     await shell.dismissAnnouncementIfPresent();
     await expect(compactionLogPage.heading).toBeVisible();
-    await expect(compactionLogPage.promptChangesHeading).toBeVisible();
-    const changeCard = compactionLogPage.promptChangeCard(personalityName);
-    await expect(changeCard).toContainText(initialPrompt);
-    await expect(changeCard).toContainText(updatedPrompt);
+    await expect(compactionLogPage.promptChangesToggle).toBeVisible();
+    await expect(compactionLogPage.promptChangesToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(compactionLogPage.promptChangesList).toHaveCount(0);
 
+    // The visual contract for #76 is the compact default state: prompt history is discoverable
+    // without pushing the existing checkpoint feed down the page.
     await expect(page).toHaveScreenshot('compaction-log-personality-prompt-history.png', {
       animations: 'disabled',
-      mask: [...commonMasks(page), compactionLogPage.promptChangeMetadata(personalityName)],
-      // A second CI-image render varied by at most 36 pixels across desktop
-      // and mobile after masking the timestamp; keep that renderer noise from
-      // flaking the visual contract while leaving the threshold effectively zero.
+      mask: commonMasks(page),
       maxDiffPixels: 50,
     });
+
+    await compactionLogPage.expandPromptChanges();
+    await expect(compactionLogPage.promptChangesToggle).toHaveAttribute('aria-expanded', 'true');
+    const changeCard = compactionLogPage.promptChangeCard(personalityName);
+    await expect(changeCard).toBeVisible();
+    await expect(changeCard).toContainText(initialPrompt);
+    await expect(changeCard).toContainText(updatedPrompt);
   },
 );
