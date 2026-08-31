@@ -3,9 +3,8 @@
     <a routerLink="/memories" class="compaction-log-header__back">← Back to memories</a>
     <h1>Compaction log</h1>
     <p>
-      Every conversation checkpoint, captured like a diff: the summary and scratchpad before and after,
-      which memories were loaded into the segment, and every dedupe/merge/link action it produced.
-      Revert a summary or scratchpad to roll back to a known-good checkpoint.
+      Every conversation checkpoint and personality prompt change, captured like a diff. Review summary,
+      scratchpad, memory, and prompt changes here and restore a known-good state when needed.
     </p>
   </header>
 
@@ -33,6 +32,67 @@
       </select>
     </label>
   </div>
+
+  <section aria-labelledby="prompt-change-heading" class="flex flex-col gap-3">
+    <div>
+      <h2 id="prompt-change-heading" class="text-base font-semibold">Personality prompt changes</h2>
+      <p class="text-sm text-(--color-text-secondary)">Prompt edits and restores are append-only audit entries.</p>
+    </div>
+    @if (promptChangesLoading()) {
+      <p class="compaction-log-status" role="status">Loading personality prompt changes…</p>
+    } @else if (promptChangesError()) {
+      <p class="compaction-log-error" role="alert">{{ promptChangesError() }}</p>
+    } @else if (promptChanges().length === 0) {
+      <p class="compaction-log-status">No personality prompt changes logged yet.</p>
+    } @else {
+      <ul class="compaction-log-list" role="list" aria-label="Personality prompt changes">
+        @for (change of promptChanges(); track change.id) {
+          <li class="compaction-card">
+            <div class="compaction-card__head">
+              <div class="compaction-card__badges">
+                <span class="compaction-card__badge compaction-card__badge--muted">
+                  <span class="compaction-card__badge-label">Personality</span>
+                  <span class="compaction-card__badge-value">{{ change.personality_name }}</span>
+                </span>
+                <span class="compaction-card__badge compaction-card__badge--muted">
+                  <span class="compaction-card__badge-label">Prompt</span>
+                  <span class="compaction-card__badge-value">{{ change.action === 'revert' ? 'Restored' : 'Edited' }}</span>
+                </span>
+              </div>
+              <div class="compaction-card__meta">
+                <span>{{ change.created_at | date:'MMM d, y' | uppercase }}</span>
+                <span>{{ change.created_at | date:'h:mm a' }}</span>
+              </div>
+            </div>
+            <div class="compaction-card__body">
+              <section class="diff-block">
+                <div class="diff-block__title-row">
+                  <h3 class="diff-block__title">System prompt</h3>
+                  <button
+                    type="button"
+                    class="diff-pane__revert"
+                    [disabled]="revertingPromptChangeId() === change.id"
+                    (click)="revertPromptChange(change)">
+                    {{ revertingPromptChangeId() === change.id ? 'Restoring…' : 'Restore previous' }}
+                  </button>
+                </div>
+                <div class="diff-grid">
+                  <div class="diff-pane diff-pane--old">
+                    <div class="diff-pane__head"><span class="diff-pane__label">Before</span></div>
+                    <pre class="diff-pane__content">{{ change.old_prompt || '(empty)' }}</pre>
+                  </div>
+                  <div class="diff-pane diff-pane--new">
+                    <div class="diff-pane__head"><span class="diff-pane__label">After</span></div>
+                    <pre class="diff-pane__content">{{ change.new_prompt || '(empty)' }}</pre>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </li>
+        }
+      </ul>
+    }
+  </section>
 
   @if (loading()) {
     <p class="compaction-log-status" role="status">Loading compaction log…</p>
@@ -87,7 +147,6 @@
                 <span class="compaction-toggle__chevron" aria-hidden="true"></span>
               </button>
               @if (!isSectionCollapsed(event, 'summary')) {
-              <!-- Conversation summary -->
               <section class="diff-block">
                 <div class="diff-block__title-row">
                   <h3 class="diff-block__title">Conversation summary</h3>
@@ -129,7 +188,6 @@
                 </div>
               </section>
 
-              <!-- Scratchpad -->
               @if (event.old_scratchpad || event.new_scratchpad) {
                 <section class="diff-block">
                   <div class="diff-block__title-row">
@@ -179,7 +237,6 @@
                 <span class="compaction-toggle__chevron" aria-hidden="true"></span>
               </button>
               @if (!isSectionCollapsed(event, 'memory')) {
-              <!-- Loaded memories -->
               <section class="detail-block">
                 <button
                   type="button"
@@ -213,7 +270,6 @@
                 }
               </section>
 
-              <!-- New and updated memory operations -->
               <section class="detail-block">
                 <h3 class="detail-block__title">New memories ({{ createdMemories(event).length }})</h3>
                 @if (createdMemories(event).length === 0) {

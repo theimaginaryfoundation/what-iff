@@ -9,11 +9,18 @@ import { ConfirmationService } from '../../core/services/confirmation.service';
 import { MemoryService } from '../../core/services/memory.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { CompactionEvent } from '../../core/models/memory.model';
+import { Personality, PersonalityPromptChange } from '../../core/models/personality.model';
 import { CompactionLogPageComponent } from './compaction-log-page.component';
 
 describe('CompactionLogPageComponent', () => {
     let component: CompactionLogPageComponent;
     let fixture: ComponentFixture<CompactionLogPageComponent>;
+    let personalityService: {
+        listPersonalities: ReturnType<typeof vi.fn>;
+        listPromptChanges: ReturnType<typeof vi.fn>;
+        revertPromptChange: ReturnType<typeof vi.fn>;
+    };
+    let confirmation: { confirm: ReturnType<typeof vi.fn> };
 
     const event: CompactionEvent = {
         id: 'checkpoint-1',
@@ -23,6 +30,30 @@ describe('CompactionLogPageComponent', () => {
         loaded_memories: [{ memory_id: 'memory-1', content: 'User prefers concise updates.', scope: 'global' }],
         created_at: '2026-08-11T12:00:00Z',
         updated_at: '2026-08-11T12:00:00Z',
+    };
+
+    const personality: Personality = {
+        id: 'personality-9',
+        name: 'Vera',
+        system_prompt: 'Current prompt',
+        auto_pin_memories: false,
+        cover_image_id: null,
+        cover_image_url: null,
+        expressions_enabled: true,
+        image_style: 'auto',
+        created_at: '2026-08-11T00:00:00Z',
+        updated_at: '2026-08-11T00:00:00Z',
+        stats: { chat_count: 1, last_used_at: null },
+    };
+
+    const promptChange: PersonalityPromptChange = {
+        id: 'change-1',
+        user_id: 'user-1',
+        personality_id: 'personality-9',
+        old_prompt: 'Old prompt text',
+        new_prompt: 'New prompt text',
+        action: 'edit',
+        created_at: '2026-08-12T12:00:00Z',
     };
 
     beforeEach(async () => {
@@ -37,10 +68,17 @@ describe('CompactionLogPageComponent', () => {
         };
         chatService.listChats.mockReturnValue(of({ results: [], total_count: 0, page: 1 }));
 
-        const personalityService = {
-            listPersonalities: vi.fn().mockName("PersonalityService.listPersonalities")
+        personalityService = {
+            listPersonalities: vi.fn().mockName("PersonalityService.listPersonalities"),
+            listPromptChanges: vi.fn().mockName("PersonalityService.listPromptChanges"),
+            revertPromptChange: vi.fn().mockName("PersonalityService.revertPromptChange"),
         };
-        personalityService.listPersonalities.mockReturnValue(of({ results: [], total_count: 0, page: 1 }));
+        personalityService.listPersonalities.mockReturnValue(of({ results: [personality], total_count: 1, page: 1 }));
+        personalityService.listPromptChanges.mockReturnValue(of([promptChange]));
+        personalityService.revertPromptChange.mockReturnValue(of({ ...promptChange, id: 'change-2', action: 'revert' }));
+
+        confirmation = { confirm: vi.fn().mockName("ConfirmationService.confirm") };
+        confirmation.confirm.mockResolvedValue(true);
 
         await TestBed.configureTestingModule({
             imports: [CompactionLogPageComponent],
@@ -50,9 +88,7 @@ describe('CompactionLogPageComponent', () => {
                 { provide: MemoryService, useValue: memoryService },
                 { provide: ChatService, useValue: chatService },
                 { provide: PersonalityService, useValue: personalityService },
-                { provide: ConfirmationService, useValue: {
-                        confirm: vi.fn().mockName("ConfirmationService.confirm")
-                    } },
+                { provide: ConfirmationService, useValue: confirmation },
             ],
         }).compileComponents();
 
@@ -65,13 +101,32 @@ describe('CompactionLogPageComponent', () => {
 
     it('shows labeled, human-readable status chips', () => {
         const text = fixture.nativeElement.textContent;
-
         expect(text).toContain('Thread');
         expect(text).toContain('A long-running project conversation');
         expect(text).toContain('Checkpoint');
         expect(text).toContain('Turn limit reached');
         expect(text).toContain('Memory changes');
         expect(text).not.toContain('(20) >= 20');
+    });
+
+    it('shows personality prompt audit entries in the same change-log page', () => {
+        const text = fixture.nativeElement.textContent;
+        expect(personalityService.listPromptChanges).toHaveBeenCalledWith('personality-9');
+        expect(text).toContain('Personality prompt changes');
+        expect(text).toContain('Vera');
+        expect(text).toContain('Old prompt text');
+        expect(text).toContain('New prompt text');
+        expect(text).toContain('Restore previous');
+    });
+
+    it('restores a historical personality prompt through the audit entry', async () => {
+        personalityService.listPromptChanges.mockClear();
+        await component.revertPromptChange({ ...promptChange, personality_name: 'Vera' });
+
+        expect(confirmation.confirm).toHaveBeenCalled();
+        expect(personalityService.revertPromptChange).toHaveBeenCalledWith('personality-9', 'change-1');
+        expect(personalityService.listPromptChanges).toHaveBeenCalledWith('personality-9');
+        expect(component.notice()).toBe('Prompt restored for Vera.');
     });
 
     it('collapses and expands the loaded memories segment', () => {
@@ -84,13 +139,11 @@ describe('CompactionLogPageComponent', () => {
 
         component.toggleLoadedMemories(event);
         fixture.detectChanges();
-
         expect(fixture.nativeElement.querySelector('.loaded-memories-toggle')?.getAttribute('aria-expanded')).toBe('false');
         expect(component.isLoadedMemoriesCollapsed(event)).toBe(true);
         expect(fixture.nativeElement.textContent).not.toContain('User prefers concise updates.');
 
         component.toggleLoadedMemories(event);
-
         expect(component.isLoadedMemoriesCollapsed(event)).toBe(false);
     });
 
@@ -98,9 +151,7 @@ describe('CompactionLogPageComponent', () => {
         const withCreated: CompactionEvent = {
             ...event,
             id: 'checkpoint-2',
-            created_memories: [
-                { memory_id: 'memory-2', content: 'User is allergic to shellfish.', scope: 'global' },
-            ],
+            created_memories: [{ memory_id: 'memory-2', content: 'User is allergic to shellfish.', scope: 'global' }],
         };
         component.events.set([withCreated]);
         fixture.detectChanges();
@@ -121,6 +172,7 @@ describe('CompactionLogPageComponent', () => {
     it('narrows results by thread and personality filters', () => {
         const memoryService = TestBed.inject(MemoryService) as MockedObject<MemoryService>;
         memoryService.listCompactionEvents.mockClear();
+        personalityService.listPromptChanges.mockClear();
 
         component.updateFilters('chat-42', 'personality-9');
 
@@ -130,6 +182,7 @@ describe('CompactionLogPageComponent', () => {
             chat_id: 'chat-42',
             personality_id: 'personality-9',
         });
+        expect(personalityService.listPromptChanges).toHaveBeenCalledWith('personality-9');
     });
 
     it('collapses and expands the summaries section', () => {
@@ -138,13 +191,11 @@ describe('CompactionLogPageComponent', () => {
 
         component.toggleSection(event, 'summary');
         fixture.detectChanges();
-
         expect(component.isSectionCollapsed(event, 'summary')).toBe(true);
         expect(fixture.nativeElement.textContent).not.toContain('Conversation summary');
 
         component.toggleSection(event, 'summary');
         fixture.detectChanges();
-
         expect(component.isSectionCollapsed(event, 'summary')).toBe(false);
         expect(fixture.nativeElement.textContent).toContain('Conversation summary');
     });
@@ -155,12 +206,10 @@ describe('CompactionLogPageComponent', () => {
 
         const withMessage: CompactionEvent = { ...event, assistant_message_id: 'msg-77' };
         component.openThread(withMessage);
-
         expect(navigateSpy).toHaveBeenCalledWith(['/chat', 'chat-1'], { queryParams: { checkpoint: 'msg-77' } });
 
         navigateSpy.mockClear();
         component.openThread(event);
-
         expect(navigateSpy).toHaveBeenCalledWith(['/chat', 'chat-1'], { queryParams: undefined });
     });
 });
