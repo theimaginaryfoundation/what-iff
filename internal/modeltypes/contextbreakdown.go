@@ -25,20 +25,6 @@ type ContextSegmentStat struct {
 	Images    int    `json:"images,omitempty"`
 }
 
-// APICostEstimate records the approximate standard API cost for a BYOK/self-hosted
-// turn together with the exact usage and price snapshot used to calculate it. The
-// estimate is deliberately persisted so later price-table updates do not rewrite history.
-type APICostEstimate struct {
-	AmountUSD           float64   `json:"amount_usd"`
-	InputTokens         int64     `json:"input_tokens"`
-	OutputTokens        int64     `json:"output_tokens"`
-	InputUSDPerMillion  float64   `json:"input_usd_per_million"`
-	OutputUSDPerMillion float64   `json:"output_usd_per_million"`
-	PricingSource       string    `json:"pricing_source"`
-	PricingCheckedAt    time.Time `json:"pricing_checked_at"`
-	CalculatedAt        time.Time `json:"calculated_at"`
-}
-
 // ContextBreakdown is a snapshot of the model context assembled for one assistant turn:
 // the segment rows in the order they were laid out, the estimated total, the display
 // budget, and the model/provider that consumed it. It is captured at generation time and
@@ -55,7 +41,4 @@ type ContextBreakdown struct {
 	Model        string               `json:"model,omitempty"`
 	Provider     string               `json:"provider,omitempty"`
 	CapturedAt   time.Time            `json:"captured_at"`
-	// APICost is present only when this exact provider/model has a reviewed standard
-	// token price. Nil means the application does not know enough to estimate safely.
-	APICost *APICostEstimate `json:"api_cost,omitempty"`
 }
