@@ -58,20 +58,30 @@ describe('ContextBreakdownTabComponent', () => {
         expect(fixture.componentInstance.overBudget()).toBe(false);
     });
 
-    it('shows the authoritative charged credit cost near the token gauge', () => {
-        const breakdownWithCost: ContextBreakdown = {
+    it('shows the estimated provider API cost near the token gauge', () => {
+        const breakdownWithCost = {
             ...sampleBreakdown,
-            charged_credits: 1.25,
-        };
+            api_cost: {
+                amount_usd: 0.0134,
+                input_tokens: 5720,
+                output_tokens: 625,
+                input_usd_per_million: 1.25,
+                output_usd_per_million: 10,
+                pricing_source: 'OpenAI API pricing',
+                pricing_updated_at: '2026-08-30T00:00:00Z',
+                calculated_at: '2026-08-30T00:00:01Z',
+            },
+        } as ContextBreakdown;
 
         fixture.componentRef.setInput('breakdown', breakdownWithCost);
         fixture.detectChanges();
 
         const gauge = fixture.nativeElement.querySelector('.gauge') as HTMLElement;
-        expect(gauge.textContent ?? '').toContain('1.25 credits');
+        expect(gauge.textContent ?? '').toContain('Estimated API cost');
+        expect(gauge.textContent ?? '').toContain('$0.0134');
     });
 
-    it('does not invent a charged cost when settlement data is absent', () => {
+    it('does not invent an API cost when pricing is unknown', () => {
         fixture.componentRef.setInput('breakdown', sampleBreakdown);
         fixture.detectChanges();
 
