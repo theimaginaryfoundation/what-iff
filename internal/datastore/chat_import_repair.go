@@ -14,10 +14,10 @@ import (
 // Ambiguous timestamp groups are filtered out before becoming candidates; collision and
 // concurrent-change abstentions are counted explicitly because they were otherwise eligible.
 type ImportMessageOrderRepairResult struct {
-	CandidatePairs         int
-	RepairedPairs          int
-	CollisionAbstentions   int
-	ConcurrentAbstentions  int
+	CandidatePairs        int
+	RepairedPairs         int
+	CollisionAbstentions  int
+	ConcurrentAbstentions int
 }
 
 type importedMessageOrderRepairCandidate struct {
