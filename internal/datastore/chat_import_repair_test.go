@@ -65,6 +65,14 @@ func messageTime(t *testing.T, ds *Datastore, id uuid.UUID) time.Time {
 	return msg.SentAt
 }
 
+func chatLastMessageTime(t *testing.T, ds *Datastore, chatID uuid.UUID) time.Time {
+	t.Helper()
+	var got time.Time
+	err := ds.sqlDB.QueryRow(`SELECT last_message_time FROM chats WHERE id = $1`, chatID).Scan(&got)
+	require.NoError(t, err)
+	return got
+}
+
 func TestRepairImportedMessageOrderRepairsExactUserAssistantPair(t *testing.T) {
 	ds, cleanup := newImportOrderRepairTestDatastore(t)
 	defer cleanup()
@@ -79,10 +87,7 @@ func TestRepairImportedMessageOrderRepairsExactUserAssistantPair(t *testing.T) {
 	require.Equal(t, 1, result.RepairedPairs)
 	require.Equal(t, base, messageTime(t, ds, userID))
 	require.Equal(t, base.Add(time.Microsecond), messageTime(t, ds, assistantID))
-
-	chat, err := ds.dbClient.Chat.Get(context.Background(), chatID)
-	require.NoError(t, err)
-	require.Equal(t, base.Add(time.Microsecond), *chat.LastMessageTime)
+	require.Equal(t, base.Add(time.Microsecond), chatLastMessageTime(t, ds, chatID))
 }
 
 func TestRepairImportedMessageOrderAbstainsOnAmbiguousTimestampGroup(t *testing.T) {
