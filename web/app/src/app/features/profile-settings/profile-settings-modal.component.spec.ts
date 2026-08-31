@@ -118,6 +118,16 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     expect(defaults?.textContent).toContain('No default personality');
   });
 
+  it('keeps auto-saving chat defaults outside the profile submit form', async () => {
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    await openAndWaitForProfile(fixture);
+
+    const defaults = fixture.nativeElement.querySelector('[data-testid="chat-defaults"]') as HTMLElement | null;
+    expect(defaults).not.toBeNull();
+    expect(defaults?.closest('form')).toBeNull();
+    expect(defaults?.querySelector('button[type="submit"]')).toBeNull();
+  });
+
   it('persists a changed default model without dropping other preferences', async () => {
     const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
     const component = fixture.componentInstance;
