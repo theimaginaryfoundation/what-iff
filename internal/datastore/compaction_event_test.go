@@ -43,6 +43,8 @@ func createCompactionEventTestSchema(t *testing.T, db *sql.DB) {
 			assistant_message_id uuid,
 			provider text,
 			reason text,
+			summary_explanation text,
+			scratchpad_explanation text,
 			loaded_memories json,
 			created_memories json,
 			old_summary_id uuid,
@@ -89,22 +91,24 @@ func TestCompactionEventContentAddressing(t *testing.T) {
 
 	// Compaction 1: summary "" -> (new set later), scratchpad "scratch v0" -> "scratch v1".
 	ev1, err := ds.CreateCompactionEvent(ctx, userID, models.CompactionEventInput{
-		ChatID:        chatID,
-		PersonalityID: &personalityID,
-		Provider:      "Claude",
-		Reason:        "token_budget",
-		OldSummary:    "",
-		OldScratchpad: "scratch v0",
-		NewScratchpad: "scratch v1",
-		HasScratchpad: true,
+		ChatID:                chatID,
+		PersonalityID:         &personalityID,
+		Provider:              "Claude",
+		Reason:                "token_budget",
+		OldSummary:            "",
+		OldScratchpad:         "scratch v0",
+		NewScratchpad:         "scratch v1",
+		ScratchpadExplanation: "Added the latest working preference.",
+		HasScratchpad:         true,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, ev1.OldSummary)
 	require.NotNil(t, ev1.OldScratchpad)
 	require.NotNil(t, ev1.NewScratchpad)
 	require.Equal(t, "scratch v1", ev1.NewScratchpad.Content)
+	require.Equal(t, "Added the latest working preference.", ev1.ScratchpadExplanation)
 	require.Equal(t, "chat", ev1.ChatName)
-	require.NoError(t, ds.SetCompactionEventNewSummary(ctx, userID, ev1.ID, "summary A"))
+	require.NoError(t, ds.SetCompactionEventNewSummary(ctx, userID, ev1.ID, "summary A", "Captured the current project state."))
 
 	// Compaction 2: old summary is now "summary A" (== ev1 new summary); old scratchpad is
 	// "scratch v1" (== ev1 new scratchpad). Both must reuse ev1's snapshot rows.
@@ -123,6 +127,7 @@ func TestCompactionEventContentAddressing(t *testing.T) {
 	ev1Reloaded, err := ds.GetCompactionEvent(ctx, userID, ev1.ID)
 	require.NoError(t, err)
 	require.NotNil(t, ev1Reloaded.NewSummary)
+	require.Equal(t, "Captured the current project state.", ev1Reloaded.SummaryExplanation)
 	require.Equal(t, "chat", ev1Reloaded.ChatName)
 	require.Equal(t, ev1Reloaded.NewSummary.ID, ev2.OldSummary.ID, "new summary of ev1 is old summary of ev2")
 	require.Equal(t, ev1.NewScratchpad.ID, ev2.OldScratchpad.ID, "new scratchpad of ev1 is old scratchpad of ev2")

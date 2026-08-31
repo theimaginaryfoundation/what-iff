@@ -36,14 +36,18 @@ type CompactionLoadedMemory struct {
 // CompactionEvent is the audit record for one conversation checkpoint. It captures the before/after
 // of both the conversation summary and the personality scratchpad, the loaded-memory set, memories
 // newly created during the compaction, and merge/link actions that changed existing agent state.
+// Explanation fields describe the transition and therefore live on the event rather than on the
+// content-addressed snapshots, which can be reused by adjacent events.
 type CompactionEvent struct {
-	ID                 uuid.UUID  `json:"id"`
-	ChatID             uuid.UUID  `json:"chat_id"`
-	ChatName           string     `json:"chat_name,omitempty"`
-	PersonalityID      *uuid.UUID `json:"personality_id,omitempty"`
-	AssistantMessageID *uuid.UUID `json:"assistant_message_id,omitempty"`
-	Provider           string     `json:"provider,omitempty"`
-	Reason             string     `json:"reason,omitempty"`
+	ID                    uuid.UUID  `json:"id"`
+	ChatID                uuid.UUID  `json:"chat_id"`
+	ChatName              string     `json:"chat_name,omitempty"`
+	PersonalityID         *uuid.UUID `json:"personality_id,omitempty"`
+	AssistantMessageID    *uuid.UUID `json:"assistant_message_id,omitempty"`
+	Provider              string     `json:"provider,omitempty"`
+	Reason                string     `json:"reason,omitempty"`
+	SummaryExplanation    string     `json:"summary_explanation,omitempty"`
+	ScratchpadExplanation string     `json:"scratchpad_explanation,omitempty"`
 
 	OldSummary    *CheckpointSnapshot `json:"old_summary,omitempty"`
 	NewSummary    *CheckpointSnapshot `json:"new_summary,omitempty"`
@@ -59,16 +63,17 @@ type CompactionEvent struct {
 }
 
 // CompactionEventInput carries everything known when a compaction begins (before the new summary is
-// produced). NewSummary is filled in via SetCompactionEventNewSummary once summarization completes.
+// produced). NewSummary and its explanation are filled in once summarization completes.
 type CompactionEventInput struct {
-	ChatID             uuid.UUID
-	PersonalityID      *uuid.UUID
-	AssistantMessageID *uuid.UUID
-	Provider           string
-	Reason             string
-	OldSummary         string
-	OldScratchpad      string
-	NewScratchpad      string
+	ChatID                uuid.UUID
+	PersonalityID         *uuid.UUID
+	AssistantMessageID    *uuid.UUID
+	Provider              string
+	Reason                string
+	OldSummary            string
+	OldScratchpad         string
+	NewScratchpad         string
+	ScratchpadExplanation string
 	// HasScratchpad is false when the checkpoint had no personality (so no scratchpad snapshots are
 	// recorded). It disambiguates "scratchpad was genuinely empty" from "no scratchpad step ran".
 	HasScratchpad  bool

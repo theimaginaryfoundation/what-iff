@@ -121,6 +121,9 @@ func (d *Datastore) CreateCompactionEvent(ctx context.Context, userID uuid.UUID,
 		SetReason(input.Reason).
 		SetOldSummaryID(oldSummary.ID).
 		SetLoadedMemories(toEntLoadedMemories(input.LoadedMemories))
+	if input.ScratchpadExplanation != "" {
+		create = create.SetScratchpadExplanation(input.ScratchpadExplanation)
+	}
 
 	// Scratchpad snapshots only exist when the checkpoint had a personality to update.
 	if input.HasScratchpad && input.PersonalityID != nil {
@@ -199,8 +202,8 @@ func (d *Datastore) appendCompactionEventCreatedMemoriesTx(ctx context.Context, 
 	return nil
 }
 
-// SetCompactionEventNewSummary attaches the post-checkpoint summary snapshot to an existing event.
-func (d *Datastore) SetCompactionEventNewSummary(ctx context.Context, userID, eventID uuid.UUID, newSummary string) error {
+// SetCompactionEventNewSummary attaches the post-checkpoint summary snapshot and explanation to an existing event.
+func (d *Datastore) SetCompactionEventNewSummary(ctx context.Context, userID, eventID uuid.UUID, newSummary, explanation string) error {
 	tx, err := d.dbClient.Tx(ctx)
 	if err != nil {
 		return err
@@ -228,7 +231,11 @@ func (d *Datastore) SetCompactionEventNewSummary(ctx context.Context, userID, ev
 		_ = tx.Rollback()
 		return err
 	}
-	if _, err := tx.CompactionEvent.UpdateOneID(event.ID).SetNewSummaryID(snap.ID).Save(ctx); err != nil {
+	update := tx.CompactionEvent.UpdateOneID(event.ID).SetNewSummaryID(snap.ID)
+	if explanation != "" {
+		update = update.SetSummaryExplanation(explanation)
+	}
+	if _, err := update.Save(ctx); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -484,16 +491,18 @@ func toCompactionEventModel(row *ent.CompactionEvent) *models.CompactionEvent {
 		return nil
 	}
 	event := &models.CompactionEvent{
-		ID:                 row.ID,
-		ChatID:             row.ChatID,
-		PersonalityID:      row.PersonalityID,
-		AssistantMessageID: row.AssistantMessageID,
-		Provider:           row.Provider,
-		Reason:             row.Reason,
-		LoadedMemories:     loadedMemoriesToModel(row.LoadedMemories),
-		CreatedMemories:    loadedMemoriesToModel(row.CreatedMemories),
-		CreatedAt:          row.CreatedAt,
-		UpdatedAt:          row.UpdatedAt,
+		ID:                    row.ID,
+		ChatID:                row.ChatID,
+		PersonalityID:         row.PersonalityID,
+		AssistantMessageID:    row.AssistantMessageID,
+		Provider:              row.Provider,
+		Reason:                row.Reason,
+		SummaryExplanation:    row.SummaryExplanation,
+		ScratchpadExplanation: row.ScratchpadExplanation,
+		LoadedMemories:        loadedMemoriesToModel(row.LoadedMemories),
+		CreatedMemories:       loadedMemoriesToModel(row.CreatedMemories),
+		CreatedAt:             row.CreatedAt,
+		UpdatedAt:             row.UpdatedAt,
 	}
 	if row.Edges.OldSummary != nil {
 		event.OldSummary = toCheckpointSnapshotModel(row.Edges.OldSummary)

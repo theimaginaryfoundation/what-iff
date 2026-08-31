@@ -3,9 +3,9 @@
     <a routerLink="/memories" class="compaction-log-header__back">← Back to memories</a>
     <h1>Compaction log</h1>
     <p>
-      Every conversation checkpoint, captured like a diff: the summary and scratchpad before and after,
+      Every conversation checkpoint, captured like a diff: what changed in the summary and scratchpad,
       which memories were loaded into the segment, and every dedupe/merge/link action it produced.
-      Revert a summary or scratchpad to roll back to a known-good checkpoint.
+      Open a change to inspect the full before/after state or restore a known-good checkpoint.
     </p>
   </header>
 
@@ -18,18 +18,14 @@
       Thread
       <select #chatFilter [value]="selectedChatID()" (change)="updateFilters(chatFilter.value, personalityFilter.value)">
         <option value="">All threads</option>
-        @for (chat of chats(); track chat.id) {
-          <option [value]="chat.id">{{ chat.name }}</option>
-        }
+        @for (chat of chats(); track chat.id) { <option [value]="chat.id">{{ chat.name }}</option> }
       </select>
     </label>
     <label>
       Personality
       <select #personalityFilter [value]="selectedPersonalityID()" (change)="updateFilters(chatFilter.value, personalityFilter.value)">
         <option value="">All personalities</option>
-        @for (personality of personalities(); track personality.id) {
-          <option [value]="personality.id">{{ personality.name }}</option>
-        }
+        @for (personality of personalities(); track personality.id) { <option [value]="personality.id">{{ personality.name }}</option> }
       </select>
     </label>
   </div>
@@ -48,19 +44,16 @@
             <div class="compaction-card__badges">
               @if (event.chat_name) {
                 <span class="compaction-card__badge compaction-card__badge--muted compaction-card__badge--chat" [title]="event.chat_name">
-                  <span class="compaction-card__badge-label">Thread</span>
-                  <span class="compaction-card__badge-value">{{ event.chat_name }}</span>
+                  <span class="compaction-card__badge-label">Thread</span><span class="compaction-card__badge-value">{{ event.chat_name }}</span>
                 </span>
               }
               @if (event.reason) {
                 <span class="compaction-card__badge compaction-card__badge--muted">
-                  <span class="compaction-card__badge-label">Checkpoint</span>
-                  <span class="compaction-card__badge-value">{{ checkpointReasonLabel(event.reason) }}</span>
+                  <span class="compaction-card__badge-label">Checkpoint</span><span class="compaction-card__badge-value">{{ checkpointReasonLabel(event.reason) }}</span>
                 </span>
               }
               <span class="compaction-card__badge compaction-card__badge--muted">
-                <span class="compaction-card__badge-label">Memory changes</span>
-                <span class="compaction-card__badge-value">{{ mergeSummary(event) }}</span>
+                <span class="compaction-card__badge-label">Memory changes</span><span class="compaction-card__badge-value">{{ mergeSummary(event) }}</span>
               </span>
             </div>
             <div class="compaction-card__meta">
@@ -70,196 +63,104 @@
             </div>
           </div>
 
-          <button
-            type="button"
-            class="compaction-card__toggle"
-            [attr.aria-expanded]="isExpanded(event)"
-            (click)="toggleExpanded(event)">
-            <span class="compaction-toggle__label">Details</span>
-            <span class="compaction-toggle__chevron" aria-hidden="true"></span>
+          <button type="button" class="compaction-card__toggle" [attr.aria-expanded]="isExpanded(event)" (click)="toggleExpanded(event)">
+            <span class="compaction-toggle__label">Details</span><span class="compaction-toggle__chevron" aria-hidden="true"></span>
           </button>
 
           @if (isExpanded(event)) {
             <div class="compaction-card__body">
-
               <button type="button" class="compaction-section-toggle" [attr.aria-expanded]="!isSectionCollapsed(event, 'summary')" (click)="toggleSection(event, 'summary')">
-                <span>Summaries</span>
-                <span class="compaction-toggle__chevron" aria-hidden="true"></span>
+                <span>Summaries</span><span class="compaction-toggle__chevron" aria-hidden="true"></span>
               </button>
               @if (!isSectionCollapsed(event, 'summary')) {
-              <!-- Conversation summary -->
-              <section class="diff-block">
-                <div class="diff-block__title-row">
-                  <h3 class="diff-block__title">Conversation summary</h3>
-                  @if (!summaryChanged(event)) {
-                    <span class="diff-block__unchanged">unchanged</span>
-                  }
-                </div>
-                <div class="diff-grid">
-                  <div class="diff-pane diff-pane--old">
-                    <div class="diff-pane__head">
-                      <span class="diff-pane__label">Before</span>
-                      @if (event.old_summary && summaryChanged(event)) {
-                        <button
-                          type="button"
-                          class="diff-pane__revert"
-                          [disabled]="revertingId() === event.old_summary?.id || isSnapshotReverted(event.old_summary)"
-                          (click)="revert(event.old_summary)">
-                          {{ isSnapshotReverted(event.old_summary) ? 'Restored' : (revertingId() === event.old_summary?.id ? 'Reverting…' : 'Revert to this') }}
-                        </button>
-                      }
-                    </div>
-                    <pre class="diff-pane__content">{{ event.old_summary?.content || '(empty)' }}</pre>
-                  </div>
-                  <div class="diff-pane diff-pane--new">
-                    <div class="diff-pane__head">
-                      <span class="diff-pane__label">After</span>
-                      @if (event.new_summary && summaryChanged(event)) {
-                        <button
-                          type="button"
-                          class="diff-pane__revert"
-                          [disabled]="revertingId() === event.new_summary?.id || isSnapshotReverted(event.new_summary)"
-                          (click)="revert(event.new_summary)">
-                          {{ isSnapshotReverted(event.new_summary) ? 'Restored' : (revertingId() === event.new_summary?.id ? 'Reverting…' : 'Revert to this') }}
-                        </button>
-                      }
-                    </div>
-                    <pre class="diff-pane__content">{{ event.new_summary?.content || '(empty)' }}</pre>
-                  </div>
-                </div>
-              </section>
-
-              <!-- Scratchpad -->
-              @if (event.old_scratchpad || event.new_scratchpad) {
-                <section class="diff-block">
+                <section class="diff-block change-summary">
                   <div class="diff-block__title-row">
-                    <h3 class="diff-block__title">Scratchpad <span class="diff-block__hint">(personality-wide)</span></h3>
-                    @if (!scratchpadChanged(event)) {
-                      <span class="diff-block__unchanged">unchanged</span>
-                    }
+                    <h3 class="diff-block__title">Conversation summary</h3>
+                    @if (!summaryChanged(event)) { <span class="diff-block__unchanged">unchanged</span> }
                   </div>
-                  <div class="diff-grid">
-                    <div class="diff-pane diff-pane--old">
-                      <div class="diff-pane__head">
-                        <span class="diff-pane__label">Before</span>
-                        @if (event.old_scratchpad && scratchpadChanged(event)) {
-                          <button
-                            type="button"
-                            class="diff-pane__revert"
-                            [disabled]="revertingId() === event.old_scratchpad?.id || isSnapshotReverted(event.old_scratchpad)"
-                            (click)="revert(event.old_scratchpad)">
-                            {{ isSnapshotReverted(event.old_scratchpad) ? 'Restored' : (revertingId() === event.old_scratchpad?.id ? 'Reverting…' : 'Revert to this') }}
-                          </button>
-                        }
-                      </div>
-                      <pre class="diff-pane__content">{{ event.old_scratchpad?.content || '(empty)' }}</pre>
-                    </div>
-                    <div class="diff-pane diff-pane--new">
-                      <div class="diff-pane__head">
-                        <span class="diff-pane__label">After</span>
-                        @if (event.new_scratchpad && scratchpadChanged(event)) {
-                          <button
-                            type="button"
-                            class="diff-pane__revert"
-                            [disabled]="revertingId() === event.new_scratchpad?.id || isSnapshotReverted(event.new_scratchpad)"
-                            (click)="revert(event.new_scratchpad)">
-                            {{ isSnapshotReverted(event.new_scratchpad) ? 'Restored' : (revertingId() === event.new_scratchpad?.id ? 'Reverting…' : 'Revert to this') }}
-                          </button>
-                        }
-                      </div>
-                      <pre class="diff-pane__content">{{ event.new_scratchpad?.content || '(empty)' }}</pre>
-                    </div>
-                  </div>
+                  <p class="change-summary__explanation">{{ changeExplanation(event, 'summary') }}</p>
+                  <button type="button" class="change-summary__open" (click)="openChangeDetail(event, 'summary')">View full change</button>
                 </section>
-              }
+
+                @if (event.old_scratchpad || event.new_scratchpad) {
+                  <section class="diff-block change-summary">
+                    <div class="diff-block__title-row">
+                      <h3 class="diff-block__title">Scratchpad <span class="diff-block__hint">(personality-wide)</span></h3>
+                      @if (!scratchpadChanged(event)) { <span class="diff-block__unchanged">unchanged</span> }
+                    </div>
+                    <p class="change-summary__explanation">{{ changeExplanation(event, 'scratchpad') }}</p>
+                    <button type="button" class="change-summary__open" (click)="openChangeDetail(event, 'scratchpad')">View full change</button>
+                  </section>
+                }
               }
 
               <button type="button" class="compaction-section-toggle" [attr.aria-expanded]="!isSectionCollapsed(event, 'memory')" (click)="toggleSection(event, 'memory')">
-                <span>Memory</span>
-                <span class="compaction-toggle__chevron" aria-hidden="true"></span>
+                <span>Memory</span><span class="compaction-toggle__chevron" aria-hidden="true"></span>
               </button>
               @if (!isSectionCollapsed(event, 'memory')) {
-              <!-- Loaded memories -->
-              <section class="detail-block">
-                <button
-                  type="button"
-                  class="loaded-memories-toggle"
-                  [attr.aria-expanded]="!isLoadedMemoriesCollapsed(event)"
-                  (click)="toggleLoadedMemories(event)">
-                  <span>Loaded memories ({{ event.loaded_memories?.length ?? 0 }})</span>
-                  <span class="compaction-toggle__chevron" aria-hidden="true"></span>
-                </button>
-                @if (!isLoadedMemoriesCollapsed(event)) {
-                  @if ((event.loaded_memories?.length ?? 0) === 0) {
-                    <p class="detail-block__empty">No memories were loaded into this segment.</p>
+                <section class="detail-block">
+                  <button type="button" class="loaded-memories-toggle" [attr.aria-expanded]="!isLoadedMemoriesCollapsed(event)" (click)="toggleLoadedMemories(event)">
+                    <span>Loaded memories ({{ event.loaded_memories?.length ?? 0 }})</span><span class="compaction-toggle__chevron" aria-hidden="true"></span>
+                  </button>
+                  @if (!isLoadedMemoriesCollapsed(event)) {
+                    @if ((event.loaded_memories?.length ?? 0) === 0) {
+                      <p class="detail-block__empty">No memories were loaded into this segment.</p>
+                    } @else {
+                      <ul class="loaded-list" role="list">
+                        @for (mem of event.loaded_memories; track $index) {
+                          <li class="loaded-item">
+                            <div class="loaded-item__head">
+                              <span class="loaded-item__scope">{{ mem.scope }}</span>
+                              @if (mem.confidence) { <span class="loaded-item__confidence">conf {{ mem.confidence | number:'1.2-2' }}</span> }
+                              @if (mem.memory_id) { <button type="button" class="loaded-item__link" (click)="openMemory(mem.memory_id)">View</button> }
+                            </div>
+                            <p class="loaded-item__content">{{ mem.content }}</p>
+                          </li>
+                        }
+                      </ul>
+                    }
+                  }
+                </section>
+
+                <section class="detail-block">
+                  <h3 class="detail-block__title">New memories ({{ createdMemories(event).length }})</h3>
+                  @if (createdMemories(event).length === 0) {
+                    <p class="detail-block__empty">No new memories created in this compaction.</p>
                   } @else {
-                    <ul class="loaded-list" role="list">
-                      @for (mem of event.loaded_memories; track $index) {
-                        <li class="loaded-item">
-                          <div class="loaded-item__head">
-                            <span class="loaded-item__scope">{{ mem.scope }}</span>
-                            @if (mem.confidence) {
-                              <span class="loaded-item__confidence">conf {{ mem.confidence | number:'1.2-2' }}</span>
-                            }
-                            @if (mem.memory_id) {
-                              <button type="button" class="loaded-item__link" (click)="openMemory(mem.memory_id)">View</button>
-                            }
+                    <ul class="merge-list" role="list">
+                      @for (mem of createdMemories(event); track mem.memory_id ?? mem.content) {
+                        <li class="merge-item">
+                          <div class="merge-item__head">
+                            <span class="merge-item__type">Created</span>
+                            @if (mem.memory_id) { <button type="button" class="merge-item__link" (click)="openMemory(mem.memory_id)">View memory</button> }
                           </div>
-                          <p class="loaded-item__content">{{ mem.content }}</p>
+                          <p class="merge-item__content">{{ mem.content }}</p>
                         </li>
                       }
                     </ul>
                   }
-                }
-              </section>
-
-              <!-- New and updated memory operations -->
-              <section class="detail-block">
-                <h3 class="detail-block__title">New memories ({{ createdMemories(event).length }})</h3>
-                @if (createdMemories(event).length === 0) {
-                  <p class="detail-block__empty">No new memories created in this compaction.</p>
-                } @else {
-                  <ul class="merge-list" role="list">
-                    @for (mem of createdMemories(event); track mem.memory_id ?? mem.content) {
-                      <li class="merge-item">
-                        <div class="merge-item__head">
-                          <span class="merge-item__type">Created</span>
-                          @if (mem.memory_id) {
-                            <button type="button" class="merge-item__link" (click)="openMemory(mem.memory_id)">View memory</button>
-                          }
-                        </div>
-                        <p class="merge-item__content">{{ mem.content }}</p>
-                      </li>
-                    }
-                  </ul>
-                }
-              </section>
-              <section class="detail-block">
-                <h3 class="detail-block__title">Memory updates ({{ updatedMemoryEvents(event).length }})</h3>
-                @if (updatedMemoryEvents(event).length === 0) {
-                  <p class="detail-block__empty">No dedupe/merge/link actions in this compaction.</p>
-                } @else {
-                  <ul class="merge-list" role="list">
-                    @for (me of updatedMemoryEvents(event); track me.id) {
-                      <li class="merge-item">
-                        <div class="merge-item__head">
-                          <span class="merge-item__type merge-item__type--{{ me.merge_type }}">{{ mergeTypeLabel(me) }}</span>
-                          @if (me.merge_type === 'fold_live' && mergedSourceCount(me) >= 2) {
-                            <span class="merge-item__count">{{ mergedSourceCount(me) }}×</span>
-                          }
-                          @if (me.reverted_at) {
-                            <span class="merge-item__reverted">Undone</span>
-                          }
-                          <button type="button" class="merge-item__link" (click)="openMemory(me.survivor_memory_id)">View memory</button>
-                        </div>
-                        <p class="merge-item__content">{{ me.content }}</p>
-                      </li>
-                    }
-                  </ul>
-                }
-              </section>
+                </section>
+                <section class="detail-block">
+                  <h3 class="detail-block__title">Memory updates ({{ updatedMemoryEvents(event).length }})</h3>
+                  @if (updatedMemoryEvents(event).length === 0) {
+                    <p class="detail-block__empty">No dedupe/merge/link actions in this compaction.</p>
+                  } @else {
+                    <ul class="merge-list" role="list">
+                      @for (me of updatedMemoryEvents(event); track me.id) {
+                        <li class="merge-item">
+                          <div class="merge-item__head">
+                            <span class="merge-item__type merge-item__type--{{ me.merge_type }}">{{ mergeTypeLabel(me) }}</span>
+                            @if (me.merge_type === 'fold_live' && mergedSourceCount(me) >= 2) { <span class="merge-item__count">{{ mergedSourceCount(me) }}×</span> }
+                            @if (me.reverted_at) { <span class="merge-item__reverted">Undone</span> }
+                            <button type="button" class="merge-item__link" (click)="openMemory(me.survivor_memory_id)">View memory</button>
+                          </div>
+                          <p class="merge-item__content">{{ me.content }}</p>
+                        </li>
+                      }
+                    </ul>
+                  }
+                </section>
               }
-
             </div>
           }
         </li>
@@ -275,3 +176,41 @@
     }
   }
 </section>
+
+@if (changeDetail(); as detail) {
+  <div class="change-modal__backdrop" (click)="closeChangeDetail()">
+    <section class="change-modal" role="dialog" aria-modal="true" [attr.aria-label]="detail.title" (click)="$event.stopPropagation()">
+      <header class="change-modal__header">
+        <div>
+          <h2>{{ detail.title }}</h2>
+          <p>{{ detail.explanation }}</p>
+        </div>
+        <button type="button" class="change-modal__close" aria-label="Close change details" (click)="closeChangeDetail()">×</button>
+      </header>
+      <div class="diff-grid change-modal__diff">
+        <div class="diff-pane diff-pane--old">
+          <div class="diff-pane__head">
+            <span class="diff-pane__label">Before</span>
+            @if (detail.before) {
+              <button type="button" class="diff-pane__revert" [disabled]="revertingId() === detail.before.id || isSnapshotReverted(detail.before)" (click)="revert(detail.before)">
+                {{ isSnapshotReverted(detail.before) ? 'Restored' : (revertingId() === detail.before.id ? 'Reverting…' : 'Revert to this') }}
+              </button>
+            }
+          </div>
+          <pre class="diff-pane__content">{{ detail.before?.content || '(empty)' }}</pre>
+        </div>
+        <div class="diff-pane diff-pane--new">
+          <div class="diff-pane__head">
+            <span class="diff-pane__label">After</span>
+            @if (detail.after) {
+              <button type="button" class="diff-pane__revert" [disabled]="revertingId() === detail.after.id || isSnapshotReverted(detail.after)" (click)="revert(detail.after)">
+                {{ isSnapshotReverted(detail.after) ? 'Restored' : (revertingId() === detail.after.id ? 'Reverting…' : 'Revert to this') }}
+              </button>
+            }
+          </div>
+          <pre class="diff-pane__content">{{ detail.after?.content || '(empty)' }}</pre>
+        </div>
+      </div>
+    </section>
+  </div>
+}
