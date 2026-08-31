@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -36,12 +37,38 @@ func TestGetAvailableToolsUsesHumanDescriptions(t *testing.T) {
 
 	require.Equal(t, agenttools.AvailableToolDescriptionWebSearch, byName[agenttools.ToolNameWebSearch])
 	for _, def := range agenttools.FunctionToolCatalog() {
-		if !def.UserToggleable {
+		if !def.UserToggleable || strings.TrimSpace(def.HumanDescription) == "" {
 			continue
 		}
-		require.Equal(t, def.HumanDescription, byName[def.Spec.Name], "UI metadata should use the human description for %s", def.Spec.Name)
+		require.Equal(t, strings.TrimSpace(def.HumanDescription), byName[def.Spec.Name], "UI metadata should use the human description for %s", def.Spec.Name)
 		require.NotEqual(t, def.Spec.Description, byName[def.Spec.Name], "agent prompt leaked into UI metadata for %s", def.Spec.Name)
 	}
+}
+
+func TestGetAvailableToolsFallsBackForExternalToolWithoutHumanDescription(t *testing.T) {
+	prev := agenttools.AdditionalFunctionToolCatalog
+	t.Cleanup(func() { agenttools.AdditionalFunctionToolCatalog = prev })
+
+	const agentDescription = "Agent-facing external tool description."
+	agenttools.AdditionalFunctionToolCatalog = func() []agenttools.FunctionToolDefinition {
+		return []agenttools.FunctionToolDefinition{{
+			Spec: agenttools.FunctionToolSpec{
+				Name:        "external_tool",
+				Description: agentDescription,
+				Properties:  map[string]interface{}{},
+			},
+			HumanDescription: "   ",
+			UserToggleable:   true,
+		}}
+	}
+
+	available := GetAvailableTools(context.Background())
+	byName := make(map[string]string, len(available))
+	for _, tool := range available {
+		byName[tool.Name] = tool.Description
+	}
+
+	require.Equal(t, agentDescription, byName["external_tool"])
 }
 
 func TestDisabledToolsSetReturnsEmptyMapForEmptyInput(t *testing.T) {
