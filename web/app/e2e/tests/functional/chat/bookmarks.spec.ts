@@ -1,5 +1,6 @@
 import { test, expect } from '../../../fixtures';
 import { sendChatMessage } from '../../../sdk/client';
+import { rect } from '../../../helpers/responsive-layout';
 import { IMMEDIATE_UI_UPDATE_TIMEOUT, UI_REACTION_TIMEOUT } from '../../../timeouts';
 
 /**
@@ -77,6 +78,39 @@ test('bookmark navigator opens a dropdown with the snippet and selecting it clos
   // Clicking a bookmark emits `jump` and closes the dropdown.
   await menuItem.click();
   await expect(page.getByRole('menu', { name: 'Bookmarks' })).toBeHidden({ timeout: UI_REACTION_TIMEOUT });
+});
+
+test('long mobile thread names do not overlap bookmark actions', async ({
+  chatPage,
+  seed,
+  userWithPersonality,
+  page,
+  apiClient,
+}) => {
+  await page.setViewportSize({ width: 375, height: 900 });
+  const thread = await seed.thread();
+  await sendChatMessage(apiClient, thread.id!, 'mobile bookmark layout target');
+  await chatPage.navigateTo(thread.id!);
+
+  await chatPage.renameButton.click();
+  await chatPage.renameInput.fill('A very long thread name that must yield space to bookmark controls on a narrow mobile viewport');
+  await chatPage.renameInput.press('Enter');
+
+  const bubble = chatPage.messageText('mobile bookmark layout target');
+  await expect(bubble).toBeVisible({ timeout: UI_REACTION_TIMEOUT });
+  await bubble.hover();
+  await bubble.getByRole('button', { name: 'Bookmark this message' }).click();
+
+  const navigatorPill = page.getByRole('button', { name: 'Jump to a bookmark' });
+  await expect(navigatorPill).toBeVisible({ timeout: UI_REACTION_TIMEOUT });
+
+  const titleBox = await rect(chatPage.renameButton, 'thread title');
+  const bookmarkBox = await rect(navigatorPill, 'bookmark navigator');
+
+  expect(
+    titleBox.x + titleBox.width,
+    'thread title should yield horizontal space before bookmark controls',
+  ).toBeLessThanOrEqual(bookmarkBox.x + 1);
 });
 
 test('un-starring a message removes it from the navigator', async ({
