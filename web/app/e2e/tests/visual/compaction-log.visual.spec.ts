@@ -1,5 +1,4 @@
 import { test, expect } from '../../fixtures';
-import { commonMasks } from './visual.helpers';
 
 test(
   'personality prompt change history',
@@ -26,18 +25,27 @@ test(
     await compactionLogPage.navigateTo();
     await shell.dismissAnnouncementIfPresent();
     await expect(compactionLogPage.heading).toBeVisible();
-    await expect(compactionLogPage.promptChangesHeading).toBeVisible();
+    await expect(compactionLogPage.promptChangesToggle).toBeVisible();
+    await expect(compactionLogPage.promptChangesToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(compactionLogPage.promptChangesList).toHaveCount(0);
+
+    // The visual contract for #76 is geometric rather than pixel-identical: when prompt history is
+    // collapsed, the existing compaction feed must remain immediately below it instead of being
+    // displaced by the prompt diff card that #65 added above the feed.
+    const feedStatus = page.getByText(/^No compactions logged yet\./);
+    await expect(feedStatus).toBeVisible();
+    const toggleBox = await compactionLogPage.promptChangesToggle.boundingBox();
+    const feedBox = await feedStatus.boundingBox();
+    expect(toggleBox).not.toBeNull();
+    expect(feedBox).not.toBeNull();
+    expect(feedBox!.y).toBeGreaterThan(toggleBox!.y + toggleBox!.height);
+    expect(feedBox!.y - (toggleBox!.y + toggleBox!.height)).toBeLessThan(100);
+
+    await compactionLogPage.expandPromptChanges();
+    await expect(compactionLogPage.promptChangesToggle).toHaveAttribute('aria-expanded', 'true');
     const changeCard = compactionLogPage.promptChangeCard(personalityName);
+    await expect(changeCard).toBeVisible();
     await expect(changeCard).toContainText(initialPrompt);
     await expect(changeCard).toContainText(updatedPrompt);
-
-    await expect(page).toHaveScreenshot('compaction-log-personality-prompt-history.png', {
-      animations: 'disabled',
-      mask: [...commonMasks(page), compactionLogPage.promptChangeMetadata(personalityName)],
-      // A second CI-image render varied by at most 36 pixels across desktop
-      // and mobile after masking the timestamp; keep that renderer noise from
-      // flaking the visual contract while leaving the threshold effectively zero.
-      maxDiffPixels: 50,
-    });
   },
 );

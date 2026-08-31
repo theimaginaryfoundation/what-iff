@@ -109,14 +109,24 @@ describe('CompactionLogPageComponent', () => {
         expect(text).not.toContain('(20) >= 20');
     });
 
-    it('shows personality prompt audit entries in the same change-log page', () => {
-        const text = fixture.nativeElement.textContent;
+    it('keeps personality prompt audit details collapsed by default so the checkpoint feed stays visible', () => {
+        const toggle = fixture.nativeElement.querySelector('[data-testid="prompt-change-toggle"]') as HTMLButtonElement | null;
         expect(personalityService.listPromptChanges).toHaveBeenCalledWith('personality-9');
-        expect(text).toContain('Personality prompt changes');
-        expect(text).toContain('Vera');
-        expect(text).toContain('Old prompt text');
-        expect(text).toContain('New prompt text');
-        expect(text).toContain('Restore previous');
+        expect(toggle).not.toBeNull();
+        expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+        expect(fixture.nativeElement.textContent).toContain('Personality prompt changes');
+        expect(fixture.nativeElement.textContent).toContain('A long-running project conversation');
+        expect(fixture.nativeElement.textContent).not.toContain('Old prompt text');
+        expect(fixture.nativeElement.textContent).not.toContain('New prompt text');
+
+        component.togglePromptChanges();
+        fixture.detectChanges();
+
+        expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+        expect(fixture.nativeElement.textContent).toContain('Vera');
+        expect(fixture.nativeElement.textContent).toContain('Old prompt text');
+        expect(fixture.nativeElement.textContent).toContain('New prompt text');
+        expect(fixture.nativeElement.textContent).toContain('Restore previous');
     });
 
     it('restores a historical personality prompt through the audit entry', async () => {
