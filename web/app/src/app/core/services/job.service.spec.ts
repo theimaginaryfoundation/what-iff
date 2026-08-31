@@ -1,7 +1,7 @@
 import type { MockedObject } from "vitest";
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { provideHttpClient, withXhr } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 
@@ -79,5 +79,49 @@ describe('JobService', () => {
 
         expect(emissions[0]?.status).toBe('cancelled');
         expect(messageService.addErrorMessage).not.toHaveBeenCalledWith('chat-1', 'Failed to process message');
+    });
+
+    it('pollJob keeps polling after a transient transport error instead of showing a false job failure', async () => {
+        vi.useFakeTimers();
+        try {
+            let polls = 0;
+            vi.spyOn(service, 'getJob').mockImplementation(() => {
+                polls += 1;
+                if (polls === 1) {
+                    return throwError(() => new Error('temporary network failure'));
+                }
+                return of({
+                    id: 'job-1',
+                    user_id: 'user-1',
+                    status: 'complete',
+                    job_type: 'chat_message',
+                    reference: 'message-1',
+                    result_id: 'm1',
+                    created_at: '',
+                    updated_at: '',
+                } as Job);
+            });
+
+            const emissions: Job[] = [];
+            let observedError: unknown;
+            let completed = false;
+            service.pollJob('job-1', 'chat-1', 10).subscribe({
+                next: value => emissions.push(value),
+                error: error => { observedError = error; },
+                complete: () => { completed = true; },
+            });
+
+            await vi.advanceTimersByTimeAsync(0);
+            expect(observedError).toBeUndefined();
+            expect(messageService.addErrorMessage).not.toHaveBeenCalledWith('chat-1', 'Failed to process message');
+            expect(service.isJobBeingPolled('job-1')).toBe(true);
+
+            await vi.advanceTimersByTimeAsync(10);
+            expect(emissions.at(-1)?.status).toBe('complete');
+            expect(completed).toBe(true);
+            expect(service.isJobBeingPolled('job-1')).toBe(false);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });
