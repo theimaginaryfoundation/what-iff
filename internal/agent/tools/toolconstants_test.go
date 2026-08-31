@@ -62,15 +62,3 @@ func TestCreateMemoryToolScopeEnumExcludesSummary(t *testing.T) {
 	require.Equal(t, []string{MemoryScopeUser, MemoryScopeChat}, scopeProperty["enum"])
 	require.NotContains(t, scopeProperty["enum"], "Summary")
 }
-
-// An append operation prevents a near-full scratchpad update from requiring the
-// model to echo the entire existing scratchpad back inside one JSON argument.
-// That keeps the generated tool payload proportional to the new context instead
-// of the accumulated scratchpad size.
-func TestUpdateScratchpadToolSpecSupportsAppendOperation(t *testing.T) {
-	operation, ok := UpdateScratchpadToolSpec.Properties["operation"].(map[string]interface{})
-	require.True(t, ok, "update_scratchpad should expose an explicit operation property")
-	require.Equal(t, []string{"replace", "append"}, operation["enum"])
-	require.Contains(t, UpdateScratchpadToolSpec.Required, "operation")
-	require.Contains(t, UpdateScratchpadToolSpec.Required, "content")
-}

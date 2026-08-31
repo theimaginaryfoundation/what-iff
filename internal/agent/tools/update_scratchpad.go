@@ -4,22 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
 
-const (
-	scratchpadOperationReplace = "replace"
-	scratchpadOperationAppend  = "append"
-)
-
 // updateScratchpadToolArgs represents the arguments for the update_scratchpad function
 type updateScratchpadToolArgs struct {
-	Operation string `json:"operation"`
-	Content   string `json:"content"`
+	Content string `json:"content"`
 }
 
 // updateScratchpadToolResult represents the result of updating the scratchpad
@@ -28,27 +21,6 @@ type updateScratchpadToolResult struct {
 	Success       bool   `json:"success"`
 	ContentLength int    `json:"content_length"`
 	Error         string `json:"error,omitempty"`
-}
-
-func scratchpadContentForOperation(operation, current, content string) (string, error) {
-	operation = strings.TrimSpace(operation)
-	if operation == "" {
-		// Backward compatibility for tool calls created against the old contract.
-		operation = scratchpadOperationReplace
-	}
-
-	switch operation {
-	case scratchpadOperationReplace:
-		return content, nil
-	case scratchpadOperationAppend:
-		current = strings.TrimRight(current, "\n")
-		if current == "" {
-			return content, nil
-		}
-		return current + "\n" + content, nil
-	default:
-		return "", fmt.Errorf("unsupported scratchpad operation %q", operation)
-	}
 }
 
 // updateScratchpadTool is the implementation of the update_scratchpad function
@@ -85,43 +57,18 @@ func (t *ScratchpadTool) UpdateScratchpadTool(ctx context.Context, chat *models.
 		return marshalToolResult(result, "update_scratchpad")
 	}
 
-	currentScratchpad := ""
-	operation := strings.TrimSpace(updateArgs.Operation)
-	if operation == scratchpadOperationAppend {
-		personality, err := t.datastore.GetPersonality(ctx, chat.UserID, chat.PersonalityID)
-		if err != nil {
-			result := updateScratchpadToolResult{
-				PersonalityID: chat.PersonalityID.String(),
-				Success:       false,
-				Error:         fmt.Sprintf("failed to load scratchpad for append: %v", err),
-			}
-			return marshalToolResult(result, "update_scratchpad")
-		}
-		currentScratchpad = personality.Scratchpad
-	}
-
-	nextContent, err := scratchpadContentForOperation(operation, currentScratchpad, trimmedContent)
-	if err != nil {
-		result := updateScratchpadToolResult{
-			PersonalityID: chat.PersonalityID.String(),
-			Success:       false,
-			Error:         err.Error(),
-		}
-		return marshalToolResult(result, "update_scratchpad")
-	}
-
-	// Update the personality scratchpad in the datastore.
+	// Update the personality scratchpad in the datastore
 	personalityModel := models.Personality{
 		ID:         chat.PersonalityID,
-		Scratchpad: nextContent,
+		Scratchpad: trimmedContent,
 	}
 
 	updatedPersonality, err := t.datastore.UpdatePersonalityScratchpad(ctx, chat.UserID, personalityModel)
 	if err != nil {
 		t.logger.Error("failed to update personality scratchpad",
 			zap.String("personality_id", chat.PersonalityID.String()),
-			zap.String("content_preview", truncateForLog(nextContent, 64)),
-			zap.Int("content_length", len(nextContent)),
+			zap.String("content_preview", truncateForLog(trimmedContent, 64)),
+			zap.Int("content_length", len(trimmedContent)),
 			zap.Error(err))
 		result := updateScratchpadToolResult{
 			PersonalityID: chat.PersonalityID.String(),

@@ -29,8 +29,8 @@ describe('ContextToolsTabComponent', () => {
             listTools: vi.fn().mockName("ToolService.listTools")
         };
         toolService.listTools.mockReturnValue(of([
-            { name: 'web_search', description: 'Search web' },
-            { name: 'read_file', description: 'Read files' },
+            { name: 'web_search', description: 'Search the web for current information.' },
+            { name: 'update_scratchpad', description: "Update this personality's working notes, which persist across conversations using the same personality." },
         ]));
         const mcpService = {
             listActiveForChat: vi.fn().mockName("MCPServerService.listActiveForChat"),
@@ -81,11 +81,13 @@ describe('ContextToolsTabComponent', () => {
         fixture.detectChanges();
     });
 
-    it('renders available tools', () => {
+    it('renders available tools with descriptions returned by the tools API', () => {
         expect(fixture.nativeElement.textContent).toContain('Available Tools');
         expect(fixture.nativeElement.textContent).toContain('Tool Call History');
         const labels = fixture.nativeElement.querySelectorAll('.tool-item');
         expect(labels.length).toBe(2);
+        expect(fixture.nativeElement.textContent).toContain('Search the web for current information.');
+        expect(fixture.nativeElement.textContent).toContain("Update this personality's working notes, which persist across conversations using the same personality.");
         expect(fixture.nativeElement.textContent).not.toContain('Austin vs Seattle cost of living 2026');
     });
 

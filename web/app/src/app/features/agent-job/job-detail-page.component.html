@@ -18,14 +18,16 @@
             Open chat
           </button>
         }
-        <button
-          type="button"
-          class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary"
-          [disabled]="runningNow()"
-          [attr.aria-disabled]="runningNow()"
-          (click)="runNow()">
-          {{ runningNow() ? 'Running…' : 'Run now' }}
-        </button>
+        @if (canRunNow()) {
+          <button
+            type="button"
+            class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary"
+            [disabled]="runningNow()"
+            [attr.aria-disabled]="runningNow()"
+            (click)="runNow()">
+            {{ runningNow() ? 'Running…' : 'Run now' }}
+          </button>
+        }
         @if (current.status === 'active' || current.status === 'paused') {
           <button
             type="button"
