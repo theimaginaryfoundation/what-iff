@@ -132,7 +132,7 @@ func UploadFileAttachment(w http.ResponseWriter, r *http.Request, logger *zap.Lo
 
 		// The upload cap bounds disk usage; stream image data between temp files
 		// so the raw upload is not also buffered in application memory.
-		err = imageutil.NormalizeForUpload(imageFile, normalizedTempFile, imageutil.DefaultUploadImageMaxPx)
+		fileName, err = imageutil.NormalizeForUpload(imageFile, normalizedTempFile, fileName, imageutil.DefaultUploadImageMaxPx)
 		if closeErr := imageFile.Close(); closeErr != nil && err == nil {
 			err = closeErr
 		}
@@ -152,13 +152,9 @@ func UploadFileAttachment(w http.ResponseWriter, r *http.Request, logger *zap.Lo
 			return models.FileAttachment{}, "", err
 		}
 
-		ext := filepath.Ext(fileName)
-		fileName = strings.TrimSuffix(fileName, ext) + ".png"
-		fileTypeInfo, err = utils.GetFileType(fileName)
-		if err != nil {
-			_ = os.Remove(tempFilePath)
-			RespondWithError(w, logger, http.StatusInternalServerError, CodeNotSet, "Error resolving normalized image type", err)
-			return models.FileAttachment{}, "", err
+		fileTypeInfo = utils.FileTypeInfo{
+			ContentType: imageutil.NormalizedUploadContentType,
+			Extension:   ".png",
 		}
 	}
 

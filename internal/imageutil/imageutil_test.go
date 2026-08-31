@@ -16,7 +16,9 @@ func TestNormalizeForUploadStreamsPNG(t *testing.T) {
 	require.NoError(t, png.Encode(&input, image.NewRGBA(image.Rect(0, 0, 4000, 2000))))
 
 	var output bytes.Buffer
-	require.NoError(t, NormalizeForUpload(&input, &output, DefaultUploadImageMaxPx))
+	fileName, err := NormalizeForUpload(&input, &output, "original.jpeg", DefaultUploadImageMaxPx)
+	require.NoError(t, err)
+	require.Equal(t, "original.png", fileName)
 
 	normalized, format, err := image.Decode(&output)
 	require.NoError(t, err)
