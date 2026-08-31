@@ -24,6 +24,10 @@ import (
 // If the index is renamed in a future migration this constant must be updated to match.
 const importHashIndex = "chat_import_hash_user_chats"
 
+// PostgreSQL timestamps are stored at microsecond resolution. Using a smaller adjustment can be
+// collapsed back into an equal timestamp at persistence time, restoring UUID-based tie ordering.
+const importedMessageOrderStep = time.Microsecond
+
 // ImportChats persists parsed conversations (from any supported export source) for the user, one
 // transaction per conversation. Imports are intentionally sequential; result is shared across
 // iterations and not goroutine-safe.
@@ -98,7 +102,8 @@ func (d *Datastore) importOneConversation(ctx context.Context, userID uuid.UUID,
 // (sent_at, id) retrieval key. Provider exports can contain equal, missing-fallback, or regressing
 // timestamps; without normalization equal times are broken by UUID ordering, which is unrelated to
 // conversational sequence. Existing increasing timestamps are preserved exactly. A non-increasing
-// timestamp is advanced by the minimum representable duration so source order remains authoritative.
+// timestamp is advanced by the smallest duration preserved by the production datastore so source
+// order remains authoritative after persistence.
 func normalizeImportedMessageTimes(messages []models.ChatMessage) []models.ChatMessage {
 	if len(messages) < 2 {
 		return messages
@@ -110,7 +115,7 @@ func normalizeImportedMessageTimes(messages []models.ChatMessage) []models.ChatM
 	for i := 1; i < len(normalized); i++ {
 		candidate := normalized[i].SentAt.UTC()
 		if !candidate.After(previous) {
-			candidate = previous.Add(time.Nanosecond)
+			candidate = previous.Add(importedMessageOrderStep)
 		}
 		normalized[i].SentAt = candidate
 		previous = candidate
