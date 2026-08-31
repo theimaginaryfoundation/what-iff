@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3/responses"
@@ -30,8 +31,19 @@ type ToolMeta struct {
 	Description string `json:"description"`
 }
 
+// humanFacingToolDescription resolves the presentation copy for a tool.
+// A non-empty HumanDescription wins after trimming whitespace. External/runtime tools may omit
+// HumanDescription, in which case the existing agent description remains a backward-compatible
+// fallback rather than rendering a blank entry in the UI.
+func humanFacingToolDescription(def agenttools.FunctionToolDefinition) string {
+	if description := strings.TrimSpace(def.HumanDescription); description != "" {
+		return description
+	}
+	return def.Spec.Description
+}
+
 // GetAvailableTools returns human-facing metadata for tools the user can toggle via disabled_tools.
-// Provider/agent prompt descriptions remain on FunctionToolSpec and are intentionally not exposed here.
+// Provider/agent prompt descriptions remain on FunctionToolSpec and are intentionally not modified.
 func GetAvailableTools(ctx context.Context) []ToolMeta {
 	_ = ctx
 	definitions := agenttools.FunctionToolCatalog()
@@ -41,7 +53,7 @@ func GetAvailableTools(ctx context.Context) []ToolMeta {
 		if !def.UserToggleable {
 			continue
 		}
-		out = append(out, ToolMeta{Name: def.Spec.Name, Description: def.HumanDescription})
+		out = append(out, ToolMeta{Name: def.Spec.Name, Description: humanFacingToolDescription(def)})
 	}
 	return out
 }
