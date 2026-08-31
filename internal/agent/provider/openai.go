@@ -79,6 +79,20 @@ func (c *OpenAIProvider) responsesNewStreaming(
 			completed := ev.AsResponseCompleted()
 			resp := completed.Response
 			finalResp = &resp
+			continue
+		}
+		if ev.Type == "response.incomplete" {
+			incomplete := ev.AsResponseIncomplete()
+			resp := incomplete.Response
+			if resp.IncompleteDetails.Reason != "max_output_tokens" {
+				continue
+			}
+			for _, output := range resp.Output {
+				if output.Type == "function_call" {
+					finalResp = &resp
+					break
+				}
+			}
 		}
 	}
 
