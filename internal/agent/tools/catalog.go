@@ -13,15 +13,15 @@ type FunctionToolDefinition struct {
 }
 
 var functionToolCatalog = []FunctionToolDefinition{
-	{Spec: UpdateScratchpadToolSpec, HumanDescription: "Update the assistant's temporary working notes for the current conversation.", AgentDefault: true, UserToggleable: true},
-	{Spec: CreateMemoryToolSpec, HumanDescription: "Save useful information to long-term memory for future conversations.", AgentDefault: true, UserToggleable: true},
-	{Spec: ListToolSpec, HumanDescription: "Browse available conversations, files, jobs, personalities, skills, and other resources.", AgentDefault: true, UserToggleable: true},
+	{Spec: UpdateScratchpadToolSpec, HumanDescription: "Update this personality's working notes, which persist across conversations using the same personality.", AgentDefault: true, UserToggleable: true},
+	{Spec: CreateMemoryToolSpec, HumanDescription: "Save useful information to memory for this conversation or across future conversations.", AgentDefault: true, UserToggleable: true},
+	{Spec: ListToolSpec, HumanDescription: "Browse available models, personalities, skills, files, conversations, jobs, and MCP servers.", AgentDefault: true, UserToggleable: true},
 	{Spec: ListMoodsToolSpec, AgentDefault: true, MoodOnly: true, UserToggleable: false},
 	{Spec: ChangeMoodToolSpec, AgentDefault: true, MoodOnly: true, UserToggleable: false},
-	{Spec: RunSubagentToolSpec, HumanDescription: "Delegate a focused task to a sub-agent and return its result.", AgentDefault: true, UserToggleable: true},
+	{Spec: RunSubagentToolSpec, HumanDescription: "Run a focused sub-agent with an optional personality, model, or skills and return its result.", AgentDefault: true, UserToggleable: true},
 	{Spec: GenerateImageToolSpec, HumanDescription: "Create an image from a written description.", AgentDefault: true, UserToggleable: true},
-	{Spec: CreateAgentJobToolSpec, HumanDescription: "Create a scheduled or recurring task for the assistant to run later.", AgentDefault: true, UserToggleable: true},
-	{Spec: RecallToolSpec, HumanDescription: "Find relevant memories, files, summaries, and conversation history when more context is needed.", AgentDefault: true, UserToggleable: true},
+	{Spec: CreateAgentJobToolSpec, HumanDescription: "Create a one-time or recurring task using natural-language timing. Run it in the current or a new thread, optionally with a different model or skills.", AgentDefault: true, UserToggleable: true},
+	{Spec: RecallToolSpec, HumanDescription: "Search or retrieve memories, files, summaries, and conversation history. Often use list first to find an item, then find_context to inspect or retrieve its contents.", AgentDefault: true, UserToggleable: true},
 }
 
 func FunctionToolCatalog() []FunctionToolDefinition {
