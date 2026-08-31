@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,6 +24,26 @@ type ImportMessageOrderRepairResult struct {
 type importedMessageOrderRepairCandidate struct {
 	chatID uuid.UUID
 	sentAt time.Time
+}
+
+func bindImportOrderQuery(sqlDB *sql.DB, query string) string {
+	// database.NewClient currently uses lib/pq for PostgreSQL and go-sql-driver/mysql for MySQL.
+	// SQLite is used by datastore tests. MySQL/SQLite accept '?' placeholders; lib/pq requires $N.
+	if sqlDB == nil || !strings.Contains(fmt.Sprintf("%T", sqlDB.Driver()), "pq.Driver") {
+		return query
+	}
+
+	var out strings.Builder
+	placeholder := 1
+	for _, r := range query {
+		if r == '?' {
+			fmt.Fprintf(&out, "$%d", placeholder)
+			placeholder++
+			continue
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
 }
 
 // RepairImportedMessageOrder repairs historical import rows only where conversational order is
@@ -46,12 +67,12 @@ func RepairImportedMessageOrder(ctx context.Context, sqlDB *sql.DB) (ImportMessa
 		_ = tx.Rollback()
 	}()
 
-	rows, err := tx.QueryContext(ctx, `
+	rows, err := tx.QueryContext(ctx, bindImportOrderQuery(sqlDB, `
 		SELECT cm.chat_messages, cm.sent_at
 		FROM chat_messages AS cm
 		JOIN chats AS c ON c.id = cm.chat_messages
 		WHERE c.archived = TRUE
-		  AND c.source IN ($1, $2)
+		  AND c.source IN (?, ?)
 		  AND c.import_hash IS NOT NULL
 		  AND c.import_hash <> ''
 		  AND NOT EXISTS (
@@ -61,7 +82,7 @@ func RepairImportedMessageOrder(ctx context.Context, sqlDB *sql.DB) (ImportMessa
 		HAVING COUNT(*) = 2
 		   AND SUM(CASE WHEN cm.origin = 'User' THEN 1 ELSE 0 END) = 1
 		   AND SUM(CASE WHEN cm.origin = 'Assistant' THEN 1 ELSE 0 END) = 1
-	`, models.ChatSourceOpenAI, models.ChatSourceAnthropic)
+	`), models.ChatSourceOpenAI, models.ChatSourceAnthropic)
 	if err != nil {
 		return result, fmt.Errorf("find imported message order repair candidates: %w", err)
 	}
@@ -89,13 +110,13 @@ func RepairImportedMessageOrder(ctx context.Context, sqlDB *sql.DB) (ImportMessa
 		target := candidate.sentAt.Add(importedMessageOrderStep)
 
 		var nextTime time.Time
-		err := tx.QueryRowContext(ctx, `
+		err := tx.QueryRowContext(ctx, bindImportOrderQuery(sqlDB, `
 			SELECT sent_at
 			FROM chat_messages
-			WHERE chat_messages = $1 AND sent_at > $2
+			WHERE chat_messages = ? AND sent_at > ?
 			ORDER BY sent_at ASC, id ASC
 			LIMIT 1
-		`, candidate.chatID, candidate.sentAt).Scan(&nextTime)
+		`), candidate.chatID, candidate.sentAt).Scan(&nextTime)
 		if err != nil && err != sql.ErrNoRows {
 			return result, fmt.Errorf("check imported message order repair collision: %w", err)
 		}
@@ -105,21 +126,21 @@ func RepairImportedMessageOrder(ctx context.Context, sqlDB *sql.DB) (ImportMessa
 		}
 
 		var assistantID uuid.UUID
-		if err := tx.QueryRowContext(ctx, `
+		if err := tx.QueryRowContext(ctx, bindImportOrderQuery(sqlDB, `
 			SELECT id
 			FROM chat_messages
-			WHERE chat_messages = $1 AND sent_at = $2 AND origin = 'Assistant'
+			WHERE chat_messages = ? AND sent_at = ? AND origin = 'Assistant'
 			ORDER BY id ASC
 			LIMIT 1
-		`, candidate.chatID, candidate.sentAt).Scan(&assistantID); err != nil {
+		`), candidate.chatID, candidate.sentAt).Scan(&assistantID); err != nil {
 			return result, fmt.Errorf("find assistant row for imported message order repair: %w", err)
 		}
 
-		update, err := tx.ExecContext(ctx, `
+		update, err := tx.ExecContext(ctx, bindImportOrderQuery(sqlDB, `
 			UPDATE chat_messages
-			SET sent_at = $1
-			WHERE id = $2 AND sent_at = $3 AND origin = 'Assistant'
-		`, target, assistantID, candidate.sentAt)
+			SET sent_at = ?
+			WHERE id = ? AND sent_at = ? AND origin = 'Assistant'
+		`), target, assistantID, candidate.sentAt)
 		if err != nil {
 			return result, fmt.Errorf("repair imported assistant timestamp: %w", err)
 		}
@@ -132,11 +153,11 @@ func RepairImportedMessageOrder(ctx context.Context, sqlDB *sql.DB) (ImportMessa
 			continue
 		}
 
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := tx.ExecContext(ctx, bindImportOrderQuery(sqlDB, `
 			UPDATE chats
-			SET last_message_time = $1
-			WHERE id = $2 AND (last_message_time IS NULL OR last_message_time < $1)
-		`, target, candidate.chatID); err != nil {
+			SET last_message_time = ?
+			WHERE id = ? AND (last_message_time IS NULL OR last_message_time < ?)
+		`), target, candidate.chatID, target); err != nil {
 			return result, fmt.Errorf("update repaired import last message time: %w", err)
 		}
 		result.RepairedPairs++
