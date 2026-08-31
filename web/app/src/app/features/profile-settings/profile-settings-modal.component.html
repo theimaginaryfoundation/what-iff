@@ -72,41 +72,41 @@
             </select>
           </label>
 
-          <fieldset
-            class="profile-settings__callout profile-settings__form"
-            data-testid="chat-defaults">
-            <legend>Chat defaults</legend>
-            <small>Choose what new chats start with. You can leave personality unset.</small>
-
-            <label class="profile-settings__field">
-              <span>Default model</span>
-              <select
-                [value]="preferences()?.default_model_id ?? ''"
-                [disabled]="loadingAction()"
-                (change)="onDefaultModelChange($any($event.target).value)">
-                @for (model of models(); track model.id) {
-                  <option [value]="model.id">{{ model.display_name }}</option>
-                }
-              </select>
-            </label>
-            <label class="profile-settings__field">
-              <span>Default personality</span>
-              <select
-                [value]="preferences()?.default_personality_id ?? ''"
-                [disabled]="loadingAction()"
-                (change)="onDefaultPersonalityChange($any($event.target).value)">
-                <option value="">No default personality</option>
-                @for (personality of personalities(); track personality.id) {
-                  <option [value]="personality.id">{{ personality.name }}</option>
-                }
-              </select>
-            </label>
-          </fieldset>
-
           <button class="profile-settings__button profile-settings__button--primary" type="submit" [disabled]="loadingAction()">
-            Save Changes
+            Save profile
           </button>
         </form>
+
+        <fieldset
+          class="profile-settings__callout profile-settings__form"
+          data-testid="chat-defaults">
+          <legend>Chat defaults</legend>
+          <small>Choose what new chats start with. Changes save immediately; you can leave personality unset.</small>
+
+          <label class="profile-settings__field">
+            <span>Default model</span>
+            <select
+              [value]="preferences()?.default_model_id ?? ''"
+              [disabled]="loadingAction()"
+              (change)="onDefaultModelChange($any($event.target).value)">
+              @for (model of models(); track model.id) {
+                <option [value]="model.id">{{ model.display_name }}</option>
+              }
+            </select>
+          </label>
+          <label class="profile-settings__field">
+            <span>Default personality</span>
+            <select
+              [value]="preferences()?.default_personality_id ?? ''"
+              [disabled]="loadingAction()"
+              (change)="onDefaultPersonalityChange($any($event.target).value)">
+              <option value="">No default personality</option>
+              @for (personality of personalities(); track personality.id) {
+                <option [value]="personality.id">{{ personality.name }}</option>
+              }
+            </select>
+          </label>
+        </fieldset>
 
         <form class="profile-settings__form profile-settings__password-form" [formGroup]="passwordForm" (ngSubmit)="savePassword()">
           <label class="profile-settings__field">
