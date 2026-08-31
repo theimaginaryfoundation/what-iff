@@ -181,16 +181,16 @@ export class ProfileSettingsModalComponent {
   private async loadProfile(): Promise<void> {
     this.loadingProfile.set(true);
     try {
-      const [user, preferences, models, personalityPage] = await Promise.all([
+      const [user, preferences, models, personalities] = await Promise.all([
         firstValueFrom(this.authService.getUserProfile()),
         firstValueFrom(this.preferencesService.getUserPreferences()),
         firstValueFrom(this.modelService.getModels()),
-        firstValueFrom(this.personalityService.listPersonalities(1, 100)),
+        this.loadAllPersonalities(),
       ]);
       this.currentUser.set(user);
       this.preferences.set(preferences);
       this.models.set(models);
-      this.personalities.set(personalityPage.results);
+      this.personalities.set(personalities);
       this.profileForm.patchValue({
         email: user.email || '',
         first_name: user.first_name || '',
@@ -205,6 +205,20 @@ export class ProfileSettingsModalComponent {
     }
   }
 
+  private async loadAllPersonalities(): Promise<readonly Personality[]> {
+    const limit = 100;
+    const firstPage = await firstValueFrom(this.personalityService.listPersonalities(1, limit));
+    const personalities = [...firstPage.results];
+
+    for (let page = 2; personalities.length < firstPage.total_count; page++) {
+      const nextPage = await firstValueFrom(this.personalityService.listPersonalities(page, limit));
+      personalities.push(...nextPage.results);
+      if (nextPage.results.length === 0) break;
+    }
+
+    return personalities;
+  }
+
   private async savePreferences(
     patch: Partial<Pick<UserPreferences, 'default_model_id' | 'default_personality_id'>>,
     successMessage: string,
@@ -214,8 +228,12 @@ export class ProfileSettingsModalComponent {
     this.loadingAction.set(true);
     this.message.set(null);
     try {
+      const updatedPreferences = { ...current, ...patch };
+      if ('default_personality_id' in patch && patch.default_personality_id === undefined) {
+        delete updatedPreferences.default_personality_id;
+      }
       const updated = await firstValueFrom(
-        this.preferencesService.updateUserPreferences({ ...current, ...patch }),
+        this.preferencesService.updateUserPreferences(updatedPreferences),
       );
       this.preferences.set(updated);
       this.message.set({ type: 'success', text: successMessage });

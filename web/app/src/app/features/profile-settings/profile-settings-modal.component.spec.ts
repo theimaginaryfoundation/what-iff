@@ -17,6 +17,9 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     getUserPreferences: ReturnType<typeof vi.fn>;
     updateUserPreferences: ReturnType<typeof vi.fn>;
   };
+  let personalityService: {
+    listPersonalities: ReturnType<typeof vi.fn>;
+  };
 
   async function openAndWaitForProfile(fixture: ReturnType<typeof TestBed.createComponent<ProfileSettingsModalComponent>>): Promise<void> {
     const component = fixture.componentInstance;
@@ -61,12 +64,11 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
         { id: 'model-2', name: 'model-two', display_name: 'Model Two', description: '', tool_support: true },
       ])),
     };
-    const personalityService = {
+    personalityService = {
       listPersonalities: vi.fn().mockReturnValue(of({
         results: [{ id: 'personality-1', name: 'Vera' }],
-        total: 1,
+        total_count: 1,
         page: 1,
-        limit: 100,
       })),
     };
 
@@ -144,7 +146,32 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
       default_model_id: 'model-1',
       favorite_model_ids: [],
     }));
+    expect(update).not.toHaveProperty('default_personality_id');
     expect(JSON.stringify(update)).not.toContain('default_personality_id');
+  });
+
+  it('loads every personality page for the default selector', async () => {
+    personalityService.listPersonalities.mockImplementation((page: number) => of(
+      page === 1
+        ? {
+            results: Array.from({ length: 100 }, (_, index) => ({ id: `personality-${index}`, name: `Personality ${index}` })),
+            total_count: 101,
+            page: 1,
+          }
+        : {
+            results: [{ id: 'personality-100', name: 'Personality 100' }],
+            total_count: 101,
+            page: 2,
+          },
+    ));
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    const component = fixture.componentInstance;
+
+    await openAndWaitForProfile(fixture);
+
+    expect(personalityService.listPersonalities).toHaveBeenNthCalledWith(1, 1, 100);
+    expect(personalityService.listPersonalities).toHaveBeenNthCalledWith(2, 2, 100);
+    expect(component.personalities()).toHaveLength(101);
   });
 
   it('loads the profile when the modal opens', async () => {
