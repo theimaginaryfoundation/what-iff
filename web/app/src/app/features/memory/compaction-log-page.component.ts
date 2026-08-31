@@ -37,6 +37,7 @@ export class CompactionLogPageComponent implements OnInit {
   readonly promptChanges = signal<PromptAuditEntry[]>([]);
   readonly promptChangesLoading = signal(false);
   readonly promptChangesError = signal<string | null>(null);
+  readonly promptChangesExpanded = signal(false);
   readonly chats = signal<readonly Chat[]>([]);
   readonly personalities = signal<readonly Personality[]>([]);
   readonly selectedChatID = signal('');
@@ -119,6 +120,10 @@ export class CompactionLogPageComponent implements OnInit {
         this.promptChangesLoading.set(false);
       },
     });
+  }
+
+  togglePromptChanges(): void {
+    this.promptChangesExpanded.update(expanded => !expanded);
   }
 
   updateFilters(chatID: string, personalityID: string): void {
