@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -11,9 +12,17 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
+func addImportOrderRepairChatProvenanceTestSchema(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec(`ALTER TABLE chats ADD COLUMN source text`)
+	require.NoError(t, err)
+	_, err = db.Exec(`ALTER TABLE chats ADD COLUMN import_hash text`)
+	require.NoError(t, err)
+}
+
 func newImportOrderRepairTestDatastore(t *testing.T) (*Datastore, func()) {
 	t.Helper()
-	return newTestDatastore(t, createMemoryImportTestSchema, createAccountBackupTestSchema)
+	return newTestDatastore(t, createMemoryImportTestSchema, createAccountBackupTestSchema, addImportOrderRepairChatProvenanceTestSchema)
 }
 
 func createImportOrderTestChat(t *testing.T, ds *Datastore, imported, archived bool, lastMessageTime time.Time) (uuid.UUID, uuid.UUID) {
