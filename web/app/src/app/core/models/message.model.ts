@@ -33,8 +33,6 @@ export interface ContextBreakdown {
   model?: string;
   provider?: string;
   captured_at: string;
-  /** Authoritative settled credit charge when supplied by the metering implementation. */
-  charged_credits?: number;
 }
 
 export interface ChatMessage {
