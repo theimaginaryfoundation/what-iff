@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUserToggleableToolCatalogHasHumanDescriptions(t *testing.T) {
-	for _, def := range FunctionToolCatalog() {
+func TestUserToggleableBuiltInToolsHaveHumanDescriptions(t *testing.T) {
+	for _, def := range functionToolCatalog {
 		if !def.UserToggleable {
 			continue
 		}
