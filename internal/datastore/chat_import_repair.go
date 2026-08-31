@@ -32,10 +32,13 @@ type importedMessageOrderRepairCandidate struct {
 //
 // The normal Ent mutation API deliberately keeps ChatMessage.sent_at immutable. This repair uses a
 // tightly scoped SQL transaction instead of weakening that invariant for every caller.
-func (d *Datastore) RepairImportedMessageOrder(ctx context.Context) (ImportMessageOrderRepairResult, error) {
+func RepairImportedMessageOrder(ctx context.Context, sqlDB *sql.DB) (ImportMessageOrderRepairResult, error) {
 	result := ImportMessageOrderRepairResult{}
+	if sqlDB == nil {
+		return result, fmt.Errorf("repair imported message order: nil database")
+	}
 
-	tx, err := d.sqlDB.BeginTx(ctx, nil)
+	tx, err := sqlDB.BeginTx(ctx, nil)
 	if err != nil {
 		return result, fmt.Errorf("begin imported message order repair: %w", err)
 	}
@@ -143,4 +146,9 @@ func (d *Datastore) RepairImportedMessageOrder(ctx context.Context) (ImportMessa
 		return result, fmt.Errorf("commit imported message order repair: %w", err)
 	}
 	return result, nil
+}
+
+// RepairImportedMessageOrder applies the same startup repair through an existing Datastore.
+func (d *Datastore) RepairImportedMessageOrder(ctx context.Context) (ImportMessageOrderRepairResult, error) {
+	return RepairImportedMessageOrder(ctx, d.sqlDB)
 }
