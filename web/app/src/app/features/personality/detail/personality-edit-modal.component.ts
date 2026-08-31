@@ -239,27 +239,6 @@ const DEFAULT_THUMBNAIL_CIRCLE: PersonalityThumbnailCircle = { cx: 0.5, cy: 0.42
 
                 @if (scratchpadAdvancedOpen()) {
                   <div class="flex flex-col gap-4 border-t border-border-base px-3 pb-3 pt-3">
-
-                    @if (scratchpadHistory().length > 0) {
-                      <div class="flex flex-col gap-2">
-                        <p class="text-xs font-semibold text-(--color-text-secondary)">Revert to a previous version</p>
-                        <ul class="flex flex-col divide-y divide-border-base rounded-lg border border-border-base">
-                          @for (version of scratchpadHistory(); track $index; let i = $index) {
-                            <li class="flex items-center justify-between gap-3 px-3 py-2">
-                              <p class="min-w-0 flex-1 truncate text-xs text-(--color-text-secondary)" [title]="version">
-                                <span class="mr-1.5 font-semibold text-(--color-text-primary)">v{{ scratchpadHistory().length - i }}</span>{{ version || '(empty)' }}
-                              </p>
-                              <button
-                                type="button"
-                                class="shrink-0 rounded-md border border-border-base bg-(--color-surface-input) px-2 py-0.5 text-xs text-(--color-text-primary) hover:bg-(--color-surface-card)"
-                                (click)="revertScratchpad(version)"
-                              >Restore</button>
-                            </li>
-                          }
-                        </ul>
-                      </div>
-                    }
-
                     <label class="flex flex-col gap-1">
                       <span class="text-xs font-semibold text-(--color-text-secondary)">Custom scratchpad update prompt</span>
                       @if (promptDefaultsLoading()) {
@@ -277,7 +256,6 @@ const DEFAULT_THUMBNAIL_CIRCLE: PersonalityThumbnailCircle = { cx: 0.5, cy: 0.42
                         <span class="text-[11px] text-(--color-text-muted)">Leave blank to use the system default. Overrides the prompt the agent receives when writing a scratchpad checkpoint.</span>
                       }
                     </label>
-
                   </div>
                 }
               </div>
@@ -411,7 +389,6 @@ export class PersonalityEditModalComponent {
   readonly promptDefaultsLoading = signal(false);
   readonly promptDefaultsError = signal(false);
 
-  readonly scratchpadHistory = computed(() => this.personality()?.scratchpad_history ?? []);
   readonly systemPromptHardLimitLabel = TEXT_LIMIT_HARD_MAX.toLocaleString();
   readonly systemPromptWarningLimitLabel = TEXT_LIMIT_WARNING_THRESHOLD.toLocaleString();
   readonly systemPromptCount = computed(() => this.draft()?.system_prompt.length ?? 0);
@@ -632,10 +609,6 @@ export class PersonalityEditModalComponent {
         },
       });
     }
-  }
-
-  revertScratchpad(content: string): void {
-    this.setDraftField('scratchpad', content);
   }
 
   viewMemories(): void {

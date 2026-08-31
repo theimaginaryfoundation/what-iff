@@ -31,6 +31,17 @@ export interface Personality {
   stats: PersonalityUsageStats;
 }
 
+export interface PersonalityPromptChange {
+  id: string;
+  user_id: string;
+  personality_id: string;
+  old_prompt: string;
+  new_prompt: string;
+  action: 'edit' | 'revert';
+  reverted_change_id?: string | null;
+  created_at: string;
+}
+
 export interface PersonalityThumbnailCircle {
   cx: number;
   cy: number;
@@ -111,4 +122,3 @@ export interface PaginatedPersonalityResponse {
   total_count: number;
   page: number;
 }
-

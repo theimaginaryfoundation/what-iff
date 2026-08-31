@@ -229,8 +229,10 @@ func (a recallArgs) wantsCurrentConversation() bool {
 type recallChunk struct {
 	SourceType string `json:"source_type"` // "file" | "conversation" | "summary"
 	Name       string `json:"name"`        // file name, conversation name, or chat name (summary)
-	Index      int    `json:"index"`       // chunk sequence / message ordinal
-	Text       string `json:"text"`
+	// AttachmentID is set for file chunks sourced from a file attachment.
+	AttachmentID string `json:"attachment_id,omitempty"`
+	Index        int    `json:"index"` // chunk sequence / message ordinal
+	Text         string `json:"text"`
 	// ConversationID is set on "summary" chunks: the conversation the summary was checkpointed
 	// from, so the model can hop straight into conversation/fetch mode for the full source.
 	ConversationID string `json:"conversation_id,omitempty"`
