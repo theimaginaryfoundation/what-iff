@@ -56,7 +56,7 @@ describe('ContextBreakdownTabComponent', () => {
         fixture.detectChanges();
         const gauge = fixture.nativeElement.querySelector('.gauge') as HTMLElement;
         expect(gauge.textContent ?? '').toContain('Estimated input API cost');
-        expect(gauge.textContent ?? '').toContain('$0.0072');
+        expect(gauge.textContent ?? '').toContain('$0.00715');
     });
 
     it('does not invent an API cost when provider/model pricing is unknown', () => {
