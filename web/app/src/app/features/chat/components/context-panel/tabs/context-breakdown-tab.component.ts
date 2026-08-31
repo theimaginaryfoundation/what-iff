@@ -64,7 +64,7 @@ interface BreakdownRow {
                 <span
                   class="gauge__cost"
                   [title]="'Standard input-token rate checked ' + cost.pricingCheckedAt + '. Excludes output tokens, cached-input discounts, tool fees, batch/priority tiers, regional uplifts, and account-specific pricing.'"
-                >Estimated input API cost ${{ cost.amountUsd | number: '1.4-6' }}</span>
+                >Estimated input API cost &#36;{{ cost.amountUsd | number: '1.4-6' }}</span>
               }
             </div>
             <div
@@ -127,7 +127,7 @@ interface BreakdownRow {
             }
             <span class="foot__note">Total reflects vendor-reported input usage when available; named buckets are estimates.</span>
             @if (inputCost(); as cost) {
-              <span class="foot__note">Input price: ${{ cost.inputUsdPerMillion | number: '1.0-4' }}/1M · reviewed {{ cost.pricingCheckedAt }}. Output and non-token fees are not included.</span>
+              <span class="foot__note">Input price: &#36;{{ cost.inputUsdPerMillion | number: '1.0-4' }}/1M · reviewed {{ cost.pricingCheckedAt }}. Output and non-token fees are not included.</span>
             }
           </footer>
         }
