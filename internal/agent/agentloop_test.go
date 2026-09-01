@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/stretchr/testify/assert"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
 
@@ -210,4 +212,60 @@ func TestExecuteToolUseWithRecovery_RecoversPanics(t *testing.T) {
 	assert.Contains(t, result.Output, `tool "create_agent_job" encountered an internal error`)
 	assert.Contains(t, result.Output, "panic-tool-id")
 	assert.Empty(t, attachments)
+}
+
+func TestHandleAgentLoop_AppendsPostToolLoopAttachments(t *testing.T) {
+	prev := additionalGeneratedAttachmentsForChat
+	t.Cleanup(func() { additionalGeneratedAttachmentsForChat = prev })
+
+	additionalGeneratedAttachmentsForChat = func(_ *Agent, _ *models.Chat) func(context.Context) []*models.FileAttachment {
+		return func(context.Context) []*models.FileAttachment {
+			return []*models.FileAttachment{{Name: "final.txt", FileType: "text/plain", FileContent: "aGk="}}
+		}
+	}
+
+	adapter := &scriptedAdapter{
+		callFn: func(step int) (*provider.GenerateResponse, []provider.ToolUse, error) {
+			return &provider.GenerateResponse{ID: "r-final", Text: "final-answer"}, nil, nil
+		},
+	}
+	chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), PersonalityID: uuid.New()}
+	a := &Agent{logger: zap.NewNop()}
+
+	result, _, generatedAttachments, err := a.handleAgentLoop(context.Background(), &chatContext{chat: chat}, adapter)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, generatedAttachments, 1)
+	assert.Equal(t, "final.txt", generatedAttachments[0].Name)
+}
+
+func TestExecuteToolUses_NotifiesPerToolGeneratedAttachments(t *testing.T) {
+	prev := onToolUseGeneratedAttachmentsForChat
+	prevExtra := extraToolHandlersForChat
+	t.Cleanup(func() { onToolUseGeneratedAttachmentsForChat = prev })
+	t.Cleanup(func() { extraToolHandlersForChat = prevExtra })
+
+	seen := make([]string, 0, 2)
+	onToolUseGeneratedAttachmentsForChat = func(_ *Agent, _ *models.Chat, use provider.ToolUse, atts []*models.FileAttachment) {
+		seen = append(seen, use.Name)
+		assert.NotEmpty(t, atts)
+	}
+	extraToolHandlersForChat = func(_ *Agent, _ *models.Chat) map[string]ExtraToolHandler {
+		return map[string]ExtraToolHandler{
+			"fake_tool": func(context.Context, []byte) (string, []*models.FileAttachment, error) {
+				return `{"ok":true}`, []*models.FileAttachment{{Name: "out.txt", FileType: "text/plain", FileContent: "aGk="}}, nil
+			},
+		}
+	}
+
+	a := &Agent{logger: zap.NewNop()}
+	chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), PersonalityID: uuid.New()}
+	uses := []provider.ToolUse{
+		{ID: "u1", Name: "fake_tool", Input: []byte(`{}`)},
+	}
+	ctx := &chatContext{chat: chat}
+
+	_, _, attachments := a.executeToolUses(context.Background(), ctx, uses)
+	assert.NotEmpty(t, attachments)
+	assert.Equal(t, []string{"fake_tool"}, seen)
 }

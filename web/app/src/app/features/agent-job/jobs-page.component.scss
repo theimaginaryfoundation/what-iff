@@ -1,3 +1,9 @@
 :host {
   display: block;
 }
+
+@media (max-width: 1023px) {
+  .jobs-page {
+    padding-top: 4rem;
+  }
+}

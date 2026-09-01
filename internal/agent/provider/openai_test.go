@@ -1,9 +1,7 @@
 package provider
 
 import (
-	"crypto/md5"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -14,45 +12,21 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
-// Test helper functions for processResponseOutput
-// We test the core deduplication logic directly rather than mocking the complex OpenAI Response struct
-
-// testProcessResponseOutput extracts the core deduplication logic for testing
-// This mirrors the actual processResponseOutput function but accepts our mock
+// testProcessResponseOutput adapts raw text into the real OpenAI Response shape and then calls the
+// production ProcessResponseOutput path. It intentionally contains no copy of the deduplication
+// algorithm, so these tests fail when production response processing regresses.
 func testProcessResponseOutput(rawOutput string) string {
-	// If the output is empty or very short, return as-is (no duplication possible)
-	if len(strings.TrimSpace(rawOutput)) < shortMessageThreshold {
-		return rawOutput
+	quoted, err := json.Marshal(rawOutput)
+	if err != nil {
+		panic(err)
 	}
-
-	// Split the output into paragraphs and deduplicate
-	paragraphs := strings.Split(rawOutput, "\n\n")
-	var uniqueParagraphs []string
-	seenContent := make(map[string]bool)
-
-	for _, paragraph := range paragraphs {
-		trimmedParagraph := strings.TrimSpace(paragraph)
-
-		// Preserve empty paragraphs for proper markdown formatting
-		// (they're needed for spacing between blocks, tables, etc.)
-		if trimmedParagraph == "" {
-			uniqueParagraphs = append(uniqueParagraphs, paragraph)
-			continue
-		}
-
-		// Create a hash of the paragraph content for deduplication
-		// We normalize whitespace to catch minor formatting differences
-		normalizedContent := strings.Join(strings.Fields(trimmedParagraph), " ")
-		contentHash := fmt.Sprintf("%x", md5.Sum([]byte(normalizedContent)))
-
-		// Only add if we haven't seen this content before
-		if !seenContent[contentHash] {
-			uniqueParagraphs = append(uniqueParagraphs, trimmedParagraph)
-			seenContent[contentHash] = true
-		}
+	raw := `{"id":"resp_test","object":"response","created_at":1,"model":"test","status":"completed",` +
+		`"output":[{"type":"message","id":"m1","role":"assistant","status":"completed","content":[{"type":"output_text","text":` + string(quoted) + `}]}]}`
+	var resp responses.Response
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		panic(err)
 	}
-
-	return strings.Join(uniqueParagraphs, "\n\n")
+	return ProcessResponseOutput(&resp)
 }
 
 func TestProcessResponseOutput_NilResponse(t *testing.T) {
@@ -121,10 +95,11 @@ This is a paragraph with normal spacing.
 
 This is a paragraph with normal spacing.`
 
-	// Expected: Duplicate paragraphs should be removed, regardless of minor whitespace differences
+	// The production pipeline deduplicates paragraphs and then StripOpenAIFileLinks normalizes
+	// repeated spaces/tabs, so the surviving unique paragraph uses single internal spaces.
 	expectedResult := `This is a paragraph with normal spacing.
 
-This   is   a   paragraph   with   extra   spaces.`
+This is a paragraph with extra spaces.`
 
 	result := testProcessResponseOutput(content)
 	assert.Equal(t, expectedResult, result, "Duplicate paragraphs should be deduplicated")
@@ -344,7 +319,7 @@ Final paragraph.`
 
 // Benchmark test to ensure performance is acceptable
 func BenchmarkProcessResponseOutput(b *testing.B) {
-	// Create a realistic content scenario with some duplicates
+	// Create a realistic content scenario with some duplicates.
 	content := `This is a research summary about artificial intelligence and its applications.
 
 Key findings from multiple sources indicate significant growth in AI adoption across industries.
@@ -361,15 +336,27 @@ Robotics integration with AI is creating new opportunities in manufacturing and 
 
 The future of AI development looks promising with continued investment and research breakthroughs.`
 
+	// Build the SDK response fixture once. The benchmark is intended to measure
+	// ProcessResponseOutput, not JSON marshaling/unmarshaling in the test adapter.
+	quoted, err := json.Marshal(content)
+	if err != nil {
+		b.Fatal(err)
+	}
+	raw := `{"id":"resp_bench","object":"response","created_at":1,"model":"test","status":"completed",` +
+		`"output":[{"type":"message","id":"m1","role":"assistant","status":"completed","content":[{"type":"output_text","text":` + string(quoted) + `}]}]}`
+	var resp responses.Response
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		b.Fatal(err)
+	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		testProcessResponseOutput(content)
+		ProcessResponseOutput(&resp)
 	}
 }
 
 // responseWithOutputText builds a *responses.Response whose OutputText() returns text, so
-// ProcessResponseOutput (and therefore dedupeParagraphs) can be exercised directly instead of via
-// the standalone testProcessResponseOutput reimplementation above.
+// ProcessResponseOutput (and therefore dedupeParagraphs) can be exercised directly.
 func responseWithOutputText(t *testing.T, text string) *responses.Response {
 	t.Helper()
 	quoted, err := json.Marshal(text)
@@ -381,9 +368,6 @@ func responseWithOutputText(t *testing.T, text string) *responses.Response {
 	return &resp
 }
 
-// TestProcessResponseOutput_RealResponse_Dedupes exercises the actual ProcessResponseOutput /
-// dedupeParagraphs path (not the standalone reimplementation used by the other tests in this
-// file) against a real *responses.Response, so the production dedup logic itself is covered.
 func TestProcessResponseOutput_RealResponse_Dedupes(t *testing.T) {
 	t.Parallel()
 	content := "This is a unique paragraph about artificial intelligence, long enough to pass the short-message threshold.\n\n" +

@@ -31,10 +31,11 @@ type FileChunkInput struct {
 
 // FileChunkResult represents a file chunk returned from a similarity search
 type FileChunkResult struct {
-	Content  string
-	FileName string
-	Sequence int
-	Score    float64
+	Content          string
+	FileName         string
+	FileAttachmentID uuid.UUID
+	Sequence         int
+	Score            float64
 	// CreatedAt is the parent file attachment's upload time. Populated so callers can
 	// time-filter file results (e.g. recall's time_scope). Zero when the attachment edge
 	// was not loaded.
@@ -164,7 +165,7 @@ func (d *Datastore) GetRelatedFileChunks(ctx context.Context, userID uuid.UUID, 
 	// Vector is passed as $1 (parameterized) to avoid SQL injection from string interpolation.
 
 	baseQuery := `
-		SELECT fc.content, fa.name, fc.sequence, fc.embedding <-> $1::vector AS score, fa.created_at
+		SELECT fc.content, fa.name, fa.id, fc.sequence, fc.embedding <-> $1::vector AS score, fa.created_at
 		FROM file_chunks fc
 		JOIN file_attachments fa ON fc.file_chunk_file_attachment = fa.id
 		WHERE fa.user_file_attachments = $2`
@@ -221,7 +222,7 @@ func (d *Datastore) GetRelatedFileChunks(ctx context.Context, userID uuid.UUID, 
 	var results []FileChunkResult
 	for rows.Next() {
 		var r FileChunkResult
-		if err := rows.Scan(&r.Content, &r.FileName, &r.Sequence, &r.Score, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.Content, &r.FileName, &r.FileAttachmentID, &r.Sequence, &r.Score, &r.CreatedAt); err != nil {
 			d.logger.Error(i18n.T("filechunk.scan_failed"), zap.Error(err))
 			return nil, err
 		}
@@ -270,10 +271,11 @@ func (d *Datastore) ListFileChunksForAttachment(ctx context.Context, fileAttachm
 			createdAt = row.Edges.FileAttachment.CreatedAt
 		}
 		results = append(results, FileChunkResult{
-			Content:   row.Content,
-			FileName:  name,
-			Sequence:  row.Sequence,
-			CreatedAt: createdAt,
+			Content:          row.Content,
+			FileName:         name,
+			FileAttachmentID: fileAttachmentID,
+			Sequence:         row.Sequence,
+			CreatedAt:        createdAt,
 		})
 	}
 	return results, nil

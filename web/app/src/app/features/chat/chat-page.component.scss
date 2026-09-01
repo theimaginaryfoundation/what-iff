@@ -477,19 +477,17 @@ h1 {
     position: relative;
     padding-inline: 0.75rem;
     padding-left: 3.5rem;
-    padding-right: 5rem;
     row-gap: 0.25rem;
   }
 
   .chat-page__thread-meta {
-    flex-basis: auto;
+    flex: 1 1 0;
     min-width: 0;
   }
 
   .chat-page__title-actions {
-    position: absolute;
-    right: 0.75rem;
-    top: 0.75rem;
+    margin-left: auto;
+    position: static;
   }
 
   .chat-page__personality-trigger {
