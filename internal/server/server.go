@@ -41,6 +41,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
+	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"github.com/theimaginaryfoundation/what-iff/internal/userhooks"
@@ -162,6 +163,13 @@ func (s *Server) setupRoutes() {
 	// metering.NoopMeter — no wiring required here.
 	if metering.New != nil {
 		agentCfg.Meter = metering.New(dataStore, s.logger)
+	}
+	// Optional push-notification sender (linked privately; nil in the open-source
+	// build, which notifies nothing). Registered via a blank import in
+	// cmd/api-server, same as the meter; it reads its own credentials from the
+	// environment. When absent, NewAgent falls back to pushnotify.NoopNotifier.
+	if pushnotify.New != nil {
+		agentCfg.PushNotifier = pushnotify.New(dataStore, s.logger)
 	}
 	// Optional feature-entitlement gate (linked privately; nil in the open-source
 	// build, where every feature is available). Registered via a blank import in

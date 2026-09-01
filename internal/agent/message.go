@@ -22,6 +22,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
+	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
@@ -127,6 +128,11 @@ type Agent struct {
 	// is chosen at construction and swapped via server wiring, so no implementation
 	// detail reaches this package.
 	meter metering.Meter
+	// pushNotifier delivers a push on autonomous/webhook reply completion. Like
+	// meter, the concrete implementation (a real sender vs. pushnotify.NoopNotifier)
+	// is chosen at construction and swapped via server wiring, so no push detail
+	// reaches this package.
+	pushNotifier pushnotify.Notifier
 	// lifecycleCtx is cancelled on server/process shutdown. Use for detached writes
 	// that should outlive request cancellation but still stop on app shutdown.
 	lifecycleCtx context.Context
@@ -176,6 +182,10 @@ type AgentConfig struct {
 	// Meter gates and records billable turns. When nil, NewAgent falls back to
 	// metering.NoopMeter (allow-all, no tracking) — the open-source default.
 	Meter metering.Meter
+	// PushNotifier delivers a push on autonomous/webhook reply completion. When
+	// nil, NewAgent falls back to pushnotify.NoopNotifier (sends nothing) — the
+	// open-source default.
+	PushNotifier pushnotify.Notifier
 	// LifecycleContext is cancelled on app shutdown and used for detached work.
 	// Nil defaults to context.Background().
 	LifecycleContext context.Context
@@ -256,6 +266,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		chunkPipeline:                newChunkPipelineForMode(cfg.LLMBackend != "vendor", &oaiClient, ds, logger),
 		fileStore:                    fileStore,
 		meter:                        cfg.Meter,
+		pushNotifier:                 cfg.PushNotifier,
 		runningJobCancels:            make(map[uuid.UUID]runningJobCancel),
 		lifecycleCtx:                 cfg.LifecycleContext,
 		mockLLM:                      cfg.LLMBackend == "mock",
@@ -272,6 +283,11 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		// No metering implementation supplied (e.g. open-source build): every turn
 		// is allowed and untracked.
 		a.meter = metering.NoopMeter{Logger: logger}
+	}
+	if a.pushNotifier == nil {
+		// No push implementation supplied (e.g. open-source build): completed
+		// replies notify nothing.
+		a.pushNotifier = pushnotify.NoopNotifier{}
 	}
 
 	// recallTool is constructed after `a` so its investigate distiller can reuse the agent's

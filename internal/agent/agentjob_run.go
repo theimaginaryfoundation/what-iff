@@ -11,6 +11,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 
 	"github.com/google/uuid"
@@ -319,6 +320,23 @@ func (a *Agent) handleEphemeralPrompt(
 	}
 	if err := a.advanceChatJobStatus(ctx, trackingJob, models.JobStatusComplete); err != nil {
 		return nil, fmt.Errorf("finalize agent job: %w", err)
+	}
+
+	// Push a notification for this completed reply. Gated to the agent-job path
+	// (callPath), which is what both scheduled/autonomous jobs and webhook
+	// background-mode invocations run under — the replies that land after the
+	// user has closed the app. Interactive user chat completes elsewhere
+	// (runUserChatPostInferencePhases) and is deliberately not notified.
+	// Fire-and-forget on the lifecycle context so the send outlives this job's
+	// request context but still stops on process shutdown; NoopNotifier makes it
+	// a no-op in builds without a push implementation.
+	if callPath == telemetry.CallPathAgentJob {
+		a.pushNotifier.Notify(a.lifecycleCtx, pushnotify.Event{
+			UserID:    userID,
+			ChatID:    agentMessage.ChatID,
+			MessageID: agentMessage.ID,
+			Body:      agentMessage.Message,
+		})
 	}
 
 	return agentMessage, nil
