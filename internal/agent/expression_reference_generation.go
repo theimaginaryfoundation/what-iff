@@ -26,15 +26,15 @@ var phaseOneReferenceExpressionKeys = []string{"happy", "content"}
 // a reference-conditioned method may only be recorded when canonical image bytes
 // were actually supplied to a provider that declared reference capability.
 type expressionGenerationReceipt struct {
-	PersonalityID          uuid.UUID                           `json:"personality_id"`
-	ExpressionKey          string                              `json:"expression_key"`
-	OutputImageID          uuid.UUID                           `json:"output_image_id"`
-	CanonicalImageID       *uuid.UUID                          `json:"canonical_image_id"`
-	CanonicalImageVersion  string                              `json:"canonical_image_version"`
+	PersonalityID          uuid.UUID                            `json:"personality_id"`
+	ExpressionKey          string                               `json:"expression_key"`
+	OutputImageID          uuid.UUID                            `json:"output_image_id"`
+	CanonicalImageID       *uuid.UUID                           `json:"canonical_image_id"`
+	CanonicalImageVersion  string                               `json:"canonical_image_version"`
 	GenerationMethod       provider.ExpressionGenerationMethod `json:"generation_method"`
 	ReferenceCapability    provider.ReferenceCapability        `json:"reference_capability"`
-	ReferenceInputSupplied bool                                `json:"reference_input_supplied"`
-	Provider               string                              `json:"provider"`
+	ReferenceInputSupplied bool                                 `json:"reference_input_supplied"`
+	Provider               string                               `json:"provider"`
 }
 
 func (r expressionGenerationReceipt) validate() error {
@@ -101,7 +101,13 @@ func referenceQualityPathEligible(enabled, hasCanonicalImage bool, capability pr
 // domain. OpenAI is the first adapter; future provider wiring belongs here rather
 // than in expression-generation logic.
 func (a *Agent) expressionImageProvider() provider.ExpressionImageProvider {
-	if a == nil || a.OpenAIProvider == nil {
+	if a == nil {
+		return nil
+	}
+	if a.testHooks.ExpressionImageProviderOverride != nil {
+		return a.testHooks.ExpressionImageProviderOverride
+	}
+	if a.OpenAIProvider == nil {
 		return nil
 	}
 	return a.OpenAIProvider
@@ -112,6 +118,22 @@ func expressionProviderState(p provider.ExpressionImageProvider) (provider.Refer
 		return provider.ReferenceCapabilityUnavailable, "unavailable"
 	}
 	return p.ExpressionReferenceCapability(), p.ExpressionProviderName()
+}
+
+// persistExpressionCell keeps Phase 1 orchestration testable without weakening
+// the production persistence path. The override is reachable only through the
+// package's test-hook mechanism, which is forbidden in production execution.
+func (a *Agent) persistExpressionCell(
+	ctx context.Context,
+	userID, personalityID uuid.UUID,
+	expressionKey string,
+	pngBytes []byte,
+	receipt expressionGenerationReceipt,
+) error {
+	if a != nil && a.testHooks.ExpressionPersistCellOverride != nil {
+		return a.testHooks.ExpressionPersistCellOverride(ctx, userID, personalityID, expressionKey, pngBytes, receipt)
+	}
+	return a.uploadPersonalityExpressionCell(ctx, userID, personalityID, expressionKey, pngBytes, receipt)
 }
 
 func (a *Agent) maybeGeneratePhaseOneReferenceExpressions(
@@ -169,7 +191,7 @@ func (a *Agent) maybeGeneratePhaseOneReferenceExpressions(
 		if err := receipt.validate(); err != nil {
 			return fmt.Errorf("reference expression %q receipt: %w", expressionKey, err)
 		}
-		if err := a.uploadPersonalityExpressionCell(ctx, userID, personalityID, expressionKey, result.PNG, receipt); err != nil {
+		if err := a.persistExpressionCell(ctx, userID, personalityID, expressionKey, result.PNG, receipt); err != nil {
 			return fmt.Errorf("reference expression %q persist: %w", expressionKey, err)
 		}
 	}
