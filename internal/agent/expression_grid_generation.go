@@ -60,7 +60,12 @@ Match the character design described in the preceding paragraph.`
 
 // GenerateDefaultExpressionGrid runs likeness (nano) + one medium-quality square image generation,
 // splices the 3×3 grid into PNG cells, uploads all nine cells, and upserts each expression key.
-// Quota: not metered (personality tooling); approximate cost ~nano chat + one medium image generation (~$0.01).
+// When EXPRESSION_REFERENCE_GENERATION_ENABLED=true, Phase 1 then independently regenerates
+// happy/content from the immutable cover portrait through a provider-native reference operation.
+// The grid remains the deliberate fallback for unsupported providers and the other seven slots.
+//
+// Quota: personality tooling is not quota-metered. Reference-conditioned Phase 1 adds up to two
+// medium-quality image-edit calls when the feature flag is enabled and a canonical cover is available.
 //
 // Semantics / retries:
 //   - Safe to call multiple times: UpsertPersonalityExpression overwrites rows for the same keys.
@@ -94,7 +99,10 @@ func (a *Agent) GenerateDefaultExpressionGrid(ctx context.Context, userID, perso
 
 	ctx = telemetry.WithCallPath(ctx, telemetry.CallPathExpressionGrid)
 
-	// Resolve reference image bytes from the cover image when available.
+	// Resolve canonical portrait bytes from the cover image when available. These
+	// bytes serve two different purposes:
+	//   1. likeness extraction for the legacy grid fallback, and
+	//   2. the actual image input for the reference-conditioned quality path.
 	var referenceImageBytes []byte
 	var referenceImageMIME string
 	if person.CoverImageID != nil {
@@ -131,9 +139,15 @@ func (a *Agent) GenerateDefaultExpressionGrid(ctx context.Context, userID, perso
 		a.logger.Warn("expression grid: empty likeness segment; using fallback prose")
 	}
 
+	// This prose remains the primary appearance input for the legacy grid, but is
+	// supplemental-only when the actual canonical image is sent through the
+	// reference-conditioned provider path below.
+	referenceConstraints := strings.TrimSpace(likeness)
 	canvasInstructions := expressionGridCanvasInstructions
 	if person.ImageStyle != "" && person.ImageStyle != "auto" {
-		canvasInstructions += "\n\nArt style: " + person.ImageStyle
+		styleConstraint := "Art style: " + person.ImageStyle
+		canvasInstructions += "\n\n" + styleConstraint
+		referenceConstraints += "\n\n" + styleConstraint
 	}
 
 	fullPrompt := strings.TrimSpace(likeness) + "\n\n" + canvasInstructions
@@ -158,11 +172,39 @@ func (a *Agent) GenerateDefaultExpressionGrid(ctx context.Context, userID, perso
 		return nil, fmt.Errorf("slice grid: expected 9 cells, got %d", len(cells))
 	}
 
+	expressionProvider := a.expressionImageProvider()
+	referenceCapability, expressionProviderName := expressionProviderState(expressionProvider)
 	for i := range ExpressionGridKeys {
 		key := ExpressionGridKeys[i]
-		if err := a.uploadPersonalityExpressionCell(ctx, userID, personalityID, key, cells[i]); err != nil {
+		receipt := expressionGenerationReceipt{
+			PersonalityID:          personalityID,
+			ExpressionKey:          key,
+			CanonicalImageID:       person.CoverImageID,
+			CanonicalImageVersion:  canonicalImageVersion(person.CoverImageID),
+			GenerationMethod:       provider.ExpressionGenerationMethodGridFallback,
+			ReferenceCapability:    referenceCapability,
+			ReferenceInputSupplied: false,
+			Provider:               expressionProviderName,
+		}
+		if err := a.uploadPersonalityExpressionCell(ctx, userID, personalityID, key, cells[i], receipt); err != nil {
 			return nil, fmt.Errorf("expression %q: %w", key, err)
 		}
+	}
+
+	// Phase 1 quality slice: overwrite only happy/content from independent edits of
+	// the same immutable canonical portrait. If the configured adapter does not
+	// truly support reference input, the grid assets remain in place and their
+	// receipts continue to say grid_fallback.
+	if err := a.maybeGeneratePhaseOneReferenceExpressions(
+		ctx,
+		userID,
+		personalityID,
+		person,
+		referenceImageBytes,
+		referenceImageMIME,
+		referenceConstraints,
+	); err != nil {
+		return nil, fmt.Errorf("reference expression generation: %w", err)
 	}
 
 	out, err := a.ds.ListPersonalityExpressions(ctx, userID, personalityID)
@@ -231,8 +273,15 @@ func (a *Agent) inferExpressionGridLikeness(ctx context.Context, systemPrompt st
 	return strings.TrimSpace(resp.OutputText()), nil
 }
 
-// uploadPersonalityExpressionCell persists one grid cell image in S3 (not file_content).
-func (a *Agent) uploadPersonalityExpressionCell(ctx context.Context, userID, personalityID uuid.UUID, expressionKey string, pngBytes []byte) error {
+// uploadPersonalityExpressionCell persists one expression image in S3 (not file_content),
+// writes a machine-readable generation receipt next to it, and upserts the expression slot.
+func (a *Agent) uploadPersonalityExpressionCell(
+	ctx context.Context,
+	userID, personalityID uuid.UUID,
+	expressionKey string,
+	pngBytes []byte,
+	receipt expressionGenerationReceipt,
+) error {
 	if len(pngBytes) == 0 {
 		return fmt.Errorf("empty cell png")
 	}
@@ -269,6 +318,15 @@ func (a *Agent) uploadPersonalityExpressionCell(ctx context.Context, userID, per
 		}
 		return fmt.Errorf("persist file attachment s3 key: %w", err)
 	}
+
+	receipt.OutputImageID = created.ID
+	if err := a.persistExpressionGenerationReceipt(ctx, s3Key, receipt); err != nil {
+		_ = a.fileStore.DeleteFile(ctx, s3Key+".generation.json")
+		_ = a.fileStore.DeleteFile(ctx, s3Key)
+		_ = a.ds.DeleteFileAttachment(ctx, userID, created.ID)
+		return fmt.Errorf("persist generation receipt: %w", err)
+	}
+
 	thumb, err := imageutil.GenerateThumbnail(pngBytes, imageutil.DefaultThumbnailMaxPx)
 	if err == nil && len(thumb) > 0 {
 		thumbKey := storage.FileKeyForImageThumbnail(userID, created.ID)
