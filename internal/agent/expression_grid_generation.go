@@ -172,23 +172,8 @@ func (a *Agent) GenerateDefaultExpressionGrid(ctx context.Context, userID, perso
 		return nil, fmt.Errorf("slice grid: expected 9 cells, got %d", len(cells))
 	}
 
-	expressionProvider := a.expressionImageProvider()
-	referenceCapability, expressionProviderName := expressionProviderState(expressionProvider)
-	for i := range ExpressionGridKeys {
-		key := ExpressionGridKeys[i]
-		receipt := expressionGenerationReceipt{
-			PersonalityID:          personalityID,
-			ExpressionKey:          key,
-			CanonicalImageID:       person.CoverImageID,
-			CanonicalImageVersion:  canonicalImageVersion(person.CoverImageID),
-			GenerationMethod:       provider.ExpressionGenerationMethodGridFallback,
-			ReferenceCapability:    referenceCapability,
-			ReferenceInputSupplied: false,
-			Provider:               expressionProviderName,
-		}
-		if err := a.uploadPersonalityExpressionCell(ctx, userID, personalityID, key, cells[i], receipt); err != nil {
-			return nil, fmt.Errorf("expression %q: %w", key, err)
-		}
+	if err := a.persistGridFallbackExpressions(ctx, userID, personalityID, person, cells); err != nil {
+		return nil, err
 	}
 
 	// Phase 1 quality slice: overwrite only happy/content from independent edits of
