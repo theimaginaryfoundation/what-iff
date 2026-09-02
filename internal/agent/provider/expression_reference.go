@@ -40,7 +40,7 @@ type ExpressionReferenceResult struct {
 	PNG                 []byte
 	GenerationMethod    ExpressionGenerationMethod
 	ReferenceCapability ReferenceCapability
-	Provider             string
+	Provider            string
 }
 
 // ExpressionImageProvider is the quality-path capability for expression images.
