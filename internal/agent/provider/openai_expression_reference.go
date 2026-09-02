@@ -62,6 +62,23 @@ func (a *OpenAIProvider) GenerateExpressionFromReference(ctx context.Context, re
 	}, nil
 }
 
+func canonicalExpressionImageFileMetadata(mimeType string) (filename string, contentType string) {
+	contentType = strings.ToLower(strings.TrimSpace(strings.SplitN(mimeType, ";", 2)[0]))
+	switch contentType {
+	case "image/jpeg":
+		return "canonical.jpg", contentType
+	case "image/webp":
+		return "canonical.webp", contentType
+	case "image/png":
+		return "canonical.png", contentType
+	default:
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		return "canonical.image", contentType
+	}
+}
+
 func buildExpressionReferenceEditParams(req ExpressionReferenceRequest, quality ImageQuality) openai.ImageEditParams {
 	prompt := strings.TrimSpace(fmt.Sprintf(`Preserve the exact visual identity of the character in the supplied canonical portrait.
 Keep the same face, facial proportions, apparent age, hair, eyes, glasses/accessories, clothing design, palette, and art style.
@@ -78,9 +95,10 @@ Supplemental constraints from the personality: %s`, strings.TrimSpace(req.Expres
 		oaiQuality = openai.ImageEditParamsQualityHigh
 	}
 
+	filename, contentType := canonicalExpressionImageFileMetadata(req.CanonicalImageMIME)
 	return openai.ImageEditParams{
 		Image: openai.ImageEditParamsImageUnion{
-			OfFile: bytes.NewReader(req.CanonicalImage),
+			OfFile: openai.File(bytes.NewReader(req.CanonicalImage), filename, contentType),
 		},
 		Prompt:        prompt,
 		InputFidelity: openai.ImageEditParamsInputFidelityHigh,
