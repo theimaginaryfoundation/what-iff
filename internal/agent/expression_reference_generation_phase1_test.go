@@ -77,8 +77,12 @@ func TestExpressionGenerationReceiptValidationRejectsInvalidProvenance(t *testin
 		{"nil canonical image", func(r *expressionGenerationReceipt) { id := uuid.Nil; r.CanonicalImageID = &id }, "requires canonical image id"},
 		{"missing canonical version", func(r *expressionGenerationReceipt) { r.CanonicalImageVersion = "" }, "requires canonical image version"},
 		{"reference not supplied", func(r *expressionGenerationReceipt) { r.ReferenceInputSupplied = false }, "reference input was not supplied"},
-		{"grid claims reference", func(r *expressionGenerationReceipt) { r.GenerationMethod = provider.ExpressionGenerationMethodGridFallback }, "grid fallback cannot claim reference input"},
-		{"unknown method", func(r *expressionGenerationReceipt) { r.GenerationMethod = provider.ExpressionGenerationMethod("mystery") }, "unknown expression generation method"},
+		{"grid claims reference", func(r *expressionGenerationReceipt) {
+			r.GenerationMethod = provider.ExpressionGenerationMethodGridFallback
+		}, "grid fallback cannot claim reference input"},
+		{"unknown method", func(r *expressionGenerationReceipt) {
+			r.GenerationMethod = provider.ExpressionGenerationMethod("mystery")
+		}, "unknown expression generation method"},
 	}
 
 	for _, tc := range cases {
@@ -250,9 +254,9 @@ func TestPhaseOneReferenceExpressionsSurfaceProviderAndPersistenceFailures(t *te
 		{
 			name: "empty image",
 			result: provider.ExpressionReferenceResult{
-				GenerationMethod: provider.ExpressionGenerationMethodReferenceEdit,
+				GenerationMethod:    provider.ExpressionGenerationMethodReferenceEdit,
 				ReferenceCapability: provider.ReferenceCapabilitySupported,
-				Provider: "fake",
+				Provider:            "fake",
 			},
 			want: "provider returned empty image",
 		},
@@ -319,9 +323,13 @@ func TestPhaseOneReferenceExpressionsSurfaceProviderAndPersistenceFailures(t *te
 
 type failingReceiptFileStore struct{ err error }
 
-func (s *failingReceiptFileStore) UploadFile(context.Context, string, []byte, string) error { return s.err }
-func (s *failingReceiptFileStore) DownloadFile(context.Context, string) ([]byte, error)      { return nil, nil }
-func (s *failingReceiptFileStore) DeleteFile(context.Context, string) error                 { return nil }
+func (s *failingReceiptFileStore) UploadFile(context.Context, string, []byte, string) error {
+	return s.err
+}
+func (s *failingReceiptFileStore) DownloadFile(context.Context, string) ([]byte, error) {
+	return nil, nil
+}
+func (s *failingReceiptFileStore) DeleteFile(context.Context, string) error { return nil }
 
 func TestPersistExpressionGenerationReceiptRejectsInvalidReceiptAndUploadFailure(t *testing.T) {
 	t.Parallel()

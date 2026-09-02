@@ -26,15 +26,15 @@ var phaseOneReferenceExpressionKeys = []string{"happy", "content"}
 // a reference-conditioned method may only be recorded when canonical image bytes
 // were actually supplied to a provider that declared reference capability.
 type expressionGenerationReceipt struct {
-	PersonalityID          uuid.UUID                            `json:"personality_id"`
-	ExpressionKey          string                               `json:"expression_key"`
-	OutputImageID          uuid.UUID                            `json:"output_image_id"`
-	CanonicalImageID       *uuid.UUID                           `json:"canonical_image_id"`
-	CanonicalImageVersion  string                               `json:"canonical_image_version"`
+	PersonalityID          uuid.UUID                           `json:"personality_id"`
+	ExpressionKey          string                              `json:"expression_key"`
+	OutputImageID          uuid.UUID                           `json:"output_image_id"`
+	CanonicalImageID       *uuid.UUID                          `json:"canonical_image_id"`
+	CanonicalImageVersion  string                              `json:"canonical_image_version"`
 	GenerationMethod       provider.ExpressionGenerationMethod `json:"generation_method"`
 	ReferenceCapability    provider.ReferenceCapability        `json:"reference_capability"`
-	ReferenceInputSupplied bool                                 `json:"reference_input_supplied"`
-	Provider               string                               `json:"provider"`
+	ReferenceInputSupplied bool                                `json:"reference_input_supplied"`
+	Provider               string                              `json:"provider"`
 }
 
 func (r expressionGenerationReceipt) validate() error {
