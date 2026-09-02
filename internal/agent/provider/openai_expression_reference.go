@@ -58,7 +58,7 @@ func (a *OpenAIProvider) GenerateExpressionFromReference(ctx context.Context, re
 		PNG:                 pngBytes,
 		GenerationMethod:    ExpressionGenerationMethodReferenceEdit,
 		ReferenceCapability: ReferenceCapabilitySupported,
-		Provider:             openAIExpressionProviderName,
+		Provider:            openAIExpressionProviderName,
 	}, nil
 }
 
