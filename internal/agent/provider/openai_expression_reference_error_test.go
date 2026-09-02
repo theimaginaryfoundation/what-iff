@@ -122,3 +122,25 @@ func TestBuildExpressionReferenceEditParamsMapsQualityAndPrompt(t *testing.T) {
 	require.Contains(t, medium.Prompt, "confused")
 	require.Contains(t, medium.Prompt, "blue hair")
 }
+
+func TestCanonicalExpressionImageFileMetadataPreservesSupportedMIME(t *testing.T) {
+	cases := []struct {
+		mime        string
+		wantName    string
+		wantContent string
+	}{
+		{"image/png", "canonical.png", "image/png"},
+		{" IMAGE/JPEG ; charset=binary ", "canonical.jpg", "image/jpeg"},
+		{"image/webp", "canonical.webp", "image/webp"},
+		{"image/gif", "canonical.image", "image/gif"},
+		{"", "canonical.image", "application/octet-stream"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.mime, func(t *testing.T) {
+			name, contentType := canonicalExpressionImageFileMetadata(tc.mime)
+			require.Equal(t, tc.wantName, name)
+			require.Equal(t, tc.wantContent, contentType)
+		})
+	}
+}
