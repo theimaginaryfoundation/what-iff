@@ -26,15 +26,15 @@ var phaseOneReferenceExpressionKeys = []string{"happy", "content"}
 // a reference-conditioned method may only be recorded when canonical image bytes
 // were actually supplied to a provider that declared reference capability.
 type expressionGenerationReceipt struct {
-	PersonalityID          uuid.UUID                           `json:"personality_id"`
-	ExpressionKey          string                              `json:"expression_key"`
-	OutputImageID          uuid.UUID                           `json:"output_image_id"`
-	CanonicalImageID       *uuid.UUID                          `json:"canonical_image_id"`
-	CanonicalImageVersion  string                              `json:"canonical_image_version"`
+	PersonalityID          uuid.UUID                            `json:"personality_id"`
+	ExpressionKey          string                               `json:"expression_key"`
+	OutputImageID          uuid.UUID                            `json:"output_image_id"`
+	CanonicalImageID       *uuid.UUID                           `json:"canonical_image_id"`
+	CanonicalImageVersion  string                               `json:"canonical_image_version"`
 	GenerationMethod       provider.ExpressionGenerationMethod `json:"generation_method"`
 	ReferenceCapability    provider.ReferenceCapability        `json:"reference_capability"`
-	ReferenceInputSupplied bool                                `json:"reference_input_supplied"`
-	Provider               string                              `json:"provider"`
+	ReferenceInputSupplied bool                                 `json:"reference_input_supplied"`
+	Provider               string                               `json:"provider"`
 }
 
 func (r expressionGenerationReceipt) validate() error {
@@ -134,6 +134,45 @@ func (a *Agent) persistExpressionCell(
 		return a.testHooks.ExpressionPersistCellOverride(ctx, userID, personalityID, expressionKey, pngBytes, receipt)
 	}
 	return a.uploadPersonalityExpressionCell(ctx, userID, personalityID, expressionKey, pngBytes, receipt)
+}
+
+// persistGridFallbackExpressions records the legacy 3x3 outputs with explicit
+// fallback provenance before Phase 1 optionally overwrites selected slots via
+// reference-conditioned generation. Keeping this transition in one helper makes
+// the fallback/reference boundary directly unit-testable.
+func (a *Agent) persistGridFallbackExpressions(
+	ctx context.Context,
+	userID, personalityID uuid.UUID,
+	person *models.Personality,
+	cells [][]byte,
+) error {
+	if len(cells) != len(ExpressionGridKeys) {
+		return fmt.Errorf("grid fallback: expected %d cells, got %d", len(ExpressionGridKeys), len(cells))
+	}
+
+	var canonicalImageID *uuid.UUID
+	if person != nil {
+		canonicalImageID = person.CoverImageID
+	}
+
+	expressionProvider := a.expressionImageProvider()
+	referenceCapability, expressionProviderName := expressionProviderState(expressionProvider)
+	for i, key := range ExpressionGridKeys {
+		receipt := expressionGenerationReceipt{
+			PersonalityID:          personalityID,
+			ExpressionKey:          key,
+			CanonicalImageID:       canonicalImageID,
+			CanonicalImageVersion:  canonicalImageVersion(canonicalImageID),
+			GenerationMethod:       provider.ExpressionGenerationMethodGridFallback,
+			ReferenceCapability:    referenceCapability,
+			ReferenceInputSupplied: false,
+			Provider:               expressionProviderName,
+		}
+		if err := a.persistExpressionCell(ctx, userID, personalityID, key, cells[i], receipt); err != nil {
+			return fmt.Errorf("expression %q: %w", key, err)
+		}
+	}
+	return nil
 }
 
 func (a *Agent) maybeGeneratePhaseOneReferenceExpressions(
