@@ -2719,6 +2719,172 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /account/export:
+    post:
+      summary: Enqueue a full-account export
+      description: |
+        Enqueues an asynchronous full-account export for the authenticated user, built in-process. The
+        export is a **ZIP** containing conversations (in the round-trippable Claude `conversations.json`
+        shape), personalities (with scratchpads), memories (as a nested `memories.zip`), a
+        `files/manifest.json` inventory of the user's uploaded files, and a `manifest.json`.
+
+        Returns `202` with a Job; poll `GET /account/export/{id}` for the phase. **The download link is
+        delivered only by email — never in the API response.** This is a deliberate security control:
+        access to the app account alone cannot exfiltrate the full account, since the download also
+        requires access to the user's mailbox.
+
+        Rate limited to one export per user per 10 minutes.
+      tags: [Account Export]
+      security:
+        - bearerAuth: []
+      responses:
+        '202':
+          description: Export enqueued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: An export was requested too recently
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /account/export/{id}:
+    get:
+      summary: Get account export status
+      description: |
+        Returns the export Job. Its `progress` field is a JSON-encoded `AccountExportProgress`
+        (`phase` of queued/building/uploading/complete/failed, section `counts`, and a user-safe
+        `message`). It never contains the download link — that is emailed.
+      tags: [Account Export]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Export job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Export not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /account/import:
+    post:
+      summary: Enqueue an account export ZIP import
+      description: |
+        Restores conversations, memories, and personalities from an export ZIP (produced by
+        `/account/export`). Additive and id-stripped: conversations dedupe by import hash,
+        personalities dedupe by name, and everything is created fresh under the importing user, so an
+        export loads into any account without key collisions. Whatiff metadata in `conversations.json`
+        preserves checkpoint context and personality associations; source chat/personality references are
+        remapped before memories import. Summarized threads are immediately resumable, while threads
+        without a summary remain archived for lazy rehydration. The upload is staged to a temporary
+        file, then restored by a bounded in-process worker. Returns `202` with a Job; poll
+        `GET /account/import/{id}` until terminal status. Its JSON-encoded `progress` contains phase,
+        section counts, warnings, and the final result. Memory import requires the server to have an
+        OpenAI key (embeddings are regenerated); when unavailable, memories are skipped.
+      tags: [Account Export]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The export ZIP.
+      responses:
+        '202':
+          description: Import enqueued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '400':
+          description: Missing or invalid ZIP
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Import file too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /account/import/{id}:
+    get:
+      summary: Get account import status and results
+      description: |
+        Returns the account-import Job. Parse its JSON-encoded `progress` as `AccountImportProgress`;
+        terminal successful jobs include the per-section result and warnings.
+      tags: [Account Export]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Account import job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Import not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /memory/import:
     post:
       summary: Import memories from export
@@ -2752,6 +2918,19 @@ paths:
                     type: integer
                   invalid_record_count:
                     type: integer
+                  invalid_reasons:
+                    type: object
+                    properties:
+                      malformed_json:
+                        type: integer
+                      missing_id:
+                        type: integer
+                      empty_content:
+                        type: integer
+                      missing_created_at:
+                        type: integer
+                      missing_chat_id:
+                        type: integer
                   skipped_missing_chat_count:
                     type: integer
                   skipped_missing_personality_count:
@@ -5600,7 +5779,9 @@ components:
           type: string
           description: |
             Optional JSON-encoded progress payload for long-running jobs. Opaque to clients except per
-            job_type. For `chat_import` it is `{phase, source, total, imported, skipped}`.
+            job_type. For `chat_import` it is `{phase, source, total, imported, skipped}`; for
+            `account_import` it is `{phase, message, counts, conversations, personalities, memories,
+            warnings, result}`, where `result` is present on terminal success.
         created_at:
           type: string
           format: date-time

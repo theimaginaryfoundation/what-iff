@@ -142,16 +142,38 @@ func (d *Datastore) persistImportedConversation(ctx context.Context, tx *ent.Tx,
 		source = models.ChatSourceOpenAI
 	}
 
-	entChat, err := tx.Chat.Create().
+	create := tx.Chat.Create().
 		SetName(conv.Title).
 		SetOwnerID(userID).
-		SetArchived(true).
 		SetSource(source).
 		SetImportHash(conv.ImportHash).
-		SetIsAutoMood(true).
 		SetCreatedAt(conv.CreatedAt).
-		SetLastMessageTime(lastMsgTime).
-		Save(ctx)
+		SetLastMessageTime(lastMsgTime)
+	if conv.AccountExport {
+		create.SetArchived(!conv.RestoreReady).
+			SetIsAutoMood(conv.IsAutoMood).
+			SetIsFavorite(conv.IsFavorite)
+		if conv.RestoreReady {
+			create.SetRehydrationState(models.RehydrationStateReady)
+			create.SetCheckpointSummary(conv.CheckpointSummary)
+			create.SetCheckpointUserMessageCount(conv.CheckpointUserMessageCount)
+			if conv.LastCheckpointAt != nil {
+				create.SetLastCheckpointAt(*conv.LastCheckpointAt)
+			}
+		}
+		if conv.PersonalityID != nil {
+			create.SetPersonalityID(*conv.PersonalityID)
+		}
+		if conv.DisabledTools != nil {
+			create.SetDisabledTools(conv.DisabledTools)
+		}
+		if conv.Tags != nil {
+			create.SetTags(conv.Tags)
+		}
+	} else {
+		create.SetArchived(true).SetIsAutoMood(true)
+	}
+	entChat, err := create.Save(ctx)
 	if err != nil {
 		rollback()
 		// Only treat the specific import-hash uniqueness violation as a dedup race;

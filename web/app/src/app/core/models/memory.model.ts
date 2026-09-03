@@ -78,6 +78,13 @@ export interface MemoryImportResult {
   imported_count: number;
   duplicate_count: number;
   invalid_record_count: number;
+  invalid_reasons?: {
+    malformed_json: number;
+    missing_id: number;
+    empty_content: number;
+    missing_created_at: number;
+    missing_chat_id: number;
+  };
   skipped_missing_chat_count: number;
   skipped_missing_personality_count: number;
 }

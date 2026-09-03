@@ -62,6 +62,19 @@ type ImportConversation struct {
 	// conversation ID (not timestamps) ensures stable dedup across repeated imports.
 	ImportHash string
 	Messages   []ChatMessage
+
+	// The fields below are set only by the Whatiff account importer. External conversation
+	// imports intentionally retain the archived/lazy-rehydration defaults.
+	PersonalityID              *uuid.UUID
+	CheckpointSummary          string
+	CheckpointUserMessageCount int
+	LastCheckpointAt           *time.Time
+	DisabledTools              []string
+	Tags                       []string
+	IsFavorite                 bool
+	IsAutoMood                 bool
+	AccountExport              bool
+	RestoreReady               bool
 }
 
 // MaxImportTitleLen is the maximum number of runes from a conversation title included in

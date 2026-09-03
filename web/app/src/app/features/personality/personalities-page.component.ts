@@ -100,7 +100,6 @@ export class PersonalitiesPageComponent implements OnInit {
   readonly createPromptHardLimitLabel = TEXT_LIMIT_HARD_MAX.toLocaleString();
   readonly createPromptWarningLimitLabel = TEXT_LIMIT_WARNING_THRESHOLD.toLocaleString();
   private readonly createLimitWarningAcknowledged = signal(false);
-
   readonly defaultPersonalityId = computed<string | null>(() => {
     const id = this.preferences()?.default_personality_id;
     if (!id || id === NULL_PERSONALITY_ID) return null;
