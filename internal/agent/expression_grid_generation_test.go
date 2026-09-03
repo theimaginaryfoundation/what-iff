@@ -156,6 +156,6 @@ func TestUploadPersonalityExpressionCell_EmptyPNG(t *testing.T) {
 	ctx := context.Background()
 	uid, pid := uuid.New(), uuid.New()
 	a := &Agent{}
-	err := a.uploadPersonalityExpressionCell(ctx, uid, pid, "happy", nil)
+	err := a.uploadPersonalityExpressionCell(ctx, uid, pid, "happy", nil, expressionGenerationReceipt{})
 	require.ErrorContains(t, err, "empty cell png")
 }
