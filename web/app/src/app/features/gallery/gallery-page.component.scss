@@ -51,6 +51,30 @@
   color: var(--color-text-primary) !important;
 }
 
+@media (max-width: 767px) {
+  // On a phone the centered title and the wide "Expression Manager" switch can't
+  // share a row — the balancing spacer wants ~switch-width on the left too, so the
+  // switch overflowed back over the title. Stack them instead: title on its own
+  // row, switch beneath, both flush left. Robust to any title length.
+  .gallery-page__header {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+
+  .gallery-page__title-spacer {
+    display: none;
+  }
+
+  .gallery-page__title {
+    justify-self: start;
+    text-align: left;
+  }
+
+  .gallery-page__mode-switch {
+    justify-self: start;
+  }
+}
+
 .gallery-page__search-row {
   align-items: center;
   display: flex;

@@ -1240,6 +1240,16 @@ export class ChatComposerComponent {
    */
   readonly softKeyboard = signal(detectSoftKeyboard());
   private textareaResizeRaf: number | null = null;
+  /**
+   * Last viewport width the textarea auto-size ran for. The auto-size depends
+   * only on available width (line wrapping) and content — never on viewport
+   * height — so we ignore height-only `window:resize` events. This matters on
+   * mobile: the soft keyboard (and its suggestion strip / browser chrome) fires
+   * a storm of height-only resizes *while typing*, and re-running the auto-size
+   * on each one momentarily collapses the textarea to `height:auto` and snaps it
+   * back, which reads as a per-keystroke "earthquake" shake of the whole app.
+   */
+  private lastViewportWidth = typeof window !== 'undefined' ? window.innerWidth : 0;
   private activeResizeDrag: {
     removeMove: (fn: (e: MouseEvent | TouchEvent) => void) => void;
     removeUp: (fn: () => void) => void;
@@ -1692,6 +1702,13 @@ export class ChatComposerComponent {
 
   @HostListener('window:resize')
   onWindowResize(): void {
+    // Only re-measure when the width actually changed. Height-only resizes
+    // (soft keyboard opening/closing, mobile browser chrome, Capacitor's
+    // Keyboard `resize:'body'`) don't affect wrapping, so responding to them
+    // just causes a per-keystroke layout shake. See {@link lastViewportWidth}.
+    const width = window.innerWidth;
+    if (width === this.lastViewportWidth) return;
+    this.lastViewportWidth = width;
     this.scheduleTextareaResize();
   }
 
