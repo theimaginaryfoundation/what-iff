@@ -26,36 +26,48 @@ describe('ContextBreakdownTabComponent', () => {
             imports: [ContextBreakdownTabComponent],
             providers: [provideZonelessChangeDetection()],
         }).compileComponents();
-
         fixture = TestBed.createComponent(ContextBreakdownTabComponent);
     });
 
     it('shows an empty state when no breakdown is present', () => {
         fixture.componentRef.setInput('breakdown', null);
         fixture.detectChanges();
-
-        const text = (fixture.nativeElement.textContent ?? '') as string;
-        expect(text).toContain('Send a message');
+        expect((fixture.nativeElement.textContent ?? '') as string).toContain('Send a message');
     });
 
     it('renders one legend row per segment, ordered by token weight', () => {
         fixture.componentRef.setInput('breakdown', sampleBreakdown);
         fixture.detectChanges();
-
         const rows = fixture.nativeElement.querySelectorAll('.legend__row');
         expect(rows.length).toBe(4);
-        // Largest segment (history, 4200 tok) should sort first.
         expect((rows[0].textContent ?? '')).toContain('History');
     });
 
     it('computes fullness against the budget', () => {
         fixture.componentRef.setInput('breakdown', sampleBreakdown);
         fixture.detectChanges();
-
-        // 5720 / 30000 ≈ 19%
         expect(fixture.componentInstance.fillPct()).toBe(19);
         expect(fixture.componentInstance.total()).toBe(5720);
         expect(fixture.componentInstance.overBudget()).toBe(false);
+    });
+
+    it('shows estimated standard input API cost near the token gauge', () => {
+        fixture.componentRef.setInput('breakdown', sampleBreakdown);
+        fixture.detectChanges();
+        const gauge = fixture.nativeElement.querySelector('.gauge') as HTMLElement;
+        expect(gauge.textContent ?? '').toContain('Estimated input API cost');
+        expect(gauge.textContent ?? '').toContain('$0.00715');
+    });
+
+    it('does not invent an API cost when provider/model pricing is unknown', () => {
+        fixture.componentRef.setInput('breakdown', {
+            ...sampleBreakdown,
+            provider: 'local',
+            model: 'my-custom-model',
+        } satisfies ContextBreakdown);
+        fixture.detectChanges();
+        const gauge = fixture.nativeElement.querySelector('.gauge') as HTMLElement;
+        expect(gauge.querySelector('.gauge__cost')).toBeNull();
     });
 
     it('never lets the denominator fall below usage and flags over-budget', () => {
@@ -66,7 +78,6 @@ describe('ContextBreakdownTabComponent', () => {
             budget_tokens: 30000,
         } satisfies ContextBreakdown);
         fixture.detectChanges();
-
         expect(fixture.componentInstance.overBudget()).toBe(true);
         expect(fixture.componentInstance.fillPct()).toBe(100);
         expect(fixture.componentInstance.budget()).toBeGreaterThanOrEqual(42000);
@@ -78,7 +89,6 @@ describe('ContextBreakdownTabComponent', () => {
     it('shows segment names and proportions without token counts', () => {
         fixture.componentRef.setInput('breakdown', sampleBreakdown);
         fixture.detectChanges();
-
         const history = fixture.nativeElement.querySelector('.legend__row') as HTMLElement;
         expect(history.textContent ?? '').toContain('History');
         expect(history.textContent ?? '').not.toContain('4,200');
@@ -95,7 +105,6 @@ describe('ContextBreakdownTabComponent', () => {
             total_tokens: 150,
         } satisfies ContextBreakdown);
         fixture.detectChanges();
-
         const rows = fixture.nativeElement.querySelectorAll('.legend__row');
         expect(rows.length).toBe(1);
         expect((rows[0].textContent ?? '')).toContain('Developer notes');
