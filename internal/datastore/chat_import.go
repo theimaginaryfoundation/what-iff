@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
@@ -22,6 +23,10 @@ import (
 // dedup-race violation on this specific index from any other constraint error on the chats table.
 // If the index is renamed in a future migration this constant must be updated to match.
 const importHashIndex = "chat_import_hash_user_chats"
+
+// PostgreSQL timestamps are stored at microsecond resolution. Using a smaller adjustment can be
+// collapsed back into an equal timestamp at persistence time, restoring UUID-based tie ordering.
+const importedMessageOrderStep = time.Microsecond
 
 // ImportChats persists parsed conversations (from any supported export source) for the user, one
 // transaction per conversation. Imports are intentionally sequential; result is shared across
@@ -93,6 +98,31 @@ func (d *Datastore) importOneConversation(ctx context.Context, userID uuid.UUID,
 	}
 }
 
+// normalizeImportedMessageTimes preserves the archive transcript order under the datastore's
+// (sent_at, id) retrieval key. Provider exports can contain equal, missing-fallback, or regressing
+// timestamps; without normalization equal times are broken by UUID ordering, which is unrelated to
+// conversational sequence. Existing increasing timestamps are preserved exactly. A non-increasing
+// timestamp is advanced by the smallest duration preserved by the production datastore so source
+// order remains authoritative after persistence.
+func normalizeImportedMessageTimes(messages []models.ChatMessage) []models.ChatMessage {
+	if len(messages) < 2 {
+		return messages
+	}
+
+	normalized := append([]models.ChatMessage(nil), messages...)
+	previous := normalized[0].SentAt.UTC()
+	normalized[0].SentAt = previous
+	for i := 1; i < len(normalized); i++ {
+		candidate := normalized[i].SentAt.UTC()
+		if !candidate.After(previous) {
+			candidate = previous.Add(importedMessageOrderStep)
+		}
+		normalized[i].SentAt = candidate
+		previous = candidate
+	}
+	return normalized
+}
+
 // persistImportedConversation runs dedup, create, bulk messages, and commit inside an open tx.
 // Returns true only when the conversation was committed. Skip and error paths update result in place.
 func (d *Datastore) persistImportedConversation(ctx context.Context, tx *ent.Tx, userID uuid.UUID, conv models.ImportConversation, result *models.ImportResult) (committed bool) {
@@ -128,10 +158,12 @@ func (d *Datastore) persistImportedConversation(ctx context.Context, tx *ent.Tx,
 		return false
 	}
 
-	// Use the latest SentAt across all messages rather than the last by index, since the upstream
-	// library returns messages in chronological order but this is not guaranteed.
+	// Normalize imported timestamps before both metadata calculation and persistence so the archive's
+	// transcript sequence remains the authoritative ordering even when source timestamps tie/regress.
+	messages := normalizeImportedMessageTimes(conv.Messages)
+
 	lastMsgTime := conv.CreatedAt
-	for _, msg := range conv.Messages {
+	for _, msg := range messages {
 		if msg.SentAt.After(lastMsgTime) {
 			lastMsgTime = msg.SentAt
 		}
@@ -167,9 +199,9 @@ func (d *Datastore) persistImportedConversation(ctx context.Context, tx *ent.Tx,
 		return false
 	}
 
-	if len(conv.Messages) > 0 {
-		_, err = tx.ChatMessage.MapCreateBulk(conv.Messages, func(c *ent.ChatMessageCreate, i int) {
-			msg := conv.Messages[i]
+	if len(messages) > 0 {
+		_, err = tx.ChatMessage.MapCreateBulk(messages, func(c *ent.ChatMessageCreate, i int) {
+			msg := messages[i]
 			c.SetMessage(msg.Message).
 				SetOrigin(chatmessage.Origin(msg.Origin)).
 				SetReadStatus(chatmessage.ReadStatusRead).
