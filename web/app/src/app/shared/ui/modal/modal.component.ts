@@ -1,5 +1,5 @@
 import { DOCUMENT } from '@angular/common';
-import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, effect, inject, input, output, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
 import { lockBodyScroll, releaseBodyScroll, type BodyScrollLockHandle } from '../helpers/body-scroll-lock.helpers';
 import { createFocusTrap, releaseFocusTrap, type FocusTrapHandle } from '../helpers/focus-trap.helpers';
 import { isEscapeKey } from '../helpers/keyboard.helpers';
@@ -35,9 +35,14 @@ export class ModalComponent implements OnDestroy {
   readonly describedBy = input<string | null>(null);
   readonly dismissible = input(true);
   readonly size = input<ModalSize>('md');
+  readonly fullscreen = input(false);
   readonly dismiss = output<ModalDismissReason>();
 
   readonly dialog = viewChild<ElementRef<HTMLElement>>('dialog');
+  readonly expanded = signal(false);
+  readonly canToggleFullscreen = computed(() => this.size() === 'lg');
+  readonly fullscreenActive = computed(() => this.fullscreen() || this.expanded());
+
   private readonly document = inject(DOCUMENT);
   private focusTrap: FocusTrapHandle | null = null;
   private bodyLock: BodyScrollLockHandle | null = null;
@@ -48,6 +53,7 @@ export class ModalComponent implements OnDestroy {
         this.lockBody();
         setTimeout(() => this.activateFocusTrap(), 0);
       } else {
+        this.expanded.set(false);
         this.releaseFocusTrap();
         this.releaseBody();
       }
@@ -60,7 +66,21 @@ export class ModalComponent implements OnDestroy {
   }
 
   panelClass(): string {
+    if (this.fullscreenActive()) {
+      return 'ui-modal__panel ui-modal__panel--fullscreen w-full';
+    }
     return `ui-modal__panel w-full ${SIZE_CLASSES[this.size()]}`;
+  }
+
+  backdropClass(): string {
+    return this.fullscreenActive()
+      ? 'ui-modal fixed inset-0 z-50 flex bg-black/60'
+      : 'ui-modal fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4';
+  }
+
+  toggleFullscreen(): void {
+    if (!this.canToggleFullscreen()) return;
+    this.expanded.update(current => !current);
   }
 
   onBackdropClick(): void {

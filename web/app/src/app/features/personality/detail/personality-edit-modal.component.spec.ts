@@ -100,6 +100,37 @@ describe('PersonalityEditModalComponent', () => {
         expect(component.draft()?.thumbnail_circle?.r).toBeCloseTo(0.34, 5);
     });
 
+    it('offers an explicit full-screen editing affordance', () => {
+        const buttons = Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[];
+        const fullScreenButton = buttons.find(button => /full.?screen|expand/i.test(button.textContent ?? ''));
+
+        expect(fullScreenButton).toBeTruthy();
+    });
+
+    it('expands and contracts without replacing the in-progress draft', () => {
+        component.setDraftField('name', 'Unsaved Vera');
+        fixture.detectChanges();
+
+        const findToggle = () => (Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[])
+            .find(button => /full.?screen|contract/i.test(button.textContent ?? ''));
+
+        const expandButton = findToggle();
+        expect(expandButton).toBeTruthy();
+        expandButton!.click();
+        fixture.detectChanges();
+
+        const expandedPanel = fixture.nativeElement.querySelector('.ui-modal__panel--fullscreen');
+        expect(expandedPanel).toBeTruthy();
+        expect(component.draft()?.name).toBe('Unsaved Vera');
+        expect(findToggle()?.textContent).toContain('Contract');
+
+        findToggle()!.click();
+        fixture.detectChanges();
+
+        expect(fixture.nativeElement.querySelector('.ui-modal__panel--fullscreen')).toBeFalsy();
+        expect(component.draft()?.name).toBe('Unsaved Vera');
+    });
+
     it('emits dismissed on cancel', () => {
         vi.spyOn(component.dismissed, 'emit').mockReturnValue(undefined);
         component.cancel();
