@@ -26,27 +26,39 @@ import (
 	"go.uber.org/zap"
 )
 
-// Event describes one completed assistant reply for Notifier.Notify. It carries
-// only facts the agent legitimately owns; the implementation decides recipients
-// (the user's registered devices), formatting, and transport.
+// EventKind identifies the kind of action an Event describes. Today only agent
+// replies are emitted; it exists so the same seam can carry other user-facing
+// actions later without widening the interface.
+type EventKind string
+
+const (
+	// EventKindAgentReply is a completed assistant reply from an autonomous or
+	// webhook-triggered agent job.
+	EventKindAgentReply EventKind = "agent_reply"
+)
+
+// Event describes a notable, user-facing action for Notifier.Notify. It carries
+// only pointers the agent owns — never the message content itself: the recipient
+// fetches the body through the API on tap, so reply text does not transit the
+// notifier (nor any third-party push service). The implementation decides
+// recipients (the user's registered devices), formatting, and transport.
 type Event struct {
-	// UserID is the recipient: the owner of the chat/job that just completed.
+	// Kind is the action this event describes (e.g. EventKindAgentReply).
+	Kind EventKind
+	// UserID is the recipient: the owner of the chat/job that produced the action.
 	UserID uuid.UUID
-	// ChatID and MessageID identify the reply so a notification can deep-link to
-	// it on tap.
+	// ChatID and MessageID identify the target, so a notification can deep-link to
+	// it — and the client can fetch its content — on tap.
 	ChatID    uuid.UUID
 	MessageID uuid.UUID
-	// Body is the assistant reply text (unbounded); the implementation truncates
-	// it to a notification-sized preview.
-	Body string
 }
 
-// Notifier delivers a push for one completed reply.
+// Notifier delivers a notification for one Event to a user's channels.
 //
-// Notify is fire-and-forget: it must not block the caller on network I/O
-// (implementations fan out to the user's devices on their own goroutine) and
-// must swallow its own errors. Implementations must be safe for concurrent use;
-// Notify is called from per-job goroutines.
+// The core calls Notify on a detached goroutine and recovers any panic, so an
+// implementation may block on I/O and a faulty one cannot stall or crash the
+// agent. It should still bound its own work (e.g. a context deadline) and
+// swallow its own errors. Implementations must be safe for concurrent use.
 type Notifier interface {
 	Notify(ctx context.Context, ev Event)
 }

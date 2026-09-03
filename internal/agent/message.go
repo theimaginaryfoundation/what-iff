@@ -133,6 +133,10 @@ type Agent struct {
 	// is chosen at construction and swapped via server wiring, so no push detail
 	// reaches this package.
 	pushNotifier pushnotify.Notifier
+	// pushEnabled is true when a real push implementation was wired (a non-nil
+	// PushNotifier). It lets the completion hook skip spawning a detached
+	// goroutine when push is off (the open-source default).
+	pushEnabled bool
 	// lifecycleCtx is cancelled on server/process shutdown. Use for detached writes
 	// that should outlive request cancellation but still stop on app shutdown.
 	lifecycleCtx context.Context
@@ -267,6 +271,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		fileStore:                    fileStore,
 		meter:                        cfg.Meter,
 		pushNotifier:                 cfg.PushNotifier,
+		pushEnabled:                  cfg.PushNotifier != nil,
 		runningJobCancels:            make(map[uuid.UUID]runningJobCancel),
 		lifecycleCtx:                 cfg.LifecycleContext,
 		mockLLM:                      cfg.LLMBackend == "mock",

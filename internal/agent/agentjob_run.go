@@ -322,21 +322,33 @@ func (a *Agent) handleEphemeralPrompt(
 		return nil, fmt.Errorf("finalize agent job: %w", err)
 	}
 
-	// Push a notification for this completed reply. Gated to the agent-job path
-	// (callPath), which is what both scheduled/autonomous jobs and webhook
-	// background-mode invocations run under — the replies that land after the
-	// user has closed the app. Interactive user chat completes elsewhere
-	// (runUserChatPostInferencePhases) and is deliberately not notified.
-	// Fire-and-forget on the lifecycle context so the send outlives this job's
-	// request context but still stops on process shutdown; NoopNotifier makes it
-	// a no-op in builds without a push implementation.
-	if callPath == telemetry.CallPathAgentJob {
-		a.pushNotifier.Notify(a.lifecycleCtx, pushnotify.Event{
+	// Notify the user of this completed reply. Gated to the agent-job path
+	// (callPath) — scheduled/autonomous jobs and webhook background-mode
+	// invocations, the replies that land after the app is closed; interactive
+	// chat completes elsewhere (runUserChatPostInferencePhases) and is not
+	// notified. Only pointers are passed; the client fetches the content.
+	//
+	// Runs on a detached goroutine with panic recovery so a slow or faulty
+	// notifier implementation can neither stall nor crash this job goroutine.
+	// a.lifecycleCtx outlives the request but is cancelled on shutdown. Skipped
+	// entirely when no push implementation is wired (a.pushEnabled == false).
+	if a.pushEnabled && callPath == telemetry.CallPathAgentJob {
+		ev := pushnotify.Event{
+			Kind:      pushnotify.EventKindAgentReply,
 			UserID:    userID,
 			ChatID:    agentMessage.ChatID,
 			MessageID: agentMessage.ID,
-			Body:      agentMessage.Message,
-		})
+		}
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					a.logger.Error("push notifier panicked",
+						zap.Any("recover", r),
+						zap.ByteString("stack", debug.Stack()))
+				}
+			}()
+			a.pushNotifier.Notify(a.lifecycleCtx, ev)
+		}()
 	}
 
 	return agentMessage, nil
