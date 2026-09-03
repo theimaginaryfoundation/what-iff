@@ -33,6 +33,17 @@
   padding: 0.625rem 1rem;
 }
 
+@media (max-width: 1023px) {
+  // Reserve room for the app-layout floating hamburger (absolute at left .625rem,
+  // width 2.25rem) so the thread title sits beside it on one row rather than
+  // under it. The bar's min-height already exceeds the button, so it stays a
+  // single line. On the native shell the generic hamburger push-down is
+  // suppressed for this page (see mobile/native-web/capacitor-glue.js).
+  .chat-page__title-bar {
+    padding-left: 3.25rem;
+  }
+}
+
 .chat-page__thread-meta {
   flex: 1;
   min-width: 0;
