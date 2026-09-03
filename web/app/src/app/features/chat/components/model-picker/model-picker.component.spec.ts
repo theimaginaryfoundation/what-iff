@@ -75,6 +75,33 @@ describe('ModelPickerComponent', () => {
         expect(spy).toHaveBeenCalledWith(models[2]);
     });
 
+    it('shows fine-grained capabilities on each model option', () => {
+        fixture.componentRef.setInput('models', [
+            {
+                ...models[2],
+                capabilities: {
+                    tool_calling: true,
+                    vision: true,
+                    mcp: true,
+                    tools: ['recall', 'web_search'],
+                },
+            },
+        ]);
+        fixture.componentRef.setInput('selectedId', 'm1');
+        fixture.detectChanges();
+
+        fixture.nativeElement.querySelector('.model-picker__trigger').click();
+        fixture.detectChanges();
+
+        const badges = [...fixture.nativeElement.querySelectorAll('.model-picker__capability')]
+            .map((node: Element) => node.textContent?.trim());
+        expect(badges).toEqual(['Tools 2', 'Vision', 'MCP']);
+        expect(fixture.nativeElement.querySelector('.model-picker__capabilities')?.getAttribute('aria-label'))
+            .toBe('Capabilities: 2 tools, vision, MCP');
+        expect(fixture.nativeElement.querySelector('.model-picker__capability')?.getAttribute('title'))
+            .toBe('Available tools: recall, web_search');
+    });
+
     it('shows vendor step first when no model is selected', () => {
         fixture.componentRef.setInput('selectedId', null);
         fixture.detectChanges();
