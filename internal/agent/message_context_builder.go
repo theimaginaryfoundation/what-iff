@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/memoryutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
@@ -484,19 +485,49 @@ func mergeAdditionalContextItems(
 		}
 		raw = append(raw, item)
 	}
-	seen := make(map[string]struct{}, len(raw))
+	seen := make(map[string]int, len(raw))
 	deduped := make([]models.AdditionalContextItem, 0, len(raw))
 	for _, it := range raw {
 		scope := normalizeMemoryScope(it.Scope)
-		key := it.Type + "\x00" + scope + "\x00" + it.Content
-		if _, ok := seen[key]; ok {
+		it.Scope = scope
+		key := it.Type + "\x00" + scope + "\x00" + additionalContextDedupeIdentity(it)
+		if idx, ok := seen[key]; ok {
+			// Later entries are fresher: raw is assembled oldest-first (carry-over,
+			// history, current row, then this turn's prefetch), so the last rendering of
+			// a memory is the one whose age_days and relevance describe *now*. Keep the
+			// original position — memory ordering is deliberate — but take the newer
+			// rendering. Without this the surviving copy would be the stalest one.
+			deduped[idx] = it
 			continue
 		}
-		seen[key] = struct{}{}
-		it.Scope = scope
+		seen[key] = len(deduped)
 		deduped = append(deduped, it)
 	}
 	return deduped
+}
+
+// additionalContextDedupeIdentity returns the part of an additional-context item that
+// identifies *which* item it is, independent of how it happened to be rendered.
+//
+// Memory items cannot be deduped on their rendered content. FormatMemoryForContext
+// appends a metadata block — age_days, relevance, reconfirmed — whose values are computed
+// at render time, so the same memory rendered on two different days produces two
+// different strings. Since prior turns' renderings are persisted on the user message as
+// additional_context and replayed alongside a freshly rendered prefetch, keying on the
+// raw string let one memory accumulate a new near-duplicate copy per turn, each carrying
+// a different age_days for an identical stored_at.
+//
+// Stripping that block and normalising is the same identity every other memory dedupe
+// site in this package uses (see loadedMemoryPoolKey and the merge-inference pass), which
+// is what keeps those paths agreeing with this one about what counts as "the same
+// memory". MemoryID would be a stronger key but is not populated on every item — the
+// synthesised name line has none — and mixing the two would split an id-bearing copy from
+// an identical id-less one.
+func additionalContextDedupeIdentity(it models.AdditionalContextItem) string {
+	if it.Type != models.AdditionalContextTypeMemory {
+		return it.Content
+	}
+	return memoryutil.NormalizeContentForDedupe(memoryutil.StripMemoryContextMetadata(it.Content))
 }
 
 func appendMergedAdditionalContext(modelCtx *provider.ModelContext, items []models.AdditionalContextItem) {
