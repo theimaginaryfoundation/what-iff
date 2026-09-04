@@ -948,6 +948,13 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 	toolCalls = append(toolCalls, memoryToolCallsForChatContext(chatCtx)...)
 	a.recordToolCalls(ctx, toolCalls)
 
+	// Checked after tool-call metrics and the web-search count: the work in this turn
+	// really happened and the provider will bill for it, so it stays counted even though
+	// the turn is about to fail. Only the blank assistant row is prevented.
+	if err := a.assertGenerationProducedOutput(opts.provider, chatCtx, result, generatedAttachments); err != nil {
+		return nil, nil, err
+	}
+
 	personalityName := a.resolvePersonalityName(ctx, userID, chatCtx.chat.PersonalityID)
 	moodID := activeMoodID(chatCtx.activeMood)
 	agentMessage, err := a.saveAgentResponse(ctx, userID, chatMessage.ChatID, result, toolCalls, generatedAttachments, chatCtx.model, personalityName, moodID)
@@ -1236,6 +1243,11 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 
 	toolCalls = append(toolCalls, memoryToolCallsForChatContext(chatCtx)...)
 	a.recordToolCalls(ctx, toolCalls)
+
+	// See runGeneration: guard after metrics so a failed turn still counts its work.
+	if err := a.assertGenerationProducedOutput("local model", chatCtx, result, generatedAttachments); err != nil {
+		return nil, nil, err
+	}
 
 	personalityName := a.resolvePersonalityName(ctx, userID, chatCtx.chat.PersonalityID)
 	moodID := activeMoodID(chatCtx.activeMood)
@@ -1924,6 +1936,70 @@ func resolveTimezoneLocation(tz string) *time.Location {
 	}
 	tzLocationCache.Store(tz, loc)
 	return loc
+}
+
+// assertGenerationProducedOutput rejects a turn that completed without producing
+// anything to show the user.
+//
+// A model call can return cleanly — no transport error, no API error, a well-formed
+// response object — and still carry no assistant text: a stream that closes after
+// message_start without emitting content blocks, a response truncated before any text
+// was written, or content in a block shape the provider extractor does not recognise.
+// Persisting that as an ordinary assistant message produces a turn that *looks* answered
+// while being empty, which is strictly worse than a visible failure: the user sees
+// nothing and no error, retry state is never offered, and the blank row is then dropped
+// from history reconstruction on the next turn (AppendHistoryTurn skips empty content),
+// so the fault leaves no trace in the rebuilt context either.
+//
+// Returning an error here routes the turn through the normal failure path, which marks
+// the job failed and sets last_error_message on the user's message.
+//
+// Attachment-only turns are legitimate: an image ritual can answer with a generated
+// image and no prose, so a turn with attachments is never treated as empty.
+func (a *Agent) assertGenerationProducedOutput(providerName string, chatCtx *chatContext, result *provider.GenerateResponse, generatedAttachments []*models.FileAttachment) error {
+	if result == nil {
+		return fmt.Errorf("%s generation returned no response", providerName)
+	}
+	if strings.TrimSpace(result.Text) != "" {
+		return nil
+	}
+	for _, att := range generatedAttachments {
+		if att != nil {
+			return nil
+		}
+	}
+
+	stopReason := strings.TrimSpace(result.StopReason)
+	if stopReason == "" {
+		stopReason = "unreported"
+	}
+
+	fields := []zap.Field{
+		zap.String("provider", providerName),
+		zap.String("stop_reason", stopReason),
+		zap.String("response_id", result.ID),
+		zap.Int64("input_tokens", result.InputTokens),
+		zap.Int64("output_tokens", result.OutputTokens),
+	}
+	if chatCtx != nil {
+		fields = append(fields,
+			zap.String("model", chatCtx.model),
+			zap.String("model_provider", chatCtx.modelProvider),
+			zap.Int("memories_count", len(chatCtx.memories)),
+		)
+		if chatCtx.chat != nil {
+			fields = append(fields,
+				zap.String("chat_id", chatCtx.chat.ID.String()),
+				zap.String("user_id", chatCtx.chat.UserID.String()),
+			)
+		}
+	}
+	// output_tokens is the field that separates the two causes: non-zero means the model
+	// generated text that extraction dropped; zero means nothing came back at all.
+	a.logger.Error("model returned an empty response; failing the turn instead of persisting a blank assistant message", fields...)
+
+	return fmt.Errorf("%s model returned an empty response (stop_reason=%s, output_tokens=%d)",
+		providerName, stopReason, result.OutputTokens)
 }
 
 // saveAgentResponse saves the agent's response message and tool calls using the
