@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"runtime/debug"
 	"slices"
@@ -267,6 +266,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		memoryTool:                   tools.NewVectorStoreMemoryTool(ds, &oaiClient, logger),
 		scratchpadTool:               tools.NewScratchpadTool(ds, logger),
 		listTool:                     tools.NewListTool(ds, logger),
+		mcpClient:                    mcpclient.New(nil, logger),
 		chunkPipeline:                newChunkPipelineForMode(cfg.LLMBackend != "vendor", &oaiClient, ds, logger),
 		fileStore:                    fileStore,
 		meter:                        cfg.Meter,

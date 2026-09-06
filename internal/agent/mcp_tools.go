@@ -105,7 +105,13 @@ func (a *Agent) discoverMCPFunctionToolSpecs(ctx context.Context, userID uuid.UU
 	if a.mcpClient == nil || len(servers) == 0 {
 		return nil
 	}
-	out := a.mcpClient.DiscoverTools(ctx, userID, servers)
+	out, discoverErr := a.mcpClient.DiscoverTools(ctx, userID, servers)
+	if discoverErr != nil {
+		a.logger.Warn("mcp tool discovery encountered only connector failures",
+			zap.String("user_id", userID.String()),
+			zap.Int("connector_count", len(servers)),
+			zap.Error(discoverErr))
+	}
 	now := time.Now().UTC()
 	specs := make([]agenttools.FunctionToolSpec, 0, len(out.Tools))
 	healthy := map[uuid.UUID]bool{}

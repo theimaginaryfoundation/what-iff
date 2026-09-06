@@ -340,7 +340,7 @@ func TestListWhitespaceOnlyFilterIgnored(t *testing.T) {
 func TestListMCPServersScopedToChat(t *testing.T) {
 	chat := listTestChat()
 	store := &fakeListStore{mcp: []*models.MCPServer{
-		{ID: uuid.New(), Name: "github", ServerURL: "https://mcp.example", ErrorMessage: "auth failed"},
+		{ID: uuid.New(), Name: "github", ServerURL: "https://mcp.example", Status: models.MCPServerStatusInvalid, StatusReason: "401 upstream"},
 	}}
 	tool := newTestListTool(store)
 	out, err := tool.List(context.Background(), chat, []byte(`{"kind":"mcp_servers"}`))
@@ -351,8 +351,34 @@ func TestListMCPServersScopedToChat(t *testing.T) {
 		t.Fatalf("expected MCP listing scoped to current chat %s, got %s", chat.ID, store.lastMCPChatID)
 	}
 	res := decodeList(t, out)
-	if res.Items[0].Status != "error: auth failed" || res.Items[0].URL != "https://mcp.example" {
+	if res.Items[0].Status != models.MCPServerStatusInvalid || res.Items[0].URL != "https://mcp.example" {
 		t.Fatalf("unexpected mcp item: %+v", res.Items[0])
+	}
+	if res.Items[0].StatusDetail == "" {
+		t.Fatalf("expected agent-friendly status detail, got %+v", res.Items[0])
+	}
+	if res.Error == "" {
+		t.Fatalf("expected top-level tool error when all MCP discovery fails, got %+v", res)
+	}
+}
+
+func TestListMCPServers_PartialDiscoveryFailureAddsNoteNotError(t *testing.T) {
+	chat := listTestChat()
+	store := &fakeListStore{mcp: []*models.MCPServer{
+		{ID: uuid.New(), Name: "healthy", ServerURL: "https://ok.example", Status: models.MCPServerStatusActive},
+		{ID: uuid.New(), Name: "broken", ServerURL: "https://bad.example", Status: models.MCPServerStatusInvalid},
+	}}
+	tool := newTestListTool(store)
+	out, err := tool.List(context.Background(), chat, []byte(`{"kind":"mcp_servers"}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	res := decodeList(t, out)
+	if res.Error != "" {
+		t.Fatalf("expected no top-level error when at least one MCP is healthy, got %+v", res)
+	}
+	if !strings.Contains(res.Note, "unavailable for MCP tool discovery") {
+		t.Fatalf("expected partial-failure note, got %q", res.Note)
 	}
 }
 
