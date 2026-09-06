@@ -2,7 +2,7 @@
 
 ## Role
 
-HTTP API for **MCP server catalog** — list/register MCP servers available to the user/org and expose provider wiring for the agent (tool definitions come from agent + datastore).
+HTTP API for the MCP connector catalog — list/register user-owned connectors used by the first-party in-process MCP runtime.
 
 ## Responsibilities
 
@@ -17,6 +17,7 @@ HTTP API for **MCP server catalog** — list/register MCP servers available to t
 
 - Chat-level MCP association is under **`handlers/chat`**; this package is the global MCP server resource API.
 - **`PUT/PATCH /mcp-servers/{id}`** accepts optional **`ritual_ids`**: omitted leaves ritual↔MCP edges unchanged; a JSON array (including `[]`) replaces the full set. Invalid or foreign ritual IDs return **400**.
+- Runtime health fields (`status`, `status_reason`, `last_checked_at`, `last_healthy_at`, `tool_count`) are read-only from this handler and updated by runtime discovery/execution paths in `internal/agent`.
 
 ## Testing
 

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/filechunker"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
@@ -116,6 +117,7 @@ type Agent struct {
 	scratchpadTool *tools.ScratchpadTool
 	recallTool     *tools.RecallTool
 	listTool       *tools.ListTool
+	mcpClient      *mcpclient.Client
 	chunkPipeline  *filechunker.FileChunkPipeline
 	fileStore      storage.FileStore
 	// expressionPortraitThumbCache caches thumbnails loaded for expression continuity in message context (bounded).
@@ -267,6 +269,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		memoryTool:                   tools.NewVectorStoreMemoryTool(ds, &oaiClient, logger),
 		scratchpadTool:               tools.NewScratchpadTool(ds, logger),
 		listTool:                     tools.NewListTool(ds, logger),
+		mcpClient:                    mcpclient.New(http.DefaultClient, logger),
 		chunkPipeline:                newChunkPipelineForMode(cfg.LLMBackend != "vendor", &oaiClient, ds, logger),
 		fileStore:                    fileStore,
 		meter:                        cfg.Meter,
@@ -678,6 +681,7 @@ func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid
 
 // chatContext holds the context needed for processing a chat message
 type chatContext struct {
+	userID                 uuid.UUID
 	chat                   *models.Chat
 	memories               []string
 	liveMemories           []*models.Memory
@@ -690,6 +694,7 @@ type chatContext struct {
 	modelSubscriptionTier string
 	activeMood            *models.Mood
 	activeMoodRituals     []*models.Ritual
+	mcpServers            []*models.MCPServer
 	// expressionsEnabled mirrors personality.ExpressionsEnabled; when false,
 	// expression picking is skipped for this turn.
 	expressionsEnabled bool
@@ -1070,7 +1075,7 @@ func (a *Agent) openAIResponseParamsForChat(ctx context.Context, chatCtx *chatCo
 			DisabledTools: policy.disabledTools,
 		})
 		agentTools := getAgentToolsList(policy.disabledTools, policy.showMoodTools)
-		mcpTools := a.getChatMCPTools(ctx, userID, chatMessage.ChatID, policy.ritualIDs, chatCtx.model)
+		mcpTools := tools.OpenAIFunctionTools(a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs))
 		toolParams = provider.BuildOpenAITools(chatCtx.model, chatTools, agentTools, mcpTools)
 	}
 	a.recordToolDefinitionEstimate(modelCtx, toolParams)
@@ -1143,23 +1148,20 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 	claudeParams := modelContext.BuildClaudeParams(chatCtx.model)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
-	// Anthropic-native features (beta MCP, native web search) are not available on
-	// z.ai's compatible endpoint — gate them to native Anthropic only.
-	var mcpConfig *provider.ClaudeMCPConfig
-	if policy.toolsEnabled && nativeAnthropic {
-		mcpConfig = a.getChatClaudeMCPConfig(ctx, userID, chatMessage.ChatID, policy.ritualIDs)
+	claudeSpecs := tools.AgentFunctionToolSpecs(policy.showMoodTools)
+	if policy.toolsEnabled {
+		claudeSpecs = append(claudeSpecs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
 	}
-
-	claudeFunctionTools := claudeFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
+	claudeFunctionTools := claudeFunctionTools(claudeSpecs)
 	a.recordToolDefinitionEstimate(modelContext, claudeFunctionTools)
 	webSearchEnabled := policy.toolsEnabled && nativeAnthropic && !policy.disabledTools[tools.ToolNameWebSearch]
-	adapter := provider.NewClaudeAdapter(claudeProvider, claudeParams, claudeFunctionTools, webSearchEnabled, mcpConfig, policy.disabledTools)
+	adapter := provider.NewClaudeAdapter(claudeProvider, claudeParams, claudeFunctionTools, webSearchEnabled, policy.disabledTools)
 
 	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, generationOptions{
 		provider: "Claude",
 		mergeToolCalls: func(toolCalls []*models.ToolCall) []*models.ToolCall {
 			toolCalls = mergeWebSearchToolCalls(toolCalls, webSearchToolCallsFromClaudeMessages(adapter.AllRawMessages()...))
-			return mergeWebSearchToolCalls(toolCalls, webSearchToolCallsFromClaudeBetaMessages(adapter.AllRawBetaMessages()...))
+			return toolCalls
 		},
 	})
 }
@@ -1175,7 +1177,11 @@ func (a *Agent) generateAssistantForMessageGemini(ctx context.Context, userID uu
 	geminiParams := modelContext.BuildGeminiParams(chatCtx.model)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
-	geminiFunctionTools := geminiFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
+	geminiSpecs := tools.AgentFunctionToolSpecs(policy.showMoodTools)
+	if policy.toolsEnabled {
+		geminiSpecs = append(geminiSpecs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
+	}
+	geminiFunctionTools := geminiFunctionTools(geminiSpecs)
 	a.recordToolDefinitionEstimate(modelContext, geminiFunctionTools)
 	toolNames := make([]string, 0, len(geminiFunctionTools))
 	for _, t := range geminiFunctionTools {
@@ -1214,7 +1220,11 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	params := renderCtx.BuildOpenAIChatCompletionParams(a.localLLMModel)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
-	functionTools := openAIChatCompletionFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
+	localSpecs := tools.AgentFunctionToolSpecs(policy.showMoodTools)
+	if policy.toolsEnabled {
+		localSpecs = append(localSpecs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
+	}
+	functionTools := openAIChatCompletionFunctionTools(localSpecs)
 	a.recordToolDefinitionEstimate(modelContext, functionTools)
 
 	adapter := provider.NewLocalAdapter(a.LocalProvider, params, functionTools, policy.disabledTools)
@@ -1702,6 +1712,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 	expressionsEnabled := parentChat.PersonalityExpressionsEnabled
 
 	return &chatContext{
+		userID:                 userID,
 		chat:                   parentChat,
 		memories:               memories,
 		liveMemories:           liveMemories,

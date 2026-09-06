@@ -2485,6 +2485,14 @@ export interface paths {
                         /** @description Optional hex accent color for this personality (for example */
                         accent_color?: string | null;
                         thumbnail_circle?: components["schemas"]["PersonalityThumbnailCircle"];
+                        /** @description Default autoplay behavior for TTS when using this personality. */
+                        tts_autoplay_default?: boolean;
+                        /** @description Voice preset used for TTS. */
+                        voice?: string;
+                        /** @description Optional voice-style instruction passed to TTS synthesis. */
+                        voice_style?: string;
+                        /** @description Voice speed multiplier used for TTS. */
+                        voice_speed?: number;
                     };
                 };
             };
@@ -3349,6 +3357,14 @@ export interface paths {
                         /** @description Optional hex accent color for this personality (for example */
                         accent_color?: string | null;
                         thumbnail_circle?: components["schemas"]["PersonalityThumbnailCircle"];
+                        /** @description Default autoplay behavior for TTS when using this personality. */
+                        tts_autoplay_default?: boolean;
+                        /** @description Voice preset used for TTS. */
+                        voice?: string;
+                        /** @description Optional voice-style instruction passed to TTS synthesis. */
+                        voice_style?: string;
+                        /** @description Voice speed multiplier used for TTS. */
+                        voice_speed?: number;
                     };
                 };
             };
@@ -4790,6 +4806,8 @@ export interface paths {
                         tags?: string[];
                         /** @description Whether the chat is marked as favorite */
                         is_favorite?: boolean;
+                        /** @description Optional per-chat TTS autoplay override. Null/omitted means inherit personality default. */
+                        tts_autoplay_override?: boolean | null;
                     };
                 };
             };
@@ -4823,6 +4841,258 @@ export interface paths {
                 };
                 /** @description Personality or model not found / not owned by user */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/speech/stt/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start STT session
+         * @description Starts a session for chunked speech-to-text uploads.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["SpeechSTTSessionStartRequest"];
+                };
+            };
+            responses: {
+                /** @description STT session started */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SpeechSTTSessionResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/speech/stt/session/{id}/chunk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload STT audio chunk
+         * @description Uploads one audio chunk and returns transcript delta and accumulated transcript.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /** Format: binary */
+                        audio?: string;
+                        duration_seconds?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description STT chunk transcribed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SpeechSTTSessionResponse"];
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Session not found or expired */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/speech/stt/session/{id}/finalize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finalize STT session
+         * @description Finalizes a chunked STT session and returns final transcript.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["SpeechSTTFinalizeRequest"];
+                };
+            };
+            responses: {
+                /** @description STT session finalized */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SpeechSTTSessionResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Session not found or expired */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/speech/tts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stream text-to-speech audio
+         * @description Streams TTS audio chunks over server-sent events.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SpeechTTSRequest"];
+                };
+            };
+            responses: {
+                /** @description SSE stream with `status`, `audio_chunk`, and `done` events. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/event-stream": string;
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -4928,6 +5198,8 @@ export interface paths {
                         tags?: string[];
                         /** @description Optional favorite flag */
                         is_favorite?: boolean;
+                        /** @description Optional per-chat TTS autoplay override. Null means inherit personality default. */
+                        tts_autoplay_override?: boolean | null;
                     };
                 };
             };
@@ -5056,6 +5328,8 @@ export interface paths {
                         is_favorite?: boolean;
                         /** @description When true, hides the thread from default lists; set to false to restore from the archive */
                         archived?: boolean;
+                        /** @description Optional per-chat TTS autoplay override. Null means inherit personality default. */
+                        tts_autoplay_override?: boolean | null;
                     };
                 };
             };
@@ -6253,6 +6527,86 @@ export interface paths {
                 };
                 /** @description Premium plan required */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mcp-servers/test-connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test MCP server connection
+         * @description Tests a connector configuration by calling MCP `tools/list` using the provided unsaved form values.
+         *     This does not persist or modify connector records.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TestMCPServerConnectionRequest"];
+                };
+            };
+            responses: {
+                /** @description Connection test completed (pass/fail encoded in response body) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TestMCPServerConnectionResponse"];
+                    };
+                };
+                /** @description Invalid request data */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Premium plan required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Referenced MCP server not found */
+                404: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -7824,12 +8178,40 @@ export interface components {
             personality_name?: string;
             tags?: string[];
             is_favorite?: boolean;
+            /** @description Optional per-chat TTS autoplay override. Null means inherit personality default. */
+            tts_autoplay_override?: boolean | null;
             /** @description When true, the thread is in the archive and omitted from default list responses */
             archived?: boolean;
             /** Format: date-time */
             created_at?: string;
             /** Format: date-time */
             updated_at?: string;
+        };
+        SpeechSTTSessionStartRequest: {
+            operation_id?: string;
+            /** Format: uuid */
+            chat_id?: string;
+            /** Format: uuid */
+            message_id?: string;
+        };
+        SpeechSTTFinalizeRequest: {
+            duration_seconds?: number;
+        };
+        SpeechSTTSessionResponse: {
+            session_id: string;
+            operation_id?: string;
+            transcript: string;
+            delta_text?: string;
+            duration_seconds?: number;
+            done: boolean;
+        };
+        SpeechTTSRequest: {
+            text: string;
+            voice?: string;
+            voice_speed?: number;
+            voice_style?: string;
+            /** @enum {string} */
+            playback_mode?: "manual" | "autoplay";
         };
         ChatContext: {
             /** Format: uuid */
@@ -7853,6 +8235,22 @@ export interface components {
             description: string;
             /** Format: uri */
             server_url: string;
+            /** @description Runtime connector status (for example active, refresh_failed, invalid, disabled). */
+            status: string;
+            /** @description Optional machine/user-readable reason associated with the current status. */
+            status_reason?: string;
+            /**
+             * Format: date-time
+             * @description Most recent runtime discovery/health check timestamp.
+             */
+            last_checked_at?: string | null;
+            /**
+             * Format: date-time
+             * @description Most recent timestamp this connector was observed healthy.
+             */
+            last_healthy_at?: string | null;
+            /** @description Count of currently discovered tools for this connector. */
+            tool_count?: number;
             /** @description Optional MCP integration warning (for example token decryption failure) to surface to the user. */
             error_message?: string;
             default_enabled: boolean;
@@ -7889,6 +8287,27 @@ export interface components {
             authentication?: string | null;
             default_enabled?: boolean;
             ritual_ids?: string[];
+        };
+        TestMCPServerConnectionRequest: {
+            /** Format: uri */
+            server_url: string;
+            /**
+             * @description Optional authentication override for connection testing.
+             *     - omitted: for edits, fallback to stored token when connector_id is provided
+             *     - null: explicitly test without authentication
+             *     - string: use provided value
+             */
+            authentication?: string | null;
+            /**
+             * Format: uuid
+             * @description Optional existing connector id used for auth fallback when authentication is omitted.
+             */
+            connector_id?: string;
+        };
+        TestMCPServerConnectionResponse: {
+            pass: boolean;
+            tool_count: number;
+            message?: string;
         };
         /**
          * @example User
@@ -8182,6 +8601,14 @@ export interface components {
             accent_color?: string | null;
             /** @description Optional normalized portrait circle bounds used to focus circular thumbnails. */
             thumbnail_circle?: components["schemas"]["PersonalityThumbnailCircle"] | null;
+            /** @description Default TTS autoplay behavior for chats using this personality. */
+            tts_autoplay_default?: boolean;
+            /** @description Personality-level TTS voice preset. */
+            voice?: string;
+            /** @description Optional personality-level style instruction used for TTS synthesis. */
+            voice_style?: string;
+            /** @description Personality-level TTS speed multiplier. */
+            voice_speed?: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */

@@ -1582,6 +1582,20 @@ paths:
                   description: Optional hex accent color for this personality (for example #C2572A).
                 thumbnail_circle:
                   $ref: '#/components/schemas/PersonalityThumbnailCircle'
+                tts_autoplay_default:
+                  type: boolean
+                  description: Default autoplay behavior for TTS when using this personality.
+                voice:
+                  type: string
+                  description: Voice preset used for TTS.
+                voice_style:
+                  type: string
+                  description: Optional voice-style instruction passed to TTS synthesis.
+                voice_speed:
+                  type: number
+                  minimum: 0.25
+                  maximum: 4
+                  description: Voice speed multiplier used for TTS.
               required:
                 - name
                 - system_prompt
@@ -2145,6 +2159,20 @@ paths:
                   description: Optional hex accent color for this personality (for example #C2572A).
                 thumbnail_circle:
                   $ref: '#/components/schemas/PersonalityThumbnailCircle'
+                tts_autoplay_default:
+                  type: boolean
+                  description: Default autoplay behavior for TTS when using this personality.
+                voice:
+                  type: string
+                  description: Voice preset used for TTS.
+                voice_style:
+                  type: string
+                  description: Optional voice-style instruction passed to TTS synthesis.
+                voice_speed:
+                  type: number
+                  minimum: 0.25
+                  maximum: 4
+                  description: Voice speed multiplier used for TTS.
               required:
                 - name
                 - system_prompt
@@ -3261,6 +3289,10 @@ paths:
                 is_favorite:
                   type: boolean
                   description: Whether the chat is marked as favorite
+                tts_autoplay_override:
+                  type: boolean
+                  nullable: true
+                  description: Optional per-chat TTS autoplay override. Null/omitted means inherit personality default.
               required:
                 - name
       responses:
@@ -3284,6 +3316,148 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           description: Personality or model not found / not owned by user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /speech/stt/session:
+    post:
+      summary: Start STT session
+      description: Starts a session for chunked speech-to-text uploads.
+      tags: [Chat Management]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpeechSTTSessionStartRequest'
+      responses:
+        '200':
+          description: STT session started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpeechSTTSessionResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /speech/stt/session/{id}/chunk:
+    post:
+      summary: Upload STT audio chunk
+      description: Uploads one audio chunk and returns transcript delta and accumulated transcript.
+      tags: [Chat Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                audio:
+                  type: string
+                  format: binary
+                duration_seconds:
+                  type: integer
+      responses:
+        '200':
+          description: STT chunk transcribed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpeechSTTSessionResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Session not found or expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /speech/stt/session/{id}/finalize:
+    post:
+      summary: Finalize STT session
+      description: Finalizes a chunked STT session and returns final transcript.
+      tags: [Chat Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpeechSTTFinalizeRequest'
+      responses:
+        '200':
+          description: STT session finalized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpeechSTTSessionResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Session not found or expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /speech/tts:
+    post:
+      summary: Stream text-to-speech audio
+      description: Streams TTS audio chunks over server-sent events.
+      tags: [Chat Management]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpeechTTSRequest'
+      responses:
+        '200':
+          description: SSE stream with `status`, `audio_chunk`, and `done` events.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
           content:
             application/json:
               schema:
@@ -3367,6 +3541,10 @@ paths:
                 is_favorite:
                   type: boolean
                   description: Optional favorite flag
+                tts_autoplay_override:
+                  type: boolean
+                  nullable: true
+                  description: Optional per-chat TTS autoplay override. Null means inherit personality default.
               required:
                 - name
       responses:
@@ -3443,6 +3621,10 @@ paths:
                 archived:
                   type: boolean
                   description: When true, hides the thread from default lists; set to false to restore from the archive
+                tts_autoplay_override:
+                  type: boolean
+                  nullable: true
+                  description: Optional per-chat TTS autoplay override. Null means inherit personality default.
       responses:
         '200':
           description: Chat updated successfully
@@ -4339,6 +4521,51 @@ paths:
                 $ref: '#/components/schemas/Error'
         '403':
           description: Premium plan required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /mcp-servers/test-connection:
+    post:
+      summary: Test MCP server connection
+      description: |
+        Tests a connector configuration by calling MCP `tools/list` using the provided unsaved form values.
+        This does not persist or modify connector records.
+      tags: [MCP Integrations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestMCPServerConnectionRequest'
+      responses:
+        '200':
+          description: Connection test completed (pass/fail encoded in response body)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestMCPServerConnectionResponse'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Premium plan required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Referenced MCP server not found
           content:
             application/json:
               schema:
@@ -5815,6 +6042,10 @@ components:
             maxLength: 10
         is_favorite:
           type: boolean
+        tts_autoplay_override:
+          type: boolean
+          nullable: true
+          description: Optional per-chat TTS autoplay override. Null means inherit personality default.
         archived:
           type: boolean
           description: When true, the thread is in the archive and omitted from default list responses
@@ -5834,6 +6065,64 @@ components:
         archived: false
         created_at: "2024-01-01T00:00:00Z"
         updated_at: "2024-01-01T00:00:00Z"
+
+    SpeechSTTSessionStartRequest:
+      type: object
+      properties:
+        operation_id:
+          type: string
+        chat_id:
+          type: string
+          format: uuid
+        message_id:
+          type: string
+          format: uuid
+
+    SpeechSTTFinalizeRequest:
+      type: object
+      properties:
+        duration_seconds:
+          type: integer
+          minimum: 1
+
+    SpeechSTTSessionResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+        operation_id:
+          type: string
+        transcript:
+          type: string
+        delta_text:
+          type: string
+        duration_seconds:
+          type: integer
+        done:
+          type: boolean
+      required:
+        - session_id
+        - transcript
+        - done
+
+    SpeechTTSRequest:
+      type: object
+      properties:
+        text:
+          type: string
+        voice:
+          type: string
+        voice_speed:
+          type: number
+          minimum: 0.25
+          maximum: 4
+        voice_style:
+          type: string
+        playback_mode:
+          type: string
+          enum: [manual, autoplay]
+      required:
+        - text
 
     ChatContext:
       type: object
@@ -5878,6 +6167,26 @@ components:
         server_url:
           type: string
           format: uri
+        status:
+          type: string
+          description: Runtime connector status (for example active, refresh_failed, invalid, disabled).
+        status_reason:
+          type: string
+          description: Optional machine/user-readable reason associated with the current status.
+        last_checked_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Most recent runtime discovery/health check timestamp.
+        last_healthy_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Most recent timestamp this connector was observed healthy.
+        tool_count:
+          type: integer
+          minimum: 0
+          description: Count of currently discovered tools for this connector.
         error_message:
           type: string
           description: Optional MCP integration warning (for example token decryption failure) to surface to the user.
@@ -5901,6 +6210,7 @@ components:
         - name
         - description
         - server_url
+        - status
         - default_enabled
         - created_at
         - updated_at
@@ -5954,6 +6264,41 @@ components:
           items:
             type: string
             format: uuid
+
+    TestMCPServerConnectionRequest:
+      type: object
+      properties:
+        server_url:
+          type: string
+          format: uri
+        authentication:
+          type: string
+          nullable: true
+          description: |
+            Optional authentication override for connection testing.
+            - omitted: for edits, fallback to stored token when connector_id is provided
+            - null: explicitly test without authentication
+            - string: use provided value
+        connector_id:
+          type: string
+          format: uuid
+          description: Optional existing connector id used for auth fallback when authentication is omitted.
+      required:
+        - server_url
+
+    TestMCPServerConnectionResponse:
+      type: object
+      properties:
+        pass:
+          type: boolean
+        tool_count:
+          type: integer
+          minimum: 0
+        message:
+          type: string
+      required:
+        - pass
+        - tool_count
 
     # Chat Message Schemas
     MessageOrigin:
@@ -6401,6 +6746,20 @@ components:
             - $ref: '#/components/schemas/PersonalityThumbnailCircle'
           nullable: true
           description: Optional normalized portrait circle bounds used to focus circular thumbnails.
+        tts_autoplay_default:
+          type: boolean
+          description: Default TTS autoplay behavior for chats using this personality.
+        voice:
+          type: string
+          description: Personality-level TTS voice preset.
+        voice_style:
+          type: string
+          description: Optional personality-level style instruction used for TTS synthesis.
+        voice_speed:
+          type: number
+          minimum: 0.25
+          maximum: 4
+          description: Personality-level TTS speed multiplier.
         created_at:
           type: string
           format: date-time

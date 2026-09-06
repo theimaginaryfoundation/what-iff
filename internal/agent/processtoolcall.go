@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
@@ -30,6 +31,9 @@ func getAgentToolsList(disabledTools map[string]bool, includeMoodTools bool) []r
 func (a *Agent) dispatchToolUse(ctx context.Context, chatCtx *chatContext, use provider.ToolUse) (string, []*models.FileAttachment, error) {
 	handler, ok := a.toolHandlers(chatCtx)[use.Name]
 	if !ok {
+		if strings.HasPrefix(use.Name, "mcp__") {
+			return a.dispatchMCPToolUse(ctx, chatCtx, use)
+		}
 		return "", nil, fmt.Errorf("unknown tool: %s", use.Name)
 	}
 	return handler(ctx, use.Input)
@@ -87,4 +91,23 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 		}
 	}
 	return handlers
+}
+
+func (a *Agent) dispatchMCPToolUse(ctx context.Context, chatCtx *chatContext, use provider.ToolUse) (string, []*models.FileAttachment, error) {
+	if a.mcpClient == nil {
+		return "", nil, fmt.Errorf("mcp client is not configured")
+	}
+	if chatCtx == nil || chatCtx.chat == nil {
+		return "", nil, fmt.Errorf("mcp tool requires an active chat context")
+	}
+	servers := chatCtx.mcpServers
+	if len(servers) == 0 {
+		servers = a.getChatMCPServers(ctx, chatCtx.userID, chatCtx.chat.ID, nil)
+		chatCtx.mcpServers = servers
+	}
+	out, err := a.mcpClient.CallToolByFullName(ctx, servers, use.Name, use.Input)
+	if err != nil {
+		return "", nil, err
+	}
+	return out, nil, nil
 }

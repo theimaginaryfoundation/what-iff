@@ -52,6 +52,16 @@
                   : 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-300'">
                     {{ server.default_enabled ? 'Default enabled' : 'Default disabled' }}
                   </span>
+                  <span
+                    class="inline-block mt-2 ml-2 px-2 py-1 rounded-full text-[11px] font-medium"
+                    [ngClass]="server.status === 'active'
+                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300'
+                      : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'">
+                    {{ server.status || 'active' }}
+                  </span>
+                  @if (server.status_reason) {
+                    <p class="text-[11px] text-amber-700 dark:text-amber-300 mt-1">{{ server.status_reason }}</p>
+                  }
                 </div>
                 <div class="flex gap-2">
                   <button
@@ -100,17 +110,17 @@
     <div class="space-y-3">
       <div>
         <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
-        <input [ngModel]="formName()" (ngModelChange)="formName.set($event)" type="text"
+        <input [ngModel]="formName()" (ngModelChange)="formName.set($event); onFormValueChange()" type="text"
           class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
       </div>
       <div>
         <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
-        <textarea [ngModel]="formDescription()" (ngModelChange)="formDescription.set($event)" rows="3"
+        <textarea [ngModel]="formDescription()" (ngModelChange)="formDescription.set($event); onFormValueChange()" rows="3"
         class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm"></textarea>
       </div>
       <div>
         <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Connector URL</label>
-        <input [ngModel]="formServerURL()" (ngModelChange)="formServerURL.set($event)" type="text"
+        <input [ngModel]="formServerURL()" (ngModelChange)="formServerURL.set($event); onFormValueChange()" type="text"
           class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
       </div>
       <div>
@@ -174,6 +184,12 @@
 
     <div class="flex gap-2 mt-4">
       <button
+        (click)="test()"
+        [disabled]="!canTest()"
+        class="px-4 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200 dark:text-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-700 dark:hover:bg-indigo-900/30 disabled:opacity-50">
+        {{ isTesting() ? 'Testing...' : 'Test' }}
+      </button>
+      <button
         (click)="save()"
         [disabled]="!canSave()"
         class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50">
@@ -187,5 +203,14 @@
         </button>
       }
     </div>
+    @if (testResult()) {
+      <p class="mt-2 text-xs" [ngClass]="testResult()!.pass ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'">
+        {{ testResult()!.pass ? 'Connection successful' : 'Connection failed' }}.
+        Tools discovered: {{ testResult()!.tool_count }}.
+        @if (testResult()!.message && !testResult()!.pass) {
+          <span> {{ testResult()!.message }}</span>
+        }
+      </p>
+    }
   </div>
 </div>

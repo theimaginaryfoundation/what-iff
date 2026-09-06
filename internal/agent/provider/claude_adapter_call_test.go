@@ -20,7 +20,7 @@ func newTestClaudeAdapter(baseURL string) *ClaudeAdapter {
 			anthropic.NewUserMessage(anthropic.NewTextBlock("hi")),
 		},
 	}
-	return NewClaudeAdapter(provider, params, nil, false, nil, nil)
+	return NewClaudeAdapter(provider, params, nil, false, nil)
 }
 
 func claudeMessageTextJSON(id, text string) string {

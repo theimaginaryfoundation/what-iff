@@ -14,6 +14,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/embedding"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	agentjobscheduler "github.com/theimaginaryfoundation/what-iff/internal/agentjobs/scheduler"
 	"github.com/theimaginaryfoundation/what-iff/internal/buildinfo"
@@ -34,6 +35,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/ritual"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/role"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/search"
+	"github.com/theimaginaryfoundation/what-iff/internal/handlers/speech"
 	toolshandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/user"
 	versionhandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/version"
@@ -222,12 +224,22 @@ func (s *Server) setupRoutes() {
 	userHandler := user.NewHandler(dataStore, s.logger, s.config.AllowedEmails, s.config.Environment)
 	jobHandler := job.NewHandlerWithCanceller(dataStore, agent, s.logger)
 	memoryHandler := memory.NewHandler(dataStore, s.logger, s.config.OpenAIKey, providerHTTPClient)
-	mcpServerHandler := mcpserver.NewHandler(dataStore, s.logger)
+	mcpServerHandler := mcpserver.NewHandler(dataStore, mcpclient.New(http.DefaultClient, s.logger), s.logger)
 	modelHandler := model.NewHandler(dataStore, s.logger)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)
 	chatHandler := chat.NewHandler(dataStore, s.logger, agent, chat.HandlerConfig{
 		RequireBilling: s.config.RequireBilling,
 	})
+	clientOptions := []option.RequestOption{option.WithAPIKey(s.config.OpenAIKey)}
+	if providerHTTPClient != nil {
+		clientOptions = append(clientOptions, option.WithHTTPClient(providerHTTPClient))
+	}
+	oaiClient := openai.NewClient(clientOptions...)
+	speechProvider := provider.NewOpenAIProviderWithSpeechModels(dataStore, &oaiClient, fileStore, s.telemetry, provider.SpeechModelConfig{
+		STTModel: s.config.SpeechSTTModel,
+		TTSModel: s.config.SpeechTTSModel,
+	})
+	speechHandler := speech.NewHandler(dataStore, s.logger, s.telemetry.Metrics, speechProvider)
 	agentJobHandler := agentjob.NewHandler(dataStore, agent, s.agentJobScheduler, s.logger)
 	ritualHandler := ritual.NewHandler(dataStore, s.logger)
 	fileAttachmentHandler := fileattachment.NewHandler(dataStore, s.logger, agent)
@@ -272,7 +284,7 @@ func (s *Server) setupRoutes() {
 
 		s.logger.Info("Test handler: Successfully authenticated", zap.String("user_id", userID.String()))
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fmt.Sprintf(`{"status":"authenticated","user_id":"%s"}`, userID.String())))
+		_, _ = fmt.Fprintf(w, `{"status":"authenticated","user_id":"%s"}`, userID.String())
 	}).Methods("GET")
 
 	// Register protected routes
@@ -280,6 +292,7 @@ func (s *Server) setupRoutes() {
 	webhookHandler.RegisterTokenRoutes(authRouter)
 	jobHandler.RegisterRoutes(authRouter)
 	chatHandler.RegisterRoutes(authRouter)
+	speechHandler.RegisterRoutes(authRouter)
 	agentJobHandler.RegisterRoutes(authRouter)
 	memoryHandler.RegisterRoutes(authRouter)
 	mcpServerHandler.RegisterRoutes(authRouter)
@@ -429,6 +442,13 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Flush() {
+	flusher, ok := r.ResponseWriter.(http.Flusher)
+	if ok {
+		flusher.Flush()
+	}
 }
 
 func (s *Server) metricsMiddleware(next http.Handler) http.Handler {

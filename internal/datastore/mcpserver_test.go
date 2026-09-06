@@ -28,6 +28,11 @@ func createMCPServerTestSchema(t *testing.T, db *sql.DB) {
 			description text NOT NULL,
 			server_url text NOT NULL,
 			auth_token text,
+			status text NOT NULL DEFAULT 'active',
+			status_reason text NOT NULL DEFAULT '',
+			last_checked_at datetime,
+			last_healthy_at datetime,
+			tool_count integer NOT NULL DEFAULT 0,
 			default_enabled bool NOT NULL DEFAULT false,
 			user_mcp_servers uuid NOT NULL
 		)`,

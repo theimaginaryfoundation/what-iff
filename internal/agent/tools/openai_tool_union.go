@@ -8,15 +8,23 @@ import (
 // OpenAIToolUnionParam builds a Responses API function tool from a FunctionToolSpec
 // (JSON Schema object with type/properties/required).
 func OpenAIToolUnionParam(spec FunctionToolSpec) responses.ToolUnionParam {
+	parameters := openai.FunctionParameters{
+		"type": "object",
+	}
+	if spec.Properties != nil {
+		parameters["properties"] = spec.Properties
+	} else {
+		parameters["properties"] = map[string]any{}
+	}
+	if len(spec.Required) > 0 {
+		parameters["required"] = spec.Required
+	}
+
 	return responses.ToolUnionParam{
 		OfFunction: &responses.FunctionToolParam{
 			Name:        spec.Name,
 			Description: openai.String(spec.Description),
-			Parameters: openai.FunctionParameters{
-				"type":       "object",
-				"properties": spec.Properties,
-				"required":   spec.Required,
-			},
+			Parameters:  parameters,
 		},
 	}
 }

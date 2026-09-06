@@ -31,6 +31,19 @@ func (MCPServer) Fields() []ent.Field {
 		field.String("auth_token").
 			Optional().
 			Sensitive(),
+		field.String("status").
+			Default("active"),
+		field.String("status_reason").
+			Optional().
+			Default(""),
+		field.Time("last_checked_at").
+			Optional().
+			Nillable(),
+		field.Time("last_healthy_at").
+			Optional().
+			Nillable(),
+		field.Int("tool_count").
+			Default(0),
 		field.Bool("default_enabled").
 			Default(false),
 	}
