@@ -1,117 +1,115 @@
 import { EmojiSearch } from '@ctrl/ngx-emoji-mart';
 import { EmojiData } from '@ctrl/ngx-emoji-mart/ngx-emoji';
 
-export interface CompletedEmojiShortcode {
+/**
+ * Shortest `:query` we search for. One character (`:a`) matches almost every
+ * emoji and is pure noise, so the popup stays quiet until there is something
+ * worth narrowing on.
+ */
+export const MIN_EMOJI_QUERY_LENGTH = 2;
+
+/** Default number of suggestions shown in the composer autocomplete popup. */
+export const EMOJI_SUGGESTION_LIMIT = 8;
+
+/**
+ * The in-progress `:shortcode` fragment immediately before the caret. Unlike a
+ * completed `:shortcode:`, this has no trailing colon — it is what the user is
+ * still typing, and drives the suggestion popup.
+ */
+export interface ActiveEmojiShortcode {
+  /** Lowercased text typed after the opening colon (colon excluded). */
   query: string;
+  /** Index of the opening colon within the draft. */
   start: number;
+  /** Caret index — the exclusive end of the fragment to replace on accept. */
   end: number;
 }
 
-/**
- * Return the completed :shortcode: immediately before the caret.
- *
- * A shortcode must begin at the start of the draft or after whitespace/opening
- * punctuation. That keeps URL-ish and ordinary colon-delimited text from being
- * rewritten while the user is typing.
- */
-export function completedEmojiShortcode(value: string, caret: number): CompletedEmojiShortcode | null {
-  if (caret < 3 || caret > value.length || value[caret - 1] !== ':') {
-    return null;
-  }
-
-  const beforeCaret = value.slice(0, caret);
-  const match = /:([A-Za-z0-9_+\-]{1,64}):$/.exec(beforeCaret);
-  if (!match || match.index < 0) {
-    return null;
-  }
-
-  const start = match.index;
-  if (start > 0 && !/[\s([{]/.test(value[start - 1])) {
-    return null;
-  }
-
-  return { query: match[1].toLowerCase(), start, end: caret };
+/** A single emoji offered in the composer autocomplete popup. */
+export interface EmojiSuggestion {
+  /** Stable Emoji Mart id, used for list tracking. */
+  id: string;
+  /** Canonical `:short_name:` label shown beside the glyph. */
+  colons: string;
+  /** The native emoji character inserted when the suggestion is accepted. */
+  native: string;
 }
 
-type SearchableEmoji = EmojiData & {
-  id?: string;
-  name?: string;
-  shortNames?: string[];
-  keywords?: string[];
-};
+/**
+ * A shortcode may only begin at the start of the draft or after whitespace or
+ * opening punctuation. That keeps URL-ish and identifier-ish colons (e.g.
+ * `https://host/:id`) from ever opening the popup.
+ */
+const ACTIVE_SHORTCODE = /(^|[\s([{])(:)([A-Za-z0-9_+\-]{1,64})$/;
 
 /**
- * Resolve a shortcode from Emoji Mart search results without accepting an
- * arbitrary fuzzy first hit. Exact IDs/short names win. For convenience aliases
- * such as :fox: -> fox_face, accept only a single result whose name/id/keyword
- * contains the query as a whole word.
+ * Return the in-progress `:shortcode` immediately before the caret, or null when
+ * the caret is not inside one. This never rewrites the draft — it only reports
+ * what the user is typing so the composer can offer suggestions.
  */
-export function resolveEmojiSearchResult(query: string, results: readonly EmojiData[]): EmojiData | null {
+export function activeEmojiShortcodeQuery(value: string, caret: number): ActiveEmojiShortcode | null {
+  if (caret < 0 || caret > value.length) {
+    return null;
+  }
+
+  const match = ACTIVE_SHORTCODE.exec(value.slice(0, caret));
+  if (!match) {
+    return null;
+  }
+
+  const query = match[3].toLowerCase();
+  if (query.length < MIN_EMOJI_QUERY_LENGTH) {
+    return null;
+  }
+
+  // match[1] is the boundary char (or empty at start); the colon follows it.
+  const start = match.index + match[1].length;
+  return { query, start, end: caret };
+}
+
+/**
+ * Look up emoji suggestions for an in-progress shortcode query. Returns
+ * insertable suggestions (those we can render as a native character), de-duped
+ * by id and capped at {@link EMOJI_SUGGESTION_LIMIT}.
+ */
+export function searchEmojiShortcodes(
+  emojiSearch: EmojiSearch,
+  query: string,
+  limit: number = EMOJI_SUGGESTION_LIMIT,
+): EmojiSuggestion[] {
   const normalized = query.trim().toLowerCase();
-  if (!normalized) return null;
+  if (normalized.length < MIN_EMOJI_QUERY_LENGTH) {
+    return [];
+  }
 
-  const searchable = results as readonly SearchableEmoji[];
-  const exact = searchable.find(emoji => emojiNames(emoji).includes(normalized));
-  if (exact) return exact;
+  const results = emojiSearch.search(normalized, undefined, limit) ?? [];
+  const suggestions: EmojiSuggestion[] = [];
+  const seen = new Set<string>();
 
-  const wordMatches = searchable.filter(emoji => emojiWords(emoji).has(normalized));
-  return wordMatches.length === 1 ? wordMatches[0] : null;
+  for (const emoji of results) {
+    const native = emojiCharFromData(emoji);
+    if (!native) {
+      continue;
+    }
+    const id = (emoji as { id?: string }).id ?? native;
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    suggestions.push({ id, colons: emojiColons(emoji, id), native });
+  }
+
+  return suggestions;
 }
 
-/**
- * Install the editor-local shortcode behavior before Angular's textarea input
- * listener runs. The capture listener is intentionally scoped to the one chat
- * composer textarea, so transport/persistence code never rewrites user text.
- *
- * The listener mutates the textarea value in the capture phase; the original
- * input event then reaches ChatComposerComponent.onInput(), which emits the
- * already-expanded draft through the normal controlled-input path.
- */
-export function installComposerEmojiShortcodes(emojiSearch: EmojiSearch): void {
-  if (typeof document === 'undefined' || composerShortcodesInstalled) return;
-  composerShortcodesInstalled = true;
-
-  document.addEventListener('input', event => {
-    const textarea = event.target;
-    if (!(textarea instanceof HTMLTextAreaElement) || textarea.id !== 'chat-composer-input') return;
-
-    const start = textarea.selectionStart ?? textarea.value.length;
-    const end = textarea.selectionEnd ?? start;
-    if (start !== end) return;
-
-    const shortcode = completedEmojiShortcode(textarea.value, start);
-    if (!shortcode) return;
-
-    const results = emojiSearch.search(shortcode.query) ?? [];
-    const emoji = resolveEmojiSearchResult(shortcode.query, results);
-    const native = emoji ? emojiChar(emoji) : '';
-    if (!native) return;
-
-    textarea.value = textarea.value.slice(0, shortcode.start) + native + textarea.value.slice(shortcode.end);
-    const caret = shortcode.start + native.length;
-    textarea.setSelectionRange(caret, caret);
-  }, true);
-}
-
-let composerShortcodesInstalled = false;
-
-function emojiNames(emoji: SearchableEmoji): string[] {
-  return [emoji.id ?? '', ...(emoji.shortNames ?? [])]
-    .map(name => name.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-function emojiWords(emoji: SearchableEmoji): Set<string> {
-  const fields = [emoji.id ?? '', emoji.name ?? '', ...(emoji.shortNames ?? []), ...(emoji.keywords ?? [])];
-  const words = fields
-    .flatMap(field => field.toLowerCase().split(/[^a-z0-9+\-]+/))
-    .filter(Boolean);
-  return new Set(words);
-}
-
-function emojiChar(emoji: EmojiData): string {
-  if (emoji.native) return emoji.native;
-  if (!emoji.unified) return '';
+/** Resolve the native character for an emoji, from `native` or its codepoints. */
+export function emojiCharFromData(emoji: EmojiData): string {
+  if (emoji.native) {
+    return emoji.native;
+  }
+  if (!emoji.unified) {
+    return '';
+  }
   try {
     return emoji.unified
       .split('-')
@@ -120,4 +118,12 @@ function emojiChar(emoji: EmojiData): string {
   } catch {
     return '';
   }
+}
+
+function emojiColons(emoji: EmojiData, id: string): string {
+  const colons = (emoji as { colons?: string }).colons;
+  if (colons) {
+    return colons;
+  }
+  return `:${id}:`;
 }
