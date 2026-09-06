@@ -1,6 +1,7 @@
 import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { MCPServerService } from '../../core/services/mcp-server.service';
 import { RitualService } from '../../core/services/ritual.service';
@@ -24,6 +25,7 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
   private confirmationService = inject(ConfirmationService);
   private mcpServerService = inject(MCPServerService);
   private ritualService = inject(RitualService);
+  private route = inject(ActivatedRoute);
 
   isLoading = signal(false);
   isSaving = signal(false);
@@ -38,12 +40,21 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
   formName = signal('');
   formDescription = signal('');
   formServerURL = signal('');
+  formAuthMode = signal<'header' | 'oauth'>('header');
   formAuthentication = signal('');
   formClearAuthentication = signal(false);
+  formOAuthAuthURL = signal('');
+  formOAuthTokenURL = signal('');
+  formOAuthClientID = signal('');
+  formOAuthClientSecret = signal('');
+  formClearOAuthClientSecret = signal(false);
+  formOAuthScopes = signal('');
+  formOAuthPKCEPolicy = signal<'required' | 'supported' | 'not_supported'>('supported');
   formDefaultEnabled = signal(false);
   rituals = signal<Ritual[]>([]);
   selectedRitualIds = signal<string[]>([]);
   testResult = signal<TestMCPServerConnectionResponse | null>(null);
+  oauthBanner = signal<{ success: boolean; message: string } | null>(null);
 
   canSave = computed(() => {
     return this.formName().trim() !== '' &&
@@ -53,10 +64,18 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
   });
 
   canTest = computed(() => {
-    return this.formServerURL().trim() !== '' && !this.isTesting() && !this.isSaving();
+    return this.formAuthMode() !== 'oauth' && this.formServerURL().trim() !== '' && !this.isTesting() && !this.isSaving();
   });
 
   ngOnInit(): void {
+    const status = this.route.snapshot.queryParamMap.get('oauth_status');
+    const message = this.route.snapshot.queryParamMap.get('oauth_message');
+    if (status === 'success' || status === 'error') {
+      this.oauthBanner.set({
+        success: status === 'success',
+        message: message?.trim() || (status === 'success' ? 'Connector authenticated successfully.' : 'Connector authentication failed.')
+      });
+    }
     this.loadServers();
     this.loadRituals();
   }
@@ -101,8 +120,16 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
     this.formName.set('');
     this.formDescription.set('');
     this.formServerURL.set('');
+    this.formAuthMode.set('header');
     this.formAuthentication.set('');
     this.formClearAuthentication.set(false);
+    this.formOAuthAuthURL.set('');
+    this.formOAuthTokenURL.set('');
+    this.formOAuthClientID.set('');
+    this.formOAuthClientSecret.set('');
+    this.formClearOAuthClientSecret.set(false);
+    this.formOAuthScopes.set('');
+    this.formOAuthPKCEPolicy.set('supported');
     this.formDefaultEnabled.set(false);
     this.selectedRitualIds.set([]);
     this.clearTestResult();
@@ -115,8 +142,16 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
         this.formName.set(full.name);
         this.formDescription.set(full.description);
         this.formServerURL.set(full.server_url);
+        this.formAuthMode.set((full.auth_mode || 'header') as 'header' | 'oauth');
         this.formAuthentication.set('');
         this.formClearAuthentication.set(false);
+        this.formOAuthAuthURL.set(full.oauth_auth_url || '');
+        this.formOAuthTokenURL.set(full.oauth_token_url || '');
+        this.formOAuthClientID.set(full.oauth_client_id || '');
+        this.formOAuthClientSecret.set('');
+        this.formClearOAuthClientSecret.set(false);
+        this.formOAuthScopes.set((full.oauth_scopes || []).join(' '));
+        this.formOAuthPKCEPolicy.set((full.oauth_pkce_policy || 'supported') as 'required' | 'supported' | 'not_supported');
         this.formDefaultEnabled.set(full.default_enabled);
         this.selectedRitualIds.set(full.ritual_ids ? [...full.ritual_ids] : []);
         this.clearTestResult();
@@ -126,8 +161,16 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
         this.formName.set(server.name);
         this.formDescription.set(server.description);
         this.formServerURL.set(server.server_url);
+        this.formAuthMode.set((server.auth_mode || 'header') as 'header' | 'oauth');
         this.formAuthentication.set('');
         this.formClearAuthentication.set(false);
+        this.formOAuthAuthURL.set(server.oauth_auth_url || '');
+        this.formOAuthTokenURL.set(server.oauth_token_url || '');
+        this.formOAuthClientID.set(server.oauth_client_id || '');
+        this.formOAuthClientSecret.set('');
+        this.formClearOAuthClientSecret.set(false);
+        this.formOAuthScopes.set((server.oauth_scopes || []).join(' '));
+        this.formOAuthPKCEPolicy.set((server.oauth_pkce_policy || 'supported') as 'required' | 'supported' | 'not_supported');
         this.formDefaultEnabled.set(server.default_enabled);
         this.selectedRitualIds.set(server.ritual_ids ? [...server.ritual_ids] : []);
         this.clearTestResult();
@@ -158,6 +201,12 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
   unsetAuthenticationToken(): void {
     this.formAuthentication.set('');
     this.formClearAuthentication.set(true);
+    this.clearTestResult();
+  }
+
+  unsetOAuthClientSecret(): void {
+    this.formOAuthClientSecret.set('');
+    this.formClearOAuthClientSecret.set(true);
     this.clearTestResult();
   }
 
@@ -199,9 +248,16 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
             name: this.formName().trim(),
             description: this.formDescription().trim(),
             server_url: this.formServerURL().trim(),
+            auth_mode: this.formAuthMode(),
             authentication: this.formClearAuthentication() ? null : this.formAuthentication(),
             default_enabled: this.formDefaultEnabled(),
-            ritual_ids: [...this.selectedRitualIds()]
+            ritual_ids: [...this.selectedRitualIds()],
+            oauth_auth_url: this.formOAuthAuthURL().trim() || undefined,
+            oauth_token_url: this.formOAuthTokenURL().trim() || undefined,
+            oauth_client_id: this.formOAuthClientID().trim() || undefined,
+            oauth_client_secret: this.formClearOAuthClientSecret() ? null : (this.formOAuthClientSecret().trim() || undefined),
+            oauth_scopes: this.formOAuthScopes().trim() === '' ? [] : this.formOAuthScopes().trim().split(/\s+/),
+            oauth_pkce_policy: this.formOAuthPKCEPolicy()
           };
           return this.mcpServerService.updateMCPServer(editing.id, payload);
         })()
@@ -210,8 +266,15 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
             name: this.formName().trim(),
             description: this.formDescription().trim(),
             server_url: this.formServerURL().trim(),
+            auth_mode: this.formAuthMode(),
             authentication: this.formAuthentication(),
-            default_enabled: this.formDefaultEnabled()
+            default_enabled: this.formDefaultEnabled(),
+            oauth_auth_url: this.formOAuthAuthURL().trim() || undefined,
+            oauth_token_url: this.formOAuthTokenURL().trim() || undefined,
+            oauth_client_id: this.formOAuthClientID().trim() || undefined,
+            oauth_client_secret: this.formOAuthClientSecret().trim() || undefined,
+            oauth_scopes: this.formOAuthScopes().trim() === '' ? [] : this.formOAuthScopes().trim().split(/\s+/),
+            oauth_pkce_policy: this.formOAuthPKCEPolicy()
           };
           return this.mcpServerService.createMCPServer(payload);
         })();
@@ -263,6 +326,28 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
     return server.id;
   }
 
+  authActionLabel(server: MCPServer): string {
+    if ((server.auth_mode || 'header') !== 'oauth') return '';
+    return server.oauth_has_refresh_token || server.oauth_has_access_token ? 'Reauthenticate' : 'Authenticate';
+  }
+
+  authenticate(server: MCPServer): void {
+    if ((server.auth_mode || 'header') !== 'oauth') return;
+    this.mcpServerService.startOAuth(server.id, { redirect_after: window.location.href }).subscribe({
+      next: (res) => {
+        if (res.authorization_url) {
+          window.location.href = res.authorization_url;
+        }
+      },
+      error: async (error) => {
+        await this.confirmationService.alert({
+          message: error?.message || 'Failed to start connector authentication.',
+          type: 'danger'
+        });
+      }
+    });
+  }
+
   private clearTestResult(): void {
     this.testResult.set(null);
   }
@@ -270,7 +355,8 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
   private buildTestPayload(): TestMCPServerConnectionRequest {
     const editing = this.editingServer();
     const payload: TestMCPServerConnectionRequest = {
-      server_url: this.formServerURL().trim()
+      server_url: this.formServerURL().trim(),
+      auth_mode: this.formAuthMode()
     };
 
     if (editing) {

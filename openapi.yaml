@@ -4571,6 +4571,76 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /mcp-servers/{id}/oauth/start:
+    post:
+      summary: Start connector OAuth authentication
+      description: Creates an OAuth authorization session and returns provider authorization URL.
+      tags: [MCP Integrations]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartMCPServerOAuthRequest'
+      responses:
+        '200':
+          description: Authorization URL generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartMCPServerOAuthResponse'
+        '400':
+          description: Invalid connector OAuth configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: MCP server not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /mcp-servers/oauth/callback:
+    get:
+      summary: OAuth callback for connector authentication
+      description: Handles OAuth callback and redirects the browser back to the integrations view with status query params.
+      tags: [MCP Integrations]
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: code
+          in: query
+          schema:
+            type: string
+        - name: error
+          in: query
+          schema:
+            type: string
+        - name: error_description
+          in: query
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to integrations page with oauth_status query parameter.
+
   /mcp-servers/{id}:
     get:
       summary: Get MCP server configuration
@@ -6167,6 +6237,47 @@ components:
         server_url:
           type: string
           format: uri
+        auth_mode:
+          type: string
+          enum: [header, oauth]
+        oauth_auth_url:
+          type: string
+          format: uri
+        oauth_token_url:
+          type: string
+          format: uri
+        oauth_client_id:
+          type: string
+        oauth_scopes:
+          type: array
+          items:
+            type: string
+        oauth_pkce_policy:
+          type: string
+          enum: [required, supported, not_supported]
+        oauth_access_token_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        oauth_refresh_token_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        oauth_authenticated_at:
+          type: string
+          format: date-time
+          nullable: true
+        oauth_last_refresh_at:
+          type: string
+          format: date-time
+          nullable: true
+        oauth_refresh_fail_count:
+          type: integer
+          minimum: 0
+        oauth_has_refresh_token:
+          type: boolean
+        oauth_has_access_token:
+          type: boolean
         status:
           type: string
           description: Runtime connector status (for example active, refresh_failed, invalid, disabled).
@@ -6225,9 +6336,29 @@ components:
         server_url:
           type: string
           format: uri
+        auth_mode:
+          type: string
+          enum: [header, oauth]
         authentication:
           type: string
           description: Optional authentication token to be sent to MCP server as Authorization header.
+        oauth_auth_url:
+          type: string
+          format: uri
+        oauth_token_url:
+          type: string
+          format: uri
+        oauth_client_id:
+          type: string
+        oauth_client_secret:
+          type: string
+        oauth_scopes:
+          type: array
+          items:
+            type: string
+        oauth_pkce_policy:
+          type: string
+          enum: [required, supported, not_supported]
         default_enabled:
           type: boolean
       required:
@@ -6253,10 +6384,31 @@ components:
         server_url:
           type: string
           format: uri
+        auth_mode:
+          type: string
+          enum: [header, oauth]
         authentication:
           type: string
           nullable: true
           description: Optional authentication token patch. Null clears token; empty string keeps existing token.
+        oauth_auth_url:
+          type: string
+          format: uri
+        oauth_token_url:
+          type: string
+          format: uri
+        oauth_client_id:
+          type: string
+        oauth_client_secret:
+          type: string
+          nullable: true
+        oauth_scopes:
+          type: array
+          items:
+            type: string
+        oauth_pkce_policy:
+          type: string
+          enum: [required, supported, not_supported]
         default_enabled:
           type: boolean
         ritual_ids:
@@ -6271,6 +6423,9 @@ components:
         server_url:
           type: string
           format: uri
+        auth_mode:
+          type: string
+          enum: [header, oauth]
         authentication:
           type: string
           nullable: true
@@ -6299,6 +6454,22 @@ components:
       required:
         - pass
         - tool_count
+
+    StartMCPServerOAuthRequest:
+      type: object
+      properties:
+        redirect_after:
+          type: string
+          format: uri
+
+    StartMCPServerOAuthResponse:
+      type: object
+      properties:
+        authorization_url:
+          type: string
+          format: uri
+      required:
+        - authorization_url
 
     # Chat Message Schemas
     MessageOrigin:

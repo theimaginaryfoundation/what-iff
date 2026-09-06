@@ -56,18 +56,24 @@ type Config struct {
 	// GeminiKey enables Google Gemini models (OpenAI-compatible Chat Completions); optional.
 	GeminiKey string
 	// GeminiBaseURL overrides Google's OpenAI-compatible base URL; optional.
-	GeminiBaseURL         string
-	MistralKey            string
-	MistralBaseURL        string
-	DeepSeekKey           string
-	DeepSeekBaseURL       string
-	QwenKey               string
-	QwenBaseURL           string
-	XiaomiKey             string
-	XiaomiBaseURL         string
-	TokenEncryptionSecret string
-	AllowedEmails         []string
-	RequireBilling        bool // Feature flag to enable/disable billing
+	GeminiBaseURL            string
+	MistralKey               string
+	MistralBaseURL           string
+	DeepSeekKey              string
+	DeepSeekBaseURL          string
+	QwenKey                  string
+	QwenBaseURL              string
+	XiaomiKey                string
+	XiaomiBaseURL            string
+	TokenEncryptionSecret    string
+	MCPOAuthRedirectURL      string
+	MCPOAuthPostAuthURL      string
+	MCPOAuthAllowedRedirects []string
+	MCPOAuthSweepInterval    time.Duration
+	MCPOAuthRefreshAhead     time.Duration
+	MCPOAuthMaxFailures      int
+	AllowedEmails            []string
+	RequireBilling           bool // Feature flag to enable/disable billing
 	// EnableAgentJobsScheduler starts the in-process AgentJob scheduler (single-server MVP).
 	EnableAgentJobsScheduler bool
 	// AgentJobsSchedulerDistributed enables Postgres-backed leader election so only one
@@ -168,6 +174,41 @@ func NewConfig() *Config {
 	xiaomiKey := os.Getenv("XIAOMI_API_KEY")
 	xiaomiBaseURL := strings.TrimSpace(os.Getenv("XIAOMI_BASE_URL"))
 	tokenEncryptionSecret := strings.TrimSpace(os.Getenv("TOKEN_ENCRYPTION_SECRET"))
+	mcpOAuthRedirectURL := strings.TrimSpace(os.Getenv("MCP_OAUTH_REDIRECT_URL"))
+	if mcpOAuthRedirectURL == "" {
+		mcpOAuthRedirectURL = "http://localhost:8080/api/mcp-servers/oauth/callback"
+	}
+	mcpOAuthPostAuthURL := strings.TrimSpace(os.Getenv("MCP_OAUTH_POST_AUTH_URL"))
+	if mcpOAuthPostAuthURL == "" {
+		mcpOAuthPostAuthURL = "http://localhost:4200/integrations"
+	}
+	mcpOAuthAllowedRedirects := []string{}
+	if v := strings.TrimSpace(os.Getenv("MCP_OAUTH_ALLOWED_REDIRECTS")); v != "" {
+		for _, raw := range strings.Split(v, ",") {
+			trimmed := strings.TrimSpace(raw)
+			if trimmed != "" {
+				mcpOAuthAllowedRedirects = append(mcpOAuthAllowedRedirects, trimmed)
+			}
+		}
+	}
+	mcpOAuthSweepInterval := 2 * time.Minute
+	if v := strings.TrimSpace(os.Getenv("MCP_OAUTH_SWEEP_INTERVAL")); v != "" {
+		if parsed, err := time.ParseDuration(v); err == nil && parsed > 0 {
+			mcpOAuthSweepInterval = parsed
+		}
+	}
+	mcpOAuthRefreshAhead := 15 * time.Minute
+	if v := strings.TrimSpace(os.Getenv("MCP_OAUTH_REFRESH_AHEAD")); v != "" {
+		if parsed, err := time.ParseDuration(v); err == nil && parsed > 0 {
+			mcpOAuthRefreshAhead = parsed
+		}
+	}
+	mcpOAuthMaxFailures := 3
+	if v := strings.TrimSpace(os.Getenv("MCP_OAUTH_MAX_FAILURES")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			mcpOAuthMaxFailures = parsed
+		}
+	}
 
 	// Local-development defaults only. Deployed environments must set
 	// ALLOWED_ORIGINS explicitly (comma-separated) — production hostnames are
@@ -283,6 +324,12 @@ func NewConfig() *Config {
 		XiaomiKey:                           xiaomiKey,
 		XiaomiBaseURL:                       xiaomiBaseURL,
 		TokenEncryptionSecret:               tokenEncryptionSecret,
+		MCPOAuthRedirectURL:                 mcpOAuthRedirectURL,
+		MCPOAuthPostAuthURL:                 mcpOAuthPostAuthURL,
+		MCPOAuthAllowedRedirects:            mcpOAuthAllowedRedirects,
+		MCPOAuthSweepInterval:               mcpOAuthSweepInterval,
+		MCPOAuthRefreshAhead:                mcpOAuthRefreshAhead,
+		MCPOAuthMaxFailures:                 mcpOAuthMaxFailures,
 		AllowedEmails:                       allowedEmails,
 		RequireBilling:                      requireBilling,
 		EnableAgentJobsScheduler:            enableAgentJobsScheduler,

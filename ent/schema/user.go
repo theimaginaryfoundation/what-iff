@@ -88,6 +88,8 @@ func (User) Edges() []ent.Edge {
 			Annotations(entsql.OnDelete(entsql.Cascade)),
 		edge.To("mcp_servers", MCPServer.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),
+		edge.To("mcp_oauth_sessions", MCPOAuthSession.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 		edge.To("webhook_tokens", WebhookToken.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),
 		edge.To("system_ritual_bindings", SystemRitualBinding.Type).

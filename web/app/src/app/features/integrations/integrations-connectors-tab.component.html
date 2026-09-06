@@ -1,5 +1,13 @@
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
   <div class="lg:col-span-2">
+    @if (oauthBanner()) {
+      <div class="mb-3 rounded-lg border px-3 py-2 text-sm"
+        [ngClass]="oauthBanner()!.success
+          ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300'
+          : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'">
+        {{ oauthBanner()!.message }}
+      </div>
+    }
     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-4">
       <div class="flex gap-2">
         <input
@@ -64,6 +72,13 @@
                   }
                 </div>
                 <div class="flex gap-2">
+                  @if ((server.auth_mode || 'header') === 'oauth') {
+                    <button
+                      (click)="authenticate(server)"
+                      class="px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200 dark:text-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-700 dark:hover:bg-indigo-900/30">
+                      {{ authActionLabel(server) }}
+                    </button>
+                  }
                   <button
                     (click)="startEdit(server)"
                     class="px-3 py-1.5 text-xs font-medium text-gray-900 bg-white hover:bg-gray-50 rounded-lg border border-gray-300 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-600 dark:hover:bg-gray-700">
@@ -124,6 +139,16 @@
           class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
       </div>
       <div>
+        <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Authentication mode</label>
+        <select [ngModel]="formAuthMode()" (ngModelChange)="formAuthMode.set($event); onFormValueChange()"
+          class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm">
+          <option value="header">Header token</option>
+          <option value="oauth">OAuth</option>
+        </select>
+      </div>
+
+      @if (formAuthMode() === 'header') {
+      <div>
         <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Authentication token</label>
         <div class="flex items-center gap-2">
           <input [ngModel]="formAuthentication()" (ngModelChange)="onAuthenticationChange($event)" type="text" [placeholder]="editingServer() ? 'Leave empty to keep existing token' : ''"
@@ -151,6 +176,57 @@
           </p>
         }
       </div>
+      }
+
+      @if (formAuthMode() === 'oauth') {
+        <div>
+          <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OAuth Authorization URL</label>
+          <input [ngModel]="formOAuthAuthURL()" (ngModelChange)="formOAuthAuthURL.set($event); onFormValueChange()" type="text"
+            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OAuth Token URL</label>
+          <input [ngModel]="formOAuthTokenURL()" (ngModelChange)="formOAuthTokenURL.set($event); onFormValueChange()" type="text"
+            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OAuth Client ID</label>
+          <input [ngModel]="formOAuthClientID()" (ngModelChange)="formOAuthClientID.set($event); onFormValueChange()" type="text"
+            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OAuth Client Secret</label>
+          <div class="flex items-center gap-2">
+            <input [ngModel]="formOAuthClientSecret()" (ngModelChange)="formOAuthClientSecret.set($event); formClearOAuthClientSecret.set(false); onFormValueChange()" type="text" [placeholder]="editingServer() ? 'Leave empty to keep existing secret' : ''"
+              class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
+            @if (editingServer()) {
+              <button
+                (click)="unsetOAuthClientSecret()"
+                type="button"
+                class="inline-flex items-center justify-center rounded-lg border border-red-300 px-2.5 py-2 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/30"
+                title="Unset saved client secret">
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </button>
+            }
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OAuth Scopes (space separated)</label>
+          <input [ngModel]="formOAuthScopes()" (ngModelChange)="formOAuthScopes.set($event); onFormValueChange()" type="text"
+            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">PKCE Policy</label>
+          <select [ngModel]="formOAuthPKCEPolicy()" (ngModelChange)="formOAuthPKCEPolicy.set($event); onFormValueChange()"
+            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm">
+            <option value="required">Required</option>
+            <option value="supported">Supported</option>
+            <option value="not_supported">Not Supported</option>
+          </select>
+        </div>
+      }
       <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
         <input [ngModel]="formDefaultEnabled()" (ngModelChange)="formDefaultEnabled.set($event)" type="checkbox" class="rounded border-gray-300 dark:border-gray-600" />
         Enabled by default in new chats
@@ -187,7 +263,7 @@
         (click)="test()"
         [disabled]="!canTest()"
         class="px-4 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200 dark:text-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-700 dark:hover:bg-indigo-900/30 disabled:opacity-50">
-        {{ isTesting() ? 'Testing...' : 'Test' }}
+        {{ formAuthMode() === 'oauth' ? 'Test unavailable for OAuth' : (isTesting() ? 'Testing...' : 'Test') }}
       </button>
       <button
         (click)="save()"

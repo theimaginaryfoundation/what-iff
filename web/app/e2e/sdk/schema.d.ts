@@ -6622,6 +6622,120 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/mcp-servers/{id}/oauth/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start connector OAuth authentication
+         * @description Creates an OAuth authorization session and returns provider authorization URL.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["StartMCPServerOAuthRequest"];
+                };
+            };
+            responses: {
+                /** @description Authorization URL generated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StartMCPServerOAuthResponse"];
+                    };
+                };
+                /** @description Invalid connector OAuth configuration */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description MCP server not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mcp-servers/oauth/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * OAuth callback for connector authentication
+         * @description Handles OAuth callback and redirects the browser back to the integrations view with status query params.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    state?: string;
+                    code?: string;
+                    error?: string;
+                    error_description?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Redirect to integrations page with oauth_status query parameter. */
+                302: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mcp-servers/{id}": {
         parameters: {
             query?: never;
@@ -8235,6 +8349,27 @@ export interface components {
             description: string;
             /** Format: uri */
             server_url: string;
+            /** @enum {string} */
+            auth_mode?: "header" | "oauth";
+            /** Format: uri */
+            oauth_auth_url?: string;
+            /** Format: uri */
+            oauth_token_url?: string;
+            oauth_client_id?: string;
+            oauth_scopes?: string[];
+            /** @enum {string} */
+            oauth_pkce_policy?: "required" | "supported" | "not_supported";
+            /** Format: date-time */
+            oauth_access_token_expires_at?: string | null;
+            /** Format: date-time */
+            oauth_refresh_token_expires_at?: string | null;
+            /** Format: date-time */
+            oauth_authenticated_at?: string | null;
+            /** Format: date-time */
+            oauth_last_refresh_at?: string | null;
+            oauth_refresh_fail_count?: number;
+            oauth_has_refresh_token?: boolean;
+            oauth_has_access_token?: boolean;
             /** @description Runtime connector status (for example active, refresh_failed, invalid, disabled). */
             status: string;
             /** @description Optional machine/user-readable reason associated with the current status. */
@@ -8266,8 +8401,19 @@ export interface components {
             description: string;
             /** Format: uri */
             server_url: string;
+            /** @enum {string} */
+            auth_mode?: "header" | "oauth";
             /** @description Optional authentication token to be sent to MCP server as Authorization header. */
             authentication?: string;
+            /** Format: uri */
+            oauth_auth_url?: string;
+            /** Format: uri */
+            oauth_token_url?: string;
+            oauth_client_id?: string;
+            oauth_client_secret?: string;
+            oauth_scopes?: string[];
+            /** @enum {string} */
+            oauth_pkce_policy?: "required" | "supported" | "not_supported";
             default_enabled: boolean;
         };
         /**
@@ -8283,14 +8429,27 @@ export interface components {
             description?: string;
             /** Format: uri */
             server_url?: string;
+            /** @enum {string} */
+            auth_mode?: "header" | "oauth";
             /** @description Optional authentication token patch. Null clears token; empty string keeps existing token. */
             authentication?: string | null;
+            /** Format: uri */
+            oauth_auth_url?: string;
+            /** Format: uri */
+            oauth_token_url?: string;
+            oauth_client_id?: string;
+            oauth_client_secret?: string | null;
+            oauth_scopes?: string[];
+            /** @enum {string} */
+            oauth_pkce_policy?: "required" | "supported" | "not_supported";
             default_enabled?: boolean;
             ritual_ids?: string[];
         };
         TestMCPServerConnectionRequest: {
             /** Format: uri */
             server_url: string;
+            /** @enum {string} */
+            auth_mode?: "header" | "oauth";
             /**
              * @description Optional authentication override for connection testing.
              *     - omitted: for edits, fallback to stored token when connector_id is provided
@@ -8308,6 +8467,14 @@ export interface components {
             pass: boolean;
             tool_count: number;
             message?: string;
+        };
+        StartMCPServerOAuthRequest: {
+            /** Format: uri */
+            redirect_after?: string;
+        };
+        StartMCPServerOAuthResponse: {
+            /** Format: uri */
+            authorization_url: string;
         };
         /**
          * @example User
