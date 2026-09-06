@@ -224,7 +224,7 @@ func (s *Server) setupRoutes() {
 	userHandler := user.NewHandler(dataStore, s.logger, s.config.AllowedEmails, s.config.Environment)
 	jobHandler := job.NewHandlerWithCanceller(dataStore, agent, s.logger)
 	memoryHandler := memory.NewHandler(dataStore, s.logger, s.config.OpenAIKey, providerHTTPClient)
-	mcpServerHandler := mcpserver.NewHandler(dataStore, mcpclient.New(http.DefaultClient, s.logger), s.logger)
+	mcpServerHandler := mcpserver.NewHandler(dataStore, mcpclient.New(nil, s.logger), s.logger)
 	modelHandler := model.NewHandler(dataStore, s.logger)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)
 	chatHandler := chat.NewHandler(dataStore, s.logger, agent, chat.HandlerConfig{

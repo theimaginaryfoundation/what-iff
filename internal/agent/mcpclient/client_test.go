@@ -68,7 +68,8 @@ func TestDiscoverToolsAndCallByFullName(t *testing.T) {
 		Status:      models.MCPServerStatusActive,
 		Description: "Tracker connector",
 	}
-	out := client.DiscoverTools(context.Background(), uuid.New(), []*models.MCPServer{server})
+	out, err := client.DiscoverTools(context.Background(), uuid.New(), []*models.MCPServer{server})
+	require.NoError(t, err)
 	require.NotEmpty(t, out.Tools)
 	require.True(t, initializeCalled)
 	fullName := out.Tools[0].FullName
@@ -166,4 +167,32 @@ func TestProbeConnection(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, count)
 	})
+}
+
+func TestDiscoverTools_ErrorWhenAllEligibleConnectorsFail(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"invalid token"}`))
+	}))
+	defer srv.Close()
+
+	client := New(nil, nil)
+	server := &models.MCPServer{
+		ID:        uuid.New(),
+		Name:      "broken",
+		ServerURL: srv.URL,
+		Status:    models.MCPServerStatusActive,
+	}
+	out, err := client.DiscoverTools(context.Background(), uuid.New(), []*models.MCPServer{server})
+	require.Error(t, err)
+	require.Empty(t, out.Tools)
+	require.NotEmpty(t, out.Errors[server.ID])
+}
+
+func TestParseInputSchema_EmptyPropertiesRemainEmptyMap(t *testing.T) {
+	props, req := parseInputSchema(map[string]any{
+		"type": "object",
+	})
+	require.Empty(t, req)
+	require.Equal(t, map[string]any{}, props)
 }

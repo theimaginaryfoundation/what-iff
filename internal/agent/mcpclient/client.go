@@ -88,11 +88,12 @@ func (c *Client) ProbeConnection(ctx context.Context, server *models.MCPServer) 
 	return len(tools), nil
 }
 
-func (c *Client) DiscoverTools(ctx context.Context, userID uuid.UUID, servers []*models.MCPServer) DiscoveryResult {
+func (c *Client) DiscoverTools(ctx context.Context, userID uuid.UUID, servers []*models.MCPServer) (DiscoveryResult, error) {
 	res := DiscoveryResult{
 		Tools:  make([]ConnectorTool, 0),
 		Errors: make(map[uuid.UUID]string),
 	}
+	eligibleConnectors := 0
 	for _, s := range servers {
 		if s == nil || s.ID == uuid.Nil {
 			continue
@@ -101,6 +102,7 @@ func (c *Client) DiscoverTools(ctx context.Context, userID uuid.UUID, servers []
 			res.Errors[s.ID] = fmt.Sprintf("connector status %q not eligible", strings.TrimSpace(s.Status))
 			continue
 		}
+		eligibleConnectors++
 		tools, err := c.discoverConnectorTools(ctx, userID, s)
 		if err != nil {
 			res.Errors[s.ID] = err.Error()
@@ -108,7 +110,10 @@ func (c *Client) DiscoverTools(ctx context.Context, userID uuid.UUID, servers []
 		}
 		res.Tools = append(res.Tools, tools...)
 	}
-	return res
+	if eligibleConnectors > 0 && len(res.Tools) == 0 && len(res.Errors) >= eligibleConnectors {
+		return res, fmt.Errorf("mcp tool discovery failed for all eligible connectors")
+	}
+	return res, nil
 }
 
 func connectorEligible(s *models.MCPServer) bool {
@@ -277,13 +282,6 @@ func parseInputSchema(schema map[string]any) (map[string]any, []string) {
 	}
 	if rawReq, ok := schema["required"].([]string); ok {
 		required = append(required, rawReq...)
-	}
-	if len(props) == 0 {
-		props = map[string]any{
-			"type": map[string]any{
-				"type": "object",
-			},
-		}
 	}
 	return props, required
 }

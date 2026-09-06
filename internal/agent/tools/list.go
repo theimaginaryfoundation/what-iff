@@ -138,17 +138,18 @@ type listArgs struct {
 // listItem is a single uniform row. Fields are populated per kind and omitted when empty, so every
 // kind reads through one shape while only carrying what's relevant.
 type listItem struct {
-	ID          string `json:"id"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-	Provider    string `json:"provider,omitempty"`     // models
-	ToolSupport *bool  `json:"tool_support,omitempty"` // models
-	FileType    string `json:"file_type,omitempty"`    // files
-	Status      string `json:"status,omitempty"`       // jobs, mcp_servers
-	NextRuntime string `json:"next_runtime,omitempty"` // jobs (omitted when complete/failed)
-	UpdatedAt   string `json:"updated_at,omitempty"`   // personalities, conversations
-	URL         string `json:"url,omitempty"`          // mcp_servers
-	Archived    *bool  `json:"archived,omitempty"`     // conversations
+	ID           string `json:"id"`
+	Name         string `json:"name,omitempty"`
+	Description  string `json:"description,omitempty"`
+	Provider     string `json:"provider,omitempty"`      // models
+	ToolSupport  *bool  `json:"tool_support,omitempty"`  // models
+	FileType     string `json:"file_type,omitempty"`     // files
+	Status       string `json:"status,omitempty"`        // jobs, mcp_servers
+	StatusDetail string `json:"status_detail,omitempty"` // mcp_servers
+	NextRuntime  string `json:"next_runtime,omitempty"`  // jobs (omitted when complete/failed)
+	UpdatedAt    string `json:"updated_at,omitempty"`    // personalities, conversations
+	URL          string `json:"url,omitempty"`           // mcp_servers
+	Archived     *bool  `json:"archived,omitempty"`      // conversations
 }
 
 type listResult struct {
