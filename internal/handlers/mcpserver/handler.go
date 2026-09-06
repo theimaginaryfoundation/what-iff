@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -18,12 +19,18 @@ import (
 
 type Handler struct {
 	provider Provider
+	prober   ConnectionProber
 	logger   *zap.Logger
 }
 
-func NewHandler(provider Provider, logger *zap.Logger) *Handler {
+type ConnectionProber interface {
+	ProbeConnection(ctx context.Context, server *models.MCPServer) (int, error)
+}
+
+func NewHandler(provider Provider, prober ConnectionProber, logger *zap.Logger) *Handler {
 	return &Handler{
 		provider: provider,
+		prober:   prober,
 		logger:   logger,
 	}
 }
@@ -33,6 +40,7 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 		mcpRouter := router.PathPrefix(prefix).Subrouter()
 		mcpRouter.HandleFunc("", h.CreateMCPServer).Methods("POST")
 		mcpRouter.HandleFunc("", h.ListMCPServers).Methods("GET")
+		mcpRouter.HandleFunc("/test-connection", h.TestMCPServerConnection).Methods("POST")
 		mcpRouter.HandleFunc("/{id}", h.GetMCPServer).Methods("GET")
 		mcpRouter.HandleFunc("/{id}", h.UpdateMCPServer).Methods("PUT")
 		mcpRouter.HandleFunc("/{id}", h.UpdateMCPServer).Methods("PATCH")
@@ -46,6 +54,18 @@ type createMCPServerRequest struct {
 	ServerURL      string `json:"server_url"`
 	Authentication string `json:"authentication"`
 	DefaultEnabled bool   `json:"default_enabled"`
+}
+
+type testMCPServerConnectionRequest struct {
+	ServerURL      string              `json:"server_url"`
+	Authentication nullableStringField `json:"authentication,omitempty"`
+	ConnectorID    *uuid.UUID          `json:"connector_id,omitempty"`
+}
+
+type testMCPServerConnectionResponse struct {
+	Pass      bool   `json:"pass"`
+	ToolCount int    `json:"tool_count"`
+	Message   string `json:"message,omitempty"`
 }
 
 func (h *Handler) CreateMCPServer(w http.ResponseWriter, r *http.Request) {
@@ -83,6 +103,80 @@ func (h *Handler) CreateMCPServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusCreated, server)
+}
+
+func (h *Handler) TestMCPServerConnection(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		handlerutils.RespondWithError(w, h.logger, http.StatusUnauthorized, handlerutils.CodeNotSet, "Unauthorized", nil)
+		return
+	}
+
+	if h.prober == nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "MCP connection testing is unavailable", nil)
+		return
+	}
+
+	var req testMCPServerConnectionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid request body", err)
+		return
+	}
+
+	serverURL := strings.TrimSpace(req.ServerURL)
+	if serverURL == "" {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "server_url is required", nil)
+		return
+	}
+
+	testServer := &models.MCPServer{
+		ID:        uuid.New(),
+		Name:      "test-connection",
+		ServerURL: serverURL,
+		Status:    models.MCPServerStatusActive,
+	}
+	if req.ConnectorID != nil {
+		testServer.ID = *req.ConnectorID
+	}
+
+	if req.Authentication.IsSet {
+		if req.Authentication.Value != nil {
+			testServer.AuthToken = strings.TrimSpace(*req.Authentication.Value)
+		}
+	} else if req.ConnectorID != nil {
+		current, err := h.provider.GetMCPServer(r.Context(), userID, *req.ConnectorID)
+		if ent.IsNotFound(err) || err == datastore.ErrMCPServerNotFound {
+			handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "MCP server not found", err)
+			return
+		}
+		if err != nil {
+			h.logger.Error("failed to load mcp server for connection test", zap.String("user_id", userID.String()), zap.Error(err))
+			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to test MCP server connection", err)
+			return
+		}
+		testServer.AuthToken = strings.TrimSpace(current.AuthToken)
+	}
+
+	toolCount, err := h.prober.ProbeConnection(r.Context(), testServer)
+	if err != nil {
+		h.logger.Warn("mcp test connection failed",
+			zap.String("user_id", userID.String()),
+			zap.String("server_url", testServer.ServerURL),
+			zap.Error(err),
+		)
+		handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, testMCPServerConnectionResponse{
+			Pass:      false,
+			ToolCount: 0,
+			Message:   err.Error(),
+		})
+		return
+	}
+
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, testMCPServerConnectionResponse{
+		Pass:      true,
+		ToolCount: toolCount,
+		Message:   "Connected successfully",
+	})
 }
 
 func (h *Handler) ListMCPServers(w http.ResponseWriter, r *http.Request) {

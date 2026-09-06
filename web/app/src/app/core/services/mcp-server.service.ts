@@ -9,7 +9,9 @@ import {
   MCPServer,
   MCPServerFilters,
   CreateMCPServerRequest,
-  UpdateMCPServerRequest
+  UpdateMCPServerRequest,
+  TestMCPServerConnectionRequest,
+  TestMCPServerConnectionResponse
 } from '../models/mcp-server.model';
 
 @Injectable({
@@ -40,6 +42,11 @@ export class MCPServerService {
 
   updateMCPServer(id: string, request: UpdateMCPServerRequest): Observable<MCPServer> {
     return this.http.put<MCPServer>(`${this.apiUrl}/${id}`, request)
+      .pipe(catchError(this.handleError));
+  }
+
+  testMCPServerConnection(request: TestMCPServerConnectionRequest): Observable<TestMCPServerConnectionResponse> {
+    return this.http.post<TestMCPServerConnectionResponse>(`${this.apiUrl}/test-connection`, request)
       .pipe(catchError(this.handleError));
   }
 

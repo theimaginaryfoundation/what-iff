@@ -4,6 +4,11 @@ export interface MCPServer {
   name: string;
   description: string;
   server_url: string;
+  status: string;
+  status_reason?: string;
+  last_checked_at?: string;
+  last_healthy_at?: string;
+  tool_count?: number;
   error_message?: string;
   default_enabled: boolean;
   /** Rituals that load this MCP when triggered (same edge as ritual `mcp_server_ids`). */
@@ -32,5 +37,17 @@ export interface UpdateMCPServerRequest {
   default_enabled?: boolean;
   /** Replaces linked rituals; omit for no change. */
   ritual_ids?: string[];
+}
+
+export interface TestMCPServerConnectionRequest {
+  server_url: string;
+  authentication?: string | null;
+  connector_id?: string;
+}
+
+export interface TestMCPServerConnectionResponse {
+  pass: boolean;
+  tool_count: number;
+  message?: string;
 }
 

@@ -193,37 +193,36 @@ func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelNa
 	}
 
 	if models.UsesAnthropicMessagesAPI(modelProvider, modelName) {
-		// z.ai GLM shares the Messages API but uses a different client and does not
-		// support Anthropic beta MCP.
+		// z.ai GLM shares the Messages API but uses a different client.
 		claudeProvider := a.ClaudeProvider
-		nativeAnthropic := true
 		if models.IsZAIModel(modelProvider, modelName) {
 			claudeProvider = a.ZAIProvider
-			nativeAnthropic = false
 		}
 		if claudeProvider == nil {
-			if nativeAnthropic {
+			if !models.IsZAIModel(modelProvider, modelName) {
 				return nil, fmt.Errorf("Claude model %q requested but ANTHROPIC_API_KEY is not configured", modelName)
 			}
 			return nil, fmt.Errorf("z.ai model %q requested but ZAI_API_KEY is not configured", modelName)
 		}
 		claudeParams := modelContext.BuildClaudeParams(modelName)
-		if nativeAnthropic {
-			mcpConfig := a.getSubagentClaudeMCPConfig(ctx, userID, ritualIDs)
-			if mcpConfig != nil {
-				betaParams, err := provider.BuildClaudeBetaMCPParams(claudeParams, mcpConfig)
-				if err == nil {
-					msg, betaErr := claudeProvider.CallBeta(ctx, betaParams)
-					if betaErr != nil {
-						return nil, provider.WrapSafetyViolationError(models.SafetyViolationProviderAnthropic, fmt.Errorf("Claude subagent MCP call failed: %w", betaErr))
-					}
-					// BetaToGenerateResponse folds cached prefix tokens into InputTokens.
-					resp := claudeProvider.BetaToGenerateResponse(msg)
-					return &subagentCallResult{
-						Output:      strings.TrimSpace(resp.Text),
-						InputTokens: resp.InputTokens,
-					}, nil
-				}
+		mcpSpecs, mcpServers := a.getSubagentMCPFunctionToolSpecs(ctx, userID, ritualIDs)
+		if len(mcpSpecs) > 0 {
+			adapter := provider.NewClaudeAdapter(claudeProvider, claudeParams, claudeFunctionTools(mcpSpecs), false, nil)
+			toolCtx := &chatContext{
+				userID:     userID,
+				chat:       &models.Chat{ID: uuid.New(), UserID: userID},
+				mcpServers: mcpServers,
+				model:      modelName,
+			}
+			resp, _, _, err := a.handleAgentLoop(ctx, toolCtx, adapter)
+			if err != nil {
+				return nil, provider.WrapSafetyViolationError(models.SafetyViolationProviderAnthropic, fmt.Errorf("Claude subagent MCP call failed: %w", err))
+			}
+			if resp != nil {
+				return &subagentCallResult{
+					Output:      strings.TrimSpace(resp.Text),
+					InputTokens: resp.InputTokens,
+				}, nil
 			}
 		}
 		msg, err := claudeProvider.Call(ctx, claudeParams)
@@ -247,13 +246,27 @@ func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelNa
 		Tools:             mcpTools,
 		Instructions:      "",
 	})
-	resp, err := a.OpenAIProvider.CallWithRetry(ctx, params)
+	adapter := provider.NewOpenAIAdapter(a.OpenAIProvider, params)
+	toolCtx := &chatContext{
+		userID: userID,
+		chat:   &models.Chat{ID: uuid.New(), UserID: userID},
+		model:  modelName,
+	}
+	if len(ritualIDs) > 0 {
+		if servers, err := a.ds.ListRitualMCPServers(ctx, userID, ritualIDs); err == nil {
+			toolCtx.mcpServers = servers
+		}
+	}
+	final, _, _, err := a.handleAgentLoop(ctx, toolCtx, adapter)
 	if err != nil {
 		return nil, provider.WrapSafetyViolationError(models.SafetyViolationProviderOpenAI, fmt.Errorf("OpenAI subagent call failed: %w", err))
 	}
+	if final == nil {
+		return nil, fmt.Errorf("OpenAI subagent call returned no final response")
+	}
 	return &subagentCallResult{
-		Output:      strings.TrimSpace(provider.ProcessResponseOutput(resp)),
-		InputTokens: resp.Usage.InputTokens,
+		Output:      strings.TrimSpace(final.Text),
+		InputTokens: final.InputTokens,
 	}, nil
 }
 

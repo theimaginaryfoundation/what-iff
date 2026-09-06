@@ -139,7 +139,7 @@ func TestClaudeAdapter_AppendToolResults_UserTurnWithBlocks(t *testing.T) {
 			anthropic.NewUserMessage(anthropic.NewTextBlock("hello")),
 		},
 	}
-	a := NewClaudeAdapter(nil, base, nil, false, nil, nil)
+	a := NewClaudeAdapter(nil, base, nil, false, nil)
 	a.AppendToolResults([]ToolResult{
 		{ID: "call_a", Output: `{"ok":true}`, IsErr: false},
 		{ID: "call_b", Output: "", IsErr: true},
@@ -158,7 +158,7 @@ func TestClaudeAdapter_AppendToolResults_InjectsGeneratedImagesOnUserTurn(t *tes
 			anthropic.NewUserMessage(anthropic.NewTextBlock("hello")),
 		},
 	}
-	a := NewClaudeAdapter(nil, base, nil, false, nil, nil)
+	a := NewClaudeAdapter(nil, base, nil, false, nil)
 	a.AppendToolResults([]ToolResult{
 		{
 			ID:     "call_img",
@@ -177,29 +177,6 @@ func TestClaudeAdapter_AppendToolResults_InjectsGeneratedImagesOnUserTurn(t *tes
 	require.Contains(t, body, "image")
 }
 
-func TestNewClaudeAdapter_WithMCPConfig_UsesBetaMode(t *testing.T) {
-	t.Parallel()
-	base := anthropic.MessageNewParams{
-		Model: anthropic.Model("claude-sonnet-4-6"),
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock("hello")),
-		},
-		MaxTokens: 128,
-	}
-	mcp := &ClaudeMCPConfig{
-		Servers: []anthropic.BetaRequestMCPServerURLDefinitionParam{
-			{Name: "mcp-a", URL: "https://mcp.example.com"},
-		},
-		Toolsets: []anthropic.BetaToolUnionParam{
-			anthropic.BetaToolUnionParamOfMCPToolset("mcp-a"),
-		},
-	}
-	a := NewClaudeAdapter(nil, base, nil, true, mcp, nil)
-	require.True(t, a.useBetaMCP)
-	require.NotEmpty(t, a.betaParams.Betas)
-	require.Len(t, a.betaParams.MCPServers, 1)
-}
-
 func TestNewClaudeAdapter_IncludeMoodToolsWhenRequested(t *testing.T) {
 	t.Parallel()
 	base := anthropic.MessageNewParams{
@@ -209,7 +186,7 @@ func TestNewClaudeAdapter_IncludeMoodToolsWhenRequested(t *testing.T) {
 		ClaudeFunctionTool("list_modes", "List modes", map[string]interface{}{}, []string{}, false),
 		ClaudeFunctionTool("change_mode", "Change mode", map[string]interface{}{}, []string{}, false),
 	}
-	a := NewClaudeAdapter(nil, base, moodTools, false, nil, nil)
+	a := NewClaudeAdapter(nil, base, moodTools, false, nil)
 
 	var hasListModes, hasChangeMode bool
 	for _, t := range a.params.Tools {
@@ -225,48 +202,4 @@ func TestNewClaudeAdapter_IncludeMoodToolsWhenRequested(t *testing.T) {
 	}
 	require.True(t, hasListModes)
 	require.True(t, hasChangeMode)
-}
-
-func TestBuildClaudeBetaMCPParams_WebSearchToolOmitsInputSchema(t *testing.T) {
-	t.Parallel()
-	base := anthropic.MessageNewParams{
-		Model:     anthropic.Model("claude-sonnet-4-6"),
-		MaxTokens: 128,
-		Tools: []anthropic.ToolUnionParam{
-			claudeWebSearchTool,
-		},
-	}
-	mcp := &ClaudeMCPConfig{
-		Servers: []anthropic.BetaRequestMCPServerURLDefinitionParam{
-			{Name: "mcp-a", URL: "https://mcp.example.com"},
-		},
-		Toolsets: []anthropic.BetaToolUnionParam{
-			anthropic.BetaToolUnionParamOfMCPToolset("mcp-a"),
-		},
-	}
-	out, err := buildClaudeBetaMCPParams(base, mcp)
-	require.NoError(t, err)
-	var found bool
-	for _, tool := range out.Tools {
-		if tool.OfWebSearchTool20250305 == nil {
-			continue
-		}
-		found = true
-		raw, err := json.Marshal(tool)
-		require.NoError(t, err)
-		require.NotContains(t, string(raw), "input_schema", "web_search beta tool must not carry input_schema: %s", string(raw))
-	}
-	require.True(t, found, "expected web search tool in beta tools list")
-}
-
-func TestConvertClaudeToolUnionsToBeta_WebSearchOmitsInputSchema(t *testing.T) {
-	t.Parallel()
-	out, err := convertClaudeToolUnionsToBeta([]anthropic.ToolUnionParam{
-		{OfWebSearchTool20250305: &anthropic.WebSearchTool20250305Param{}},
-	})
-	require.NoError(t, err)
-	require.Len(t, out, 1)
-	raw, err := json.Marshal(out[0])
-	require.NoError(t, err)
-	require.NotContains(t, string(raw), "input_schema", string(raw))
 }

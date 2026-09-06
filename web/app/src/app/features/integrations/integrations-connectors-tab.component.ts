@@ -5,7 +5,13 @@ import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { MCPServerService } from '../../core/services/mcp-server.service';
 import { RitualService } from '../../core/services/ritual.service';
-import { MCPServer, CreateMCPServerRequest, UpdateMCPServerRequest } from '../../core/models/mcp-server.model';
+import {
+  MCPServer,
+  CreateMCPServerRequest,
+  UpdateMCPServerRequest,
+  TestMCPServerConnectionRequest,
+  TestMCPServerConnectionResponse
+} from '../../core/models/mcp-server.model';
 import { Ritual } from '../../core/models/ritual.model';
 
 @Component({
@@ -22,6 +28,7 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
 
   isLoading = signal(false);
   isSaving = signal(false);
+  isTesting = signal(false);
   servers = signal<MCPServer[]>([]);
   totalCount = signal(0);
   search = signal('');
@@ -37,12 +44,17 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
   formDefaultEnabled = signal(false);
   rituals = signal<Ritual[]>([]);
   selectedRitualIds = signal<string[]>([]);
+  testResult = signal<TestMCPServerConnectionResponse | null>(null);
 
   canSave = computed(() => {
     return this.formName().trim() !== '' &&
       this.formDescription().trim() !== '' &&
       this.formServerURL().trim() !== '' &&
       !this.isSaving();
+  });
+
+  canTest = computed(() => {
+    return this.formServerURL().trim() !== '' && !this.isTesting() && !this.isSaving();
   });
 
   ngOnInit(): void {
@@ -94,6 +106,7 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
     this.formClearAuthentication.set(false);
     this.formDefaultEnabled.set(false);
     this.selectedRitualIds.set([]);
+    this.clearTestResult();
   }
 
   startEdit(server: MCPServer): void {
@@ -107,6 +120,7 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
         this.formClearAuthentication.set(false);
         this.formDefaultEnabled.set(full.default_enabled);
         this.selectedRitualIds.set(full.ritual_ids ? [...full.ritual_ids] : []);
+        this.clearTestResult();
       },
       error: () => {
         this.editingServer.set(server);
@@ -117,6 +131,7 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
         this.formClearAuthentication.set(false);
         this.formDefaultEnabled.set(server.default_enabled);
         this.selectedRitualIds.set(server.ritual_ids ? [...server.ritual_ids] : []);
+        this.clearTestResult();
       }
     });
   }
@@ -138,11 +153,40 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
   onAuthenticationChange(value: string): void {
     this.formAuthentication.set(value);
     this.formClearAuthentication.set(false);
+    this.clearTestResult();
   }
 
   unsetAuthenticationToken(): void {
     this.formAuthentication.set('');
     this.formClearAuthentication.set(true);
+    this.clearTestResult();
+  }
+
+  onFormValueChange(): void {
+    this.clearTestResult();
+  }
+
+  test(): void {
+    if (!this.canTest()) return;
+
+    this.isTesting.set(true);
+    this.clearTestResult();
+    const payload = this.buildTestPayload();
+
+    this.mcpServerService.testMCPServerConnection(payload).subscribe({
+      next: (result) => {
+        this.isTesting.set(false);
+        this.testResult.set(result);
+      },
+      error: (error) => {
+        this.isTesting.set(false);
+        this.testResult.set({
+          pass: false,
+          tool_count: 0,
+          message: error?.message || 'Connection test failed.'
+        });
+      }
+    });
   }
 
   async save(): Promise<void> {
@@ -218,5 +262,32 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
 
   trackByServerId(index: number, server: MCPServer): string {
     return server.id;
+  }
+
+  private clearTestResult(): void {
+    this.testResult.set(null);
+  }
+
+  private buildTestPayload(): TestMCPServerConnectionRequest {
+    const editing = this.editingServer();
+    const payload: TestMCPServerConnectionRequest = {
+      server_url: this.formServerURL().trim()
+    };
+
+    if (editing) {
+      payload.connector_id = editing.id;
+    }
+
+    if (this.formClearAuthentication()) {
+      payload.authentication = null;
+      return payload;
+    }
+
+    const auth = this.formAuthentication().trim();
+    if (auth !== '') {
+      payload.authentication = auth;
+    }
+
+    return payload;
   }
 }

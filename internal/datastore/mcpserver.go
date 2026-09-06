@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
@@ -51,10 +52,18 @@ func (d *Datastore) toMCPServerModel(e *ent.MCPServer) *models.MCPServer {
 		Description:    e.Description,
 		ServerURL:      e.ServerURL,
 		AuthToken:      decryptedToken,
+		Status:         strings.TrimSpace(e.Status),
+		StatusReason:   strings.TrimSpace(e.StatusReason),
 		ErrorMessage:   errorMessage,
 		DefaultEnabled: e.DefaultEnabled,
+		LastCheckedAt:  e.LastCheckedAt,
+		LastHealthyAt:  e.LastHealthyAt,
+		ToolCount:      e.ToolCount,
 		CreatedAt:      e.CreatedAt,
 		UpdatedAt:      e.UpdatedAt,
+	}
+	if m.Status == "" {
+		m.Status = models.MCPServerStatusActive
 	}
 	if len(e.Edges.Rituals) > 0 {
 		m.RitualIDs = make([]uuid.UUID, len(e.Edges.Rituals))
@@ -93,6 +102,7 @@ func (d *Datastore) CreateMCPServer(ctx context.Context, userID uuid.UUID, serve
 		SetName(server.Name).
 		SetDescription(server.Description).
 		SetServerURL(server.ServerURL).
+		SetStatus(models.MCPServerStatusActive).
 		SetDefaultEnabled(server.DefaultEnabled).
 		SetOwnerID(userID)
 
@@ -339,6 +349,24 @@ func (d *Datastore) UpdateMCPServer(ctx context.Context, userID uuid.UUID, serve
 		SetDescription(server.Description).
 		SetServerURL(server.ServerURL).
 		SetDefaultEnabled(server.DefaultEnabled)
+
+	if status := strings.TrimSpace(server.Status); status != "" {
+		update.SetStatus(status)
+	}
+	update.SetStatusReason(strings.TrimSpace(server.StatusReason))
+	if server.LastCheckedAt != nil {
+		update.SetLastCheckedAt(*server.LastCheckedAt)
+	} else {
+		update.ClearLastCheckedAt()
+	}
+	if server.LastHealthyAt != nil {
+		update.SetLastHealthyAt(*server.LastHealthyAt)
+	} else {
+		update.ClearLastHealthyAt()
+	}
+	if server.ToolCount >= 0 {
+		update.SetToolCount(server.ToolCount)
+	}
 
 	if authTokenUpdate.Provided {
 		if authTokenUpdate.Clear {
@@ -755,6 +783,64 @@ func (d *Datastore) RemoveMCPServerFromChat(ctx context.Context, userID, chatID,
 
 	if err := tx.Commit(); err != nil {
 		d.logger.Error("failed to commit transaction", zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// UpdateMCPServerRuntimeState updates runtime health metadata for one user-owned connector.
+// Empty status defaults to active; zero-value pointers clear corresponding timestamps.
+func (d *Datastore) UpdateMCPServerRuntimeState(ctx context.Context, userID, mcpServerID uuid.UUID, status, reason string, toolCount int, checkedAt, healthyAt *time.Time) error {
+	tx, err := d.dbClient.Tx(ctx)
+	if err != nil {
+		d.logger.Error("failed to start transaction", zap.Error(err))
+		return err
+	}
+	defer func() {
+		if v := recover(); v != nil {
+			tx.Rollback()
+			panic(v)
+		}
+	}()
+
+	exists, err := tx.MCPServer.Query().
+		Where(
+			entmcp.ID(mcpServerID),
+			entmcp.HasOwnerWith(user.ID(userID)),
+		).
+		Exist(ctx)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	if !exists {
+		tx.Rollback()
+		return ErrMCPServerNotFound
+	}
+
+	nextStatus := strings.TrimSpace(status)
+	if nextStatus == "" {
+		nextStatus = models.MCPServerStatusActive
+	}
+	upd := tx.MCPServer.UpdateOneID(mcpServerID).
+		SetStatus(nextStatus).
+		SetStatusReason(strings.TrimSpace(reason)).
+		SetToolCount(max(toolCount, 0))
+	if checkedAt != nil {
+		upd.SetLastCheckedAt(*checkedAt)
+	} else {
+		upd.ClearLastCheckedAt()
+	}
+	if healthyAt != nil {
+		upd.SetLastHealthyAt(*healthyAt)
+	} else {
+		upd.ClearLastHealthyAt()
+	}
+	if _, err := upd.Save(ctx); err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 	return nil
