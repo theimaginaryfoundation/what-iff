@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -166,6 +167,35 @@ func TestProbeConnection(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Equal(t, 1, count)
+	})
+}
+
+func TestAuthHeaderForServer(t *testing.T) {
+	t.Run("header mode passes through token", func(t *testing.T) {
+		token, err := authHeaderForServer(&models.MCPServer{
+			AuthMode:  models.MCPServerAuthModeHeader,
+			AuthToken: "Bearer abc",
+		}, time.Now().UTC())
+		require.NoError(t, err)
+		require.Equal(t, "Bearer abc", token)
+	})
+
+	t.Run("oauth mode builds bearer header", func(t *testing.T) {
+		expires := time.Now().UTC().Add(5 * time.Minute)
+		token, err := authHeaderForServer(&models.MCPServer{
+			AuthMode:                  models.MCPServerAuthModeOAuth,
+			OAuthAccessToken:          "oauth-token",
+			OAuthAccessTokenExpiresAt: &expires,
+		}, time.Now().UTC())
+		require.NoError(t, err)
+		require.Equal(t, "Bearer oauth-token", token)
+	})
+
+	t.Run("oauth mode missing token errors", func(t *testing.T) {
+		_, err := authHeaderForServer(&models.MCPServer{
+			AuthMode: models.MCPServerAuthModeOAuth,
+		}, time.Now().UTC())
+		require.Error(t, err)
 	})
 }
 

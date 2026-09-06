@@ -45,6 +45,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/user"
 	versionhandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/version"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/webhook"
+	"github.com/theimaginaryfoundation/what-iff/internal/mcpoauth"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -304,7 +305,13 @@ func (s *Server) setupRoutes() {
 		}
 	}
 	accountExportHandler := accountexport.NewHandler(dataStore, s.logger, fileStore, exportSender, s.config.OpenAIKey, providerHTTPClient)
-	mcpServerHandler := mcpserver.NewHandler(dataStore, mcpclient.New(nil, s.logger), s.logger)
+	oauthService := mcpoauth.New(dataStore, providerHTTPClient, s.logger, mcpoauth.Config{
+		RedirectURL:         s.config.MCPOAuthRedirectURL,
+		PostAuthRedirectURL: s.config.MCPOAuthPostAuthURL,
+		AllowedRedirects:    s.config.MCPOAuthAllowedRedirects,
+	})
+	go mcpoauth.NewSweeper(oauthService, s.config.MCPOAuthSweepInterval, s.config.MCPOAuthRefreshAhead, s.config.MCPOAuthMaxFailures).Run(s.lifecycleCtx)
+	mcpServerHandler := mcpserver.NewHandler(dataStore, mcpclient.New(nil, s.logger), oauthService, s.logger)
 	modelHandler := model.NewHandler(dataStore, s.logger)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)
 	chatHandler := chat.NewHandler(dataStore, s.logger, agent, chat.HandlerConfig{
@@ -348,6 +355,7 @@ func (s *Server) setupRoutes() {
 	webhookRouter := apiRouter.PathPrefix("/webhooks").Subrouter()
 	webhookRouter.Use(middleware.WebhookAuthMiddleware(dataStore, s.logger))
 	webhookHandler.RegisterWebhookRoutes(webhookRouter)
+	mcpServerHandler.RegisterPublicRoutes(apiRouter)
 
 	// Protected routes
 	authRouter := apiRouter.NewRoute().Subrouter()

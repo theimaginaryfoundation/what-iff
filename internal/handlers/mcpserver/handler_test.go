@@ -33,7 +33,7 @@ func (f *fakeProvider) GetMCPServer(ctx context.Context, userID, id uuid.UUID) (
 func (f *fakeProvider) ListMCPServers(context.Context, uuid.UUID, int, int, models.MCPServerFilters) (*models.PaginatedResponse, error) {
 	return nil, nil
 }
-func (f *fakeProvider) UpdateMCPServer(context.Context, uuid.UUID, models.MCPServer, models.MCPServerAuthTokenUpdate, *[]uuid.UUID) (*models.MCPServer, error) {
+func (f *fakeProvider) UpdateMCPServer(context.Context, uuid.UUID, models.MCPServer, models.MCPServerAuthTokenUpdate, models.MCPOAuthSecretUpdate, *[]uuid.UUID) (*models.MCPServer, error) {
 	return nil, nil
 }
 func (f *fakeProvider) DeleteMCPServer(context.Context, uuid.UUID, uuid.UUID) error { return nil }
@@ -43,6 +43,35 @@ type fakeProber struct {
 	err       error
 	last      *models.MCPServer
 	calls     int
+}
+
+type fakeOAuthService struct {
+	startURL     string
+	startErr     error
+	callbackURL  string
+	callbackMsg  string
+	callbackPass bool
+	callbackErr  error
+	lastStartID  uuid.UUID
+	lastUserID   uuid.UUID
+	lastRedirect string
+}
+
+func (f *fakeOAuthService) StartAuth(_ context.Context, userID, connectorID uuid.UUID, redirectAfter string) (string, error) {
+	f.lastUserID = userID
+	f.lastStartID = connectorID
+	f.lastRedirect = redirectAfter
+	if f.startErr != nil {
+		return "", f.startErr
+	}
+	return f.startURL, nil
+}
+
+func (f *fakeOAuthService) HandleCallback(_ context.Context, _, _, _, _ string) (string, string, bool, error) {
+	if f.callbackErr != nil {
+		return f.callbackURL, f.callbackMsg, f.callbackPass, f.callbackErr
+	}
+	return f.callbackURL, "ok", true, nil
 }
 
 func (f *fakeProber) ProbeConnection(_ context.Context, server *models.MCPServer) (int, error) {
@@ -66,7 +95,15 @@ func newAuthedRequest(t *testing.T, method, target string, body []byte) *http.Re
 
 func newRouter(provider Provider, prober ConnectionProber) *mux.Router {
 	r := mux.NewRouter()
-	NewHandler(provider, prober, zap.NewNop()).RegisterRoutes(r)
+	NewHandler(provider, prober, nil, zap.NewNop()).RegisterRoutes(r)
+	return r
+}
+
+func newRouterWithOAuth(provider Provider, prober ConnectionProber, oauth OAuthService) *mux.Router {
+	r := mux.NewRouter()
+	h := NewHandler(provider, prober, oauth, zap.NewNop())
+	h.RegisterRoutes(r)
+	h.RegisterPublicRoutes(r)
 	return r
 }
 
@@ -176,4 +213,57 @@ func TestTestMCPServerConnection_ValidationAndFailure(t *testing.T) {
 		require.Zero(t, resp.ToolCount)
 		require.NotEmpty(t, resp.Message)
 	})
+}
+
+func TestStartMCPServerOAuth(t *testing.T) {
+	t.Parallel()
+	oauth := &fakeOAuthService{startURL: "https://accounts.example.com/authorize?state=abc"}
+	router := newRouterWithOAuth(&fakeProvider{}, &fakeProber{}, oauth)
+	connectorID := uuid.New()
+	req := newAuthedRequest(t, http.MethodPost, "/mcp-servers/"+connectorID.String()+"/oauth/start", []byte(`{"redirect_after":"http://localhost:4200/integrations"}`))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	require.Equal(t, connectorID, oauth.lastStartID)
+	var body startMCPServerOAuthResponse
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	require.Contains(t, body.AuthorizationURL, "authorize")
+}
+
+func TestHandleMCPServerOAuthCallbackRedirects(t *testing.T) {
+	t.Parallel()
+	oauth := &fakeOAuthService{callbackURL: "http://localhost:4200/integrations?oauth_status=success"}
+	router := newRouterWithOAuth(&fakeProvider{}, &fakeProber{}, oauth)
+	req := httptest.NewRequest(http.MethodGet, "/mcp-servers/oauth/callback?state=abc&code=xyz", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusFound, rr.Code)
+	require.Equal(t, oauth.callbackURL, rr.Header().Get("Location"))
+}
+
+func TestHandleMCPServerOAuthCallback_KnownErrorWithRedirectStillRedirects(t *testing.T) {
+	t.Parallel()
+	oauth := &fakeOAuthService{
+		callbackURL:  "http://localhost:4200/integrations?oauth_status=error&oauth_message=bad_state",
+		callbackErr:  datastore.ErrMCPOAuthSessionExpired,
+		callbackPass: false,
+	}
+	router := newRouterWithOAuth(&fakeProvider{}, &fakeProber{}, oauth)
+	req := httptest.NewRequest(http.MethodGet, "/mcp-servers/oauth/callback?state=abc", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusFound, rr.Code)
+	require.Equal(t, oauth.callbackURL, rr.Header().Get("Location"))
+}
+
+func TestHandleMCPServerOAuthCallback_KnownErrorWithoutRedirectReturnsBadRequest(t *testing.T) {
+	t.Parallel()
+	oauth := &fakeOAuthService{
+		callbackErr: datastore.ErrMCPOAuthSessionExpired,
+	}
+	router := newRouterWithOAuth(&fakeProvider{}, &fakeProber{}, oauth)
+	req := httptest.NewRequest(http.MethodGet, "/mcp-servers/oauth/callback?state=abc", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusBadRequest, rr.Code)
 }

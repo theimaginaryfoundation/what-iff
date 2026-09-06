@@ -2,6 +2,7 @@ import type { MockedObject } from 'vitest';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { of, throwError } from 'rxjs';
+import { ActivatedRoute, convertToParamMap } from '@angular/router';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { MCPServerService } from '../../core/services/mcp-server.service';
 import { RitualService } from '../../core/services/ritual.service';
@@ -10,7 +11,7 @@ import { IntegrationsConnectorsTabComponent } from './integrations-connectors-ta
 describe('IntegrationsConnectorsTabComponent', () => {
   let fixture: ComponentFixture<IntegrationsConnectorsTabComponent>;
   let component: IntegrationsConnectorsTabComponent;
-  let mcpServerService: Pick<MockedObject<MCPServerService>, 'listMCPServers' | 'getMCPServer' | 'createMCPServer' | 'updateMCPServer' | 'deleteMCPServer' | 'testMCPServerConnection'>;
+  let mcpServerService: Pick<MockedObject<MCPServerService>, 'listMCPServers' | 'getMCPServer' | 'createMCPServer' | 'updateMCPServer' | 'deleteMCPServer' | 'testMCPServerConnection' | 'startOAuth'>;
 
   beforeEach(async () => {
     mcpServerService = {
@@ -19,7 +20,8 @@ describe('IntegrationsConnectorsTabComponent', () => {
       createMCPServer: vi.fn().mockName('MCPServerService.createMCPServer'),
       updateMCPServer: vi.fn().mockName('MCPServerService.updateMCPServer'),
       deleteMCPServer: vi.fn().mockName('MCPServerService.deleteMCPServer'),
-      testMCPServerConnection: vi.fn().mockName('MCPServerService.testMCPServerConnection')
+      testMCPServerConnection: vi.fn().mockName('MCPServerService.testMCPServerConnection'),
+      startOAuth: vi.fn().mockName('MCPServerService.startOAuth')
     };
     mcpServerService.listMCPServers.mockReturnValue(of({ results: [], total_count: 0, page: 1 }));
     mcpServerService.testMCPServerConnection.mockReturnValue(of({ pass: true, tool_count: 2, message: 'ok' }));
@@ -41,7 +43,8 @@ describe('IntegrationsConnectorsTabComponent', () => {
         provideZonelessChangeDetection(),
         { provide: MCPServerService, useValue: mcpServerService },
         { provide: RitualService, useValue: ritualService },
-        { provide: ConfirmationService, useValue: confirmationService }
+        { provide: ConfirmationService, useValue: confirmationService },
+        { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: convertToParamMap({}) } } }
       ]
     }).compileComponents();
 
@@ -58,6 +61,7 @@ describe('IntegrationsConnectorsTabComponent', () => {
 
     expect(mcpServerService.testMCPServerConnection).toHaveBeenCalledWith({
       server_url: 'https://example.com/mcp',
+      auth_mode: 'header',
       authentication: 'Bearer token'
     });
     expect(component.testResult()?.pass).toBe(true);
@@ -84,6 +88,7 @@ describe('IntegrationsConnectorsTabComponent', () => {
 
     expect(mcpServerService.testMCPServerConnection).toHaveBeenCalledWith({
       server_url: 'https://new.example.com/mcp',
+      auth_mode: 'header',
       connector_id: '4f36536c-90da-4fc4-91eb-5bb8b0e085f3'
     });
   });
@@ -107,6 +112,7 @@ describe('IntegrationsConnectorsTabComponent', () => {
 
     expect(mcpServerService.testMCPServerConnection).toHaveBeenCalledWith({
       server_url: 'https://mail.example.com/mcp',
+      auth_mode: 'header',
       connector_id: 'dd57f6cf-37af-4e71-87bb-6a7f1d5b8979',
       authentication: null
     });
@@ -125,5 +131,12 @@ describe('IntegrationsConnectorsTabComponent', () => {
       tool_count: 0,
       message: 'auth failed'
     });
+  });
+
+  it('disables test for oauth mode', () => {
+    component.formAuthMode.set('oauth');
+    component.formServerURL.set('https://example.com/mcp');
+    component.test();
+    expect(mcpServerService.testMCPServerConnection).not.toHaveBeenCalled();
   });
 });

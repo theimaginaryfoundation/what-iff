@@ -122,7 +122,7 @@ func connectorEligible(s *models.MCPServer) bool {
 		status = models.MCPServerStatusActive
 	}
 	switch status {
-	case models.MCPServerStatusActive, models.MCPServerStatusRefreshError:
+	case models.MCPServerStatusActive, models.MCPServerStatusExpiring, models.MCPServerStatusRefreshError:
 		return true
 	default:
 		return false
@@ -392,7 +392,11 @@ func (c *Client) rpcNotify(ctx context.Context, server *models.MCPServer, method
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", streamableAccept)
-	if token := strings.TrimSpace(server.AuthToken); token != "" {
+	token, err := authHeaderForServer(server, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if token != "" {
 		httpReq.Header.Set("Authorization", token)
 	}
 	resp, err := c.httpClient.Do(httpReq)
@@ -420,7 +424,11 @@ func (c *Client) rpcCall(ctx context.Context, server *models.MCPServer, method s
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", streamableAccept)
-	if token := strings.TrimSpace(server.AuthToken); token != "" {
+	token, err := authHeaderForServer(server, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	if token != "" {
 		httpReq.Header.Set("Authorization", token)
 	}
 	resp, err := c.httpClient.Do(httpReq)
@@ -523,4 +531,25 @@ func truncateForError(s string, max int) string {
 		return s
 	}
 	return s[:max] + "...(truncated)"
+}
+
+func authHeaderForServer(server *models.MCPServer, now time.Time) (string, error) {
+	if server == nil {
+		return "", fmt.Errorf("server is required")
+	}
+	mode := strings.TrimSpace(server.AuthMode)
+	if mode == "" {
+		mode = models.MCPServerAuthModeHeader
+	}
+	if mode == models.MCPServerAuthModeOAuth {
+		accessToken := strings.TrimSpace(server.OAuthAccessToken)
+		if accessToken == "" {
+			return "", fmt.Errorf("oauth connector is not authenticated")
+		}
+		if server.OAuthAccessTokenExpiresAt != nil && now.After(server.OAuthAccessTokenExpiresAt.UTC()) {
+			return "", fmt.Errorf("oauth access token is expired; reauthenticate connector")
+		}
+		return "Bearer " + accessToken, nil
+	}
+	return strings.TrimSpace(server.AuthToken), nil
 }
