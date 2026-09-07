@@ -2,6 +2,7 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 
 import { ContextBreakdown, ContextSegmentStat } from '../../../../../core/models/message.model';
+import { ContextCostOutletComponent } from '../../../../../extensions/context-cost-outlet.component';
 import { estimateInputAPICost } from '../../../helpers/api-pricing.helpers';
 
 interface KindMeta {
@@ -43,7 +44,7 @@ interface BreakdownRow {
 @Component({
   selector: 'app-context-breakdown-tab',
   standalone: true,
-  imports: [DatePipe, DecimalPipe],
+  imports: [ContextCostOutletComponent, DatePipe, DecimalPipe],
   template: `
     <section class="tab-body" aria-label="Context breakdown">
       @if (breakdown(); as b) {
@@ -61,10 +62,7 @@ interface BreakdownRow {
               <span class="gauge__total">{{ format(total()) }}</span>
               <span class="gauge__budget">/ {{ format(displayBudget()) }} tokens</span>
               @if (inputCost(); as cost) {
-                <span
-                  class="gauge__cost"
-                  [title]="'Standard input-token rate checked ' + cost.pricingCheckedAt + '. Excludes output tokens, cached-input discounts, tool fees, batch/priority tiers, regional uplifts, and account-specific pricing.'"
-                >Estimated input API cost &#36;{{ cost.amountUsd | number: '1.4-6' }}</span>
+                <app-context-cost-outlet [cost]="cost" />
               }
             </div>
             <div
@@ -169,7 +167,6 @@ interface BreakdownRow {
     .gauge__top { align-items: baseline; display: flex; gap: 0.35rem; }
     .gauge__total { color: var(--color-text-primary); font-size: 1.35rem; font-weight: 700; }
     .gauge__budget { color: var(--color-text-muted); font-size: 0.8rem; }
-    .gauge__cost { color: var(--color-text-secondary); font-size: 0.8rem; font-weight: 600; margin-left: auto; }
 
     .gauge__track {
       background: var(--color-surface-base);

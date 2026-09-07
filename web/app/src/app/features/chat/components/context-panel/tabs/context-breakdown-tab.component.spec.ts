@@ -51,12 +51,12 @@ describe('ContextBreakdownTabComponent', () => {
         expect(fixture.componentInstance.overBudget()).toBe(false);
     });
 
-    it('shows estimated standard input API cost near the token gauge', () => {
+    it('shows the estimated input API cost near the token gauge', () => {
         fixture.componentRef.setInput('breakdown', sampleBreakdown);
         fixture.detectChanges();
         const gauge = fixture.nativeElement.querySelector('.gauge') as HTMLElement;
-        expect(gauge.textContent ?? '').toContain('Estimated input API cost');
-        expect(gauge.textContent ?? '').toContain('$0.00715');
+        expect(gauge.textContent ?? '').toContain('Est. $0.007');
+        expect(gauge.textContent ?? '').not.toContain('Estimated input API cost');
     });
 
     it('does not invent an API cost when provider/model pricing is unknown', () => {
