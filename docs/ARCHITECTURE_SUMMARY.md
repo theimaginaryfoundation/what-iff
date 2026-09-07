@@ -64,6 +64,7 @@
  ### Frontend
 - Angular SPA in `web/app/`.
 - Talks to the REST API defined in `openapi.yaml`, handles auth, chat, memories, personalities, rituals, file uploads, and job tracking.
+- **Build-specific UI extensions:** `web/app/src/app/extensions/` contains unconditional standalone outlet components and DI-provider swap-point files. The open-source build supplies no-op/default implementations; a private overlay replaces the individual source file to supply feature-specific UI or policy (for example, help, chat-send, and Context X-ray cost displays) without changing the consuming component.
 - **`openapi.yaml` is a frontend build input, not just documentation.** The e2e SDK's types are generated from it into `web/app/e2e/sdk/schema.d.ts`, and `frontend-pr-validation` fails when the committed file does not match what the spec would generate. So **any change to `openapi.yaml` — including a backend-only PR — must regenerate the SDK and commit the result**, or frontend CI goes red on a PR that touched no frontend code:
 
   ```bash
