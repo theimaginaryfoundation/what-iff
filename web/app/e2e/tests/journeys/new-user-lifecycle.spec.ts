@@ -52,7 +52,7 @@ test(
       );
 
       await expect(page).toHaveURL(/\/personality\/[^/]+$/);
-      await expect(personalityDetailPage.heading(personalityName)).toBeVisible();
+      await expect(personalityDetailPage.nameInput).toHaveValue(personalityName);
     });
 
     await test.step('chat with it', async () => {

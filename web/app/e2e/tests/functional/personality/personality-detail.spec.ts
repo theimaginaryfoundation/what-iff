@@ -9,14 +9,23 @@ import { test, expect } from '../../../fixtures';
 test('edits and saves the system prompt', async ({ personalityDetailPage, userWithPersonality }) => {
   await personalityDetailPage.navigateTo(userWithPersonality.personality.id);
 
-  const newName = `${userWithPersonality.personality.name} v2`;
   const newPrompt = 'Updated by the e2e suite — respond tersely.';
-  await personalityDetailPage.editPrompt({ name: newName, systemPrompt: newPrompt });
+  await personalityDetailPage.editPrompt({ systemPrompt: newPrompt });
   await personalityDetailPage.savePrompt();
 
-  await expect(personalityDetailPage.promptEditor).toContainText(newName);
   await expect(personalityDetailPage.promptEditor).toContainText(newPrompt);
   await expect(personalityDetailPage.editPromptButton).toBeVisible();
+});
+
+test('renames the personality from the header field', async ({ personalityDetailPage, userWithPersonality }) => {
+  await personalityDetailPage.navigateTo(userWithPersonality.personality.id);
+
+  const newName = `${userWithPersonality.personality.name} v2`;
+  await personalityDetailPage.rename(newName);
+
+  // The header field now doubles as the full-screen editor's name input, so the
+  // persisted value is what it holds after the save round-trips.
+  await expect(personalityDetailPage.nameInput).toHaveValue(newName);
 });
 
 test('cancelling the system prompt editor discards the draft', async ({ personalityDetailPage, userWithPersonality }) => {

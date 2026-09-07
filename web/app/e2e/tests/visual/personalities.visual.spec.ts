@@ -35,7 +35,7 @@ test.describe('personalities screens', () => {
       );
 
       await expect(page).toHaveURL(/\/personality\/[^/]+$/);
-      await expect(personalityDetailPage.heading(personalityName)).toBeVisible();
+      await expect(personalityDetailPage.nameInput).toHaveValue(personalityName);
       // The "DEFAULT" badge depends on a user-preferences fetch that trails
       // the personality-detail navigation; a fresh user's first personality
       // always ends up default, so wait for that badge rather than racing it —
