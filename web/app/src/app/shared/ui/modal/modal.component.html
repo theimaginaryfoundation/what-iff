@@ -4,11 +4,6 @@
       <header class="ui-modal__header">
         <ng-content select="[modal-header]" />
         <div class="ui-modal__header-actions">
-          @if (canToggleFullscreen()) {
-            <button class="ui-modal__fullscreen" type="button" (click)="toggleFullscreen()">
-              {{ fullscreenActive() ? 'Contract' : 'Full screen' }}
-            </button>
-          }
           @if (dismissible()) {
             <button class="ui-modal__close" type="button" aria-label="Close" (click)="requestDismiss()">
               <ui-x-icon [size]="18" />

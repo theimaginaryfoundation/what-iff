@@ -14,14 +14,13 @@ import {
 } from '../../../core/constants/text-limits.constants';
 
 export interface SystemPromptValue {
-  name: string;
   systemPrompt: string;
 }
 
 /**
- * Inline editor for a personality's name + system prompt. Handles
- * save/discard and exposes both the soft warning (≥20k chars) and hard
- * limit (>25k chars). Cancellation reverts to the latest input value.
+ * Inline editor for a personality's system prompt. Handles save/discard and
+ * exposes both the soft warning (≥20k chars) and hard limit (>25k chars).
+ * Cancellation reverts to the latest input value.
  */
 @Component({
   selector: 'app-personality-system-prompt-editor',
@@ -44,21 +43,11 @@ export interface SystemPromptValue {
 
       @if (isEditing()) {
         <label class="flex flex-col gap-1 text-sm">
-          <span class="font-medium text-(--color-text-primary)">Name</span>
-          <input
-            type="text"
-            class="rounded-lg border border-(--color-border-default) bg-(--color-surface-input) px-3 py-2 text-(--color-text-primary) outline-none focus:border-(--color-accent) focus:ring-2 focus:ring-(--color-accent)"
-            [value]="draft().name"
-            (input)="setName($any($event.target).value)"
-          />
-        </label>
-
-        <label class="flex flex-col gap-1 text-sm">
           <span class="font-medium text-(--color-text-primary)">Prompt</span>
           <textarea
             rows="10"
-            class="rounded-lg border border-(--color-border-default) bg-(--color-surface-input) px-3 py-2 font-mono text-sm text-(--color-text-primary) outline-none focus:border-(--color-accent) focus:ring-2 focus:ring-(--color-accent)"
-            [value]="draft().systemPrompt"
+            class="rounded-lg border border-(--color-border-default) bg-(--color-surface-input) px-3 py-2 text-sm leading-relaxed text-(--color-text-primary) outline-none focus:border-(--color-accent) focus:ring-2 focus:ring-(--color-accent)"
+            [value]="draft()"
             (input)="setSystemPrompt($any($event.target).value)"
           ></textarea>
           <div class="flex items-center justify-between text-xs">
@@ -88,10 +77,9 @@ export interface SystemPromptValue {
           >{{ isSaving() ? 'Saving…' : 'Save' }}</button>
         </div>
       } @else {
-        <div class="flex flex-col gap-2">
-          <p class="text-sm font-medium text-(--color-text-primary)">{{ value().name }}</p>
+        <div>
           <pre
-            class="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg bg-(--color-surface-elevated) p-3 font-mono text-xs text-(--color-text-secondary)"
+            class="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg bg-(--color-surface-elevated) p-3 text-sm leading-relaxed text-(--color-text-secondary)"
           >{{ value().systemPrompt || 'No system prompt set.' }}</pre>
         </div>
       }
@@ -111,16 +99,15 @@ export class PersonalitySystemPromptEditorComponent {
   readonly hardLimitLabel = TEXT_LIMIT_HARD_MAX.toLocaleString();
 
   readonly isEditing = signal(false);
-  readonly draft = signal<SystemPromptValue>({ name: '', systemPrompt: '' });
+  readonly draft = signal('');
   readonly errorMessage = signal<string | null>(null);
 
-  readonly characterCount = computed(() => this.draft().systemPrompt.length);
+  readonly characterCount = computed(() => this.draft().length);
   readonly characterCountLabel = computed(() => this.characterCount().toLocaleString());
   readonly isNearLimit = computed(() => this.characterCount() >= TEXT_LIMIT_WARNING_THRESHOLD);
   readonly isOverLimit = computed(() => this.characterCount() > TEXT_LIMIT_HARD_MAX);
   readonly canSave = computed(() => {
-    const draft = this.draft();
-    if (!draft.name.trim() || !draft.systemPrompt.trim()) return false;
+    if (!this.draft().trim()) return false;
     if (this.isOverLimit()) return false;
     return true;
   });
@@ -128,36 +115,32 @@ export class PersonalitySystemPromptEditorComponent {
   constructor() {
     effect(() => {
       if (!this.isEditing()) {
-        this.draft.set(this.value());
+        this.draft.set(this.value().systemPrompt);
       }
     });
   }
 
   startEdit(): void {
-    this.draft.set(this.value());
+    this.draft.set(this.value().systemPrompt);
     this.errorMessage.set(null);
     this.isEditing.set(true);
   }
 
   cancelEdit(): void {
-    this.draft.set(this.value());
+    this.draft.set(this.value().systemPrompt);
     this.errorMessage.set(null);
     this.isEditing.set(false);
     this.cancel.emit();
   }
 
-  setName(value: string): void {
-    this.draft.update(draft => ({ ...draft, name: value }));
-  }
-
   setSystemPrompt(value: string): void {
-    this.draft.update(draft => ({ ...draft, systemPrompt: value }));
+    this.draft.set(value);
   }
 
   onSave(): void {
     const draft = this.draft();
-    if (!draft.name.trim() || !draft.systemPrompt.trim()) {
-      this.errorMessage.set('Name and prompt are required.');
+    if (!draft.trim()) {
+      this.errorMessage.set('Prompt is required.');
       return;
     }
     if (this.isOverLimit()) {
@@ -165,7 +148,7 @@ export class PersonalitySystemPromptEditorComponent {
       return;
     }
     this.errorMessage.set(null);
-    this.save.emit({ name: draft.name.trim(), systemPrompt: draft.systemPrompt.trim() });
+    this.save.emit({ systemPrompt: draft.trim() });
     this.isEditing.set(false);
   }
 }

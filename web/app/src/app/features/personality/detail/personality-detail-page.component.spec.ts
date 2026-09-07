@@ -125,7 +125,19 @@ describe('PersonalityDetailPageComponent', () => {
 
     it('instantiates and loads a personality from the route id', () => {
         fixture.detectChanges();
-        expect(fixture.nativeElement.textContent).toContain('Vera Calder');
+        const nameInput = fixture.nativeElement.querySelector('input[aria-label="Personality name"]') as HTMLInputElement;
+        expect(nameInput.value).toBe('Vera Calder');
+    });
+
+    it('contracts the editor back to the personalities list', () => {
+        fixture.detectChanges();
+
+        const contractButton = fixture.nativeElement.querySelector('[aria-label="Contract editor"]') as HTMLButtonElement;
+        contractButton.click();
+
+        expect(router.navigate).toHaveBeenCalledWith(['/personality'], {
+            queryParams: { edit: 'p-1' },
+        });
     });
 
     it('starts a new chat with the personality without requiring ChatSessionService', async () => {
@@ -144,7 +156,6 @@ describe('PersonalityDetailPageComponent', () => {
         fixture.detectChanges();
 
         await fixture.componentInstance.onSavePrompt({
-            name: 'Vera Calder',
             systemPrompt: 'Updated prompt',
         });
 

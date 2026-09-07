@@ -697,3 +697,45 @@ export class CircleHelpIconComponent {
 export class ExpandVerticalIconComponent {
   readonly size = input(16);
 }
+
+@Component({
+  selector: 'ui-expand-icon',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
+  template: `
+    <svg [attr.width]="size()" [attr.height]="size()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <path d="M8 3H3v5"/>
+      <path d="m3 3 6 6"/>
+      <path d="M16 3h5v5"/>
+      <path d="m21 3-6 6"/>
+      <path d="M8 21H3v-5"/>
+      <path d="m3 21 6-6"/>
+      <path d="M16 21h5v-5"/>
+      <path d="m21 21-6-6"/>
+    </svg>
+  `,
+})
+export class ExpandIconComponent {
+  readonly size = input(16);
+}
+
+@Component({
+  selector: 'ui-contract-icon',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
+  template: `
+    <svg [attr.width]="size()" [attr.height]="size()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <path d="M9 3v6H3"/>
+      <path d="m3 9 6-6"/>
+      <path d="M15 3v6h6"/>
+      <path d="m21 9-6-6"/>
+      <path d="M9 21v-6H3"/>
+      <path d="m3 15 6 6"/>
+      <path d="M15 21v-6h6"/>
+      <path d="m21 15-6 6"/>
+    </svg>
+  `,
+})
+export class ContractIconComponent {
+  readonly size = input(16);
+}

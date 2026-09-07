@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  effect,
   inject,
   OnInit,
   signal,
@@ -31,7 +32,14 @@ import { PersonalitySystemPromptEditorComponent, SystemPromptValue } from './per
 import { PersonalityAttachmentsListComponent } from './personality-attachments-list.component';
 import { PersonalityExpressionsManagerComponent } from './personality-expressions-manager.component';
 import { PersonalityMediaJobBannerComponent } from '../components/personality-media-job-banner.component';
-import { BellIconComponent } from '../../../shared/ui/icons/icons';
+import {
+  BellIconComponent,
+  ContractIconComponent,
+} from '../../../shared/ui/icons/icons';
+import {
+  PersonalityEditDraft,
+  PersonalityEditorSessionService,
+} from '../services/personality-editor-session.service';
 
 @Component({
   selector: 'app-personality-detail-page',
@@ -44,6 +52,7 @@ import { BellIconComponent } from '../../../shared/ui/icons/icons';
     PersonalityExpressionsManagerComponent,
     PersonalityMediaJobBannerComponent,
     BellIconComponent,
+    ContractIconComponent,
   ],
   providers: [PersonalityViewService],
   templateUrl: './personality-detail-page.component.html',
@@ -58,6 +67,7 @@ export class PersonalityDetailPageComponent implements OnInit {
   private readonly confirmation = inject(ConfirmationService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  private readonly editorSession = inject(PersonalityEditorSessionService);
 
   readonly personality = this.view.personality;
   readonly expressions = this.view.expressions;
@@ -95,14 +105,27 @@ export class PersonalityDetailPageComponent implements OnInit {
 
   readonly autoPinUpdating = signal(false);
   readonly expressionsEnabledUpdating = signal(false);
+  readonly editorSaving = signal(false);
+  readonly scratchpadAdvancedOpen = signal(false);
 
   readonly systemPromptValue = computed<SystemPromptValue>(() => {
     const personality = this.personality();
+    const draft = this.editorSession.personalityId() === personality?.id
+      ? this.editorSession.draft()
+      : null;
     return {
-      name: personality?.name ?? '',
-      systemPrompt: personality?.system_prompt ?? '',
+      systemPrompt: draft?.system_prompt ?? personality?.system_prompt ?? '',
     };
   });
+
+  constructor() {
+    effect(() => {
+      const personality = this.personality();
+      if (personality) {
+        this.editorSession.begin(personality);
+      }
+    });
+  }
 
   ngOnInit(): void {
     this.userPreferencesService.getUserPreferences().subscribe();
@@ -119,7 +142,43 @@ export class PersonalityDetailPageComponent implements OnInit {
   }
 
   goBack(): void {
-    this.router.navigate(['/personality']);
+    const personalityId = this.personality()?.id;
+    this.router.navigate(['/personality'], {
+      queryParams: personalityId ? { edit: personalityId } : undefined,
+    });
+  }
+
+  editorDraft(): PersonalityEditDraft | null {
+    const personality = this.personality();
+    if (!personality || this.editorSession.personalityId() !== personality.id) {
+      return null;
+    }
+    return this.editorSession.draft();
+  }
+
+  setDraftField<K extends keyof PersonalityEditDraft>(key: K, value: PersonalityEditDraft[K]): void {
+    this.editorSession.update(key, value);
+  }
+
+  saveEditor(): void {
+    const personality = this.personality();
+    if (!personality || this.editorSaving()) return;
+    this.editorSaving.set(true);
+    this.personalityService.updatePersonality(personality.id, this.buildUpdateRequest(personality, {})).subscribe({
+      next: updated => {
+        this.view.setPersonality(updated);
+        this.editorSession.commit(updated);
+        this.editorSaving.set(false);
+      },
+      error: async err => {
+        console.error('Failed to save personality editor', err);
+        this.editorSaving.set(false);
+        await this.confirmation.alert({
+          message: 'Failed to save personality. Please try again.',
+          type: 'danger',
+        });
+      },
+    });
   }
 
   onExpressionsEnabledChanged(enabled: boolean): void {
@@ -151,6 +210,7 @@ export class PersonalityDetailPageComponent implements OnInit {
   onAutoPinMemoriesChange(enabled: boolean): void {
     const personality = this.personality();
     if (!personality || personality.auto_pin_memories === enabled) return;
+    this.editorSession.update('auto_pin_memories', enabled);
     this.autoPinUpdating.set(true);
     const request = this.buildUpdateRequest(personality, {
       auto_pin_memories: enabled,
@@ -162,6 +222,7 @@ export class PersonalityDetailPageComponent implements OnInit {
       },
       error: async err => {
         console.error('Failed to update auto-pin setting', err);
+        this.editorSession.update('auto_pin_memories', personality.auto_pin_memories);
         this.autoPinUpdating.set(false);
         await this.confirmation.alert({
           message: 'Failed to update auto-pin setting. Please try again.',
@@ -174,8 +235,8 @@ export class PersonalityDetailPageComponent implements OnInit {
   async onSavePrompt(value: SystemPromptValue): Promise<void> {
     const personality = this.personality();
     if (!personality) return;
+    this.editorSession.update('system_prompt', value.systemPrompt);
     const request = this.buildUpdateRequest(personality, {
-      name: value.name,
       system_prompt: value.systemPrompt,
     });
     this.personalityService.updatePersonality(personality.id, request).subscribe({
@@ -202,7 +263,10 @@ export class PersonalityDetailPageComponent implements OnInit {
     });
     if (!confirmed) return;
     this.personalityService.deletePersonality(personality.id).subscribe({
-      next: () => this.router.navigate(['/personality']),
+      next: () => {
+        this.editorSession.clear(personality.id);
+        this.router.navigate(['/personality']);
+      },
       error: async err => {
         console.error('Failed to delete personality', err);
         await this.confirmation.alert({
@@ -254,15 +318,18 @@ export class PersonalityDetailPageComponent implements OnInit {
     personality: Personality,
     overrides: Partial<UpdatePersonalityRequest>,
   ): UpdatePersonalityRequest {
+    const draft = this.editorSession.personalityId() === personality.id
+      ? this.editorSession.draft()
+      : null;
     return {
-      name: personality.name,
-      system_prompt: personality.system_prompt,
-      auto_pin_memories: personality.auto_pin_memories,
-      cover_image_id: personality.cover_image_id,
-      accent_color: personality.accent_color,
-      thumbnail_circle: personality.thumbnail_circle,
-      scratchpad: personality.scratchpad,
-      scratchpad_update_prompt: personality.scratchpad_update_prompt,
+      name: draft?.name ?? personality.name,
+      system_prompt: draft?.system_prompt ?? personality.system_prompt,
+      auto_pin_memories: draft?.auto_pin_memories ?? personality.auto_pin_memories,
+      cover_image_id: draft?.cover_image_id ?? personality.cover_image_id,
+      accent_color: draft?.accent_color ?? personality.accent_color,
+      thumbnail_circle: draft?.thumbnail_circle ?? personality.thumbnail_circle,
+      scratchpad: draft?.scratchpad ?? personality.scratchpad,
+      scratchpad_update_prompt: draft?.scratchpad_update_prompt ?? personality.scratchpad_update_prompt,
       archival_model: personality.archival_model,
       memory_search_prompt: personality.memory_search_prompt,
       memory_write_prompt: personality.memory_write_prompt,

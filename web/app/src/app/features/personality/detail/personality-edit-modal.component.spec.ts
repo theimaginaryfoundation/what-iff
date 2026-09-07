@@ -100,34 +100,21 @@ describe('PersonalityEditModalComponent', () => {
         expect(component.draft()?.thumbnail_circle?.r).toBeCloseTo(0.34, 5);
     });
 
-    it('offers an explicit full-screen editing affordance', () => {
-        const buttons = Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[];
-        const fullScreenButton = buttons.find(button => /full.?screen|expand/i.test(button.textContent ?? ''));
+    it('offers an icon-only expand action', () => {
+        const expandButton = fixture.nativeElement.querySelector('[aria-label="Expand editor"]') as HTMLButtonElement;
 
-        expect(fullScreenButton).toBeTruthy();
+        expect(expandButton).toBeTruthy();
+        expect(expandButton.textContent?.trim()).toBe('');
     });
 
-    it('expands and contracts without replacing the in-progress draft', () => {
+    it('emits an expand request without discarding an in-progress draft', () => {
+        vi.spyOn(component.expandRequested, 'emit').mockReturnValue(undefined);
         component.setDraftField('name', 'Unsaved Vera');
-        fixture.detectChanges();
 
-        const findToggle = () => (Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[])
-            .find(button => /full.?screen|contract/i.test(button.textContent ?? ''));
+        component.requestExpand();
 
-        const expandButton = findToggle();
-        expect(expandButton).toBeTruthy();
-        expandButton!.click();
-        fixture.detectChanges();
-
-        const expandedPanel = fixture.nativeElement.querySelector('.ui-modal__panel--fullscreen');
-        expect(expandedPanel).toBeTruthy();
-        expect(component.draft()?.name).toBe('Unsaved Vera');
-        expect(findToggle()?.textContent).toContain('Contract');
-
-        findToggle()!.click();
-        fixture.detectChanges();
-
-        expect(fixture.nativeElement.querySelector('.ui-modal__panel--fullscreen')).toBeFalsy();
+        expect(confirmDiscardCalls).toBe(0);
+        expect(component.expandRequested.emit).toHaveBeenCalled();
         expect(component.draft()?.name).toBe('Unsaved Vera');
     });
 
