@@ -60,9 +60,20 @@ export class ChatPage {
     this.skillOptionList = this.skillPickerDialog.getByRole('listbox', { name: 'Available skills' });
     this.skillPickerStatus = this.skillPickerDialog.locator('.composer__skill-status');
     this.pendingSkills = this.page.getByLabel('Skills to send with this message');
+    this.emojiAutocomplete = this.page.getByRole('listbox', { name: 'Emoji suggestions' });
   }
 
   readonly composerInput: Locator;
+
+  // --- emoji shortcode autocomplete -----------------------------------------
+
+  /** The `:shortcode` suggestion popup (`role="listbox"` "Emoji suggestions"). */
+  readonly emojiAutocomplete: Locator;
+
+  /** A single emoji suggestion row, matched by its `:short_name:` label. */
+  emojiSuggestion(colons: string): Locator {
+    return this.emojiAutocomplete.getByRole('option', { name: colons });
+  }
 
   /**
    * Header button showing the active personality's name (and the matching

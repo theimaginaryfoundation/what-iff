@@ -18,8 +18,8 @@ import { FormsModule } from '@angular/forms';
 import { Subject, forkJoin, of } from 'rxjs';
 import { catchError, finalize, map, switchMap } from 'rxjs/operators';
 
-import { PickerComponent } from '@ctrl/ngx-emoji-mart';
-import { EmojiData, EmojiEvent } from '@ctrl/ngx-emoji-mart/ngx-emoji';
+import { EmojiSearch, PickerComponent } from '@ctrl/ngx-emoji-mart';
+import { EmojiEvent } from '@ctrl/ngx-emoji-mart/ngx-emoji';
 
 import {
   FileAttachment,
@@ -42,7 +42,15 @@ import {
   resolveSlashCommand,
   SlashCommand,
 } from '../../helpers/slash-command.helpers';
+import {
+  ActiveEmojiShortcode,
+  EmojiSuggestion,
+  activeEmojiShortcodeQuery,
+  emojiCharFromData,
+  searchEmojiShortcodes,
+} from '../../helpers/emoji-shortcode.helpers';
 import { ModelPickerComponent } from '../model-picker/model-picker.component';
+import { EmojiAutocompleteMenuComponent } from '../emoji-autocomplete-menu/emoji-autocomplete-menu.component';
 import { SlashMenuComponent } from '../slash-menu/slash-menu.component';
 import { BoltIconComponent, FileIconComponent, ImageIconComponent, PlusIconComponent } from '../../../../shared/ui/icons/icons';
 import { ModalComponent } from '../../../../shared/ui/modal/modal.component';
@@ -75,6 +83,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
     FormsModule,
     PickerComponent,
     ModelPickerComponent,
+    EmojiAutocompleteMenuComponent,
     SlashMenuComponent,
     BoltIconComponent,
     FileIconComponent,
@@ -404,6 +413,17 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
             }
           </div>
         </div>
+
+        @if (emojiAutocompleteOpen()) {
+          <div class="composer__emoji-autocomplete">
+            <app-emoji-autocomplete-menu
+              #emojiMenu
+              [suggestions]="emojiSuggestions()"
+              (selected)="onEmojiSuggestionSelected($event)"
+              (closed)="closeEmojiAutocomplete()"
+            />
+          </div>
+        }
 
       </div>
 
@@ -1008,6 +1028,15 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
       width: min(100%, 26rem, calc(100% - 2rem));
     }
 
+    .composer__emoji-autocomplete {
+      bottom: calc(100% + 0.375rem);
+      left: 0;
+      max-width: min(20rem, 92vw);
+      position: absolute;
+      width: max-content;
+      z-index: 60;
+    }
+
     .composer__quota {
       color: var(--color-danger);
       font-size: 0.875rem;
@@ -1157,6 +1186,7 @@ export class ChatComposerComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly ritualService = inject(RitualService);
   private readonly moodService = inject(MoodService);
+  private readonly emojiSearch = inject(EmojiSearch);
   readonly imageGallery = inject(ImageGalleryService);
   readonly modeSingular = MODE_SINGULAR;
   readonly modeSingularPlural = MODE_PLURAL;
@@ -1213,6 +1243,11 @@ export class ChatComposerComponent {
   readonly slashOpen = signal(false);
   readonly slashQuery = signal('');
   private readonly slashMenu = viewChild<SlashMenuComponent>('slashMenu');
+  /** In-progress `:shortcode` autocomplete state, distinct from the plus-menu emoji picker. */
+  readonly emojiAutocompleteOpen = signal(false);
+  readonly emojiSuggestions = signal<readonly EmojiSuggestion[]>([]);
+  private readonly emojiQuery = signal<ActiveEmojiShortcode | null>(null);
+  private readonly emojiMenu = viewChild<EmojiAutocompleteMenuComponent>('emojiMenu');
   readonly isDragOver = signal(false);
   readonly plusOpen = signal(false);
   readonly emojiOpen = signal(false);
@@ -1363,7 +1398,8 @@ export class ChatComposerComponent {
   }
 
   onInput(event: Event): void {
-    const value = (event.target as HTMLTextAreaElement).value;
+    const textarea = event.target as HTMLTextAreaElement;
+    const value = textarea.value;
     this.draftChange.emit(value);
     this.limitWarningAcknowledged.set(false);
     if (this.limitWarningOpen()) {
@@ -1372,10 +1408,82 @@ export class ChatComposerComponent {
     const parsed = parseSlash(value);
     this.slashOpen.set(parsed.command !== null);
     this.slashQuery.set(parsed.command ?? '');
+    this.updateEmojiAutocomplete(textarea);
     this.scheduleTextareaResize();
   }
 
+  /**
+   * Recompute the emoji suggestion popup from the caret position. Opens it only
+   * when the caret sits inside an in-progress `:shortcode` with real matches;
+   * an in-progress shortcode supersedes the slash menu.
+   */
+  private updateEmojiAutocomplete(textarea: HTMLTextAreaElement): void {
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? start;
+    if (start !== end) {
+      this.closeEmojiAutocomplete();
+      return;
+    }
+
+    const active = activeEmojiShortcodeQuery(textarea.value, start);
+    if (!active) {
+      this.closeEmojiAutocomplete();
+      return;
+    }
+
+    const suggestions = searchEmojiShortcodes(this.emojiSearch, active.query);
+    if (!suggestions.length) {
+      this.closeEmojiAutocomplete();
+      return;
+    }
+
+    this.emojiQuery.set(active);
+    this.emojiSuggestions.set(suggestions);
+    this.emojiAutocompleteOpen.set(true);
+    this.slashOpen.set(false);
+  }
+
+  closeEmojiAutocomplete(): void {
+    if (this.emojiAutocompleteOpen()) {
+      this.emojiAutocompleteOpen.set(false);
+    }
+    this.emojiSuggestions.set([]);
+    this.emojiQuery.set(null);
+  }
+
+  onEmojiSuggestionSelected(suggestion: EmojiSuggestion): void {
+    const range = this.emojiQuery();
+    this.closeEmojiAutocomplete();
+    if (!range) {
+      this.insertAtCursor(suggestion.native);
+      return;
+    }
+    this.replaceRange(range.start, range.end, suggestion.native);
+  }
+
   onKeydown(event: KeyboardEvent): void {
+    // The emoji autocomplete popup owns navigation/accept keys while open, ahead
+    // of both the slash menu and Enter-to-send.
+    if (this.emojiAutocompleteOpen()) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        this.closeEmojiAutocomplete();
+        return;
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        this.emojiMenu()?.onKeydown(event);
+        return;
+      }
+      // Enter and Tab both accept the highlighted suggestion instead of sending
+      // the message or moving focus.
+      if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
+        event.preventDefault();
+        this.emojiMenu()?.selectHighlighted();
+        return;
+      }
+    }
+
     // On soft-keyboard devices Enter is a newline; submitting happens via the
     // Send button. This avoids needing a Shift key those devices don't have.
     const enterSends = event.key === 'Enter' && !event.shiftKey && !this.softKeyboard();
@@ -1649,6 +1757,38 @@ export class ChatComposerComponent {
     }, 0);
   }
 
+  /**
+   * Replace an explicit `[start, end)` range with text, used to swap an
+   * in-progress `:shortcode` for the chosen emoji. Selects the fragment first so
+   * the browser records a single undoable edit via execCommand where available.
+   */
+  private replaceRange(start: number, end: number, insert: string): void {
+    const ta = this.textareaRef()?.nativeElement;
+    const value = this.draft();
+    if (!ta) {
+      this.draftChange.emit(value.slice(0, start) + insert + value.slice(end));
+      return;
+    }
+    const pos = start + insert.length;
+    ta.focus();
+    ta.setSelectionRange(start, end);
+    if (typeof document.execCommand === 'function' && document.execCommand('insertText', false, insert)) {
+      this.draftChange.emit(ta.value);
+      setTimeout(() => {
+        ta.focus();
+        ta.setSelectionRange(pos, pos);
+      }, 0);
+      return;
+    }
+    const next = value.slice(0, start) + insert + value.slice(end);
+    ta.value = next;
+    this.draftChange.emit(next);
+    setTimeout(() => {
+      ta.focus();
+      ta.setSelectionRange(pos, pos);
+    }, 0);
+  }
+
   onFileInput(event: Event): void {
     const input = event.target as HTMLInputElement;
     const files = Array.from(input.files ?? []).filter(isAllowedFile);
@@ -1738,8 +1878,17 @@ export class ChatComposerComponent {
       }
     }
 
+    if (this.emojiAutocompleteOpen() && target instanceof Element) {
+      const inMenu = target.closest('.composer__emoji-autocomplete');
+      const inTextarea = target.closest('#chat-composer-input');
+      if (!inMenu && !inTextarea) {
+        this.closeEmojiAutocomplete();
+      }
+    }
+
     if (this.host.nativeElement.contains(target)) return;
     this.closeAuxiliaryPopovers();
+    this.closeEmojiAutocomplete();
     this.slashOpen.set(false);
   }
 
@@ -1964,22 +2113,4 @@ function ensurePastedFileName(file: File): File {
     type: file.type,
     lastModified: file.lastModified,
   });
-}
-
-function emojiCharFromData(emoji: EmojiData): string {
-  if (emoji.native) {
-    return emoji.native;
-  }
-  const unified = emoji.unified;
-  if (!unified) {
-    return '';
-  }
-  try {
-    return unified
-      .split('-')
-      .map(hex => String.fromCodePoint(parseInt(hex, 16)))
-      .join('');
-  } catch {
-    return '';
-  }
 }
