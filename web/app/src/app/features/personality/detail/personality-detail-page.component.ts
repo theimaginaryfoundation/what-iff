@@ -163,8 +163,16 @@ export class PersonalityDetailPageComponent implements OnInit {
   saveEditor(): void {
     const personality = this.personality();
     if (!personality || this.editorSaving()) return;
+    // Null only when no draft is tracked for the loaded personality (same
+    // not-ready guard as the other actions here); nothing to save.
+    const draft = this.editorDraft();
+    if (!draft) return;
     this.editorSaving.set(true);
-    this.personalityService.updatePersonality(personality.id, this.buildUpdateRequest(personality, {})).subscribe({
+    // The explicit "Save changes" action is the one place the in-progress
+    // draft is persisted — its fields become the overrides on top of the
+    // preserved personality.
+    const request = this.buildUpdateRequest(personality, { ...draft });
+    this.personalityService.updatePersonality(personality.id, request).subscribe({
       next: updated => {
         this.view.setPersonality(updated);
         this.editorSession.commit(updated);
@@ -313,23 +321,27 @@ export class PersonalityDetailPageComponent implements OnInit {
     }
   }
 
-  /** Builds a full PUT payload so untouched personality settings are preserved on partial edits. */
+  /**
+   * Builds a full PUT payload from the *persisted* personality plus explicit
+   * `overrides`. It never reads the editor draft, so a partial edit preserves
+   * every untouched setting and callers must pass whatever they are changing.
+   * `saveEditor` is the only caller that applies the in-progress draft (by
+   * spreading it as overrides); immediate controls pass just their own field,
+   * which is what keeps them from flushing an unsaved draft on save.
+   */
   private buildUpdateRequest(
     personality: Personality,
     overrides: Partial<UpdatePersonalityRequest>,
   ): UpdatePersonalityRequest {
-    const draft = this.editorSession.personalityId() === personality.id
-      ? this.editorSession.draft()
-      : null;
     return {
-      name: draft?.name ?? personality.name,
-      system_prompt: draft?.system_prompt ?? personality.system_prompt,
-      auto_pin_memories: draft?.auto_pin_memories ?? personality.auto_pin_memories,
-      cover_image_id: draft?.cover_image_id ?? personality.cover_image_id,
-      accent_color: draft?.accent_color ?? personality.accent_color,
-      thumbnail_circle: draft?.thumbnail_circle ?? personality.thumbnail_circle,
-      scratchpad: draft?.scratchpad ?? personality.scratchpad,
-      scratchpad_update_prompt: draft?.scratchpad_update_prompt ?? personality.scratchpad_update_prompt,
+      name: personality.name,
+      system_prompt: personality.system_prompt,
+      auto_pin_memories: personality.auto_pin_memories,
+      cover_image_id: personality.cover_image_id,
+      accent_color: personality.accent_color,
+      thumbnail_circle: personality.thumbnail_circle,
+      scratchpad: personality.scratchpad,
+      scratchpad_update_prompt: personality.scratchpad_update_prompt,
       archival_model: personality.archival_model,
       memory_search_prompt: personality.memory_search_prompt,
       memory_write_prompt: personality.memory_write_prompt,
