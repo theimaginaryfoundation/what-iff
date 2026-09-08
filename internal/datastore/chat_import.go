@@ -98,12 +98,12 @@ func (d *Datastore) importOneConversation(ctx context.Context, userID uuid.UUID,
 	}
 }
 
-// normalizeImportedMessageTimes preserves the archive transcript order under the datastore's
-// (sent_at, id) retrieval key. Provider exports can contain equal, missing-fallback, or regressing
-// timestamps; without normalization equal times are broken by UUID ordering, which is unrelated to
-// conversational sequence. Existing increasing timestamps are preserved exactly. A non-increasing
-// timestamp is advanced by the smallest duration preserved by the production datastore so source
-// order remains authoritative after persistence.
+// normalizeImportedMessageTimes preserves archive transcript order under the datastore's
+// (sent_at, id) retrieval key. Every persisted imported message after the first must be at least one
+// datastore-supported precision step later than the previous normalized message. Source timestamps
+// that already satisfy that invariant are preserved exactly; equal, regressing, fallback, or
+// sub-precision values are advanced to previousNormalized + importedMessageOrderStep. The comparison
+// deliberately uses the prior normalized value so corrections remain monotonic across a sequence.
 func normalizeImportedMessageTimes(messages []models.ChatMessage) []models.ChatMessage {
 	if len(messages) < 2 {
 		return messages
@@ -114,8 +114,9 @@ func normalizeImportedMessageTimes(messages []models.ChatMessage) []models.ChatM
 	normalized[0].SentAt = previous
 	for i := 1; i < len(normalized); i++ {
 		candidate := normalized[i].SentAt.UTC()
-		if !candidate.After(previous) {
-			candidate = previous.Add(importedMessageOrderStep)
+		minimumNext := previous.Add(importedMessageOrderStep)
+		if candidate.Before(minimumNext) {
+			candidate = minimumNext
 		}
 		normalized[i].SentAt = candidate
 		previous = candidate
@@ -222,7 +223,7 @@ func (d *Datastore) persistImportedConversation(ctx context.Context, tx *ent.Tx,
 	if err := tx.Commit(); err != nil {
 		d.logger.Error("chat import: failed to commit transaction",
 			zap.String("title", conv.Title), zap.Error(err))
-		result.Errors = append(result.Errors, fmt.Sprintf("conversation %q: database error committing transaction", models.TruncateImportTitle(conv.Title)))
+		result.Errors = append(result.Errors, fmt.Sprintf("conversation %q: database error committing chat", models.TruncateImportTitle(conv.Title)))
 		return false
 	}
 
