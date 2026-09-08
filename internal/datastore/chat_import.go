@@ -223,7 +223,7 @@ func (d *Datastore) persistImportedConversation(ctx context.Context, tx *ent.Tx,
 	if err := tx.Commit(); err != nil {
 		d.logger.Error("chat import: failed to commit transaction",
 			zap.String("title", conv.Title), zap.Error(err))
-		result.Errors = append(result.Errors, fmt.Sprintf("conversation %q: database error committing chat", models.TruncateImportTitle(conv.Title)))
+		result.Errors = append(result.Errors, fmt.Sprintf("conversation %q: database error committing", models.TruncateImportTitle(conv.Title)))
 		return false
 	}
 
