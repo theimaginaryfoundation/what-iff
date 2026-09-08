@@ -2105,7 +2105,7 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 		if hasSystemRitual(chatMessage.Rituals, SystemRitualIDImageGenerate) {
 			recordAction = models.ActionTypeImageGeneration
 		}
-		// Link this turn's primary billed event to the assistant message that owns
+		// Link this turn's primary metered event to the assistant message that owns
 		// its Context X-ray, so an implementation can surface the turn's cost on the
 		// X-ray later. Empty when the turn produced no assistant message.
 		var messageID string
