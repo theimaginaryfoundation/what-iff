@@ -25,6 +25,7 @@ Defines the implementation-independent metering contract used by the agent.
 ## Non-obvious decisions
 
 - The agent reads only `Decision.Allowed` and `Decision.FreeChat`; `State` remains owned by the implementation.
+- `Usage.MessageID` is a plain fact the agent owns (the assistant message the turn produced), not metering data. It exists so an implementation can persist a link from a recorded turn to the message whose Context X-ray it paid for; `NoopMeter` ignores it and the core reads it back nowhere.
 - `New` is intentionally nil when no implementation is linked. `Agent.NewAgent` then chooses `NoopMeter`, so removing the production meter does not require agent or server changes.
 
 ## Testing

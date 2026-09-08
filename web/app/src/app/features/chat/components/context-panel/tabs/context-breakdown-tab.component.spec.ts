@@ -70,6 +70,22 @@ describe('ContextBreakdownTabComponent', () => {
         expect(gauge.querySelector('.gauge__cost')).toBeNull();
     });
 
+    it('mounts the cost outlet when only a message id is available, without a dollar estimate', () => {
+        // An unknown-priced model has no cost estimate, but the outlet must still mount so a
+        // private build can render its per-turn credit cost from the message id. The default
+        // build renders nothing there.
+        fixture.componentRef.setInput('breakdown', {
+            ...sampleBreakdown,
+            provider: 'local',
+            model: 'my-custom-model',
+        } satisfies ContextBreakdown);
+        fixture.componentRef.setInput('messageId', 'msg-1');
+        fixture.detectChanges();
+        const gauge = fixture.nativeElement.querySelector('.gauge') as HTMLElement;
+        expect(gauge.querySelector('app-context-cost-outlet')).not.toBeNull();
+        expect(gauge.querySelector('.gauge__cost')).toBeNull();
+    });
+
     it('never lets the denominator fall below usage and flags over-budget', () => {
         fixture.componentRef.setInput('breakdown', {
             ...sampleBreakdown,

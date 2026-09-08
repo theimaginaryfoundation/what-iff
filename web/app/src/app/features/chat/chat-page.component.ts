@@ -683,7 +683,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   openContextForMessage(message: ChatMessage): void {
     const breakdown = message.context_breakdown;
     if (!breakdown) return;
-    this.contextPanel.selectBreakdown(breakdown);
+    this.contextPanel.selectBreakdown(breakdown, message.id);
     this.contextPanel.setActiveTab('context');
     this.contextPanel.setDesktopVisible(true);
     if (this.isMobileViewport()) {
