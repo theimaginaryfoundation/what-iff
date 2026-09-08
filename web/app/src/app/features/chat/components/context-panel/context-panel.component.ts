@@ -85,7 +85,10 @@ import { XIconComponent } from '../../../../shared/ui/icons/icons';
           <app-context-tools-tab [chat]="context.activeChat()" [toolCalls]="context.toolCalls()" />
           }
           @case ('context') {
-          <app-context-breakdown-tab [breakdown]="context.shownBreakdown()" />
+          <app-context-breakdown-tab
+            [breakdown]="context.shownBreakdown()"
+            [messageId]="context.shownBreakdownId()"
+          />
           }
         }
       </div>

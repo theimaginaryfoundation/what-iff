@@ -61,8 +61,8 @@ interface BreakdownRow {
             <div class="gauge__top">
               <span class="gauge__total">{{ format(total()) }}</span>
               <span class="gauge__budget">/ {{ format(displayBudget()) }} tokens</span>
-              @if (inputCost(); as cost) {
-                <app-context-cost-outlet [cost]="cost" />
+              @if (inputCost() || messageId()) {
+                <app-context-cost-outlet [cost]="inputCost()" [messageId]="messageId()" />
               }
             </div>
             <div
@@ -236,6 +236,8 @@ interface BreakdownRow {
 })
 export class ContextBreakdownTabComponent {
   readonly breakdown = input<ContextBreakdown | null>(null);
+  /** Owning message id of the shown breakdown; forwarded to the cost outlet (used by private builds). */
+  readonly messageId = input<string | null>(null);
   readonly inputCost = computed(() => estimateInputAPICost(this.breakdown()));
 
   readonly total = computed(() => {

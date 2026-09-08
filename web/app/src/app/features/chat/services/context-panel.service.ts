@@ -20,6 +20,9 @@ export class ContextPanelService {
   private readonly _latestBreakdownId = signal<string | null>(null);
   // A specific past turn the user pinned via "Show context"; cleared when a new turn lands.
   private readonly _pinnedBreakdown = signal<ContextBreakdown | null>(null);
+  // The owning message id of the pinned past turn, tracked alongside it so the shown
+  // breakdown always resolves to a message id (see shownBreakdownId).
+  private readonly _pinnedBreakdownId = signal<string | null>(null);
 
   readonly activeChat = this._activeChat.asReadonly();
   readonly mobileOpen = this._mobileOpen.asReadonly();
@@ -29,6 +32,10 @@ export class ContextPanelService {
   readonly latestBreakdown = this._latestBreakdown.asReadonly();
   /** The breakdown the Context tab should render: a pinned past turn, else the latest. */
   readonly shownBreakdown = computed(() => this._pinnedBreakdown() ?? this._latestBreakdown());
+  /** Owning message id of shownBreakdown, or null. Mirrors the pinned-else-latest choice above. */
+  readonly shownBreakdownId = computed(() =>
+    this._pinnedBreakdown() ? this._pinnedBreakdownId() : this._latestBreakdownId(),
+  );
   readonly visible = computed(() => this.rightPanel.visible());
   readonly activeChatId = computed(() => this._activeChat()?.id ?? null);
   readonly activeTab = computed<ContextPanelTab>(() => {
@@ -52,14 +59,16 @@ export class ContextPanelService {
     // panel follows the conversation forward after each send.
     if (messageId !== null && messageId !== this._latestBreakdownId()) {
       this._pinnedBreakdown.set(null);
+      this._pinnedBreakdownId.set(null);
     }
     this._latestBreakdown.set(breakdown);
     this._latestBreakdownId.set(messageId);
   }
 
   /** Pin a specific past turn's breakdown in the Context tab (from a message's "Show context"). */
-  selectBreakdown(breakdown: ContextBreakdown | null): void {
+  selectBreakdown(breakdown: ContextBreakdown | null, messageId: string | null = null): void {
     this._pinnedBreakdown.set(breakdown);
+    this._pinnedBreakdownId.set(messageId);
   }
 
   setActiveTab(tab: ContextPanelTab): void {

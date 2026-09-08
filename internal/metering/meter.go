@@ -71,6 +71,12 @@ type Usage struct {
 	Model      string
 	ChatID     string
 	Tokens     int64
+	// MessageID is the assistant message this turn produced — the same message
+	// that owns the turn's Context X-ray snapshot. Optional (empty when no
+	// assistant message exists, e.g. a failed turn); it carries no metering
+	// meaning here. An implementation may persist it so per-turn cost can later
+	// be looked up by message; NoopMeter ignores it.
+	MessageID string
 	// Metadata augments the recorded usage event (e.g. cancellation details).
 	Metadata map[string]interface{}
 	// SubagentRun marks the usage as originating from a subagent job.
