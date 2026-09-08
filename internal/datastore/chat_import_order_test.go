@@ -25,6 +25,21 @@ func TestNormalizeImportedMessageTimesPreservesOrder(t *testing.T) {
 	require.Equal(t, base.Add(-time.Second), messages[2].SentAt)
 }
 
+func TestNormalizeImportedMessageTimesEnforcesDatastorePrecisionStep(t *testing.T) {
+	base := time.Date(2025, 8, 3, 3, 0, 2, 123456000, time.UTC)
+	messages := []models.ChatMessage{
+		{Message: "first", Origin: models.MessageOriginUser, SentAt: base},
+		{Message: "second", Origin: models.MessageOriginAssistant, SentAt: base.Add(500 * time.Nanosecond)},
+		{Message: "third", Origin: models.MessageOriginUser, SentAt: base.Add(750 * time.Nanosecond)},
+	}
+
+	normalized := normalizeImportedMessageTimes(messages)
+
+	require.Equal(t, base, normalized[0].SentAt)
+	require.Equal(t, base.Add(time.Microsecond), normalized[1].SentAt)
+	require.Equal(t, base.Add(2*time.Microsecond), normalized[2].SentAt)
+}
+
 func TestNormalizeImportedMessageTimesLeavesIncreasingTimesUnchanged(t *testing.T) {
 	base := time.Date(2025, 8, 3, 3, 0, 0, 0, time.UTC)
 	messages := []models.ChatMessage{
@@ -34,4 +49,19 @@ func TestNormalizeImportedMessageTimesLeavesIncreasingTimesUnchanged(t *testing.
 	}
 
 	require.Equal(t, messages, normalizeImportedMessageTimes(messages))
+}
+
+func TestNormalizeImportedMessageTimesIsIdempotent(t *testing.T) {
+	base := time.Date(2025, 8, 3, 3, 0, 2, 123456000, time.UTC)
+	messages := []models.ChatMessage{
+		{Message: "first", Origin: models.MessageOriginUser, SentAt: base},
+		{Message: "second", Origin: models.MessageOriginAssistant, SentAt: base},
+		{Message: "third", Origin: models.MessageOriginUser, SentAt: base.Add(-time.Second)},
+		{Message: "fourth", Origin: models.MessageOriginAssistant, SentAt: base.Add(500 * time.Nanosecond)},
+	}
+
+	once := normalizeImportedMessageTimes(messages)
+	twice := normalizeImportedMessageTimes(once)
+
+	require.Equal(t, once, twice)
 }
