@@ -38,7 +38,7 @@ test('create a personality and send/receive a chat message with it', async ({
 
     // Successful create navigates to the personality detail page.
     await expect(page).toHaveURL(/\/personality\/[^/]+$/);
-    await expect(personalityDetailPage.heading(personalityName)).toBeVisible();
+    await expect(personalityDetailPage.nameInput).toHaveValue(personalityName);
   });
 
   await test.step('start a new chat with this personality', async () => {

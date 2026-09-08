@@ -17,7 +17,7 @@ test(
       personalityName,
       'You are a calm, precise assistant used only for visual regression testing. Your answers are always short.',
     );
-    await expect(personalityDetailPage.heading(personalityName)).toBeVisible();
+    await expect(personalityDetailPage.nameInput).toHaveValue(personalityName);
 
     await personalityDetailPage.useInNewChat();
     await expect(page).toHaveURL(/\/chat\/[^/]+$/);

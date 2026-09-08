@@ -7,10 +7,11 @@ export class PersonalityDetailPage {
 
   constructor(private readonly page: Page) {
     this.confirmation = new ConfirmationModal(page);
+    this.nameInput = this.page.getByRole('textbox', { name: 'Personality name' });
+    this.saveChangesButton = this.page.getByRole('button', { name: 'Save changes' });
     this.autoPinToggle = this.page.getByRole('switch', { name: 'Auto-pin new User memories' });
     this.promptEditor = this.page.getByLabel('System prompt editor');
     this.editPromptButton = this.promptEditor.getByRole('button', { name: 'Edit' });
-    this.promptNameInput = this.promptEditor.getByLabel('Name');
     this.promptTextarea = this.promptEditor.getByLabel('Prompt');
     this.savePromptButton = this.promptEditor.getByRole('button', { name: 'Save' });
     this.cancelPromptButton = this.promptEditor.getByRole('button', { name: 'Cancel' });
@@ -28,9 +29,18 @@ export class PersonalityDetailPage {
     this.expressionKeyError = this.expressionKeyDialog.getByRole('alert');
   }
 
-  heading(name: string) {
-    return this.page.getByRole('heading', { name });
-  }
+  /**
+   * The personality's name is now an inline-editable field in the page header
+   * (the detail page doubles as the full-screen editor), not an `<h1>`. Tests
+   * assert the page loaded for a personality via `toHaveValue(name)`.
+   */
+  readonly nameInput: Locator;
+
+  /**
+   * Persists header-level edits (name, scratchpad, auto-pin) — distinct from
+   * the system prompt editor's own inline Save.
+   */
+  readonly saveChangesButton: Locator;
 
   async navigateTo(id: string): Promise<void> {
     await this.page.goto(`/personality/${id}`);
@@ -38,6 +48,12 @@ export class PersonalityDetailPage {
 
   async useInNewChat(): Promise<void> {
     await this.page.getByRole('button', { name: 'Use in new chat' }).click();
+  }
+
+  /** Renames the personality via the header field and persists it. */
+  async rename(name: string): Promise<void> {
+    await this.nameInput.fill(name);
+    await this.saveChangesButton.click();
   }
 
   // --- auto-pin memories -----------------------------------------------------
@@ -54,19 +70,14 @@ export class PersonalityDetailPage {
 
   readonly editPromptButton: Locator;
 
-  readonly promptNameInput: Locator;
-
   readonly promptTextarea: Locator;
 
   readonly savePromptButton: Locator;
 
   readonly cancelPromptButton: Locator;
 
-  async editPrompt(details: { name?: string; systemPrompt?: string }): Promise<void> {
+  async editPrompt(details: { systemPrompt?: string }): Promise<void> {
     await this.editPromptButton.click();
-    if (details.name !== undefined) {
-      await this.promptNameInput.fill(details.name);
-    }
     if (details.systemPrompt !== undefined) {
       await this.promptTextarea.fill(details.systemPrompt);
     }

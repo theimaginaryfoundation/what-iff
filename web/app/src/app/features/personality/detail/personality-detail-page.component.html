@@ -9,13 +9,7 @@
   </section>
 } @else if (personality(); as personality) {
   <persona-accent-scope [personality]="personality">
-    <section class="personality-detail mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-      <button
-        type="button"
-        class="self-start text-sm font-medium text-(--color-accent) hover:underline"
-        (click)="goBack()"
-      >← Back</button>
-
+    <section class="personality-detail flex w-full flex-1 flex-col gap-6 overflow-y-auto px-8 py-6">
       <app-personality-media-job-banner [personalityId]="personality.id" />
 
       <header class="flex flex-col gap-4 rounded-2xl border border-(--color-border-default) bg-(--color-surface-card) p-4 sm:flex-row sm:items-center">
@@ -26,8 +20,16 @@
           size="lg"
         />
         <div class="flex flex-1 flex-col gap-1">
-          <h1 class="text-2xl font-bold text-(--color-text-primary)">{{ personality.name }}</h1>
-          <p class="text-sm text-(--color-text-secondary)">{{ vm()?.shortName }}</p>
+          <label class="flex w-full max-w-xl">
+            <span class="sr-only">Personality name</span>
+            <input
+              type="text"
+              aria-label="Personality name"
+              class="min-w-0 flex-1 rounded-lg border border-(--color-border-default) bg-(--color-surface-input) px-3 py-2 text-base font-semibold text-(--color-text-primary) outline-none focus:border-(--color-accent) focus:ring-2 focus:ring-(--color-accent)"
+              [value]="editorDraft()?.name ?? personality.name"
+              (input)="setDraftField('name', $any($event.target).value)"
+            />
+          </label>
           <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-(--color-text-secondary)">
             <span class="rounded-full bg-[var(--persona-accent-surface)] px-2 py-0.5 font-medium text-(--color-text-primary)">
               {{ personality.stats.chat_count }} thread{{ personality.stats.chat_count === 1 ? '' : 's' }}
@@ -40,6 +42,13 @@
           </div>
         </div>
         <div class="flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-(--color-border-default) bg-(--color-surface-elevated) text-(--color-text-secondary) shadow-sm hover:bg-(--color-surface-input) hover:text-(--color-text-primary) focus:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)"
+            aria-label="Contract editor"
+            title="Contract editor"
+            (click)="goBack()"
+          ><ui-contract-icon [size]="18" /></button>
           <button
             type="button"
             class="rounded-lg bg-(--color-accent) px-3 py-2 text-sm font-semibold text-white hover:brightness-95"
@@ -60,6 +69,55 @@
         </div>
       </header>
 
+      <app-personality-system-prompt-editor
+        [value]="systemPromptValue()"
+        (save)="onSavePrompt($event)"
+      />
+
+      <section class="flex flex-col gap-3 rounded-2xl border border-(--color-border-default) bg-(--color-surface-card) p-4">
+        <h2 class="text-base font-semibold text-(--color-text-primary)">Scratchpad</h2>
+        <textarea
+          rows="8"
+          class="w-full resize-y rounded-lg border border-(--color-border-default) bg-(--color-surface-input) px-3 py-2 text-sm leading-relaxed text-(--color-text-primary) outline-none focus:border-(--color-accent) focus:ring-2 focus:ring-(--color-accent)"
+          [value]="editorDraft()?.scratchpad ?? ''"
+          (input)="setDraftField('scratchpad', $any($event.target).value)"
+        ></textarea>
+
+        <div class="rounded-lg border border-(--color-border-default) bg-(--color-surface-elevated)">
+          <button
+            type="button"
+            class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-semibold text-(--color-text-secondary) hover:text-(--color-text-primary)"
+            [attr.aria-expanded]="scratchpadAdvancedOpen()"
+            (click)="scratchpadAdvancedOpen.update(value => !value)"
+          >
+            <span>Advanced scratchpad settings</span>
+            <span aria-hidden="true">{{ scratchpadAdvancedOpen() ? '▲' : '▼' }}</span>
+          </button>
+          @if (scratchpadAdvancedOpen()) {
+            <label class="flex flex-col gap-1 border-t border-(--color-border-default) p-3 text-sm">
+              <span class="font-medium text-(--color-text-primary)">Custom scratchpad update prompt</span>
+              <textarea
+                rows="7"
+                class="w-full resize-y rounded-lg border border-(--color-border-default) bg-(--color-surface-input) px-3 py-2 font-mono text-sm text-(--color-text-primary) outline-none focus:border-(--color-accent) focus:ring-2 focus:ring-(--color-accent)"
+                placeholder="Leave blank to use the system default…"
+                [value]="editorDraft()?.scratchpad_update_prompt ?? ''"
+                (input)="setDraftField('scratchpad_update_prompt', $any($event.target).value)"
+              ></textarea>
+              <span class="text-xs text-(--color-text-secondary)">Leave blank to use the system default.</span>
+            </label>
+          }
+        </div>
+
+        <div class="flex justify-end">
+          <button
+            type="button"
+            class="rounded-lg bg-(--color-accent) px-3 py-1.5 text-sm font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
+            [disabled]="editorSaving()"
+            (click)="saveEditor()"
+          >{{ editorSaving() ? 'Saving…' : 'Save changes' }}</button>
+        </div>
+      </section>
+
       <section
         class="flex items-start gap-3 rounded-2xl border border-(--color-border-default) bg-(--color-surface-card) p-4"
       >
@@ -76,24 +134,19 @@
           type="button"
           role="switch"
           class="relative mt-1 h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50"
-          [class.bg-(--color-accent)]="personality.auto_pin_memories"
-          [class.bg-(--color-surface-input)]="!personality.auto_pin_memories"
-          [attr.aria-checked]="personality.auto_pin_memories"
+          [class.bg-(--color-accent)]="editorDraft()?.auto_pin_memories ?? personality.auto_pin_memories"
+          [class.bg-(--color-surface-input)]="!(editorDraft()?.auto_pin_memories ?? personality.auto_pin_memories)"
+          [attr.aria-checked]="editorDraft()?.auto_pin_memories ?? personality.auto_pin_memories"
           [attr.aria-label]="'Auto-pin new User memories'"
           [disabled]="autoPinUpdating()"
-          (click)="onAutoPinMemoriesChange(!personality.auto_pin_memories)"
+          (click)="onAutoPinMemoriesChange(!(editorDraft()?.auto_pin_memories ?? personality.auto_pin_memories))"
         >
           <span
             class="absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
-            [class.translate-x-5]="personality.auto_pin_memories"
+            [class.translate-x-5]="editorDraft()?.auto_pin_memories ?? personality.auto_pin_memories"
           ></span>
         </button>
       </section>
-
-      <app-personality-system-prompt-editor
-        [value]="systemPromptValue()"
-        (save)="onSavePrompt($event)"
-      />
 
       <app-personality-expressions-manager
         [personalityId]="personality.id"

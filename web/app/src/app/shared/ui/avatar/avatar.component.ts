@@ -3,7 +3,7 @@ import { initials } from '../helpers/initials.helpers';
 import { PersonalityThumbnailCircle } from '../../../core/models/personality.model';
 import { thumbnailCircleToImageStyle } from './avatar-thumbnail.helpers';
 
-export type AvatarSize = 'xxs' | 'xs' | 'sm' | 'md' | 'lg' | 'xl';
+export type AvatarSize = 'xxs' | 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl';
 
 const SIZE_CLASSES: Record<AvatarSize, string> = {
   xxs: 'h-3.5 w-3.5 text-[8px]',
@@ -12,6 +12,7 @@ const SIZE_CLASSES: Record<AvatarSize, string> = {
   md: 'h-10 w-10 text-sm',
   lg: 'h-12 w-12 text-base',
   xl: 'h-16 w-16 text-lg',
+  '2xl': 'h-24 w-24 text-2xl',
 };
 
 @Component({

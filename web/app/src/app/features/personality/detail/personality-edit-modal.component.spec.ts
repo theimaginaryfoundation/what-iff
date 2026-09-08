@@ -100,6 +100,24 @@ describe('PersonalityEditModalComponent', () => {
         expect(component.draft()?.thumbnail_circle?.r).toBeCloseTo(0.34, 5);
     });
 
+    it('offers an icon-only expand action', () => {
+        const expandButton = fixture.nativeElement.querySelector('[aria-label="Expand editor"]') as HTMLButtonElement;
+
+        expect(expandButton).toBeTruthy();
+        expect(expandButton.textContent?.trim()).toBe('');
+    });
+
+    it('emits an expand request without discarding an in-progress draft', () => {
+        vi.spyOn(component.expandRequested, 'emit').mockReturnValue(undefined);
+        component.setDraftField('name', 'Unsaved Vera');
+
+        component.requestExpand();
+
+        expect(confirmDiscardCalls).toBe(0);
+        expect(component.expandRequested.emit).toHaveBeenCalled();
+        expect(component.draft()?.name).toBe('Unsaved Vera');
+    });
+
     it('emits dismissed on cancel', () => {
         vi.spyOn(component.dismissed, 'emit').mockReturnValue(undefined);
         component.cancel();
