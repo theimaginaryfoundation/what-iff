@@ -653,21 +653,31 @@ a local eyeball on a macOS-rendered screenshot.
 **Prerequisites** for the `:docker` scripts (see `e2e/scripts/visual-docker.sh`
 for the fully commented version): a backend API reachable on the host at
 `:8080`. The script ensures this itself — if nothing is already serving
-`:8080` it brings up the self-contained compose `api` service (which carries
-its own Postgres), so you don't need the old `make db-up` + `make dev-up` /
-`make run-mock` / `make run-local` dance (that leaned on your local `.env` and
-a host Postgres). An already-running backend is reused untouched, and anything
-the script starts is left running afterwards. If you'd rather start it
-yourself first, `docker compose up -d api` is the same thing. The Angular dev
-server is started _inside_ the container by Playwright's normal `webServer`
-config — nothing extra to run for that.
+`:8080` it **builds from current source** and starts the self-contained
+compose `api` service (which carries its own Postgres) **in mock mode**
+(`ENV=development LLM_BACKEND=mock`), so you don't need the old `make db-up` +
+`make dev-up` / `make run-mock` / `make run-local` dance. Both details are
+load-bearing: the visual suite is `@mock-only`, and a _stale_ prebuilt image
+silently 404s any endpoint added since it was built — which surfaces as a
+misleading CORS / "failed to load" error inside a baseline rather than a clean
+failure. If you start the backend yourself, match that:
+`ENV=development LLM_BACKEND=mock docker compose up -d --build api`. An
+already-running backend is reused (the script warns that it must be current +
+mock). The Angular dev server needs nothing extra either: on a native amd64
+host it is started _inside_ the container by Playwright's normal `webServer`
+config; on other hosts the script serves it on the host instead (see the Apple
+Silicon note below).
 
-> **Apple Silicon note:** the container is forced to `linux/amd64` for
-> render parity with CI, so on an arm64 Mac the in-container Angular build
-> runs under emulation and a cold `npm start` can exceed Playwright's
-> `webServer` timeout. If the run dies with `Timed out waiting … from
-> config.webServer`, regenerate on a native x86_64 host (or in CI) rather
-> than chasing the timeout.
+> **Apple Silicon:** the container is forced to `linux/amd64` for render
+> parity with CI, so an in-container Angular build would run under emulation
+> and a cold `npm start` there overruns Playwright's `webServer` timeout. The
+> script handles this automatically: on a non-amd64 host it serves the app
+> _natively_ on the host (`:4200`, bound to `0.0.0.0`) and routes only
+> Chromium's rendering through the amd64 container — the app bundle is
+> platform-independent, so only the rasterization that must match CI stays
+> emulated. Nothing extra to run; if `:4200` is already serving (bound to
+> `0.0.0.0`) it's reused, otherwise a dev server is started and torn down with
+> the run. This is why regenerating baselines now works on an arm64 Mac.
 
 **The recipe that actually works on Docker Desktop for macOS:**
 `--network host` is a no-op there (unlike native Linux Docker), so the

@@ -11,12 +11,16 @@
 #   e2e/scripts/visual-docker.sh --update   # regenerate baselines
 #
 # Backend: a backend API must be reachable on the HOST at :8080. This script
-# now ensures that itself — if nothing is already serving :8080 it brings up
-# the self-contained compose `api` service (which carries its own Postgres),
-# so you no longer need the old `make db-up` + `make dev-up`/`run-mock` dance
-# (which leaned on your local .env and a host Postgres). An already-running
-# backend is reused untouched, and anything this script starts is left
-# running afterwards rather than torn out from under you.
+# now ensures that itself — if nothing is already serving :8080 it builds (from
+# current source) and starts the self-contained compose `api` service (which
+# carries its own Postgres) in mock mode, so you no longer need the old
+# `make db-up` + `make dev-up`/`run-mock` dance. The `--build` and mock mode
+# both matter: the @visual suite is @mock-only, and a stale prebuilt image
+# silently 404s any endpoint added since it was built (which shows up as a
+# misleading CORS/"failed to load" error inside a baseline). An already-running
+# backend is reused (with a warning that it must be current + mock), and
+# anything this script starts is left running rather than torn out from under
+# you. See the ensure-backend block below for the details.
 #
 # The Angular dev server is started *inside* the container (same as a normal
 # local run — see `localWebServer` in playwright.config.base.ts) rather than
@@ -100,27 +104,98 @@ if [[ "${1:-}" == "--update" ]]; then
   npm_script="e2e:mock-llm:visual:update"
 fi
 
+# Poll an HTTP endpoint until it answers (2xx/3xx), up to `attempts` tries 2s
+# apart. Returns non-zero on timeout so the caller can emit a context-specific
+# error. Used for both the backend and the host dev-server waits below.
+wait_for_http() {
+  local url="$1" attempts="$2" i
+  for (( i = 1; i <= attempts; i++ )); do
+    curl -fsS -o /dev/null --max-time 3 "${url}" 2>/dev/null && return 0
+    sleep 2
+  done
+  return 1
+}
+
 # Ensure a backend is reachable on the host at :8080 (the container reaches it
-# via host.docker.internal — see the networking notes above). Reuse whatever is
-# already there; otherwise start the self-contained compose `api` service (it
-# depends on, and brings up, its own `db`). Left running on exit — this script
-# never tears down a backend it may not own.
+# via host.docker.internal — see the networking notes above). The visual suite
+# is @mock-only, so the backend it renders against MUST be:
+#   * in mock mode (ENV=development LLM_BACKEND=mock) — the app refuses mock
+#     unless ENV is explicitly a local env, hence both are set here; and
+#   * built from the current source — a stale image silently 404s any endpoint
+#     added since it was built, which surfaces as a misleading CORS/"failed to
+#     load" error in a baseline rather than a clean failure.
+# So when this script starts the backend it uses `--build` + mock; the compose
+# `api` service carries its own `db`. It is left running on exit.
 backend_health="http://localhost:8080/api/health"
 if curl -fsS -o /dev/null --max-time 3 "${backend_health}" 2>/dev/null; then
   echo "Backend already reachable on :8080 — reusing it."
+  echo "  NOTE: the @mock-only visual suite needs a CURRENT, mock-mode backend. If a baseline"
+  echo "  fails to load data (e.g. a 404/CORS error on a newer endpoint), your backend is stale"
+  echo "  or not in mock mode — stop it and re-run so this script can start a fresh one."
 else
-  echo "No backend on :8080 — starting the compose 'api' service (db + api)…"
-  docker compose -f "${repo_root}/docker-compose.yml" up -d api
-  echo "Waiting for backend readiness on :8080 (up to 120s)…"
-  for _ in $(seq 1 60); do
-    curl -fsS -o /dev/null --max-time 3 "${backend_health}" 2>/dev/null && break
-    sleep 2
-  done
-  if ! curl -fsS -o /dev/null --max-time 3 "${backend_health}" 2>/dev/null; then
-    echo "❌ Backend did not become ready on :8080 within 120s — see 'docker compose logs api'." >&2
+  echo "No backend on :8080 — building and starting the compose 'api' service (db + api) in mock mode…"
+  ENV=development LLM_BACKEND=mock \
+    docker compose -f "${repo_root}/docker-compose.yml" up -d --build api
+  echo "Waiting for backend readiness on :8080 (up to ~180s)…"
+  if ! wait_for_http "${backend_health}" 90; then
+    echo "❌ Backend did not become ready on :8080 within ~180s — see 'docker compose logs api'." >&2
     exit 1
   fi
-  echo "✅ Backend ready on :8080 (left running; stop later with 'docker compose stop api db')."
+  echo "✅ Backend ready on :8080 (mock mode; left running — stop later with 'docker compose stop api db')."
+fi
+
+# On a native amd64 host the container both builds and serves the app itself
+# (the `webServer` block in playwright.config.mock-llm.ts). On any other host
+# that build runs under emulation, where a cold `ng serve` is so slow it
+# overruns Playwright's webServer timeout — the whole reason this used to be
+# "regenerate on an x86_64 box instead". But the rendering that has to match CI
+# is Chromium's rasterization inside the amd64 container, NOT the app bundle,
+# which is platform-independent. So on an emulated host, serve the app natively
+# on the host and route only Chromium through the container: extend the
+# host-resolver remap to cover localhost:4200 as well as localhost:8080, and
+# set E2E_REUSE_HOST_WEBSERVER so Playwright skips its own (emulated) dev
+# server. The app's origin stays localhost:4200 — CORS, cookies and the
+# committed baselines are byte-for-byte the same as the in-container path.
+resolver_rules="MAP localhost:8080 host.docker.internal:8080"
+reuse_webserver_env=()
+# PID of the backgrounded dev-server subshell, when THIS script started one.
+# Empty means we reused an existing :4200 (or never started one), so the trap
+# must not signal anything.
+dev_server_pid=""
+stop_host_dev_server() {
+  [[ -n "${dev_server_pid}" ]] || return 0
+  echo "Stopping the host Angular dev server (pid/pgid ${dev_server_pid})…"
+  # Started under `set -m`, so the backgrounded subshell leads its own process
+  # group whose id equals its PID ($!); signalling the negative PID takes down
+  # `ng serve` and its build workers together. Fall back to the bare PID if the
+  # group is already gone.
+  kill -TERM "-${dev_server_pid}" 2>/dev/null || kill -TERM "${dev_server_pid}" 2>/dev/null || true
+}
+if [[ ${#platform_flag[@]} -gt 0 ]]; then
+  frontend_url="http://localhost:4200"
+  if curl -fsS -o /dev/null --max-time 3 "${frontend_url}" 2>/dev/null; then
+    echo "Angular dev server already on :4200 — reusing it (it must be bound to 0.0.0.0 to be reachable from the container)."
+  else
+    echo "Emulated render container — serving the app natively on the host (:4200) to skip an emulated build…"
+    # `set -m` puts the backgrounded subshell in its own process group so the
+    # EXIT trap can take down `ng serve` and its build workers, not just the
+    # npm wrapper. Bound to 0.0.0.0 because the container reaches it via
+    # host.docker.internal — a default localhost-only bind would refuse that.
+    set -m
+    ( cd "${repo_root}/${app_dir}" && npm start -- --host 0.0.0.0 --port 4200 --live-reload=false ) \
+      >/tmp/visual-host-webserver.log 2>&1 &
+    dev_server_pid=$!
+    set +m
+    trap stop_host_dev_server EXIT
+    echo "Waiting for the host dev server on :4200 (up to ~240s — a cold native build)…"
+    if ! wait_for_http "${frontend_url}" 120; then
+      echo "❌ Host dev server did not come up on :4200 — see /tmp/visual-host-webserver.log" >&2
+      exit 1
+    fi
+    echo "✅ Host dev server ready on :4200."
+  fi
+  resolver_rules="${resolver_rules},MAP localhost:4200 host.docker.internal:4200"
+  reuse_webserver_env=(-e "E2E_REUSE_HOST_WEBSERVER=1")
 fi
 
 echo "Using image ${image}"
@@ -137,7 +212,8 @@ docker run --rm \
   -v "/repo/${app_dir}/node_modules" \
   -w "/repo/${app_dir}" \
   -e "E2E_API_BASE_URL=http://host.docker.internal:8080/api" \
-  -e "E2E_CHROMIUM_HOST_RESOLVER_RULES=MAP localhost:8080 host.docker.internal:8080" \
+  -e "E2E_CHROMIUM_HOST_RESOLVER_RULES=${resolver_rules}" \
+  ${reuse_webserver_env[@]+"${reuse_webserver_env[@]}"} \
   -e "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1" \
   "${image}" \
   /bin/bash -lc "npm ci && npm run ${npm_script}"

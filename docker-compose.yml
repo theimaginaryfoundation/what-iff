@@ -43,6 +43,11 @@ services:
       # datastore.ValidateTokenEncryptionSecret.
       OPENAI_API_KEY:
       ANTHROPIC_API_KEY:
+      # LLM backend selector (ADR 0x018). Empty default preserves the app's
+      # real-provider behaviour for normal `docker compose up`; set
+      # LLM_BACKEND=mock in your shell to run the in-process deterministic mock
+      # (no provider egress/keys) — what the @mock-only e2e/visual suites need.
+      LLM_BACKEND: ${LLM_BACKEND:-}
       JWT_SECRET:
       JWT_REFRESH_SECRET:
       TOKEN_ENCRYPTION_SECRET:
