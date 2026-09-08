@@ -40,7 +40,7 @@ func TestNormalizeImportedMessageTimesEnforcesDatastorePrecisionStep(t *testing.
 	require.Equal(t, base.Add(2*time.Microsecond), normalized[2].SentAt)
 }
 
-func TestNormalizeImportedMessageTimesLeavesIncreasingTimesUnchanged(t *testing.T) {
+func TestNormalizeImportedMessageTimesLeavesPrecisionSafeIncreasingTimesUnchanged(t *testing.T) {
 	base := time.Date(2025, 8, 3, 3, 0, 0, 0, time.UTC)
 	messages := []models.ChatMessage{
 		{Message: "first", Origin: models.MessageOriginUser, SentAt: base},
