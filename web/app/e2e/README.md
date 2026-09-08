@@ -651,11 +651,23 @@ covered screens; the container run is what actually validates the diff, not
 a local eyeball on a macOS-rendered screenshot.
 
 **Prerequisites** for the `:docker` scripts (see `e2e/scripts/visual-docker.sh`
-for the fully commented version): Postgres + the backend API running on the
-host at `:8080` (`make db-up`, then `make dev-up` / `make run-mock` /
-`make run-local`). The Angular dev server itself is started _inside_ the
-container by Playwright's normal `webServer` config — nothing extra to run
-for that.
+for the fully commented version): a backend API reachable on the host at
+`:8080`. The script ensures this itself — if nothing is already serving
+`:8080` it brings up the self-contained compose `api` service (which carries
+its own Postgres), so you don't need the old `make db-up` + `make dev-up` /
+`make run-mock` / `make run-local` dance (that leaned on your local `.env` and
+a host Postgres). An already-running backend is reused untouched, and anything
+the script starts is left running afterwards. If you'd rather start it
+yourself first, `docker compose up -d api` is the same thing. The Angular dev
+server is started _inside_ the container by Playwright's normal `webServer`
+config — nothing extra to run for that.
+
+> **Apple Silicon note:** the container is forced to `linux/amd64` for
+> render parity with CI, so on an arm64 Mac the in-container Angular build
+> runs under emulation and a cold `npm start` can exceed Playwright's
+> `webServer` timeout. If the run dies with `Timed out waiting … from
+> config.webServer`, regenerate on a native x86_64 host (or in CI) rather
+> than chasing the timeout.
 
 **The recipe that actually works on Docker Desktop for macOS:**
 `--network host` is a no-op there (unlike native Linux Docker), so the

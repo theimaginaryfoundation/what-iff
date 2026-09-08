@@ -10,9 +10,13 @@
 #   e2e/scripts/visual-docker.sh            # check mode (fails on mismatch)
 #   e2e/scripts/visual-docker.sh --update   # regenerate baselines
 #
-# Prerequisites (this repo's local stack, not started by this script):
-#   - Postgres + backend API reachable on the HOST at :8080 (make db-up,
-#     make dev-up / make run-mock / make run-local).
+# Backend: a backend API must be reachable on the HOST at :8080. This script
+# now ensures that itself — if nothing is already serving :8080 it brings up
+# the self-contained compose `api` service (which carries its own Postgres),
+# so you no longer need the old `make db-up` + `make dev-up`/`run-mock` dance
+# (which leaned on your local .env and a host Postgres). An already-running
+# backend is reused untouched, and anything this script starts is left
+# running afterwards rather than torn out from under you.
 #
 # The Angular dev server is started *inside* the container (same as a normal
 # local run — see `localWebServer` in playwright.config.base.ts) rather than
@@ -94,6 +98,29 @@ fi
 npm_script="e2e:mock-llm:visual"
 if [[ "${1:-}" == "--update" ]]; then
   npm_script="e2e:mock-llm:visual:update"
+fi
+
+# Ensure a backend is reachable on the host at :8080 (the container reaches it
+# via host.docker.internal — see the networking notes above). Reuse whatever is
+# already there; otherwise start the self-contained compose `api` service (it
+# depends on, and brings up, its own `db`). Left running on exit — this script
+# never tears down a backend it may not own.
+backend_health="http://localhost:8080/api/health"
+if curl -fsS -o /dev/null --max-time 3 "${backend_health}" 2>/dev/null; then
+  echo "Backend already reachable on :8080 — reusing it."
+else
+  echo "No backend on :8080 — starting the compose 'api' service (db + api)…"
+  docker compose -f "${repo_root}/docker-compose.yml" up -d api
+  echo "Waiting for backend readiness on :8080 (up to 120s)…"
+  for _ in $(seq 1 60); do
+    curl -fsS -o /dev/null --max-time 3 "${backend_health}" 2>/dev/null && break
+    sleep 2
+  done
+  if ! curl -fsS -o /dev/null --max-time 3 "${backend_health}" 2>/dev/null; then
+    echo "❌ Backend did not become ready on :8080 within 120s — see 'docker compose logs api'." >&2
+    exit 1
+  fi
+  echo "✅ Backend ready on :8080 (left running; stop later with 'docker compose stop api db')."
 fi
 
 echo "Using image ${image}"
