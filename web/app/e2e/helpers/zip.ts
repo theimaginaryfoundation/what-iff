@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import type { Download } from '@playwright/test';
 import JSZip from 'jszip';
 
 /**
@@ -56,4 +58,22 @@ export function parseJsonl<T = unknown>(text: string): T[] {
     }
     return JSON.parse(line) as T;
   });
+}
+
+/**
+ * Reads a ZIP the browser actually downloaded.
+ *
+ * Going through `download.path()` rather than re-fetching the URL is the
+ * point: it is the only way to assert on the bytes that reached the user,
+ * after the app's own blob handling. The chat export revokes its object URL
+ * as soon as the click is dispatched, so a test that re-requested the export
+ * would be exercising the server a second time instead of the download.
+ */
+export async function readDownloadedZip(download: Download): Promise<ZipEntry[]> {
+  const path = await download.path();
+  if (!path) {
+    throw new Error(`download ${download.suggestedFilename()} produced no file on disk`);
+  }
+  const bytes = await readFile(path);
+  return readZipEntries(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
 }
