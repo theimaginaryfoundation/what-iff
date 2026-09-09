@@ -890,3 +890,84 @@ export async function importChats(client: ApiClient, part: UploadPart): Promise<
   }
   return job;
 }
+
+/**
+ * A response whose body is an archive rather than JSON.
+ *
+ * Both fields are populated from the same read: `bytes` always holds what
+ * arrived, and `json` is set only when the server answered with an error
+ * document instead. Callers assert on `status` first and then reach for
+ * whichever is relevant — an export that fails does so with a JSON body under
+ * a 4xx, and a test that assumed bytes would silently see an empty archive.
+ */
+export interface ArchiveResponse {
+  status: number;
+  headers: Headers;
+  bytes: ArrayBuffer;
+  json?: unknown;
+}
+
+/**
+ * Turns one archive-endpoint call into an `ArchiveResponse`.
+ *
+ * A `Response` body may only be read once, and the two branches here are read
+ * by different readers. `parseAs: 'stream'` keeps openapi-fetch's hands off a
+ * *successful* body so the `arrayBuffer()` below is the only read of it — but
+ * that setting does not apply to failures, which openapi-fetch always parses
+ * itself and hands back as `error`. Reading the body again on that path is
+ * what "Body has already been read" means, so the already-parsed value is
+ * used instead of re-reading.
+ */
+async function readArchive(response: Response, error: unknown): Promise<ArchiveResponse> {
+  if (!response.ok) {
+    return { status: response.status, headers: response.headers, bytes: new ArrayBuffer(0), json: error };
+  }
+  return { status: response.status, headers: response.headers, bytes: await response.arrayBuffer() };
+}
+
+/**
+ * `GET /chat/{id}/export` — one thread as a ZIP of `chat.json` and
+ * `messages.jsonl`.
+ *
+ * Never throws on a non-2xx. The failure modes worth testing here are the
+ * response itself: a 404 for someone else's thread, a 400 for an unparseable
+ * id, and — the reason the risk register lists this endpoint at all — a 200
+ * whose body is a truncated archive.
+ */
+export async function exportChat(client: ApiClient, chatId: string): Promise<ArchiveResponse> {
+  const { error, response } = await client.GET('/chat/{id}/export', {
+    params: { path: { id: chatId } },
+    parseAs: 'stream',
+  });
+  return readArchive(response, error);
+}
+
+/** `GET /memory/export` — every memory the caller owns, as a ZIP of JSONL files. */
+export async function exportMemories(client: ApiClient): Promise<ArchiveResponse> {
+  const { error, response } = await client.GET('/memory/export', { parseAs: 'stream' });
+  return readArchive(response, error);
+}
+
+export interface MemoryImportResult {
+  imported_count?: number;
+  duplicate_count?: number;
+  invalid_record_count?: number;
+  skipped_missing_chat_count?: number;
+  skipped_missing_personality_count?: number;
+}
+
+/**
+ * `POST /memory/import`, returning the status alongside the parsed body.
+ *
+ * Non-throwing for the same reason as `importChatsRaw`: most of what is worth
+ * asserting about this endpoint is how it rejects things, and a helper that
+ * threw would turn each of those into a caught exception the test then has to
+ * unpick.
+ */
+export async function importMemories(client: ApiClient, part: UploadPart): Promise<{ status: number; body: MemoryImportResult & { message?: string; code?: string } }> {
+  const { data, error, response } = await client.POST('/memory/import', {
+    body: { file: part.name },
+    bodySerializer: () => fileForm('file', part),
+  });
+  return { status: response.status, body: (error ?? data ?? {}) as MemoryImportResult & { message?: string; code?: string } };
+}
