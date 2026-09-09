@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -161,4 +162,30 @@ func TestParseAnthropicArchive_ContinuesAfterMalformedEntry(t *testing.T) {
 	require.Len(t, errs, 1)
 	require.Contains(t, errs[0], "entry 2")
 	require.Contains(t, errs[0], "skipped")
+}
+
+// TestParseAnthropicArchive_NormalizesTitles pins that a Claude export whose conversation name
+// is over-long or invisible still produces an importable conversation. Chat.name is MaxLen(200)
+// in bytes and NotEmpty, so before normalization these conversations either failed validation
+// at insert and vanished from the import, or landed as a thread with no readable name.
+func TestParseAnthropicArchive_NormalizesTitles(t *testing.T) {
+	t.Parallel()
+
+	longName := strings.Repeat("漢", 200) // 600 bytes, well past the 200-byte column limit
+	body := `[
+		{"uuid":"u1","name":"` + longName + `","chat_messages":[{"sender":"human","text":"hi"}]},
+		{"uuid":"u2","name":"   ","chat_messages":[{"sender":"human","text":"hi"}]},
+		{"uuid":"u3","name":"  Trimmed  ","chat_messages":[{"sender":"human","text":"hi"}]}
+	]`
+
+	convs, _, err := parseAnthropicArchive(context.Background(), strings.NewReader(body), fixedNow)
+	require.NoError(t, err)
+	require.Len(t, convs, 3)
+
+	require.LessOrEqual(t, len(convs[0].Title), models.MaxChatTitleBytes)
+	require.True(t, utf8.ValidString(convs[0].Title))
+
+	require.Equal(t, "Imported chat 2024-01-15 10:30", convs[1].Title,
+		"a blank name must fall back to the synthesized title")
+	require.Equal(t, "Trimmed", convs[2].Title)
 }

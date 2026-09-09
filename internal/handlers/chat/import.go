@@ -313,14 +313,11 @@ func prepareConversations(raw []migration.SimplifiedConversation, now time.Time)
 	var errs []string
 
 	for _, r := range raw {
-		title := r.Title
-		if title == "" {
-			ts := now
-			if r.CreateTime != nil {
-				ts = floatToTime(*r.CreateTime)
-			}
-			title = "Imported chat " + ts.Format("2006-01-02 15:04")
+		ts := now
+		if r.CreateTime != nil {
+			ts = floatToTime(*r.CreateTime)
 		}
+		title := models.NormalizeImportedTitle(r.Title, "Imported chat "+ts.Format("2006-01-02 15:04"))
 
 		var (
 			msgs         []models.ChatMessage

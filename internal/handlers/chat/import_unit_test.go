@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	migration "github.com/theimaginaryfoundation/what-iff/internal/chatimport"
@@ -233,4 +234,32 @@ func TestPrepareConversations_OriginMapping(t *testing.T) {
 	convs, _ := prepareConversations(raw, fixedNow)
 	require.Equal(t, models.MessageOriginUser, convs[0].Messages[0].Origin)
 	require.Equal(t, models.MessageOriginAssistant, convs[0].Messages[1].Origin)
+}
+
+// TestPrepareConversations_NormalizesTitles is the OpenAI counterpart of the Anthropic title
+// test: Chat.name is MaxLen(200) in bytes and NotEmpty, so an over-long title used to fail
+// validation and drop the conversation, and a blank-but-not-empty one used to slip past the
+// synthesized-title fallback and land as a thread with no readable name.
+func TestPrepareConversations_NormalizesTitles(t *testing.T) {
+	t.Parallel()
+
+	msgs := []migration.SimplifiedMessage{{Role: "user", Text: "Hello", CreateTime: floatPtr(1700000001)}}
+	raw := []migration.SimplifiedConversation{
+		conv("id-long", strings.Repeat("漢", 200), floatPtr(1700000000), msgs),
+		conv("id-blank", "   ", floatPtr(1700000000), msgs),
+		conv("id-zero-width", "​", floatPtr(1700000000), msgs),
+		conv("id-trim", "  Trimmed  ", floatPtr(1700000000), msgs),
+	}
+
+	convs, _ := prepareConversations(raw, fixedNow)
+	require.Len(t, convs, 4)
+
+	require.LessOrEqual(t, len(convs[0].Title), models.MaxChatTitleBytes,
+		"must fit the Chat.name MaxLen(200) byte validator")
+	require.True(t, utf8.ValidString(convs[0].Title), "must not cut in the middle of a rune")
+
+	fallback := "Imported chat " + floatToTime(1700000000).Format("2006-01-02 15:04")
+	require.Equal(t, fallback, convs[1].Title, "a whitespace-only title must fall back")
+	require.Equal(t, fallback, convs[2].Title, "an invisible title must fall back")
+	require.Equal(t, "Trimmed", convs[3].Title)
 }
