@@ -29,6 +29,7 @@ type importStore struct {
 	mu            sync.Mutex
 	capturedConvs []models.ImportConversation
 	finalStatus   models.JobStatus
+	finalError    string
 	done          chan struct{}
 }
 
@@ -51,6 +52,7 @@ func (s *importStore) UpdateJobStatus(ctx context.Context, userID, id uuid.UUID,
 	if status == models.JobStatusComplete || status == models.JobStatusFailed {
 		s.mu.Lock()
 		s.finalStatus = status
+		s.finalError = errorMsg
 		s.mu.Unlock()
 		close(s.done)
 	}
@@ -77,6 +79,13 @@ func (s *importStore) status() models.JobStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.finalStatus
+}
+
+// statusError returns the user-facing message recorded with the terminal job status.
+func (s *importStore) statusError() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.finalError
 }
 
 func importRequestNamed(t *testing.T, userID uuid.UUID, filename string, body []byte) *http.Request {
@@ -274,4 +283,69 @@ func TestImportChats_DatastoreErrorMarksJobFailed(t *testing.T) {
 
 	store.waitDone(t)
 	require.Equal(t, models.JobStatusFailed, store.status())
+}
+
+// importPayloadOneConversation is a minimal valid OpenAI export with a single conversation.
+func importPayloadOneConversation() []byte {
+	return []byte(`[
+		{
+			"conversation_id": "conv-1",
+			"title": "Only thread",
+			"create_time": 1700001000,
+			"current_node": "m1",
+			"mapping": {
+				"m1": {"id":"m1","message":{"author":{"role":"user"},"create_time":1700001001,"content":{"content_type":"text","parts":["Question"]}},"parent":null,"children":[]}
+			}
+		}
+	]`)
+}
+
+// TestImportChats_AllConversationsFailedMarksJobFailed pins that an import which persisted
+// nothing ends as failed. ImportChats only returns an error for a failure that aborts the run;
+// a conversation that fails on its own is collected in ImportResult.Errors and the run
+// continues. When that happened to every conversation the job was still marked complete, so
+// the client polled its way to "Imported 0 threads" with nothing to say anything went wrong.
+func TestImportChats_AllConversationsFailedMarksJobFailed(t *testing.T) {
+	t.Parallel()
+
+	userID := uuid.New()
+	store := newImportStore(func(_ context.Context, _ uuid.UUID, convs []models.ImportConversation) (*models.ImportResult, error) {
+		return &models.ImportResult{
+			Imported: 0,
+			Skipped:  0,
+			Errors:   []string{`conversation "Only thread": insert failed`},
+		}, nil
+	})
+	router := setupImportRouter(store)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, importRequest(t, userID, importPayloadOneConversation()))
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+
+	store.waitDone(t)
+	require.Equal(t, models.JobStatusFailed, store.status(),
+		"an import that persisted nothing must not report success")
+	require.Equal(t, "Failed to import any conversations", store.statusError())
+}
+
+// TestImportChats_AllDuplicatesStillCompletes guards the boundary of the check above: a re-import
+// of an export already in the account imports nothing but skips everything, which is a success
+// the UI renders as "No new threads", not a failure.
+func TestImportChats_AllDuplicatesStillCompletes(t *testing.T) {
+	t.Parallel()
+
+	userID := uuid.New()
+	store := newImportStore(func(_ context.Context, _ uuid.UUID, convs []models.ImportConversation) (*models.ImportResult, error) {
+		return &models.ImportResult{Imported: 0, Skipped: len(convs), Errors: []string{}}, nil
+	})
+	router := setupImportRouter(store)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, importRequest(t, userID, importPayloadOneConversation()))
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+
+	store.waitDone(t)
+	require.Equal(t, models.JobStatusComplete, store.status(),
+		"an all-duplicate re-import is a successful no-op, not a failure")
+	require.Empty(t, store.statusError())
 }
