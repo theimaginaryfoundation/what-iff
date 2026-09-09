@@ -3090,6 +3090,10 @@ paths:
 
         **Error reporting:** Per-conversation parse and persistence failures are non-fatal and logged
         server-side; aggregate counts are reflected in the job's `progress`.
+
+        A malformed or truncated archive is a different case: once the JSON stream itself cannot be
+        read any further, no remaining conversation can be recovered, so the job ends as `failed`
+        rather than importing whatever prefix happened to parse.
       tags: [Chat Management]
       security:
         - bearerAuth: []
