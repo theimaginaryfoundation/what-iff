@@ -164,12 +164,30 @@ reuse_webserver_env=()
 dev_server_pid=""
 stop_host_dev_server() {
   [[ -n "${dev_server_pid}" ]] || return 0
+  # Guard against PID/PGID reuse: only signal if a node/npm process is still
+  # alive in our process group. The subshell runs `cd && npm start`, so bash
+  # does not exec-replace itself — the group leader stays a shell with node/npm
+  # children sharing its pgid. If that subshell already died on its own, its PID
+  # may have been recycled by an unrelated process, and blindly TERMing the
+  # negative PID would take down a stranger's group. Confirm the group is still
+  # ours before touching it. `ps -A -o pgid=,command=` is portable across the
+  # BSD (macOS) and GNU ps this script may run under.
+  if ! ps -A -o pgid=,command= 2>/dev/null \
+       | awk -v pg="${dev_server_pid}" '$1 == pg' \
+       | grep -Eiq 'node|npm'; then
+    echo "Host Angular dev server (pgid ${dev_server_pid}) already gone — nothing to stop."
+    dev_server_pid=""
+    return 0
+  fi
   echo "Stopping the host Angular dev server (pid/pgid ${dev_server_pid})…"
   # Started under `set -m`, so the backgrounded subshell leads its own process
   # group whose id equals its PID ($!); signalling the negative PID takes down
   # `ng serve` and its build workers together. Fall back to the bare PID if the
   # group is already gone.
   kill -TERM "-${dev_server_pid}" 2>/dev/null || kill -TERM "${dev_server_pid}" 2>/dev/null || true
+  # Idempotent: the EXIT trap fires once, but clearing avoids any re-entry
+  # re-signalling a PID that is no longer ours.
+  dev_server_pid=""
 }
 if [[ ${#platform_flag[@]} -gt 0 ]]; then
   frontend_url="http://localhost:4200"
