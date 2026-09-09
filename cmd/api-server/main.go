@@ -203,6 +203,20 @@ func init() {
 		logger.Debug("Database migrations applied", zap.Bool("destructive_migration", destructiveMigration))
 	}
 
+	// Best-effort historical repair for imported conversations affected by equal timestamp ordering.
+	// The repair is deliberately narrow and idempotent: only archived imported 1-user/1-assistant
+	// ties with no job association and no surrounding timestamp collision are changed.
+	if repair, repairErr := datastore.RepairImportedMessageOrder(context.Background(), sqlDB); repairErr != nil {
+		logger.Warn("Imported message ordering repair could not complete", zap.Error(repairErr))
+	} else if repair.CandidatePairs > 0 {
+		logger.Info("Imported message ordering repair complete",
+			zap.Int("candidate_pairs", repair.CandidatePairs),
+			zap.Int("repaired_pairs", repair.RepairedPairs),
+			zap.Int("collision_abstentions", repair.CollisionAbstentions),
+			zap.Int("concurrent_abstentions", repair.ConcurrentAbstentions),
+		)
+	}
+
 	// Ensure seed data exists before serving requests
 	if err := database.EnsureSeedData(context.Background(), client, logger); err != nil {
 		logger.Fatal("Failed to seed database", zap.Error(err))
