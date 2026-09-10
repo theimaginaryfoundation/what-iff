@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -161,4 +162,85 @@ func TestParseAnthropicArchive_ContinuesAfterMalformedEntry(t *testing.T) {
 	require.Len(t, errs, 1)
 	require.Contains(t, errs[0], "entry 2")
 	require.Contains(t, errs[0], "skipped")
+}
+
+// TestParseAnthropicArchive_TerminatesOnMalformedStream pins the fix for a decode loop that
+// never returned. json.Decoder keeps a stream-level syntax error permanently while More()
+// goes on reporting data, so the parser's "skip the entry and continue" branch spun forever
+// on any corruption after the first element, growing the error slice without bound and
+// leaving the import job stuck in "processing" with its temp file still on disk.
+//
+// The parse runs in a goroutine behind a deadline so a regression fails this test in seconds
+// instead of hanging the package until the go test timeout.
+func TestParseAnthropicArchive_TerminatesOnMalformedStream(t *testing.T) {
+	t.Parallel()
+
+	const good = `{"uuid":"good-1","name":"First","chat_messages":[{"sender":"human","text":"hi"}]}`
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"truncated after first entry", `[` + good + `,{"uuid":"u2"`},
+		{"invalid token after first entry", `[` + good + `,@]`},
+		{"trailing comma", `[` + good + `,]`},
+		{"syntax error nested in a later entry", `[` + good + `,{"chat_messages":[{,}]}]`},
+		{"truncated inside the first entry", `[{"uuid":"u1","chat_messages":`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			type result struct {
+				convs []models.ImportConversation
+				errs  []string
+				err   error
+			}
+
+			// The context is only an escape hatch. parseAnthropicArchive checks
+			// ctx.Err() once per iteration, so cancelling releases a spinning
+			// goroutine instead of leaving it to burn a core until the package
+			// timeout. A correct parser returns long before this matters.
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			done := make(chan result, 1)
+			go func() {
+				convs, errs, err := parseAnthropicArchive(ctx, strings.NewReader(tc.body), fixedNow)
+				done <- result{convs, errs, err}
+			}()
+
+			select {
+			case got := <-done:
+				require.Error(t, got.err, "a malformed stream must report an error, not be skipped")
+				require.NotErrorIs(t, got.err, context.Canceled,
+					"the parser must reject the malformed stream on its own, not wait to be cancelled")
+				require.Less(t, len(got.errs), 10, "per-entry errors must not accumulate in a loop")
+			case <-time.After(10 * time.Second):
+				cancel()
+				<-done
+				t.Fatal("parseAnthropicArchive did not return: the decode loop is spinning on a sticky decoder error")
+			}
+		})
+	}
+}
+
+// TestParseAnthropicArchive_MalformedStreamKeepsEarlierConversations documents what a caller
+// receives alongside the error: conversations decoded before the corruption. runChatImport
+// discards them and fails the job, but the parser reports how far it got.
+func TestParseAnthropicArchive_MalformedStreamKeepsEarlierConversations(t *testing.T) {
+	t.Parallel()
+
+	body := `[
+		{"uuid":"good-1","name":"First","chat_messages":[{"sender":"human","text":"hi"}]},
+		{"uuid":"good-2","name":"Second","chat_messages":[{"sender":"human","text":"bye"}]},
+		{"uuid":"trunc"`
+
+	convs, _, err := parseAnthropicArchive(context.Background(), strings.NewReader(body), fixedNow)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "conversation entry 3")
+	require.Len(t, convs, 2)
+	require.Equal(t, "First", convs[0].Title)
+	require.Equal(t, "Second", convs[1].Title)
 }
