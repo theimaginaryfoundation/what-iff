@@ -18,6 +18,7 @@ type generateImageToolArgs struct {
 	Prompt         string  `json:"prompt"`
 	Count          *int    `json:"count,omitempty"`
 	Quality        *string `json:"quality,omitempty"`
+	AspectRatio    *string `json:"aspect_ratio,omitempty"`
 	FilenamePrefix *string `json:"filename_prefix,omitempty"`
 }
 
@@ -27,12 +28,13 @@ type generateImageToolImage struct {
 }
 
 type generateImageToolResult struct {
-	Success bool                     `json:"success"`
-	Prompt  string                   `json:"prompt,omitempty"`
-	Quality string                   `json:"quality,omitempty"`
-	Count   int                      `json:"count,omitempty"`
-	Images  []generateImageToolImage `json:"images,omitempty"`
-	Error   string                   `json:"error,omitempty"`
+	Success     bool                     `json:"success"`
+	Prompt      string                   `json:"prompt,omitempty"`
+	Quality     string                   `json:"quality,omitempty"`
+	AspectRatio string                   `json:"aspect_ratio,omitempty"`
+	Count       int                      `json:"count,omitempty"`
+	Images      []generateImageToolImage `json:"images,omitempty"`
+	Error       string                   `json:"error,omitempty"`
 }
 
 func marshalGenerateImageToolResult(result generateImageToolResult) (string, error) {
@@ -70,6 +72,26 @@ func parseGenerateImageQuality(raw *string) (provider.ImageQuality, error) {
 		return provider.ImageQualityHigh, nil
 	default:
 		return provider.ImageQualityLow, fmt.Errorf("invalid quality %q (expected low|medium|high)", q)
+	}
+}
+
+func parseGenerateImageAspectRatio(raw *string) (provider.ImageAspectRatio, error) {
+	if raw == nil {
+		return provider.ImageAspectRatioSquare, nil
+	}
+	ar := strings.ToLower(strings.TrimSpace(*raw))
+	if ar == "" {
+		return provider.ImageAspectRatioSquare, nil
+	}
+	switch ar {
+	case string(provider.ImageAspectRatioSquare):
+		return provider.ImageAspectRatioSquare, nil
+	case string(provider.ImageAspectRatioLandscape):
+		return provider.ImageAspectRatioLandscape, nil
+	case string(provider.ImageAspectRatioPortrait):
+		return provider.ImageAspectRatioPortrait, nil
+	default:
+		return provider.ImageAspectRatioSquare, fmt.Errorf("invalid aspect_ratio %q (expected square|landscape|portrait)", ar)
 	}
 }
 
@@ -119,6 +141,19 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 		return out, nil, nil
 	}
 
+	aspectRatio, arErr := parseGenerateImageAspectRatio(toolArgs.AspectRatio)
+	if arErr != nil {
+		out, merr := marshalGenerateImageToolResult(generateImageToolResult{
+			Success: false,
+			Error:   arErr.Error(),
+		})
+		if merr != nil {
+			a.logger.Error("failed to marshal generate_image invalid-aspect-ratio result", zap.Error(merr))
+			return "", nil, merr
+		}
+		return out, nil, nil
+	}
+
 	prefix := "image"
 	if toolArgs.FilenamePrefix != nil {
 		if trimmed := strings.TrimSpace(*toolArgs.FilenamePrefix); trimmed != "" {
@@ -138,7 +173,7 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			b64, err := a.OpenAIProvider.GenerateImagePNGBase64WithQuality(ctx, prompt, quality)
+			b64, err := a.OpenAIProvider.GenerateImagePNGBase64WithOptions(ctx, prompt, quality, aspectRatio)
 			if err != nil {
 				errs[i] = err
 				return
@@ -261,12 +296,13 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 	}
 
 	out, err := marshalGenerateImageToolResult(generateImageToolResult{
-		Success: true,
-		Prompt:  prompt,
-		Quality: string(quality),
-		Count:   count,
-		Images:  imagesMeta,
-		Error:   toolErrText,
+		Success:     true,
+		Prompt:      prompt,
+		Quality:     string(quality),
+		AspectRatio: string(aspectRatio),
+		Count:       count,
+		Images:      imagesMeta,
+		Error:       toolErrText,
 	})
 	if err != nil {
 		a.logger.Error("failed to marshal generate_image success result", zap.Error(err))
