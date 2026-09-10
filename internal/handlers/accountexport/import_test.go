@@ -104,6 +104,7 @@ func TestRemapMemoryArchiveRewritesChatAndPersonalityReferences(t *testing.T) {
 	remapped, err := remapMemoryArchive(zr, targetUserID,
 		map[uuid.UUID]uuid.UUID{sourceChat: destinationChat},
 		map[uuid.UUID]uuid.UUID{sourcePersonality: destinationPersonality},
+		nil, // no native ids: every source memory is namespaced to the target user
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -151,9 +152,68 @@ func TestRemapMemoryArchiveRejectsDuplicateEntryNames(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = remapMemoryArchive(zr, uuid.New(), nil, nil)
+	_, err = remapMemoryArchive(zr, uuid.New(), nil, nil, nil)
 	if !errors.Is(err, errDuplicateMemoryArchiveEntry) {
 		t.Fatalf("remapMemoryArchive() error = %v, want duplicate entry error", err)
+	}
+}
+
+// TestRemapMemoryArchiveKeepsNativeMemoryIDs verifies the round-trip case: a memory the resolver
+// reports as already owned by the target user keeps its original id (so the importer's id-dedup
+// skips it), while a memory not owned by the target is namespaced as usual.
+func TestRemapMemoryArchiveKeepsNativeMemoryIDs(t *testing.T) {
+	targetUserID := uuid.New()
+	nativeMemory := uuid.New()  // already the target user's own (origin round-trip)
+	foreignMemory := uuid.New() // not owned by target (cross-account or restore)
+
+	var src bytes.Buffer
+	zw := zip.NewWriter(&src)
+	w, err := zw.Create("chat.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []uuid.UUID{nativeMemory, foreignMemory} {
+		rec, _ := json.Marshal(models.MemoryRecord{ID: id, Content: "c", CreatedAt: time.Now()})
+		if _, err := w.Write(append(rec, '\n')); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(src.Bytes()), int64(src.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resolveNative := func(ids []uuid.UUID) (map[uuid.UUID]struct{}, error) {
+		return map[uuid.UUID]struct{}{nativeMemory: {}}, nil
+	}
+	remapped, err := remapMemoryArchive(zr, targetUserID, nil, nil, resolveNative)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := zip.NewReader(bytes.NewReader(remapped), int64(len(remapped)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, found, err := readZipEntry(out, "chat.json", 4096)
+	if err != nil || !found {
+		t.Fatalf("chat.json found:%v err:%v", found, err)
+	}
+	gotIDs := map[uuid.UUID]struct{}{}
+	for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
+		var rec models.MemoryRecord
+		if err := json.Unmarshal(line, &rec); err != nil {
+			t.Fatal(err)
+		}
+		gotIDs[rec.ID] = struct{}{}
+	}
+	if _, ok := gotIDs[nativeMemory]; !ok {
+		t.Errorf("native memory id was rewritten; want it preserved so the importer dedups it")
+	}
+	if _, ok := gotIDs[uuid.NewSHA1(targetUserID, foreignMemory[:])]; !ok {
+		t.Errorf("foreign memory id was not namespaced to the target user")
 	}
 }
 

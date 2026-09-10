@@ -1880,6 +1880,31 @@ func (d *Datastore) existingAnyMemoryIDs(ctx context.Context, ids []uuid.UUID) (
 	return set, nil
 }
 
+// MemoryIDsOwnedByUser returns the subset of the given memory ids that already exist and are owned
+// by userID. The account importer uses it to decide, per record, whether an exported memory is the
+// target user's own native memory (keep its id so the id-dedup below treats it as an existing
+// duplicate) or belongs elsewhere (namespace the id to avoid a cross-account primary-key collision).
+func (d *Datastore) MemoryIDsOwnedByUser(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]struct{}, error) {
+	set := make(map[uuid.UUID]struct{})
+	if len(ids) == 0 {
+		return set, nil
+	}
+	existing, err := d.dbClient.Memory.Query().
+		Where(
+			memory.IDIn(ids...),
+			memory.HasOwnerWith(user.ID(userID)),
+		).
+		Select(memory.FieldID).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range existing {
+		set[m.ID] = struct{}{}
+	}
+	return set, nil
+}
+
 func (d *Datastore) existingChatIDs(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]struct{}, error) {
 	set := make(map[uuid.UUID]struct{})
 	if len(ids) == 0 {

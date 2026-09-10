@@ -64,7 +64,13 @@ type ImportConversation struct {
 	// (owner_id, import_hash) unique index on the chats table. Using the export's own
 	// conversation ID (not timestamps) ensures stable dedup across repeated imports.
 	ImportHash string
-	Messages   []ChatMessage
+	// SourceID, when set, is the export's original conversation UUID. Account exports carry the
+	// source chat's own id here so a round-trip into the origin account can be deduped against the
+	// native chat (which has no import_hash): if a chat with this id already exists for the user,
+	// the conversation is skipped instead of creating a duplicate. External OpenAI/Anthropic imports
+	// leave it nil (their conversation ids are not what-iff chat ids), so they are unaffected.
+	SourceID *uuid.UUID
+	Messages []ChatMessage
 
 	// The fields below are set only by the Whatiff account importer. External conversation
 	// imports intentionally retain the archived/lazy-rehydration defaults.

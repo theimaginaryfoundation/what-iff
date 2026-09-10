@@ -237,7 +237,10 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string) {
 			h.logger.Warn("account import: memories.zip exceeds safety limits", zap.Error(zerr))
 			result.Warnings = append(result.Warnings, "Memories could not be imported because the archive exceeds safety limits.")
 		} else {
-			remapped, remapErr := remapMemoryArchive(mzr, userID, chatIDs, personalityIDs)
+			resolveNative := func(ids []uuid.UUID) (map[uuid.UUID]struct{}, error) {
+				return h.ds.MemoryIDsOwnedByUser(ctx, userID, ids)
+			}
+			remapped, remapErr := remapMemoryArchive(mzr, userID, chatIDs, personalityIDs, resolveNative)
 			if remapErr != nil {
 				h.logger.Warn("account import: could not remap memory references", zap.Error(remapErr))
 				result.Warnings = append(result.Warnings, "Memories could not be imported from the export.")
@@ -441,11 +444,19 @@ func toImportConversations(parsed []exporter.ParsedConversation, personalityIDs 
 				personalityID = &destinationID
 			}
 		}
+		// The export's uuid is the source chat's own id. Carrying it lets the importer skip a
+		// round-trip into the origin account (where a native chat with this id already exists but
+		// has no import_hash to match). A non-uuid source id simply leaves this nil.
+		var sourceID *uuid.UUID
+		if parsed, perr := uuid.Parse(c.UUID); perr == nil {
+			sourceID = &parsed
+		}
 		out = append(out, models.ImportConversation{
 			Title:                      title,
 			CreatedAt:                  createdAt.UTC(),
 			Source:                     models.ChatSourceAnthropic,
 			ImportHash:                 conversationImportHash(c.UUID),
+			SourceID:                   sourceID,
 			Messages:                   msgs,
 			PersonalityID:              personalityID,
 			CheckpointSummary:          c.WhatiffCheckpointSummary,
@@ -491,20 +502,78 @@ func personalityIDFromArchivePath(name string) uuid.UUID {
 	return id
 }
 
+// isMemoryRecordEntry reports whether an archive entry name holds newline-delimited MemoryRecords
+// (as opposed to, e.g., a manifest). Both id collection and remapping key off the same predicate.
+func isMemoryRecordEntry(name string) bool {
+	return name == "chat.json" || name == "user.json" ||
+		(strings.HasPrefix(name, "personality-") && strings.HasSuffix(name, ".json"))
+}
+
+// memoryRecordIDs extracts the source memory ids from a record entry, skipping malformed lines
+// (the generic importer owns invalid-record accounting). Used to resolve which exported memories
+// are already the target user's own before deciding how to key each one.
+func memoryRecordIDs(data []byte) []uuid.UUID {
+	var ids []uuid.UUID
+	for _, line := range bytes.SplitAfter(data, []byte("\n")) {
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 {
+			continue
+		}
+		var record models.MemoryRecord
+		if err := json.Unmarshal(trimmed, &record); err != nil {
+			continue
+		}
+		ids = append(ids, record.ID)
+	}
+	return ids
+}
+
 // remapMemoryArchive rewrites account-export relationships to target-account IDs before the
 // generic memory importer validates ownership. Source memory IDs are rekeyed per target account
 // because Memory.ID is globally unique; chat references and personality section filenames change.
 // It rejects duplicate names, including names that collide after personality-ID remapping.
-func remapMemoryArchive(zr *zip.Reader, targetUserID uuid.UUID, chatIDs, personalityIDs map[uuid.UUID]uuid.UUID) ([]byte, error) {
-	entries := make(map[string][]byte, len(zr.File))
+//
+// resolveNative reports which source memory ids already belong to the target user; those keep their
+// original id so the importer's id-dedup skips them (an idempotent round-trip into the origin
+// account) instead of creating a namespaced duplicate of a memory the user already has.
+func remapMemoryArchive(zr *zip.Reader, targetUserID uuid.UUID, chatIDs, personalityIDs map[uuid.UUID]uuid.UUID, resolveNative func([]uuid.UUID) (map[uuid.UUID]struct{}, error)) ([]byte, error) {
+	// Pass 1: read every entry and collect the source memory ids across all record entries.
+	type archiveEntry struct {
+		name string
+		data []byte
+	}
+	raw := make([]archiveEntry, 0, len(zr.File))
+	var allIDs []uuid.UUID
 	for _, zf := range zr.File {
 		data, err := readZipFile(zf, maxImportExpandedBytes)
 		if err != nil {
 			return nil, err
 		}
-		name := zf.Name
-		if name == "chat.json" || name == "user.json" || (strings.HasPrefix(name, "personality-") && strings.HasSuffix(name, ".json")) {
-			data, err = remapMemoryRecords(data, targetUserID, chatIDs)
+		raw = append(raw, archiveEntry{name: zf.Name, data: data})
+		if isMemoryRecordEntry(zf.Name) {
+			allIDs = append(allIDs, memoryRecordIDs(data)...)
+		}
+	}
+
+	native := map[uuid.UUID]struct{}{}
+	if resolveNative != nil {
+		resolved, err := resolveNative(allIDs)
+		if err != nil {
+			return nil, fmt.Errorf("resolve native memory ids: %w", err)
+		}
+		if resolved != nil {
+			native = resolved
+		}
+	}
+
+	// Pass 2: remap record ids/chat references and rename personality section files.
+	entries := make(map[string][]byte, len(zr.File))
+	for _, entry := range raw {
+		name := entry.name
+		data := entry.data
+		if isMemoryRecordEntry(name) {
+			var err error
+			data, err = remapMemoryRecords(data, targetUserID, chatIDs, native)
 			if err != nil {
 				return nil, err
 			}
@@ -545,7 +614,11 @@ func remapMemoryArchive(zr *zip.Reader, targetUserID uuid.UUID, chatIDs, persona
 	return buf.Bytes(), nil
 }
 
-func remapMemoryRecords(data []byte, targetUserID uuid.UUID, chatIDs map[uuid.UUID]uuid.UUID) ([]byte, error) {
+// remapMemoryRecords rewrites the chat references and ids of every record in one archive entry.
+// nativeIDs is the set (from remapMemoryArchive's resolveNative) of source memory ids the target
+// user already owns; a nil or empty set simply namespaces every record. Reading a nil map is safe
+// in Go, so the nil case needs no special handling here.
+func remapMemoryRecords(data []byte, targetUserID uuid.UUID, chatIDs map[uuid.UUID]uuid.UUID, nativeIDs map[uuid.UUID]struct{}) ([]byte, error) {
 	var out bytes.Buffer
 	for _, line := range bytes.SplitAfter(data, []byte("\n")) {
 		trimmed := bytes.TrimSpace(line)
@@ -563,10 +636,14 @@ func remapMemoryRecords(data []byte, targetUserID uuid.UUID, chatIDs map[uuid.UU
 				record.ChatID = &destinationID
 			}
 		}
-		// Memory IDs are global primary keys. Deriving a destination ID from the target user and
-		// source ID keeps a repeated import idempotent for that account while allowing the same
-		// account ZIP to be restored into another account without a primary-key collision.
-		record.ID = uuid.NewSHA1(targetUserID, record.ID[:])
+		// Memory IDs are global primary keys. A memory that already belongs to the target user
+		// (an import back into the origin account) keeps its original id so the importer's id-dedup
+		// treats it as an existing duplicate and skips it. Otherwise the id is derived from the
+		// target user and source id, which keeps a repeated import idempotent for that account while
+		// letting the same ZIP restore into another account without a primary-key collision.
+		if _, isNative := nativeIDs[record.ID]; !isNative {
+			record.ID = uuid.NewSHA1(targetUserID, record.ID[:])
+		}
 		encoded, err := json.Marshal(record)
 		if err != nil {
 			return nil, err
