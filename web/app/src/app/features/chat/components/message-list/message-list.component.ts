@@ -419,7 +419,23 @@ export class MessageListComponent {
       if (emit) this.scrollToBottomRequested.emit();
       return;
     }
+    // A DOM scroll with `behavior:'auto'` does NOT mean "instant" — it defers to
+    // the CSS `scroll-behavior`, which is `smooth` on this container (wanted for
+    // explicit nav like the jump button / bookmarks). The stream-follow and
+    // new-message snap pass 'auto' meaning instant, so force it here: otherwise
+    // every ~220ms streaming tick starts a fresh smooth animation that interrupts
+    // the previous one, and while the mobile soft keyboard is resizing the
+    // viewport those compounding animations read as a jitter that fights the
+    // resize (the chat "keeps snapping to the bottom"). Mirrors pinToAnchor,
+    // which suppresses smooth for the same visible-wobble reason.
+    const priorBehavior = container.style.scrollBehavior;
+    if (behavior === 'auto') {
+      container.style.scrollBehavior = 'auto';
+    }
     container.scrollTo({ top: container.scrollHeight, behavior });
+    if (behavior === 'auto') {
+      container.style.scrollBehavior = priorBehavior;
+    }
     this.isNearBottom.set(true);
     this.stickyToBottom.set(true);
     if (emit) this.scrollToBottomRequested.emit();
