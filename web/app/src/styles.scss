@@ -35,6 +35,32 @@
 /* Phase 01 design-system: tokens, typography, themes, motion, Tailwind bridge. */
 @import "./styles/index";
 
+/* App-shell scroll lock.
+ *
+ * The signed-in app renders inside AppLayoutComponent — a fixed `100dvh`
+ * `overflow:hidden` shell that owns ALL of its scrolling internally (message
+ * list, side panels, `.app-layout__main`). The document itself must therefore
+ * never scroll. Without this, `html`/`body` keep their default `overflow`, so
+ * on mobile the soft keyboard drags the whole page around: with
+ * `interactive-widget=resizes-content` (see mobile/native-web/capacitor-glue.js)
+ * the layout viewport shrinks when the keyboard opens, and when the chat
+ * composer grows to a second line the browser scrolls the DOCUMENT to keep the
+ * focused textarea's caret in view — pulling the top bar off the top of the
+ * screen and jittering as it fights the viewport resize. Toggling the keyboard
+ * just resets the document scroll, which is why that "fixed" it.
+ *
+ * Scoped with `:has(.app-layout)` so it applies only on app-shell routes: the
+ * `auth/*` pages (login/register) render OUTSIDE AppLayout, use `min-h-screen`
+ * centered cards, and legitimately need the document to scroll on short
+ * viewports — so they must stay unlocked. Browsers without `:has()` simply keep
+ * today's behavior (no regression). */
+html:has(.app-layout),
+html:has(.app-layout) body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 .ui-tooltip {
   background: color-mix(in srgb, var(--color-surface-inverse, #0f172a) 94%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-border-base, #334155) 70%, transparent);
