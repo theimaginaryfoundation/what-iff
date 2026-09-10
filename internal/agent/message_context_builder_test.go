@@ -47,6 +47,37 @@ func TestMergeAdditionalContextItems_DedupesByTypeAndContent(t *testing.T) {
 	require.Equal(t, 1, keys[models.AdditionalContextTypeMemory+"\x00"+"from-fetch"])
 }
 
+// A memory's rendered form carries metadata recomputed at render time (age_days,
+// relevance), so the copy persisted on an earlier turn and the copy rendered this turn are
+// different strings for the same fact. Keying dedupe on the raw string let each turn add a
+// fresh near-duplicate, and a long thread accumulated one copy per turn — same content,
+// same stored_at, a different age_days on each.
+func TestMergeAdditionalContextItems_DedupesMemoriesAcrossRerenders(t *testing.T) {
+	t.Parallel()
+
+	const stored = "2026-01-02T03:04:05Z"
+	const fact = "Prefers metric units"
+	stale := fact + " [stored_at=" + stored + " age_days=22]"
+	fresh := fact + " [stored_at=" + stored + " age_days=35 relevance=0.81]"
+
+	history := []*models.ChatMessage{
+		{
+			ID:      uuid.New(),
+			Origin:  models.MessageOriginUser,
+			Message: "earlier turn",
+			AdditionalContext: []models.AdditionalContextItem{
+				{Type: models.AdditionalContextTypeMemory, Content: stale},
+			},
+		},
+	}
+
+	got := mergeAdditionalContextItems(nil, history, nil, []string{fresh}, nil)
+
+	require.Len(t, got, 1, "the same memory rendered twice must collapse to one entry")
+	require.Equal(t, fresh, got[0].Content,
+		"the surviving copy must be the current rendering, not the stale one whose age_days is wrong")
+}
+
 // Memories persisted on earlier turns must survive rehydration as memory refs. They only do so
 // when the stored context item carries its scope, so this pins the whole-segment accumulation the
 // merger and compaction audit depend on.

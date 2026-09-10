@@ -212,12 +212,26 @@ func appendClaudeHistoryTurn(messages *[]anthropic.MessageParam, seg ModelContex
 }
 
 func (m *ModelContext) BuildClaudeParams(model string) anthropic.MessageNewParams {
+	return m.BuildClaudeParamsWithMaxTokens(model, 0)
+}
+
+// BuildClaudeParamsWithMaxTokens is BuildClaudeParams with an explicit output cap.
+// maxTokens <= 0 selects DefaultMaxContentLength, so the zero value keeps the previous
+// behaviour. This mirrors OpenAIResponseParamsOptions.MaxOutputTokens on the Responses
+// path, which has always been per-call configurable; the Anthropic path hard-coded the
+// default, and a response truncated at that cap is indistinguishable from a complete one
+// unless the caller can raise it (or read GenerateResponse.StopReason, which now carries
+// "max_tokens").
+func (m *ModelContext) BuildClaudeParamsWithMaxTokens(model string, maxTokens int) anthropic.MessageNewParams {
+	if maxTokens <= 0 {
+		maxTokens = DefaultMaxContentLength
+	}
 
 	systemBlocks, messages := renderClaudeContext(m)
 
 	return anthropic.MessageNewParams{
 		Model:     anthropic.Model(model),
-		MaxTokens: int64(DefaultMaxContentLength),
+		MaxTokens: int64(maxTokens),
 		System:    systemBlocks,
 		Messages:  messages,
 	}
