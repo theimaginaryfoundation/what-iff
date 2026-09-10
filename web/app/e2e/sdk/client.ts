@@ -853,15 +853,18 @@ export interface UploadPart {
 /**
  * Builds the `multipart/form-data` body for an upload part.
  *
- * The `new Uint8Array(...).buffer` copy is not redundant: a Node `Buffer` is a
- * view into a pooled `ArrayBuffer` shared with unrelated allocations, so
- * handing `buffer.buffer` straight to `Blob` uploads whatever else happens to
- * sit in that pool. Same reasoning as `uploadPersonalityAttachment`.
+ * `new Uint8Array(part.buffer)` copies into a fresh, exactly-sized buffer: a
+ * Node `Buffer` is a view into a pooled `ArrayBuffer` shared with unrelated
+ * allocations, and the copy is what keeps only the part's own bytes in play —
+ * the result has `byteOffset` 0 and a backing buffer its own length. The
+ * `Blob` then takes that view directly, so it reads exactly the part's range
+ * regardless of any offset (and no `ArrayBuffer` assertion is needed). Same
+ * reasoning as `uploadPersonalityAttachment`.
  */
 function fileForm(field: string, part: UploadPart): FormData {
   const form = new FormData();
   const bytes = new Uint8Array(part.buffer);
-  form.append(field, new Blob([bytes.buffer as ArrayBuffer], { type: part.mimeType }), part.name);
+  form.append(field, new Blob([bytes], { type: part.mimeType }), part.name);
   return form;
 }
 
