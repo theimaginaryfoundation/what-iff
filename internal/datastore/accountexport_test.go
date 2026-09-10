@@ -27,6 +27,7 @@ func TestExportConversationInputsUsesSentAtIDCursor(t *testing.T) {
 			message text NOT NULL,
 			origin text NOT NULL,
 			read_status text NOT NULL,
+			bookmarked boolean NOT NULL DEFAULT 0,
 			response_id text,
 			sent_at datetime NOT NULL,
 			tokens integer,
@@ -35,6 +36,7 @@ func TestExportConversationInputsUsesSentAtIDCursor(t *testing.T) {
 			generation_expression_reasoning text,
 			last_error_message text,
 			checkpoint_completed_at datetime,
+			context_breakdown json,
 			chat_messages uuid NOT NULL,
 			chat_message_generation_mood uuid,
 			chat_message_generation_expression uuid
