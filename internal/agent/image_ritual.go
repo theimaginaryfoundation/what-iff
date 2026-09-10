@@ -29,7 +29,7 @@ Rules:
 
 // handleImageGenerateRitual executes the system-ritual image generation flow:
 // 1) infer an image prompt via the active chat model (OpenAI Responses or Claude Messages; no tools)
-// 2) generate image bytes via Images API (gpt-image-1)
+// 2) generate image bytes via Images API (see provider.ImageEngine)
 // 3) save an assistant message + S3-backed FileAttachment(image/png) via saveImageRitualResult
 //
 // In mock mode (a.mockLLM) steps 1-2 are skipped entirely — no provider egress —

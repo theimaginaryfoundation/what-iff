@@ -31,7 +31,8 @@ Notes:
 - This tool returns metadata only. The actual image bytes will be attached to the assistant message automatically.
 - Prefer concise but specific prompts (subject, style, composition, colors, lighting). Include exact text if the image should render text.
 - Default count is 1 unless the user asks for variations/options.
-- Quality controls cost. Default to low. Do NOT choose high automatically; use quality="high" only if the user explicitly asks for high quality.
+- Quality controls cost and detail. Choose the level appropriate to the request; higher quality yields more detail.
+- Use aspect_ratio to match the subject: square for icons/avatars/logos, landscape for scenes/banners, portrait for characters/posters. Defaults to square.
 - To create multiple variations, either set count > 1 or call this tool multiple times with different prompts.`
 
 const CreateAgentJobToolDescription = `Schedule a future reminder / follow-up / check-in / task for the current user.
@@ -150,8 +151,13 @@ var GenerateImageToolSpec = FunctionToolSpec{
 		},
 		"quality": map[string]interface{}{
 			"type":        "string",
-			"description": "Image quality level. low is cheapest; medium is higher quality; high is expensive.",
+			"description": "Image quality level. low is cheapest and fastest; medium and high add progressively more detail.",
 			"enum":        []string{"low", "medium", "high"},
+		},
+		"aspect_ratio": map[string]interface{}{
+			"type":        "string",
+			"description": "Image aspect ratio. square is 1024x1024, landscape is 1536x1024, portrait is 1024x1536. Defaults to square.",
+			"enum":        []string{"square", "landscape", "portrait"},
 		},
 		"filename_prefix": map[string]interface{}{
 			"type":        "string",

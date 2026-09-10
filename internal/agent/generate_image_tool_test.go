@@ -94,6 +94,44 @@ func TestParseGenerateImageQuality(t *testing.T) {
 	}
 }
 
+// --- parseGenerateImageAspectRatio ---
+
+func TestParseGenerateImageAspectRatio(t *testing.T) {
+	t.Parallel()
+	square := "square"
+	landscape := "LANDSCAPE"
+	portrait := " portrait "
+	empty := ""
+	bogus := "wide"
+
+	cases := []struct {
+		name    string
+		in      *string
+		want    provider.ImageAspectRatio
+		wantErr bool
+	}{
+		{"nil defaults to square", nil, provider.ImageAspectRatioSquare, false},
+		{"empty defaults to square", &empty, provider.ImageAspectRatioSquare, false},
+		{"square", &square, provider.ImageAspectRatioSquare, false},
+		{"landscape case-insensitive", &landscape, provider.ImageAspectRatioLandscape, false},
+		{"portrait trimmed", &portrait, provider.ImageAspectRatioPortrait, false},
+		{"invalid", &bogus, provider.ImageAspectRatioSquare, true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseGenerateImageAspectRatio(tc.in)
+			require.Equal(t, tc.want, got)
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 // --- generateImageTool ---
 
 func imagesGenerateJSONServer(handler http.HandlerFunc) *httptest.Server {
