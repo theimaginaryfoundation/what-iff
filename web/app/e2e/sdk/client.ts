@@ -415,13 +415,66 @@ export async function createChat(client: ApiClient, input: CreateChatInput): Pro
   return data;
 }
 
-/** Lists the authenticated user's chats. */
-export async function listChats(client: ApiClient): Promise<Chat[]> {
-  const { data, error, response } = await client.GET('/chat', {});
+export interface ListChatsParams {
+  page?: number;
+  limit?: number;
+  name?: string;
+  search?: string;
+  tag?: string;
+  isFavorite?: boolean;
+  /**
+   * `true` returns *only* archived threads; omitting it returns only active
+   * ones. There is no value that returns both — which matters for the import
+   * specs, because `POST /chat/import` creates every thread archived, so a
+   * default `listChats()` never sees an imported thread at all.
+   */
+  archived?: boolean;
+}
+
+/**
+ * Lists the authenticated user's chats.
+ *
+ * Note the endpoint's default `limit` is 10, not "all" — a caller counting
+ * threads it seeded must pass a `limit` above that count or page through,
+ * or it will assert against a truncated first page.
+ */
+export async function listChats(client: ApiClient, params: ListChatsParams = {}): Promise<Chat[]> {
+  const { data, error, response } = await client.GET('/chat', {
+    params: {
+      query: {
+        page: params.page,
+        limit: params.limit,
+        name: params.name,
+        search: params.search,
+        tag: params.tag,
+        is_favorite: params.isFavorite,
+        archived: params.archived,
+      },
+    },
+  });
   if (error || !data) {
     fail('list chats', response.status, error);
   }
   return data.results ?? [];
+}
+
+/**
+ * Every archived thread the caller owns, following pagination to the end.
+ *
+ * The import specs need a complete list to assert "exactly these five titles,
+ * each once" — a single capped page cannot distinguish "the sixth thread was
+ * never created" from "the sixth thread is on page two".
+ */
+export async function listAllArchivedChats(client: ApiClient): Promise<Chat[]> {
+  const PAGE_SIZE = 100; // the endpoint's documented maximum
+  const all: Chat[] = [];
+  for (let page = 1; ; page++) {
+    const batch = await listChats(client, { archived: true, page, limit: PAGE_SIZE });
+    all.push(...batch);
+    if (batch.length < PAGE_SIZE) {
+      return all;
+    }
+  }
 }
 
 /** Fetches a single chat thread by ID. */
@@ -587,6 +640,28 @@ export async function getJob(client: ApiClient, id: string): Promise<Job> {
     fail('get job', response.status, error);
   }
   return data;
+}
+
+/**
+ * `PUT /job/{id}/status` without the throw-on-non-2xx of every other helper
+ * here, so a spec can assert on a rejection rather than only on success.
+ *
+ * `body` is deliberately untyped: the specs that need this helper send
+ * statuses the `JobStatus` union does not contain, which is the whole point —
+ * a well-typed call could only ever exercise the values the backend already
+ * accepts. The generated types are still applied to the path, so a renamed
+ * route breaks at build time.
+ */
+export async function updateJobStatusRaw(
+  client: ApiClient,
+  jobId: string,
+  body: Record<string, unknown>,
+): Promise<{ status: number; body: unknown }> {
+  const { data, error, response } = await client.PUT('/job/{id}/status', {
+    params: { path: { id: jobId } },
+    body: body as never,
+  });
+  return { status: response.status, body: error ?? data };
 }
 
 // --- Memories --------------------------------------------------------------
@@ -764,4 +839,138 @@ export async function deleteAgentJob(client: ApiClient, id: string): Promise<voi
   if (error) {
     fail('delete agent job', response.status, error);
   }
+}
+
+// --- Chat import / export --------------------------------------------------
+
+/** One multipart file part, shaped like the fixture builders in e2e/fixtures/. */
+export interface UploadPart {
+  name: string;
+  mimeType: string;
+  buffer: Buffer | Uint8Array;
+}
+
+/**
+ * Builds the `multipart/form-data` body for an upload part.
+ *
+ * `new Uint8Array(part.buffer)` copies into a fresh, exactly-sized buffer: a
+ * Node `Buffer` is a view into a pooled `ArrayBuffer` shared with unrelated
+ * allocations, and the copy is what keeps only the part's own bytes in play —
+ * the result has `byteOffset` 0 and a backing buffer its own length. The
+ * `Blob` then takes that view directly, so it reads exactly the part's range
+ * regardless of any offset (and no `ArrayBuffer` assertion is needed). Same
+ * reasoning as `uploadPersonalityAttachment`.
+ */
+function fileForm(field: string, part: UploadPart): FormData {
+  const form = new FormData();
+  const bytes = new Uint8Array(part.buffer);
+  form.append(field, new Blob([bytes], { type: part.mimeType }), part.name);
+  return form;
+}
+
+/**
+ * `POST /chat/import`, returning the raw status alongside the parsed body.
+ *
+ * The endpoint answers `202 Accepted` with a Job and does the parse and the
+ * persistence in the background — nothing is imported when this resolves.
+ * Callers wait on the returned job (see `waitForJobTerminal` in
+ * api-tests/fixtures.ts); `importChats` below is the throwing shorthand for
+ * the common case.
+ */
+export async function importChatsRaw(client: ApiClient, part: UploadPart): Promise<{ status: number; job?: Job; error?: unknown }> {
+  const { data, error, response } = await client.POST('/chat/import', {
+    body: { file: part.name },
+    bodySerializer: () => fileForm('file', part),
+  });
+  return { status: response.status, job: data as Job | undefined, error };
+}
+
+/** `POST /chat/import`, failing loudly on anything that is not the documented 202. */
+export async function importChats(client: ApiClient, part: UploadPart): Promise<Job> {
+  const { status, job, error } = await importChatsRaw(client, part);
+  if (status !== 202 || !job?.id) {
+    fail('import chats', status, error);
+  }
+  return job;
+}
+
+/**
+ * A response whose body is an archive rather than JSON.
+ *
+ * Both fields are populated from the same read: `bytes` always holds what
+ * arrived, and `json` is set only when the server answered with an error
+ * document instead. Callers assert on `status` first and then reach for
+ * whichever is relevant — an export that fails does so with a JSON body under
+ * a 4xx, and a test that assumed bytes would silently see an empty archive.
+ */
+export interface ArchiveResponse {
+  status: number;
+  headers: Headers;
+  bytes: ArrayBuffer;
+  json?: unknown;
+}
+
+/**
+ * Turns one archive-endpoint call into an `ArchiveResponse`.
+ *
+ * A `Response` body may only be read once, and the two branches here are read
+ * by different readers. `parseAs: 'stream'` keeps openapi-fetch's hands off a
+ * *successful* body so the `arrayBuffer()` below is the only read of it — but
+ * that setting does not apply to failures, which openapi-fetch always parses
+ * itself and hands back as `error`. Reading the body again on that path is
+ * what "Body has already been read" means, so the already-parsed value is
+ * used instead of re-reading.
+ */
+async function readArchive(response: Response, error: unknown): Promise<ArchiveResponse> {
+  if (!response.ok) {
+    return { status: response.status, headers: response.headers, bytes: new ArrayBuffer(0), json: error };
+  }
+  return { status: response.status, headers: response.headers, bytes: await response.arrayBuffer() };
+}
+
+/**
+ * `GET /chat/{id}/export` — one thread as a ZIP of `chat.json` and
+ * `messages.jsonl`.
+ *
+ * Never throws on a non-2xx. The failure modes worth testing here are the
+ * response itself: a 404 for someone else's thread, a 400 for an unparseable
+ * id, and — the reason the risk register lists this endpoint at all — a 200
+ * whose body is a truncated archive.
+ */
+export async function exportChat(client: ApiClient, chatId: string): Promise<ArchiveResponse> {
+  const { error, response } = await client.GET('/chat/{id}/export', {
+    params: { path: { id: chatId } },
+    parseAs: 'stream',
+  });
+  return readArchive(response, error);
+}
+
+/** `GET /memory/export` — every memory the caller owns, as a ZIP of JSONL files. */
+export async function exportMemories(client: ApiClient): Promise<ArchiveResponse> {
+  const { error, response } = await client.GET('/memory/export', { parseAs: 'stream' });
+  return readArchive(response, error);
+}
+
+export interface MemoryImportResult {
+  imported_count?: number;
+  duplicate_count?: number;
+  invalid_record_count?: number;
+  skipped_missing_chat_count?: number;
+  skipped_missing_personality_count?: number;
+}
+
+/**
+ * `POST /memory/import`, returning the status alongside the parsed body.
+ *
+ * Non-throwing for the same reason as `importChatsRaw`: most of what is worth
+ * asserting about this endpoint is how it rejects things, and a helper that
+ * threw would turn each of those into a caught exception the test then has to
+ * unpick.
+ */
+export async function importMemories(client: ApiClient, part: UploadPart): Promise<{ status: number; body: MemoryImportResult & { message?: string; code?: string } }> {
+  const { data, error, response } = await client.POST('/memory/import', {
+    body: { file: part.name },
+    bodySerializer: () => fileForm('file', part),
+  });
+  return { status: response.status, body: (error ?? data ?? {}) as MemoryImportResult & { message?: string; code?: string } };
 }
