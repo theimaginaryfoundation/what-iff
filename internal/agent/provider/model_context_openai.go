@@ -73,6 +73,82 @@ func appendOpenAIResponseInputImages(parts responses.ResponseInputMessageContent
 	return parts
 }
 
+// openAISupportedImageMediaTypes are the image media types the OpenAI Responses API
+// accepts as input. Other vendors (Anthropic, Gemini) accept a broader set, so an image
+// that arrived on a Claude/Gemini turn can carry a media type OpenAI rejects with a 4xx.
+var openAISupportedImageMediaTypes = map[string]struct{}{
+	"image/jpeg": {},
+	"image/jpg":  {}, // non-standard, but some clients send it
+	"image/png":  {},
+	"image/gif":  {},
+	"image/webp": {},
+}
+
+// openAIAcceptsImage reports whether the OpenAI Responses API will accept this image.
+//
+// Two independent things make OpenAI reject an input image:
+//   - an unsupported media type (e.g. image/heic that rode in on another vendor's turn), and
+//   - a file_id whose *stored* filename extension is not lowercase-supported — OpenAI
+//     validates that case-sensitively, so an uploaded "photo.JPG" is refused even though
+//     JPEG is a supported format.
+//
+// We can inspect the media type here but not the filename behind a file_id, so an image is
+// only accepted when it carries raw bytes to render as a data URL (whose media type we
+// control via normalizeImageMediaType). file_id-only images are treated as unusable for
+// this path; callers that sanitize also clear FileID so survivors render from bytes.
+func openAIAcceptsImage(im UserMessageImage) bool {
+	if len(im.RawBytes) == 0 {
+		return false
+	}
+	mt := strings.ToLower(strings.TrimSpace(im.MediaType))
+	if mt == "" {
+		mt = "image/jpeg" // matches normalizeImageMediaType's default for the data-URL path
+	}
+	_, ok := openAISupportedImageMediaTypes[mt]
+	return ok
+}
+
+// SanitizeImagesForOpenAIInput returns a clone of ctx whose image attachments are safe to
+// send to the OpenAI Responses API. Images OpenAI would reject (see openAIAcceptsImage) are
+// dropped, and FileID is cleared on the survivors so they render as data URLs — sidestepping
+// OpenAI's case-sensitive validation of a file_id's stored filename. A segment left with no
+// images and no text is removed, mirroring StripUserMessageImages, so we never emit an empty
+// turn. Intended for background paths like the checkpoint summarizer, where one bad image
+// must not fail the whole request. Broader upload-time normalization is the longer-term fix.
+func SanitizeImagesForOpenAIInput(ctx *ModelContext) *ModelContext {
+	if ctx == nil {
+		return nil
+	}
+	clone := ctx.Clone()
+	write := 0
+	for read := 0; read < len(clone.Segments); read++ {
+		seg := clone.Segments[read]
+		if len(seg.UserImages) > 0 {
+			kept := seg.UserImages[:0]
+			for _, im := range seg.UserImages {
+				if !openAIAcceptsImage(im) {
+					continue
+				}
+				im.FileID = "" // force the data-URL path; do not trust the stored filename
+				kept = append(kept, im)
+			}
+			if len(kept) == 0 {
+				seg.UserImages = nil
+				// Drop turns that were image-only once their images are gone.
+				if strings.TrimSpace(seg.Content) == "" {
+					continue
+				}
+			} else {
+				seg.UserImages = kept
+			}
+		}
+		clone.Segments[write] = seg
+		write++
+	}
+	clone.Segments = clone.Segments[:write]
+	return clone
+}
+
 func normalizeImageMediaType(mediaType string) string {
 	mt := strings.TrimSpace(mediaType)
 	if mt == "" || !strings.HasPrefix(strings.ToLower(mt), "image/") {

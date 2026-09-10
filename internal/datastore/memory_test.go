@@ -12,8 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"entgo.io/ent/dialect"
-	entsql "entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
 	"github.com/pgvector/pgvector-go"
 	"github.com/stretchr/testify/require"
@@ -21,9 +19,6 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/embedding"
 	entmemory "github.com/theimaginaryfoundation/what-iff/ent/memory"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
-	"go.uber.org/zap"
-
-	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestMemoryScopeValidation(t *testing.T) {
@@ -934,22 +929,7 @@ func TestImportMemoriesWithBatchEmbeddingsUsesBoundedBatchesAndBulkPersistence(t
 
 func newSQLiteDatastore(t *testing.T) (*Datastore, func()) {
 	t.Helper()
-
-	db, err := sql.Open("sqlite3", "file:"+uuid.NewString()+"?mode=memory&cache=shared&_fk=1")
-	require.NoError(t, err)
-
-	createMemoryImportTestSchema(t, db)
-
-	drv := entsql.OpenDB(dialect.SQLite, db)
-	client := ent.NewClient(ent.Driver(drv))
-	ds, err := NewDatastore(client, db, zap.NewNop(), "12345678901234567890123456789012", nil)
-	require.NoError(t, err)
-
-	cleanup := func() {
-		_ = client.Close()
-		_ = db.Close()
-	}
-	return ds, cleanup
+	return newTestDatastore(t, createMemoryImportTestSchema)
 }
 
 func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {

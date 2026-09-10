@@ -19,7 +19,7 @@ import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from './chat.constants';
 describe('ChatSessionService', () => {
     type ChatServiceMock = Pick<MockedObject<ChatService>, 'createChat' | 'getChat' | 'patchChat' | 'setLastChatId' | 'markChatRead'>;
     type ThreadListServiceMock = Pick<MockedObject<ThreadListService>, 'clearUnreadForThread'>;
-    type MessageServiceMock = Pick<MockedObject<MessageService>, 'clearMessages' | 'listMessages' | 'sendMessage' | 'retryUserMessage' | 'setCurrentChatId' | 'markAssistantMessagesRead' | 'messages$'>;
+    type MessageServiceMock = Pick<MockedObject<MessageService>, 'clearMessages' | 'listMessages' | 'reconcileLatestPage' | 'sendMessage' | 'retryUserMessage' | 'setCurrentChatId' | 'markAssistantMessagesRead' | 'messages$'>;
     type ChatStreamingServiceMock = Pick<MockedObject<ChatStreamingService>, 'appendServerChunks' | 'clearMessageState' | 'completeStreaming' | 'configure' | 'destroy' | 'getDisplayMessage' | 'getDisplayRevision' | 'setCompletionCallback' | 'startStreaming' | 'stopStreaming'>;
     type DraftMessageServiceMock = Pick<MockedObject<DraftMessageService>, 'clearDraft' | 'getDraft' | 'saveDraft'>;
     type JobServiceMock = Pick<MockedObject<JobService>, 'pollJob' | 'getActiveChatMessageJob' | 'isJobBeingPolled' | 'cancelJob'>;
@@ -65,6 +65,7 @@ describe('ChatSessionService', () => {
         messageService = {
             clearMessages: vi.fn().mockName("MessageService.clearMessages"),
             listMessages: vi.fn().mockName("MessageService.listMessages"),
+            reconcileLatestPage: vi.fn().mockName("MessageService.reconcileLatestPage"),
             sendMessage: vi.fn().mockName("MessageService.sendMessage"),
             retryUserMessage: vi.fn().mockName("MessageService.retryUserMessage"),
             setCurrentChatId: vi.fn().mockName("MessageService.setCurrentChatId"),
@@ -114,6 +115,7 @@ describe('ChatSessionService', () => {
         chatService.createChat.mockReturnValue(of(chat));
         chatService.markChatRead.mockReturnValue(of({ updated_count: 0 }));
         messageService.listMessages.mockReturnValue(of({ results: [], page: 1, total_count: 0 }));
+        messageService.reconcileLatestPage.mockReturnValue(of({ appended: 0, total: 0, gap: false }));
         messageService.sendMessage.mockReturnValue(of({ id: 'user-msg', job_id: 'job-1', type: 'chat_message' }));
         messageService.retryUserMessage.mockReturnValue(of({ id: 'user-msg', job_id: 'job-2', type: 'chat_message' }));
         draftService.getDraft.mockReturnValue({ chatId: 'chat-1', message: 'saved draft', timestamp: Date.now() });
@@ -414,26 +416,25 @@ describe('ChatSessionService', () => {
         expect(service.contextCheckpointToken()).toBe(1);
     });
 
-    it('reloads the active thread messages on return to the app', () => {
+    it('reconciles the active thread messages on return to the app', () => {
         service.setActive('chat-1');
-        messageService.listMessages.mockClear();
-        messageService.listMessages.mockReturnValue(of({ results: [], page: 1, total_count: 3 }));
+        messageService.reconcileLatestPage.mockClear();
 
-        service.reloadActiveThread();
+        service.syncActiveThread(true);
 
-        expect(messageService.listMessages).toHaveBeenCalledWith('chat-1', 1, expect.any(Number));
+        expect(messageService.reconcileLatestPage).toHaveBeenCalledWith('chat-1', expect.any(Number));
     });
 
-    it('does not reload the active thread while a job is in flight', () => {
+    it('does not reconcile the active thread while a job is in flight', () => {
         const activeJob$ = new Subject<any>();
         jobService.pollJob.mockReturnValue(activeJob$ as any);
         service.setActive('chat-1');
         service.startAssistantJobPolling('job-1', 'chat-1');
-        messageService.listMessages.mockClear();
+        messageService.reconcileLatestPage.mockClear();
 
-        service.reloadActiveThread();
+        service.syncActiveThread(true);
 
-        expect(messageService.listMessages).not.toHaveBeenCalled();
+        expect(messageService.reconcileLatestPage).not.toHaveBeenCalled();
         activeJob$.complete();
     });
 

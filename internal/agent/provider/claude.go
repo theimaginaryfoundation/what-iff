@@ -429,22 +429,26 @@ func handleClaudeBetaTextDeltaEvent(ev anthropic.BetaRawMessageStreamEventUnion,
 // ToGenerateResponse converts an Anthropic Message to the provider-agnostic
 // GenerateResponse, extracting text content and token counts.
 func (c *ClaudeProvider) ToGenerateResponse(msg *anthropic.Message) *GenerateResponse {
-	return ClaudeGenerateResponse(
+	resp := ClaudeGenerateResponse(
 		msg.ID,
 		anthropicUsageInputTokens(msg.Usage),
 		anthropicUsageOutputTokens(msg.Usage),
 		ExtractClaudeText(msg),
 	)
+	resp.StopReason = string(msg.StopReason)
+	return resp
 }
 
 // BetaToGenerateResponse converts an Anthropic BetaMessage to the provider-agnostic GenerateResponse.
 func (c *ClaudeProvider) BetaToGenerateResponse(msg *anthropic.BetaMessage) *GenerateResponse {
-	return ClaudeGenerateResponse(
+	resp := ClaudeGenerateResponse(
 		msg.ID,
 		anthropicBetaUsageInputTokens(msg.Usage),
 		anthropicBetaUsageOutputTokens(msg.Usage),
 		ExtractClaudeBetaText(msg),
 	)
+	resp.StopReason = string(msg.StopReason)
+	return resp
 }
 
 // ExtractClaudeText concatenates all text blocks in the response content.

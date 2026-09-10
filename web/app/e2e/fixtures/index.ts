@@ -7,6 +7,7 @@ import {
   ChatImportModal,
   ChatPage,
   CommandPalette,
+  CompactionLogPage,
   ConfirmationModal,
   DashboardPage,
   GalleryPage,
@@ -255,6 +256,7 @@ interface PomFixtures {
   chatImportModal: ChatImportModal;
   chatPage: ChatPage;
   commandPalette: CommandPalette;
+  compactionLogPage: CompactionLogPage;
   confirmationModal: ConfirmationModal;
   dashboardPage: DashboardPage;
   integrationsPage: IntegrationsPage;
@@ -298,6 +300,7 @@ export const test = base.extend<Fixtures & InternalFixtures & PomFixtures>({
   chatImportModal: async ({ page }, use) => use(new ChatImportModal(page)),
   chatPage: async ({ page }, use) => use(new ChatPage(page)),
   commandPalette: async ({ page }, use) => use(new CommandPalette(page)),
+  compactionLogPage: async ({ page }, use) => use(new CompactionLogPage(page)),
   confirmationModal: async ({ page }, use) => use(new ConfirmationModal(page)),
   dashboardPage: async ({ page }, use) => use(new DashboardPage(page)),
   integrationsPage: async ({ page }, use) => use(new IntegrationsPage(page)),

@@ -63,6 +63,16 @@ export interface ChatMessage {
   checkpoint_completed_at?: string | null;
   /** Per-turn model-context composition captured at generation time (assistant messages). */
   context_breakdown?: ContextBreakdown | null;
+  /** Whether the user has bookmarked this message for long-thread navigation. */
+  bookmarked?: boolean;
+}
+
+/** Lightweight bookmark entry for the thread navigator (from GET /chat/{id}/bookmarks). */
+export interface MessageBookmark {
+  id: string;
+  origin: MessageOrigin;
+  snippet: string;
+  sent_at: string;
 }
 
 export interface ChatMessageFilters {

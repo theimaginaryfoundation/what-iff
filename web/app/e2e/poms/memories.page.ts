@@ -29,6 +29,18 @@ export class MemoriesPage {
       name: 'Memories',
       level: 1,
     });
+    this.subtitle = this.page.getByText('Saved context that informs your conversations.', {
+      exact: true,
+    });
+    this.header = this.page.locator('.memories-header');
+    this.headerCopy = this.page.locator('.memories-header__copy');
+    this.headerActions = this.page.locator('.memories-header__actions');
+    this.mergeHistoryLink = this.page.getByRole('link', { name: 'Merge history', exact: true });
+    this.compactionLogLink = this.page.getByRole('link', { name: 'Compaction log', exact: true });
+    this.batchImportButton = this.page.getByRole('button', { name: 'Batch Import', exact: true });
+    this.mobileMenuButton = this.page.getByRole('button', { name: 'Open navigation menu', exact: true });
+    this.mainContent = this.page.locator('#main-content');
+    this.toolbar = this.page.locator('.memories-toolbar');
     this.filterTabs = this.page.getByRole('tablist', {
       name: 'Memory filters',
     });
@@ -46,6 +58,26 @@ export class MemoriesPage {
   }
 
   readonly heading: Locator;
+
+  readonly subtitle: Locator;
+
+  readonly header: Locator;
+
+  readonly headerCopy: Locator;
+
+  readonly headerActions: Locator;
+
+  readonly mergeHistoryLink: Locator;
+
+  readonly compactionLogLink: Locator;
+
+  readonly batchImportButton: Locator;
+
+  readonly mobileMenuButton: Locator;
+
+  readonly mainContent: Locator;
+
+  readonly toolbar: Locator;
 
   readonly filterTabs: Locator;
 

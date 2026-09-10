@@ -6,7 +6,7 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
 
 ## Responsibilities
 
-- **Tool catalog/specs:** `FunctionToolSpec`, `FunctionToolDefinition`, and catalog helpers (`catalog.go`, `toolconstants.go`) define the static function-tool surface and user-toggleable metadata.
+- **Tool catalog/specs:** `FunctionToolSpec`, `FunctionToolDefinition`, and catalog helpers (`catalog.go`, `toolconstants.go`) define the static function-tool surface and user-toggleable metadata. `FunctionToolDefinition.HumanDescription` is presentation copy for human-facing surfaces and is intentionally separate from the agent-facing `FunctionToolSpec.Description` prompt.
 - **Provider projection:** `OpenAIToolUnionParam` / `OpenAIFunctionTools` build OpenAI Responses function tools; Claude projection is built by `internal/agent` via `provider.ClaudeFunctionTool`.
 - **Implementations:** Per-tool structs with `Execute`-style handlers, e.g.:
   - `VectorStoreMemoryTool` — memory search (`memory.go`).
@@ -22,7 +22,8 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
 
 | Symbol | Notes |
 |--------|--------|
-| `FunctionToolSpec` | Name, description, JSON schema map for OpenAI tools. |
+| `FunctionToolSpec` | Name, agent-facing description, JSON schema map for provider tools. |
+| `FunctionToolDefinition` | Catalog metadata, including optional human-facing description and user-toggleable/default flags. |
 | `FunctionToolCatalog` / `AgentFunctionToolSpecs` / `UserToggleableFunctionToolSpecs` | Ordered static catalog projections used by agent/tool metadata assembly. |
 | `RecallTool`, `NewVectorStoreMemoryTool`, `NewScratchpadTool` | Wired from `internal/agent` when building tool lists. |
 | `OpenAIToolUnionParam` | Builds `responses.ToolUnionParam` from a spec. |
@@ -38,11 +39,13 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
 - **`list` conversations:** Empty shells (no messages / nil `last_message_time`) are excluded via `ChatFilters.HasMessages` so they do not crowd out real conversations under Postgres `DESC NULLS FIRST` sort. Unlike the HTTP sidebar list, agent discovery includes archived threads so imported history can be read with `find_context` without rehydrating it.
 - **`list` jobs:** Emits `next_runtime` for non-terminal jobs only; does not echo raw `schedule_input` (e.g. "in 5 minutes" next to `complete` is noise).
 - **`list` pagination:** Files/conversations/jobs (and personalities/skills) accept `page` + `limit`; results include `page`/`total_count`/`has_more` and a note that suggests `page=N+1` when more remain.
+- **Human vs agent descriptions:** Built-in user-toggleable tools provide `FunctionToolDefinition.HumanDescription` for presentation. `internal/agent.GetAvailableTools` trims and prefers that field, but falls back to `FunctionToolSpec.Description` when a runtime/external tool omits it or supplies only whitespace. Provider-facing tool prompts remain unchanged on `FunctionToolSpec.Description`.
 - **Spec parity:** `toolconstants_test.go` asserts OpenAI function tool projection stays aligned with the shared catalog; Claude schema sanitization is tested in `internal/agent/provider`.
 - **Execution location:** Some tools are defined here only as shared schema/registration (`run_subagent`) while execution lives in `internal/agent` to reuse chat/user/provider context safely.
 
 ## Testing
 
+- `catalog_human_description_test.go` — every built-in user-toggleable catalog entry has non-empty human-facing copy distinct from its agent-facing prompt; runtime/external definitions may omit it and rely on the API fallback contract.
 - `list_test.go` — unified list kinds (filters, scopes, empty-conversation / terminal-job omission).
 - `tool_helpers_test.go` — marshaling and validation utilities.
 - `toolconstants_test.go` — schema parity with shared specs.

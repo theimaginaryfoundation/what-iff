@@ -25,6 +25,15 @@ func TestGetAgentToolsList_IncludesCreateJobByDefault(t *testing.T) {
 	require.True(t, hasCreateJob)
 }
 
+func TestGetAgentToolsList_RespectsDisabledTools(t *testing.T) {
+	list := getAgentToolsList(map[string]bool{"create_agent_job": true}, false)
+	for _, tool := range list {
+		if tool.OfFunction != nil && tool.OfFunction.Name == "create_agent_job" {
+			t.Fatalf("create_agent_job should have been filtered out")
+		}
+	}
+}
+
 func TestGetAgentToolsList_IncludesGenerateImageTool(t *testing.T) {
 	list := getAgentToolsList(nil, true)
 	hasGenerateImage := false
@@ -50,16 +59,22 @@ func TestGetAgentToolsListMatchesSharedSpecsOrder(t *testing.T) {
 func TestGetAvailableToolsMatchesCatalogAndLogicalTools(t *testing.T) {
 	ctx := context.Background()
 	avail := GetAvailableTools(ctx)
-	specs := tools.UserToggleableFunctionToolSpecs()
-	require.Len(t, avail, len(specs)+1, "web + user-toggleable function specs")
+	definitions := tools.FunctionToolCatalog()
+	userToggleable := make([]tools.FunctionToolDefinition, 0, len(definitions))
+	for _, def := range definitions {
+		if def.UserToggleable {
+			userToggleable = append(userToggleable, def)
+		}
+	}
+	require.Len(t, avail, len(userToggleable)+1, "web + user-toggleable function definitions")
 
 	require.Equal(t, tools.ToolNameWebSearch, avail[0].Name)
 	require.Equal(t, tools.AvailableToolDescriptionWebSearch, avail[0].Description)
-	idx := 1
-	for _, spec := range specs {
-		require.Equal(t, spec.Name, avail[idx].Name)
-		require.Equal(t, spec.Description, avail[idx].Description, "spec %q description", spec.Name)
-		idx++
+	for i, def := range userToggleable {
+		actual := avail[i+1]
+		require.Equal(t, def.Spec.Name, actual.Name)
+		require.Equal(t, def.HumanDescription, actual.Description, "tool %q human description", def.Spec.Name)
+		require.NotEqual(t, def.Spec.Description, actual.Description, "tool %q must not expose its agent prompt as UI copy", def.Spec.Name)
 	}
 }
 
@@ -87,6 +102,28 @@ func TestExecutableCatalogToolsHaveHandlers(t *testing.T) {
 	for _, spec := range tools.ExecutableFunctionToolSpecs() {
 		require.Contains(t, handlers, spec.Name)
 	}
+}
+
+func TestToolHandlers_ExtraHandlersOverrideDefaults(t *testing.T) {
+	prev := extraToolHandlersForChat
+	t.Cleanup(func() { extraToolHandlersForChat = prev })
+
+	extraToolHandlersForChat = func(_ *Agent, _ *models.Chat) map[string]ExtraToolHandler {
+		return map[string]ExtraToolHandler{
+			"list": func(context.Context, []byte) (string, []*models.FileAttachment, error) {
+				return `{"source":"extra"}`, nil, nil
+			},
+		}
+	}
+
+	a := &Agent{logger: zap.NewNop()}
+	out, _, err := a.dispatchToolUse(context.Background(), &chatContext{chat: &models.Chat{}}, provider.ToolUse{
+		ID:    "override-list",
+		Name:  "list",
+		Input: []byte(`{}`),
+	})
+	require.NoError(t, err)
+	require.Contains(t, out, `"source":"extra"`)
 }
 
 func TestDispatchToolUse_CreateAgentJobValidation_NoAttachments(t *testing.T) {

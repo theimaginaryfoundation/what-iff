@@ -135,8 +135,12 @@ func parseAnthropicArchive(ctx context.Context, r io.Reader, now time.Time) ([]m
 
 		var elem json.RawMessage
 		if err := dec.Decode(&elem); err != nil {
-			errs = append(errs, fmt.Sprintf("conversation entry %d: malformed entry in archive; skipped", idx))
-			continue
+			// Decoding into a json.RawMessage only fails when the stream itself is
+			// malformed or truncated, never because a single conversation is
+			// unsupported. json.Decoder keeps that error permanently while More()
+			// goes on reporting data, so skipping the entry and continuing would
+			// spin forever and grow errs without bound. Stop and report instead.
+			return convs, errs, fmt.Errorf("conversation entry %d: %w", idx, err)
 		}
 
 		var raw anthropicConversation
@@ -176,14 +180,11 @@ func anthropicImportOrigin(sender string) (origin models.MessageOrigin, ok bool,
 func prepareAnthropicConversation(raw anthropicConversation, now time.Time) (*models.ImportConversation, []string) {
 	var errs []string
 
-	title := raw.Name
-	if title == "" {
-		ts := now
-		if !raw.CreatedAt.IsZero() {
-			ts = raw.CreatedAt.UTC()
-		}
-		title = "Imported chat " + ts.Format("2006-01-02 15:04")
+	ts := now
+	if !raw.CreatedAt.IsZero() {
+		ts = raw.CreatedAt.UTC()
 	}
+	title := models.NormalizeImportedTitle(raw.Name, "Imported chat "+ts.Format("2006-01-02 15:04"))
 
 	var (
 		msgs         []models.ChatMessage

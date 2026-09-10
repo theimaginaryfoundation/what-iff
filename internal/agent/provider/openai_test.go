@@ -1,54 +1,32 @@
 package provider
 
 import (
-	"crypto/md5"
-	"fmt"
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/openai/openai-go/v3/responses"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
-// Test helper functions for processResponseOutput
-// We test the core deduplication logic directly rather than mocking the complex OpenAI Response struct
-
-// testProcessResponseOutput extracts the core deduplication logic for testing
-// This mirrors the actual processResponseOutput function but accepts our mock
+// testProcessResponseOutput adapts raw text into the real OpenAI Response shape and then calls the
+// production ProcessResponseOutput path. It intentionally contains no copy of the deduplication
+// algorithm, so these tests fail when production response processing regresses.
 func testProcessResponseOutput(rawOutput string) string {
-	// If the output is empty or very short, return as-is (no duplication possible)
-	if len(strings.TrimSpace(rawOutput)) < shortMessageThreshold {
-		return rawOutput
+	quoted, err := json.Marshal(rawOutput)
+	if err != nil {
+		panic(err)
 	}
-
-	// Split the output into paragraphs and deduplicate
-	paragraphs := strings.Split(rawOutput, "\n\n")
-	var uniqueParagraphs []string
-	seenContent := make(map[string]bool)
-
-	for _, paragraph := range paragraphs {
-		trimmedParagraph := strings.TrimSpace(paragraph)
-
-		// Preserve empty paragraphs for proper markdown formatting
-		// (they're needed for spacing between blocks, tables, etc.)
-		if trimmedParagraph == "" {
-			uniqueParagraphs = append(uniqueParagraphs, paragraph)
-			continue
-		}
-
-		// Create a hash of the paragraph content for deduplication
-		// We normalize whitespace to catch minor formatting differences
-		normalizedContent := strings.Join(strings.Fields(trimmedParagraph), " ")
-		contentHash := fmt.Sprintf("%x", md5.Sum([]byte(normalizedContent)))
-
-		// Only add if we haven't seen this content before
-		if !seenContent[contentHash] {
-			uniqueParagraphs = append(uniqueParagraphs, trimmedParagraph)
-			seenContent[contentHash] = true
-		}
+	raw := `{"id":"resp_test","object":"response","created_at":1,"model":"test","status":"completed",` +
+		`"output":[{"type":"message","id":"m1","role":"assistant","status":"completed","content":[{"type":"output_text","text":` + string(quoted) + `}]}]}`
+	var resp responses.Response
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		panic(err)
 	}
-
-	return strings.Join(uniqueParagraphs, "\n\n")
+	return ProcessResponseOutput(&resp)
 }
 
 func TestProcessResponseOutput_NilResponse(t *testing.T) {
@@ -117,10 +95,11 @@ This is a paragraph with normal spacing.
 
 This is a paragraph with normal spacing.`
 
-	// Expected: Duplicate paragraphs should be removed, regardless of minor whitespace differences
+	// The production pipeline deduplicates paragraphs and then StripOpenAIFileLinks normalizes
+	// repeated spaces/tabs, so the surviving unique paragraph uses single internal spaces.
 	expectedResult := `This is a paragraph with normal spacing.
 
-This   is   a   paragraph   with   extra   spaces.`
+This is a paragraph with extra spaces.`
 
 	result := testProcessResponseOutput(content)
 	assert.Equal(t, expectedResult, result, "Duplicate paragraphs should be deduplicated")
@@ -340,7 +319,7 @@ Final paragraph.`
 
 // Benchmark test to ensure performance is acceptable
 func BenchmarkProcessResponseOutput(b *testing.B) {
-	// Create a realistic content scenario with some duplicates
+	// Create a realistic content scenario with some duplicates.
 	content := `This is a research summary about artificial intelligence and its applications.
 
 Key findings from multiple sources indicate significant growth in AI adoption across industries.
@@ -357,8 +336,78 @@ Robotics integration with AI is creating new opportunities in manufacturing and 
 
 The future of AI development looks promising with continued investment and research breakthroughs.`
 
+	// Build the SDK response fixture once. The benchmark is intended to measure
+	// ProcessResponseOutput, not JSON marshaling/unmarshaling in the test adapter.
+	quoted, err := json.Marshal(content)
+	if err != nil {
+		b.Fatal(err)
+	}
+	raw := `{"id":"resp_bench","object":"response","created_at":1,"model":"test","status":"completed",` +
+		`"output":[{"type":"message","id":"m1","role":"assistant","status":"completed","content":[{"type":"output_text","text":` + string(quoted) + `}]}]}`
+	var resp responses.Response
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		b.Fatal(err)
+	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		testProcessResponseOutput(content)
+		ProcessResponseOutput(&resp)
 	}
+}
+
+// responseWithOutputText builds a *responses.Response whose OutputText() returns text, so
+// ProcessResponseOutput (and therefore dedupeParagraphs) can be exercised directly.
+func responseWithOutputText(t *testing.T, text string) *responses.Response {
+	t.Helper()
+	quoted, err := json.Marshal(text)
+	require.NoError(t, err)
+	raw := `{"id":"resp_1","object":"response","created_at":1,"model":"test","status":"completed",` +
+		`"output":[{"type":"message","id":"m1","role":"assistant","status":"completed","content":[{"type":"output_text","text":` + string(quoted) + `}]}]}`
+	var resp responses.Response
+	require.NoError(t, json.Unmarshal([]byte(raw), &resp))
+	return &resp
+}
+
+func TestProcessResponseOutput_RealResponse_Dedupes(t *testing.T) {
+	t.Parallel()
+	content := "This is a unique paragraph about artificial intelligence, long enough to pass the short-message threshold.\n\n" +
+		"This is a unique paragraph about artificial intelligence, long enough to pass the short-message threshold.\n\n" +
+		"This is a second, different paragraph that is also long enough to matter for the test."
+	resp := responseWithOutputText(t, content)
+
+	got := ProcessResponseOutput(resp)
+	require.Equal(t, 1, strings.Count(got, "artificial intelligence"), "exact duplicate paragraph must be folded to one copy")
+	require.Contains(t, got, "second, different paragraph")
+}
+
+func TestProcessResponseOutput_RealResponse_ShortContentPassesThrough(t *testing.T) {
+	t.Parallel()
+	resp := responseWithOutputText(t, "short")
+	require.Equal(t, "short", ProcessResponseOutput(resp))
+}
+
+func TestDedupeParagraphs_PreservesEmptyParagraphsAndDedupes(t *testing.T) {
+	t.Parallel()
+	in := []string{"Same content here.", "", "Same   content  here.", "Different."}
+	out := dedupeParagraphs(in)
+	require.Equal(t, []string{"Same content here.", "", "Different."}, out)
+}
+
+func TestDedupeParagraphs_Empty(t *testing.T) {
+	t.Parallel()
+	require.Nil(t, dedupeParagraphs(nil))
+}
+
+func TestOpenAIProvider_SelectCarryOverTurns(t *testing.T) {
+	t.Parallel()
+	c := &OpenAIProvider{tokenCounter: NewTokenCounter()}
+	now := time.Now()
+	recent := []*models.ChatMessage{
+		{Origin: models.MessageOriginAssistant, Message: "reply", SentAt: now},
+		{Origin: models.MessageOriginUser, Message: "question", SentAt: now.Add(-time.Second)},
+	}
+	turns := c.SelectCarryOverTurns(recent, 5, 1000)
+	require.Len(t, turns, 1)
+	require.Equal(t, "question", turns[0][0].Message)
+	require.Equal(t, "reply", turns[0][1].Message)
 }

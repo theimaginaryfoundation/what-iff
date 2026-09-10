@@ -4905,6 +4905,10 @@ export interface paths {
          *
          *     **Error reporting:** Per-conversation parse and persistence failures are non-fatal and logged
          *     server-side; aggregate counts are reflected in the job's `progress`.
+         *
+         *     A malformed or truncated archive is a different case: once the JSON stream itself cannot be
+         *     read any further, no remaining conversation can be recovered, so the job ends as `failed`
+         *     rather than importing whatever prefix happened to parse.
          */
         post: {
             parameters: {
@@ -5899,6 +5903,132 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/{chatId}/chat-message/{messageId}/bookmark": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set or clear a message bookmark
+         * @description Toggles the user's bookmark flag on a message (either origin) for long-thread navigation. Returns the updated message.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                    messageId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description Desired bookmark state. */
+                        bookmarked: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated message */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ChatMessage"];
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Message not found or not owned by the user */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/chat/{chatId}/bookmarks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List bookmarked messages in a chat
+         * @description Returns every bookmarked message in the chat as lightweight snippets, in thread order. Complete regardless of message-list pagination so the navigator can jump to bookmarks not yet loaded client-side.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Bookmarks in thread order */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ChatMessageBookmark"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7242,7 +7372,69 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Download file attachment
+         * @description Downloads the binary content for a single file attachment owned by the authenticated user.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description File attachment ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description File attachment content */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/octet-stream": string;
+                    };
+                };
+                /** @description Invalid attachment ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description File attachment not found or content unavailable */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error while downloading the file */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         put?: never;
         post?: never;
         /**
@@ -7995,6 +8187,17 @@ export interface components {
          * @enum {string}
          */
         MessageReadStatus: "read" | "unread";
+        /** @description Lightweight bookmark entry for the thread navigator — enough to label and jump to a message. */
+        ChatMessageBookmark: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            origin: "User" | "Assistant";
+            /** @description Single-line, length-bounded preview of the bookmarked message. */
+            snippet: string;
+            /** Format: date-time */
+            sent_at: string;
+        };
         /**
          * @example {
          *       "id": "123e4567-e89b-12d3-a456-426614174000",
@@ -8048,6 +8251,8 @@ export interface components {
             checkpoint_completed_at?: string | null;
             /** @description Per-turn snapshot of the model-context composition captured at generation time (segment-by-segment estimated tokens + budget) for the "Context X-ray" UI. Set on assistant messages when captured; absent on user messages and older assistant messages. */
             context_breakdown?: components["schemas"]["ContextBreakdown"] | null;
+            /** @description Whether the user has bookmarked this message for long-thread navigation. */
+            bookmarked?: boolean;
         };
         /** @description One segment-kind row of a per-turn context breakdown ("Context X-ray"). */
         ContextSegmentStat: {

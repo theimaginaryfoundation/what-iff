@@ -47,6 +47,37 @@ func TestMergeAdditionalContextItems_DedupesByTypeAndContent(t *testing.T) {
 	require.Equal(t, 1, keys[models.AdditionalContextTypeMemory+"\x00"+"from-fetch"])
 }
 
+// A memory's rendered form carries metadata recomputed at render time (age_days,
+// relevance), so the copy persisted on an earlier turn and the copy rendered this turn are
+// different strings for the same fact. Keying dedupe on the raw string let each turn add a
+// fresh near-duplicate, and a long thread accumulated one copy per turn — same content,
+// same stored_at, a different age_days on each.
+func TestMergeAdditionalContextItems_DedupesMemoriesAcrossRerenders(t *testing.T) {
+	t.Parallel()
+
+	const stored = "2026-01-02T03:04:05Z"
+	const fact = "Prefers metric units"
+	stale := fact + " [stored_at=" + stored + " age_days=22]"
+	fresh := fact + " [stored_at=" + stored + " age_days=35 relevance=0.81]"
+
+	history := []*models.ChatMessage{
+		{
+			ID:      uuid.New(),
+			Origin:  models.MessageOriginUser,
+			Message: "earlier turn",
+			AdditionalContext: []models.AdditionalContextItem{
+				{Type: models.AdditionalContextTypeMemory, Content: stale},
+			},
+		},
+	}
+
+	got := mergeAdditionalContextItems(nil, history, nil, []string{fresh}, nil)
+
+	require.Len(t, got, 1, "the same memory rendered twice must collapse to one entry")
+	require.Equal(t, fresh, got[0].Content,
+		"the surviving copy must be the current rendering, not the stale one whose age_days is wrong")
+}
+
 // Memories persisted on earlier turns must survive rehydration as memory refs. They only do so
 // when the stored context item carries its scope, so this pins the whole-segment accumulation the
 // merger and compaction audit depend on.
@@ -224,6 +255,40 @@ func TestMessageContextBuilder_Build_InjectsPersistedToolResults(t *testing.T) {
 	require.Contains(t, joined, tools.RecallToolSpec.Name)
 }
 
+func TestMessageContextBuilder_Build_AppendsAdditionalDeveloperContextBeforeUser(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	userID := uuid.New()
+	chat := &models.Chat{ID: uuid.New(), SystemPrompt: "be helpful"}
+	tel := &telemetry.Telemetry{Logger: zap.NewNop()}
+	b, err := newMessageContextBuilder(nil, tel, nil, func(_ context.Context, _, _ uuid.UUID, _ uuid.UUID, _ int, _ *time.Time, _ string) []*models.ChatMessage {
+		return nil
+	}, nil)
+	require.NoError(t, err)
+
+	mc, err := b.build(ctx, messageContextBuildRequest{
+		UserID:                     userID,
+		Chat:                       chat,
+		UserPrompt:                 "final user text",
+		AdditionalDeveloperContext: "extra shell guidance",
+	})
+	require.NoError(t, err)
+
+	var devIdx, userIdx int
+	devIdx, userIdx = -1, -1
+	for i, s := range mc.Segments {
+		if s.Kind == provider.SegmentKindDeveloperContext && s.Content == "extra shell guidance" {
+			devIdx = i
+		}
+		if s.Kind == provider.SegmentKindUserMessage {
+			userIdx = i
+		}
+	}
+	require.GreaterOrEqual(t, devIdx, 0, "expected injected developer context segment")
+	require.GreaterOrEqual(t, userIdx, 0, "expected user message segment")
+	require.Less(t, devIdx, userIdx, "developer guidance must be placed before user message")
+}
+
 func TestMessageContextBuilder_SelectCarryOverTurns_InvalidMax(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -259,4 +324,21 @@ func TestMessageContextBuilder_LoadHistoryOverride_UsedAndNotReversed(t *testing
 	require.Len(t, msgs, 2)
 	require.Equal(t, "first", msgs[0].Message)
 	require.Equal(t, "second", msgs[1].Message)
+}
+
+// fetchRecentMessages is best-effort: a datastore error must not propagate,
+// it must surface as an empty slice so callers can keep composing context.
+func TestFetchRecentMessages_DatastoreErrorReturnsEmptySlice(t *testing.T) {
+	t.Parallel()
+
+	ds, _, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	b := &messageContextBuilder{ds: ds, telemetry: &telemetry.Telemetry{Logger: zap.NewNop()}}
+
+	// No sqlmock expectations are configured, so the underlying query fails
+	// immediately, exercising the error/best-effort-empty-slice branch.
+	msgs := b.fetchRecentMessages(context.Background(), uuid.New(), uuid.New(), nil, 10, models.ChatMessageFilters{}, "test")
+	require.NotNil(t, msgs)
+	require.Empty(t, msgs)
 }

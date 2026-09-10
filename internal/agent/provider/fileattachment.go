@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"regexp"
 	"strings"
 
@@ -39,7 +40,7 @@ var sandboxLinkRegex = regexp.MustCompile(`\[[^\]]*\]\(sandbox:/mnt/data/[^)]+\)
 var sentenceRegex = regexp.MustCompile(`([.!?]+)\s+`)
 
 func (a *OpenAIProvider) UploadFileAttachment(ctx context.Context, userID uuid.UUID, attrs map[string]string, file io.Reader, fileName string, fileTypeInfo utils.FileTypeInfo) (string, error) {
-	inputFile := openai.File(file, fileName, fileTypeInfo.ContentType)
+	inputFile := openai.File(file, normalizeUploadFileNameExtension(fileName), fileTypeInfo.ContentType)
 
 	storedFile, err := a.oaiClient.Files.New(ctx, openai.FileNewParams{
 		File:    inputFile,
@@ -51,6 +52,22 @@ func (a *OpenAIProvider) UploadFileAttachment(ctx context.Context, userID uuid.U
 	}
 
 	return storedFile.ID, nil
+}
+
+// normalizeUploadFileNameExtension lowercases a filename's extension so files land in the
+// OpenAI Files API with an extension its Responses API accepts. OpenAI validates image
+// extensions case-sensitively (an uploaded "photo.JPG" is later rejected as an unsupported
+// format even though ".jpg" is fine). The base name is left untouched.
+func normalizeUploadFileNameExtension(fileName string) string {
+	ext := path.Ext(fileName)
+	if ext == "" {
+		return fileName
+	}
+	lower := strings.ToLower(ext)
+	if lower == ext {
+		return fileName
+	}
+	return fileName[:len(fileName)-len(ext)] + lower
 }
 
 func (a *OpenAIProvider) DeleteFileAttachment(ctx context.Context, fileID string) error {

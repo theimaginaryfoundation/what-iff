@@ -1,13 +1,20 @@
 name: 'Post E2E status comment section'
 description: >-
-  Merges one E2E workflow's results into a single sticky PR comment, as a
-  section keyed by a stable id. Each e2e workflow (mock backend, local-LLM
-  backend, ...) calls this once with its own section id so they land as
-  separate parts of one comment instead of one comment per workflow.
+  Merges one E2E workflow's results into a sticky PR comment, as a section
+  keyed by a stable id. Workflows that share a comment-key land as separate
+  sections of one comment; a workflow with its own comment-key (e.g. the
+  opt-in local-LLM run, which triggers on a different cadence) gets its own
+  sticky comment that updates independently.
 inputs:
   pr:
     description: 'Pull request number to comment on'
     required: true
+  comment-key:
+    description: >-
+      Identity of the sticky comment this section belongs to. Sections
+      sharing a key merge into one comment; a distinct key gets its own.
+    required: false
+    default: 'e2e-status-comment'
   section:
     description: "Stable id for this workflow's section, e.g. mock, local-llm"
     required: true
@@ -25,6 +32,7 @@ runs:
         GH_TOKEN: ${{ github.token }}
         REPO: ${{ github.repository }}
         PR: ${{ inputs.pr }}
+        COMMENT_KEY: ${{ inputs.comment-key }}
         SECTION: ${{ inputs.section }}
         ORDER: ${{ inputs.order }}
         BODY_FILE: ${{ inputs.body-file }}

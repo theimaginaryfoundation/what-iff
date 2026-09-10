@@ -244,7 +244,15 @@ export class ChatSessionService implements OnDestroy {
    * No-op while this tab has its own in-flight job or streaming: the job poller
    * already keeps it current, and we must not disturb that state.
    */
-  reloadActiveThread(): void {
+  /**
+   * Refresh the active thread after a tab-return/focus without destroying the user's scrollback.
+   * Thread metadata (name/summary) always refreshes. Messages are reconciled non-destructively:
+   * messages already loaded are updated in place and anything new is appended — older loaded
+   * pages and the scroll position are preserved. A full reload only happens when more than a
+   * page arrived while away (a gap) AND the user is following at the bottom; a user reading
+   * history is never yanked back to the present.
+   */
+  syncActiveThread(nearBottom: boolean): void {
     const threadId = this.activeThreadId;
     if (!threadId || this.assistantJobPending() || this.isStreaming()) {
       return;
@@ -263,6 +271,30 @@ export class ChatSessionService implements OnDestroy {
     );
 
     this.subscriptions.add(
+      this.messageService.reconcileLatestPage(threadId, MESSAGE_LIST_PAGE_SIZE).subscribe({
+        next: result => {
+          if (!this.isActiveThread(threadId)) return;
+          if (result.gap) {
+            // More than a page arrived while away. Rebuild only if the user is following the
+            // conversation; if they're reading history, leave their view exactly as it is.
+            if (nearBottom) this.reloadFromLatest(threadId);
+            return;
+          }
+          this.messagesTotalCount = result.total;
+          this.hasMoreOlderMessages.set(this.messages().length < this.messagesTotalCount);
+          this.resumePendingJobIfNeeded(threadId);
+          this.markActiveThreadRead(threadId);
+        },
+        error: () => {
+          // Best-effort refresh: leave the current list intact on failure.
+        },
+      }),
+    );
+  }
+
+  /** Destructive reload to the newest page (used only when a gap makes a merge unsafe). */
+  private reloadFromLatest(threadId: string): void {
+    this.subscriptions.add(
       this.messageService.listMessages(threadId, 1, MESSAGE_LIST_PAGE_SIZE).subscribe({
         next: response => {
           if (!this.isActiveThread(threadId)) return;
@@ -270,21 +302,25 @@ export class ChatSessionService implements OnDestroy {
           this.messagesTotalCount = response.total_count ?? response.results.length;
           this.hasMoreOlderMessages.set(this.messages().length < this.messagesTotalCount);
           this.resumePendingJobIfNeeded(threadId);
-          this.subscriptions.add(
-            this.chatService.markChatRead(threadId).subscribe({
-              next: () => {
-                if (!this.isActiveThread(threadId)) return;
-                this.messageService.markAssistantMessagesRead(threadId);
-                this.threadList.clearUnreadForThread(threadId);
-              },
-              error: () => {
-                // Best-effort: thread still works if mark-read fails.
-              },
-            }),
-          );
+          this.markActiveThreadRead(threadId);
         },
         error: () => {
-          // Best-effort refresh: leave the current list intact on failure.
+          // Best-effort: leave the current list intact on failure.
+        },
+      }),
+    );
+  }
+
+  private markActiveThreadRead(threadId: string): void {
+    this.subscriptions.add(
+      this.chatService.markChatRead(threadId).subscribe({
+        next: () => {
+          if (!this.isActiveThread(threadId)) return;
+          this.messageService.markAssistantMessagesRead(threadId);
+          this.threadList.clearUnreadForThread(threadId);
+        },
+        error: () => {
+          // Best-effort: thread still works if mark-read fails.
         },
       }),
     );
@@ -315,6 +351,51 @@ export class ChatSessionService implements OnDestroy {
           }
         },
       });
+  }
+
+  /**
+   * Load successive older pages until `messageId` is present in the list, or there are no more
+   * pages / a page cap is hit. Resolves to whether the message is now loaded. Powers jumping to
+   * a bookmark that lives on an older, not-yet-loaded page.
+   */
+  loadOlderMessagesUntil(messageId: string, maxPages = 60): Promise<boolean> {
+    const threadId = this.activeThreadId;
+    const isLoaded = () => this.messages().some(m => m.id === messageId);
+    if (!threadId || isLoaded()) {
+      return Promise.resolve(isLoaded());
+    }
+    return new Promise<boolean>(resolve => {
+      let remaining = maxPages;
+      const step = (): void => {
+        if (isLoaded()) {
+          resolve(true);
+          return;
+        }
+        if (!this.hasMoreOlderMessages() || remaining-- <= 0) {
+          resolve(isLoaded());
+          return;
+        }
+        const nextPage = this.messagesPage + 1;
+        this.loadingOlderMessages.set(true);
+        this.messageService
+          .listMessages(threadId, nextPage, MESSAGE_LIST_PAGE_SIZE)
+          .pipe(finalize(() => this.loadingOlderMessages.set(false)))
+          .subscribe({
+            next: response => {
+              if (!this.isActiveThread(threadId)) {
+                resolve(false);
+                return;
+              }
+              this.messagesPage = nextPage;
+              this.messagesTotalCount = response.total_count ?? this.messagesTotalCount;
+              this.hasMoreOlderMessages.set(this.messages().length < this.messagesTotalCount);
+              step();
+            },
+            error: () => resolve(isLoaded()),
+          });
+      };
+      step();
+    });
   }
 
   clearActive(): void {

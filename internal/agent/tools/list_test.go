@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -353,6 +354,79 @@ func TestListMCPServersScopedToChat(t *testing.T) {
 	if res.Items[0].Status != "error: auth failed" || res.Items[0].URL != "https://mcp.example" {
 		t.Fatalf("unexpected mcp item: %+v", res.Items[0])
 	}
+}
+
+func TestListPersonalities(t *testing.T) {
+	now := time.Now()
+	store := &fakeListStore{pers: []*models.Personality{
+		{ID: uuid.New(), Name: "Ada", UpdatedAt: now},
+	}}
+	res := runList(t, newTestListTool(store), `{"kind":"personalities"}`)
+	if res.Kind != listKindPersonalities || res.Count != 1 {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+	if res.Items[0].Name != "Ada" || res.Items[0].UpdatedAt == "" {
+		t.Fatalf("unexpected personality item: %+v", res.Items[0])
+	}
+	if store.lastPageNum != 1 {
+		t.Fatalf("expected default page 1, got %d", store.lastPageNum)
+	}
+}
+
+func TestListPersonalitiesStoreError(t *testing.T) {
+	store := &erroringListStore{}
+	res := runList(t, newTestListTool(store), `{"kind":"personalities"}`)
+	if res.Error == "" {
+		t.Fatalf("expected error from store failure, got %+v", res)
+	}
+}
+
+func TestListSkills(t *testing.T) {
+	store := &fakeListStore{rituals: []*models.Ritual{
+		{ID: uuid.New(), Name: "Standup", Description: "daily sync"},
+	}}
+	res := runList(t, newTestListTool(store), `{"kind":"skills"}`)
+	if res.Kind != listKindSkills || res.Count != 1 {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+	if res.Items[0].Name != "Standup" || res.Items[0].Description != "daily sync" {
+		t.Fatalf("unexpected skill item: %+v", res.Items[0])
+	}
+}
+
+func TestListSkillsStoreError(t *testing.T) {
+	store := &erroringListStore{}
+	res := runList(t, newTestListTool(store), `{"kind":"skills"}`)
+	if res.Error == "" {
+		t.Fatalf("expected error from store failure, got %+v", res)
+	}
+}
+
+// erroringListStore fails every call, for exercising the fail() paths of each listX helper.
+type erroringListStore struct{}
+
+var errListStoreBoom = errors.New("boom")
+
+func (e *erroringListStore) ListModels(_ context.Context) ([]*models.Model, error) {
+	return nil, errListStoreBoom
+}
+func (e *erroringListStore) ListPersonalities(_ context.Context, _ uuid.UUID, _, _ int, _ models.PersonalityFilters) (*models.PaginatedResponse, error) {
+	return nil, errListStoreBoom
+}
+func (e *erroringListStore) ListRituals(_ context.Context, _ uuid.UUID, _, _ int, _ models.RitualFilters) (*models.PaginatedResponse, error) {
+	return nil, errListStoreBoom
+}
+func (e *erroringListStore) ListFileAttachments(_ context.Context, _ uuid.UUID, _, _ int, _ models.FileAttachmentFilters) (*models.PaginatedResponse, error) {
+	return nil, errListStoreBoom
+}
+func (e *erroringListStore) ListChats(_ context.Context, _ uuid.UUID, _, _ int, _ models.ChatFilters) (*models.PaginatedResponse, error) {
+	return nil, errListStoreBoom
+}
+func (e *erroringListStore) ListAgentJobs(_ context.Context, _ uuid.UUID, _, _ int, _ models.AgentJobFilters) (*models.PaginatedResponse, error) {
+	return nil, errListStoreBoom
+}
+func (e *erroringListStore) ListChatMCPServers(_ context.Context, _, _ uuid.UUID) ([]*models.MCPServer, error) {
+	return nil, errListStoreBoom
 }
 
 func TestListFilesPersonalityScopeWithoutPersonality(t *testing.T) {

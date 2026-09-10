@@ -110,13 +110,16 @@ export class PersonalityPortraitFocusEditorComponent {
     } else {
       const dx = x - this.cxPx();
       const dy = y - this.cyPx();
-      const maxR = Math.min(
+      const next = fitCircleWithinViewport(
         this.cxPx(),
         this.cyPx(),
-        rect.width - this.cxPx(),
-        rect.height - this.cyPx(),
+        Math.sqrt(dx * dx + dy * dy),
+        rect.width,
+        rect.height,
       );
-      this.rPx.set(clamp(Math.sqrt(dx * dx + dy * dy), 14, maxR));
+      this.cxPx.set(next.cx);
+      this.cyPx.set(next.cy);
+      this.rPx.set(next.r);
     }
     this.syncHandle();
     this.emitNormalized(rect.width, rect.height);
@@ -154,4 +157,19 @@ export class PersonalityPortraitFocusEditorComponent {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+export function fitCircleWithinViewport(
+  cx: number,
+  cy: number,
+  desiredRadius: number,
+  width: number,
+  height: number,
+): { cx: number; cy: number; r: number } {
+  const r = clamp(desiredRadius, 14, Math.min(width, height) / 2);
+  return {
+    cx: clamp(cx, r, width - r),
+    cy: clamp(cy, r, height - r),
+    r,
+  };
 }

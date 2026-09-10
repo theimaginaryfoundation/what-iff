@@ -236,6 +236,21 @@ func (h *Handler) runChatImport(ctx context.Context, userID, jobID uuid.UUID, tm
 			zap.Strings("errors", allErrors))
 	}
 
+	// ImportChats only returns an error for a failure that aborts the whole run; a conversation
+	// that fails on its own is recorded in result.Errors and the run carries on. When that
+	// happens to every conversation, nothing was imported and nothing was deduplicated, so
+	// reporting the job complete left the client showing "Imported 0 threads" with no
+	// indication that anything had gone wrong. Treat it as the failure it is.
+	if total > 0 && result.Imported == 0 && result.Skipped == 0 {
+		h.logger.Error("chat import: every conversation failed to persist",
+			zap.String("user_id", userID.String()),
+			zap.String("job_id", jobID.String()),
+			zap.Int("total", total),
+			zap.Int("total_errors", totalErrors))
+		h.failImportJob(ctx, userID, jobID, "Failed to import any conversations")
+		return
+	}
+
 	h.writeImportProgress(ctx, userID, jobID, models.ImportProgress{
 		Phase: "complete", Source: format, Total: total,
 		Imported: result.Imported, Skipped: result.Skipped, ImportedIDs: result.ImportedIDs,
@@ -313,14 +328,11 @@ func prepareConversations(raw []migration.SimplifiedConversation, now time.Time)
 	var errs []string
 
 	for _, r := range raw {
-		title := r.Title
-		if title == "" {
-			ts := now
-			if r.CreateTime != nil {
-				ts = floatToTime(*r.CreateTime)
-			}
-			title = "Imported chat " + ts.Format("2006-01-02 15:04")
+		ts := now
+		if r.CreateTime != nil {
+			ts = floatToTime(*r.CreateTime)
 		}
+		title := models.NormalizeImportedTitle(r.Title, "Imported chat "+ts.Format("2006-01-02 15:04"))
 
 		var (
 			msgs         []models.ChatMessage

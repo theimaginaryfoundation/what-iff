@@ -137,7 +137,28 @@
 
 @media (max-width: 1023px) {
   .memories-header {
-    align-items: center;
-    text-align: center;
+    align-items: flex-start;
+    flex-direction: column;
+    margin-top: 2.75rem;
+    text-align: left;
+  }
+
+  .memories-header__actions {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .memories-toolbar__filters {
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .memories-toolbar__filters button {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-inline: 0.5rem;
   }
 }

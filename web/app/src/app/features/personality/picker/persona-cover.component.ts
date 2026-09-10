@@ -10,7 +10,7 @@ export type PersonaCoverSize = 'sm' | 'md' | 'lg' | 'card';
 const SIZE_TO_AVATAR_SIZE: Record<Exclude<PersonaCoverSize, 'card'>, AvatarSize> = {
   sm: 'sm',
   md: 'md',
-  lg: 'xl',
+  lg: '2xl',
 };
 
 const SIZE_CLASSES: Record<PersonaCoverSize, string> = {

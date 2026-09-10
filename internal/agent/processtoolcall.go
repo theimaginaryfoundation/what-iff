@@ -38,7 +38,7 @@ func (a *Agent) dispatchToolUse(ctx context.Context, chatCtx *chatContext, use p
 type toolHandler func(context.Context, []byte) (string, []*models.FileAttachment, error)
 
 func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
-	return map[string]toolHandler{
+	handlers := map[string]toolHandler{
 		tools.UpdateScratchpadToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
 			out, err := a.scratchpadTool.UpdateScratchpadTool(ctx, chatCtx.chat, input)
 			return out, nil, err
@@ -78,4 +78,13 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 			return out, attachments, err
 		},
 	}
+	if extraToolHandlersForChat != nil {
+		for name, h := range extraToolHandlersForChat(a, chatCtx.chat) {
+			if h == nil {
+				continue
+			}
+			handlers[name] = toolHandler(h)
+		}
+	}
+	return handlers
 }

@@ -129,6 +129,12 @@ func (f *fakeStore) GetUserByID(ctx context.Context, userID uuid.UUID) (*models.
 	return nil, errors.New("not implemented")
 }
 
+func (f *fakeStore) SetChatMessageBookmarked(ctx context.Context, userID, messageID uuid.UUID, bookmarked bool) (*models.ChatMessage, error) {
+	return nil, errors.New("not implemented")
+}
+func (f *fakeStore) ListChatMessageBookmarks(ctx context.Context, userID, chatID uuid.UUID) ([]*models.ChatMessage, error) {
+	return nil, errors.New("not implemented")
+}
 func (f *fakeStore) FindLatestActiveChatMessageJob(ctx context.Context, userID, userMessageID uuid.UUID) (*models.Job, error) {
 	return nil, errors.New("not implemented")
 }

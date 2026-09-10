@@ -69,10 +69,12 @@ describe('ContextPanelService', () => {
         const latest = breakdown(5000);
         service.setLatestBreakdown(latest, 'msg-latest');
         expect(service.shownBreakdown()).toBe(latest);
+        expect(service.shownBreakdownId()).toBe('msg-latest');
 
         const pinned = breakdown(1200);
-        service.selectBreakdown(pinned);
+        service.selectBreakdown(pinned, 'msg-pinned');
         expect(service.shownBreakdown()).toBe(pinned);
+        expect(service.shownBreakdownId()).toBe('msg-pinned');
     });
 
     it('clears a pinned past turn when a genuinely new turn lands', () => {
@@ -89,5 +91,17 @@ describe('ContextPanelService', () => {
         const newest = breakdown(6000);
         service.setLatestBreakdown(newest, 'msg-2');
         expect(service.shownBreakdown()).toBe(newest);
+    });
+
+    it('resolves shownBreakdownId to the pinned turn, else the latest', () => {
+        service.setLatestBreakdown(breakdown(5000), 'msg-latest');
+        expect(service.shownBreakdownId()).toBe('msg-latest');
+
+        service.selectBreakdown(breakdown(1200), 'msg-pinned');
+        expect(service.shownBreakdownId()).toBe('msg-pinned');
+
+        // A new turn clears the pin, so the id falls back to the latest.
+        service.setLatestBreakdown(breakdown(6000), 'msg-newest');
+        expect(service.shownBreakdownId()).toBe('msg-newest');
     });
 });

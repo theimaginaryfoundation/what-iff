@@ -11,6 +11,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 
 	"github.com/google/uuid"
@@ -319,6 +320,35 @@ func (a *Agent) handleEphemeralPrompt(
 	}
 	if err := a.advanceChatJobStatus(ctx, trackingJob, models.JobStatusComplete); err != nil {
 		return nil, fmt.Errorf("finalize agent job: %w", err)
+	}
+
+	// Notify the user of this completed reply. Gated to the agent-job path
+	// (callPath) — scheduled/autonomous jobs and webhook background-mode
+	// invocations, the replies that land after the app is closed; interactive
+	// chat completes elsewhere (runUserChatPostInferencePhases) and is not
+	// notified. Only pointers are passed; the client fetches the content.
+	//
+	// Runs on a detached goroutine with panic recovery so a slow or faulty
+	// notifier implementation can neither stall nor crash this job goroutine.
+	// a.lifecycleCtx outlives the request but is cancelled on shutdown. Skipped
+	// entirely when no push implementation is wired (a.pushEnabled == false).
+	if a.pushEnabled && callPath == telemetry.CallPathAgentJob {
+		ev := pushnotify.Event{
+			Kind:      pushnotify.EventKindAgentReply,
+			UserID:    userID,
+			ChatID:    agentMessage.ChatID,
+			MessageID: agentMessage.ID,
+		}
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					a.logger.Error("push notifier panicked",
+						zap.Any("recover", r),
+						zap.ByteString("stack", debug.Stack()))
+				}
+			}()
+			a.pushNotifier.Notify(a.lifecycleCtx, ev)
+		}()
 	}
 
 	return agentMessage, nil

@@ -1,6 +1,7 @@
 import { CommonModule, DatePipe, UpperCasePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
+import { forkJoin, map, of } from 'rxjs';
 
 import {
   CheckpointSnapshot,
@@ -9,11 +10,13 @@ import {
   MemoryMergeEvent,
 } from '../../core/models/memory.model';
 import { Chat } from '../../core/models/chat.model';
-import { Personality } from '../../core/models/personality.model';
+import { Personality, PersonalityPromptChange } from '../../core/models/personality.model';
 import { ChatService } from '../../core/services/chat.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { MemoryService } from '../../core/services/memory.service';
 import { PersonalityService } from '../../core/services/personality.service';
+
+type PromptAuditEntry = PersonalityPromptChange & { personality_name: string };
 
 @Component({
   selector: 'app-compaction-log-page',
@@ -31,6 +34,10 @@ export class CompactionLogPageComponent implements OnInit {
   private readonly personalityService = inject(PersonalityService);
 
   readonly events = signal<CompactionEvent[]>([]);
+  readonly promptChanges = signal<PromptAuditEntry[]>([]);
+  readonly promptChangesLoading = signal(false);
+  readonly promptChangesError = signal<string | null>(null);
+  readonly promptChangesExpanded = signal(false);
   readonly chats = signal<readonly Chat[]>([]);
   readonly personalities = signal<readonly Personality[]>([]);
   readonly selectedChatID = signal('');
@@ -42,6 +49,7 @@ export class CompactionLogPageComponent implements OnInit {
   readonly collapsedMemoryIds = signal<Set<string>>(new Set());
   readonly collapsedLoadedMemoryIds = signal<Set<string>>(new Set());
   readonly revertingId = signal<string | null>(null);
+  readonly revertingPromptChangeId = signal<string | null>(null);
   readonly revertedIds = signal<Set<string>>(new Set());
   readonly notice = signal<string | null>(null);
   readonly page = signal(1);
@@ -52,7 +60,12 @@ export class CompactionLogPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.chatService.listChats(1, 100).subscribe({ next: response => this.chats.set(response.results ?? []) });
-    this.personalityService.listPersonalities(1, 100).subscribe({ next: response => this.personalities.set(response.results ?? []) });
+    this.personalityService.listPersonalities(1, 100).subscribe({
+      next: response => {
+        this.personalities.set(response.results ?? []);
+        this.loadPromptChanges();
+      },
+    });
     this.load(1);
   }
 
@@ -77,10 +90,73 @@ export class CompactionLogPageComponent implements OnInit {
     });
   }
 
+  private loadPromptChanges(): void {
+    const personalities = this.personalities();
+    const selected = this.selectedPersonalityID();
+    const targets = selected ? personalities.filter(item => item.id === selected) : [...personalities];
+
+    if (targets.length === 0) {
+      this.promptChanges.set([]);
+      this.promptChangesLoading.set(false);
+      return;
+    }
+
+    this.promptChangesLoading.set(true);
+    this.promptChangesError.set(null);
+    const requests = targets.map(personality =>
+      this.personalityService.listPromptChanges(personality.id).pipe(
+        map(changes => changes.map(change => ({ ...change, personality_name: personality.name }))),
+      ),
+    );
+
+    (requests.length ? forkJoin(requests) : of([] as PromptAuditEntry[][])).subscribe({
+      next: groups => {
+        const changes = groups.flat().sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+        this.promptChanges.set(changes);
+        this.promptChangesLoading.set(false);
+      },
+      error: err => {
+        this.promptChangesError.set(err instanceof Error ? err.message : 'Failed to load personality prompt changes');
+        this.promptChangesLoading.set(false);
+      },
+    });
+  }
+
+  togglePromptChanges(): void {
+    this.promptChangesExpanded.update(expanded => !expanded);
+  }
+
   updateFilters(chatID: string, personalityID: string): void {
     this.selectedChatID.set(chatID);
     this.selectedPersonalityID.set(personalityID);
     this.load(1);
+    this.loadPromptChanges();
+  }
+
+  async revertPromptChange(change: PromptAuditEntry): Promise<void> {
+    if (this.revertingPromptChangeId()) return;
+    const confirmed = await this.confirmation.confirm({
+      title: 'Restore personality prompt?',
+      message: `Restore ${change.personality_name} to the prompt from before this change? The restore will be recorded as a new audit entry.`,
+      type: 'warning',
+      confirmText: 'Restore',
+      cancelText: 'Cancel',
+    });
+    if (!confirmed) return;
+
+    this.revertingPromptChangeId.set(change.id);
+    this.notice.set(null);
+    this.personalityService.revertPromptChange(change.personality_id, change.id).subscribe({
+      next: () => {
+        this.revertingPromptChangeId.set(null);
+        this.notice.set(`Prompt restored for ${change.personality_name}.`);
+        this.loadPromptChanges();
+      },
+      error: err => {
+        this.revertingPromptChangeId.set(null);
+        this.promptChangesError.set(err instanceof Error ? err.message : 'Failed to restore personality prompt');
+      },
+    });
   }
 
   checkpointReasonLabel(reason: string | null | undefined): string {
@@ -97,11 +173,8 @@ export class CompactionLogPageComponent implements OnInit {
 
   toggleExpanded(event: CompactionEvent): void {
     const next = new Set(this.expandedIds());
-    if (next.has(event.id)) {
-      next.delete(event.id);
-    } else {
-      next.add(event.id);
-    }
+    if (next.has(event.id)) next.delete(event.id);
+    else next.add(event.id);
     this.expandedIds.set(next);
   }
 
@@ -138,13 +211,9 @@ export class CompactionLogPageComponent implements OnInit {
   mergeSummary(event: CompactionEvent): string {
     const created = event.created_memories?.length ?? 0;
     const updates = this.updatedMemoryEvents(event);
-    if (created === 0 && updates.length === 0) {
-      return 'No memory changes';
-    }
+    if (created === 0 && updates.length === 0) return 'No memory changes';
     const counts = { fold_live: 0, link: 0 } as Record<string, number>;
-    for (const me of updates) {
-      counts[me.merge_type] = (counts[me.merge_type] ?? 0) + 1;
-    }
+    for (const me of updates) counts[me.merge_type] = (counts[me.merge_type] ?? 0) + 1;
     const parts: string[] = [];
     if (created) parts.push(`${created} created`);
     if (counts['fold_live']) parts.push(`${counts['fold_live']} merged`);
@@ -154,21 +223,15 @@ export class CompactionLogPageComponent implements OnInit {
 
   mergeTypeLabel(event: MemoryMergeEvent): string {
     switch (event.merge_type) {
-      case 'link':
-        return 'Linked';
-      case 'fold_live':
-        return 'Memories Merged';
-      default:
-        return 'Updated';
+      case 'link': return 'Linked';
+      case 'fold_live': return 'Memories Merged';
+      default: return 'Updated';
     }
   }
 
-  /** Source memories that went into a fold (stored duplicates_folded is absorb-count = n-1). */
   mergedSourceCount(event: MemoryMergeEvent): number {
     const fromMembers = event.source_members?.length ?? 0;
-    if (fromMembers > 0) {
-      return fromMembers;
-    }
+    if (fromMembers > 0) return fromMembers;
     return Math.max(event.duplicates_folded + 1, 0);
   }
 
@@ -177,7 +240,6 @@ export class CompactionLogPageComponent implements OnInit {
   }
 
   updatedMemoryEvents(event: CompactionEvent): MemoryMergeEvent[] {
-    // Legacy create-type merge rows may still exist; new creates live on created_memories.
     return (event.merge_events ?? []).filter(item => item.merge_type !== 'create');
   }
 
@@ -186,9 +248,7 @@ export class CompactionLogPageComponent implements OnInit {
   }
 
   async revert(snapshot: CheckpointSnapshot | null | undefined): Promise<void> {
-    if (!snapshot || this.revertingId()) {
-      return;
-    }
+    if (!snapshot || this.revertingId()) return;
 
     const isScratchpad = snapshot.kind === 'scratchpad';
     const confirmed = await this.confirmation.confirm({
@@ -200,9 +260,7 @@ export class CompactionLogPageComponent implements OnInit {
       confirmText: 'Restore',
       cancelText: 'Cancel',
     });
-    if (!confirmed) {
-      return;
-    }
+    if (!confirmed) return;
 
     const label = snapshot.kind === 'scratchpad' ? 'scratchpad' : 'summary';
     this.revertingId.set(snapshot.id);
@@ -227,10 +285,7 @@ export class CompactionLogPageComponent implements OnInit {
   }
 
   openMemory(memoryId: string | null | undefined): void {
-    if (!memoryId) {
-      return;
-    }
-    void this.router.navigate(['/memories', memoryId]);
+    if (memoryId) void this.router.navigate(['/memories', memoryId]);
   }
 
   openThread(event: CompactionEvent): void {
@@ -240,9 +295,7 @@ export class CompactionLogPageComponent implements OnInit {
   }
 
   goToPage(page: number): void {
-    if (page < 1 || page > this.totalPages()) {
-      return;
-    }
+    if (page < 1 || page > this.totalPages()) return;
     this.load(page);
   }
 }

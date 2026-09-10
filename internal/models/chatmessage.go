@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -84,6 +85,39 @@ type ChatMessage struct {
 	LastErrorMessage *string `json:"last_error_message,omitempty"`
 	// CheckpointCompletedAt is set on assistant messages after a successful checkpoint (scratchpad, memories, summary).
 	CheckpointCompletedAt *time.Time `json:"checkpoint_completed_at,omitempty"`
+	// Bookmarked is a user-flagged marker for navigating long threads. Either origin can be bookmarked.
+	Bookmarked bool `json:"bookmarked"`
+}
+
+// ChatMessageBookmarkRequest is the PATCH body for toggling a message bookmark.
+type ChatMessageBookmarkRequest struct {
+	Bookmarked bool `json:"bookmarked"`
+}
+
+// ChatMessageBookmark is a lightweight bookmark entry for the thread navigator: enough to
+// label the jump target without shipping the full message (and its edges) for every bookmark.
+type ChatMessageBookmark struct {
+	ID      uuid.UUID     `json:"id"`
+	Origin  MessageOrigin `json:"origin"`
+	Snippet string        `json:"snippet"`
+	SentAt  time.Time     `json:"sent_at"`
+}
+
+// bookmarkSnippetMaxRunes bounds the navigator label length.
+const bookmarkSnippetMaxRunes = 140
+
+// BookmarkPageDefault is the bounded default for non-UI bookmark consumers, such as agent tools.
+const BookmarkPageDefault = 25
+
+// BookmarkSnippet renders a single-line, length-bounded preview of a message for the
+// bookmark navigator (collapses whitespace, appends an ellipsis when truncated).
+func BookmarkSnippet(message string) string {
+	collapsed := strings.Join(strings.Fields(message), " ")
+	runes := []rune(collapsed)
+	if len(runes) <= bookmarkSnippetMaxRunes {
+		return collapsed
+	}
+	return strings.TrimSpace(string(runes[:bookmarkSnippetMaxRunes])) + "…"
 }
 
 type ChatMessageFilters struct {

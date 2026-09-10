@@ -580,16 +580,19 @@ func (d *Datastore) ListChats(ctx context.Context, userID uuid.UUID, pageNum, pa
 		queryValue := strings.ToLower(strings.TrimSpace(*filters.Query))
 		if queryValue != "" {
 			likeQuery := "%" + queryValue + "%"
-			// tags are stored as JSON (not a native PG array); use jsonb_array_elements_text.
+			// Tags are stored as JSON (not a native PG array). Legacy rows can contain a
+			// scalar, which jsonb_array_elements_text rejects, so normalize non-arrays to [].
 			// Use sql.P + b.Arg so Postgres gets $n placeholders (ExprP leaves literal "?" in the string).
 			query = query.Where(entchat.Or(
 				entchat.NameContainsFold(queryValue),
 				entchat.CheckpointSummaryContainsFold(queryValue),
 				func(selector *sql.Selector) {
 					selector.Where(sql.P(func(b *sql.Builder) {
-						b.WriteString("EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(")
+						b.WriteString("EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(COALESCE(")
 						b.WriteString(selector.C(entchat.FieldTags))
-						b.WriteString("::jsonb, '[]'::jsonb)) AS _chat_tags(tag_value) WHERE lower(_chat_tags.tag_value) LIKE ")
+						b.WriteString("::jsonb, '[]'::jsonb)) = 'array' THEN COALESCE(")
+						b.WriteString(selector.C(entchat.FieldTags))
+						b.WriteString("::jsonb, '[]'::jsonb) ELSE '[]'::jsonb END) AS _chat_tags(tag_value) WHERE lower(_chat_tags.tag_value) LIKE ")
 						b.Arg(likeQuery)
 						b.WriteString(")")
 					}))
@@ -603,9 +606,11 @@ func (d *Datastore) ListChats(ctx context.Context, userID uuid.UUID, pageNum, pa
 		if exactTag != "" {
 			query = query.Where(func(selector *sql.Selector) {
 				selector.Where(sql.P(func(b *sql.Builder) {
-					b.WriteString("EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(")
+					b.WriteString("EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(COALESCE(")
 					b.WriteString(selector.C(entchat.FieldTags))
-					b.WriteString("::jsonb, '[]'::jsonb)) AS _chat_tags(tag_value) WHERE lower(_chat_tags.tag_value) = ")
+					b.WriteString("::jsonb, '[]'::jsonb)) = 'array' THEN COALESCE(")
+					b.WriteString(selector.C(entchat.FieldTags))
+					b.WriteString("::jsonb, '[]'::jsonb) ELSE '[]'::jsonb END) AS _chat_tags(tag_value) WHERE lower(_chat_tags.tag_value) = ")
 					b.Arg(exactTag)
 					b.WriteString(")")
 				}))

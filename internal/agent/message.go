@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
+	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
@@ -126,6 +128,15 @@ type Agent struct {
 	// is chosen at construction and swapped via server wiring, so no implementation
 	// detail reaches this package.
 	meter metering.Meter
+	// pushNotifier delivers a push on autonomous/webhook reply completion. Like
+	// meter, the concrete implementation (a real sender vs. pushnotify.NoopNotifier)
+	// is chosen at construction and swapped via server wiring, so no push detail
+	// reaches this package.
+	pushNotifier pushnotify.Notifier
+	// pushEnabled is true when a real push implementation was wired (a non-nil
+	// PushNotifier). It lets the completion hook skip spawning a detached
+	// goroutine when push is off (the open-source default).
+	pushEnabled bool
 	// lifecycleCtx is cancelled on server/process shutdown. Use for detached writes
 	// that should outlive request cancellation but still stop on app shutdown.
 	lifecycleCtx context.Context
@@ -175,6 +186,10 @@ type AgentConfig struct {
 	// Meter gates and records billable turns. When nil, NewAgent falls back to
 	// metering.NoopMeter (allow-all, no tracking) — the open-source default.
 	Meter metering.Meter
+	// PushNotifier delivers a push on autonomous/webhook reply completion. When
+	// nil, NewAgent falls back to pushnotify.NoopNotifier (sends nothing) — the
+	// open-source default.
+	PushNotifier pushnotify.Notifier
 	// LifecycleContext is cancelled on app shutdown and used for detached work.
 	// Nil defaults to context.Background().
 	LifecycleContext context.Context
@@ -255,6 +270,8 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		chunkPipeline:                newChunkPipelineForMode(cfg.LLMBackend != "vendor", &oaiClient, ds, logger),
 		fileStore:                    fileStore,
 		meter:                        cfg.Meter,
+		pushNotifier:                 cfg.PushNotifier,
+		pushEnabled:                  cfg.PushNotifier != nil,
 		runningJobCancels:            make(map[uuid.UUID]runningJobCancel),
 		lifecycleCtx:                 cfg.LifecycleContext,
 		mockLLM:                      cfg.LLMBackend == "mock",
@@ -271,6 +288,11 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		// No metering implementation supplied (e.g. open-source build): every turn
 		// is allowed and untracked.
 		a.meter = metering.NoopMeter{Logger: logger}
+	}
+	if a.pushNotifier == nil {
+		// No push implementation supplied (e.g. open-source build): completed
+		// replies notify nothing.
+		a.pushNotifier = pushnotify.NoopNotifier{}
 	}
 
 	// recallTool is constructed after `a` so its investigate distiller can reuse the agent's
@@ -406,6 +428,20 @@ func (a *Agent) ChunkPipeline() *filechunker.FileChunkPipeline { return a.chunkP
 // FileStore returns the file store for S3 archival.
 func (a *Agent) FileStore() storage.FileStore { return a.fileStore }
 
+// DataStore returns the agent datastore for extension seams.
+func (a *Agent) DataStore() *datastore.Datastore { return a.ds }
+
+// Logger returns the agent logger for extension seams.
+func (a *Agent) Logger() *zap.Logger { return a.logger }
+
+// DeleteProviderFileAttachment deletes a provider-managed file by provider file ID.
+func (a *Agent) DeleteProviderFileAttachment(ctx context.Context, fileID string) error {
+	if a == nil || a.OpenAIProvider == nil {
+		return fmt.Errorf("openai provider is not configured")
+	}
+	return a.OpenAIProvider.DeleteFileAttachment(ctx, fileID)
+}
+
 // RecordFileUpload emits a counter for a file-attachment upload attempt.
 // status should be "success" or "failure".
 func (a *Agent) RecordFileUpload(ctx context.Context, fileType, status string) {
@@ -437,22 +473,27 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 	}
 	// Attachment labels are only injected when tools are enabled, matching the
 	// previous behavior for OpenAI chat turns.
+	additionalDevContext := ""
+	if additionalDeveloperContextForChat != nil {
+		additionalDevContext = additionalDeveloperContextForChat(a, chatCtx.chat)
+	}
 	return b.build(ctx, messageContextBuildRequest{
-		UserID:                   userID,
-		Chat:                     chatCtx.chat,
-		UserPrompt:               userPrompt,
-		CurrentMessage:           chatMessage,
-		Memories:                 chatCtx.memories,
-		LiveMemories:             chatCtx.liveMemories,
-		ActiveMood:               chatCtx.activeMood,
-		ActiveMoodRituals:        chatCtx.activeMoodRituals,
-		IsAutoMood:               chatCtx.chat.IsAutoMood,
-		MoodToolsAvailable:       a.shouldExposeMoodTools(ctx, userID, chatCtx.chat),
-		Attachments:              chatMessage.Attachments,
-		ImageBytes:               imageBytes,
-		ExpressionsEnabled:       chatCtx.expressionsEnabled,
-		IncludeAttachmentContext: chatCtx.chat.ToolsEnabled,
-		LoadHistoryImageBytes:    models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model),
+		UserID:                     userID,
+		Chat:                       chatCtx.chat,
+		UserPrompt:                 userPrompt,
+		CurrentMessage:             chatMessage,
+		Memories:                   chatCtx.memories,
+		LiveMemories:               chatCtx.liveMemories,
+		ActiveMood:                 chatCtx.activeMood,
+		ActiveMoodRituals:          chatCtx.activeMoodRituals,
+		IsAutoMood:                 chatCtx.chat.IsAutoMood,
+		MoodToolsAvailable:         a.shouldExposeMoodTools(ctx, userID, chatCtx.chat),
+		Attachments:                chatMessage.Attachments,
+		ImageBytes:                 imageBytes,
+		ExpressionsEnabled:         chatCtx.expressionsEnabled,
+		IncludeAttachmentContext:   chatCtx.chat.ToolsEnabled,
+		AdditionalDeveloperContext: additionalDevContext,
+		LoadHistoryImageBytes:      models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model),
 	})
 }
 
@@ -503,6 +544,12 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 	go func() {
 		defer cancel()
 		defer a.unregisterRunningJobCancel(newJob.ID)
+		// An unrecovered panic in any goroutine takes down the whole process (and so the
+		// pod). Recover here so a failure while processing one message fails just that job
+		// instead — e.g. a post-inference checkpoint summary that a provider rejects must
+		// not crash every other in-flight chat. Registered after cancel/unregister so it
+		// runs first (LIFO) and UpdateJobStatus still sees a live runCtx.
+		defer a.recoverAsyncMessageJob(runCtx, userID, newJob.ID, chatMessage.ID)
 		_, err := a.handleUserMessage(runCtx, newJob, chatMessage)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -526,6 +573,31 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 		JobID: newJob.ID.String(),
 		Type:  JobTypeChatMessage,
 	}, nil
+}
+
+// recoverAsyncMessageJob is the deferred panic guard for async chat-message processing.
+// A panic in the background goroutine would otherwise crash the whole process (the pod);
+// here it is contained to the single job, which is marked failed and logged with its stack.
+// Failing to record the failed status is itself logged and swallowed — recovery must never
+// re-panic. runCtx must still be live (call before its cancel runs).
+func (a *Agent) recoverAsyncMessageJob(runCtx context.Context, userID, jobID, chatMessageID uuid.UUID) {
+	recovered := recover()
+	if recovered == nil {
+		return
+	}
+	panicMessage := fmt.Sprintf("panic: %v", recovered)
+	if _, failErr := a.ds.UpdateJobStatus(runCtx, userID, jobID, models.JobStatusFailed, panicMessage); failErr != nil {
+		a.logger.Error("failed to mark async agent message job failed after panic",
+			zap.String("job_id", jobID.String()),
+			zap.Error(failErr),
+		)
+	}
+	a.logger.Error("panic recovered in async agent message processing",
+		zap.String("job_id", jobID.String()),
+		zap.String("chat_message_id", chatMessageID.String()),
+		zap.Any("panic", recovered),
+		zap.ByteString("stack_trace", debug.Stack()),
+	)
 }
 
 // RetryUserChatMessage enqueues another chat_message job for an existing user turn.
@@ -876,6 +948,13 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 	toolCalls = append(toolCalls, memoryToolCallsForChatContext(chatCtx)...)
 	a.recordToolCalls(ctx, toolCalls)
 
+	// Checked after tool-call metrics and the web-search count: the work in this turn
+	// really happened and the provider will bill for it, so it stays counted even though
+	// the turn is about to fail. Only the blank assistant row is prevented.
+	if err := a.assertGenerationProducedOutput(opts.provider, chatCtx, result, generatedAttachments); err != nil {
+		return nil, nil, err
+	}
+
 	personalityName := a.resolvePersonalityName(ctx, userID, chatCtx.chat.PersonalityID)
 	moodID := activeMoodID(chatCtx.activeMood)
 	agentMessage, err := a.saveAgentResponse(ctx, userID, chatMessage.ChatID, result, toolCalls, generatedAttachments, chatCtx.model, personalityName, moodID)
@@ -1164,6 +1243,11 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 
 	toolCalls = append(toolCalls, memoryToolCallsForChatContext(chatCtx)...)
 	a.recordToolCalls(ctx, toolCalls)
+
+	// See runGeneration: guard after metrics so a failed turn still counts its work.
+	if err := a.assertGenerationProducedOutput("local model", chatCtx, result, generatedAttachments); err != nil {
+		return nil, nil, err
+	}
 
 	personalityName := a.resolvePersonalityName(ctx, userID, chatCtx.chat.PersonalityID)
 	moodID := activeMoodID(chatCtx.activeMood)
@@ -1854,6 +1938,70 @@ func resolveTimezoneLocation(tz string) *time.Location {
 	return loc
 }
 
+// assertGenerationProducedOutput rejects a turn that completed without producing
+// anything to show the user.
+//
+// A model call can return cleanly — no transport error, no API error, a well-formed
+// response object — and still carry no assistant text: a stream that closes after
+// message_start without emitting content blocks, a response truncated before any text
+// was written, or content in a block shape the provider extractor does not recognise.
+// Persisting that as an ordinary assistant message produces a turn that *looks* answered
+// while being empty, which is strictly worse than a visible failure: the user sees
+// nothing and no error, retry state is never offered, and the blank row is then dropped
+// from history reconstruction on the next turn (AppendHistoryTurn skips empty content),
+// so the fault leaves no trace in the rebuilt context either.
+//
+// Returning an error here routes the turn through the normal failure path, which marks
+// the job failed and sets last_error_message on the user's message.
+//
+// Attachment-only turns are legitimate: an image ritual can answer with a generated
+// image and no prose, so a turn with attachments is never treated as empty.
+func (a *Agent) assertGenerationProducedOutput(providerName string, chatCtx *chatContext, result *provider.GenerateResponse, generatedAttachments []*models.FileAttachment) error {
+	if result == nil {
+		return fmt.Errorf("%s generation returned no response", providerName)
+	}
+	if strings.TrimSpace(result.Text) != "" {
+		return nil
+	}
+	for _, att := range generatedAttachments {
+		if att != nil {
+			return nil
+		}
+	}
+
+	stopReason := strings.TrimSpace(result.StopReason)
+	if stopReason == "" {
+		stopReason = "unreported"
+	}
+
+	fields := []zap.Field{
+		zap.String("provider", providerName),
+		zap.String("stop_reason", stopReason),
+		zap.String("response_id", result.ID),
+		zap.Int64("input_tokens", result.InputTokens),
+		zap.Int64("output_tokens", result.OutputTokens),
+	}
+	if chatCtx != nil {
+		fields = append(fields,
+			zap.String("model", chatCtx.model),
+			zap.String("model_provider", chatCtx.modelProvider),
+			zap.Int("memories_count", len(chatCtx.memories)),
+		)
+		if chatCtx.chat != nil {
+			fields = append(fields,
+				zap.String("chat_id", chatCtx.chat.ID.String()),
+				zap.String("user_id", chatCtx.chat.UserID.String()),
+			)
+		}
+	}
+	// output_tokens is the field that separates the two causes: non-zero means the model
+	// generated text that extraction dropped; zero means nothing came back at all.
+	a.logger.Error("model returned an empty response; failing the turn instead of persisting a blank assistant message", fields...)
+
+	return fmt.Errorf("%s model returned an empty response (stop_reason=%s, output_tokens=%d)",
+		providerName, stopReason, result.OutputTokens)
+}
+
 // saveAgentResponse saves the agent's response message and tool calls using the
 // provider-agnostic GenerateResponse. OpenAI-native attachment persistence is
 // handled separately by the OpenAI adapter path.
@@ -1915,21 +2063,42 @@ func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID,
 		}
 		persistSuccesses++
 
-		// Best-effort: upload to S3/local images/ path so the gallery and Claude can
-		// access the image.
-		if created != nil && strings.HasPrefix(fileType, models.ImageMIMEPrefix) {
-			rawBytes, decodeErr := base64.StdEncoding.DecodeString(content)
-			if decodeErr == nil && len(rawBytes) > 0 {
-				imageutil.UploadBytesToGalleryPath(ctx, a.fileStore, a.logger, userID, created.ID, name, fileType, rawBytes)
-				// Persist the S3 key so delete/rename can resolve it without re-deriving.
-				imgKey := storage.FileKeyForImage(userID, created.ID, name)
-				if err := a.ds.SetFileAttachmentS3Key(ctx, userID, created.ID, imgKey); err != nil {
-					a.logger.Warn("failed to persist attachment s3_key after tool-generated image save",
-						zap.String("attachment_id", created.ID.String()),
-						zap.String("s3_key", imgKey),
-						zap.Error(err))
-				}
+		rawBytes, decodeErr := base64.StdEncoding.DecodeString(content)
+		if decodeErr != nil || len(rawBytes) == 0 {
+			a.logger.Warn("failed to decode tool-generated attachment content",
+				zap.String("chat_message_id", agentMessage.ID.String()),
+				zap.String("attachment_id", created.ID.String()),
+				zap.String("name", name),
+				zap.Error(decodeErr),
+			)
+			continue
+		}
+
+		var s3Key string
+		if strings.HasPrefix(fileType, models.ImageMIMEPrefix) {
+			// Keep generated images on the canonical gallery path (full-size + thumb).
+			imageutil.UploadBytesToGalleryPath(ctx, a.fileStore, a.logger, userID, created.ID, name, fileType, rawBytes)
+			s3Key = storage.FileKeyForImage(userID, created.ID, name)
+		} else {
+			chatIDRef := agentMessage.ChatID
+			s3Key = storage.FileKeyForAttachment(userID, created.ID, name, fileType, &chatIDRef, nil)
+			if uploadErr := a.fileStore.UploadFile(ctx, s3Key, rawBytes, fileType); uploadErr != nil {
+				a.logger.Error("failed to upload tool-generated attachment",
+					zap.String("chat_message_id", agentMessage.ID.String()),
+					zap.String("attachment_id", created.ID.String()),
+					zap.String("name", name),
+					zap.String("s3_key", s3Key),
+					zap.Error(uploadErr),
+				)
+				continue
 			}
+		}
+
+		if err := a.ds.SetFileAttachmentS3Key(ctx, userID, created.ID, s3Key); err != nil {
+			a.logger.Warn("failed to persist attachment s3_key after tool-generated attachment save",
+				zap.String("attachment_id", created.ID.String()),
+				zap.String("s3_key", s3Key),
+				zap.Error(err))
 		}
 	}
 
@@ -2012,12 +2181,20 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 		if hasSystemRitual(chatMessage.Rituals, SystemRitualIDImageGenerate) {
 			recordAction = models.ActionTypeImageGeneration
 		}
+		// Link this turn's primary metered event to the assistant message that owns
+		// its Context X-ray, so an implementation can surface the turn's cost on the
+		// X-ray later. Empty when the turn produced no assistant message.
+		var messageID string
+		if agentMessage != nil {
+			messageID = agentMessage.ID.String()
+		}
 		a.meter.Record(ctx, qd, metering.Usage{
 			UserID:     userID,
 			ActionType: recordAction,
 			Model:      chatCtx.model,
 			ChatID:     chatMessage.ChatID.String(),
 			Tokens:     chatMessage.Tokens,
+			MessageID:  messageID,
 		})
 
 		if actionType == models.ActionTypeChatMessage && chatCtx != nil && chatCtx.webSearchCount > 0 {

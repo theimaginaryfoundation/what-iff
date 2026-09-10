@@ -404,15 +404,20 @@ describe('AgentJobDetailComponent', () => {
             expect(mockAgentJobService.updateAgentJobStatus).not.toHaveBeenCalled();
         });
 
-        it('runs job now for active/paused statuses and refreshes details', () => {
-            const refreshed = { ...mockJob, run_count: 4 };
-            mockAgentJobService.getAgentJob.mockReturnValueOnce(of(mockJob)).mockReturnValueOnce(of(refreshed));
+        it('runs job now without a chat and refreshes details', () => {
+            const noChatJob = { ...mockJob, chat_id: null };
+            const refreshed = { ...noChatJob, run_count: 4 };
+            component.job.set(noChatJob);
+            mockAgentJobService.getAgentJob.mockReturnValue(of(refreshed));
+            mockRouter.navigate.mockClear();
+            mockChatService.setLastChatId.mockClear();
 
-            component.ngOnInit();
             component.runNow();
 
             expect(mockAgentJobService.runNow).toHaveBeenCalledWith('job-1');
             expect(component.job()?.run_count).toBe(4);
+            expect(mockChatService.setLastChatId).not.toHaveBeenCalled();
+            expect(mockRouter.navigate).not.toHaveBeenCalledWith(['/chat']);
             expect(component.successMessage()).toBe('Job run triggered.');
             expect(component.isRunningNow()).toBe(false);
         });

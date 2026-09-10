@@ -42,6 +42,7 @@ func toChatMessageModel(e *ent.ChatMessage) *models.ChatMessage {
 		GenerationPersonality: e.GenerationPersonality,
 		SentAt:                e.SentAt,
 		Tokens:                e.Tokens,
+		Bookmarked:            e.Bookmarked,
 	}
 
 	if e.Edges.GenerationMood != nil {
@@ -998,6 +999,93 @@ func (d *Datastore) UpdateChatMessageGenerationExpression(ctx context.Context, u
 	}
 
 	return toChatMessageModel(entChatMessage), nil
+}
+
+// SetChatMessageBookmarked toggles the bookmark flag on a chat message the user owns and
+// returns the updated message. Either origin (user or assistant) may be bookmarked.
+func (d *Datastore) SetChatMessageBookmarked(ctx context.Context, userID, messageID uuid.UUID, bookmarked bool) (*models.ChatMessage, error) {
+	n, err := d.dbClient.ChatMessage.Update().
+		Where(
+			chatmessage.ID(messageID),
+			chatmessage.HasChatWith(
+				entchat.HasOwnerWith(user.ID(userID)),
+			),
+		).
+		SetBookmarked(bookmarked).
+		Save(ctx)
+	if err != nil {
+		d.logger.Error("failed to set bookmarked on chat message", zap.Error(err))
+		return nil, err
+	}
+	if n == 0 {
+		return nil, ErrChatMessageNotFound
+	}
+	return d.GetChatMessage(ctx, userID, messageID)
+}
+
+// ListChatMessageBookmarks returns every bookmarked message in a chat the user owns, oldest
+// first (thread order), independent of message-list pagination so the navigator always sees
+// the complete set. Bodies are trimmed to a snippet by the caller/handler if needed.
+func (d *Datastore) ListChatMessageBookmarks(ctx context.Context, userID, chatID uuid.UUID) ([]*models.ChatMessage, error) {
+	rows, err := d.dbClient.ChatMessage.Query().
+		Where(
+			chatmessage.Bookmarked(true),
+			chatmessage.HasChatWith(
+				entchat.ID(chatID),
+				entchat.HasOwnerWith(user.ID(userID)),
+			),
+		).
+		Order(ent.Asc(chatmessage.FieldSentAt)).
+		All(ctx)
+	if err != nil {
+		d.logger.Error("failed to list chat message bookmarks", zap.Error(err))
+		return nil, err
+	}
+	out := make([]*models.ChatMessage, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, toChatMessageModel(row))
+	}
+	return out, nil
+}
+
+// ListChatMessageBookmarksPage returns bookmark navigation metadata in stable thread order.
+// Unlike ListChatMessageBookmarks (the complete UI navigator feed), this is bounded for
+// agent-tool responses.
+func (d *Datastore) ListChatMessageBookmarksPage(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int) (*models.PaginatedResponse, error) {
+	query := d.dbClient.ChatMessage.Query().
+		Where(
+			chatmessage.Bookmarked(true),
+			chatmessage.HasChatWith(
+				entchat.ID(chatID),
+				entchat.HasOwnerWith(user.ID(userID)),
+			),
+		)
+
+	totalCount, err := query.Count(ctx)
+	if err != nil {
+		d.logger.Error("failed to count chat message bookmarks", zap.Error(err))
+		return nil, err
+	}
+	if pageNum < 1 {
+		pageNum = 1
+	}
+	if pageSize < 1 {
+		pageSize = models.BookmarkPageDefault
+	}
+	rows, err := query.
+		Offset((pageNum-1)*pageSize).
+		Limit(pageSize).
+		Order(ent.Asc(chatmessage.FieldSentAt), ent.Asc(chatmessage.FieldID)).
+		All(ctx)
+	if err != nil {
+		d.logger.Error("failed to list chat message bookmark page", zap.Error(err))
+		return nil, err
+	}
+	results := make([]any, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, toChatMessageModel(row))
+	}
+	return &models.PaginatedResponse{Results: results, TotalCount: totalCount, Page: pageNum}, nil
 }
 
 // SetChatMessageCheckpointCompletedAt records a successful scratchpad/memory/summary checkpoint on an assistant message.

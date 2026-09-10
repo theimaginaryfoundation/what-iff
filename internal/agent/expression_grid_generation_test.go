@@ -2,12 +2,16 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"image"
 	"image/color"
 	"image/png"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 )
 
 func TestSlicePNGGrid3x3_NineCells(t *testing.T) {
@@ -96,4 +100,62 @@ func TestCapExpressionReferenceImage(t *testing.T) {
 	got, mime = capExpressionReferenceImage(large, "image/jpeg")
 	require.Nil(t, got)
 	require.Equal(t, "", mime)
+}
+
+func TestGenerateDefaultExpressionGrid_NotConfigured(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	uid, pid := uuid.New(), uuid.New()
+
+	// Nil agent, nil ds, and nil OpenAIProvider all hit the same "not configured" guard.
+	_, err := (&Agent{}).GenerateDefaultExpressionGrid(ctx, uid, pid)
+	require.ErrorContains(t, err, "agent not configured")
+
+	_, err = (&Agent{ds: &datastore.Datastore{}}).GenerateDefaultExpressionGrid(ctx, uid, pid)
+	require.ErrorContains(t, err, "agent not configured")
+}
+
+func TestGenerateDefaultExpressionGrid_MockBackendDisabled(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	uid, pid := uuid.New(), uuid.New()
+
+	a := &Agent{
+		ds:             &datastore.Datastore{},
+		OpenAIProvider: &provider.OpenAIProvider{},
+		mockLLM:        true,
+	}
+	_, err := a.GenerateDefaultExpressionGrid(ctx, uid, pid)
+	require.ErrorContains(t, err, "disabled under LLM_BACKEND=mock/local")
+}
+
+func TestGenerateDefaultExpressionGrid_FileStoreNotConfigured(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	uid, pid := uuid.New(), uuid.New()
+
+	a := &Agent{
+		ds:             &datastore.Datastore{},
+		OpenAIProvider: &provider.OpenAIProvider{},
+	}
+	_, err := a.GenerateDefaultExpressionGrid(ctx, uid, pid)
+	require.ErrorContains(t, err, "file store not configured")
+}
+
+func TestInferExpressionGridLikeness_EmptyInputs(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	a := &Agent{}
+	out, err := a.inferExpressionGridLikeness(ctx, "", nil, "")
+	require.NoError(t, err)
+	require.Equal(t, "", out)
+}
+
+func TestUploadPersonalityExpressionCell_EmptyPNG(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	uid, pid := uuid.New(), uuid.New()
+	a := &Agent{}
+	err := a.uploadPersonalityExpressionCell(ctx, uid, pid, "happy", nil)
+	require.ErrorContains(t, err, "empty cell png")
 }

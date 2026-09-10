@@ -75,6 +75,7 @@
   (dismissed)="closeEditModal()"
   (saved)="onEditSaved($event)"
   (deleted)="onEditDeleted($event)"
+  (expandRequested)="openExpandedEditor()"
 />
 
 <ui-modal [open]="isCreateOpen()" [labelledBy]="'create-personality-title'" size="lg" (dismiss)="closeCreate()">

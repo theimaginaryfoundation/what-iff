@@ -33,6 +33,7 @@ func (a *Agent) handleAgentLoop(
 
 		if len(toolUses) == 0 {
 			// Model produced a final answer — no tool calls requested.
+			allGeneratedAttachments = a.appendPostToolLoopGeneratedAttachments(ctx, chatCtx, allGeneratedAttachments)
 			return result, allToolCalls, allGeneratedAttachments, nil
 		}
 
@@ -47,11 +48,27 @@ func (a *Agent) handleAgentLoop(
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("failed to force final response: %w", err)
 			}
+			allGeneratedAttachments = a.appendPostToolLoopGeneratedAttachments(ctx, chatCtx, allGeneratedAttachments)
 			return final, allToolCalls, allGeneratedAttachments, nil
 		}
 	}
 
 	return nil, nil, nil, fmt.Errorf("agent loop ended without a final response after %d rounds", maxToolCallRounds)
+}
+
+func (a *Agent) appendPostToolLoopGeneratedAttachments(ctx context.Context, chatCtx *chatContext, existing []*models.FileAttachment) []*models.FileAttachment {
+	if chatCtx == nil || chatCtx.chat == nil || additionalGeneratedAttachmentsForChat == nil {
+		return existing
+	}
+	load := additionalGeneratedAttachmentsForChat(a, chatCtx.chat)
+	if load == nil {
+		return existing
+	}
+	extra := load(ctx)
+	if len(extra) == 0 {
+		return existing
+	}
+	return append(existing, extra...)
 }
 
 // executeToolUses executes all tool uses and returns provider-agnostic results
@@ -61,6 +78,7 @@ func (a *Agent) executeToolUses(ctx context.Context, chatCtx *chatContext, uses 
 	generatedAttachments := make([][]*models.FileAttachment, len(uses))
 	for i, use := range uses {
 		results[i], generatedAttachments[i] = a.executeToolUseWithRecovery(ctx, chatCtx, use)
+		a.notifyToolUseGeneratedAttachments(chatCtx, use, generatedAttachments[i])
 		results[i].Images = toolResultImagesFromAttachments(generatedAttachments[i])
 	}
 
@@ -90,6 +108,13 @@ func (a *Agent) executeToolUses(ctx context.Context, chatCtx *chatContext, uses 
 		flatAttachments = append(flatAttachments, perTool...)
 	}
 	return results, modelToolCalls, flatAttachments
+}
+
+func (a *Agent) notifyToolUseGeneratedAttachments(chatCtx *chatContext, use provider.ToolUse, attachments []*models.FileAttachment) {
+	if chatCtx == nil || chatCtx.chat == nil || onToolUseGeneratedAttachmentsForChat == nil || len(attachments) == 0 {
+		return
+	}
+	onToolUseGeneratedAttachmentsForChat(a, chatCtx.chat, use, attachments)
 }
 
 // executeToolUseWithRecovery executes a single tool use with panic recovery.

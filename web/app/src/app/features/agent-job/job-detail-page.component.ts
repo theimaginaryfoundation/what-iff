@@ -269,13 +269,23 @@ export class JobDetailPageComponent implements OnInit, OnDestroy {
     });
   }
 
+  canRunNow(): boolean {
+    const status = this.job()?.status;
+    return status === 'active' || status === 'paused';
+  }
+
   runNow(): void {
     const current = this.job();
-    if (!current) return;
+    if (!current || !this.canRunNow()) return;
     this.runningNow.set(true);
+    this.error.set(null);
     this.agentJobService.runNow(current.id).subscribe({
       next: () => {
         this.runningNow.set(false);
+        if (current.chat_id) {
+          this.openChat();
+          return;
+        }
         this.startPollingIfNeeded(current.status);
       },
       error: error => {

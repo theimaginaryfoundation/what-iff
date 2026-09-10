@@ -2,6 +2,7 @@ export { AppShell, navSections, quickActions, type NavSection, type QuickAction 
 export { ChatImportModal } from './chat-import-modal';
 export { ChatPage } from './chat.page';
 export { CommandPalette } from './command-palette';
+export { CompactionLogPage } from './compaction-log.page';
 export { ConfirmationModal } from './confirmation.modal';
 export { DashboardPage, dashboardTiles, type DashboardTile } from './dashboard.page';
 export { GalleryPage, type GalleryMode, type GallerySort, type GallerySource } from './gallery.page';

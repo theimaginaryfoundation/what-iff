@@ -547,8 +547,12 @@ export class AgentJobDetailComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: () => {
         this.successMessage.set('Job run triggered.');
-        this.refreshJobAfterRunNow();
         this.isRunningNow.set(false);
+        if (this.job()?.chat_id) {
+          this.openChat();
+          return;
+        }
+        this.refreshJobAfterRunNow();
       },
       error: (error) => {
         console.error('Failed to run job now:', error);
@@ -674,4 +678,3 @@ export class AgentJobDetailComponent implements OnInit, OnDestroy {
     return new Date(dateString).toLocaleString();
   }
 }
-

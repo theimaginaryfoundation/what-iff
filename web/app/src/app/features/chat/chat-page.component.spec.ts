@@ -30,7 +30,7 @@ describe('ChatPageComponent', () => {
     type ChatServiceMock = Pick<MockedObject<ChatService>, 'createChat' | 'createWelcomeMessage' | 'getChat' | 'getChatContext' | 'getLastChatId' | 'listChats' | 'patchChat' | 'setLastChatId' | 'clearLastChatId' | 'exportChat' | 'markChatRead' | 'listAllChats'>;
     type ImageGalleryServiceMock = Pick<MockedObject<ImageGalleryService>, 'referenceImage' | 'getImageUrl'>;
     type FileAttachmentServiceMock = Pick<MockedObject<FileAttachmentService>, 'uploadChatFileAttachment'>;
-    type MessageServiceMock = Pick<MockedObject<MessageService>, 'clearMessages' | 'listMessages' | 'sendMessage' | 'setCurrentChatId' | 'markAssistantMessagesRead' | 'messages$'>;
+    type MessageServiceMock = Pick<MockedObject<MessageService>, 'clearMessages' | 'listMessages' | 'listBookmarks' | 'sendMessage' | 'setCurrentChatId' | 'markAssistantMessagesRead' | 'messages$'>;
     type RouterMock = Pick<MockedObject<Router>, 'navigate' | 'events'>;
 
     let chatService: ChatServiceMock;
@@ -67,6 +67,7 @@ describe('ChatPageComponent', () => {
         messageService = {
             clearMessages: vi.fn().mockName("MessageService.clearMessages"),
             listMessages: vi.fn().mockName("MessageService.listMessages"),
+            listBookmarks: vi.fn().mockName("MessageService.listBookmarks"),
             sendMessage: vi.fn().mockName("MessageService.sendMessage"),
             setCurrentChatId: vi.fn().mockName("MessageService.setCurrentChatId"),
             markAssistantMessagesRead: vi.fn().mockName("MessageService.markAssistantMessagesRead"),
@@ -134,6 +135,7 @@ describe('ChatPageComponent', () => {
         messageService.markAssistantMessagesRead.mockImplementation(() => {
         });
         messageService.listMessages.mockReturnValue(of({ results: [], page: 1, total_count: 0 }));
+        messageService.listBookmarks.mockReturnValue(of([]));
         messageService.sendMessage.mockReturnValue(of({ id: 'msg-1', job_id: '', type: 'message' }));
         draftService.getDraft.mockReturnValue(null);
         fileAttachmentService.uploadChatFileAttachment.mockReturnValue(of(fileAttachment()));

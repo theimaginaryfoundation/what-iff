@@ -40,7 +40,7 @@ test(
         'You are a terse, friendly assistant used only for automated end-to-end testing.',
       );
 
-      await expect(personalityDetailPage.heading(personalityName)).toBeVisible();
+      await expect(personalityDetailPage.nameInput).toHaveValue(personalityName);
     });
 
     await test.step('change the password', async () => {

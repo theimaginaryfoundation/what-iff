@@ -61,7 +61,9 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	personalityRouter.HandleFunc("/{id}/expressions/generate-default-grid", h.GenerateDefaultExpressionGrid).Methods("POST")
 	personalityRouter.HandleFunc("/{id}/expressions/{expression_key}", h.UpsertExpression).Methods("PUT")
 	personalityRouter.HandleFunc("/{id}/expressions/{expression_key}", h.DeleteExpression).Methods("DELETE")
+	personalityRouter.HandleFunc("/{id}/prompt-changes", h.ListPersonalityPromptChanges).Methods("GET")
+	personalityRouter.HandleFunc("/{id}/prompt-changes/{change_id}/revert", h.RevertPersonalityPromptChange).Methods("POST")
 	personalityRouter.HandleFunc("/{id}", h.GetPersonality).Methods("GET")
-	personalityRouter.HandleFunc("/{id}", h.UpdatePersonality).Methods("PUT")
+	personalityRouter.HandleFunc("/{id}", h.UpdatePersonalityWithPromptHistory).Methods("PUT")
 	personalityRouter.HandleFunc("/{id}", h.DeletePersonality).Methods("DELETE")
 }

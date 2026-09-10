@@ -6,40 +6,17 @@ import (
 	"testing"
 	"time"
 
-	"entgo.io/ent/dialect"
-	entsql "entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-	"github.com/theimaginaryfoundation/what-iff/ent"
 	entsnap "github.com/theimaginaryfoundation/what-iff/ent/checkpointsnapshot"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
-	"go.uber.org/zap"
-
-	_ "github.com/mattn/go-sqlite3"
 )
 
 func newCompactionEventTestDatastore(t *testing.T) (*Datastore, func()) {
 	t.Helper()
-
-	db, err := sql.Open("sqlite3", "file:"+uuid.NewString()+"?mode=memory&cache=shared&_fk=1")
-	require.NoError(t, err)
-
 	// Parent (compaction_events) before child (memory_merge_events) so the FK + ON DELETE SET NULL
 	// in createMemoryMergeEventTestSchema can be applied — mirrors production ent schema order.
-	createMemoryImportTestSchema(t, db)
-	createCompactionEventTestSchema(t, db)
-	createMemoryMergeEventTestSchema(t, db)
-
-	drv := entsql.OpenDB(dialect.SQLite, db)
-	client := ent.NewClient(ent.Driver(drv))
-	ds, err := NewDatastore(client, db, zap.NewNop(), "12345678901234567890123456789012", nil)
-	require.NoError(t, err)
-
-	cleanup := func() {
-		_ = client.Close()
-		_ = db.Close()
-	}
-	return ds, cleanup
+	return newTestDatastore(t, createMemoryImportTestSchema, createCompactionEventTestSchema, createMemoryMergeEventTestSchema)
 }
 
 func createCompactionEventTestSchema(t *testing.T, db *sql.DB) {

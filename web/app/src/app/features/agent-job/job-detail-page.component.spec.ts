@@ -21,6 +21,7 @@ describe('JobDetailPageComponent', () => {
     let modelService: Pick<MockedObject<ModelService>, 'getModels'>;
     let personalityService: Pick<MockedObject<PersonalityService>, 'listPersonalities'>;
     let ritualService: Pick<MockedObject<RitualService>, 'listRituals'>;
+    let router: { navigate: ReturnType<typeof vi.fn> };
     let route: {
         snapshot: {
             paramMap: {
@@ -81,11 +82,11 @@ describe('JobDetailPageComponent', () => {
         } as unknown as Pick<MockedObject<PersonalityService>, 'listPersonalities'>;
         ritualService = {
             listRituals: vi.fn().mockName("RitualService.listRituals")
-        } as unknown as Pick<MockedObject<RitualService>, 'listRituals'>;
+        } as unknown as Pick<MockedObject<RitualService>, 'listRituals' | never>;
         const confirmation = {
             confirm: vi.fn().mockName("ConfirmationService.confirm")
         };
-        const router = {
+        router = {
             navigate: vi.fn().mockName("Router.navigate")
         };
         route = { snapshot: { paramMap: { get: vi.fn().mockName('get').mockReturnValue('job-1') } } };
@@ -146,6 +147,17 @@ describe('JobDetailPageComponent', () => {
         expect(host.querySelector('app-job-run-history')).not.toBeNull();
     });
 
+    it('opens the associated chat after a successful run-now trigger', () => {
+        agentJobService.runNow.mockReturnValue(of({ status: 'triggered' }));
+        fixture.detectChanges();
+
+        fixture.componentInstance.runNow();
+
+        expect(agentJobService.runNow).toHaveBeenCalledWith('job-1');
+        expect(chatService.setLastChatId).toHaveBeenCalledWith('chat-1');
+        expect(router.navigate).toHaveBeenCalledWith(['/chat']);
+    });
+
     it('renders every attached and available skill, and hides ineligible actions', () => {
         fixture.detectChanges();
         const component = fixture.componentInstance;
@@ -159,6 +171,7 @@ describe('JobDetailPageComponent', () => {
         expect(host.textContent).toContain('+ Weekly review');
         expect(host.textContent).not.toContain('No attached skills.');
         expect(host.textContent).not.toContain('Open chat');
+        expect(host.textContent).not.toContain('Run now');
         expect(host.textContent).not.toContain('Pause');
         expect(host.textContent).not.toContain('Resume');
     });

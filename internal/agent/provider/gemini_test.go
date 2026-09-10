@@ -2,10 +2,12 @@ package provider
 
 import (
 	"testing"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/shared"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
 func TestBuildGeminiParams_ModelAndMessages(t *testing.T) {
@@ -85,4 +87,38 @@ func TestBuildGeminiParams_RendersToolResultAttachmentAndPortrait(t *testing.T) 
 	require.Equal(t, "attached: report.pdf", p.Messages[1].OfUser.Content.OfString.Value)
 	require.Equal(t, ExpressionPortraitVisualReferenceCaption, p.Messages[2].OfUser.Content.OfArrayOfContentParts[0].OfText.Text)
 	require.Equal(t, "follow up", p.Messages[3].OfUser.Content.OfString.Value)
+}
+
+func TestExtractGeminiText_AliasesExtractChatCompletionText(t *testing.T) {
+	t.Parallel()
+	require.Empty(t, ExtractGeminiText(nil))
+
+	resp := &openai.ChatCompletion{
+		Choices: []openai.ChatCompletionChoice{{
+			Message: openai.ChatCompletionMessage{Content: "  hello gemini  "},
+		}},
+	}
+	require.Equal(t, "hello gemini", ExtractGeminiText(resp))
+}
+
+func TestGeminiProvider_CountTokens(t *testing.T) {
+	t.Parallel()
+	c := &GeminiProvider{tokenCounter: NewTokenCounter()}
+	n, err := c.CountTokens("hello world")
+	require.NoError(t, err)
+	require.Positive(t, n)
+}
+
+func TestGeminiProvider_SelectCarryOverTurns(t *testing.T) {
+	t.Parallel()
+	c := &GeminiProvider{tokenCounter: NewTokenCounter()}
+	now := time.Now()
+	recent := []*models.ChatMessage{
+		{Origin: models.MessageOriginAssistant, Message: "reply", SentAt: now},
+		{Origin: models.MessageOriginUser, Message: "question", SentAt: now.Add(-time.Second)},
+	}
+	turns := c.SelectCarryOverTurns(recent, 5, 1000)
+	require.Len(t, turns, 1)
+	require.Equal(t, "question", turns[0][0].Message)
+	require.Equal(t, "reply", turns[0][1].Message)
 }

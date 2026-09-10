@@ -1,5 +1,5 @@
 import { DOCUMENT } from '@angular/common';
-import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, effect, inject, input, output, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, OnDestroy, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
 import { lockBodyScroll, releaseBodyScroll, type BodyScrollLockHandle } from '../helpers/body-scroll-lock.helpers';
 import { createFocusTrap, releaseFocusTrap, type FocusTrapHandle } from '../helpers/focus-trap.helpers';
 import { isEscapeKey } from '../helpers/keyboard.helpers';
@@ -38,6 +38,7 @@ export class ModalComponent implements OnDestroy {
   readonly dismiss = output<ModalDismissReason>();
 
   readonly dialog = viewChild<ElementRef<HTMLElement>>('dialog');
+
   private readonly document = inject(DOCUMENT);
   private focusTrap: FocusTrapHandle | null = null;
   private bodyLock: BodyScrollLockHandle | null = null;
@@ -61,6 +62,10 @@ export class ModalComponent implements OnDestroy {
 
   panelClass(): string {
     return `ui-modal__panel w-full ${SIZE_CLASSES[this.size()]}`;
+  }
+
+  backdropClass(): string {
+    return 'ui-modal fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4';
   }
 
   onBackdropClick(): void {

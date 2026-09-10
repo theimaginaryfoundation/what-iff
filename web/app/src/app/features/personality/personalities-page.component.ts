@@ -35,6 +35,7 @@ import {
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { SparkleIconComponent } from '../../shared/ui/icons/icons';
 import { PersonalityEditModalComponent } from './detail/personality-edit-modal.component';
+import { PersonalityEditorSessionService } from './services/personality-editor-session.service';
 import {
   TEXT_LIMIT_HARD_MAX,
   TEXT_LIMIT_WARNING_THRESHOLD,
@@ -63,6 +64,7 @@ export class PersonalitiesPageComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly generatePersonalityModal = inject(GeneratePersonalityModalService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly editorSession = inject(PersonalityEditorSessionService);
 
   readonly personalities = signal<Personality[]>([]);
   readonly totalCount = signal(0);
@@ -81,6 +83,7 @@ export class PersonalitiesPageComponent implements OnInit {
   readonly isCreateOpen = signal(false);
   readonly isEditOpen = signal(false);
   readonly editingPersonality = signal<Personality | null>(null);
+  private readonly pendingEditId = signal<string | null>(null);
   readonly createForm = signal({ name: '', system_prompt: '' });
   readonly isCreating = signal(false);
   readonly createErrorMessage = signal<string | null>(null);
@@ -145,6 +148,23 @@ export class PersonalitiesPageComponent implements OnInit {
         });
       });
 
+    this.route.queryParamMap
+      .pipe(
+        map(params => params.get('edit')),
+        filter((id): id is string => !!id),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(id => {
+        this.pendingEditId.set(id);
+        this.openPendingEditor();
+        void this.router.navigate([], {
+          relativeTo: this.route,
+          queryParams: { edit: null },
+          queryParamsHandling: 'merge',
+          replaceUrl: true,
+        });
+      });
+
     const createdSub = this.generatePersonalityModal.personalityCreated$.subscribe(() => {
       this.loadPersonalities();
       this.loadPreferences();
@@ -172,6 +192,7 @@ export class PersonalitiesPageComponent implements OnInit {
           this.personalities.set(response.results ?? []);
           this.totalCount.set(response.total_count ?? 0);
           this.isLoading.set(false);
+          this.openPendingEditor();
         },
         error: err => {
           console.error('Failed to load personalities', err);
@@ -215,14 +236,34 @@ export class PersonalitiesPageComponent implements OnInit {
     this.router.navigate(['/personality', personality.id]);
   }
 
-  closeEditModal(): void {
+  closeEditModal(clearSession = true): void {
+    const personalityId = this.editingPersonality()?.id;
     this.isEditOpen.set(false);
     this.editingPersonality.set(null);
+    if (clearSession) {
+      this.editorSession.clear(personalityId);
+    }
+  }
+
+  openExpandedEditor(): void {
+    const personality = this.editingPersonality();
+    if (!personality) return;
+    this.closeEditModal(false);
+    this.router.navigate(['/personality', personality.id]);
   }
 
   onEditSaved(updated: Personality): void {
     this.personalities.update(list => list.map(item => (item.id === updated.id ? updated : item)));
     this.closeEditModal();
+  }
+
+  private openPendingEditor(): void {
+    const personalityId = this.pendingEditId();
+    if (!personalityId) return;
+    const personality = this.personalities().find(item => item.id === personalityId);
+    if (!personality) return;
+    this.pendingEditId.set(null);
+    this.openPersonality(personality, { edit: true });
   }
 
   onEditDeleted(_personalityId: string): void {

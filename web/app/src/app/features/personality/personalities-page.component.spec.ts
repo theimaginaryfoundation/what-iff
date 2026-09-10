@@ -163,6 +163,16 @@ describe('PersonalitiesPageComponent', () => {
         expect(component.editingPersonality()?.id).toBe('p-2');
     });
 
+    it('opens the center workspace editor from the modal expand action', () => {
+        component.onAction({ action: 'edit', personality: personalities[1] });
+
+        component.openExpandedEditor();
+
+        expect(component.isEditOpen()).toBe(false);
+        expect(component.editingPersonality()).toBeNull();
+        expect(router.navigate).toHaveBeenCalledWith(['/personality', 'p-2']);
+    });
+
     it('set-default action updates preferences', async () => {
         userPrefsService.updateUserPreferences.mockReturnValue(of({ ...preferences, default_personality_id: 'p-2' } as UserPreferences));
         await component.makeDefault(personalities[1]);
@@ -189,6 +199,19 @@ describe('PersonalitiesPageComponent', () => {
         expect(component.isCreateOpen()).toBe(true);
         expect(router.navigate).toHaveBeenCalledWith([], expect.objectContaining({
             queryParams: { create: null },
+            queryParamsHandling: 'merge',
+            replaceUrl: true,
+        }));
+    });
+
+    it('reopens the compact editor when a contracted expanded editor supplies edit=id', () => {
+        queryParamMap$.next(convertToParamMap({ edit: 'p-2' }));
+        fixture.detectChanges();
+
+        expect(component.isEditOpen()).toBe(true);
+        expect(component.editingPersonality()?.id).toBe('p-2');
+        expect(router.navigate).toHaveBeenCalledWith([], expect.objectContaining({
+            queryParams: { edit: null },
             queryParamsHandling: 'merge',
             replaceUrl: true,
         }));

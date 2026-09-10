@@ -30,29 +30,26 @@ import { PersonalityService } from '../../../core/services/personality.service';
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { ModalComponent, ModalDismissReason } from '../../../shared/ui/modal/modal.component';
 import { AuthImagePipe } from '../../../core/pipes/auth-image.pipe';
-import { ArrowRightIconComponent, BellIconComponent, BrainIconComponent } from '../../../shared/ui/icons/icons';
+import {
+  ArrowRightIconComponent,
+  BellIconComponent,
+  BrainIconComponent,
+  ExpandIconComponent,
+} from '../../../shared/ui/icons/icons';
 import { PersonalityAttachmentsListComponent } from './personality-attachments-list.component';
 import { PersonalityPortraitFocusEditorComponent } from './personality-portrait-focus-editor.component';
 import {
   TEXT_LIMIT_HARD_MAX,
   TEXT_LIMIT_WARNING_THRESHOLD,
 } from '../../../core/constants/text-limits.constants';
-
-interface PersonalityEditDraft {
-  name: string;
-  system_prompt: string;
-  scratchpad: string;
-  scratchpad_update_prompt: string;
-  auto_pin_memories: boolean;
-  accent_color: string | null;
-  cover_image_id: string | null;
-  thumbnail_circle: PersonalityThumbnailCircle | null;
-}
+import {
+  PersonalityEditDraft,
+  PersonalityEditorSessionService,
+} from '../services/personality-editor-session.service';
 
 const PORTRAIT_EDITOR_WIDTH = 200;
 const PORTRAIT_EDITOR_HEIGHT = 267;
 const THUMBNAIL_PREVIEW_SIZE = 96;
-const DEFAULT_THUMBNAIL_CIRCLE: PersonalityThumbnailCircle = { cx: 0.5, cy: 0.42, r: 0.34 };
 
 @Component({
   selector: 'app-personality-edit-modal',
@@ -67,11 +64,21 @@ const DEFAULT_THUMBNAIL_CIRCLE: PersonalityThumbnailCircle = { cx: 0.5, cy: 0.42
     BellIconComponent,
     BrainIconComponent,
     ArrowRightIconComponent,
+    ExpandIconComponent,
   ],
   template: `
     <ui-modal [open]="open()" [labelledBy]="titleId" size="lg" (dismiss)="onModalDismiss($event)">
-      <div modal-header>
+      <div modal-header class="flex min-w-0 flex-1 items-center justify-between gap-3">
         <h2 [id]="titleId" class="text-base font-semibold text-(--color-text-primary)">Edit Personality</h2>
+        <button
+          type="button"
+          class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-(--color-text-secondary) hover:bg-(--color-surface-elevated) hover:text-(--color-text-primary) focus:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)"
+          aria-label="Expand editor"
+          title="Expand editor"
+          (click)="requestExpand()"
+        >
+          <ui-expand-icon [size]="18" />
+        </button>
       </div>
 
       @if (draft(); as value) {
@@ -239,27 +246,6 @@ const DEFAULT_THUMBNAIL_CIRCLE: PersonalityThumbnailCircle = { cx: 0.5, cy: 0.42
 
                 @if (scratchpadAdvancedOpen()) {
                   <div class="flex flex-col gap-4 border-t border-border-base px-3 pb-3 pt-3">
-
-                    @if (scratchpadHistory().length > 0) {
-                      <div class="flex flex-col gap-2">
-                        <p class="text-xs font-semibold text-(--color-text-secondary)">Revert to a previous version</p>
-                        <ul class="flex flex-col divide-y divide-border-base rounded-lg border border-border-base">
-                          @for (version of scratchpadHistory(); track $index; let i = $index) {
-                            <li class="flex items-center justify-between gap-3 px-3 py-2">
-                              <p class="min-w-0 flex-1 truncate text-xs text-(--color-text-secondary)" [title]="version">
-                                <span class="mr-1.5 font-semibold text-(--color-text-primary)">v{{ scratchpadHistory().length - i }}</span>{{ version || '(empty)' }}
-                              </p>
-                              <button
-                                type="button"
-                                class="shrink-0 rounded-md border border-border-base bg-(--color-surface-input) px-2 py-0.5 text-xs text-(--color-text-primary) hover:bg-(--color-surface-card)"
-                                (click)="revertScratchpad(version)"
-                              >Restore</button>
-                            </li>
-                          }
-                        </ul>
-                      </div>
-                    }
-
                     <label class="flex flex-col gap-1">
                       <span class="text-xs font-semibold text-(--color-text-secondary)">Custom scratchpad update prompt</span>
                       @if (promptDefaultsLoading()) {
@@ -277,7 +263,6 @@ const DEFAULT_THUMBNAIL_CIRCLE: PersonalityThumbnailCircle = { cx: 0.5, cy: 0.42
                         <span class="text-[11px] text-(--color-text-muted)">Leave blank to use the system default. Overrides the prompt the agent receives when writing a scratchpad checkpoint.</span>
                       }
                     </label>
-
                   </div>
                 }
               </div>
@@ -386,6 +371,7 @@ export class PersonalityEditModalComponent {
   readonly dismissed = output<void>();
   readonly saved = output<Personality>();
   readonly deleted = output<string>();
+  readonly expandRequested = output<void>();
 
   private readonly personalityService = inject(PersonalityService);
   private readonly imageGallery = inject(ImageGalleryService);
@@ -393,11 +379,12 @@ export class PersonalityEditModalComponent {
   private readonly confirmationService = inject(ConfirmationService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly editorSession = inject(PersonalityEditorSessionService);
   private readonly coverFileInput = viewChild<ElementRef<HTMLInputElement>>('coverFileInput');
 
   readonly titleId = `personality-edit-modal-${Math.random().toString(36).slice(2, 10)}`;
   readonly systemPromptWarningTitleId = `personality-edit-warning-${Math.random().toString(36).slice(2, 10)}`;
-  readonly draft = signal<PersonalityEditDraft | null>(null);
+  readonly draft = this.editorSession.draft;
   readonly saving = signal(false);
   readonly deleting = signal(false);
 
@@ -411,7 +398,6 @@ export class PersonalityEditModalComponent {
   readonly promptDefaultsLoading = signal(false);
   readonly promptDefaultsError = signal(false);
 
-  readonly scratchpadHistory = computed(() => this.personality()?.scratchpad_history ?? []);
   readonly systemPromptHardLimitLabel = TEXT_LIMIT_HARD_MAX.toLocaleString();
   readonly systemPromptWarningLimitLabel = TEXT_LIMIT_WARNING_THRESHOLD.toLocaleString();
   readonly systemPromptCount = computed(() => this.draft()?.system_prompt.length ?? 0);
@@ -454,16 +440,7 @@ export class PersonalityEditModalComponent {
       const open = this.open();
       const personality = this.personality();
       if (!open || !personality) return;
-      this.draft.set({
-        name: personality.name,
-        system_prompt: personality.system_prompt,
-        scratchpad: personality.scratchpad ?? '',
-        scratchpad_update_prompt: personality.scratchpad_update_prompt ?? '',
-        auto_pin_memories: personality.auto_pin_memories,
-        accent_color: personality.accent_color ?? null,
-        cover_image_id: personality.cover_image_id ?? null,
-        thumbnail_circle: personality.thumbnail_circle ?? DEFAULT_THUMBNAIL_CIRCLE,
-      });
+      this.editorSession.begin(personality);
       this.scratchpadAdvancedOpen.set(false);
     });
   }
@@ -473,7 +450,7 @@ export class PersonalityEditModalComponent {
     const draft = this.draft();
     const original = this.personality();
     if (!draft || !original) return false;
-    const originalCircle = original.thumbnail_circle ?? DEFAULT_THUMBNAIL_CIRCLE;
+    const originalCircle = original.thumbnail_circle ?? { cx: 0.5, cy: 0.42, r: 0.34 };
     return (
       draft.name !== original.name ||
       draft.system_prompt !== original.system_prompt ||
@@ -496,6 +473,10 @@ export class PersonalityEditModalComponent {
     void this.requestSoftDismiss();
   }
 
+  requestExpand(): void {
+    this.expandRequested.emit();
+  }
+
   private async requestSoftDismiss(): Promise<void> {
     if (this.isDirty() && !(await this.confirmationService.confirmDiscardChanges())) {
       return;
@@ -504,7 +485,7 @@ export class PersonalityEditModalComponent {
   }
 
   setDraftField<K extends keyof PersonalityEditDraft>(key: K, value: PersonalityEditDraft[K]): void {
-    this.draft.update(current => current ? { ...current, [key]: value } : current);
+    this.editorSession.update(key, value);
     if (key === 'system_prompt') {
       this.systemPromptWarningAcknowledged.set(false);
       if (this.systemPromptWarningOpen()) {
@@ -632,10 +613,6 @@ export class PersonalityEditModalComponent {
         },
       });
     }
-  }
-
-  revertScratchpad(content: string): void {
-    this.setDraftField('scratchpad', content);
   }
 
   viewMemories(): void {

@@ -132,3 +132,20 @@ func TestParseSafetyViolationErrorFallsBackToTheMessage(t *testing.T) {
 		require.Equal(t, tc.want, v.Provider, tc.text)
 	}
 }
+
+func TestSafetyViolationError_Error(t *testing.T) {
+	t.Parallel()
+
+	var nilErr *SafetyViolationError
+	require.Equal(t, "safety violation", nilErr.Error())
+
+	require.Equal(t, "safety violation", (&SafetyViolationError{}).Error())
+
+	require.Equal(t, "safety violation", (&SafetyViolationError{
+		Violation: &SafetyViolation{ProviderMessage: "   "},
+	}).Error())
+
+	require.Equal(t, "request was blocked", (&SafetyViolationError{
+		Violation: &SafetyViolation{ProviderMessage: "  request was blocked  "},
+	}).Error())
+}

@@ -9,10 +9,39 @@ import (
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
+
+// TestRecoverAsyncMessageJob_ContainsPanic locks in the pod-crash guard: a panic in the
+// async chat-message goroutine must be contained to its job, not propagated (which would
+// take down the process). It must stay contained even when recording the failed status
+// fails — here the datastore call errors because no expectation is registered.
+func TestRecoverAsyncMessageJob_ContainsPanic(t *testing.T) {
+	ds, _, cleanup := newTestDatastore(t)
+	defer cleanup()
+	a := newTestAgent(ds)
+
+	require.NotPanics(t, func() {
+		defer a.recoverAsyncMessageJob(context.Background(), uuid.New(), uuid.New(), uuid.New())
+		panic("boom in post-inference checkpoint")
+	})
+}
+
+// TestRecoverAsyncMessageJob_NoPanicIsNoop verifies the guard is inert on the happy path:
+// with no panic in flight it must not touch the datastore (no sqlmock expectations set).
+func TestRecoverAsyncMessageJob_NoPanicIsNoop(t *testing.T) {
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+	a := newTestAgent(ds)
+
+	require.NotPanics(t, func() {
+		defer a.recoverAsyncMessageJob(context.Background(), uuid.New(), uuid.New(), uuid.New())
+	})
+	require.NoError(t, mock.ExpectationsWereMet())
+}
 
 // Test buildAttachmentLabels function
 func TestBuildAttachmentLabels_EmptyAttachments(t *testing.T) {
@@ -106,6 +135,99 @@ func TestCancelledInputTokensForBilling_OpenAIEstimateFailureFallsBackToOne(t *t
 	assert.Equal(t, int64(0), outputTokens)
 	assert.False(t, outputKnown)
 	assert.False(t, providerUsageAvailable)
+}
+
+// A provider call can succeed at the transport level and still carry no assistant text.
+// Persisting that as a normal assistant message produced a turn that looked answered but
+// was blank, with no error and no retry offered, so the turn must fail instead.
+func TestAssertGenerationProducedOutput(t *testing.T) {
+	a := &Agent{logger: zap.NewNop()}
+	chatCtx := &chatContext{model: "claude-sonnet-4-6", modelProvider: "anthropic"}
+
+	t.Run("empty text with no attachments fails the turn", func(t *testing.T) {
+		err := a.assertGenerationProducedOutput("anthropic", chatCtx,
+			&provider.GenerateResponse{ID: "msg_1", StopReason: "max_tokens", OutputTokens: 4096}, nil)
+
+		require.Error(t, err)
+		// The message has to carry the two fields that separate "generated text we failed
+		// to extract" from "nothing came back", since that is the whole diagnostic value.
+		require.Contains(t, err.Error(), "max_tokens")
+		require.Contains(t, err.Error(), "4096")
+	})
+
+	t.Run("unreported stop reason is still named", func(t *testing.T) {
+		err := a.assertGenerationProducedOutput("zai", chatCtx, &provider.GenerateResponse{ID: "msg_2"}, nil)
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unreported")
+	})
+
+	t.Run("whitespace-only text is empty", func(t *testing.T) {
+		err := a.assertGenerationProducedOutput("anthropic", chatCtx,
+			&provider.GenerateResponse{ID: "msg_3", Text: "  \n\t "}, nil)
+
+		require.Error(t, err)
+	})
+
+	t.Run("text passes", func(t *testing.T) {
+		err := a.assertGenerationProducedOutput("anthropic", chatCtx,
+			&provider.GenerateResponse{ID: "msg_4", Text: "a real reply"}, nil)
+
+		require.NoError(t, err)
+	})
+
+	// An image ritual legitimately answers with an attachment and no prose.
+	t.Run("attachment-only turn passes", func(t *testing.T) {
+		err := a.assertGenerationProducedOutput("openai", chatCtx,
+			&provider.GenerateResponse{ID: "msg_5"},
+			[]*models.FileAttachment{{Name: "image.png", FileType: "image/png"}})
+
+		require.NoError(t, err)
+	})
+
+	t.Run("nil attachment entries do not count as output", func(t *testing.T) {
+		err := a.assertGenerationProducedOutput("openai", chatCtx,
+			&provider.GenerateResponse{ID: "msg_6"}, []*models.FileAttachment{nil})
+
+		require.Error(t, err)
+	})
+}
+
+// Pins that runGeneration actually consults the empty-response guard. The unit test
+// above covers the predicate; this covers the wiring, which is the part a refactor can
+// silently drop — and dropping it restores the original defect (a blank assistant row
+// saved as a normal turn) with every test still green.
+//
+// The mock is driven through the real adapter interface and returns empty text, so the
+// turn must fail before saveAgentResponse. That early return is also why this needs no
+// datastore: newJobDraftDeltaBuffer degrades to an inert buffer without one, and nothing
+// past the guard is reached.
+func TestRunGeneration_FailsTurnOnEmptyModelResponse(t *testing.T) {
+	a := &Agent{logger: zap.NewNop()}
+	chatCtx := &chatContext{
+		chat:          &models.Chat{ID: uuid.New(), UserID: uuid.New()},
+		model:         "mock-model",
+		modelProvider: "mock",
+	}
+	adapter := provider.NewMockAdapter(provider.MockAdapterConfig{
+		Mode:           provider.MockModeFixed,
+		FixedResponses: []string{""},
+	})
+
+	agentMessage, result, err := a.runGeneration(
+		context.Background(),
+		chatCtx.chat.UserID,
+		nil, // no job: the draft buffer is inert, and the turn fails before persistence
+		&models.ChatMessage{ID: uuid.New(), ChatID: chatCtx.chat.ID},
+		chatCtx,
+		adapter,
+		generationOptions{provider: "mock"},
+	)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "empty response")
+	require.Nil(t, agentMessage, "no assistant message may be persisted for an empty turn")
+	require.Nil(t, result)
 }
 
 func TestBackfillSummaryMemoriesSkipsWithoutMemoryTool(t *testing.T) {

@@ -2,6 +2,20 @@ import { defineConfig } from '@playwright/test';
 import { MOCK_TEST_TIMEOUT } from './timeouts';
 import { baseConfig, localWebServer } from './playwright.config.base';
 
+// Set by e2e/scripts/visual-docker.sh on a non-amd64 host, where it serves the
+// app on the host and points the container's Chromium at it (see the webServer
+// note below). It requires `baseURL` to stay http://localhost:4200 so the app
+// origin — and thus CORS/cookies and the committed baselines — is unchanged;
+// that only holds while E2E_BASE_URL is unset, so guard the contradiction
+// rather than silently rewriting the origin.
+const reuseHostWebServer = process.env['E2E_REUSE_HOST_WEBSERVER'] === '1';
+if (reuseHostWebServer && process.env['E2E_BASE_URL']) {
+  throw new Error(
+    'E2E_REUSE_HOST_WEBSERVER=1 expects E2E_BASE_URL to be unset so baseURL stays ' +
+      'http://localhost:4200 (the app origin the host-served dev server and CORS rely on).',
+  );
+}
+
 /**
  * Default config: local backend running with LLM_BACKEND=mock (deterministic
  * replies), Playwright starting only the Angular dev server. The backend
@@ -35,5 +49,14 @@ export default defineConfig({
   grepInvert: /@visual/,
   // A cold `npm start` compiles the whole app, which is far slower than
   // anything the tests themselves wait on — hence the outlier value.
-  webServer: { ...localWebServer, timeout: 120 * 1000 },
+  //
+  // `E2E_REUSE_HOST_WEBSERVER=1` omits the managed dev server entirely: the
+  // caller has already started (and waited on) an Angular dev server elsewhere
+  // and is routing the browser to it — e.g. `visual-docker.sh` on an arm64
+  // host, which serves the app natively and remaps `localhost:4200` into the
+  // amd64 render container via `--host-resolver-rules` to dodge an emulated
+  // build. `baseURL` stays `localhost:4200` so the app's origin (and thus
+  // CORS/cookies) is unchanged. When set, `E2E_BASE_URL` must be left unset so
+  // that default holds.
+  ...(reuseHostWebServer ? {} : { webServer: { ...localWebServer, timeout: 120 * 1000 } }),
 });

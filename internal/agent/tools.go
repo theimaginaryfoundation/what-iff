@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3/responses"
@@ -30,15 +31,29 @@ type ToolMeta struct {
 	Description string `json:"description"`
 }
 
-// GetAvailableTools returns metadata for tools the user can toggle via disabled_tools.
+// humanFacingToolDescription resolves the presentation copy for a tool.
+// A non-empty HumanDescription wins after trimming whitespace. External/runtime tools may omit
+// HumanDescription, in which case the existing agent description remains a backward-compatible
+// fallback rather than rendering a blank entry in the UI.
+func humanFacingToolDescription(def agenttools.FunctionToolDefinition) string {
+	if description := strings.TrimSpace(def.HumanDescription); description != "" {
+		return description
+	}
+	return def.Spec.Description
+}
+
+// GetAvailableTools returns human-facing metadata for tools the user can toggle via disabled_tools.
+// Provider/agent prompt descriptions remain on FunctionToolSpec and are intentionally not modified.
 func GetAvailableTools(ctx context.Context) []ToolMeta {
 	_ = ctx
-	specs := agenttools.UserToggleableFunctionToolSpecs()
-	cap := len(specs) + 1 // web + function tools
-	out := make([]ToolMeta, 0, cap)
+	definitions := agenttools.FunctionToolCatalog()
+	out := make([]ToolMeta, 0, len(definitions)+1)
 	out = append(out, ToolMeta{Name: agenttools.ToolNameWebSearch, Description: agenttools.AvailableToolDescriptionWebSearch})
-	for _, spec := range specs {
-		out = append(out, ToolMeta{Name: spec.Name, Description: spec.Description})
+	for _, def := range definitions {
+		if !def.UserToggleable {
+			continue
+		}
+		out = append(out, ToolMeta{Name: def.Spec.Name, Description: humanFacingToolDescription(def)})
 	}
 	return out
 }
@@ -68,6 +83,13 @@ func (a *Agent) buildTurnToolPolicy(ctx context.Context, chatCtx *chatContext, u
 	}
 	if !policy.toolsEnabled {
 		return policy
+	}
+	if additionalDisabledToolsForChat != nil {
+		for name, disabled := range additionalDisabledToolsForChat(a, chatCtx.chat) {
+			if disabled {
+				policy.disabledTools[name] = true
+			}
+		}
 	}
 
 	return policy

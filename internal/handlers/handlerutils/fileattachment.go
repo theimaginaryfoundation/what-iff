@@ -6,9 +6,12 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/filechunker"
+	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"github.com/theimaginaryfoundation/what-iff/internal/utils"
@@ -64,8 +67,8 @@ type FileAttachmentUploader interface {
 }
 
 // UploadFileAttachment parses a multipart file upload, validates the file type,
-// streams it to a temp file, uploads to OpenAI from disk, and returns the
-// attachment model plus temp file path for optional async chunking.
+// streams it to a temp file, normalizes image uploads, uploads from disk, and
+// returns the attachment model plus temp file path for optional async chunking.
 func UploadFileAttachment(w http.ResponseWriter, r *http.Request, logger *zap.Logger, a FileAttachmentUploader, userID uuid.UUID, attrs map[string]string) (models.FileAttachment, string, error) {
 	// Validate file size
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
@@ -83,7 +86,8 @@ func UploadFileAttachment(w http.ResponseWriter, r *http.Request, logger *zap.Lo
 	defer file.Close()
 
 	// Check file extension
-	fileTypeInfo, err := utils.GetFileType(header.Filename)
+	fileName := header.Filename
+	fileTypeInfo, err := utils.GetFileType(fileName)
 	if err != nil {
 		RespondWithError(w, logger, http.StatusBadRequest, CodeNotSet, "Unsupported file type", err)
 		return models.FileAttachment{}, "", err
@@ -95,12 +99,63 @@ func UploadFileAttachment(w http.ResponseWriter, r *http.Request, logger *zap.Lo
 		return models.FileAttachment{}, "", err
 	}
 	tempFilePath := tempFile.Name()
-	defer tempFile.Close()
 
 	if _, err := io.Copy(tempFile, file); err != nil {
+		_ = tempFile.Close()
 		_ = os.Remove(tempFilePath)
 		RespondWithError(w, logger, http.StatusInternalServerError, CodeNotSet, "Error buffering file", err)
 		return models.FileAttachment{}, "", err
+	}
+	if err := tempFile.Close(); err != nil {
+		_ = os.Remove(tempFilePath)
+		RespondWithError(w, logger, http.StatusInternalServerError, CodeNotSet, "Error closing temp file", err)
+		return models.FileAttachment{}, "", err
+	}
+
+	if strings.HasPrefix(fileTypeInfo.ContentType, models.ImageMIMEPrefix) {
+		normalizedTempFile, err := os.CreateTemp(filepath.Dir(tempFilePath), "chat-app-upload-normalized-*")
+		if err != nil {
+			_ = os.Remove(tempFilePath)
+			RespondWithError(w, logger, http.StatusInternalServerError, CodeNotSet, "Error creating normalized image buffer", err)
+			return models.FileAttachment{}, "", err
+		}
+		normalizedTempFilePath := normalizedTempFile.Name()
+
+		imageFile, err := os.Open(tempFilePath)
+		if err != nil {
+			_ = normalizedTempFile.Close()
+			_ = os.Remove(normalizedTempFilePath)
+			_ = os.Remove(tempFilePath)
+			RespondWithError(w, logger, http.StatusInternalServerError, CodeNotSet, "Error opening image upload", err)
+			return models.FileAttachment{}, "", err
+		}
+
+		// The upload cap bounds disk usage; stream image data between temp files
+		// so the raw upload is not also buffered in application memory.
+		fileName, err = imageutil.NormalizeForUpload(imageFile, normalizedTempFile, fileName, imageutil.DefaultUploadImageMaxPx)
+		if closeErr := imageFile.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+		if closeErr := normalizedTempFile.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			_ = os.Remove(normalizedTempFilePath)
+			_ = os.Remove(tempFilePath)
+			RespondWithError(w, logger, http.StatusBadRequest, CodeNotSet, "Invalid image", err)
+			return models.FileAttachment{}, "", err
+		}
+		if err := os.Rename(normalizedTempFilePath, tempFilePath); err != nil {
+			_ = os.Remove(normalizedTempFilePath)
+			_ = os.Remove(tempFilePath)
+			RespondWithError(w, logger, http.StatusInternalServerError, CodeNotSet, "Error replacing normalized image", err)
+			return models.FileAttachment{}, "", err
+		}
+
+		fileTypeInfo = utils.FileTypeInfo{
+			ContentType: imageutil.NormalizedUploadContentType,
+			Extension:   ".png",
+		}
 	}
 
 	uploadReader, err := os.Open(tempFilePath)
@@ -111,7 +166,7 @@ func UploadFileAttachment(w http.ResponseWriter, r *http.Request, logger *zap.Lo
 	}
 	defer uploadReader.Close()
 
-	fileId, err := a.UploadFileAttachment(r.Context(), userID, attrs, uploadReader, header.Filename, fileTypeInfo)
+	fileId, err := a.UploadFileAttachment(r.Context(), userID, attrs, uploadReader, fileName, fileTypeInfo)
 	if err != nil {
 		_ = os.Remove(tempFilePath)
 		RespondWithError(w, logger, http.StatusInternalServerError, CodeNotSet, "Error uploading file", err)
@@ -121,7 +176,7 @@ func UploadFileAttachment(w http.ResponseWriter, r *http.Request, logger *zap.Lo
 	return models.FileAttachment{
 		UserID:   userID,
 		FileID:   &fileId,
-		Name:     header.Filename,
+		Name:     fileName,
 		FileType: fileTypeInfo.ContentType,
 	}, tempFilePath, nil
 }

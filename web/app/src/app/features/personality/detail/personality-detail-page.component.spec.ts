@@ -125,7 +125,19 @@ describe('PersonalityDetailPageComponent', () => {
 
     it('instantiates and loads a personality from the route id', () => {
         fixture.detectChanges();
-        expect(fixture.nativeElement.textContent).toContain('Vera Calder');
+        const nameInput = fixture.nativeElement.querySelector('input[aria-label="Personality name"]') as HTMLInputElement;
+        expect(nameInput.value).toBe('Vera Calder');
+    });
+
+    it('contracts the editor back to the personalities list', () => {
+        fixture.detectChanges();
+
+        const contractButton = fixture.nativeElement.querySelector('[aria-label="Contract editor"]') as HTMLButtonElement;
+        contractButton.click();
+
+        expect(router.navigate).toHaveBeenCalledWith(['/personality'], {
+            queryParams: { edit: 'p-1' },
+        });
     });
 
     it('starts a new chat with the personality without requiring ChatSessionService', async () => {
@@ -144,7 +156,6 @@ describe('PersonalityDetailPageComponent', () => {
         fixture.detectChanges();
 
         await fixture.componentInstance.onSavePrompt({
-            name: 'Vera Calder',
             systemPrompt: 'Updated prompt',
         });
 
@@ -157,5 +168,35 @@ describe('PersonalityDetailPageComponent', () => {
         expect(request.memory_write_prompt).toBe('Write memories like this');
         expect(request.image_style).toBe('auto');
         expect(request.expressions_enabled).toBe(true);
+    });
+
+    it('does not flush unsaved draft edits when an immediate toggle saves', () => {
+        fixture.detectChanges();
+
+        // Unsaved header-form edits sitting in the draft, awaiting "Save changes".
+        fixture.componentInstance.setDraftField('name', 'Half-typed name');
+        fixture.componentInstance.setDraftField('scratchpad', 'Half-typed scratchpad');
+
+        // An immediate control (the auto-pin toggle) persists on its own. It
+        // must send only its own field against the persisted personality — not
+        // drag the in-progress draft to the server behind the user's back.
+        fixture.componentInstance.onAutoPinMemoriesChange(true);
+
+        const request = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
+        expect(request.auto_pin_memories).toBe(true);
+        expect(request.name).toBe('Vera Calder');
+        expect(request.scratchpad).toBe('Scratchpad body');
+    });
+
+    it('persists the in-progress draft only on an explicit Save changes', () => {
+        fixture.detectChanges();
+
+        fixture.componentInstance.setDraftField('name', 'Renamed via header');
+        fixture.componentInstance.setDraftField('scratchpad', 'New scratchpad body');
+        fixture.componentInstance.saveEditor();
+
+        const request = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
+        expect(request.name).toBe('Renamed via header');
+        expect(request.scratchpad).toBe('New scratchpad body');
     });
 });

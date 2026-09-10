@@ -1,12 +1,16 @@
 package agent
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"go.uber.org/zap"
 )
 
 // TestSalvageMemoryMergeGroups_Truncated pins the truncation safety net: a grouping response cut off
@@ -289,4 +293,173 @@ func TestPlanMemoryCompaction_LinkAllNewMembers(t *testing.T) {
 	require.Len(t, plan.Links, 1)
 	require.Empty(t, plan.Links[0].ExistingIDs)
 	require.Len(t, plan.Links[0].NewMembers, 2)
+}
+
+// --- formatMemoryMergeCandidateList ---
+
+func TestFormatMemoryMergeCandidateList(t *testing.T) {
+	t.Parallel()
+	id := uuid.New()
+	candidates := []memoryMergeCandidate{
+		{Content: "Prefers dark mode", Scope: "User", MemoryID: &id},
+		{Content: "Drinks tea", Scope: "Chat", IsNew: true},
+	}
+	out := formatMemoryMergeCandidateList(candidates)
+	require.Contains(t, out, "0. Prefers dark mode [memory_id="+id.String()+"] [scope=User]")
+	require.Contains(t, out, "1. Drinks tea [new] [scope=Chat]")
+}
+
+func TestFormatMemoryMergeCandidateList_Empty(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "", formatMemoryMergeCandidateList(nil))
+}
+
+// --- fallbackExactMergeGroups ---
+
+func TestFallbackExactMergeGroups_Empty(t *testing.T) {
+	t.Parallel()
+	require.Nil(t, fallbackExactMergeGroups(nil))
+}
+
+func TestFallbackExactMergeGroups_GroupsExactDuplicates(t *testing.T) {
+	t.Parallel()
+	candidates := []memoryMergeCandidate{
+		{Content: "Likes tea", Scope: "User", Confidence: models.MemoryConfidenceMedium},
+		{Content: "likes tea", Scope: "User", Confidence: models.MemoryConfidenceLow},
+		{Content: "Different fact", Scope: "User", Confidence: models.MemoryConfidenceHigh},
+	}
+	groups := fallbackExactMergeGroups(candidates)
+	require.Len(t, groups, 2, "case-insensitive duplicate content collapses to one group")
+	for _, g := range groups {
+		if len(g.MemberIndices) == 2 {
+			require.Equal(t, models.MemoryConfidenceLow, g.Confidence, "lowest-ranked confidence wins")
+		}
+	}
+}
+
+// --- inferMemoryMergeGroupsOpenAI ---
+
+func TestInferMemoryMergeGroupsOpenAI_NilProviderReturnsError(t *testing.T) {
+	t.Parallel()
+	a := &Agent{logger: zap.NewNop()}
+	_, err := a.inferMemoryMergeGroupsOpenAI(context.Background(), uuid.New(), "", nil)
+	require.ErrorContains(t, err, "OpenAIProvider is nil")
+}
+
+func TestInferMemoryMergeGroupsOpenAI_ProviderErrorIsReturned(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
+	candidates := []memoryMergeCandidate{{Content: "Likes tea", Scope: "User"}}
+	_, err := a.inferMemoryMergeGroupsOpenAI(context.Background(), uuid.New(), "persona", candidates)
+	require.Error(t, err)
+}
+
+func TestInferMemoryMergeGroupsOpenAI_TruncatedJSONIsSalvaged(t *testing.T) {
+	t.Parallel()
+	raw := `{\"groups\":[{\"member_indices\":[0],\"relation\":\"merge\",\"canonical_content\":\"\",\"scope\":\"User\",\"confidence\":\"medium\"},{\"member_indices\":[1],\"relation\":\"merge\",\"canonical_content\":\"never fini`
+	srv := jsonResponsesServer(t, responseTextJSONBody("resp_1", raw))
+	defer srv.Close()
+
+	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
+	candidates := []memoryMergeCandidate{
+		{Content: "Likes tea", Scope: "User"},
+		{Content: "Likes coffee", Scope: "User"},
+	}
+	groups, err := a.inferMemoryMergeGroupsOpenAI(context.Background(), uuid.New(), "", candidates)
+	require.NoError(t, err)
+	require.Len(t, groups, 1, "only the complete group survives salvage")
+}
+
+func TestInferMemoryMergeGroupsOpenAI_UnparsableNonJSONReturnsError(t *testing.T) {
+	t.Parallel()
+	srv := jsonResponsesServer(t, responseTextJSONBody("resp_1", "not valid json at all"))
+	defer srv.Close()
+
+	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
+	_, err := a.inferMemoryMergeGroupsOpenAI(context.Background(), uuid.New(), "persona", nil)
+	require.ErrorContains(t, err, "parse memory merge grouping")
+}
+
+func TestInferMemoryMergeGroupsOpenAI_SuccessParsesGroups(t *testing.T) {
+	t.Parallel()
+	raw := `{\"groups\":[{\"member_indices\":[0,1],\"relation\":\"merge\",\"canonical_content\":\"Likes tea\",\"scope\":\"User\",\"confidence\":\"medium\"}]}`
+	srv := jsonResponsesServer(t, responseTextJSONBody("resp_1", raw))
+	defer srv.Close()
+
+	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
+	candidates := []memoryMergeCandidate{
+		{Content: "Likes tea", Scope: "User"},
+		{Content: "Likes tea a lot", Scope: "User"},
+	}
+	groups, err := a.inferMemoryMergeGroupsOpenAI(context.Background(), uuid.New(), "", candidates)
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+	require.Equal(t, []int{0, 1}, groups[0].MemberIndices)
+}
+
+// --- inferMemoryMergeGroups ---
+
+func TestInferMemoryMergeGroups_ZeroOrOneCandidateUsesFallback(t *testing.T) {
+	t.Parallel()
+	a := &Agent{logger: zap.NewNop()}
+	require.Nil(t, a.inferMemoryMergeGroups(context.Background(), uuid.New(), "", nil))
+
+	candidates := []memoryMergeCandidate{{Content: "Solo fact", Scope: "User"}}
+	groups := a.inferMemoryMergeGroups(context.Background(), uuid.New(), "", candidates)
+	require.Len(t, groups, 1)
+	require.Equal(t, "Solo fact", groups[0].CanonicalContent)
+}
+
+func TestInferMemoryMergeGroups_ProviderErrorFallsBackToExact(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
+	candidates := []memoryMergeCandidate{
+		{Content: "Likes tea", Scope: "User"},
+		{Content: "likes tea", Scope: "User"},
+	}
+	groups := a.inferMemoryMergeGroups(context.Background(), uuid.New(), "", candidates)
+	require.Len(t, groups, 1, "exact-content fallback collapses the duplicate pair")
+}
+
+func TestInferMemoryMergeGroups_EmptyGroupsFallsBackToExact(t *testing.T) {
+	t.Parallel()
+	srv := jsonResponsesServer(t, responseTextJSONBody("resp_1", `{\"groups\":[]}`))
+	defer srv.Close()
+
+	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
+	candidates := []memoryMergeCandidate{
+		{Content: "Likes tea", Scope: "User"},
+		{Content: "Likes coffee", Scope: "User"},
+	}
+	groups := a.inferMemoryMergeGroups(context.Background(), uuid.New(), "", candidates)
+	require.Len(t, groups, 2, "distinct facts fall back to two singleton exact-merge groups")
+}
+
+func TestInferMemoryMergeGroups_SuccessFiltersAndBackfillsAndCovers(t *testing.T) {
+	t.Parallel()
+	// Group covers only index 0 with an empty canonical_content singleton; index 1 (a distinct
+	// candidate) is left uncovered by the model and must be picked up by the completeness net.
+	raw := `{\"groups\":[{\"member_indices\":[0],\"relation\":\"merge\",\"canonical_content\":\"\",\"scope\":\"User\",\"confidence\":\"medium\"}]}`
+	srv := jsonResponsesServer(t, responseTextJSONBody("resp_1", raw))
+	defer srv.Close()
+
+	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
+	candidates := []memoryMergeCandidate{
+		{Content: "Likes tea", Scope: "User"},
+		{Content: "Likes coffee", Scope: "User"},
+	}
+	groups := a.inferMemoryMergeGroups(context.Background(), uuid.New(), "", candidates)
+	require.Len(t, groups, 2)
+	require.Equal(t, "Likes tea", groups[0].CanonicalContent, "empty singleton canonical is backfilled from its member")
+	require.Equal(t, "Likes coffee", groups[1].CanonicalContent, "the model-omitted candidate is covered by the completeness net")
 }

@@ -2,9 +2,9 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 
 import { ContextBreakdown, ContextSegmentStat } from '../../../../../core/models/message.model';
+import { ContextCostOutletComponent } from '../../../../../extensions/context-cost-outlet.component';
+import { estimateInputAPICost } from '../../../helpers/api-pricing.helpers';
 
-/** Display metadata for a model-context segment kind. Colors are fixed hues chosen to read
- *  on both light and dark themes; unknown kinds fall back to a neutral accent. */
 interface KindMeta {
   label: string;
   description: string;
@@ -37,16 +37,14 @@ interface BreakdownRow {
   segments: number;
   cacheable: boolean;
   images: number;
-  /** Share of the total context, 0..100. */
   sharePct: number;
-  /** Width against the token budget, 0..100 (what the stacked meter uses). */
   budgetPct: number;
 }
 
 @Component({
   selector: 'app-context-breakdown-tab',
   standalone: true,
-  imports: [DatePipe, DecimalPipe],
+  imports: [ContextCostOutletComponent, DatePipe, DecimalPipe],
   template: `
     <section class="tab-body" aria-label="Context breakdown">
       @if (breakdown(); as b) {
@@ -63,6 +61,9 @@ interface BreakdownRow {
             <div class="gauge__top">
               <span class="gauge__total">{{ format(total()) }}</span>
               <span class="gauge__budget">/ {{ format(displayBudget()) }} tokens</span>
+              @if (inputCost() || messageId()) {
+                <app-context-cost-outlet [cost]="inputCost()" [messageId]="messageId()" />
+              }
             </div>
             <div
               class="gauge__track"
@@ -123,6 +124,9 @@ interface BreakdownRow {
               <span class="foot__model">{{ b.model }}</span>
             }
             <span class="foot__note">Total reflects vendor-reported input usage when available; named buckets are estimates.</span>
+            @if (inputCost(); as cost) {
+              <span class="foot__note">Input price: &#36;{{ cost.inputUsdPerMillion | number: '1.0-4' }}/1M · reviewed {{ cost.pricingCheckedAt }}. Output and non-token fees are not included.</span>
+            }
           </footer>
         }
       } @else {
@@ -232,6 +236,9 @@ interface BreakdownRow {
 })
 export class ContextBreakdownTabComponent {
   readonly breakdown = input<ContextBreakdown | null>(null);
+  /** Owning message id of the shown breakdown; forwarded to the cost outlet (used by private builds). */
+  readonly messageId = input<string | null>(null);
+  readonly inputCost = computed(() => estimateInputAPICost(this.breakdown()));
 
   readonly total = computed(() => {
     const b = this.breakdown();
@@ -243,11 +250,9 @@ export class ContextBreakdownTabComponent {
   readonly budget = computed(() => {
     const b = this.breakdown();
     const declared = b?.budget_tokens ?? 0;
-    // Never let the denominator fall below the actual usage, so the meter stays truthful.
     return Math.max(declared, this.total(), 1);
   });
 
-  /** The configured compaction ceiling, kept visible even when the gauge expands for overflow. */
   readonly displayBudget = computed(() => {
     const declared = this.breakdown()?.budget_tokens ?? 0;
     return declared > 0 ? declared : this.budget();

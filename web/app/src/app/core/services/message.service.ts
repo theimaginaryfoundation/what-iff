@@ -1,13 +1,14 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Observable, BehaviorSubject, throwError } from 'rxjs';
-import { catchError, tap } from 'rxjs/operators';
+import { catchError, map, tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import {
   ChatMessage,
   ChatMessageFilters,
   CreateChatMessageRequest,
   ChatMessageResponse,
+  MessageBookmark,
   MessageReadStatus
 } from '../models/message.model';
 import { PaginatedResponse } from '../models/common.model';
@@ -29,6 +30,10 @@ export class MessageService {
 
   // Current active chat ID for message filtering
   private currentChatId: string | null = null;
+
+  // The active optimistic bookmark request for each loaded message. A newer request or
+  // reconciliation supersedes its token so an older response cannot overwrite newer state.
+  private bookmarkOperations = new Map<string, symbol>();
 
   setCurrentChatId(chatId: string | null): void {
     this.currentChatId = chatId;
@@ -55,12 +60,57 @@ export class MessageService {
             // Replace message list on first page
             this.messagesSubject.next(response.results.reverse()); // Reverse to show newest at bottom
           } else {
-            // Prepend older messages for infinite scroll up
+            // Prepend older messages for infinite scroll up. Dedup by id: offset-based pages
+            // can overlap what we already have once newer messages arrive, and duplicate ids
+            // would break `track message.id` rendering.
             const currentMessages = this.messagesSubject.getValue();
-            this.messagesSubject.next([...response.results.reverse(), ...currentMessages]);
+            const known = new Set(currentMessages.map(m => m.id));
+            const older = response.results.reverse().filter(m => !known.has(m.id));
+            if (older.length > 0) {
+              this.messagesSubject.next([...older, ...currentMessages]);
+            }
           }
         }),
         catchError(this.handleError)
+      );
+  }
+
+  /**
+   * Non-destructively reconcile the newest page into the loaded list: update messages already
+   * present (streaming→final, read status, bookmarks, context breakdown) and append any that
+   * arrived while away — without dropping older loaded pages or moving scroll. Returns how many
+   * new messages were appended, the server total, and whether a gap was detected (more than a
+   * page arrived while away, so the loaded tail no longer overlaps the newest page — the caller
+   * decides whether a full reload is worthwhile).
+   */
+  reconcileLatestPage(chatId: string, limit: number = 50): Observable<{ appended: number; total: number; gap: boolean }> {
+    const params = { page: '1', limit: limit.toString() };
+    return this.http
+      .get<PaginatedResponse<ChatMessage>>(`${this.apiUrl}/${chatId}/chat-message`, { params })
+      .pipe(
+        map(response => {
+          const fresh = [...response.results].reverse(); // oldest-first
+          const total = response.total_count ?? fresh.length;
+          const current = this.messagesSubject.getValue();
+          if (current.length === 0) {
+            this.messagesSubject.next(fresh);
+            return { appended: fresh.length, total, gap: false };
+          }
+          const known = new Set(current.map(m => m.id));
+          const hasOverlap = fresh.some(m => known.has(m.id));
+          if (!hasOverlap) {
+            // The loaded tail is older than the entire newest page — merging would leave a hole.
+            return { appended: 0, total, gap: true };
+          }
+          const freshById = new Map(fresh.map(m => [m.id, m]));
+          // A server reconciliation is newer than a pending optimistic bookmark update.
+          fresh.forEach(message => this.bookmarkOperations.delete(message.id));
+          const merged = current.map(m => freshById.get(m.id) ?? m);
+          const appended = fresh.filter(m => !known.has(m.id));
+          this.messagesSubject.next(appended.length > 0 ? [...merged, ...appended] : merged);
+          return { appended: appended.length, total, gap: false };
+        }),
+        catchError(this.handleError),
       );
   }
 
@@ -122,6 +172,54 @@ export class MessageService {
   getMessage(messageId: string): Observable<ChatMessage> {
     return this.http.get<ChatMessage>(`${this.apiUrl}/chat-message/${messageId}`)
       .pipe(catchError(this.handleError));
+  }
+
+  /** List all bookmarked messages for a chat (complete, regardless of pagination). */
+  listBookmarks(chatId: string): Observable<MessageBookmark[]> {
+    return this.http.get<MessageBookmark[]>(`${this.apiUrl}/${chatId}/bookmarks`)
+      .pipe(catchError(this.handleError));
+  }
+
+  /**
+   * Toggle a message bookmark. Updates the in-memory list optimistically and reconciles with
+   * the server response (reverting on error).
+   */
+  setBookmark(chatId: string, messageId: string, bookmarked: boolean): Observable<ChatMessage> {
+    const previousMessage = this.messagesSubject.getValue().find(message => message.id === messageId);
+    const previousBookmarked = previousMessage?.bookmarked;
+    const operation = Symbol(messageId);
+    this.bookmarkOperations.set(messageId, operation);
+    this.patchMessageInList(messageId, { bookmarked });
+    return this.http
+      .patch<ChatMessage>(`${this.apiUrl}/${chatId}/chat-message/${messageId}/bookmark`, { bookmarked })
+      .pipe(
+        tap(updated => {
+          if (this.bookmarkOperations.get(messageId) === operation) {
+            this.bookmarkOperations.delete(messageId);
+            this.patchMessageInList(messageId, { bookmarked: updated.bookmarked });
+          }
+        }),
+        catchError(error => {
+          if (this.bookmarkOperations.get(messageId) === operation) {
+            this.bookmarkOperations.delete(messageId);
+            const currentMessage = this.messagesSubject.getValue().find(message => message.id === messageId);
+            if (previousMessage && currentMessage) {
+              this.patchMessageInList(messageId, { bookmarked: previousBookmarked });
+            }
+          }
+          return this.handleError(error);
+        }),
+      );
+  }
+
+  /** Shallow-merge a patch onto a message already in the list (no-op if absent). */
+  private patchMessageInList(messageId: string, patch: Partial<ChatMessage>): void {
+    const current = this.messagesSubject.getValue();
+    const idx = current.findIndex(m => m.id === messageId);
+    if (idx < 0) return;
+    const next = [...current];
+    next[idx] = { ...next[idx], ...patch };
+    this.messagesSubject.next(next);
   }
 
   /** Re-run async generation for an existing user message (same turn). */

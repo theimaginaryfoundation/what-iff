@@ -106,3 +106,63 @@ export async function waitForJobComplete(client: ApiClient, jobId: string, timeo
     await new Promise(resolve => setTimeout(resolve, JOB_POLL_INTERVAL_MS));
   }
 }
+
+/**
+ * Statuses a job can no longer move away from. `inference_complete`,
+ * `expression_complete` and `compaction_complete` are deliberately absent:
+ * they are milestones the chat-message pipeline passes *through*, not
+ * endpoints, so treating them as terminal would return a job that is still
+ * being worked on.
+ */
+const TERMINAL_JOB_STATUSES: ReadonlySet<string> = new Set(['complete', 'failed']);
+
+/** True once `job` has reached a status it cannot move away from. */
+export function isTerminalJob(job: Job): boolean {
+  return job.status !== undefined && TERMINAL_JOB_STATUSES.has(job.status);
+}
+
+/**
+ * Polls until a job reaches *any* terminal status and returns it —
+ * `waitForJobComplete` above throws on `failed`, which is right when a
+ * failure means the test's setup broke, and wrong for the import specs,
+ * where `failed` is frequently the outcome under assertion.
+ *
+ * Throws only on timeout, so the caller's `expect` is what decides whether
+ * the observed status was the right one.
+ */
+export async function waitForJobTerminal(client: ApiClient, jobId: string, timeoutMs: number): Promise<Job> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const job = await getJob(client, jobId);
+    if (isTerminalJob(job)) {
+      return job;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`job ${jobId} did not reach a terminal status within ${timeoutMs}ms (last status: ${job.status})`);
+    }
+    await new Promise(resolve => setTimeout(resolve, JOB_POLL_INTERVAL_MS));
+  }
+}
+
+/**
+ * The `progress` payload a `chat_import` job carries, as documented on
+ * `POST /chat/import`. Typed here rather than in the SDK because the field is
+ * a JSON *string* on the wire and deliberately opaque per job_type — the
+ * generated types say `progress?: string` and cannot say more.
+ */
+export interface ChatImportProgress {
+  phase?: string;
+  source?: string;
+  total?: number;
+  imported?: number;
+  skipped?: number;
+  imported_ids?: string[];
+}
+
+/** Parses a chat_import job's `progress` string, or returns `undefined` when the job carries none. */
+export function importProgress(job: Job): ChatImportProgress | undefined {
+  if (!job.progress) {
+    return undefined;
+  }
+  return JSON.parse(job.progress) as ChatImportProgress;
+}
