@@ -180,14 +180,11 @@ func anthropicImportOrigin(sender string) (origin models.MessageOrigin, ok bool,
 func prepareAnthropicConversation(raw anthropicConversation, now time.Time) (*models.ImportConversation, []string) {
 	var errs []string
 
-	title := raw.Name
-	if title == "" {
-		ts := now
-		if !raw.CreatedAt.IsZero() {
-			ts = raw.CreatedAt.UTC()
-		}
-		title = "Imported chat " + ts.Format("2006-01-02 15:04")
+	ts := now
+	if !raw.CreatedAt.IsZero() {
+		ts = raw.CreatedAt.UTC()
 	}
+	title := models.NormalizeImportedTitle(raw.Name, "Imported chat "+ts.Format("2006-01-02 15:04"))
 
 	var (
 		msgs         []models.ChatMessage

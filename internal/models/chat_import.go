@@ -1,7 +1,10 @@
 package models
 
 import (
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -77,4 +80,45 @@ func TruncateImportTitle(s string) string {
 		return s
 	}
 	return string(runes[:MaxImportTitleLen]) + "…"
+}
+
+// MaxChatTitleBytes mirrors the MaxLen(200) validator on the Chat "name" field. Ent's MaxLen
+// counts bytes rather than runes, so a title of 200 CJK or emoji characters is roughly three
+// to four times over the limit even though it looks short.
+const MaxChatTitleBytes = 200
+
+// NormalizeImportedTitle prepares a title from an export for persistence. It trims surrounding
+// whitespace, substitutes fallback when nothing usable is left, and shortens the result to fit
+// MaxChatTitleBytes without splitting a rune.
+//
+// Both are required for the conversation to survive the import. A blank-but-not-empty title
+// (a space, a tab, a zero-width character) passes Ent's NotEmpty check and lands as a thread
+// with no visible name, and a title over the byte limit fails validation outright, which drops
+// that single conversation with nothing but a server-side log to explain the absence.
+func NormalizeImportedTitle(title, fallback string) string {
+	t := strings.TrimFunc(title, isBlankRune)
+	if t == "" {
+		t = strings.TrimFunc(fallback, isBlankRune)
+	}
+	if len(t) <= MaxChatTitleBytes {
+		return t
+	}
+
+	// Leave room for the ellipsis that marks the title as shortened, then step back to a
+	// rune boundary so the result stays valid UTF-8.
+	const ellipsis = "…"
+	cut := MaxChatTitleBytes - len(ellipsis)
+	for cut > 0 && !utf8.RuneStart(t[cut]) {
+		cut--
+	}
+	return strings.TrimRightFunc(t[:cut], isBlankRune) + ellipsis
+}
+
+// isBlankRune reports whether r contributes nothing a reader can see. Ordinary whitespace is
+// the obvious case; the format category (Cf) covers zero-width spaces, joiners and direction
+// marks, which strings.TrimSpace leaves alone because they are not space characters. A title
+// made only of those satisfies Ent's NotEmpty check while still showing up as an unnamed
+// thread, so it has to fall back like an empty one.
+func isBlankRune(r rune) bool {
+	return unicode.IsSpace(r) || unicode.Is(unicode.Cf, r)
 }
