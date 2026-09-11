@@ -1095,8 +1095,14 @@ func (d *Datastore) DeleteMemoriesBatch(ctx context.Context, userID uuid.UUID, i
 	deleted := 0
 	for _, id := range input.IDs {
 		if err := d.DeleteMemory(ctx, userID, id); err != nil {
-			d.logger.Warn("skipping memory delete in partial batch", zap.String("memory_id", id.String()), zap.Error(err))
-			continue
+			// Missing / unauthorized ids are safe to skip in best-effort mode;
+			// anything else (tx, DB, unexpected) aborts so callers see the failure.
+			if errors.Is(err, ErrMemoryNotFound) {
+				d.logger.Warn("skipping missing memory in partial delete batch", zap.String("memory_id", id.String()))
+				continue
+			}
+			d.logger.Error("memory delete failed in partial batch", zap.String("memory_id", id.String()), zap.Error(err))
+			return nil, err
 		}
 		deleted++
 	}
@@ -1118,8 +1124,12 @@ func (d *Datastore) PatchMemoriesBatch(ctx context.Context, userID uuid.UUID, in
 			if input.AllOrNone {
 				return nil, err
 			}
-			d.logger.Warn("skipping memory patch in partial batch", zap.String("memory_id", id.String()), zap.Error(err))
-			continue
+			if errors.Is(err, ErrMemoryNotFound) {
+				d.logger.Warn("skipping missing memory in partial patch batch", zap.String("memory_id", id.String()))
+				continue
+			}
+			d.logger.Error("memory patch failed in partial batch", zap.String("memory_id", id.String()), zap.Error(err))
+			return nil, err
 		}
 		out = append(out, mem)
 	}

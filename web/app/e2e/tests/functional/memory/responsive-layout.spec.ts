@@ -90,9 +90,26 @@ async function assertCommonLayout(memoriesPage: MemoriesPage, width: number, mem
   await memoriesPage.openMinDateButton.click({ trial: true });
 
   const mainExtent = await memoriesPage.mainContent.evaluate(element => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
-  expect(mainExtent.scrollWidth, `Main content should not require horizontal scrolling at ${width}px`).toBeLessThanOrEqual(
-    mainExtent.clientWidth + LAYOUT_TOLERANCE_PX,
-  );
+  if (mainExtent.scrollWidth > mainExtent.clientWidth + LAYOUT_TOLERANCE_PX) {
+    const offenders = await memoriesPage.mainContent.evaluate((root, clientWidth) => {
+      const out: string[] = [];
+      for (const el of Array.from(root.querySelectorAll<HTMLElement>('*'))) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width > clientWidth + 1) {
+          out.push(`${el.tagName.toLowerCase()}.${el.className}`.slice(0, 120) + ` w=${Math.round(rect.width)}`);
+        }
+      }
+      return out.slice(0, 8);
+    }, mainExtent.clientWidth);
+    expect(
+      mainExtent.scrollWidth,
+      `Main content should not require horizontal scrolling at ${width}px (offenders: ${offenders.join(' | ') || 'none'})`,
+    ).toBeLessThanOrEqual(mainExtent.clientWidth + LAYOUT_TOLERANCE_PX);
+  } else {
+    expect(mainExtent.scrollWidth, `Main content should not require horizontal scrolling at ${width}px`).toBeLessThanOrEqual(
+      mainExtent.clientWidth + LAYOUT_TOLERANCE_PX,
+    );
+  }
 
   return { headingBox, subtitleBox };
 }

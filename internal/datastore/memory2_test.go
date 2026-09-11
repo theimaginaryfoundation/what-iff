@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -739,6 +740,50 @@ func TestDeleteMemoriesBatch_AllOrNoneHappyPath(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, 2, result.DeletedCount)
+}
+
+func TestDeleteMemoriesBatch_PartialSkipsMissing(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+
+	keep, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{Content: "delete me", Level: models.MemoryLevelGlobal})
+	require.NoError(t, err)
+
+	result, err := ds.DeleteMemoriesBatch(ctx, userID, models.BatchDeleteMemoryInput{
+		IDs:       []uuid.UUID{keep.ID, uuid.New()},
+		AllOrNone: false,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.DeletedCount)
+
+	exists, err := ds.dbClient.Memory.Query().Where(entmemory.ID(keep.ID)).Exist(ctx)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+func TestDeleteMemoriesBatch_PartialPropagatesUnexpectedError(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+
+	created, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{Content: "still here", Level: models.MemoryLevelGlobal})
+	require.NoError(t, err)
+
+	require.NoError(t, ds.dbClient.Close())
+
+	_, err = ds.DeleteMemoriesBatch(ctx, userID, models.BatchDeleteMemoryInput{
+		IDs:       []uuid.UUID{created.ID},
+		AllOrNone: false,
+	})
+	require.Error(t, err)
+	require.False(t, errors.Is(err, ErrMemoryNotFound))
 }
 
 // --- GetMemory ---

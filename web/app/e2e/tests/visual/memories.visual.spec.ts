@@ -24,6 +24,9 @@ test.describe('memory manager screens', () => {
       await expect(page).toHaveScreenshot('memory-manager-empty.png', {
         animations: 'disabled',
         mask: commonMasks(page),
+        // Sidebar avatar mask + filter chrome can shift a few hundred AA pixels
+        // between CI runners and the amd64 docker baseline image.
+        maxDiffPixelRatio: 0.02,
       });
     },
   );
@@ -55,6 +58,7 @@ test.describe('memory manager screens', () => {
       await expect(page).toHaveScreenshot('memory-manager-list.png', {
         animations: 'disabled',
         mask: [...commonMasks(page), page.locator('.memory-card__date')],
+        maxDiffPixelRatio: 0.02,
       });
     },
   );
@@ -75,6 +79,7 @@ test.describe('memory manager screens', () => {
       await expect(page).toHaveScreenshot('memory-manager-merge-history.png', {
         animations: 'disabled',
         mask: commonMasks(page),
+        maxDiffPixelRatio: 0.02,
       });
     },
   );
