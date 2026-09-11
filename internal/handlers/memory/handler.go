@@ -81,3 +81,10 @@ func (h *Handler) createEmbedding(ctx context.Context, input string) ([]float32,
 	}
 	return embedding.CreateEmbedding(ctx, h.oaiClient, input)
 }
+
+func (h *Handler) createEmbeddings(ctx context.Context, inputs []string) ([][]float32, error) {
+	if h.oaiClient == nil {
+		return nil, errMemoryImportUnavailable
+	}
+	return embedding.CreateEmbeddings(ctx, h.oaiClient, inputs)
+}

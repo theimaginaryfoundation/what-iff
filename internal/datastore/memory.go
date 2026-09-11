@@ -32,9 +32,15 @@ import (
 )
 
 const MemoryRelevanceThreshold = 1.2
-const memoryImportProgressLogEvery = 50
+const memoryImportBatchSize = 200
 const memoryImportEmbeddingWorkers = 8
 const memoryImportMaxJSONLine = 16 << 20 // 16 MiB, aligned with account backup JSONL cap
+
+// maxMemoryImportEntryExpandedBytes bounds the ACTUAL decompressed bytes read
+// from a single memory-import zip entry. The handler pre-checks each entry's
+// declared size, but a crafted archive can under-declare it, so capping the real
+// read here is the true zip-bomb guard (mirrors the account-import per-entry cap).
+const maxMemoryImportEntryExpandedBytes = 250 << 20 // 250 MiB
 
 func memoryLevelForEntity(mem *ent.Memory) models.MemoryLevel {
 	switch mem.Scope {
@@ -1346,20 +1352,43 @@ type memoryImportPrepared struct {
 	embedding []float32
 }
 
+// MemoryImportBatchEmbeddingFunc generates one embedding per input, in input order.
+type MemoryImportBatchEmbeddingFunc func(context.Context, []string) ([][]float32, error)
+
 // ImportMemories imports a ZIP produced by ExportMemories, deduping by memory ID.
 func (d *Datastore) ImportMemories(ctx context.Context, userID uuid.UUID, zr *zip.Reader, createEmbedding func(context.Context, string) ([]float32, error)) (models.MemoryImportResult, error) {
-	return d.importMemories(ctx, userID, zr, createEmbedding, true)
+	return d.importMemories(ctx, userID, zr, createEmbedding, nil, true)
+}
+
+// ImportMemoriesWithBatchEmbeddings imports a ZIP with batched embedding generation.
+// The single-input callback remains available so callers without batch support retain
+// the generic ImportMemories behavior.
+func (d *Datastore) ImportMemoriesWithBatchEmbeddings(
+	ctx context.Context,
+	userID uuid.UUID,
+	zr *zip.Reader,
+	createEmbedding func(context.Context, string) ([]float32, error),
+	createEmbeddings MemoryImportBatchEmbeddingFunc,
+) (models.MemoryImportResult, error) {
+	return d.importMemories(ctx, userID, zr, createEmbedding, createEmbeddings, true)
 }
 
 // importMemories implements ImportMemories. When writePackAudit is false, no audit_log
 // rows are written for this ZIP (used by account backup import, which records memory
 // totals in the account_backup audit entry).
-func (d *Datastore) importMemories(ctx context.Context, userID uuid.UUID, zr *zip.Reader, createEmbedding func(context.Context, string) ([]float32, error), writePackAudit bool) (models.MemoryImportResult, error) {
+func (d *Datastore) importMemories(
+	ctx context.Context,
+	userID uuid.UUID,
+	zr *zip.Reader,
+	createEmbedding func(context.Context, string) ([]float32, error),
+	createEmbeddings MemoryImportBatchEmbeddingFunc,
+	writePackAudit bool,
+) (models.MemoryImportResult, error) {
 	result := models.MemoryImportResult{}
 	candidates := make([]memoryImportCandidate, 0)
 
 	for _, zf := range zr.File {
-		fileCandidates, invalidCount, err := parseMemoryImportFile(zf)
+		fileCandidates, invalidCount, invalidReasons, err := parseMemoryImportFile(zf, d.logger)
 		if err != nil {
 			if writePackAudit {
 				d.auditMemoryPackImport(ctx, userID, result, err)
@@ -1367,12 +1396,18 @@ func (d *Datastore) importMemories(ctx context.Context, userID uuid.UUID, zr *zi
 			return result, err
 		}
 		result.InvalidRecordCount += invalidCount
+		result.InvalidReasons.MalformedJSON += invalidReasons.MalformedJSON
+		result.InvalidReasons.MissingID += invalidReasons.MissingID
+		result.InvalidReasons.EmptyContent += invalidReasons.EmptyContent
+		result.InvalidReasons.MissingCreatedAt += invalidReasons.MissingCreatedAt
+		result.InvalidReasons.MissingChatID += invalidReasons.MissingChatID
 		candidates = append(candidates, fileCandidates...)
 	}
 	d.logger.Info("memory import parsed archive",
 		zap.String("user_id", userID.String()),
 		zap.Int("candidate_count", len(candidates)),
-		zap.Int("invalid_record_count", result.InvalidRecordCount))
+		zap.Int("invalid_record_count", result.InvalidRecordCount),
+		zap.Any("invalid_reasons", result.InvalidReasons))
 
 	if len(candidates) == 0 {
 		if writePackAudit {
@@ -1459,14 +1494,19 @@ func (d *Datastore) importMemories(ctx context.Context, userID uuid.UUID, zr *zi
 
 	total := len(toPrepare)
 	processed := 0
-	for start := 0; start < total; start += memoryImportProgressLogEvery {
-		end := start + memoryImportProgressLogEvery
+	for start := 0; start < total; start += memoryImportBatchSize {
+		end := start + memoryImportBatchSize
 		if end > total {
 			end = total
 		}
 		chunk := toPrepare[start:end]
 
-		prepared, err := buildImportEmbeddingsChunk(ctx, chunk, createEmbedding)
+		var prepared []memoryImportPrepared
+		if createEmbeddings != nil {
+			prepared, err = buildImportEmbeddingsBatch(ctx, chunk, createEmbeddings)
+		} else {
+			prepared, err = buildImportEmbeddingsChunk(ctx, chunk, createEmbedding)
+		}
 		if err != nil {
 			if writePackAudit {
 				d.auditMemoryPackImport(ctx, userID, result, err)
@@ -1479,30 +1519,21 @@ func (d *Datastore) importMemories(ctx context.Context, userID uuid.UUID, zr *zi
 			zap.Int("embedded", processed),
 			zap.Int("total", total))
 
-		chunkProcessed := 0
-		for _, p := range prepared {
-			chunkProcessed++
-			imported, duplicate, err := d.importPreparedMemory(ctx, userID, p)
-			if err != nil {
-				if writePackAudit {
-					d.auditMemoryPackImport(ctx, userID, result, err)
-				}
-				return result, err
+		imported, duplicates, err := d.importPreparedMemories(ctx, userID, prepared)
+		if err != nil {
+			if writePackAudit {
+				d.auditMemoryPackImport(ctx, userID, result, err)
 			}
-			if duplicate {
-				result.DuplicateCount++
-				continue
-			}
-			if imported {
-				result.ImportedCount++
-			}
+			return result, err
 		}
+		result.ImportedCount += imported
+		result.DuplicateCount += duplicates
 
 		d.logger.Info("memory import persist progress",
 			zap.String("user_id", userID.String()),
 			zap.Int("processed", processed),
 			zap.Int("total", total),
-			zap.Int("chunk_size", chunkProcessed),
+			zap.Int("chunk_size", len(prepared)),
 			zap.Int("imported_count", result.ImportedCount),
 			zap.Int("duplicate_count", result.DuplicateCount))
 	}
@@ -1513,10 +1544,14 @@ func (d *Datastore) importMemories(ctx context.Context, userID uuid.UUID, zr *zi
 	return result, nil
 }
 
-func (d *Datastore) importPreparedMemory(ctx context.Context, userID uuid.UUID, p memoryImportPrepared) (imported bool, duplicate bool, err error) {
+func (d *Datastore) importPreparedMemories(ctx context.Context, userID uuid.UUID, prepared []memoryImportPrepared) (imported int, duplicates int, err error) {
+	if len(prepared) == 0 {
+		return 0, 0, nil
+	}
+
 	tx, err := d.dbClient.Tx(ctx)
 	if err != nil {
-		return false, false, err
+		return 0, 0, err
 	}
 	defer func() {
 		if v := recover(); v != nil {
@@ -1525,44 +1560,112 @@ func (d *Datastore) importPreparedMemory(ctx context.Context, userID uuid.UUID, 
 		}
 	}()
 
-	create := tx.Memory.Create().
-		SetID(p.candidate.record.ID).
-		SetContent(p.candidate.record.Content).
-		SetScope(p.candidate.scope).
-		SetStatus(memory.StatusActive).
-		SetConfidence(models.DefaultMemoryConfidence).
-		SetOwnerID(userID).
-		SetCreatedAt(p.candidate.record.CreatedAt)
-
-	if p.candidate.chatID != nil {
-		create = create.SetChatID(*p.candidate.chatID)
+	ids := make([]uuid.UUID, 0, len(prepared))
+	for _, p := range prepared {
+		ids = append(ids, p.candidate.record.ID)
 	}
-	if p.candidate.pinnedPersonalityID != nil {
-		create = create.SetPinnedPersonalityID(*p.candidate.pinnedPersonalityID)
-	}
-
-	newMem, err := create.Save(ctx)
+	existing, err := tx.Memory.Query().
+		Where(memory.IDIn(ids...)).
+		Select(memory.FieldID).
+		All(ctx)
 	if err != nil {
 		_ = tx.Rollback()
-		if ent.IsConstraintError(err) {
-			return false, true, nil
-		}
-		return false, false, err
+		return 0, 0, err
+	}
+	existingIDs := make(map[uuid.UUID]struct{}, len(existing))
+	for _, mem := range existing {
+		existingIDs[mem.ID] = struct{}{}
 	}
 
-	if _, err := tx.Embedding.Create().
-		SetEmbedding(pgvector.NewVector(p.embedding)).
-		SetMemoryID(newMem.ID).
-		Save(ctx); err != nil {
+	toInsert := make([]memoryImportPrepared, 0, len(prepared))
+	for _, p := range prepared {
+		if _, exists := existingIDs[p.candidate.record.ID]; exists {
+			duplicates++
+			continue
+		}
+		toInsert = append(toInsert, p)
+	}
+	if len(toInsert) == 0 {
 		_ = tx.Rollback()
-		return false, false, err
+		return 0, duplicates, nil
+	}
+
+	memoryCreates := make([]*ent.MemoryCreate, 0, len(toInsert))
+	for _, p := range toInsert {
+		create := tx.Memory.Create().
+			SetID(p.candidate.record.ID).
+			SetContent(p.candidate.record.Content).
+			SetScope(p.candidate.scope).
+			SetStatus(memory.StatusActive).
+			SetConfidence(models.DefaultMemoryConfidence).
+			SetOwnerID(userID).
+			SetCreatedAt(p.candidate.record.CreatedAt)
+		if p.candidate.chatID != nil {
+			create.SetChatID(*p.candidate.chatID)
+		}
+		if p.candidate.pinnedPersonalityID != nil {
+			create.SetPinnedPersonalityID(*p.candidate.pinnedPersonalityID)
+		}
+		memoryCreates = append(memoryCreates, create)
+	}
+	if err := tx.Memory.CreateBulk(memoryCreates...).
+		OnConflictColumns(memory.FieldID).
+		DoNothing().
+		Exec(ctx); err != nil {
+		_ = tx.Rollback()
+		return 0, 0, err
+	}
+
+	embeddingCreates := make([]*ent.EmbeddingCreate, 0, len(toInsert))
+	for _, p := range toInsert {
+		embeddingCreates = append(embeddingCreates, tx.Embedding.Create().
+			// Some long-lived deployments predate the unique embedding_memory constraint.
+			// Use the deterministic imported memory ID as the embedding primary key so retries
+			// remain conflict-safe without requiring that legacy constraint.
+			SetID(p.candidate.record.ID).
+			SetEmbedding(pgvector.NewVector(p.embedding)).
+			SetMemoryID(p.candidate.record.ID))
+	}
+	if err := tx.Embedding.CreateBulk(embeddingCreates...).
+		OnConflictColumns(embedding.FieldID).
+		DoNothing().
+		Exec(ctx); err != nil {
+		_ = tx.Rollback()
+		return 0, 0, err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return false, false, err
+		return 0, 0, err
 	}
 
-	return true, false, nil
+	return len(toInsert), duplicates, nil
+}
+
+func buildImportEmbeddingsBatch(
+	ctx context.Context,
+	chunk []memoryImportCandidate,
+	createEmbeddings MemoryImportBatchEmbeddingFunc,
+) ([]memoryImportPrepared, error) {
+	inputs := make([]string, len(chunk))
+	for i, candidate := range chunk {
+		inputs[i] = candidate.record.Content
+	}
+	embeddings, err := createEmbeddings(ctx, inputs)
+	if err != nil {
+		return nil, err
+	}
+	if len(embeddings) != len(chunk) {
+		return nil, fmt.Errorf("create embeddings: got %d vectors for %d memories", len(embeddings), len(chunk))
+	}
+
+	prepared := make([]memoryImportPrepared, len(chunk))
+	for i, candidate := range chunk {
+		prepared[i] = memoryImportPrepared{
+			candidate: candidate,
+			embedding: embeddings[i],
+		}
+	}
+	return prepared, nil
 }
 
 func buildImportEmbeddingsChunk(
@@ -1648,10 +1751,10 @@ func buildImportEmbeddingsChunk(
 	return prepared, nil
 }
 
-func parseMemoryImportFile(zf *zip.File) ([]memoryImportCandidate, int, error) {
+func parseMemoryImportFile(zf *zip.File, logger *zap.Logger) ([]memoryImportCandidate, int, models.MemoryImportInvalidReasons, error) {
 	name := filepath.Base(zf.Name)
 	if !strings.HasSuffix(strings.ToLower(name), ".json") {
-		return nil, 0, nil
+		return nil, 0, models.MemoryImportInvalidReasons{}, nil
 	}
 
 	var scope memory.Scope
@@ -1666,24 +1769,30 @@ func parseMemoryImportFile(zf *zip.File) ([]memoryImportCandidate, int, error) {
 		rawID := strings.TrimSuffix(strings.TrimPrefix(name, "personality-"), ".json")
 		pid, err := uuid.Parse(rawID)
 		if err != nil {
-			return nil, 0, fmt.Errorf("invalid personality file %q: %w", name, err)
+			return nil, 0, models.MemoryImportInvalidReasons{}, fmt.Errorf("invalid personality file %q: %w", name, err)
 		}
 		pinnedPersonalityID = &pid
 	default:
-		return nil, 0, nil
+		return nil, 0, models.MemoryImportInvalidReasons{}, nil
 	}
 
 	rc, err := zf.Open()
 	if err != nil {
-		return nil, 0, fmt.Errorf("open zip entry %q: %w", zf.Name, err)
+		return nil, 0, models.MemoryImportInvalidReasons{}, fmt.Errorf("open zip entry %q: %w", zf.Name, err)
 	}
 	defer rc.Close()
 
-	scanner := bufio.NewScanner(rc)
+	// Cap the real decompressed read for this entry so an under-declared zip
+	// header cannot stream an unbounded amount into memory.
+	limited := &io.LimitedReader{R: rc, N: maxMemoryImportEntryExpandedBytes + 1}
+	scanner := bufio.NewScanner(limited)
 	scanner.Buffer(make([]byte, 64*1024), memoryImportMaxJSONLine)
 	records := make([]memoryImportCandidate, 0)
 	invalidCount := 0
+	invalidReasons := models.MemoryImportInvalidReasons{}
+	lineNumber := 0
 	for scanner.Scan() {
+		lineNumber++
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
@@ -1692,14 +1801,32 @@ func parseMemoryImportFile(zf *zip.File) ([]memoryImportCandidate, int, error) {
 		var rec models.MemoryRecord
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			invalidCount++
+			invalidReasons.MalformedJSON++
+			logInvalidMemoryImportRecord(logger, zf.Name, lineNumber, "malformed_json", uuid.Nil)
 			continue
 		}
-		if rec.ID == uuid.Nil || strings.TrimSpace(rec.Content) == "" || rec.CreatedAt.IsZero() {
+		if rec.ID == uuid.Nil {
 			invalidCount++
+			invalidReasons.MissingID++
+			logInvalidMemoryImportRecord(logger, zf.Name, lineNumber, "missing_id", uuid.Nil)
+			continue
+		}
+		if strings.TrimSpace(rec.Content) == "" {
+			invalidCount++
+			invalidReasons.EmptyContent++
+			logInvalidMemoryImportRecord(logger, zf.Name, lineNumber, "empty_content", rec.ID)
+			continue
+		}
+		if rec.CreatedAt.IsZero() {
+			invalidCount++
+			invalidReasons.MissingCreatedAt++
+			logInvalidMemoryImportRecord(logger, zf.Name, lineNumber, "missing_created_at", rec.ID)
 			continue
 		}
 		if scope == memory.ScopeChat && rec.ChatID == nil {
 			invalidCount++
+			invalidReasons.MissingChatID++
+			logInvalidMemoryImportRecord(logger, zf.Name, lineNumber, "missing_chat_id", rec.ID)
 			continue
 		}
 
@@ -1718,12 +1845,30 @@ func parseMemoryImportFile(zf *zip.File) ([]memoryImportCandidate, int, error) {
 
 	if err := scanner.Err(); err != nil {
 		if errors.Is(err, bufio.ErrTooLong) {
-			return nil, invalidCount, fmt.Errorf("import line exceeds %d MiB in %q", memoryImportMaxJSONLine>>20, zf.Name)
+			return nil, invalidCount, invalidReasons, fmt.Errorf("import line exceeds %d MiB in %q", memoryImportMaxJSONLine>>20, zf.Name)
 		}
-		return nil, invalidCount, fmt.Errorf("scan zip entry %q: %w", zf.Name, err)
+		return nil, invalidCount, invalidReasons, fmt.Errorf("scan zip entry %q: %w", zf.Name, err)
+	}
+	if limited.N <= 0 {
+		return nil, invalidCount, invalidReasons, fmt.Errorf("memory import entry %q exceeds expanded-size limit", zf.Name)
 	}
 
-	return records, invalidCount, nil
+	return records, invalidCount, invalidReasons, nil
+}
+
+func logInvalidMemoryImportRecord(logger *zap.Logger, entry string, line int, reason string, memoryID uuid.UUID) {
+	if logger == nil {
+		return
+	}
+	fields := []zap.Field{
+		zap.String("entry", entry),
+		zap.Int("line", line),
+		zap.String("reason", reason),
+	}
+	if memoryID != uuid.Nil {
+		fields = append(fields, zap.String("memory_id", memoryID.String()))
+	}
+	logger.Warn("memory import skipped invalid record", fields...)
 }
 
 func (d *Datastore) existingAnyMemoryIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]struct{}, error) {
@@ -1744,6 +1889,31 @@ func (d *Datastore) existingAnyMemoryIDs(ctx context.Context, ids []uuid.UUID) (
 		set[m.ID] = struct{}{}
 	}
 
+	return set, nil
+}
+
+// MemoryIDsOwnedByUser returns the subset of the given memory ids that already exist and are owned
+// by userID. The account importer uses it to decide, per record, whether an exported memory is the
+// target user's own native memory (keep its id so the id-dedup below treats it as an existing
+// duplicate) or belongs elsewhere (namespace the id to avoid a cross-account primary-key collision).
+func (d *Datastore) MemoryIDsOwnedByUser(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]struct{}, error) {
+	set := make(map[uuid.UUID]struct{})
+	if len(ids) == 0 {
+		return set, nil
+	}
+	existing, err := d.dbClient.Memory.Query().
+		Where(
+			memory.IDIn(ids...),
+			memory.HasOwnerWith(user.ID(userID)),
+		).
+		Select(memory.FieldID).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range existing {
+		set[m.ID] = struct{}{}
+	}
 	return set, nil
 }
 

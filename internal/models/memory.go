@@ -181,9 +181,20 @@ type MemoryRecord struct {
 
 // MemoryImportResult reports import execution stats for a ZIP upload.
 type MemoryImportResult struct {
-	ImportedCount             int `json:"imported_count"`
-	DuplicateCount            int `json:"duplicate_count"`
-	InvalidRecordCount        int `json:"invalid_record_count"`
-	SkippedMissingChat        int `json:"skipped_missing_chat_count"`
-	SkippedMissingPersonality int `json:"skipped_missing_personality_count"`
+	ImportedCount             int                        `json:"imported_count"`
+	DuplicateCount            int                        `json:"duplicate_count"`
+	InvalidRecordCount        int                        `json:"invalid_record_count"`
+	InvalidReasons            MemoryImportInvalidReasons `json:"invalid_reasons"`
+	SkippedMissingChat        int                        `json:"skipped_missing_chat_count"`
+	SkippedMissingPersonality int                        `json:"skipped_missing_personality_count"`
+}
+
+// MemoryImportInvalidReasons classifies records counted by MemoryImportResult.InvalidRecordCount.
+// It deliberately omits memory content so import progress remains safe to display and audit.
+type MemoryImportInvalidReasons struct {
+	MalformedJSON    int `json:"malformed_json"`
+	MissingID        int `json:"missing_id"`
+	EmptyContent     int `json:"empty_content"`
+	MissingCreatedAt int `json:"missing_created_at"`
+	MissingChatID    int `json:"missing_chat_id"`
 }
