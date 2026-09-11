@@ -14,6 +14,12 @@ const EXEMPT_PATH_PREFIXES = [
   '/usage',
   // Account restoration must be available before a user has a personality.
   '/experimental',
+  // Provider keys are configured here, and creating a personality is itself a
+  // model call — so key setup has to come first. Without this exemption the
+  // two setup guards bounce against each other: no key sends you to
+  // /integrations, no personality sends you back to /personality, and no key
+  // sends you to /integrations again.
+  '/integrations',
 ];
 
 function isExemptPath(url: string | undefined | null): boolean {
