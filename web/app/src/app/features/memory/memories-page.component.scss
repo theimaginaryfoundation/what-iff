@@ -35,9 +35,11 @@
 
 .memories-shell__tabs {
   display: flex;
-  gap: 1.5rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
   border-bottom: 1px solid var(--color-border-base);
   margin-bottom: 0.25rem;
+  min-width: 0;
 }
 
 .memories-shell__tab {
@@ -50,6 +52,7 @@
   font-weight: 500;
   margin-bottom: -1px;
   padding: 0.75rem 0.25rem;
+  white-space: nowrap;
 }
 
 .memories-shell__tab--active {
@@ -68,6 +71,17 @@
 
   .memories-shell {
     padding: 1rem 1rem 1.5rem;
+  }
+}
+
+@media (max-width: 400px) {
+  .memories-shell__tabs {
+    gap: 0.35rem 0.85rem;
+  }
+
+  .memories-shell__tab {
+    font-size: 0.8125rem;
+    padding: 0.6rem 0.1rem;
   }
 }
 

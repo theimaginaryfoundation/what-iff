@@ -181,12 +181,14 @@
 
 .memories-list__status-tabs {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 0.25rem;
   padding: 0.2rem;
   border-radius: 0.5rem;
   border: 1px solid var(--color-border-base);
   background: var(--color-surface-elevated);
-  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .memories-list__status-tabs button {
@@ -348,8 +350,20 @@
     align-items: stretch;
   }
 
+  .memories-list__filter-field {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
   .memories-list__date-wrap,
-  .memories-list__filter-field select {
+  .memories-list__filter-field select,
+  .memories-list__filter-field input,
+  .memories-list__sort-wrap {
     width: 100%;
+    min-width: 0;
+  }
+
+  .memories-list__status-tabs button {
+    padding: 0.35rem 0.65rem;
   }
 }
