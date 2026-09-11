@@ -1,3 +1,9 @@
 :host {
   display: block;
 }
+
+.memory-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}

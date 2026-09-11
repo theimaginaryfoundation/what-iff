@@ -49,38 +49,45 @@ async function assertCommonLayout(memoriesPage: MemoriesPage, width: number, mem
   await expect(memoriesPage.heading).toBeVisible();
   await expect(memoriesPage.subtitle).toBeVisible();
   await expect(memoriesPage.headerActions).toBeVisible();
-  await expect(memoriesPage.filterTabs).toBeVisible();
-  await expect(memoriesPage.sortSelect).toBeVisible();
+  await expect(memoriesPage.statusTabs).toBeVisible();
+  await expect(memoriesPage.filtersRow).toBeVisible();
   await expect(memoriesPage.card(memoryContent)).toBeVisible();
 
-  const headingBox = await rect(memoriesPage.heading, 'Memories heading');
-  const subtitleBox = await rect(memoriesPage.subtitle, 'Memories subtitle');
-  const headerCopyBox = await rect(memoriesPage.headerCopy, 'Memories header copy');
-  const headerActionsBox = await rect(memoriesPage.headerActions, 'Memories header actions');
-  const filterTabsBox = await rect(memoriesPage.filterTabs, 'Memory filters');
+  // Sort is always visible in the merged filters row.
+  await expect(memoriesPage.sortSelect).toBeVisible();
+  await expect(memoriesPage.openMinDateButton).toBeVisible();
+  await expect(memoriesPage.openMaxDateButton).toBeVisible();
+
+  const headingBox = await rect(memoriesPage.heading, 'Memory Manager heading');
+  const subtitleBox = await rect(memoriesPage.subtitle, 'Memory Manager subtitle');
+  const headerCopyBox = await rect(memoriesPage.headerCopy, 'Memory Manager header copy');
+  const headerActionsBox = await rect(memoriesPage.headerActions, 'Memory Manager tabs');
+  const statusTabsBox = await rect(memoriesPage.statusTabs, 'Memory status tabs');
+  const filtersBox = await rect(memoriesPage.filtersRow, 'Memory filters');
   const sortBox = await rect(memoriesPage.sortSelect, 'Memory sort control');
   const cardBox = await rect(memoriesPage.card(memoryContent), 'Memory card');
 
-  expectNoOverlap(headerCopyBox, headerActionsBox, 'Header copy and header actions must not overlap');
+  expectNoOverlap(headerCopyBox, headerActionsBox, 'Header copy and tabs must not overlap');
 
   for (const [label, box] of [
-    ['Memories heading', headingBox],
-    ['Memories subtitle', subtitleBox],
-    ['Memories header actions', headerActionsBox],
-    ['Memory filters', filterTabsBox],
+    ['Memory Manager heading', headingBox],
+    ['Memory Manager subtitle', subtitleBox],
+    ['Memory Manager tabs', headerActionsBox],
+    ['Memory status tabs', statusTabsBox],
+    ['Memory filters', filtersBox],
     ['Memory sort control', sortBox],
     ['Memory card', cardBox],
   ] as const) {
     expectInsideViewport(box, width, label);
   }
 
-  await expect(memoriesPage.batchImportButton).toBeDisabled();
-  await memoriesPage.mergeHistoryLink.click({ trial: true });
-  await memoriesPage.compactionLogLink.click({ trial: true });
-  for (const filter of ['All', 'Global', 'Personality', 'Thread', 'Summary'] as const) {
-    await memoriesPage.filterTab(filter).click({ trial: true });
-  }
+  await memoriesPage.mergeHistoryTab.click({ trial: true });
+  await memoriesPage.compactionLogTab.click({ trial: true });
+  await memoriesPage.statusTabs.getByRole('tab', { name: 'Active', exact: true }).click({ trial: true });
+  await memoriesPage.statusTabs.getByRole('tab', { name: 'Archived', exact: true }).click({ trial: true });
+  await memoriesPage.statusTabs.getByRole('tab', { name: 'Summaries', exact: true }).click({ trial: true });
   await memoriesPage.sortSelect.click({ trial: true });
+  await memoriesPage.openMinDateButton.click({ trial: true });
 
   const mainExtent = await memoriesPage.mainContent.evaluate(element => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
   expect(mainExtent.scrollWidth, `Main content should not require horizontal scrolling at ${width}px`).toBeLessThanOrEqual(

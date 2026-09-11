@@ -1,17 +1,12 @@
 import type { Locator, Page } from '@playwright/test';
 import { AppShell } from './app-shell.page';
 
-/** Filter tabs in the memories toolbar (`role="tablist"`, "Memory filters"). */
-export type MemoryFilter = 'All' | 'Global' | 'Personality' | 'Thread' | 'Summary';
+/** Sidebar association filters for memories (All / Global). */
+export type MemoryFilter = 'All' | 'Global';
 
 /**
- * Memories list (`/memories`) — features/memory/memories-page.component.html.
- *
- * NOTE: there is no free-text search on this page. The exploration pass
- * expected a `Search in memory content...` box; the only search input in the
- * feature lives in `memory-filter-bar.component`, which the page doesn't
- * render (it uses the toolbar tabs + a sort select instead). Filtering by
- * personality is done from the sidebar, not this page.
+ * Memories list (`/memories`) — features/memory/memories-list-tab under the
+ * Memory Manager shell (memories-page.component).
  */
 export class MemoriesPage {
   private readonly shell: AppShell;
@@ -23,33 +18,40 @@ export class MemoriesPage {
     this.previousPageButton = this.page.getByRole('button', {
       name: 'Previous',
     });
-    this.nextPageButton = this.page.getByRole('button', { name: 'Next' });
+    this.nextPageButton = this.page.getByRole('button', {
+      name: 'Next',
+    });
     this.pageIndicator = this.page.getByText(/^Page \d+ of \d+$/);
     this.heading = this.page.getByRole('heading', {
-      name: 'Memories',
+      name: 'Memory Manager',
       level: 1,
     });
-    this.subtitle = this.page.getByText('Saved context that informs your conversations.', {
-      exact: true,
-    });
-    this.header = this.page.locator('.memories-header');
-    this.headerCopy = this.page.locator('.memories-header__copy');
-    this.headerActions = this.page.locator('.memories-header__actions');
-    this.mergeHistoryLink = this.page.getByRole('link', { name: 'Merge history', exact: true });
-    this.compactionLogLink = this.page.getByRole('link', { name: 'Compaction log', exact: true });
-    this.batchImportButton = this.page.getByRole('button', { name: 'Batch Import', exact: true });
+    this.subtitle = this.page.getByText(
+      'Review and correct saved context that informs your conversations.',
+      { exact: true },
+    );
+    this.header = this.page.locator('.memories-shell__header');
+    this.headerCopy = this.page.locator('.memories-shell__copy');
+    this.headerActions = this.page.locator('.memories-shell__tabs');
+    this.mergeHistoryTab = this.page.getByRole('tab', { name: 'Merge history', exact: true });
+    this.compactionLogTab = this.page.getByRole('tab', { name: 'Compaction log', exact: true });
+    this.memoriesTab = this.page.getByRole('tab', { name: 'Memories', exact: true });
     this.mobileMenuButton = this.page.getByRole('button', { name: 'Open navigation menu', exact: true });
     this.mainContent = this.page.locator('#main-content');
-    this.toolbar = this.page.locator('.memories-toolbar');
-    this.filterTabs = this.page.getByRole('tablist', {
-      name: 'Memory filters',
-    });
-    this.sortSelect = this.page.locator('.memories-toolbar__sort select');
+    this.filtersRow = this.page.locator('.memories-list__filters');
+    this.statusTabs = this.page.getByRole('tablist', { name: 'Memory status' });
+    this.sortSelect = this.page.locator('.memories-list__filters .memories-list__sort-wrap select');
+    this.searchInput = this.page.getByPlaceholder('Search memories…');
+    this.minDateInput = this.page.locator('.memories-list__date-wrap input[type="date"]').first();
+    this.maxDateInput = this.page.locator('.memories-list__date-wrap input[type="date"]').last();
+    this.openMinDateButton = this.page.getByRole('button', { name: 'Open start date calendar', exact: true });
+    this.openMaxDateButton = this.page.getByRole('button', { name: 'Open end date calendar', exact: true });
     this.grid = this.page.getByRole('list', { name: 'Memories' });
     this.cards = this.page.locator('article.memory-card');
     this.editingCard = this.cards.filter({
       has: this.page.locator('.memory-card__editor'),
     });
+    this.bulkBar = this.page.getByRole('toolbar', { name: 'Bulk memory actions' });
   }
 
   async navigateTo(): Promise<void> {
@@ -67,31 +69,67 @@ export class MemoriesPage {
 
   readonly headerActions: Locator;
 
-  readonly mergeHistoryLink: Locator;
+  readonly memoriesTab: Locator;
 
-  readonly compactionLogLink: Locator;
+  readonly mergeHistoryTab: Locator;
 
-  readonly batchImportButton: Locator;
+  readonly compactionLogTab: Locator;
+
+  /** @deprecated Use mergeHistoryTab — kept for older specs during the tab migration. */
+  get mergeHistoryLink(): Locator {
+    return this.mergeHistoryTab;
+  }
+
+  /** @deprecated Use compactionLogTab — kept for older specs during the tab migration. */
+  get compactionLogLink(): Locator {
+    return this.compactionLogTab;
+  }
 
   readonly mobileMenuButton: Locator;
 
   readonly mainContent: Locator;
 
-  readonly toolbar: Locator;
+  readonly filtersRow: Locator;
 
-  readonly filterTabs: Locator;
-
-  /**
-   * The toolbar filters are plain `<button>`s inside a `role="tablist"` —
-   * they have no `role="tab"` of their own, so they're matched as buttons
-   * scoped to the tablist rather than by tab role.
-   */
-  filterTab(filter: MemoryFilter): Locator {
-    return this.filterTabs.getByRole('button', { name: filter, exact: true });
+  /** @deprecated Level chip row removed — use filtersRow / sidebar All·Global. */
+  get toolbar(): Locator {
+    return this.filtersRow;
   }
 
+  /** @deprecated Level chip row removed — use statusTabs or sidebar filters. */
+  get filterTabs(): Locator {
+    return this.statusTabs;
+  }
+
+  readonly statusTabs: Locator;
+
+  readonly searchInput: Locator;
+
+  readonly minDateInput: Locator;
+
+  readonly maxDateInput: Locator;
+
+  readonly openMinDateButton: Locator;
+
+  readonly openMaxDateButton: Locator;
+
+  readonly bulkBar: Locator;
+
   async filterBy(filter: MemoryFilter): Promise<void> {
-    await this.filterTab(filter).click();
+    const name = filter === 'All' ? 'Show all memories' : 'Show global memories only';
+    await this.page.getByRole('button', { name, exact: true }).click();
+  }
+
+  async showArchived(): Promise<void> {
+    await this.statusTabs.getByRole('tab', { name: 'Archived', exact: true }).click();
+  }
+
+  async showActive(): Promise<void> {
+    await this.statusTabs.getByRole('tab', { name: 'Active', exact: true }).click();
+  }
+
+  async showSummaries(): Promise<void> {
+    await this.statusTabs.getByRole('tab', { name: 'Summaries', exact: true }).click();
   }
 
   readonly sortSelect: Locator;
@@ -115,8 +153,13 @@ export class MemoriesPage {
   /** "No memories found." — rendered by memory-card-grid when the list is empty. */
   readonly emptyMessage: Locator;
 
+  async openCardMenu(content: string): Promise<void> {
+    await this.card(content).getByRole('button', { name: 'More actions' }).click();
+  }
+
   async startEdit(content: string): Promise<void> {
-    await this.card(content).getByRole('button', { name: 'Edit memory' }).click();
+    await this.openCardMenu(content);
+    await this.page.getByRole('menuitem', { name: 'Edit', exact: true }).click();
   }
 
   /**
@@ -139,17 +182,18 @@ export class MemoriesPage {
 
   /** Opens the delete confirmation modal for one card. */
   async requestDelete(content: string): Promise<void> {
-    await this.card(content).getByRole('button', { name: 'Delete memory' }).click();
+    await this.openCardMenu(content);
+    await this.page.getByRole('menuitem', { name: 'Delete', exact: true }).click();
   }
 
   readonly deleteDialogHeading: Locator;
 
   async confirmDelete(): Promise<void> {
-    await this.page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await this.page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click();
   }
 
   async cancelDelete(): Promise<void> {
-    await this.page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await this.page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
   }
 
   async delete(content: string): Promise<void> {
@@ -157,10 +201,46 @@ export class MemoriesPage {
     await this.confirmDelete();
   }
 
+  async selectCard(content: string): Promise<void> {
+    await this.card(content).getByLabel('Select memory').check();
+  }
+
+  async archiveFromMenu(content: string): Promise<void> {
+    await this.openCardMenu(content);
+    await this.page.getByRole('menuitem', { name: 'Archive', exact: true }).click();
+  }
+
+  async unarchiveFromMenu(content: string): Promise<void> {
+    await this.openCardMenu(content);
+    await this.page.getByRole('menuitem', { name: 'Unarchive', exact: true }).click();
+  }
+
+  async moveFromMenu(content: string, destination: string): Promise<void> {
+    await this.openCardMenu(content);
+    await this.page.getByRole('menuitem', { name: 'Move', exact: true }).click();
+    await this.page.getByRole('dialog', { name: 'Move memories' }).getByRole('button', {
+      name: destination,
+      exact: true,
+    }).click();
+  }
+
+  async bulkArchive(): Promise<void> {
+    await this.bulkBar.getByRole('button', { name: /^(Archive|Unarchive)$/ }).click();
+  }
+
+  async bulkDelete(): Promise<void> {
+    await this.bulkBar.getByRole('button', { name: 'Delete', exact: true }).click();
+  }
+
+  async bulkMove(destination: string): Promise<void> {
+    await this.bulkBar.getByRole('button', { name: 'Move', exact: true }).click();
+    await this.page.getByRole('dialog', { name: 'Move memories' }).getByRole('button', {
+      name: destination,
+      exact: true,
+    }).click();
+  }
+
   // --- pagination ----------------------------------------------------------
-  //
-  // Rendered only when there is more than one page, and with no landmark or
-  // aria-label of its own — the buttons are matched by their labels.
 
   readonly previousPageButton: Locator;
 

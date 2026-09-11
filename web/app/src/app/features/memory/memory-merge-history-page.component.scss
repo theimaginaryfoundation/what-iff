@@ -25,6 +25,19 @@
   color: var(--color-text-primary);
 }
 
+.merge-history-embedded-header h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.merge-history-embedded-header p {
+  margin: 0 0 0.5rem;
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+}
+
 .merge-history-status,
 .merge-history-error {
   border-radius: 1rem;

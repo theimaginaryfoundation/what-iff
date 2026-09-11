@@ -3940,6 +3940,146 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/batch/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete memories in batch
+         * @description Permanently deletes multiple memories owned by the authenticated user
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemoryBatchDeleteRequest"];
+                };
+            };
+            responses: {
+                /** @description Batch delete processed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryBatchDeleteResponse"];
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description One or more memories not found (all_or_none) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/batch/patch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Patch memories in batch
+         * @description Applies the same patch to multiple memories (e.g. move / archive). Useful for bulk Move (level + pinned_personality_id) and Archive (status).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemoryBatchPatchRequest"];
+                };
+            };
+            responses: {
+                /** @description Batch patch processed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryBatchPatchResponse"];
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description One or more memories not found (all_or_none) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/{id}": {
         parameters: {
             query?: never;
@@ -8430,6 +8570,24 @@ export interface components {
         MemoryBatchCreateResponse: {
             results: components["schemas"]["Memory"][];
             created_count: number;
+        };
+        MemoryBatchDeleteRequest: {
+            ids: string[];
+            /** @default false */
+            all_or_none: boolean;
+        };
+        MemoryBatchDeleteResponse: {
+            deleted_count: number;
+        };
+        MemoryBatchPatchRequest: {
+            ids: string[];
+            patch: components["schemas"]["MemoryPatchRequest"];
+            /** @default false */
+            all_or_none: boolean;
+        };
+        MemoryBatchPatchResponse: {
+            results: components["schemas"]["Memory"][];
+            updated_count: number;
         };
         MemoryPatchRequest: {
             content?: string;

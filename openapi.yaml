@@ -2581,6 +2581,82 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /memory/batch/delete:
+    post:
+      summary: Delete memories in batch
+      description: Permanently deletes multiple memories owned by the authenticated user
+      tags: [Memory Management]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryBatchDeleteRequest'
+      responses:
+        '200':
+          description: Batch delete processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryBatchDeleteResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: One or more memories not found (all_or_none)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /memory/batch/patch:
+    post:
+      summary: Patch memories in batch
+      description: >
+        Applies the same patch to multiple memories (e.g. move / archive).
+        Useful for bulk Move (level + pinned_personality_id) and Archive (status).
+      tags: [Memory Management]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryBatchPatchRequest'
+      responses:
+        '200':
+          description: Batch patch processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryBatchPatchResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: One or more memories not found (all_or_none)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /memory/{id}:
     get:
       summary: Get memory by ID
@@ -6857,6 +6933,54 @@ components:
         created_count:
           type: integer
       required: [results, created_count]
+
+    MemoryBatchDeleteRequest:
+      type: object
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            format: uuid
+        all_or_none:
+          type: boolean
+          default: false
+      required: [ids]
+
+    MemoryBatchDeleteResponse:
+      type: object
+      properties:
+        deleted_count:
+          type: integer
+      required: [deleted_count]
+
+    MemoryBatchPatchRequest:
+      type: object
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            format: uuid
+        patch:
+          $ref: '#/components/schemas/MemoryPatchRequest'
+        all_or_none:
+          type: boolean
+          default: false
+      required: [ids, patch]
+
+    MemoryBatchPatchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Memory'
+        updated_count:
+          type: integer
+      required: [results, updated_count]
 
     MemoryPatchRequest:
       type: object

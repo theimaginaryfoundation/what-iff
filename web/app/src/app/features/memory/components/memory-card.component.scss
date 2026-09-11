@@ -1,108 +1,255 @@
 :host {
   display: block;
+  position: relative;
 }
 
 .memory-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 10px 12px;
-  border-radius: 8px;
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 0.75rem;
+  align-items: start;
+  padding: 0.85rem 0.9rem;
+  border-radius: 0.65rem;
   border: 1px solid var(--color-border-base);
   background: var(--color-surface-elevated);
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
-.memory-card__actions {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.memory-card--readonly {
+  grid-template-columns: auto 1fr;
 }
 
-.memory-card__icon-button {
-  border: none;
-  background: transparent;
-  color: var(--color-text-muted);
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.memory-card:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border-base));
+}
+
+.memory-card--selected,
+.memory-card--focused {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-border-base));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+.memory-card__check {
+  display: flex;
+  padding-top: 0.2rem;
   cursor: pointer;
 }
 
-.memory-card__icon-button--active {
+.memory-card__checkbox {
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  border-radius: 0.3rem;
+  border: 1.5px solid color-mix(in srgb, var(--color-accent) 45%, var(--color-border-base));
+  background: var(--color-surface-input);
+  cursor: pointer;
+  display: grid;
+  place-content: center;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.memory-card__checkbox::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  transform: scale(0);
+  transition: transform 100ms ease;
+  box-shadow: inset 1rem 1rem #fff;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0, 43% 62%);
+}
+
+.memory-card__checkbox:checked {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.memory-card__checkbox:checked::before {
+  transform: scale(1);
+}
+
+.memory-card__checkbox:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.memory-card__avatar {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.05rem;
+}
+
+.memory-card__avatar-fallback {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--level-color, var(--color-accent)) 16%, transparent);
+  color: var(--level-color, var(--color-accent));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--level-color, var(--color-accent)) 55%, transparent);
+}
+
+.memory-card__avatar-fallback[data-level='global'] { --level-color: #4f6bed; }
+.memory-card__avatar-fallback[data-level='personality'] { --level-color: #8b5cf6; }
+.memory-card__avatar-fallback[data-level='thread'] { --level-color: #0d9488; }
+.memory-card__avatar-fallback[data-level='summary'] { --level-color: #d97706; }
+
+.memory-card__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.memory-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.memory-card__identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.memory-card__name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.memory-card__level {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  border: 1px solid color-mix(in srgb, var(--level-color, var(--color-border-base)) 55%, var(--color-border-base));
+  color: var(--level-color, var(--color-text-muted));
+  background: color-mix(in srgb, var(--level-color, transparent) 12%, transparent);
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+}
+
+.memory-card__level[data-level='global'] { --level-color: #4f6bed; }
+.memory-card__level[data-level='personality'] { --level-color: #8b5cf6; }
+.memory-card__level[data-level='thread'] { --level-color: #0d9488; }
+.memory-card__level[data-level='summary'] { --level-color: #d97706; }
+
+.memory-card__star--on {
   color: var(--color-accent);
 }
 
-.memory-card__excerpt {
-  margin: 0;
-  padding: 0 36px 0 0;
-  text-align: left;
-  font-size: 12px;
-  line-height: 1.5;
+.memory-card__top-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.memory-card__date {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.memory-card__menu-wrap {
+  position: relative;
+}
+
+.memory-card__menu-btn {
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 0.35rem;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.memory-card__menu-btn:hover {
+  background: color-mix(in srgb, var(--color-text-muted) 12%, transparent);
   color: var(--color-text-primary);
+}
+
+.memory-card__menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.2rem);
+  z-index: 5;
+  min-width: 9.5rem;
+  display: flex;
+  flex-direction: column;
+  padding: 0.3rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-elevated);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.memory-card__menu button {
+  border: none;
+  background: transparent;
+  text-align: left;
+  color: var(--color-text-primary);
+  font-size: 0.75rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+
+.memory-card__menu button:hover {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.memory-card__menu-danger {
+  color: var(--color-danger, #ef4444) !important;
+}
+
+.memory-card__backdrop {
+  position: fixed;
+  inset: 0;
+  border: none;
+  background: transparent;
+  z-index: 4;
+  cursor: default;
+}
+
+.memory-card__content {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
   overflow: hidden;
 }
 
-.memory-card__meta {
+.memory-card__footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.memory-card__meta-left {
-  min-width: 0;
-  flex: 1;
-}
-
-.memory-card__thread-label {
-  display: block;
-  font-size: 11px;
-  color: var(--color-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.memory-card__personality {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  max-width: 100%;
-  font-size: 11px;
+  gap: 0.5rem;
+  font-size: 0.75rem;
   color: var(--color-text-muted);
 }
 
-.memory-card__personality span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.memory-card__meta-right {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
-
-.memory-card__meta-right span:first-child {
-  font-size: 11px;
-}
-
-.memory-card__meta-right span:last-child {
-  font-size: 9px;
+.memory-card__verified {
+  border-radius: 999px;
+  padding: 0 0.375rem;
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  color: var(--color-text-primary);
+  font-size: 0.625rem;
+  font-weight: 700;
 }
 
 .memory-card__pin-label {
@@ -122,10 +269,6 @@
   padding: 6px 8px;
   font-size: 11px;
   color: var(--color-text-primary);
-}
-
-.memory-card__editor {
-  padding-right: 4px;
 }
 
 .memory-card__textarea {
@@ -172,13 +315,4 @@
   border: 1px solid var(--color-border-base);
   background: transparent;
   color: var(--color-text-muted);
-}
-
-.memory-card__verified {
-  border-radius: 999px;
-  padding: 0 0.375rem;
-  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
-  color: var(--color-text-primary);
-  font-size: 0.625rem;
-  font-weight: 700;
 }

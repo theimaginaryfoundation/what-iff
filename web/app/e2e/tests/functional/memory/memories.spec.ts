@@ -2,12 +2,10 @@ import { test, expect, seedName } from '../../../fixtures';
 
 /** Memories list + detail smoke coverage for the MemoriesPage/MemoryDetailPage POMs. */
 
-test('lists seeded memories and filters by level', async ({ memoriesPage, seed, userWithPersonality }) => {
-  // FIXME(memory filter tabs race): each filter-tab click fires 2-3
-  // concurrent load() calls with no request cancellation. When responses
-  // arrive out of order the stale result overwrites the correct one,
-  // showing "No memories found" after switching back to the All tab. ~50%
-  // failure rate on webkit-mobile.
+test('lists seeded memories and filters by association', async ({ memoriesPage, seed, userWithPersonality }) => {
+  // FIXME(memory filter tabs race): each filter click fires concurrent load()
+  // calls with no request cancellation. When responses arrive out of order the
+  // stale result overwrites the correct one. ~50% failure rate on webkit-mobile.
   test.fixme(true, 'Filter tabs fire concurrent non-cancelling API calls — see #37');
   const memories = await seed.memories(3);
   await memoriesPage.navigateTo();
@@ -17,21 +15,9 @@ test('lists seeded memories and filters by level', async ({ memoriesPage, seed, 
     await expect(memoriesPage.card(memory.content as string)).toBeVisible();
   }
 
-  // Everything seeded here is level "global", so the Global tab keeps them and
-  // the Thread tab drops them.
+  // Everything seeded here is level "global", so the Global sidebar filter keeps them.
   await memoriesPage.filterBy('Global');
   await expect(memoriesPage.card(memories[0].content as string)).toBeVisible();
-
-  // Asserted per-memory rather than via the grid's empty state: the empty
-  // state is a claim about the *account's* whole list, and on the deployed
-  // configs every test shares one Cognito account, so a thread-level memory
-  // belonging to some other worker makes this fail for a reason that has
-  // nothing to do with the filter. Each seeded card being hidden is the claim
-  // the test actually means to make, and it holds either way.
-  await memoriesPage.filterBy('Thread');
-  for (const memory of memories) {
-    await expect(memoriesPage.card(memory.content as string)).toBeHidden();
-  }
 
   await memoriesPage.filterBy('All');
   await expect(memoriesPage.card(memories[0].content as string)).toBeVisible();
@@ -190,4 +176,71 @@ test('paginates the memory list', { tag: '@serial' }, async ({ memoriesPage, see
 
   await memoriesPage.previousPage();
   await expect(memoriesPage.pageIndicator).toHaveText('Page 1 of 2');
+});
+
+test('archives a memory and shows it under Archived', async ({ memoriesPage, seed, userWithPersonality }) => {
+  const [memory] = await seed.memories(1, { content: seedName('memory-archive') });
+  await memoriesPage.navigateTo();
+
+  const content = memory.content as string;
+  await expect(memoriesPage.card(content)).toBeVisible();
+  await memoriesPage.archiveFromMenu(content);
+  await expect(memoriesPage.card(content)).toBeHidden();
+
+  await memoriesPage.showArchived();
+  await expect(memoriesPage.card(content)).toBeVisible();
+});
+
+test('switches Memory Manager tabs', async ({ memoriesPage, userWithPersonality }) => {
+  await memoriesPage.navigateTo();
+  await expect(memoriesPage.memoriesTab).toHaveAttribute('aria-selected', 'true');
+
+  await memoriesPage.mergeHistoryTab.click();
+  await expect(userWithPersonality.page).toHaveURL(/tab=merge-history/);
+  await expect(memoriesPage.mergeHistoryTab).toHaveAttribute('aria-selected', 'true');
+
+  await memoriesPage.compactionLogTab.click();
+  await expect(userWithPersonality.page).toHaveURL(/tab=compaction-log/);
+  await expect(memoriesPage.compactionLogTab).toHaveAttribute('aria-selected', 'true');
+});
+
+test('bulk archives selected memories', async ({ memoriesPage, seed, userWithPersonality }) => {
+  const [keep, archiveMe] = await seed.memories(2);
+  const keepContent = keep.content as string;
+  const archiveContent = archiveMe.content as string;
+  await memoriesPage.navigateTo();
+
+  await memoriesPage.selectCard(archiveContent);
+  await expect(memoriesPage.bulkBar).toBeVisible();
+  await memoriesPage.bulkArchive();
+
+  await expect(memoriesPage.card(archiveContent)).toBeHidden();
+  await expect(memoriesPage.card(keepContent)).toBeVisible();
+
+  await memoriesPage.showArchived();
+  await expect(memoriesPage.card(archiveContent)).toBeVisible();
+});
+
+test('bulk deletes selected memories', async ({ memoriesPage, seed, userWithPersonality }) => {
+  const [keep, remove] = await seed.memories(2);
+  await memoriesPage.navigateTo();
+
+  await memoriesPage.selectCard(remove.content as string);
+  await expect(memoriesPage.bulkBar).toBeVisible();
+  await memoriesPage.bulkDelete();
+  await expect(memoriesPage.deleteDialogHeading).toContainText(/Delete 1 memory/);
+  await memoriesPage.confirmDelete();
+
+  await expect(memoriesPage.card(remove.content as string)).toBeHidden();
+  await expect(memoriesPage.card(keep.content as string)).toBeVisible();
+});
+
+test('moves a memory to Global from the card menu', async ({ memoriesPage, seed, userWithPersonality }) => {
+  const [memory] = await seed.memories(1, { content: seedName('memory-move-global') });
+  await memoriesPage.navigateTo();
+
+  const content = memory.content as string;
+  await memoriesPage.moveFromMenu(content, 'Global / shared');
+  await expect(memoriesPage.card(content)).toBeVisible();
+  await expect(memoriesPage.card(content)).toContainText('Global');
 });

@@ -698,6 +698,49 @@ func TestDeleteMemory_WrongOwner(t *testing.T) {
 	require.True(t, exists, "delete by a non-owner must not remove the memory")
 }
 
+func TestDeleteMemoriesBatch_AllOrNoneNotFound(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+
+	created, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{Content: "keep me", Level: models.MemoryLevelGlobal})
+	require.NoError(t, err)
+
+	_, err = ds.DeleteMemoriesBatch(ctx, userID, models.BatchDeleteMemoryInput{
+		IDs:       []uuid.UUID{created.ID, uuid.New()},
+		AllOrNone: true,
+	})
+	require.ErrorIs(t, err, ErrMemoryNotFound)
+
+	exists, err := ds.dbClient.Memory.Query().Where(entmemory.ID(created.ID)).Exist(ctx)
+	require.NoError(t, err)
+	require.True(t, exists, "all_or_none should roll back when any id is missing")
+}
+
+func TestDeleteMemoriesBatch_AllOrNoneHappyPath(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+
+	first, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{Content: "one", Level: models.MemoryLevelGlobal})
+	require.NoError(t, err)
+	second, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{Content: "two", Level: models.MemoryLevelGlobal})
+	require.NoError(t, err)
+
+	result, err := ds.DeleteMemoriesBatch(ctx, userID, models.BatchDeleteMemoryInput{
+		IDs:       []uuid.UUID{first.ID, second.ID},
+		AllOrNone: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, result.DeletedCount)
+}
+
 // --- GetMemory ---
 
 func TestGetMemory_HappyPath(t *testing.T) {
@@ -888,6 +931,37 @@ func TestListMemories_FiltersAndPagination(t *testing.T) {
 	badLevel := models.MemoryLevel("bogus")
 	_, err = ds.ListMemories(ctx, userID, 1, 10, models.MemoryFilters{Level: &badLevel})
 	require.Error(t, err)
+}
+
+func TestListMemories_ExcludesSummaryUnlessRequested(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+	chatID := uuid.New()
+	createTestChat(t, ds, chatID, userID)
+
+	_, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{Content: "global memory", Level: models.MemoryLevelGlobal})
+	require.NoError(t, err)
+	summary, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{
+		Content: "checkpoint summary",
+		Level:   models.MemoryLevelSummary,
+		ChatID:  &chatID,
+	})
+	require.NoError(t, err)
+
+	resp, err := ds.ListMemories(ctx, userID, 1, 10, models.MemoryFilters{})
+	require.NoError(t, err)
+	require.Equal(t, 1, resp.TotalCount)
+	require.Equal(t, models.MemoryLevelGlobal, resp.Results[0].(*models.Memory).Level)
+
+	summaryLevel := models.MemoryLevelSummary
+	resp, err = ds.ListMemories(ctx, userID, 1, 10, models.MemoryFilters{Level: &summaryLevel})
+	require.NoError(t, err)
+	require.Equal(t, 1, resp.TotalCount)
+	require.Equal(t, summary.ID, resp.Results[0].(*models.Memory).ID)
 }
 
 func TestListMemories_DefaultsAndSort(t *testing.T) {

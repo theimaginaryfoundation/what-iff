@@ -7,6 +7,7 @@ HTTP API for **semantic memories** — CRUD, search, plus export/import portabil
 ## Responsibilities
 
 - **`Handler`:** Memory routes wired in `handler.go`; uses datastore memory layer and vector search.
+- **Batch actions:** `batch_actions.go` — `POST /memory/batch/delete` and `POST /memory/batch/patch` for bulk delete / move / archive (`all_or_none` supported).
 - **Import/export:** `export.go` streams memory ZIP downloads; `import.go` accepts a ZIP upload and triggers UUID-deduped import with embedding regeneration.
 
 ## Dependencies
@@ -22,6 +23,7 @@ HTTP API for **semantic memories** — CRUD, search, plus export/import portabil
 ## Testing
 
 - `import_test.go` covers import availability gating and multipart body-size enforcement.
+- `batch_actions_test.go` covers batch id/patch parsing and unauthorized delete batch.
 
 ## Related documentation
 

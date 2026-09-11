@@ -62,6 +62,8 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	memoryRouter.HandleFunc("", h.ListMemories).Methods("GET")
 	memoryRouter.HandleFunc("", h.CreateMemory).Methods("POST")
 	memoryRouter.HandleFunc("/batch", h.CreateMemoriesBatch).Methods("POST")
+	memoryRouter.HandleFunc("/batch/delete", h.DeleteMemoriesBatch).Methods("POST")
+	memoryRouter.HandleFunc("/batch/patch", h.PatchMemoriesBatch).Methods("POST")
 	memoryRouter.HandleFunc("/export", h.ExportMemories).Methods("GET")
 	memoryRouter.HandleFunc("/import", h.ImportMemories).Methods("POST")
 	memoryRouter.HandleFunc("/merge-events", h.ListMemoryMergeEvents).Methods("GET")

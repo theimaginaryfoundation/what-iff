@@ -23,9 +23,28 @@ describe('memory-vm.helpers', () => {
         expect(vm.chatName).toBe('Roadmap Chat');
     });
 
+    it('maps merged_from ids onto the card vm', () => {
+        const vm = toMemoryCardVm(
+            makeMemory({
+                chain_metadata: {
+                    duplicate_count: 2,
+                    merged_from_memory_ids: ['m-a', 'm-b'],
+                },
+            }),
+        );
+        expect(vm.mergedFromIds).toEqual(['m-a', 'm-b']);
+        expect(vm.verifiedCount).toBe(2);
+    });
+
     it('formats level badge text', () => {
-        expect(levelBadgeText('global')).toBe('User');
-        expect(levelBadgeText('thread')).toBe('Chat');
+        expect(levelBadgeText('global')).toBe('Global');
+        expect(levelBadgeText('thread')).toBe('Thread');
+    });
+
+    it('maps confidence into percent and bucket label', () => {
+        const vm = toMemoryCardVm(makeMemory({ confidence: 0.9 }));
+        expect(vm.confidencePercent).toBe(90);
+        expect(vm.confidenceLabel).toBe('High');
     });
 
     it('detects user-scoped memory levels', () => {

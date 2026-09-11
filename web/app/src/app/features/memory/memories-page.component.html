@@ -1,86 +1,48 @@
-<section class="mx-auto flex w-full max-w-7xl flex-col gap-4 p-4 md:p-6">
-  <header class="memories-header">
-    <div class="memories-header__copy">
-      <h1>Memories</h1>
-      <p>Saved context that informs your conversations.</p>
-    </div>
-    <div class="memories-header__actions">
-      <a routerLink="/memories/merge-history" class="memories-header__merge-history">
-        Merge history
-      </a>
-      <a routerLink="/memories/compaction-log" class="memories-header__merge-history">
-        Compaction log
-      </a>
-      <button type="button" class="memories-header__batch-import" disabled>
-      <ui-upload-icon [size]="12" />
-      Batch Import
-    </button>
+<section class="memories-shell">
+  <header class="memories-shell__header">
+    <div class="memories-shell__copy">
+      <h1>Memory Manager</h1>
+      <p>Review and correct saved context that informs your conversations.</p>
     </div>
   </header>
 
-  <section class="memories-toolbar">
-    <div class="memories-toolbar__filters" role="tablist" aria-label="Memory filters">
-      <button
-        type="button"
-        [class.memories-toolbar__filter--active]="!isLevelSelectionActive() && memoryAssociationMode() === 'all'"
-        (click)="selectAssociationFilter('all')">
-        All
-      </button>
-      <button
-        type="button"
-        [class.memories-toolbar__filter--active]="!isLevelSelectionActive() && memoryAssociationMode() === 'global'"
-        (click)="selectAssociationFilter('global')">
-        Global
-      </button>
-      <button
-        type="button"
-        [class.memories-toolbar__filter--active]="memoryLevelFilter() === 'personality'"
-        (click)="selectLevelFilter('personality')">
-        Personality
-      </button>
-      <button
-        type="button"
-        [class.memories-toolbar__filter--active]="memoryLevelFilter() === 'thread'"
-        (click)="selectLevelFilter('thread')">
-        Thread
-      </button>
-      <button
-        type="button"
-        [class.memories-toolbar__filter--active]="memoryLevelFilter() === 'summary'"
-        (click)="selectLevelFilter('summary')">
-        Summary
-      </button>
-    </div>
-    <div class="memories-toolbar__sort">
-      <span>Sort:</span>
-      <div class="memories-toolbar__sort-select-wrap">
-        <select [value]="filters().sort" (change)="setSort($any($event.target).value)">
-          <option value="created_desc">Created (newest)</option>
-          <option value="created_asc">Created (oldest)</option>
-          <option value="updated_desc">Last updated</option>
-        </select>
-        <ui-chev-down-icon [size]="12" />
-      </div>
-    </div>
-  </section>
+  <div class="memories-shell__tabs" role="tablist" aria-label="Memory manager sections">
+    <button
+      type="button"
+      role="tab"
+      class="memories-shell__tab"
+      [class.memories-shell__tab--active]="activeTab() === 'memories'"
+      [attr.aria-selected]="activeTab() === 'memories'"
+      (click)="setActiveTab('memories')">
+      Memories
+    </button>
+    <button
+      type="button"
+      role="tab"
+      class="memories-shell__tab"
+      [class.memories-shell__tab--active]="activeTab() === 'merge-history'"
+      [attr.aria-selected]="activeTab() === 'merge-history'"
+      (click)="setActiveTab('merge-history')">
+      Merge history
+    </button>
+    <button
+      type="button"
+      role="tab"
+      class="memories-shell__tab"
+      [class.memories-shell__tab--active]="activeTab() === 'compaction-log'"
+      [attr.aria-selected]="activeTab() === 'compaction-log'"
+      (click)="setActiveTab('compaction-log')">
+      Compaction log
+    </button>
+  </div>
 
-  <app-memory-card-grid
-    [memories]="memories()"
-    [personalities]="personalities()"
-    [pinUpdatingId]="pinUpdatingId()"
-    [loading]="loading()"
-    [error]="error()"
-    [totalPages]="totalPages()"
-    [page]="currentPage()"
-    (save)="onInlineSaveMemory($event)"
-    (pinChange)="onMemoryPinChange($event)"
-    (delete)="onDeleteSingle($event)"
-    (pageChange)="goToPage($event)" />
+  @if (activeTab() === 'memories') {
+    <app-memories-list-tab />
+  }
+  @if (activeTab() === 'merge-history') {
+    <app-memory-merge-history-page [embedded]="true" />
+  }
+  @if (activeTab() === 'compaction-log') {
+    <app-compaction-log-page [embedded]="true" />
+  }
 </section>
-
-<app-delete-memory-modal
-  [open]="deleteModalOpen()"
-  [count]="deleteTargetIds().length"
-  [deleting]="deleting()"
-  (confirm)="confirmDelete()"
-  (cancel)="closeDeleteModal()" />

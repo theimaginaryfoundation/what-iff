@@ -877,6 +877,10 @@ func (d *Datastore) ListMemories(ctx context.Context, userID uuid.UUID, pageNum,
 		default:
 			return nil, fmt.Errorf("%w: invalid memory level filter: %s", ErrInvalidRequestBody, *filters.Level)
 		}
+	} else {
+		// Checkpoint summaries are thread-management state, not editable "memories".
+		// Only return them when level=summary is requested explicitly (Summaries tab).
+		query = query.Where(memory.ScopeNEQ(memory.ScopeSummary))
 	}
 
 	if filters.Type != nil && *filters.Type != "" {
@@ -998,46 +1002,7 @@ func (d *Datastore) DeleteMemory(ctx context.Context, userID, id uuid.UUID) erro
 		}
 	}()
 
-	// Check if memory exists and belongs to the user
-	exists, err := tx.Memory.Query().
-		Where(
-			memory.ID(id),
-			memory.HasOwnerWith(
-				user.ID(userID),
-			),
-		).
-		Exist(ctx)
-
-	if err != nil {
-		d.logger.Error(i18n.T1("query.failed", "Entity", "memory"), zap.Error(err))
-		if rerr := tx.Rollback(); rerr != nil {
-			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
-		}
-		return err
-	}
-
-	if !exists {
-		d.logger.Error(i18n.T2("memory.not_found_or_unauthorized", "MemoryID", id.String(), "UserID", userID.String()))
-		if rerr := tx.Rollback(); rerr != nil {
-			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
-		}
-		return ErrMemoryNotFound
-	}
-
-	// Delete associatedembedding
-	_, err = tx.Embedding.Delete().Where(embedding.HasMemoryWith(memory.ID(id))).Exec(ctx)
-	if err != nil {
-		d.logger.Error(i18n.T1("delete.failed", "Entity", "embedding"), zap.Error(err))
-		if rerr := tx.Rollback(); rerr != nil {
-			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
-		}
-		return err
-	}
-
-	// Delete memory
-	err = tx.Memory.DeleteOneID(id).Exec(ctx)
-	if err != nil {
-		d.logger.Error(i18n.T1("delete.failed", "Entity", "memory"), zap.Error(err))
+	if err := d.deleteOwnedMemoryInTx(ctx, tx, userID, id); err != nil {
 		if rerr := tx.Rollback(); rerr != nil {
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 		}
@@ -1051,6 +1016,108 @@ func (d *Datastore) DeleteMemory(ctx context.Context, userID, id uuid.UUID) erro
 	}
 
 	return nil
+}
+
+// deleteOwnedMemoryInTx deletes one memory (and its embeddings) inside an open
+// transaction after verifying ownership. Callers own commit/rollback.
+func (d *Datastore) deleteOwnedMemoryInTx(ctx context.Context, tx *ent.Tx, userID, id uuid.UUID) error {
+	exists, err := tx.Memory.Query().
+		Where(
+			memory.ID(id),
+			memory.HasOwnerWith(
+				user.ID(userID),
+			),
+		).
+		Exist(ctx)
+	if err != nil {
+		d.logger.Error(i18n.T1("query.failed", "Entity", "memory"), zap.Error(err))
+		return err
+	}
+	if !exists {
+		d.logger.Error(i18n.T2("memory.not_found_or_unauthorized", "MemoryID", id.String(), "UserID", userID.String()))
+		return ErrMemoryNotFound
+	}
+
+	if _, err := tx.Embedding.Delete().Where(embedding.HasMemoryWith(memory.ID(id))).Exec(ctx); err != nil {
+		d.logger.Error(i18n.T1("delete.failed", "Entity", "embedding"), zap.Error(err))
+		return err
+	}
+
+	if err := tx.Memory.DeleteOneID(id).Exec(ctx); err != nil {
+		d.logger.Error(i18n.T1("delete.failed", "Entity", "memory"), zap.Error(err))
+		if ent.IsNotFound(err) {
+			return ErrMemoryNotFound
+		}
+		return err
+	}
+	return nil
+}
+
+// DeleteMemoriesBatch deletes multiple memories owned by userID.
+// When AllOrNone is true, the whole batch runs in one transaction.
+func (d *Datastore) DeleteMemoriesBatch(ctx context.Context, userID uuid.UUID, input models.BatchDeleteMemoryInput) (*models.BatchDeleteMemoryResult, error) {
+	if len(input.IDs) == 0 {
+		return &models.BatchDeleteMemoryResult{DeletedCount: 0}, nil
+	}
+
+	if input.AllOrNone {
+		tx, err := d.dbClient.Tx(ctx)
+		if err != nil {
+			d.logger.Error(i18n.T("tx.start_failed"), zap.Error(err))
+			return nil, err
+		}
+		defer func() {
+			if v := recover(); v != nil {
+				tx.Rollback()
+				panic(v)
+			}
+		}()
+
+		for _, id := range input.IDs {
+			if err := d.deleteOwnedMemoryInTx(ctx, tx, userID, id); err != nil {
+				tx.Rollback()
+				return nil, err
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			d.logger.Error(i18n.T("tx.commit_failed"), zap.Error(err))
+			return nil, err
+		}
+		return &models.BatchDeleteMemoryResult{DeletedCount: len(input.IDs)}, nil
+	}
+
+	deleted := 0
+	for _, id := range input.IDs {
+		if err := d.DeleteMemory(ctx, userID, id); err != nil {
+			d.logger.Warn("skipping memory delete in partial batch", zap.String("memory_id", id.String()), zap.Error(err))
+			continue
+		}
+		deleted++
+	}
+	return &models.BatchDeleteMemoryResult{DeletedCount: deleted}, nil
+}
+
+// PatchMemoriesBatch applies the same patch to multiple memories owned by userID.
+// When AllOrNone is true, any failure aborts remaining items (each UpdateMemory
+// is its own transaction; already-patched rows are kept).
+func (d *Datastore) PatchMemoriesBatch(ctx context.Context, userID uuid.UUID, input models.BatchPatchMemoryInput) (*models.BatchPatchMemoryResult, error) {
+	if len(input.IDs) == 0 {
+		return &models.BatchPatchMemoryResult{Results: []*models.Memory{}, UpdatedCount: 0}, nil
+	}
+
+	out := make([]*models.Memory, 0, len(input.IDs))
+	for _, id := range input.IDs {
+		mem, err := d.UpdateMemory(ctx, userID, id, input.Patch)
+		if err != nil {
+			if input.AllOrNone {
+				return nil, err
+			}
+			d.logger.Warn("skipping memory patch in partial batch", zap.String("memory_id", id.String()), zap.Error(err))
+			continue
+		}
+		out = append(out, mem)
+	}
+	return &models.BatchPatchMemoryResult{Results: out, UpdatedCount: len(out)}, nil
 }
 
 // GetMemory retrieves a memory from the datastore by ID
