@@ -31,6 +31,19 @@ func (d *Datastore) HasRecentAccountExport(ctx context.Context, userID uuid.UUID
 		Exist(ctx)
 }
 
+// HasRecentAccountImport reports whether the user started an account import at or
+// after `since`. Used to space out imports, which stage a large upload and run
+// expensive expansion/embedding work in the background.
+func (d *Datastore) HasRecentAccountImport(ctx context.Context, userID uuid.UUID, since time.Time) (bool, error) {
+	return d.dbClient.Job.Query().
+		Where(
+			entjob.JobTypeEQ(models.JobTypeAccountImport),
+			entjob.CreatedAtGTE(since),
+			entjob.HasOwnerWith(user.ID(userID)),
+		).
+		Exist(ctx)
+}
+
 // ExportConversationInputs assembles a user's chats as clean, id-stripped exporter.ConversationInput
 // values (the round-trippable conversations.json projection). Unlike the admin backup, this carries
 // no Postgres identity beyond chat.ID (used only as the importer's dedup key), and no

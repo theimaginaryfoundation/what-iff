@@ -32,6 +32,10 @@ const (
 	// exportCooldown is the minimum spacing between a user's export requests. Exports are heavy and
 	// infrequent; one in-flight/recent export per user is plenty.
 	exportCooldown = 10 * time.Minute
+	// importCooldown spaces out a user's account imports. Each stages up to
+	// maxImportBytes to a temp file and runs expensive expansion/embedding work,
+	// so back-to-back imports (or many concurrent slow uploads) are refused.
+	importCooldown = 10 * time.Minute
 	// bundlePrefix is the S3 key prefix for generated export archives (never served by other flows).
 	bundlePrefix = "exports"
 	// presignTTL is how long the emailed download link stays valid.
@@ -53,25 +57,27 @@ const (
 
 // Handler serves the account export/import endpoints.
 type Handler struct {
-	ds        *datastore.Datastore
-	logger    *zap.Logger
-	fileStore storage.FileStore
-	sender    email.Sender
-	oaiClient *openai.Client // for regenerating memory embeddings on import; nil disables memory import
-	limiter   *cooldownLimiter
-	imports   chan struct{}
+	ds            *datastore.Datastore
+	logger        *zap.Logger
+	fileStore     storage.FileStore
+	sender        email.Sender
+	oaiClient     *openai.Client // for regenerating memory embeddings on import; nil disables memory import
+	limiter       *cooldownLimiter
+	importLimiter *cooldownLimiter
+	imports       chan struct{}
 }
 
 // NewHandler builds the handler. openAIKey enables memory-embedding regeneration on import; when
 // empty, memory import is skipped (export is unaffected).
 func NewHandler(ds *datastore.Datastore, logger *zap.Logger, fileStore storage.FileStore, sender email.Sender, openAIKey string) *Handler {
 	h := &Handler{
-		ds:        ds,
-		logger:    logger,
-		fileStore: fileStore,
-		sender:    sender,
-		limiter:   newCooldownLimiter(exportCooldown),
-		imports:   make(chan struct{}, maxConcurrentAccountImports),
+		ds:            ds,
+		logger:        logger,
+		fileStore:     fileStore,
+		sender:        sender,
+		limiter:       newCooldownLimiter(exportCooldown),
+		importLimiter: newCooldownLimiter(importCooldown),
+		imports:       make(chan struct{}, maxConcurrentAccountImports),
 	}
 	if openAIKey != "" {
 		client := openai.NewClient(option.WithAPIKey(openAIKey))

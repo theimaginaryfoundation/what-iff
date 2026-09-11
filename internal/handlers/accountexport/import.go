@@ -42,6 +42,18 @@ func (h *Handler) ImportAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Space out imports before consuming the upload, so a user can't tie up disk
+	// and worker slots with many concurrent uploads. Mirrors the export cooldown.
+	recent, err := h.ds.HasRecentAccountImport(r.Context(), userID, time.Now().Add(-importCooldown))
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to check recent import requests", err)
+		return
+	}
+	if recent || !h.importLimiter.allow(userID) {
+		handlerutils.RespondWithError(w, h.logger, http.StatusTooManyRequests, handlerutils.CodeNotSet, "An import was requested recently; please wait before requesting another.", nil)
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxImportBytes)
 	if err := r.ParseMultipartForm(importMultipartMemory); err != nil {
 		var maxErr *http.MaxBytesError

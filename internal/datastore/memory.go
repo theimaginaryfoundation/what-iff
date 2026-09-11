@@ -36,6 +36,12 @@ const memoryImportBatchSize = 200
 const memoryImportEmbeddingWorkers = 8
 const memoryImportMaxJSONLine = 16 << 20 // 16 MiB, aligned with account backup JSONL cap
 
+// maxMemoryImportEntryExpandedBytes bounds the ACTUAL decompressed bytes read
+// from a single memory-import zip entry. The handler pre-checks each entry's
+// declared size, but a crafted archive can under-declare it, so capping the real
+// read here is the true zip-bomb guard (mirrors the account-import per-entry cap).
+const maxMemoryImportEntryExpandedBytes = 250 << 20 // 250 MiB
+
 func memoryLevelForEntity(mem *ent.Memory) models.MemoryLevel {
 	switch mem.Scope {
 	case memory.ScopeSummary:
@@ -1776,7 +1782,10 @@ func parseMemoryImportFile(zf *zip.File, logger *zap.Logger) ([]memoryImportCand
 	}
 	defer rc.Close()
 
-	scanner := bufio.NewScanner(rc)
+	// Cap the real decompressed read for this entry so an under-declared zip
+	// header cannot stream an unbounded amount into memory.
+	limited := &io.LimitedReader{R: rc, N: maxMemoryImportEntryExpandedBytes + 1}
+	scanner := bufio.NewScanner(limited)
 	scanner.Buffer(make([]byte, 64*1024), memoryImportMaxJSONLine)
 	records := make([]memoryImportCandidate, 0)
 	invalidCount := 0
@@ -1839,6 +1848,9 @@ func parseMemoryImportFile(zf *zip.File, logger *zap.Logger) ([]memoryImportCand
 			return nil, invalidCount, invalidReasons, fmt.Errorf("import line exceeds %d MiB in %q", memoryImportMaxJSONLine>>20, zf.Name)
 		}
 		return nil, invalidCount, invalidReasons, fmt.Errorf("scan zip entry %q: %w", zf.Name, err)
+	}
+	if limited.N <= 0 {
+		return nil, invalidCount, invalidReasons, fmt.Errorf("memory import entry %q exceeds expanded-size limit", zf.Name)
 	}
 
 	return records, invalidCount, invalidReasons, nil

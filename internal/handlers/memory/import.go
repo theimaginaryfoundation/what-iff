@@ -3,6 +3,7 @@ package memory
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -11,7 +12,34 @@ import (
 	"go.uber.org/zap"
 )
 
-const maxMemoryImportBytes = 32 << 20 // 32 MiB
+const (
+	maxMemoryImportBytes = 32 << 20 // 32 MiB compressed-upload cap
+	// Bounds on the DECOMPRESSED archive, guarding against zip bombs: a small,
+	// highly-compressible upload can still expand to gigabytes. The datastore
+	// importer additionally caps the actual bytes read per entry. Mirrors the
+	// account-import limits.
+	maxMemoryImportEntries       = 10_000
+	maxMemoryImportExpandedBytes = 250 << 20 // 250 MiB total declared
+)
+
+// validateMemoryImportArchive rejects zip bombs by entry count and declared
+// expanded size before the archive is handed to the importer for decompression.
+func validateMemoryImportArchive(zr *zip.Reader) error {
+	if len(zr.File) > maxMemoryImportEntries {
+		return fmt.Errorf("archive has %d entries (limit %d)", len(zr.File), maxMemoryImportEntries)
+	}
+	var expanded uint64
+	for _, zf := range zr.File {
+		if zf.UncompressedSize64 > uint64(maxMemoryImportExpandedBytes) {
+			return fmt.Errorf("archive entry %q exceeds expanded-size limit", zf.Name)
+		}
+		expanded += zf.UncompressedSize64
+		if expanded > uint64(maxMemoryImportExpandedBytes) {
+			return fmt.Errorf("archive exceeds expanded-size limit")
+		}
+	}
+	return nil
+}
 
 // ImportMemories handles POST /memory/import and imports a prior memory export ZIP.
 func (h *Handler) ImportMemories(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +89,11 @@ func (h *Handler) ImportMemories(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("memory import archive opened",
 		zap.String("user_id", userID.String()),
 		zap.Int("zip_entries", len(zr.File)))
+
+	if err := validateMemoryImportArchive(zr); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Import archive has too many entries or is too large when expanded", err)
+		return
+	}
 
 	result, err := h.ds.ImportMemoriesWithBatchEmbeddings(r.Context(), userID, zr, h.createEmbedding, h.createEmbeddings)
 	if err != nil {
