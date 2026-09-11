@@ -42,10 +42,12 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  min-width: 0;
 }
 
 .memories-list__search {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -58,6 +60,7 @@
 
 .memories-list__search input {
   flex: 1;
+  min-width: 0;
   border: none;
   background: transparent;
   color: var(--color-text-primary);
