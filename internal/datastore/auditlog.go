@@ -15,6 +15,7 @@ const (
 	auditCategoryModel         = "model"
 	auditCategoryQuota         = "quota"
 	auditCategoryAccountBackup = "account_backup"
+	auditCategoryAccountExport = "account_export"
 	auditCategoryMemoryPack    = "memory_pack"
 )
 
@@ -62,6 +63,7 @@ func (d *Datastore) auditMemoryPackImport(ctx context.Context, userID uuid.UUID,
 		"imported_count":                    result.ImportedCount,
 		"duplicate_count":                   result.DuplicateCount,
 		"invalid_record_count":              result.InvalidRecordCount,
+		"invalid_reasons":                   result.InvalidReasons,
 		"skipped_missing_chat_count":        result.SkippedMissingChat,
 		"skipped_missing_personality_count": result.SkippedMissingPersonality,
 	}
@@ -74,5 +76,17 @@ func (d *Datastore) auditMemoryPackImport(ctx context.Context, userID uuid.UUID,
 		Message:       fmt.Sprintf("user memory ZIP import (success=%v)", opErr == nil),
 		SubjectUserID: &sub,
 		Metadata:      meta,
+	})
+}
+
+// AuditAccountExport records an account-portability action without storing archive URLs or contents.
+func (d *Datastore) AuditAccountExport(ctx context.Context, userID uuid.UUID, action, message string, metadata map[string]any) {
+	subject := userID
+	d.writeAuditLog(ctx, auditEntry{
+		Category:      auditCategoryAccountExport,
+		Action:        action,
+		Message:       message,
+		SubjectUserID: &subject,
+		Metadata:      metadata,
 	})
 }

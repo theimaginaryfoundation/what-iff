@@ -18,7 +18,9 @@ import (
 	agentjobscheduler "github.com/theimaginaryfoundation/what-iff/internal/agentjobs/scheduler"
 	"github.com/theimaginaryfoundation/what-iff/internal/buildinfo"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/email"
 	"github.com/theimaginaryfoundation/what-iff/internal/featuregate"
+	"github.com/theimaginaryfoundation/what-iff/internal/handlers/accountexport"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/agentjob"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/chat"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/fileattachment"
@@ -222,6 +224,20 @@ func (s *Server) setupRoutes() {
 	userHandler := user.NewHandler(dataStore, s.logger, s.config.AllowedEmails, s.config.Environment)
 	jobHandler := job.NewHandlerWithCanceller(dataStore, agent, s.logger)
 	memoryHandler := memory.NewHandler(dataStore, s.logger, s.config.OpenAIKey, providerHTTPClient)
+
+	// Account export: async export runs in-process here in the main app; the bundle lands in the
+	// file store and its download link is delivered ONLY out-of-band (a deliberate control — app
+	// access alone cannot exfiltrate the account). The concrete email transport is provided by
+	// email.New, which a private implementation registers via a blank import in cmd/api-server and
+	// which reads its own configuration from the environment. When that package is absent (e.g. the
+	// open-source build), email.New is nil and we fall back to email.NoopSender, which logs the link.
+	var exportSender email.Sender = email.NoopSender{Logger: s.logger}
+	if email.New != nil {
+		if snd := email.New(s.logger); snd != nil {
+			exportSender = snd
+		}
+	}
+	accountExportHandler := accountexport.NewHandler(dataStore, s.logger, fileStore, exportSender, s.config.OpenAIKey)
 	mcpServerHandler := mcpserver.NewHandler(dataStore, s.logger)
 	modelHandler := model.NewHandler(dataStore, s.logger)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)
@@ -282,6 +298,7 @@ func (s *Server) setupRoutes() {
 	chatHandler.RegisterRoutes(authRouter)
 	agentJobHandler.RegisterRoutes(authRouter)
 	memoryHandler.RegisterRoutes(authRouter)
+	accountExportHandler.RegisterRoutes(authRouter)
 	mcpServerHandler.RegisterRoutes(authRouter)
 	modelRouter := apiRouter.PathPrefix("/model").Subrouter()
 	modelRouter.Use(middleware.OptionalAuthMiddleware(s.db, dataStore, s.logger))

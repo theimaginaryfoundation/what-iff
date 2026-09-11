@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
@@ -40,7 +41,7 @@ func NewClient(logger *zap.Logger) (*ent.Client, *sql.DB, error) {
 	dbPort := os.Getenv("DB_PORT")
 	dbUser := os.Getenv("DB_USER")
 	dbName := os.Getenv("DB_NAME")
-	dbType := os.Getenv("DB_TYPE")
+	dbType := databaseType()
 
 	// ECS injects DB_PASSWORD from Secrets Manager; local dev sets it in .env
 	dbPass, err := getDBPassword()
@@ -87,4 +88,14 @@ func NewClient(logger *zap.Logger) (*ent.Client, *sql.DB, error) {
 
 	logger.Info("Database connection established", zap.String("host", dbHost), zap.String("database", dbName))
 	return client, db, nil
+}
+
+// databaseType defaults to PostgreSQL because it is the only supported local and deployed
+// configuration. Keeping the fallback here lets standalone local commands load the same `.env`
+// used by Docker Compose, where DB_TYPE is supplied by Compose rather than the file itself.
+func databaseType() string {
+	if dbType := strings.TrimSpace(os.Getenv("DB_TYPE")); dbType != "" {
+		return dbType
+	}
+	return "postgres"
 }
