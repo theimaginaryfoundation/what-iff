@@ -148,6 +148,12 @@ type BatchCreateMemoryInput struct {
 	AllOrNone bool                `json:"all_or_none"`
 }
 
+// MaxMemoryBatchIDs bounds one bulk memory operation to prevent pathological
+// transaction/request fan-out. It exceeds the Memory Manager's 24-item page;
+// keep it in sync with MemoryBatch{Delete,Patch}Request.ids.maxItems in
+// openapi.yaml.
+const MaxMemoryBatchIDs = 100
+
 // BatchDeleteMemoryInput deletes multiple memories owned by the caller.
 type BatchDeleteMemoryInput struct {
 	IDs       []uuid.UUID `json:"ids"`

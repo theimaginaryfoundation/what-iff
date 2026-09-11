@@ -1065,6 +1065,9 @@ func (d *Datastore) DeleteMemoriesBatch(ctx context.Context, userID uuid.UUID, i
 	if len(input.IDs) == 0 {
 		return &models.BatchDeleteMemoryResult{DeletedCount: 0}, nil
 	}
+	if len(input.IDs) > models.MaxMemoryBatchIDs {
+		return nil, fmt.Errorf("%w: at most %d memory ids per batch", ErrInvalidRequestBody, models.MaxMemoryBatchIDs)
+	}
 
 	if input.AllOrNone {
 		tx, err := d.dbClient.Tx(ctx)
@@ -1115,6 +1118,9 @@ func (d *Datastore) DeleteMemoriesBatch(ctx context.Context, userID uuid.UUID, i
 func (d *Datastore) PatchMemoriesBatch(ctx context.Context, userID uuid.UUID, input models.BatchPatchMemoryInput) (*models.BatchPatchMemoryResult, error) {
 	if len(input.IDs) == 0 {
 		return &models.BatchPatchMemoryResult{Results: []*models.Memory{}, UpdatedCount: 0}, nil
+	}
+	if len(input.IDs) > models.MaxMemoryBatchIDs {
+		return nil, fmt.Errorf("%w: at most %d memory ids per batch", ErrInvalidRequestBody, models.MaxMemoryBatchIDs)
 	}
 
 	out := make([]*models.Memory, 0, len(input.IDs))

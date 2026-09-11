@@ -7127,6 +7127,8 @@ components:
         ids:
           type: array
           minItems: 1
+          # Keep synchronized with models.MaxMemoryBatchIDs.
+          maxItems: 100
           items:
             type: string
             format: uuid
@@ -7152,6 +7154,8 @@ components:
         ids:
           type: array
           minItems: 1
+          # Keep synchronized with models.MaxMemoryBatchIDs.
+          maxItems: 100
           items:
             type: string
             format: uuid

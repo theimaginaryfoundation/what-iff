@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
 
@@ -29,6 +30,13 @@ func TestParseBatchIDs(t *testing.T) {
 	}
 	if _, err := parseBatchIDs([]string{"not-a-uuid"}); err == nil {
 		t.Fatal("expected error for invalid uuid")
+	}
+	tooMany := make([]string, models.MaxMemoryBatchIDs+1)
+	for i := range tooMany {
+		tooMany[i] = uuid.NewString()
+	}
+	if _, err := parseBatchIDs(tooMany); err == nil {
+		t.Fatal("expected error for too many ids")
 	}
 }
 

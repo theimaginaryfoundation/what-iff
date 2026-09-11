@@ -30,6 +30,9 @@ func parseBatchIDs(raw []string) ([]uuid.UUID, error) {
 	if len(raw) == 0 {
 		return nil, fmt.Errorf("ids is required")
 	}
+	if len(raw) > models.MaxMemoryBatchIDs {
+		return nil, fmt.Errorf("%w: at most %d memory ids per batch", datastore.ErrInvalidRequestBody, models.MaxMemoryBatchIDs)
+	}
 	ids := make([]uuid.UUID, 0, len(raw))
 	for _, s := range raw {
 		id, err := uuid.Parse(s)

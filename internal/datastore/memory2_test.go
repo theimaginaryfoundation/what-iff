@@ -786,6 +786,34 @@ func TestDeleteMemoriesBatch_PartialPropagatesUnexpectedError(t *testing.T) {
 	require.False(t, errors.Is(err, ErrMemoryNotFound))
 }
 
+func TestDeleteMemoriesBatch_RejectsTooManyIDs(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	ids := make([]uuid.UUID, models.MaxMemoryBatchIDs+1)
+	for i := range ids {
+		ids[i] = uuid.New()
+	}
+
+	_, err := ds.DeleteMemoriesBatch(ctx, uuid.New(), models.BatchDeleteMemoryInput{IDs: ids})
+	require.ErrorIs(t, err, ErrInvalidRequestBody)
+}
+
+func TestPatchMemoriesBatch_RejectsTooManyIDs(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	ids := make([]uuid.UUID, models.MaxMemoryBatchIDs+1)
+	for i := range ids {
+		ids[i] = uuid.New()
+	}
+
+	_, err := ds.PatchMemoriesBatch(ctx, uuid.New(), models.BatchPatchMemoryInput{IDs: ids})
+	require.ErrorIs(t, err, ErrInvalidRequestBody)
+}
+
 // --- GetMemory ---
 
 func TestGetMemory_HappyPath(t *testing.T) {
