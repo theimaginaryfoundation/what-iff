@@ -1,0 +1,374 @@
+:host {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.memories-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.memories-list--with-panel {
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 22rem);
+}
+
+.memories-list__main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.memories-list__panel {
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  min-width: 0;
+}
+
+.memories-list__summary {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.memories-list__hint {
+  color: var(--color-text-muted);
+}
+
+.memories-list__search-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.memories-list__search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-input);
+  color: var(--color-text-muted);
+}
+
+.memories-list__search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.memories-list__icon-btn {
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-secondary);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.memories-list__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: end;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-elevated);
+}
+
+.memories-list__filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.memories-list__filter-field select,
+.memories-list__filter-field input,
+.memories-list__date-wrap {
+  min-width: 8.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-input);
+  color: var(--color-text-primary);
+  font-size: 0.75rem;
+  padding: 0.375rem 0.5rem;
+}
+
+.memories-list__date-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding-right: 0.25rem;
+  min-width: 10.5rem;
+}
+
+.memories-list__date-wrap input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+  outline: none;
+}
+
+.memories-list__date-btn {
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 0.3rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.memories-list__date-btn:hover {
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.memories-list__date-error {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--color-danger, #ef4444);
+}
+
+.memories-list__sort-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.memories-list__sort-wrap ui-chev-down-icon {
+  position: absolute;
+  right: 0.5rem;
+  pointer-events: none;
+  color: var(--color-text-muted);
+}
+
+.memories-list__sort-wrap select {
+  appearance: none;
+  padding-right: 1.5rem;
+}
+
+.memories-list__clear {
+  border: none;
+  background: transparent;
+  color: var(--color-accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.375rem 0.25rem;
+}
+
+.memories-list__status-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-elevated);
+  max-width: 100%;
+  min-width: 0;
+}
+
+.memories-list__status-tabs button {
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: 0.375rem;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.memories-list__status-tabs button.memories-list__status--active {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-accent);
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+.memories-list__status-tabs button.memories-list__status--summaries.memories-list__status--active {
+  background: color-mix(in srgb, #d97706 16%, transparent);
+  color: #d97706;
+  box-shadow: inset 0 -2px 0 #d97706;
+}
+
+.memories-list__bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-elevated);
+}
+
+.memories-list__bulk-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.memories-list__checkbox {
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  border-radius: 0.3rem;
+  border: 1.5px solid color-mix(in srgb, var(--color-accent) 45%, var(--color-border-base));
+  background: var(--color-surface-input);
+  cursor: pointer;
+  display: grid;
+  place-content: center;
+}
+
+.memories-list__checkbox::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  transform: scale(0);
+  transition: transform 100ms ease;
+  box-shadow: inset 1rem 1rem #fff;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0, 43% 62%);
+}
+
+.memories-list__checkbox:checked {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.memories-list__checkbox:checked::before {
+  transform: scale(1);
+}
+
+.memories-list__bulk-count {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin-right: 0.25rem;
+}
+
+.memories-list__bulk button {
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-input);
+  color: var(--color-text-primary);
+  border-radius: 0.375rem;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.memories-list__bulk button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.memories-list__bulk-danger {
+  color: var(--color-danger, #ef4444) !important;
+  border-color: color-mix(in srgb, var(--color-danger, #ef4444) 40%, var(--color-border-base)) !important;
+}
+
+.memories-list__move-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+  padding: 1rem;
+}
+
+.memories-list__move-menu {
+  width: min(22rem, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-elevated);
+}
+
+.memories-list__move-menu h2 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  color: var(--color-text-primary);
+}
+
+.memories-list__move-menu button {
+  text-align: left;
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-input);
+  color: var(--color-text-primary);
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.memories-list__move-cancel {
+  margin-top: 0.35rem;
+  color: var(--color-text-muted) !important;
+}
+
+.memories-list__focus-modal-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .memories-list__filters {
+    align-items: stretch;
+  }
+
+  .memories-list__filter-field {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .memories-list__date-wrap,
+  .memories-list__filter-field select,
+  .memories-list__filter-field input,
+  .memories-list__sort-wrap {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .memories-list__status-tabs button {
+    padding: 0.35rem 0.65rem;
+  }
+}

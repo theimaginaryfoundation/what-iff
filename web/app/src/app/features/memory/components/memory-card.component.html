@@ -1,75 +1,124 @@
-<article class="memory-card" role="listitem">
-  <div class="memory-card__actions">
-    <button
-      type="button"
-      class="memory-card__icon-button"
-      aria-label="Edit memory"
-      (click)="startEdit($event)">
-      <ui-edit-icon [size]="12" />
-    </button>
-    <button
-      type="button"
-      class="memory-card__icon-button"
-      aria-label="Delete memory"
-      (click)="delete.emit(memory().id)">
-      <ui-trash-icon [size]="13" />
-    </button>
-  </div>
-
-  @if (editing()) {
-    <div class="memory-card__editor" (click)="$event.stopPropagation()">
-      @if (showPinControl()) {
-        <label class="memory-card__pin-label">
-          Pin to personality
-          <select
-            class="memory-card__pin-select"
-            [ngModel]="pinDraft()"
-            [disabled]="pinUpdating()"
-            (ngModelChange)="onPinChange($event)">
-            <option [ngValue]="null">All personalities</option>
-            @for (personality of personalities(); track personality.id) {
-              <option [ngValue]="personality.id">{{ personality.label }}</option>
-            }
-          </select>
-        </label>
-      }
-      <textarea
-        rows="2"
-        class="memory-card__textarea"
-        [ngModel]="draft()"
-        (ngModelChange)="draft.set($event)"
-      ></textarea>
-      <div class="memory-card__editor-actions">
-        <button type="button" class="memory-card__save" [disabled]="!canSave()" (click)="submitEdit($event)">Save</button>
-        <button type="button" class="memory-card__cancel" (click)="cancelEdit($event)">Cancel</button>
-      </div>
-    </div>
-  } @else {
-    <p class="memory-card__excerpt" [attr.aria-describedby]="'full-content-' + memory().id">
-      {{ memory().excerpt }}
-    </p>
-    <span [id]="'full-content-' + memory().id" class="sr-only">{{ memory().content }}</span>
+<article
+  class="memory-card"
+  role="listitem"
+  [class.memory-card--selected]="selected()"
+  [class.memory-card--focused]="focused()"
+  [class.memory-card--readonly]="readOnly()"
+  (click)="onCardActivate($event)">
+  @if (!readOnly()) {
+    <label class="memory-card__check" (click)="$event.stopPropagation()">
+      <input
+        type="checkbox"
+        class="memory-card__checkbox"
+        [checked]="selected()"
+        (change)="onToggleSelect($event)"
+        [attr.aria-label]="'Select memory'" />
+    </label>
   }
 
-  <div class="memory-card__meta">
-    <div class="memory-card__meta-left">
-      @if (memory().pinnedPersonalityName; as personalityName) {
-        <div class="memory-card__personality">
-          <ui-user-icon [size]="12" />
-          <span>{{ personalityName }}</span>
-        </div>
-      } @else if (memory().chatName; as chatName) {
-        <span class="memory-card__thread-label">Thread: {{ chatName }}</span>
-      } @else {
-        <span class="memory-card__thread-label">{{ memory().levelLabel }}</span>
-      }
+  <div class="memory-card__avatar" aria-hidden="true">
+    @if (pinnedPersonality(); as persona) {
+      <persona-accent-scope
+        [personality]="{ id: persona.id, name: persona.label, accent_color: persona.accent_color ?? null }">
+        <persona-cover
+          size="sm"
+          [name]="persona.label"
+          [imageUrl]="persona.cover_image_url"
+          [thumbnailCircle]="persona.thumbnail_circle" />
+      </persona-accent-scope>
+    } @else {
+      <span class="memory-card__avatar-fallback" [attr.data-level]="memory().level">
+        <ui-globe-icon [size]="14" />
+      </span>
+    }
+  </div>
+
+  <div class="memory-card__body">
+    <div class="memory-card__top">
+      <div class="memory-card__identity">
+        <span class="memory-card__name">{{ association() }}</span>
+        <span class="memory-card__level" [attr.data-level]="memory().level">{{ memory().levelLabel }}</span>
+        @if (memory().starred) {
+          <ui-star-icon [size]="12" [filled]="true" class="memory-card__star memory-card__star--on" />
+        }
+      </div>
+      <div class="memory-card__top-right">
+        <span class="memory-card__date">{{ memory().updatedAt | date:'MMM d' }}</span>
+        @if (!readOnly()) {
+          <div class="memory-card__menu-wrap">
+            <button
+              type="button"
+              class="memory-card__menu-btn"
+              aria-label="More actions"
+              [attr.aria-expanded]="menuOpen()"
+              (click)="toggleMenu($event)">
+              ⋮
+            </button>
+            @if (menuOpen()) {
+              <div class="memory-card__menu" role="menu">
+                <button type="button" role="menuitem" (click)="startEdit($event)">Edit</button>
+                <button type="button" role="menuitem" (click)="onMove($event)">Move</button>
+                <button type="button" role="menuitem" (click)="onStar($event)">
+                  {{ memory().starred ? 'Unstar' : 'Star' }}
+                </button>
+                <button type="button" role="menuitem" (click)="onArchive($event)">
+                  {{ isArchivedView() ? 'Unarchive' : 'Archive' }}
+                </button>
+                <button type="button" role="menuitem" class="memory-card__menu-danger" (click)="onDelete($event)">
+                  Delete
+                </button>
+              </div>
+            }
+          </div>
+        }
+      </div>
     </div>
-    <div class="memory-card__meta-right">
-      @if (memory().verifiedCount; as count) {
-        <span class="memory-card__verified" title="Verified duplicate count">{{ count }}×</span>
+
+    @if (editing() && !readOnly()) {
+      <div class="memory-card__editor" (click)="$event.stopPropagation()">
+        @if (showPinControl()) {
+          <label class="memory-card__pin-label">
+            Pin to personality
+            <select
+              class="memory-card__pin-select"
+              [ngModel]="pinDraft()"
+              [disabled]="pinUpdating()"
+              (ngModelChange)="onPinChange($event)">
+              <option [ngValue]="null">All personalities</option>
+              @for (personality of personalities(); track personality.id) {
+                <option [ngValue]="personality.id">{{ personality.label }}</option>
+              }
+            </select>
+          </label>
+        }
+        <textarea
+          rows="3"
+          class="memory-card__textarea"
+          [ngModel]="draft()"
+          (ngModelChange)="draft.set($event)"
+        ></textarea>
+        <div class="memory-card__editor-actions">
+          <button type="button" class="memory-card__save" [disabled]="!canSave()" (click)="submitEdit($event)">Save</button>
+          <button type="button" class="memory-card__cancel" (click)="cancelEdit($event)">Cancel</button>
+        </div>
+      </div>
+    } @else {
+      <p class="memory-card__content">{{ memory().content }}</p>
+    }
+
+    <div class="memory-card__footer">
+      @if (readOnly()) {
+        <span>Thread checkpoint summary</span>
+      } @else {
+        <span>{{ memory().confidencePercent }}% · {{ memory().confidenceLabel }} confidence</span>
+        @if (memory().verifiedCount; as count) {
+          <span class="memory-card__verified" title="Verified duplicate count">{{ count }}×</span>
+        }
       }
-      <span>{{ memory().updatedAt | date:'MMM d' | uppercase }}</span>
-      <span>{{ memory().updatedAt | date:'h:mm a' }}</span>
     </div>
   </div>
 </article>
+
+@if (menuOpen() && !readOnly()) {
+  <button type="button" class="memory-card__backdrop" aria-label="Close menu" (click)="closeMenu()"></button>
+}

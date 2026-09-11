@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-/** The compaction and personality prompt audit page (`/memories/compaction-log`). */
+/** Compaction log tab under Memory Manager (`/memories?tab=compaction-log`). */
 export class CompactionLogPage {
   readonly heading: Locator;
   readonly promptChangesToggle: Locator;
@@ -13,7 +13,7 @@ export class CompactionLogPage {
   }
 
   async navigateTo(): Promise<void> {
-    await this.page.goto('/memories/compaction-log');
+    await this.page.goto('/memories?tab=compaction-log');
   }
 
   async expandPromptChanges(): Promise<void> {

@@ -1,0 +1,146 @@
+<aside
+  class="focus-panel"
+  [class.focus-panel--flush]="!showCloseButton()"
+  aria-label="Memory details">
+  <header class="focus-panel__header">
+    <div class="focus-panel__tags">
+      <span class="focus-panel__level" [attr.data-level]="memory().level">{{ memory().levelLabel }}</span>
+      @if (memory().starred) {
+        <span class="focus-panel__starred">Starred</span>
+      }
+    </div>
+    <div class="focus-panel__header-actions">
+      @if (!readOnly()) {
+        <button
+          type="button"
+          class="focus-panel__icon-btn"
+          [attr.aria-label]="memory().starred ? 'Unstar' : 'Star'"
+          (click)="starChange.emit({ id: memory().id, starred: !memory().starred })">
+          <ui-star-icon [size]="14" [filled]="memory().starred" />
+        </button>
+      }
+      @if (showCloseButton()) {
+        <button type="button" class="focus-panel__icon-btn" aria-label="Close details" (click)="close.emit()">
+          →
+        </button>
+      }
+    </div>
+  </header>
+
+  <h2 class="focus-panel__title">{{ memory().content }}</h2>
+
+  <section class="focus-panel__section">
+    <h3>Dates</h3>
+    <p class="focus-panel__muted">
+      Created {{ memory().createdAt | date:'MMM d' }}
+      · Updated {{ memory().updatedAt | date:'MMM d' }}
+    </p>
+  </section>
+
+  <section class="focus-panel__section">
+    <h3>Persona / scope</h3>
+    <div class="focus-panel__persona-row">
+      @if (pinnedPersonality(); as persona) {
+        <persona-accent-scope
+          [personality]="{ id: persona.id, name: persona.label, accent_color: persona.accent_color ?? null }">
+          <persona-cover
+            size="sm"
+            [name]="persona.label"
+            [imageUrl]="persona.cover_image_url"
+            [thumbnailCircle]="persona.thumbnail_circle" />
+        </persona-accent-scope>
+        <span>{{ persona.label }}</span>
+      } @else {
+        <span class="focus-panel__scope-chip" [attr.data-level]="memory().level">{{ association() }}</span>
+      }
+      @if (!readOnly()) {
+        <button type="button" class="focus-panel__link-btn" (click)="move.emit(memory().id)">Move</button>
+      }
+    </div>
+  </section>
+
+  <section class="focus-panel__section">
+    <h3>
+      Confidence &amp; status
+      <button
+        type="button"
+        class="focus-panel__info"
+        aria-label="About confidence"
+        uiTooltip="Your personalities rate their confidence when writing and updating memories"
+        placement="top"
+        [disabledOnTouch]="false">
+        i
+      </button>
+    </h3>
+    <p class="focus-panel__muted">
+      {{ memory().confidencePercent }}% · {{ memory().confidenceLabel }} confidence
+      @if (memory().verifiedCount; as count) {
+        · verified {{ count }}×
+      }
+    </p>
+  </section>
+
+  @if (mergedFromIds().length > 0) {
+    <section class="focus-panel__section">
+      <h3>Cluster / merged from</h3>
+      <ul class="focus-panel__id-list">
+        @for (id of mergedFromIds(); track id) {
+          <li>
+            <a [routerLink]="['/memories', id]">{{ id.slice(0, 8) }}…</a>
+          </li>
+        }
+      </ul>
+    </section>
+  }
+
+  <section class="focus-panel__section">
+    <h3>Merge events</h3>
+    @if (mergeEventsLoading()) {
+      <p class="focus-panel__muted">Loading merge events…</p>
+    } @else if (relatedMergeEvents().length === 0) {
+      <p class="focus-panel__muted">
+        No merge events for this memory.
+        <a routerLink="/memories" [queryParams]="{ tab: 'merge-history' }">Open merge history</a>
+      </p>
+    } @else {
+      <ul class="focus-panel__events">
+        @for (event of relatedMergeEvents(); track event.id) {
+          <li class="focus-panel__event">
+            <div class="focus-panel__event-top">
+              <strong>{{ mergeTypeLabel(event) }}</strong>
+              <span>{{ event.created_at | date:'MMM d' }}</span>
+            </div>
+            <p>{{ sourceCount(event) }} sources · {{ event.content }}</p>
+            @if (event.source_members?.length) {
+              <ul class="focus-panel__members">
+                @for (member of event.source_members; track $index) {
+                  <li>
+                    @if (member.memory_id) {
+                      <a [routerLink]="['/memories', member.memory_id]">{{ member.content }}</a>
+                    } @else {
+                      <span>{{ member.content }}</span>
+                    }
+                  </li>
+                }
+              </ul>
+            }
+          </li>
+        }
+      </ul>
+    }
+  </section>
+
+  @if (!readOnly()) {
+    <footer class="focus-panel__actions">
+      <button type="button" (click)="edit.emit(memory().id)">Edit</button>
+      <button type="button" (click)="archive.emit(memory().id)">
+        {{ isArchivedView() ? 'Unarchive' : 'Archive' }}
+      </button>
+      <button type="button" class="focus-panel__danger" (click)="delete.emit(memory().id)">Delete</button>
+    </footer>
+  } @else {
+    <p class="focus-panel__footnote">
+      Summaries are managed with the conversation checkpoint — they can't be archived or deleted here.
+    </p>
+  }
+</aside>

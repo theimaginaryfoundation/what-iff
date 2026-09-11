@@ -1,5 +1,5 @@
 import { CommonModule, DatePipe, UpperCasePipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, input, OnInit, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { forkJoin, map, of } from 'rxjs';
 
@@ -32,6 +32,9 @@ export class CompactionLogPageComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly chatService = inject(ChatService);
   private readonly personalityService = inject(PersonalityService);
+
+  /** When true, hide the standalone page chrome (used as a Memories tab). */
+  readonly embedded = input(false);
 
   readonly events = signal<CompactionEvent[]>([]);
   readonly promptChanges = signal<PromptAuditEntry[]>([]);

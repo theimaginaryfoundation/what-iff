@@ -6,6 +6,10 @@ import { apiErrorMessage } from '../utils/api-error.helpers';
 import {
   BatchCreateMemoryInput,
   BatchCreateMemoryResponse,
+  BatchDeleteMemoryInput,
+  BatchDeleteMemoryResponse,
+  BatchPatchMemoryInput,
+  BatchPatchMemoryResponse,
   CreateMemoryInput,
   Memory,
   MemoryFilters,
@@ -98,6 +102,16 @@ export class MemoryService {
 
   createMemoriesBatch(payload: BatchCreateMemoryInput): Observable<BatchCreateMemoryResponse> {
     return this.http.post<BatchCreateMemoryResponse>(`${this.apiUrl}/batch`, payload)
+      .pipe(catchError(this.handleError));
+  }
+
+  deleteMemoriesBatch(payload: BatchDeleteMemoryInput): Observable<BatchDeleteMemoryResponse> {
+    return this.http.post<BatchDeleteMemoryResponse>(`${this.apiUrl}/batch/delete`, payload)
+      .pipe(catchError(this.handleError));
+  }
+
+  patchMemoriesBatch(payload: BatchPatchMemoryInput): Observable<BatchPatchMemoryResponse> {
+    return this.http.post<BatchPatchMemoryResponse>(`${this.apiUrl}/batch/patch`, payload)
       .pipe(catchError(this.handleError));
   }
 

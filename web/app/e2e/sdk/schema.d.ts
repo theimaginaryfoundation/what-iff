@@ -3940,6 +3940,146 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/batch/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete memories in batch
+         * @description Permanently deletes multiple memories owned by the authenticated user. When all_or_none is false, missing ids are skipped and counted only for successful deletes; unexpected datastore errors abort the request. When all_or_none is true, the batch runs in one transaction and fails entirely if any id is missing.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemoryBatchDeleteRequest"];
+                };
+            };
+            responses: {
+                /** @description Batch delete processed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryBatchDeleteResponse"];
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description One or more memories not found (all_or_none) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/batch/patch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Patch memories in batch
+         * @description Applies the same patch to multiple memories (e.g. move / archive). Useful for bulk Move (level + pinned_personality_id) and Archive (status). When all_or_none is true, the first failure aborts remaining ids; each successful UpdateMemory is already committed (not one encompassing transaction). When all_or_none is false, missing ids are skipped; unexpected errors abort.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemoryBatchPatchRequest"];
+                };
+            };
+            responses: {
+                /** @description Batch patch processed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryBatchPatchResponse"];
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description One or more memories not found (all_or_none) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/{id}": {
         parameters: {
             query?: never;
@@ -8713,6 +8853,30 @@ export interface components {
         MemoryBatchCreateResponse: {
             results: components["schemas"]["Memory"][];
             created_count: number;
+        };
+        MemoryBatchDeleteRequest: {
+            ids: string[];
+            /**
+             * @description When true, fail the whole delete if any id is missing (single transaction). When false, skip missing ids and return deleted_count for successes only; unexpected errors still fail the request.
+             * @default false
+             */
+            all_or_none: boolean;
+        };
+        MemoryBatchDeleteResponse: {
+            deleted_count: number;
+        };
+        MemoryBatchPatchRequest: {
+            ids: string[];
+            patch: components["schemas"]["MemoryPatchRequest"];
+            /**
+             * @description When true, stop on the first failure. Already-patched rows from earlier ids in the request are kept (per-id transactions). When false, skip missing ids; unexpected errors still fail the request.
+             * @default false
+             */
+            all_or_none: boolean;
+        };
+        MemoryBatchPatchResponse: {
+            results: components["schemas"]["Memory"][];
+            updated_count: number;
         };
         MemoryPatchRequest: {
             content?: string;

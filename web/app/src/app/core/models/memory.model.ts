@@ -57,11 +57,33 @@ export interface CreateMemoryInput {
 }
 
 export interface BatchCreateMemoryInput {
-  memories: CreateMemoryInput[];
+  items: CreateMemoryInput[];
+  all_or_none?: boolean;
 }
 
 export interface BatchCreateMemoryResponse {
-  memories: Memory[];
+  results: Memory[];
+  created_count: number;
+}
+
+export interface BatchDeleteMemoryInput {
+  ids: string[];
+  all_or_none?: boolean;
+}
+
+export interface BatchDeleteMemoryResponse {
+  deleted_count: number;
+}
+
+export interface BatchPatchMemoryInput {
+  ids: string[];
+  patch: MemoryPatch;
+  all_or_none?: boolean;
+}
+
+export interface BatchPatchMemoryResponse {
+  results: Memory[];
+  updated_count: number;
 }
 
 export interface MemoryPatch {

@@ -14,6 +14,8 @@ only, nothing downstream of an assistant reply:
 | `personalities.visual.spec.ts`    | empty personalities list (fresh user), personality detail page |
 | `chat.visual.spec.ts`             | chat composer before any message is sent                       |
 | `profile-settings.visual.spec.ts` | Profile & Settings modal, profile tab                          |
+| `memories.visual.spec.ts`         | Memory Manager empty list, populated list, merge-history tab   |
+| `compaction-log.visual.spec.ts`   | Compaction log prompt-history geometry (contract, not pixels)  |
 
 These specs run under `e2e/playwright.config.mock-llm.visual.ts` (`npm run e2e:mock-llm:visual`),
 which extends the mock config and sets reduced motion on each project, so no

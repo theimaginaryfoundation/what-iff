@@ -1,5 +1,9 @@
-<section class="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 md:p-6">
+<section
+  class="mx-auto flex w-full max-w-5xl flex-col gap-4"
+  [class.p-4]="!embedded()"
+  [class.md:p-6]="!embedded()">
 
+  @if (!embedded()) {
   <header class="merge-history-header">
 
     <div>
@@ -13,6 +17,14 @@
     </div>
 
   </header>
+  } @else {
+    <div class="merge-history-embedded-header">
+      <h2>Merge history</h2>
+      <p>
+        Automatic dedupe and linking events from memory extraction. Expand an event to review exactly what happened. Undo restores the prior state.
+      </p>
+    </div>
+  }
 
 
 
