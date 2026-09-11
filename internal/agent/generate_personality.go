@@ -94,7 +94,7 @@ func (a *Agent) GeneratePersonality(ctx context.Context, answers map[string]stri
 		Model:           generatePersonalityModel,
 		MaxOutputTokens: openai.Int(provider.DefaultMaxContentLength),
 		Instructions:    openai.String(generatePersonalityPrompt),
-		ServiceTier:     responses.ResponseNewParamsServiceTierPriority, // We use prio here because these are small and part of onboarding, so we want them to be fast.
+		ServiceTier:     openAIServiceTier(responses.ResponseNewParamsServiceTierPriority), // We use prio here because these are small and part of onboarding, so we want them to be fast.
 		Input: responses.ResponseNewParamsInputUnion{
 			OfString: openai.String(sb.String()),
 		},
