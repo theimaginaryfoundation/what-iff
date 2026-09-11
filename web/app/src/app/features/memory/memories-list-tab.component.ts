@@ -1,6 +1,17 @@
-import { ChangeDetectionStrategy, Component, computed, inject, OnInit, signal } from '@angular/core';
+import { DOCUMENT } from '@angular/common';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  DestroyRef,
+  inject,
+  OnInit,
+  signal,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
+import { fromEvent } from 'rxjs';
 
 import { MemoryService } from '../../core/services/memory.service';
 import { MemoryViewService } from '../../core/services/memory-view.service';
@@ -18,12 +29,16 @@ import { MemoryPersonalityOption } from './components/memory-form.component';
 import { MemoryCardGridComponent } from './components/memory-card-grid.component';
 import { MemoryFocusPanelComponent } from './components/memory-focus-panel.component';
 import { DeleteMemoryModalComponent } from './components/delete-memory-modal.component';
+import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import {
   CalendarIconComponent,
   ChevDownIconComponent,
   DownloadIconComponent,
   SearchIconComponent,
 } from '../../shared/ui/icons/icons';
+
+/** Matches memories-list-tab SCSS: rail beside list at >960px, modal below. */
+const DESKTOP_FOCUS_QUERY = '(min-width: 961px)';
 
 @Component({
   selector: 'app-memories-list-tab',
@@ -33,6 +48,7 @@ import {
     MemoryCardGridComponent,
     MemoryFocusPanelComponent,
     DeleteMemoryModalComponent,
+    ModalComponent,
     CalendarIconComponent,
     ChevDownIconComponent,
     DownloadIconComponent,
@@ -48,6 +64,8 @@ export class MemoriesListTabComponent implements OnInit {
   private readonly personalityService = inject(PersonalityService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  private readonly document = inject(DOCUMENT);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly personalities = signal<MemoryPersonalityOption[]>([]);
   readonly deleteModalOpen = signal(false);
@@ -61,6 +79,7 @@ export class MemoriesListTabComponent implements OnInit {
   readonly mergeEvents = signal<MemoryMergeEvent[]>([]);
   readonly mergeEventsLoading = signal(false);
   readonly dateRangeError = signal<string | null>(null);
+  readonly isDesktopFocusLayout = signal(this.readDesktopFocusLayout());
   private mergeEventsLoaded = false;
 
   readonly filters = this.view.filters;
@@ -99,8 +118,16 @@ export class MemoriesListTabComponent implements OnInit {
     }
     return `${n} memor${n === 1 ? 'y' : 'ies'}`;
   });
+  readonly showDesktopFocusRail = computed(
+    () => !!this.focusedMemory() && this.isDesktopFocusLayout(),
+  );
+  readonly showMobileFocusModal = computed(
+    () => !!this.focusedMemory() && !this.isDesktopFocusLayout(),
+  );
 
   ngOnInit(): void {
+    this.bindDesktopFocusLayout();
+
     this.personalityService.listPersonalities(1, 200).subscribe({
       next: result => {
         this.personalities.set(
@@ -124,6 +151,25 @@ export class MemoriesListTabComponent implements OnInit {
       this.dateRangeError.set(null);
       this.view.applyFilters(parsed);
     });
+  }
+
+  private bindDesktopFocusLayout(): void {
+    const view = this.document.defaultView;
+    if (!view?.matchMedia) {
+      return;
+    }
+    const media = view.matchMedia(DESKTOP_FOCUS_QUERY);
+    fromEvent(media, 'change')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.isDesktopFocusLayout.set(media.matches));
+  }
+
+  private readDesktopFocusLayout(): boolean {
+    const view = this.document.defaultView;
+    if (!view?.matchMedia) {
+      return true;
+    }
+    return view.matchMedia(DESKTOP_FOCUS_QUERY).matches;
   }
 
   onFilterChanged(partial: Partial<MemoryViewFilters>): void {

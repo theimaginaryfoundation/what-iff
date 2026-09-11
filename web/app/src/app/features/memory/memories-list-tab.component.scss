@@ -337,15 +337,10 @@
   color: var(--color-text-muted) !important;
 }
 
-@media (max-width: 960px) {
-  .memories-list--with-panel {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .memories-list__panel {
-    position: static;
-    max-height: none;
-  }
+.memories-list__focus-modal-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
 }
 
 @media (max-width: 640px) {

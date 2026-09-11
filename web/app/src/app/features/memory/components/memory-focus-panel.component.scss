@@ -15,6 +15,14 @@
   overflow: auto;
 }
 
+.focus-panel--flush {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  max-height: none;
+}
+
 .focus-panel__header {
   display: flex;
   align-items: flex-start;

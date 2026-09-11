@@ -121,4 +121,14 @@ describe('MemoryFocusPanelComponent', () => {
     expect(archiveSpy).toHaveBeenCalledWith('m-1');
     expect(deleteSpy).toHaveBeenCalledWith('m-1');
   });
+
+  it('hides its own close control when showCloseButton is false', () => {
+    expect(fixture.nativeElement.querySelector('[aria-label="Close details"]')).toBeTruthy();
+
+    fixture.componentRef.setInput('showCloseButton', false);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('[aria-label="Close details"]')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.focus-panel--flush')).toBeTruthy();
+  });
 });

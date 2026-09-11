@@ -52,6 +52,8 @@ export class MemoriesPage {
       has: this.page.locator('.memory-card__editor'),
     });
     this.bulkBar = this.page.getByRole('toolbar', { name: 'Bulk memory actions' });
+    this.focusPanel = this.page.getByRole('complementary', { name: 'Memory details' });
+    this.focusDialog = this.page.getByRole('dialog', { name: 'Memory details' });
   }
 
   async navigateTo(): Promise<void> {
@@ -114,6 +116,25 @@ export class MemoriesPage {
   readonly openMaxDateButton: Locator;
 
   readonly bulkBar: Locator;
+
+  /** Desktop right-rail focus panel (`aside`). Hidden on narrow viewports. */
+  readonly focusPanel: Locator;
+
+  /** Mobile focus popup (`ui-modal` labelled "Memory details"). */
+  readonly focusDialog: Locator;
+
+  async openFocus(content: string): Promise<void> {
+    await this.card(content).click();
+  }
+
+  async closeFocus(): Promise<void> {
+    const dialogClose = this.focusDialog.getByRole('button', { name: 'Close', exact: true });
+    if (await dialogClose.isVisible().catch(() => false)) {
+      await dialogClose.click();
+      return;
+    }
+    await this.focusPanel.getByRole('button', { name: 'Close details', exact: true }).click();
+  }
 
   async filterBy(filter: MemoryFilter): Promise<void> {
     const name = filter === 'All' ? 'Show all memories' : 'Show global memories only';

@@ -1,4 +1,4 @@
-<div class="memories-list" [class.memories-list--with-panel]="!!focusedMemory()">
+<div class="memories-list" [class.memories-list--with-panel]="showDesktopFocusRail()">
   <div class="memories-list__main">
     <div class="memories-list__summary">
       <span>{{ countLabel() }}</span>
@@ -168,7 +168,7 @@
       (pageChange)="goToPage($event)" />
   </div>
 
-  @if (focusedMemory(); as focused) {
+  @if (showDesktopFocusRail() && focusedMemory(); as focused) {
     <div class="memories-list__panel">
       <app-memory-focus-panel
         [memory]="focused"
@@ -186,6 +186,32 @@
     </div>
   }
 </div>
+
+@if (showMobileFocusModal() && focusedMemory(); as focused) {
+  <ui-modal
+    [open]="true"
+    size="xl"
+    labelledBy="memory-focus-title"
+    (dismiss)="clearFocus()">
+    <div modal-header class="memories-list__focus-modal-header">
+      <h2 id="memory-focus-title">Memory details</h2>
+    </div>
+    <app-memory-focus-panel
+      [memory]="focused"
+      [personalities]="personalities()"
+      [mergeEvents]="mergeEvents()"
+      [mergeEventsLoading]="mergeEventsLoading()"
+      [isArchivedView]="isArchivedView()"
+      [readOnly]="isSummariesView() || focused.level === 'summary'"
+      [showCloseButton]="false"
+      (close)="clearFocus()"
+      (edit)="onFocusEdit($event)"
+      (move)="onMoveOne($event)"
+      (archive)="onArchiveOne($event)"
+      (delete)="onDeleteSingle($event)"
+      (starChange)="onToggleStar($event)" />
+  </ui-modal>
+}
 
 @if (moveMenuOpen()) {
   <div class="memories-list__move-overlay" (click)="closeMoveMenu()">

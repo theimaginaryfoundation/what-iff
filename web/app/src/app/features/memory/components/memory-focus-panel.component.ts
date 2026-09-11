@@ -32,6 +32,8 @@ export class MemoryFocusPanelComponent {
   readonly mergeEventsLoading = input(false);
   readonly isArchivedView = input(false);
   readonly readOnly = input(false);
+  /** When false, hide the panel's own close control (e.g. modal chrome provides one). */
+  readonly showCloseButton = input(true);
 
   readonly close = output<void>();
   readonly edit = output<string>();

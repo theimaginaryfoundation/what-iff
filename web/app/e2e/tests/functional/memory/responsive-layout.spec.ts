@@ -136,6 +136,41 @@ test.describe('memories responsive layout contract', () => {
     await assertCommonLayout(memoriesPage, DESKTOP_BREAKPOINT_WIDTH, memory.content as string);
     await expect(memoriesPage.mobileMenuButton).toBeHidden();
   });
+
+  test('opens memory details as a modal on narrow viewports and a side rail on desktop', async ({
+    memoriesPage,
+    seed,
+    userWithPersonality,
+    page,
+  }) => {
+    const [memory] = await seed.memories(1);
+    const memoryContent = memory.content as string;
+
+    await page.setViewportSize({ width: 390, height: VIEWPORT_HEIGHT });
+    await memoriesPage.navigateTo();
+    await memoriesPage.openFocus(memoryContent);
+
+    await expect(memoriesPage.focusDialog).toBeVisible();
+    await expect(memoriesPage.focusDialog.getByRole('button', { name: 'Close', exact: true })).toBeVisible();
+    await expect(memoriesPage.focusDialog.getByRole('heading', { name: 'Memory details', exact: true })).toBeVisible();
+    // Must not stack under the list as an inline bottom rail.
+    await expect(page.locator('.memories-list__panel')).toHaveCount(0);
+
+    const dialogBox = await rect(memoriesPage.focusDialog, 'Memory details dialog');
+    expectInsideViewport(dialogBox, 390, 'Memory details dialog');
+    expect(dialogBox.height).toBeGreaterThan(VIEWPORT_HEIGHT * 0.4);
+
+    await memoriesPage.closeFocus();
+    await expect(memoriesPage.focusDialog).toBeHidden();
+
+    await page.setViewportSize({ width: DESKTOP_BREAKPOINT_WIDTH, height: VIEWPORT_HEIGHT });
+    await memoriesPage.openFocus(memoryContent);
+
+    await expect(memoriesPage.focusDialog).toBeHidden();
+    await expect(memoriesPage.focusPanel).toBeVisible();
+    await expect(page.locator('.memories-list__panel')).toBeVisible();
+    await expect(memoriesPage.focusPanel.getByRole('button', { name: 'Close details', exact: true })).toBeVisible();
+  });
 });
 
 test.describe('jobs responsive layout contract', () => {

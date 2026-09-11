@@ -1,4 +1,7 @@
-<aside class="focus-panel" aria-label="Memory details">
+<aside
+  class="focus-panel"
+  [class.focus-panel--flush]="!showCloseButton()"
+  aria-label="Memory details">
   <header class="focus-panel__header">
     <div class="focus-panel__tags">
       <span class="focus-panel__level" [attr.data-level]="memory().level">{{ memory().levelLabel }}</span>
@@ -16,9 +19,11 @@
           <ui-star-icon [size]="14" [filled]="memory().starred" />
         </button>
       }
-      <button type="button" class="focus-panel__icon-btn" aria-label="Close details" (click)="close.emit()">
-        →
-      </button>
+      @if (showCloseButton()) {
+        <button type="button" class="focus-panel__icon-btn" aria-label="Close details" (click)="close.emit()">
+          →
+        </button>
+      }
     </div>
   </header>
 
