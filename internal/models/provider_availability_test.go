@@ -1,6 +1,9 @@
 package models
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func mdl(name, provider string) *Model {
 	return &Model{Name: name, Provider: provider}
@@ -11,7 +14,7 @@ func mdl(name, provider string) *Model {
 // after the user has sent a message.
 func TestFilterUsableHidesProvidersWithoutKeys(t *testing.T) {
 	p := NewProviderAvailability(true, "sk-test", "", "", "", "", "", "", "")
-	got := p.FilterUsable([]*Model{
+	got := p.FilterUsable(context.Background(), []*Model{
 		mdl("gpt-5.1", "openai"),
 		mdl("claude-sonnet-4-6", "anthropic"),
 		mdl("gemini-3.5", "google"),
@@ -25,7 +28,7 @@ func TestFilterUsableHidesProvidersWithoutKeys(t *testing.T) {
 // Adding a key must light its models up without any other change.
 func TestFilterUsableIncludesNewlyKeyedProvider(t *testing.T) {
 	p := NewProviderAvailability(true, "sk-test", "sk-ant", "", "", "", "", "", "")
-	got := p.FilterUsable([]*Model{
+	got := p.FilterUsable(context.Background(), []*Model{
 		mdl("gpt-5.1", "openai"),
 		mdl("claude-sonnet-4-6", "anthropic"),
 		mdl("gemini-3.5", "google"),
@@ -45,7 +48,7 @@ func TestFilterUsableDoesNotFilterOnNonVendorBackend(t *testing.T) {
 		mdl("claude-sonnet-4-6", "anthropic"),
 		mdl("gemini-3.5", "google"),
 	}
-	if got := p.FilterUsable(in); len(got) != len(in) {
+	if got := p.FilterUsable(context.Background(), in); len(got) != len(in) {
 		t.Fatalf("non-vendor backend must not filter; got %v", names(got))
 	}
 }
@@ -54,7 +57,7 @@ func TestFilterUsableDoesNotFilterOnNonVendorBackend(t *testing.T) {
 // [] and the client renders "no models" instead of failing to parse.
 func TestFilterUsableWithNoKeysReturnsEmptyNotNil(t *testing.T) {
 	p := NewProviderAvailability(true, "", "", "", "", "", "", "", "")
-	got := p.FilterUsable([]*Model{mdl("gpt-5.1", "openai")})
+	got := p.FilterUsable(context.Background(), []*Model{mdl("gpt-5.1", "openai")})
 	if got == nil {
 		t.Fatal("want non-nil empty slice, got nil")
 	}

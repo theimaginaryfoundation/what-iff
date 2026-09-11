@@ -1,9 +1,9 @@
 package provider
 
 import (
+	"context"
 	"net/http"
 	"strings"
-	"sync/atomic"
 )
 
 // openAIAPIHost is the only host this package rewrites credentials for.
@@ -18,52 +18,32 @@ import (
 // rewrite will silently stop applying.
 const openAIAPIHost = "api.openai.com"
 
-// OpenAICredential is the process-wide OpenAI API key.
+// OpenAIKeyResolver returns the OpenAI key for the actor ctx belongs to, or ""
+// when that actor has none.
 //
-// The key cannot simply be swapped on the clients that use it: the SDK client
+// Keys belong to accounts, not to the process: a self-hosted instance with two
+// users has two people's credentials and two people's bills. Resolving per
+// request is what makes that true, and it is cheap here because the SDK client
 // value is copied into six independent holders (OpenAIProvider, the recall and
 // memory tools, the file-chunk pipeline, the memory handler, and the plugin
-// embedder), so there is no single field to reassign. Instead the key lives
-// here and is applied per request by the transport below, which every one of
-// those clients already shares. Updating it is one atomic store and takes
-// effect on the next request, with no restart and no changes at any call site.
-type OpenAICredential struct {
-	key atomic.Pointer[string]
-}
+// embedder) that all share one HTTP client. Resolving at that shared transport
+// reaches all six without touching a single call site.
+//
+// The actor survives into background work: every detach point in the agent
+// goes through middleware.CopyUserToIDContext, so an agent job or a scheduled
+// run still resolves to the user who owns it.
+type OpenAIKeyResolver func(ctx context.Context) string
 
-// NewOpenAICredential seeds the credential with the key configured at boot,
-// which may be empty when the operator has not supplied one yet.
-func NewOpenAICredential(key string) *OpenAICredential {
-	c := &OpenAICredential{}
-	c.Set(key)
-	return c
-}
-
-// Set replaces the key. Safe to call concurrently with in-flight requests: a
-// request reads the pointer once, so it uses either the old key or the new one,
-// never a torn value.
-func (c *OpenAICredential) Set(key string) {
+// StaticOpenAIKey resolves to the same key for every actor. Used for the
+// deployment-wide fallback and in tests.
+func StaticOpenAIKey(key string) OpenAIKeyResolver {
 	k := strings.TrimSpace(key)
-	c.key.Store(&k)
+	return func(context.Context) string { return k }
 }
-
-// Get returns the current key, empty when none is configured.
-func (c *OpenAICredential) Get() string {
-	if c == nil {
-		return ""
-	}
-	if k := c.key.Load(); k != nil {
-		return *k
-	}
-	return ""
-}
-
-// Configured reports whether a key has been supplied.
-func (c *OpenAICredential) Configured() bool { return c.Get() != "" }
 
 type openAICredentialTransport struct {
-	cred *OpenAICredential
-	base http.RoundTripper
+	resolve OpenAIKeyResolver
+	base    http.RoundTripper
 }
 
 func (t *openAICredentialTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -71,25 +51,28 @@ func (t *openAICredentialTransport) RoundTrip(req *http.Request) (*http.Response
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	if req.URL == nil || req.URL.Hostname() != openAIAPIHost {
+	if req.URL == nil || req.URL.Hostname() != openAIAPIHost || t.resolve == nil {
 		return base.RoundTrip(req)
 	}
-	if key := t.cred.Get(); key != "" {
-		// RoundTrip must not modify the caller's request, so clone before
-		// touching headers (net/http.RoundTripper contract).
+	// The SDK propagates the caller's context to the outgoing request, so this
+	// is the same ctx the handler or job was running under.
+	if key := t.resolve(req.Context()); key != "" {
+		// RoundTrip must not modify the caller's request (net/http contract).
 		req = req.Clone(req.Context())
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
 	return base.RoundTrip(req)
 }
 
-// OpenAICredentialHTTPClient wraps base so that requests to the OpenAI API
-// carry the credential's current key. Pass the result wherever the shared
-// provider HTTP client is expected; every OpenAI-family SDK client built from
-// it then follows key changes automatically.
+// OpenAICredentialHTTPClient wraps base so requests to the OpenAI API carry the
+// key belonging to the actor on the request context. Pass the result wherever
+// the shared provider HTTP client is expected.
 //
-// base may be nil, in which case http.DefaultTransport is used.
-func OpenAICredentialHTTPClient(cred *OpenAICredential, base *http.Client) *http.Client {
+// base may be nil, in which case http.DefaultTransport is used. When base has
+// its own transport it is preserved — under a non-vendor backend that is the
+// deny-network transport, and dropping it would open egress the backend
+// forbids.
+func OpenAICredentialHTTPClient(resolve OpenAIKeyResolver, base *http.Client) *http.Client {
 	out := &http.Client{}
 	if base != nil {
 		*out = *base
@@ -98,6 +81,6 @@ func OpenAICredentialHTTPClient(cred *OpenAICredential, base *http.Client) *http
 	if base != nil {
 		baseRT = base.Transport
 	}
-	out.Transport = &openAICredentialTransport{cred: cred, base: baseRT}
+	out.Transport = &openAICredentialTransport{resolve: resolve, base: baseRT}
 	return out
 }
