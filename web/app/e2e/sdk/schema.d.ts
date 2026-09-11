@@ -3951,7 +3951,7 @@ export interface paths {
         put?: never;
         /**
          * Delete memories in batch
-         * @description Permanently deletes multiple memories owned by the authenticated user
+         * @description Permanently deletes multiple memories owned by the authenticated user. When all_or_none is false, missing ids are skipped and counted only for successful deletes; unexpected datastore errors abort the request. When all_or_none is true, the batch runs in one transaction and fails entirely if any id is missing.
          */
         post: {
             parameters: {
@@ -4021,7 +4021,7 @@ export interface paths {
         put?: never;
         /**
          * Patch memories in batch
-         * @description Applies the same patch to multiple memories (e.g. move / archive). Useful for bulk Move (level + pinned_personality_id) and Archive (status).
+         * @description Applies the same patch to multiple memories (e.g. move / archive). Useful for bulk Move (level + pinned_personality_id) and Archive (status). When all_or_none is true, the first failure aborts remaining ids; each successful UpdateMemory is already committed (not one encompassing transaction). When all_or_none is false, missing ids are skipped; unexpected errors abort.
          */
         post: {
             parameters: {
@@ -8856,7 +8856,10 @@ export interface components {
         };
         MemoryBatchDeleteRequest: {
             ids: string[];
-            /** @default false */
+            /**
+             * @description When true, fail the whole delete if any id is missing (single transaction). When false, skip missing ids and return deleted_count for successes only; unexpected errors still fail the request.
+             * @default false
+             */
             all_or_none: boolean;
         };
         MemoryBatchDeleteResponse: {
@@ -8865,7 +8868,10 @@ export interface components {
         MemoryBatchPatchRequest: {
             ids: string[];
             patch: components["schemas"]["MemoryPatchRequest"];
-            /** @default false */
+            /**
+             * @description When true, stop on the first failure. Already-patched rows from earlier ids in the request are kept (per-id transactions). When false, skip missing ids; unexpected errors still fail the request.
+             * @default false
+             */
             all_or_none: boolean;
         };
         MemoryBatchPatchResponse: {

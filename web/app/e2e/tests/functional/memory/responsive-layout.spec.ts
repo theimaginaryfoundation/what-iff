@@ -89,18 +89,24 @@ async function assertCommonLayout(memoriesPage: MemoriesPage, width: number, mem
   await memoriesPage.sortSelect.click({ trial: true });
   await memoriesPage.openMinDateButton.click({ trial: true });
 
-  const mainExtent = await memoriesPage.mainContent.evaluate(element => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
+  const mainExtent = await memoriesPage.mainContent.evaluate(element => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
   if (mainExtent.scrollWidth > mainExtent.clientWidth + LAYOUT_TOLERANCE_PX) {
-    const offenders = await memoriesPage.mainContent.evaluate((root, clientWidth) => {
+    const offenders = await memoriesPage.mainContent.evaluate(root => {
+      const rootRect = root.getBoundingClientRect();
+      const limit = rootRect.left + root.clientWidth + 1;
       const out: string[] = [];
       for (const el of Array.from(root.querySelectorAll<HTMLElement>('*'))) {
         const rect = el.getBoundingClientRect();
-        if (rect.width > clientWidth + 1) {
-          out.push(`${el.tagName.toLowerCase()}.${el.className}`.slice(0, 120) + ` w=${Math.round(rect.width)}`);
+        if (rect.right > limit) {
+          const cls = typeof el.className === 'string' ? el.className.split(/\s+/).slice(0, 2).join('.') : '';
+          out.push(`${el.tagName.toLowerCase()}${cls ? '.' + cls : ''} right=${Math.round(rect.right - rootRect.left)}`);
         }
       }
       return out.slice(0, 8);
-    }, mainExtent.clientWidth);
+    });
     expect(
       mainExtent.scrollWidth,
       `Main content should not require horizontal scrolling at ${width}px (offenders: ${offenders.join(' | ') || 'none'})`,
