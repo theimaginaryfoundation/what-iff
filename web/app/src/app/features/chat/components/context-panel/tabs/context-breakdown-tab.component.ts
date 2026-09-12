@@ -177,6 +177,11 @@ interface BreakdownRow {
      * implementation -- including the private build's credit-cost UI -- lands
      * in the same place without restating the rule.
      *
+     * Paired with the right-edge assertion in
+     * e2e/tests/visual/context-xray.visual.spec.ts — change this rule and that
+     * spec fails, which is how the original regression was caught. Keep them
+     * in sync.
+     *
      * No backticks anywhere in this comment: the styles block is a template
      * literal, so one would terminate it and fail the build with a "styles
      * could not be determined statically" compiler error.

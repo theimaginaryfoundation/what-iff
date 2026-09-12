@@ -33,7 +33,11 @@ test(
     await memoriesPage.navigateTo();
     await expect(memoriesPage.heading).toBeVisible();
 
+    // Exactly one, not merely visible: a `toBeVisible` alone would also pass if
+    // seeding had silently failed and a card with this fixed content survived
+    // from an earlier run.
     const card = memoriesPage.card(content);
+    await expect(card).toHaveCount(1);
     await expect(card).toBeVisible();
 
     await expect(card).toHaveScreenshot('memory-card.png', {

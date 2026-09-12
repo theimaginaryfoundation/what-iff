@@ -40,7 +40,10 @@ async function editPromptOnce(
     response => response.request().method() === 'PUT' && /\/api\/personality\/[^/]+$/.test(response.url()),
   );
   await personalityDetailPage.savePrompt();
-  await saved;
+  // Assert the save succeeded rather than only that it responded. A 4xx still
+  // settles `waitForResponse`, and the failure would then surface as a
+  // confusing empty audit list two navigations later.
+  expect((await saved).ok(), 'saving the prompt should succeed').toBe(true);
 
   return { initialPrompt, updatedPrompt };
 }
@@ -107,7 +110,7 @@ test('restoring a previous prompt appends a second, reversed entry', async ({
   // than the original being rewritten or removed.
   await expect(compactionLogPage.promptChangeCard(name)).toHaveCount(2);
   const newest = compactionLogPage.promptChangeCard(name).first();
-  await expect(newest.locator('.diff-pane--old .diff-pane__content')).toHaveText(updatedPrompt);
-  await expect(newest.locator('.diff-pane--new .diff-pane__content')).toHaveText(initialPrompt);
+  await expect(compactionLogPage.paneWithin(newest, 'Before')).toHaveText(updatedPrompt);
+  await expect(compactionLogPage.paneWithin(newest, 'After')).toHaveText(initialPrompt);
   await expect(newest.locator('.compaction-card__badge-value').filter({ hasText: 'Restored' })).toBeVisible();
 });

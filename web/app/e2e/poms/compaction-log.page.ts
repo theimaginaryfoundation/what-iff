@@ -50,11 +50,18 @@ export class CompactionLogPage {
     return this.promptChangeCard(personalityName).locator('.compaction-card__body');
   }
 
-  /** The "Before" / "After" diff panes on a prompt change card. */
+  /**
+   * The rendered prompt text in a card's "Before" / "After" diff pane. The one
+   * place these selectors live — specs and the newest-card assertions below
+   * both go through it, so a DOM change to the diff grid is a single edit.
+   */
   promptChangePane(personalityName: string, side: 'Before' | 'After'): Locator {
-    return this.promptChangeCard(personalityName)
-      .locator(side === 'Before' ? '.diff-pane--old' : '.diff-pane--new')
-      .locator('.diff-pane__content');
+    return this.paneWithin(this.promptChangeCard(personalityName), side);
+  }
+
+  /** Same, scoped to a card locator the caller already narrowed (e.g. `.first()`). */
+  paneWithin(card: Locator, side: 'Before' | 'After'): Locator {
+    return card.locator(side === 'Before' ? '.diff-pane--old' : '.diff-pane--new').locator('.diff-pane__content');
   }
 
   /** The card's "Edited" / "Restored" badge value. */

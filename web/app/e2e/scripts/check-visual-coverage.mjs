@@ -71,6 +71,21 @@ function isInside(root, target) {
 const problems = [];
 const note = (specPath, message) => problems.push(`${specPath}: ${message}`);
 
+/**
+ * Parsed results by absolute path. Several visual specs legitimately cite the
+ * same functional spec — `thread-workspace.spec.ts` already backs two — and
+ * without this each citation re-parses the file.
+ */
+const analysisCache = new Map();
+function analyze(target) {
+  let cached = analysisCache.get(target);
+  if (!cached) {
+    cached = analyzeSpec(target, readFileSync(target, 'utf8'));
+    analysisCache.set(target, cached);
+  }
+  return cached;
+}
+
 const visualSpecs = readdirSync(VISUAL_DIR)
   .filter(name => name.endsWith('.spec.ts'))
   .sort();
@@ -140,7 +155,7 @@ for (const name of visualSpecs) {
 
     let analysis;
     try {
-      analysis = analyzeSpec(target, readFileSync(target, 'utf8'));
+      analysis = analyze(target);
     } catch (err) {
       // Fail closed. An unparseable target is not evidence of coverage.
       note(specPath, `@functional-coverage '${declaredPath}' could not be parsed: ${err.message}`);
@@ -167,7 +182,7 @@ for (const name of visualSpecs) {
 console.log(`Visual specs checked: ${visualSpecs.length}`);
 
 if (problems.length > 0) {
-  console.error(`\n${problems.length} visual spec(s) without functional coverage:\n`);
+  console.error(`\n${problems.length} visual spec coverage issue(s):\n`);
   for (const problem of problems) console.error(`  ✗ ${problem}\n`);
   console.error('Rule: a screenshot may not be the only coverage of an area.');
   console.error('See e2e/README.md, "Visual regression".');

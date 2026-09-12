@@ -35,6 +35,7 @@ export class ChatPage {
     this.contextGaugeTop = this.contextBreakdown.locator('.gauge__top');
     this.contextGaugeTotal = this.contextBreakdown.locator('.gauge__total');
     this.contextGaugeBudget = this.contextBreakdown.locator('.gauge__budget');
+    this.contextCostOutlet = this.contextBreakdown.locator('app-context-cost-outlet');
     this.contextCostEstimate = this.contextBreakdown.locator('.gauge__cost');
     this.scratchpadTab = this.page.getByLabel('Thread scratchpad');
     this.scratchpadInput = this.page.getByPlaceholder('Capture thread-specific notes');
@@ -213,8 +214,15 @@ export class ChatPage {
   readonly contextGaugeBudget: Locator;
 
   /**
-   * What the cost outlet renders. In the public build that is the estimated
-   * input API cost ("Est. $0.007"); the private overlay replaces the same
+   * The outlet host element. Mounted for every assistant turn regardless of
+   * which build is running or whether a priced estimate exists, so this — not
+   * the class-based locator below — is what a spec should test presence with.
+   */
+  readonly contextCostOutlet: Locator;
+
+  /**
+   * What the public build's outlet renders inside that host: the estimated
+   * input API cost ("Est. $0.007"). The private overlay replaces the same
    * element with its credit-cost UI, which is why specs assert placement and
    * shape rather than an exact string.
    */

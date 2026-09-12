@@ -640,6 +640,12 @@ suite through, and let a blanket-skipped test pass whenever it sat inside a
 `describe` (the pattern matching `test(` also matched `test.describe(`, so
 the count came out wrong). Every one of those bypasses is now a fixture.
 
+It exits non-zero if `tests/visual/` holds no specs at all. That is a guard
+against the check silently passing because it found nothing — a
+path-resolution bug would otherwise look identical to a clean run — so an
+intentionally empty visual suite would need this relaxed rather than worked
+around.
+
 Two things it deliberately does **not** check, and should not be described as
 checking:
 

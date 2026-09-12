@@ -135,7 +135,7 @@ test('shows a reply’s token breakdown from its Context action', { tag: '@mock-
   // owning message id regardless. Its presence is the functional contract;
   // `tests/visual/context-xray.visual.spec.ts` owns where it sits.
   await expect(chatPage.contextGaugeTotal).toBeVisible();
-  await expect(chatPage.contextBreakdown.locator('app-context-cost-outlet')).toHaveCount(1);
+  await expect(chatPage.contextCostOutlet).toHaveCount(1);
 });
 
 test('opens the import-conversations modal and cancels', async ({ chatImportModal, threadListPanel, userWithPersonality }) => {
