@@ -102,8 +102,27 @@ npm run lint:e2e
 ## Visual snapshots
 
 Visual specs (`e2e/tests/visual/`, tagged `@visual @mock-only`) are
-Chromium-only and cover a handful of deterministic screens. **Baselines are
-only ever generated/updated inside the Playwright Docker container** —
+Chromium-only and cover a handful of deterministic screens.
+
+**A screenshot may not be the only coverage of an area.** Every file in
+`tests/visual/` must declare the functional spec behind it, and
+`npm run e2e:check-visual-coverage` (CI-gated) fails the build otherwise:
+
+```ts
+/**
+ * @functional-coverage tests/functional/chat/emoji-shortcodes.spec.ts
+ */
+```
+
+Paths are relative to `e2e/` and must be under `tests/functional/` or
+`tests/journeys/`. If the area has no functional spec, **write the functional
+spec first** — a baseline proves a screen still looks right, never that it
+still works. The same check rejects a declared spec that is skipped in its
+entirety by `test.skip(true, ...)`; narrow a flaky test with a tag
+(`@mock-only`) instead of skipping it everywhere.
+
+**Baselines are only ever generated/updated inside the Playwright Docker
+container** —
 never via `--update-snapshots` on a host machine (macOS/Linux font
 rasterization differs from CI):
 

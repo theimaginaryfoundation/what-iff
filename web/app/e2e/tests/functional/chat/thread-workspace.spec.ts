@@ -83,13 +83,25 @@ test('opens the conversation context panel and types in the scratchpad', async (
   await expect(chatPage.contextPanel).toBeHidden();
 });
 
-test('shows a reply’s token breakdown from its Context action', async ({ chatPage, seed, userWithPersonality }) => {
-  // Skipped: flaky against real-inference backends (e.g. local Ollama) due to a
-  // response-ordering race in JobService.pollJob() that can clobber a message's
-  // context_breakdown with a stale, breakdown-less fetch.
-  /* eslint-disable-next-line playwright/no-skipped-test -- tracked flake, not a blanket skip */
-  test.skip(true, 'Flaky on real-inference backends: JobService.pollJob() fetch-ordering race.');
-
+/**
+ * Tagged `@mock-only` rather than skipped outright. The flake this test used
+ * to carry is a response-ordering race in `JobService.pollJob()`, where a
+ * stale breakdown-less fetch can clobber a message's `context_breakdown` —
+ * and it only opens wide enough to matter against a real-inference backend
+ * (e.g. local Ollama), whose reply latency varies run to run. The mock
+ * backend's timing is deterministic, so the race does not open there.
+ *
+ * `test.skip(true, ...)` made that distinction invisible: it took the test out
+ * of *every* environment, including the one where it is sound, which left the
+ * Context X-ray with no functional coverage at all and the `context-xray`
+ * visual spec standing on nothing. The `@mock-only` tag is the mechanism this
+ * suite already has for exactly this — `playwright.config.local-llm.ts`
+ * excludes it, `playwright.config.mock-llm.ts` runs it.
+ *
+ * This narrows where the test runs; it does not fix the underlying race,
+ * which is still worth fixing in `JobService.pollJob()`.
+ */
+test('shows a reply’s token breakdown from its Context action', { tag: '@mock-only' }, async ({ chatPage, seed, userWithPersonality }) => {
   const thread = await seed.thread(undefined, {
     personalityId: userWithPersonality.personality.id,
   });
@@ -109,6 +121,13 @@ test('shows a reply’s token breakdown from its Context action', async ({ chatP
   await expect(chatPage.contextBreakdown).toBeVisible();
   await expect(chatPage.contextBreakdown.getByText('Turn context', { exact: true })).toBeVisible();
   await expect(chatPage.contextBreakdown.getByRole('img', { name: /^Context is \d+% of budget:/ })).toBeVisible();
+
+  // The cost outlet is mounted for every assistant turn, whether or not the
+  // turn's model resolves to a priced estimate — the X-ray passes it the
+  // owning message id regardless. Its presence is the functional contract;
+  // `tests/visual/context-xray.visual.spec.ts` owns where it sits.
+  await expect(chatPage.contextGaugeTotal).toBeVisible();
+  await expect(chatPage.contextBreakdown.locator('app-context-cost-outlet')).toHaveCount(1);
 });
 
 test('opens the import-conversations modal and cancels', async ({ chatImportModal, threadListPanel, userWithPersonality }) => {
