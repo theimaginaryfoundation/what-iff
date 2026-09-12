@@ -154,7 +154,26 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
           [attr.aria-selected]="model.id === selectedId()"
           (click)="choose(model)"
         >
-          <span class="model-picker__option-name">{{ model.display_name }}</span>
+          <span class="model-picker__option-details">
+            <span class="model-picker__option-name">{{ model.display_name }}</span>
+            @if (model.capabilities; as capabilities) {
+              <span class="model-picker__capabilities" [attr.aria-label]="capabilityAriaLabel(model)">
+                @if (capabilities.tool_calling) {
+                  <span class="model-picker__capability" [attr.title]="toolCapabilityTitle(model)">
+                    Tools {{ capabilities.tools.length }}
+                  </span>
+                } @else {
+                  <span class="model-picker__capability">No tools</span>
+                }
+                @if (capabilities.vision) {
+                  <span class="model-picker__capability">Vision</span>
+                }
+                @if (capabilities.mcp) {
+                  <span class="model-picker__capability">MCP</span>
+                }
+              </span>
+            }
+          </span>
           @if (tierLabel(model); as tier) {
             <span class="model-picker__tier">{{ tier }}</span>
           }
@@ -376,10 +395,34 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
       font-weight: 600;
     }
 
+    .model-picker__option-details {
+      display: grid;
+      gap: 0.25rem;
+      min-width: 0;
+    }
+
     .model-picker__option-name {
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .model-picker__capabilities {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+    }
+
+    .model-picker__capability {
+      background: var(--color-surface-muted);
+      border: 1px solid var(--color-border-base);
+      border-radius: 999px;
+      color: var(--color-text-muted);
+      font-size: 0.5625rem;
+      font-weight: 700;
+      line-height: 1.4;
+      padding: 0.05rem 0.3rem;
       white-space: nowrap;
     }
 
@@ -486,6 +529,22 @@ export class ModelPickerComponent {
 
   tierLabel(model: Model): string {
     return modelTierCompactLabel(model.subscription_tier);
+  }
+
+  capabilityAriaLabel(model: Model): string {
+    const capabilities = model.capabilities;
+    if (!capabilities) return '';
+    const parts = [
+      capabilities.tool_calling ? `${capabilities.tools.length} tools` : 'no tools',
+      capabilities.vision ? 'vision' : '',
+      capabilities.mcp ? 'MCP' : '',
+    ].filter(Boolean);
+    return `Capabilities: ${parts.join(', ')}`;
+  }
+
+  toolCapabilityTitle(model: Model): string {
+    const tools = model.capabilities?.tools ?? [];
+    return tools.length ? `Available tools: ${tools.join(', ')}` : 'Tool calling supported';
   }
 
   providerLabel(provider: string): string {
