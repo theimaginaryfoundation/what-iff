@@ -114,12 +114,19 @@ Chromium-only and cover a handful of deterministic screens.
  */
 ```
 
-Paths are relative to `e2e/` and must be under `tests/functional/` or
+Paths are relative to `e2e/` and must resolve inside `tests/functional/` or
 `tests/journeys/`. If the area has no functional spec, **write the functional
 spec first** — a baseline proves a screen still looks right, never that it
-still works. The same check rejects a declared spec that is skipped in its
-entirety by `test.skip(true, ...)`; narrow a flaky test with a tag
-(`@mock-only`) instead of skipping it everywhere.
+still works.
+
+The check also rejects a declared spec whose tests are all disabled in every
+environment, including via `test.describe.skip` and `fixme`, which it
+determines by parsing the file (`scripts/lib/playwright-test-analysis.mjs`,
+with its own `node --test` fixtures). Narrow a flaky test with a tag
+(`@mock-only`) rather than disabling it everywhere.
+
+It does **not** check that the named spec covers the right behaviour, or that
+it ran in a given CI job — don't describe it as doing either.
 
 **Baselines are only ever generated/updated inside the Playwright Docker
 container** —

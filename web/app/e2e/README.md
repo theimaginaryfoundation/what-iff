@@ -139,6 +139,8 @@ e2e/
     what-runs-where.md # which config runs what, against which backend, and why
   scripts/
     visual-docker.sh   # runs tests/visual inside the Playwright Docker image
+    check-visual-coverage.mjs # every visual spec must name a functional spec
+    lib/playwright-test-analysis.mjs # AST: does a spec declare a runnable test?
     merge-coverage.mjs # E2E_COVERAGE: raw V8 from every shard -> one lcov
     check-coverage.mjs # acceptance checks on that merged lcov
   playwright.config.base.ts   # shared settings + the three browser projects
@@ -616,17 +618,36 @@ same area, in a machine-readable header:
  */
 ```
 
-Paths are relative to `e2e/`, may be comma-separated, and must point at
-`tests/functional/` or `tests/journeys/` — a visual spec cannot satisfy the
-rule by pointing at another visual spec.
+Paths are relative to `e2e/` and may be comma-separated.
 
-`npm run e2e:check-visual-coverage` enforces it (and runs in
-`frontend-pr-validation`). It checks that a declaration exists, that every
-path resolves to a file that contains tests, and that the file is not skipped
-in its entirety by an unconditional `test.skip(true, ...)`. It deliberately
-does **not** judge whether the named spec covers the *right* behaviour; that
-is a review question. Its value is that the author has to name something and
-the reviewer has to look at what was named.
+`npm run e2e:check-visual-coverage` enforces it, and runs in
+`frontend-pr-validation`. Precisely what it checks:
+
+1. a declaration exists;
+2. each path resolves to a real, regular `.spec.ts` file — no directories,
+   no symlinks;
+3. each resolved path is genuinely *inside* `tests/functional/` or
+   `tests/journeys/`, compared after normalisation so `../` and lookalike
+   directory names cannot escape;
+4. each declared file declares at least one test that is not disabled in
+   every environment — determined by parsing it, not by matching text.
+
+Point 4 is why `scripts/lib/playwright-test-analysis.mjs` exists and has its
+own `node --test` fixtures, which the npm script runs first. Disabling in
+Playwright is inherited and positional, so it is structural, and a regex
+cannot see it: the first version of this gate let a `test.describe.skip`
+suite through, and let a blanket-skipped test pass whenever it sat inside a
+`describe` (the pattern matching `test(` also matched `test.describe(`, so
+the count came out wrong). Every one of those bypasses is now a fixture.
+
+Two things it deliberately does **not** check, and should not be described as
+checking:
+
+- whether the named spec covers the *right* behaviour. That is a review
+  question. The value of the rule is that an author must name something and a
+  reviewer must look at what was named.
+- whether the named spec actually *ran* in a given CI job. Config `grep`
+  filters and project selection decide that, and only a real run knows.
 
 The reason is that a `toHaveScreenshot()` baseline answers exactly one
 question — does this still look the way it looked — and passes happily
@@ -714,11 +735,13 @@ PNGs are the commit. A new spec whose baselines are not committed fails CI —
 Playwright writes a missing snapshot and then reports the test as failed.
 
 CI checks both the desktop and the mobile baselines on every frontend run,
-including a plain unlabelled PR (`VISUAL_PROJECTS` in `e2e-mock.yml`). That
-is deliberately different from the functional suite, which is desktop-only on
-a PR unless it carries `e2e-full`: the responsive work these baselines exist
-to protect can only regress on a mobile viewport, so gating them behind a
-label would catch a regression only after it had landed.
+including a plain unlabelled PR. The mechanism is that the "Run visual specs"
+step in `e2e-mock.yml` passes **no** `--project` filter at all — unlike the
+functional shards, it is deliberately not narrowed by that workflow's
+`PROJECTS` variable. That difference is the point: the functional suite is
+desktop-only on a PR unless it carries `e2e-full`, but the responsive work
+these baselines exist to protect can only regress on a mobile viewport, so
+gating them behind a label would catch a regression only after it had landed.
 
 **Prerequisites** for the `:docker` scripts (see `e2e/scripts/visual-docker.sh`
 for the fully commented version): a backend API reachable on the host at

@@ -86,20 +86,28 @@ test('opens the conversation context panel and types in the scratchpad', async (
 /**
  * Tagged `@mock-only` rather than skipped outright. The flake this test used
  * to carry is a response-ordering race in `JobService.pollJob()`, where a
- * stale breakdown-less fetch can clobber a message's `context_breakdown` —
- * and it only opens wide enough to matter against a real-inference backend
- * (e.g. local Ollama), whose reply latency varies run to run. The mock
- * backend's timing is deterministic, so the race does not open there.
+ * stale breakdown-less fetch can clobber a message's `context_breakdown`. It
+ * was only ever *observed* against a real-inference backend (e.g. local
+ * Ollama), whose reply latency varies run to run.
  *
- * `test.skip(true, ...)` made that distinction invisible: it took the test out
- * of *every* environment, including the one where it is sound, which left the
- * Context X-ray with no functional coverage at all and the `context-xray`
- * visual spec standing on nothing. The `@mock-only` tag is the mechanism this
- * suite already has for exactly this — `playwright.config.local-llm.ts`
- * excludes it, `playwright.config.mock-llm.ts` runs it.
+ * Note what that does and does not say. The race is not fixed, and it is not
+ * proven impossible here: the two `getMessage` subscriptions are unordered
+ * regardless of how deterministic the mock backend's reply timing is, so a
+ * slow enough CI machine could in principle still lose the breakdown. What
+ * changed is only the odds and the evidence — it passed 5/5 under
+ * `--repeat-each` locally against the mock backend, and it had no observed
+ * flake there before being skipped.
  *
- * This narrows where the test runs; it does not fix the underlying race,
- * which is still worth fixing in `JobService.pollJob()`.
+ * The reason to tag rather than skip is that `test.skip(true, ...)` took the
+ * test out of *every* environment, which left the Context X-ray with no
+ * functional coverage at all and the `context-xray` visual spec standing on
+ * nothing. A test that runs in one environment is strictly more than a test
+ * that runs in none. `@mock-only` is the mechanism this suite already has for
+ * that — `playwright.config.local-llm.ts` excludes it, `mock-llm.ts` runs it.
+ *
+ * If this does flake here, the fix is the ordering bug in
+ * `JobService.pollJob()` — stop a stale fetch overwriting a newer result —
+ * not another blanket skip.
  */
 test('shows a reply’s token breakdown from its Context action', { tag: '@mock-only' }, async ({ chatPage, seed, userWithPersonality }) => {
   const thread = await seed.thread(undefined, {
