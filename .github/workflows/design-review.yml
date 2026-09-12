@@ -1,0 +1,121 @@
+name: Design Review
+
+# Opt-in, by label. Most PRs do not change a screen, and a report that
+# appears on all of them is one people learn to scroll past — so this runs
+# only where someone has said the visual result is worth looking at.
+#
+# `labeled` is required in addition to the usual three: adding the label to
+# an already-open PR is the whole trigger, and without it nothing would run
+# until the next push. `synchronize` keeps a labelled PR's report current as
+# the branch moves, so a reviewer never opens a report for an older commit.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'Ref to compare against (default: the repository default branch)'
+        required: false
+        default: main
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  # One report per PR. A rapid series of pushes should leave the newest
+  # report standing, not race several runs to patch the same comment.
+  group: design-review-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    name: Build design review report
+    runs-on: ubuntu-latest
+    # `labeled` fires for every label, not just this one, so the event alone
+    # is not the gate — the check is whether the label is present now, which
+    # also covers `synchronize` on an already-labelled PR.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'design-review')
+
+    steps:
+      # Full history: the report's "before" is the baseline at the merge base,
+      # which a shallow clone cannot compute. Checking out the head commit
+      # rather than the default merge commit means the "after" is the branch
+      # as its author left it, not a speculative merge result whose baselines
+      # git resolved on their behalf.
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # No `npm ci` on purpose. The report has no dependencies — it reads
+      # committed baselines out of git — so installing the frontend toolchain
+      # here would be a minute of CI to run a script that does not use it.
+
+      - name: Resolve the base ref
+        id: base
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || inputs.base || 'main' }}
+        run: |
+          # `actions/checkout` fetches all branches at depth 0, but fetching
+          # the base explicitly keeps this working if that ever changes — and
+          # a missing base ref is a silently wrong report, not a failure.
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          echo "ref=origin/${BASE_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Build the report
+        env:
+          BASE: ${{ steps.base.outputs.ref }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        working-directory: web/app
+        run: |
+          node e2e/design-review/cli.mjs \
+            --base "$BASE" \
+            --head HEAD \
+            --out "$RUNNER_TEMP/design-review.html" \
+            --json "$RUNNER_TEMP/design-review.json" \
+            --markdown "$RUNNER_TEMP/design-review.md" \
+            --report-link "$RUN_URL" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/design-review.md" >> "$GITHUB_STEP_SUMMARY"
+
+      # The report is a single self-contained file; downloading the artifact
+      # and opening it is the whole workflow for a reviewer. `compression-
+      # level: 0` because the PNGs inside are already deflate-compressed and
+      # re-compressing them costs time for roughly nothing.
+      - name: Upload the report
+        uses: actions/upload-artifact@v4
+        with:
+          name: design-review
+          path: |
+            ${{ runner.temp }}/design-review.html
+            ${{ runner.temp }}/design-review.json
+          retention-days: 14
+          compression-level: 0
+
+      # Skipped for forks — same reasoning as the e2e workflows' identically
+      # named steps: a fork PR's token is read-only here, and the alternative
+      # (`pull_request_target`) would hand a write token to a job that runs
+      # the PR's own code.
+      - name: Post or update PR comment
+        if: >-
+          !cancelled() && github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        uses: ./.github/actions/e2e-status-comment
+        with:
+          pr: ${{ github.event.pull_request.number }}
+          # Its own sticky comment rather than a section of the e2e one: this
+          # is label-triggered and answers a different question, so it should
+          # appear and update on its own cadence.
+          comment-key: design-review-comment
+          section: design-review
+          order: 10
+          body-file: ${{ runner.temp }}/design-review.md

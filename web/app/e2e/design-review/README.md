@@ -10,6 +10,22 @@ make design-review              # from the repo root
 
 Writes `.dev/design-review/report.html`. Add `-- --open` to open it.
 
+## On a pull request: the `design-review` label
+
+Add the **`design-review`** label to a PR and
+`.github/workflows/design-review.yml` builds the report for it, uploads it
+as the `design-review` artifact, and posts a sticky comment listing the
+screens that moved and by how much. Pushing to a labelled PR refreshes both.
+
+Opt-in rather than automatic, for the reason every label gate in this repo
+exists: most PRs do not change a screen, and a report that appears on all of
+them is one people learn to scroll past.
+
+The job runs no browser, no backend and no `npm ci`, so it costs seconds
+rather than minutes. Fork PRs get the artifact but no comment — their token
+is read-only, and the alternative (`pull_request_target`) would hand a write
+token to a job running the PR's own code.
+
 ## Why this exists separately from the visual suite
 
 The visual suite answers "did anything change by accident?". This answers
@@ -48,17 +64,25 @@ what makes it a second-long command rather than a twenty-minute one.
 | File | Role |
 |---|---|
 | `cli.mjs` | Argument parsing, output paths, the terminal summary. |
+| `markdown.mjs` | The model as a PR comment. Same source as the HTML, so the two cannot disagree. |
 | `collect.mjs` | Builds the model. Knows about screens, statuses and impact; produces no HTML. |
 | `render.mjs` | Model to HTML. Deduplicates images and inlines everything. |
 | `assets/report.css`, `assets/report.js` | The report's own UI, inlined at render time. |
 | `lib/git.mjs` | Refs, blobs, changed files. The only place that shells out to git. |
 | `lib/screens.mjs` | Baseline paths to screens; spec titles and doc comments. |
-| `lib/png.mjs` | IHDR dimensions, nothing more. |
+| `lib/png.mjs` | Dimensions from the header, plus a decoder for 8-bit non-interlaced PNGs. |
+| `lib/diff.mjs` | Changed-pixel comparison. Mirrors the rule `assets/report.js` runs on a canvas. |
 | `lib/impact.mjs` | File categories, feature areas, the name-match heuristic. |
 
 `collect.mjs` returning a plain object rather than writing files is what lets
-`--json` and the HTML report share one definition of "which screens changed",
-instead of two that drift.
+the HTML report, `--json` and the PR comment share one definition of "which
+screens changed", instead of three that drift.
+
+The changed-pixel figure is computed twice on purpose: in Node, so the
+comment and the JSON can quote a number without rendering anything, and in
+the browser, so the report's sensitivity slider can move without a round
+trip. Both implement the same rule from the same default threshold, and a
+test pins the boundary. Changing one means changing the other.
 
 ## Known limits
 

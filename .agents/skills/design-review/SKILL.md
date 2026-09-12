@@ -10,7 +10,8 @@ description: >-
   "design review for this branch", "did the layout change", "before and after
   screenshots for the PR", "which screens did I break". Also use when a
   designer's change lands on a screen with no visual baseline and one should
-  be added.
+  be added. Covers the `design-review` PR label that builds the same report
+  in CI.
 ---
 
 # Design review
@@ -37,6 +38,23 @@ The visual suite still matters — it is what catches the *unintended* change,
 where the code moved and the baseline did not. That is a different question
 with its own command; see "When to also run the suite" below.
 
+## The `design-review` label
+
+For a PR, the usual answer is not to run anything: add the **`design-review`**
+label. `.github/workflows/design-review.yml` builds the report, uploads it as
+the `design-review` artifact, and posts a sticky comment naming the screens
+that moved and by how much. Pushing to a labelled PR refreshes both.
+
+```bash
+gh pr edit <N> --add-label design-review
+```
+
+Prefer this when the PR is already pushed — the reviewer gets a permanent
+link on the PR rather than a file on someone's laptop. Build it locally when
+iterating on uncommitted work, which the label cannot see.
+
+Fork PRs get the artifact but no comment; their token is read-only.
+
 ## Produce the report
 
 From `web/app/`:
@@ -49,6 +67,9 @@ Or from the repo root, `make design-review`. Either writes
 `.dev/design-review/report.html` — one self-contained file with the images
 inlined, so it can be sent to someone who will never clone the repo.
 
+Add `-- --markdown <path>` for the same summary as a PR comment, ready to
+paste.
+
 Useful variants:
 
 | Goal | Command |
@@ -59,6 +80,7 @@ Useful variants:
 | Everything since a release | `npm run design:review -- --base v1.4.0` |
 | Open it immediately | add `-- --open` |
 | Machine-readable, for a CI assertion | add `-- --json <path>` |
+| A summary to paste into a PR | add `-- --markdown <path>` |
 
 The default `--head` is the **working tree**, not `HEAD`. An uncommitted or
 untracked baseline shows up, which is the point when iterating.
@@ -68,8 +90,9 @@ untracked baseline shows up, which is the point when iterating.
 Do not just hand over a file path. Open the JSON model (`--json`) and say
 what is in it, because that is what the person asked:
 
-1. **Which screens changed**, by name, and how much of each differs. A screen
-   at 15% differing pixels was restructured; one at 0.3% moved a border.
+1. **Which screens changed**, by name, and how much of each differs. The
+   model carries a `diff.ratio` per viewport, so quote it. A screen at 15%
+   differing pixels was restructured; one at 0.3% moved a border.
 2. **Anything new or removed.** A removed baseline with no explanation in the
    PR is worth a question — it usually means a spec was deleted or renamed
    rather than a screen genuinely retired.

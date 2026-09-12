@@ -15,6 +15,7 @@ import * as git from './lib/git.mjs';
 import { readPngSize } from './lib/png.mjs';
 import { listBaselinePaths, parseBaselinePath, readSpecAnnotations, titleize, PROJECTS } from './lib/screens.mjs';
 import { summarizeImpact, relatedFiles } from './lib/impact.mjs';
+import { diffPngs } from './lib/diff.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -119,6 +120,12 @@ export async function collect({ cwd = process.cwd(), baseRef = 'origin/main', he
     }
 
     const project = PROJECTS[parsed.project] ?? { label: parsed.project, form: 'unknown', order: 99 };
+    const status = variantStatus(before, after);
+    // Only changed variants are compared. An unchanged one is byte-identical
+    // by definition, and a one-sided one has nothing to compare against — so
+    // decoding them would be work whose answer is already known, on every
+    // screen in the report rather than the few that moved.
+    const diff = status === 'changed' ? diffPngs(before.buffer, after.buffer) : null;
     screensByShot.get(key).variants.push({
       project: parsed.project,
       label: project.label,
@@ -126,7 +133,8 @@ export async function collect({ cwd = process.cwd(), baseRef = 'origin/main', he
       form: project.form,
       order: project.order,
       path: relPath,
-      status: variantStatus(before, after),
+      status,
+      diff,
       before,
       after,
     });
@@ -163,6 +171,12 @@ export async function collect({ cwd = process.cwd(), baseRef = 'origin/main', he
   const mentioned = new Set(screens.flatMap(screen => screen.related));
   const uncovered = impact.files
     .filter(file => ['template', 'style', 'asset'].includes(file.category))
+    // App source only. The category test is extension-based on purpose, so
+    // it also matches a stylesheet belonging to the tooling or the e2e suite
+    // — real style files, but not product surface, and listing them under
+    // "no screen shows this" would be noise that trains readers to skip the
+    // list. `area` is null for anything outside the app's src/.
+    .filter(file => file.area !== null)
     .filter(file => !mentioned.has(file.path))
     .map(file => ({ path: file.path, area: file.area, category: file.category, added: file.added, deleted: file.deleted }));
 

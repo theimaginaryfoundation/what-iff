@@ -18,6 +18,7 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { collect } from './collect.mjs';
 import { render, reportTitle } from './render.mjs';
+import { renderMarkdown } from './markdown.mjs';
 import { WORKTREE } from './lib/git.mjs';
 
 const USAGE = `
@@ -30,6 +31,8 @@ Options
   --head <ref>     Treat this ref as "after".               (default: working tree)
   --out <path>     Where to write the report.               (default: .dev/design-review/report.html)
   --json <path>    Also write the underlying model as JSON.
+  --markdown <p>   Also write a pull-request-comment summary as markdown.
+  --report-link <url>  URL to link to from that summary (where the report is published).
   --open           Open the report when it is written.
   --help           Show this.
 
@@ -38,10 +41,11 @@ Examples
   npm run design:review -- --head HEAD               # my branch as committed
   npm run design:review -- --base v1.4.0             # since a release
   npm run design:review -- --head abc1234 --open
+  npm run design:review -- --markdown /tmp/comment.md   # paste into a PR
 `;
 
 function parseArgs(argv) {
-  const options = { base: 'origin/main', head: WORKTREE, out: null, json: null, open: false };
+  const options = { base: 'origin/main', head: WORKTREE, out: null, json: null, markdown: null, reportLink: null, open: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     // A `--flag=value` form is accepted alongside `--flag value` because npm
@@ -53,6 +57,8 @@ function parseArgs(argv) {
       case '--head': options.head = next(); break;
       case '--out': options.out = next(); break;
       case '--json': options.json = next(); break;
+      case '--markdown': options.markdown = next(); break;
+      case '--report-link': options.reportLink = next(); break;
       case '--open': options.open = true; break;
       case '--help':
       case '-h': options.help = true; break;
@@ -60,7 +66,7 @@ function parseArgs(argv) {
         throw new Error(`Unknown option: ${arg}\n${USAGE}`);
     }
   }
-  for (const key of ['base', 'head', 'out', 'json']) {
+  for (const key of ['base', 'head', 'out', 'json', 'markdown', 'reportLink']) {
     if (options[key] === undefined) throw new Error(`Option --${key} needs a value.\n${USAGE}`);
   }
   return options;
@@ -112,6 +118,13 @@ async function main() {
       'utf8',
     );
     process.stdout.write(`  model  ${display(jsonPath, model.repoRoot)}\n`);
+  }
+
+  if (options.markdown) {
+    const markdownPath = path.resolve(options.markdown);
+    await mkdir(path.dirname(markdownPath), { recursive: true });
+    await writeFile(markdownPath, renderMarkdown(model, { reportLink: options.reportLink }), 'utf8');
+    process.stdout.write(`  comment ${display(markdownPath, model.repoRoot)}\n`);
   }
 
   const { changed, added, removed, unchanged } = model.summary;

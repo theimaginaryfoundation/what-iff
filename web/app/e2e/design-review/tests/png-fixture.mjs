@@ -34,30 +34,71 @@ function chunk(type, data) {
   return Buffer.concat([length, typed, checksum]);
 }
 
-/** A solid-colour RGBA PNG of the given size. */
-export function makePng(width, height, [red, green, blue, alpha = 255] = [0, 0, 0]) {
+/** Channels per colour type, matching the decoder's own table. */
+const CHANNELS = { 0: 1, 2: 3, 4: 2, 6: 4 };
+
+/**
+ * Applies a PNG row filter, encoding-direction.
+ *
+ * The decoder's hardest code is the five filter reversals, and a fixture
+ * that only ever emitted filter 0 would leave four of them untested while
+ * looking like coverage. Real screenshots use all five — Chromium picks per
+ * scanline — so the fixture can emit any of them and the tests round-trip
+ * each one.
+ */
+function applyFilter(type, row, previous, bytesPerPixel) {
+  const out = Buffer.from(row);
+  for (let i = row.length - 1; i >= 0; i--) {
+    const left = i >= bytesPerPixel ? row[i - bytesPerPixel] : 0;
+    const above = previous ? previous[i] : 0;
+    const aboveLeft = previous && i >= bytesPerPixel ? previous[i - bytesPerPixel] : 0;
+    let predictor = 0;
+    if (type === 1) predictor = left;
+    else if (type === 2) predictor = above;
+    else if (type === 3) predictor = (left + above) >> 1;
+    else if (type === 4) {
+      const estimate = left + above - aboveLeft;
+      const dLeft = Math.abs(estimate - left);
+      const dAbove = Math.abs(estimate - above);
+      const dAboveLeft = Math.abs(estimate - aboveLeft);
+      predictor = dLeft <= dAbove && dLeft <= dAboveLeft ? left : dAbove <= dAboveLeft ? above : aboveLeft;
+    }
+    out[i] = (row[i] - predictor) & 0xff;
+  }
+  return out;
+}
+
+/**
+ * A solid-colour PNG of the given size.
+ *
+ * `colourType` defaults to 6 (RGBA); pass 2 to match what Chromium actually
+ * writes for a screenshot, which is the path the committed baselines take.
+ */
+export function makePng(width, height, [red, green, blue, alpha = 255] = [0, 0, 0], { colourType = 6, filter = 0 } = {}) {
+  const channels = CHANNELS[colourType];
+  if (!channels) throw new Error(`unsupported colour type ${colourType}`);
+
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
   header[8] = 8; // bit depth
-  header[9] = 6; // colour type: truecolour with alpha
+  header[9] = colourType;
   // Bytes 10..12 are the compression, filter and interlace methods. All zero
-  // — the only combination the spec defines for this colour type.
+  // — the only combination the spec defines for these colour types.
 
-  // Each scanline carries a leading filter byte; 0 is "no filtering", which
-  // keeps both the raw bytes and this encoder trivial.
-  const stride = width * 4;
+  const stride = width * channels;
+  const samples = channels >= 3 ? [red, green, blue, alpha] : [red, alpha];
   const raw = Buffer.alloc(height * (stride + 1));
+  let previous = null;
   for (let row = 0; row < height; row++) {
-    const start = row * (stride + 1);
-    raw[start] = 0;
+    const line = Buffer.alloc(stride);
     for (let column = 0; column < width; column++) {
-      const pixel = start + 1 + column * 4;
-      raw[pixel] = red;
-      raw[pixel + 1] = green;
-      raw[pixel + 2] = blue;
-      raw[pixel + 3] = alpha;
+      for (let channel = 0; channel < channels; channel++) line[column * channels + channel] = samples[channel];
     }
+    const start = row * (stride + 1);
+    raw[start] = filter;
+    applyFilter(filter, line, previous, channels).copy(raw, start + 1);
+    previous = line;
   }
 
   return Buffer.concat([SIGNATURE, chunk('IHDR', header), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);

@@ -25,12 +25,17 @@
     filter: data.summary.changed + data.summary.added + data.summary.removed > 0 ? 'touched' : 'all',
     viewport: 'both',
     mode: 'slider',
-    // 8% of full channel range. Low enough to catch a genuine one-shade
-    // colour change, high enough that subpixel antialiasing along a text
-    // edge does not light up the whole screen.
+    // Must equal DEFAULT_THRESHOLD in lib/diff.mjs. The generator computes
+    // each screen's changed-pixel figure in Node so a PR comment can quote
+    // it; this page recomputes only when the slider moves. Starting from a
+    // different value would make the page silently disagree with the number
+    // that brought the reader here.
     threshold: 0.08,
     checker: false,
   };
+
+  /** Mirrors DEFAULT_THRESHOLD in lib/diff.mjs — see `state.threshold`. */
+  const DEFAULT_THRESHOLD = 0.08;
 
   /** Stage controllers, so a mode change updates in place instead of re-rendering. */
   let stages = [];
@@ -218,9 +223,16 @@
     );
 
     const sensitivity = el('input', { type: 'range', min: '0', max: '40', value: String(state.threshold * 100), title: 'Diff sensitivity' });
+    // Debounced: `input` fires for every pixel of a drag, and each one would
+    // otherwise re-compare every visible screen at full resolution. A short
+    // delay still feels live while collapsing a whole gesture into one pass.
+    let pending;
     sensitivity.addEventListener('input', () => {
       state.threshold = Number(sensitivity.value) / 100;
-      for (const stage of stages) stage.setThreshold(state.threshold);
+      clearTimeout(pending);
+      pending = setTimeout(() => {
+        for (const stage of stages) stage.setThreshold(state.threshold);
+      }, 120);
     });
 
     const checkerSeg = segmented(
@@ -524,6 +536,12 @@
       }
     }
 
+    /** Shows a changed-pixel figure, flagging it when it is not the default. */
+    function showDelta(ratio, custom) {
+      deltaNode.textContent = `${pct(ratio)} of pixels differ${custom ? ' at this sensitivity' : ''}`;
+      deltaNode.classList.toggle('hot', ratio > 0.005);
+    }
+
     /** Repaints the difference overlay and the header's changed-pixel figure. */
     async function refreshDiff() {
       if (!pixels) {
@@ -536,8 +554,7 @@
       }
       const result = computeDiff(pixels, threshold);
       canvas.getContext('2d').putImageData(result.overlay, 0, 0);
-      deltaNode.textContent = `${pct(result.ratio)} of pixels differ`;
-      deltaNode.classList.toggle('hot', result.ratio > 0.005);
+      showDelta(result.ratio, threshold !== DEFAULT_THRESHOLD);
     }
 
     function applyMode() {
@@ -571,20 +588,13 @@
       if (stage.hasPointerCapture?.(event.pointerId)) track(event);
     });
 
-    // The headline "x% of pixels differ" is what most readers act on, so it
-    // is computed as soon as the card is near the viewport rather than only
-    // when someone switches to difference mode. Deferred via the observer
-    // because doing it for every screen on load would decode and compare
-    // every baseline in the report before the first paint.
-    const observer = new IntersectionObserver(
-      entries => {
-        if (!entries.some(entry => entry.isIntersecting)) return;
-        observer.disconnect();
-        void refreshDiff();
-      },
-      { rootMargin: '400px' },
-    );
-    observer.observe(stage);
+    // The headline figure comes from the model, computed by the generator
+    // with the same rule this page uses. Canvas work is therefore deferred
+    // until someone actually asks for the overlay or moves the slider —
+    // which is what keeps a report of a dozen screens from decoding and
+    // comparing every baseline before its first paint.
+    if (variant.diff) showDelta(variant.diff.ratio, false);
+    else deltaNode.textContent = 'changed';
 
     applyMode();
 
@@ -595,7 +605,12 @@
       },
       setThreshold(next) {
         threshold = next;
-        pixels && void refreshDiff();
+        // Returning to the default is answered from the model rather than by
+        // decoding images to re-derive a number that shipped with the page.
+        // Any other value is an explicit request and gets a real comparison,
+        // even on a stage that has never been compared before.
+        if (next === DEFAULT_THRESHOLD && variant.diff && !pixels) showDelta(variant.diff.ratio, false);
+        else void refreshDiff();
       },
       setChecker(on) {
         stage.classList.toggle('checker', on);

@@ -210,6 +210,19 @@ Like the Go smoke test, it's `continue-on-error: true`: real inference is
 slower and less deterministic than the mock backend, so a flaky run
 shouldn't block the PR.
 
+**`design-review` builds a before/after report instead of running tests.**
+`.github/workflows/design-review.yml` is the odd one out here: it executes
+no Playwright at all. It reads the committed baselines at the merge base and
+on the branch and renders the pair, because a designer who updates a
+baseline makes the visual suite pass — the change becomes invisible in every
+report above precisely because it was done correctly. The job needs no
+browser, no backend and no `npm ci`, finishes in about a second, uploads the
+report as an artifact, and leaves a sticky comment naming the screens that
+moved and by how much. It also names the templates and styles the PR
+changed that no covered screen renders, which is the one regression the
+suites above are structurally unable to report. See
+`web/app/e2e/design-review/README.md`.
+
 **Why the mock backend in CI streams with a delay.** `e2e-mock.yml` starts
 the API with `MOCK_LLM_STREAM_DELAY_MS=150`. The mock adapter's default is
 0 — every word of the echoed reply is emitted in one synchronous burst, so a
