@@ -131,4 +131,248 @@ describe('MemoryFocusPanelComponent', () => {
     expect(fixture.nativeElement.querySelector('[aria-label="Close details"]')).toBeNull();
     expect(fixture.nativeElement.querySelector('.focus-panel--flush')).toBeTruthy();
   });
+
+  it('emits starChange with the toggled payload from the header star button', () => {
+    const starSpy = vi.spyOn(component.starChange, 'emit');
+    const starButton = () =>
+      fixture.nativeElement.querySelector('.focus-panel__icon-btn[aria-label="Star"]') as HTMLButtonElement | null;
+
+    expect(starButton()).toBeTruthy();
+    starButton()!.click();
+    expect(starSpy).toHaveBeenCalledWith({ id: 'm-1', starred: true });
+
+    fixture.componentRef.setInput('memory', makeVm({ starred: true }));
+    fixture.detectChanges();
+
+    const unstarButton = fixture.nativeElement.querySelector(
+      '.focus-panel__icon-btn[aria-label="Unstar"]',
+    ) as HTMLButtonElement;
+    expect(unstarButton).toBeTruthy();
+    expect(starButton()).toBeNull();
+    unstarButton.click();
+    expect(starSpy).toHaveBeenCalledWith({ id: 'm-1', starred: false });
+  });
+
+  it('hides the header star button when read-only', () => {
+    fixture.componentRef.setInput('readOnly', true);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.focus-panel__icon-btn[aria-label="Star"]')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.focus-panel__icon-btn[aria-label="Unstar"]')).toBeNull();
+  });
+
+  it('renders the Starred badge only when the memory is starred', () => {
+    expect(fixture.nativeElement.querySelector('.focus-panel__starred')).toBeNull();
+
+    fixture.componentRef.setInput('memory', makeVm({ starred: true }));
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.focus-panel__starred')?.textContent?.trim()).toBe('Starred');
+  });
+
+  it('renders the pinned personality cover instead of the scope chip when the id resolves', () => {
+    fixture.componentRef.setInput('personalities', [
+      { id: 'p-1', label: 'Nova', accent_color: '#123456', cover_image_url: null, thumbnail_circle: null },
+    ]);
+    fixture.componentRef.setInput('memory', makeVm({ pinnedPersonalityId: 'p-1', pinnedPersonalityName: 'Nova' }));
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('persona-accent-scope')).toBeTruthy();
+    expect(fixture.nativeElement.querySelector('persona-cover')).toBeTruthy();
+    expect(fixture.nativeElement.querySelector('.focus-panel__scope-chip')).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('Nova');
+  });
+
+  it('falls back to the scope chip when the pinned personality id is not found in the list', () => {
+    fixture.componentRef.setInput('personalities', []);
+    fixture.componentRef.setInput('memory', makeVm({ pinnedPersonalityId: 'p-missing', pinnedPersonalityName: 'Nova' }));
+    fixture.detectChanges();
+
+    expect(component.pinnedPersonality()).toBeNull();
+    expect(fixture.nativeElement.querySelector('persona-accent-scope')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.focus-panel__scope-chip')).toBeTruthy();
+  });
+
+  it('emits move with the memory id from the Move button', () => {
+    const moveSpy = vi.spyOn(component.move, 'emit');
+    const moveButton = fixture.nativeElement.querySelector('.focus-panel__link-btn') as HTMLButtonElement;
+
+    moveButton.click();
+
+    expect(moveSpy).toHaveBeenCalledWith('m-1');
+  });
+
+  it('shows the confidence tooltip with the exact copy on hover/focus', () => {
+    const infoButton = fixture.nativeElement.querySelector('.focus-panel__info') as HTMLButtonElement;
+
+    infoButton.dispatchEvent(new Event('mouseenter'));
+    fixture.detectChanges();
+
+    const tooltip = document.body.querySelector('[role="tooltip"]');
+    expect(tooltip?.textContent).toBe('Your personalities rate their confidence when writing and updating memories');
+  });
+
+  it('still shows the confidence tooltip under a simulated coarse (touch) pointer, since disabledOnTouch is false', () => {
+    vi.spyOn(window, 'matchMedia').mockReturnValue({
+      matches: true,
+      media: '(pointer: coarse)',
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => false,
+    } as MediaQueryList);
+
+    const infoButton = fixture.nativeElement.querySelector('.focus-panel__info') as HTMLButtonElement;
+    infoButton.dispatchEvent(new Event('focus'));
+    fixture.detectChanges();
+
+    const tooltip = document.body.querySelector('[role="tooltip"]');
+    expect(tooltip?.textContent).toContain('confidence');
+  });
+
+  it('shows the verified count when set and omits it when null', () => {
+    expect(fixture.nativeElement.textContent).not.toContain('verified');
+
+    fixture.componentRef.setInput('memory', makeVm({ verifiedCount: 3 }));
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('verified 3×');
+  });
+
+  it('hides the merged-from section when there are no merged ids', () => {
+    expect(fixture.nativeElement.querySelector('.focus-panel__id-list')).toBeNull();
+  });
+
+  it('renders a truncated, linked entry per merged-from id', () => {
+    fixture.componentRef.setInput('memory', makeVm({ mergedFromIds: ['abcdef1234567890', 'zzyyxxwwvvuu'] }));
+    fixture.detectChanges();
+
+    const links = Array.from(
+      fixture.nativeElement.querySelectorAll('.focus-panel__id-list li a') as NodeListOf<HTMLAnchorElement>,
+    );
+    expect(links).toHaveLength(2);
+    expect(links[0].textContent?.trim()).toBe('abcdef12…');
+    expect(links[0].getAttribute('href')).toBe('/memories/abcdef1234567890');
+    expect(links[1].getAttribute('href')).toBe('/memories/zzyyxxwwvvuu');
+  });
+
+  it('shows a loading message while merge events are loading', () => {
+    fixture.componentRef.setInput('mergeEventsLoading', true);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Loading merge events…');
+  });
+
+  it('shows an empty state with a link to merge history when there are no related events', () => {
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('No merge events for this memory.');
+
+    const link = fixture.nativeElement.querySelector('a[href^="/memories"]') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('/memories?tab=merge-history');
+  });
+
+  it('labels a "link" merge event as linking related memories', () => {
+    fixture.componentRef.setInput('mergeEvents', [
+      {
+        id: 'e-1',
+        survivor_memory_id: 'm-1',
+        merge_type: 'link',
+        content: 'Linked stuff',
+        duplicates_folded: 0,
+        created_at: '2026-08-20T00:00:00Z',
+        updated_at: '2026-08-20T00:00:00Z',
+      },
+    ]);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.focus-panel__event-top strong')?.textContent).toBe(
+      'Linked related memories',
+    );
+  });
+
+  it('labels a "create" merge event as created from batch', () => {
+    fixture.componentRef.setInput('mergeEvents', [
+      {
+        id: 'e-1',
+        survivor_memory_id: 'm-1',
+        merge_type: 'create',
+        content: 'Batch created',
+        duplicates_folded: 0,
+        created_at: '2026-08-20T00:00:00Z',
+        updated_at: '2026-08-20T00:00:00Z',
+      },
+    ]);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.focus-panel__event-top strong')?.textContent).toBe(
+      'Created from batch',
+    );
+  });
+
+  it('falls back to duplicates_folded + 1 for the source count when there are no source_members', () => {
+    fixture.componentRef.setInput('mergeEvents', [
+      {
+        id: 'e-1',
+        survivor_memory_id: 'm-1',
+        merge_type: 'fold_live',
+        content: 'Merged A',
+        duplicates_folded: 2,
+        created_at: '2026-08-20T00:00:00Z',
+        updated_at: '2026-08-20T00:00:00Z',
+      },
+    ]);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.focus-panel__event p')?.textContent).toContain('3 sources');
+  });
+
+  it('clamps the fallback source count at 0 rather than going negative', () => {
+    fixture.componentRef.setInput('mergeEvents', [
+      {
+        id: 'e-1',
+        survivor_memory_id: 'm-1',
+        merge_type: 'fold_live',
+        content: 'Merged A',
+        duplicates_folded: -1,
+        created_at: '2026-08-20T00:00:00Z',
+        updated_at: '2026-08-20T00:00:00Z',
+      },
+    ]);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.focus-panel__event p')?.textContent).toContain('0 sources');
+  });
+
+  it('renders linked source members as links and unlinked ones as plain text', () => {
+    fixture.componentRef.setInput('mergeEvents', [
+      {
+        id: 'e-1',
+        survivor_memory_id: 'm-1',
+        merge_type: 'fold_live',
+        content: 'Merged A',
+        duplicates_folded: 1,
+        created_at: '2026-08-20T00:00:00Z',
+        updated_at: '2026-08-20T00:00:00Z',
+        source_members: [
+          { content: 'Linked member', scope: 'user', is_new: false, memory_id: 'm-a' },
+          { content: 'Plain member', scope: 'user', is_new: true },
+        ],
+      },
+    ]);
+    fixture.detectChanges();
+
+    const members = Array.from(
+      fixture.nativeElement.querySelectorAll('.focus-panel__members li') as NodeListOf<HTMLLIElement>,
+    );
+    expect(members).toHaveLength(2);
+
+    const link = members[0].querySelector('a') as HTMLAnchorElement;
+    expect(link.textContent).toBe('Linked member');
+    expect(link.getAttribute('href')).toBe('/memories/m-a');
+
+    expect(members[1].querySelector('a')).toBeNull();
+    expect(members[1].querySelector('span')?.textContent).toBe('Plain member');
+  });
 });

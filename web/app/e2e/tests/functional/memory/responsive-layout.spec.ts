@@ -194,6 +194,43 @@ test.describe('memories responsive layout contract', () => {
     await expect(page.locator('.memories-list__panel')).toBeVisible();
     await expect(memoriesPage.focusPanel.getByRole('button', { name: 'Close details', exact: true })).toBeVisible();
   });
+
+  test('dismisses the mobile memory details modal with the Escape key', async ({
+    memoriesPage,
+    seed,
+    userWithPersonality,
+    page,
+  }) => {
+    const [memory] = await seed.memories(1);
+    const memoryContent = memory.content as string;
+
+    await page.setViewportSize({ width: 390, height: VIEWPORT_HEIGHT });
+    await memoriesPage.navigateTo();
+    await memoriesPage.openFocus(memoryContent);
+    await expect(memoriesPage.focusDialog).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(memoriesPage.focusDialog).toBeHidden();
+  });
+
+  test('dismisses the mobile memory details modal by clicking the backdrop', async ({
+    memoriesPage,
+    seed,
+    userWithPersonality,
+    page,
+  }) => {
+    const [memory] = await seed.memories(1);
+    const memoryContent = memory.content as string;
+
+    await page.setViewportSize({ width: 390, height: VIEWPORT_HEIGHT });
+    await memoriesPage.navigateTo();
+    await memoriesPage.openFocus(memoryContent);
+    await expect(memoriesPage.focusDialog).toBeVisible();
+
+    // A corner, away from the centered panel, which stops click propagation.
+    await memoriesPage.focusModalBackdrop.click({ position: { x: 10, y: 10 } });
+    await expect(memoriesPage.focusDialog).toBeHidden();
+  });
 });
 
 test.describe('jobs responsive layout contract', () => {
