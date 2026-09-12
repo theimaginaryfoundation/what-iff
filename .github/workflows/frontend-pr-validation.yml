@@ -105,6 +105,15 @@ jobs:
         working-directory: web/app
         run: npm run e2e:check-configs
 
+      # A screenshot may not be the only coverage of an area: a baseline pins
+      # how a screen looks and says nothing about whether it still works, so a
+      # visual spec standing alone reads as coverage while providing none.
+      # Every file under tests/visual/ has to name the functional spec behind
+      # it. Like the check above, this is static — no browsers, no backend.
+      - name: Check every visual spec has functional coverage
+        working-directory: web/app
+        run: npm run e2e:check-visual-coverage
+
       - name: TypeScript type checking
         working-directory: web/app
         run: |

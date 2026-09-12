@@ -1,6 +1,16 @@
 import { test, expect } from '../../fixtures';
 import { commonMasks } from './visual.helpers';
 
+/**
+ * @functional-coverage tests/functional/chat/thread-workspace.spec.ts, tests/journeys/resume-conversation.spec.ts
+ *
+ * The composer and the conversation shell around it are exercised behaviourally
+ * by the thread-workspace spec and the resume-conversation journey.
+ *
+ * A baseline pins how this looks; it cannot tell you it still works. See
+ * e2e/scripts/check-visual-coverage.mjs.
+ */
+
 test(
   'chat composer screen before any message is sent',
   { tag: ['@visual', '@mock-only'] },

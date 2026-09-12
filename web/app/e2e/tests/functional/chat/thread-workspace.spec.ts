@@ -83,13 +83,25 @@ test('opens the conversation context panel and types in the scratchpad', async (
   await expect(chatPage.contextPanel).toBeHidden();
 });
 
+/**
+ * This test was disabled in every environment by `test.skip(true, ...)` for a
+ * response-ordering race in `JobService.pollJob()`: the phases of one job each
+ * dispatched their own `getMessage()`, and a late `inference_complete`
+ * response could overwrite the completed row and erase its
+ * `context_breakdown`. It was only ever observed against a real-inference
+ * backend, whose reply latency varies enough to open the window.
+ *
+ * That race is now fixed — `pollJob` applies a row only if no newer phase has
+ * already been applied, covered by an out-of-order regression test in
+ * `job.service.spec.ts` — so the test runs everywhere again rather than
+ * carrying a tag that narrows it for a reason that no longer holds.
+ *
+ * If it does flake, the answer is a fix with a failing test behind it, not a
+ * blanket skip: skipping took the Context X-ray's only behavioural coverage
+ * out of every environment and left `tests/visual/context-xray.visual.spec.ts`
+ * standing on nothing.
+ */
 test('shows a reply’s token breakdown from its Context action', async ({ chatPage, seed, userWithPersonality }) => {
-  // Skipped: flaky against real-inference backends (e.g. local Ollama) due to a
-  // response-ordering race in JobService.pollJob() that can clobber a message's
-  // context_breakdown with a stale, breakdown-less fetch.
-  /* eslint-disable-next-line playwright/no-skipped-test -- tracked flake, not a blanket skip */
-  test.skip(true, 'Flaky on real-inference backends: JobService.pollJob() fetch-ordering race.');
-
   const thread = await seed.thread(undefined, {
     personalityId: userWithPersonality.personality.id,
   });
@@ -109,6 +121,13 @@ test('shows a reply’s token breakdown from its Context action', async ({ chatP
   await expect(chatPage.contextBreakdown).toBeVisible();
   await expect(chatPage.contextBreakdown.getByText('Turn context', { exact: true })).toBeVisible();
   await expect(chatPage.contextBreakdown.getByRole('img', { name: /^Context is \d+% of budget:/ })).toBeVisible();
+
+  // The cost outlet is mounted for every assistant turn, whether or not the
+  // turn's model resolves to a priced estimate — the X-ray passes it the
+  // owning message id regardless. Its presence is the functional contract;
+  // `tests/visual/context-xray.visual.spec.ts` owns where it sits.
+  await expect(chatPage.contextGaugeTotal).toBeVisible();
+  await expect(chatPage.contextCostOutlet).toHaveCount(1);
 });
 
 test('opens the import-conversations modal and cancels', async ({ chatImportModal, threadListPanel, userWithPersonality }) => {

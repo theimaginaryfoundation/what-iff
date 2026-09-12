@@ -112,6 +112,20 @@ export class MemoriesPage {
     return this.cards.filter({ hasText: content });
   }
 
+  /**
+   * A card's whole footer row: the level/thread label on the left, and the
+   * verified-duplicate count and `updatedAt` date/time on the right.
+   *
+   * Visual specs mask this row rather than just the `__meta-right` column it
+   * is volatile because of. The column is right-aligned, so its *left edge*
+   * moves with the rendered width of the time ("9:05 AM" vs "10:05 AM") and a
+   * mask sized to it leaves a one-pixel sliver of unmasked text at the
+   * boundary. The full row is full-width, so its rectangle is fixed.
+   */
+  cardMetadata(content: string): Locator {
+    return this.card(content).locator('.memory-card__meta');
+  }
+
   /** "No memories found." — rendered by memory-card-grid when the list is empty. */
   readonly emptyMessage: Locator;
 

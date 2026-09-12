@@ -1,6 +1,17 @@
 import { test, expect } from '../../fixtures';
 
 /**
+ * @functional-coverage tests/functional/auth/auth.spec.ts
+ *
+ * The login and register forms these baselines picture are driven end to end
+ * (sign in, sign out, validation errors, the registration flow) by the
+ * functional auth spec.
+ *
+ * A baseline pins how this looks; it cannot tell you it still works. See
+ * e2e/scripts/check-visual-coverage.mjs.
+ */
+
+/**
  * Unauthenticated screens — no fixture data, no LLM involvement, fully
  * static. Safest possible visual baselines.
  */

@@ -42,6 +42,8 @@ export class IntegrationsPage {
       name: 'Copy your new API token now',
     });
     this.emptyTokensMessage = this.page.getByText('No webhook API tokens created yet.');
+    this.connectorsLoading = this.page.getByText('Loading integrations...');
+    this.emptyConnectorsMessage = this.page.getByText('No connectors configured.');
     this.heading = this.page.getByRole('heading', {
       name: 'Integrations',
       level: 1,
@@ -70,6 +72,13 @@ export class IntegrationsPage {
   async openWebhooks(): Promise<void> {
     await this.webhooksTab.click();
   }
+
+  // --- connectors tab ------------------------------------------------------
+
+  /** Placeholder while GET /integrations is in flight. */
+  readonly connectorsLoading: Locator;
+
+  readonly emptyConnectorsMessage: Locator;
 
   // --- webhooks tab --------------------------------------------------------
 
