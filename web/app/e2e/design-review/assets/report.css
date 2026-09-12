@@ -1,0 +1,353 @@
+/*
+ * Design review report.
+ *
+ * Deliberately neutral: this page frames screenshots of a product that has
+ * its own colour language, so anything opinionated here would compete with
+ * the thing being reviewed. Greys, one accent, and all the saturation
+ * reserved for status (changed / new / removed) and for the diff overlay.
+ *
+ * Dark by default because that is what a screenshot with a light UI reads
+ * best against, with a light theme one keystroke away for the opposite case.
+ */
+
+:root {
+  color-scheme: dark;
+  --bg: #0d0f13;
+  --bg-raised: #151920;
+  --bg-sunken: #090b0e;
+  --border: #242a34;
+  --border-strong: #333b48;
+  --text: #e8ecf2;
+  --text-dim: #98a2b3;
+  --text-faint: #6b7585;
+  --accent: #7aa2f7;
+  --changed: #f0a04b;
+  --added: #5ec98a;
+  --removed: #e5646e;
+  --unchanged: #5a6474;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.24);
+  --radius: 10px;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --bg-raised: #ffffff;
+  --bg-sunken: #eceef2;
+  --border: #dfe3ea;
+  --border-strong: #c3cad6;
+  --text: #12161c;
+  --text-dim: #58616f;
+  --text-faint: #838d9c;
+  --accent: #3060c8;
+  --changed: #b06a12;
+  --added: #237d4c;
+  --removed: #bb2d3a;
+  --unchanged: #97a0ae;
+  --shadow: 0 1px 2px rgb(16 24 40 / 0.06), 0 8px 24px rgb(16 24 40 / 0.08);
+}
+
+* { box-sizing: border-box; }
+
+/*
+ * The compare modes switch layers with the `hidden` attribute, and every
+ * rule below that gives a layer a `display` would otherwise win against the
+ * user-agent's `[hidden] { display: none }` on specificity alone — leaving
+ * the slider, the side-by-side pair and the difference canvas all painted on
+ * top of each other. This is the one place `!important` is the correct
+ * tool: it restores a UA default that later rules were never meant to
+ * override.
+ */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); }
+
+.wrap { max-width: 1380px; margin: 0 auto; padding: 0 28px 96px; }
+
+/* ---------- header ---------- */
+
+.masthead { padding: 40px 0 24px; border-bottom: 1px solid var(--border); }
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin: 0 0 10px;
+}
+.masthead h1 { margin: 0 0 14px; font-size: 27px; line-height: 1.25; font-weight: 650; letter-spacing: -0.015em; }
+.masthead h1 a { text-decoration: none; }
+.masthead h1 a:hover { text-decoration: underline; }
+
+/* The base→head line. Monospace so two shas line up under each other. */
+.refline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+}
+.refline .sha { color: var(--text); background: var(--bg-sunken); border: 1px solid var(--border); border-radius: 5px; padding: 1px 7px; }
+.refline .arrow { color: var(--text-faint); }
+
+/* ---------- summary tiles ---------- */
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(146px, 1fr)); gap: 12px; margin: 26px 0 0; }
+.tile {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px 13px;
+  position: relative;
+  overflow: hidden;
+}
+/* A 3px status rail rather than a tinted card: the number stays readable and
+   the colour still reads at a glance from across a desk. */
+.tile::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--rail, transparent); }
+.tile .n { font-size: 26px; font-weight: 620; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.tile .k { font-size: 11.5px; color: var(--text-dim); margin-top: 1px; }
+.tile.changed { --rail: var(--changed); }
+.tile.added { --rail: var(--added); }
+.tile.removed { --rail: var(--removed); }
+.tile.unchanged { --rail: var(--unchanged); }
+.tile.surface { --rail: var(--accent); }
+
+/* ---------- toolbar ---------- */
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  align-items: center;
+  padding: 12px 28px;
+  margin: 28px -28px 0;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+}
+.group { display: flex; align-items: center; gap: 8px; }
+.group > .lbl { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); }
+
+.seg { display: flex; background: var(--bg-sunken); border: 1px solid var(--border); border-radius: 8px; padding: 2px; gap: 2px; }
+.seg button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 4px 11px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.seg button:hover { color: var(--text); }
+.seg button[aria-pressed='true'] { background: var(--bg-raised); color: var(--text); box-shadow: var(--shadow); }
+.seg button .count { color: var(--text-faint); font-variant-numeric: tabular-nums; margin-left: 5px; }
+.seg button[aria-pressed='true'] .count { color: var(--text-dim); }
+
+input[type='range'] { accent-color: var(--accent); width: 108px; }
+.spacer { flex: 1 1 auto; }
+
+/* ---------- screen cards ---------- */
+
+.screens { display: flex; flex-direction: column; gap: 22px; margin-top: 26px; }
+
+.card { background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.card > header { display: flex; align-items: baseline; gap: 11px; flex-wrap: wrap; padding: 15px 18px 13px; }
+.card h2 { margin: 0; font-size: 16.5px; font-weight: 600; letter-spacing: -0.01em; }
+.card .group-name { color: var(--text-faint); font-size: 13px; }
+.card .spec { font-family: var(--mono); font-size: 11.5px; color: var(--text-faint); margin-left: auto; }
+
+.badge {
+  font-size: 10.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  font-weight: 640;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+.badge.changed { color: var(--changed); }
+.badge.added { color: var(--added); }
+.badge.removed { color: var(--removed); }
+.badge.unchanged { color: var(--unchanged); }
+
+.note {
+  margin: 0 18px 14px;
+  padding: 10px 13px;
+  background: var(--bg-sunken);
+  border-left: 2px solid var(--border-strong);
+  border-radius: 0 6px 6px 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+}
+
+.viewports { display: grid; gap: 1px; background: var(--border); border-top: 1px solid var(--border); align-items: start; }
+/* Desktop gets the wider column; a mobile baseline is capped by height in
+   any case (MAX_STAGE_HEIGHT) and would only pad the extra space. */
+.viewports.pair { grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); }
+.viewport { background: var(--bg-raised); padding: 14px 18px 18px; min-width: 0; }
+.viewport > .vhead { display: flex; align-items: center; gap: 9px; margin-bottom: 11px; font-size: 12.5px; color: var(--text-dim); }
+.viewport .device { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.viewport .delta { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 12px; }
+.viewport .delta.hot { color: var(--changed); }
+
+/* ---------- comparison stage ---------- */
+
+/*
+ * Every compare mode stacks its layers in this one element, sized by an
+ * aspect-ratio the collector read out of the PNG header. Reserving the box
+ * before any image decodes is what keeps a gallery of a dozen screens from
+ * reflowing line by line as they load.
+ */
+.stage {
+  position: relative;
+  width: 100%;
+  background: var(--stage-bg, var(--bg-sunken));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: default;
+}
+.stage img,
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.stage.checker { --stage-bg: transparent; background-image: linear-gradient(45deg, #2a2f3a 25%, transparent 25%), linear-gradient(-45deg, #2a2f3a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #2a2f3a 75%), linear-gradient(-45deg, transparent 75%, #2a2f3a 75%); background-size: 18px 18px; background-position: 0 0, 0 9px, 9px -9px, -9px 0; }
+
+/* Side-by-side is the only mode that is a grid rather than a stack. */
+.sbs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sbs figure { margin: 0; min-width: 0; }
+.sbs figcaption { font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 6px; }
+.sbs .before figcaption { color: var(--removed); }
+.sbs .after figcaption { color: var(--added); }
+
+/* Slider: the "after" layer is clipped to the handle position. */
+.stage .clip { position: absolute; inset: 0; overflow: hidden; }
+.stage .handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35);
+  pointer-events: none;
+}
+.stage .handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 26px;
+  height: 26px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.45);
+}
+.stage.slider { cursor: ew-resize; }
+
+.empty-side {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 12.5px;
+  color: var(--text-faint);
+  background: repeating-linear-gradient(135deg, transparent 0 9px, color-mix(in srgb, var(--border) 60%, transparent) 9px 10px);
+}
+
+/* ---------- impact ---------- */
+
+.impact { margin-top: 44px; }
+.impact h2 { font-size: 18px; margin: 0 0 4px; letter-spacing: -0.01em; }
+.impact .sub { color: var(--text-dim); font-size: 13px; margin: 0 0 18px; }
+.impact-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 18px; }
+.panel { background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+.panel h3 { margin: 0 0 13px; font-size: 12px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--text-faint); font-weight: 620; }
+
+.bars { display: flex; flex-direction: column; gap: 9px; }
+.bar { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; font-size: 13px; }
+.bar .name { color: var(--text); }
+.bar .val { color: var(--text-dim); font-variant-numeric: tabular-nums; font-size: 12px; }
+.bar .track { grid-column: 1 / -1; height: 5px; border-radius: 3px; background: var(--bg-sunken); overflow: hidden; }
+.bar .fill { height: 100%; border-radius: 3px; background: var(--accent); }
+
+.files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 380px;
+  overflow-y: auto;
+  /* Fades the last row rather than slicing it. A hard cut mid-row reads as a
+     rendering bug; a fade reads as "there is more, scroll". */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
+}
+/* One row per file, one line each. The filename leads because that is what
+   a reader scans for; the directory follows, dimmed, and is the part allowed
+   to truncate when the panel is narrow. Full path stays in the title. */
+.files li {
+  display: grid;
+  grid-template-columns: auto minmax(0, auto) minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 3px 0;
+}
+.files .dir,
+.files .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files .dir { color: var(--text-faint); }
+.files .name { color: var(--text); }
+.files .churn { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.panel .prefix { font-family: var(--mono); font-size: 11px; color: var(--text-faint); margin: -6px 0 11px; }
+.files .churn .add { color: var(--added); }
+.files .churn .del { color: var(--removed); }
+.files .st { width: 7px; height: 7px; border-radius: 2px; flex: none; align-self: center; }
+.files .st.added { background: var(--added); }
+.files .st.modified { background: var(--changed); }
+.files .st.deleted { background: var(--removed); }
+.files .st.renamed { background: var(--accent); }
+
+/* The uncovered-files panel spans the grid it follows and takes the warning
+   accent, because it is the one panel that is a prompt rather than a report. */
+.panel.gap { margin-top: 18px; border-left: 3px solid var(--changed); }
+.panel.gap .files { max-height: 260px; }
+
+.related { margin: 0 18px 16px; font-size: 12px; color: var(--text-dim); }
+.related summary { cursor: pointer; color: var(--text-faint); font-size: 11.5px; letter-spacing: 0.04em; text-transform: uppercase; }
+.related ul { list-style: none; margin: 9px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.related li { font-family: var(--mono); font-size: 11.5px; }
+
+.hint { color: var(--text-faint); font-size: 11.5px; margin-top: 9px; }
+.nothing { padding: 46px 20px; text-align: center; color: var(--text-faint); }
+
+footer.meta { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--text-faint); display: flex; flex-wrap: wrap; gap: 6px 18px; }
+
+@media (max-width: 760px) {
+  .wrap { padding: 0 16px 64px; }
+  .toolbar { margin: 22px -16px 0; padding: 11px 16px; }
+  .viewports.pair { grid-template-columns: 1fr; }
+  .sbs { grid-template-columns: 1fr; }
+}
+
+@media print {
+  .toolbar { position: static; backdrop-filter: none; }
+  .card { break-inside: avoid; }
+}

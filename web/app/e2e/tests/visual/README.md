@@ -22,3 +22,16 @@ username/avatar button). Baselines are generated and checked inside the official
 Docker image so macOS font rendering never fights CI — see "Visual
 regression" → "Updating snapshots" in `e2e/README.md` for the exact
 commands and the Docker networking recipe that makes it work on macOS.
+
+## Seeing what a change did
+
+A baseline update committed on a branch makes the visual suite pass, which
+means an *intentional* design change leaves no trace in any test report. To
+see the before and after, build the design review report — it reads the
+baselines out of git rather than running anything:
+
+```bash
+npm run design:review
+```
+
+See `e2e/design-review/README.md`, or the `design-review` skill.

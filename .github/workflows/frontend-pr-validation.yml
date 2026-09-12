@@ -114,6 +114,15 @@ jobs:
         working-directory: web/app
         run: npm run e2e:check-visual-coverage
 
+      # The design review report reads git history and committed baselines,
+      # so its failure mode is a wrong answer rather than a crash — a broken
+      # merge-base calculation still renders a perfectly plausible report of
+      # the wrong change. These tests build throwaway repositories and assert
+      # on what comes back; they need no browser and no backend, and run in a
+      # couple of seconds.
+      - name: Test the design review report
+        run: make design-review-test
+
       - name: TypeScript type checking
         working-directory: web/app
         run: |
