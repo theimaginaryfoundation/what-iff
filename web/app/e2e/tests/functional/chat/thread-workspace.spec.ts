@@ -84,32 +84,24 @@ test('opens the conversation context panel and types in the scratchpad', async (
 });
 
 /**
- * Tagged `@mock-only` rather than skipped outright. The flake this test used
- * to carry is a response-ordering race in `JobService.pollJob()`, where a
- * stale breakdown-less fetch can clobber a message's `context_breakdown`. It
- * was only ever *observed* against a real-inference backend (e.g. local
- * Ollama), whose reply latency varies run to run.
+ * This test was disabled in every environment by `test.skip(true, ...)` for a
+ * response-ordering race in `JobService.pollJob()`: the phases of one job each
+ * dispatched their own `getMessage()`, and a late `inference_complete`
+ * response could overwrite the completed row and erase its
+ * `context_breakdown`. It was only ever observed against a real-inference
+ * backend, whose reply latency varies enough to open the window.
  *
- * Note what that does and does not say. The race is not fixed, and it is not
- * proven impossible here: the two `getMessage` subscriptions are unordered
- * regardless of how deterministic the mock backend's reply timing is, so a
- * slow enough CI machine could in principle still lose the breakdown. What
- * changed is only the odds and the evidence — it passed 5/5 under
- * `--repeat-each` locally against the mock backend, and it had no observed
- * flake there before being skipped.
+ * That race is now fixed — `pollJob` applies a row only if no newer phase has
+ * already been applied, covered by an out-of-order regression test in
+ * `job.service.spec.ts` — so the test runs everywhere again rather than
+ * carrying a tag that narrows it for a reason that no longer holds.
  *
- * The reason to tag rather than skip is that `test.skip(true, ...)` took the
- * test out of *every* environment, which left the Context X-ray with no
- * functional coverage at all and the `context-xray` visual spec standing on
- * nothing. A test that runs in one environment is strictly more than a test
- * that runs in none. `@mock-only` is the mechanism this suite already has for
- * that — `playwright.config.local-llm.ts` excludes it, `mock-llm.ts` runs it.
- *
- * If this does flake here, the fix is the ordering bug in
- * `JobService.pollJob()` — stop a stale fetch overwriting a newer result —
- * not another blanket skip.
+ * If it does flake, the answer is a fix with a failing test behind it, not a
+ * blanket skip: skipping took the Context X-ray's only behavioural coverage
+ * out of every environment and left `tests/visual/context-xray.visual.spec.ts`
+ * standing on nothing.
  */
-test('shows a reply’s token breakdown from its Context action', { tag: '@mock-only' }, async ({ chatPage, seed, userWithPersonality }) => {
+test('shows a reply’s token breakdown from its Context action', async ({ chatPage, seed, userWithPersonality }) => {
   const thread = await seed.thread(undefined, {
     personalityId: userWithPersonality.personality.id,
   });
