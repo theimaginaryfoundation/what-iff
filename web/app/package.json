@@ -28,7 +28,7 @@
     "e2e:mock-llm:visual:docker": "bash e2e/scripts/visual-docker.sh",
     "e2e:mock-llm:visual:docker:update": "bash e2e/scripts/visual-docker.sh --update",
     "e2e:check-configs": "bash e2e/scripts/check-config-selection.sh",
-    "e2e:check-visual-coverage": "node e2e/scripts/check-visual-coverage.mjs",
+    "e2e:check-visual-coverage": "node --test 'e2e/scripts/lib/*.test.mjs' && node e2e/scripts/check-visual-coverage.mjs",
     "sdk:generate": "openapi-typescript ../../openapi.yaml -o e2e/sdk/schema.d.ts",
     "lint:e2e": "eslint e2e --max-warnings=0"
   },

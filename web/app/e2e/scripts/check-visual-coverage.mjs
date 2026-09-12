@@ -17,65 +17,59 @@
  * Multiple paths may be comma-separated or given on repeated lines. Paths are
  * relative to `e2e/`.
  *
- * This check verifies, for each visual spec:
+ * WHAT THIS CHECKS, precisely — the wording matters, because an earlier
+ * version of this file claimed more than it delivered and the claim itself was
+ * the bug. For each visual spec:
+ *
  *   1. at least one `@functional-coverage` path is declared;
- *   2. every declared path exists;
- *   3. every declared path is under `tests/functional/` or `tests/journeys/`
- *      — a visual spec cannot satisfy the rule by pointing at another visual
- *      spec, which is the obvious way to defeat it;
- *   4. every declared file actually contains at least one test;
- *   5. the declared file is not skipped in its entirety. A blanket
- *      `test.skip(true, ...)` on every test is how this rule was broken the
- *      first time: the Context X-ray's functional test was skipped in every
- *      environment while its visual spec kept running, so the area had a
- *      baseline and no behavioural coverage at all.
+ *   2. every declared path resolves to a real, regular `.spec.ts` file
+ *      (no symlinks, no directories);
+ *   3. every resolved path is genuinely *inside* `tests/functional/` or
+ *      `tests/journeys/` — compared after normalisation, so `../` and
+ *      lookalike directory names cannot escape;
+ *   4. every declared file declares at least one test that is not disabled
+ *      in every environment, determined by parsing it (see
+ *      ./lib/playwright-test-analysis.mjs), not by matching text.
  *
- * Comments are stripped before any of the pattern matching below, so prose
- * *about* a skip (like the paragraph above) does not read as one.
+ * WHAT IT DOES NOT CHECK, and must not be described as checking:
  *
- * What it deliberately does NOT do is judge whether the referenced spec
- * covers the *right* behaviour. That is a review question, not a script
- * question. The declaration's value is that it forces the author to name
- * something, and the reviewer to look at what was named.
+ *   - whether the named spec covers the *right* behaviour. That is a review
+ *     question. The value here is that an author must name something and a
+ *     reviewer must look at what was named.
+ *   - whether the named spec actually ran in a given CI job. Config `grep`
+ *     filters and project selection decide that, and only a real run knows.
  *
  * Usage: node e2e/scripts/check-visual-coverage.mjs
  */
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { analyzeSpec } from './lib/playwright-test-analysis.mjs';
 
 // Resolved from this file, not from the cwd: the npm script runs from
 // web/app and CI may not, and a path-relative check that silently finds
 // nothing would pass by default.
 const E2E_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const VISUAL_DIR = join(E2E_DIR, 'tests', 'visual');
-const ALLOWED_PREFIXES = [join('tests', 'functional'), join('tests', 'journeys')];
+const ALLOWED_ROOTS = [join(E2E_DIR, 'tests', 'functional'), join(E2E_DIR, 'tests', 'journeys')];
 
 /** `@functional-coverage <path>[, <path>...]`, anywhere in the file's text. */
 const DECLARATION = /@functional-coverage\s+([^\n*]+)/g;
 
-/** A `test(...)` / `test.describe(...)` call, however it's indented. */
-const HAS_TEST = /(^|[^.\w])test(\.describe)?\s*\(/g;
-
-/** An unconditional `test.skip(true, ...)` — a skip in every environment. */
-const BLANKET_SKIP = /test\.skip\(\s*true\b/g;
-
 /**
- * Strips block and line comments. Crude on purpose — it does not parse
- * strings or regex literals — but the only thing it feeds is a count of
- * `test(` and `test.skip(true` occurrences, where a comment is the one source
- * of false positives that actually shows up (a doc comment explaining why
- * something used to be skipped).
+ * True when `target` is inside `root`. Compares normalised paths rather than
+ * the raw string: a `startsWith` on the declared text admitted both
+ * `tests/functional/../visual/x.visual.spec.ts` and a lookalike directory
+ * named `tests/functional-whatever/`, which let a visual spec cite another
+ * visual spec — the one thing this containment check exists to prevent.
  */
-function stripComments(source) {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-}
-
-function count(source, pattern) {
-  return [...source.matchAll(pattern)].length;
+function isInside(root, target) {
+  const rel = relative(root, target);
+  return rel !== '' && !rel.startsWith('..' + sep) && rel !== '..' && !isAbsolute(rel);
 }
 
 const problems = [];
+const note = (specPath, message) => problems.push(`${specPath}: ${message}`);
 
 const visualSpecs = readdirSync(VISUAL_DIR)
   .filter(name => name.endsWith('.spec.ts'))
@@ -87,7 +81,7 @@ if (visualSpecs.length === 0) {
 }
 
 for (const name of visualSpecs) {
-  const specPath = join('e2e', relative(E2E_DIR, join(VISUAL_DIR, name)));
+  const specPath = join('e2e', 'tests', 'visual', name);
   const source = readFileSync(join(VISUAL_DIR, name), 'utf8');
 
   const declared = [];
@@ -99,47 +93,72 @@ for (const name of visualSpecs) {
   }
 
   if (declared.length === 0) {
-    problems.push(
-      `${specPath}: no @functional-coverage declaration.\n` +
-        `    Add one naming the functional spec that covers this area, e.g.\n` +
-        `    ' * @functional-coverage tests/functional/<area>/<file>.spec.ts'\n` +
-        `    If no such spec exists, write it — a baseline is not coverage on its own.`,
+    note(
+      specPath,
+      'no @functional-coverage declaration.\n' +
+        "    Add one naming the functional spec that covers this area, e.g.\n" +
+        "    ' * @functional-coverage tests/functional/<area>/<file>.spec.ts'\n" +
+        '    If no such spec exists, write it — a baseline is not coverage on its own.',
     );
     continue;
   }
 
   for (const declaredPath of declared) {
-    if (!ALLOWED_PREFIXES.some(prefix => declaredPath.startsWith(prefix))) {
-      problems.push(
-        `${specPath}: @functional-coverage '${declaredPath}' is not under ` +
-          `${ALLOWED_PREFIXES.join(' or ')}. A visual spec cannot cover another visual spec.`,
+    if (isAbsolute(declaredPath)) {
+      note(specPath, `@functional-coverage '${declaredPath}' must be relative to e2e/, not absolute.`);
+      continue;
+    }
+
+    const target = resolve(E2E_DIR, declaredPath);
+
+    if (!ALLOWED_ROOTS.some(root => isInside(root, target))) {
+      note(
+        specPath,
+        `@functional-coverage '${declaredPath}' resolves outside tests/functional/ and ` +
+          'tests/journeys/. A visual spec cannot cover another visual spec.',
       );
       continue;
     }
 
-    const target = join(E2E_DIR, declaredPath);
+    if (!declaredPath.endsWith('.spec.ts')) {
+      note(specPath, `@functional-coverage '${declaredPath}' is not a .spec.ts file.`);
+      continue;
+    }
+
     if (!existsSync(target)) {
-      problems.push(`${specPath}: @functional-coverage '${declaredPath}' does not exist.`);
+      note(specPath, `@functional-coverage '${declaredPath}' does not exist.`);
       continue;
     }
 
-    const targetSource = stripComments(readFileSync(target, 'utf8'));
-    const tests = count(targetSource, HAS_TEST);
-    if (tests === 0) {
-      problems.push(`${specPath}: @functional-coverage '${declaredPath}' contains no tests.`);
+    // lstat, not stat: a symlink could otherwise point anywhere while the
+    // containment check above only saw the link's own tidy path.
+    const stat = lstatSync(target);
+    if (!stat.isFile()) {
+      note(specPath, `@functional-coverage '${declaredPath}' is not a regular file (symlinks are not accepted).`);
       continue;
     }
 
-    // Every test carrying an unconditional skip means the file runs nowhere.
-    // A file where only *some* tests are skipped still provides coverage, so
-    // it passes — judging which of those skips are justified is a review
-    // question, not one a regex should answer.
-    if (count(targetSource, BLANKET_SKIP) >= tests) {
-      problems.push(
-        `${specPath}: @functional-coverage '${declaredPath}' is skipped in its ` +
-          `entirety by unconditional test.skip(true, ...), so it does not run anywhere.\n` +
-          `    Narrow it with a tag (@mock-only) instead of skipping it outright, ` +
-          `or point at a spec that runs.`,
+    let analysis;
+    try {
+      analysis = analyzeSpec(target, readFileSync(target, 'utf8'));
+    } catch (err) {
+      // Fail closed. An unparseable target is not evidence of coverage.
+      note(specPath, `@functional-coverage '${declaredPath}' could not be parsed: ${err.message}`);
+      continue;
+    }
+
+    if (analysis.declared === 0) {
+      note(specPath, `@functional-coverage '${declaredPath}' declares no tests.`);
+      continue;
+    }
+
+    if (analysis.runnable === 0) {
+      note(
+        specPath,
+        `@functional-coverage '${declaredPath}' declares ${analysis.declared} test(s), all disabled in\n` +
+          '    every environment (test.skip(true, ...), test.describe.skip, or fixme), so it runs nowhere.\n' +
+          '    Narrow a flaky test with a tag (@mock-only) instead of disabling it outright,\n' +
+          '    or point at a spec that runs.',
       );
     }
   }
