@@ -244,3 +244,117 @@ test('moves a memory to Global from the card menu', async ({ memoriesPage, seed,
   await expect(memoriesPage.card(content)).toBeVisible();
   await expect(memoriesPage.card(content)).toContainText('Global');
 });
+
+test('bulk deletes multiple selected memories at once', async ({ memoriesPage, seed, userWithPersonality }) => {
+  const [keep, removeOne, removeTwo] = await seed.memories(3);
+  await memoriesPage.navigateTo();
+
+  await memoriesPage.selectCard(removeOne.content as string);
+  await memoriesPage.selectCard(removeTwo.content as string);
+  await expect(memoriesPage.bulkBar).toContainText('2 selected');
+  await memoriesPage.bulkDelete();
+  await expect(memoriesPage.deleteDialogHeading).toContainText('Delete 2 memories?');
+  await memoriesPage.confirmDelete();
+
+  await expect(memoriesPage.card(removeOne.content as string)).toBeHidden();
+  await expect(memoriesPage.card(removeTwo.content as string)).toBeHidden();
+  await expect(memoriesPage.card(keep.content as string)).toBeVisible();
+});
+
+test(
+  'selects every loaded memory via the bulk "Select all" checkbox',
+  { tag: '@serial' },
+  async ({ memoriesPage, seed, userWithPersonality }) => {
+    // @serial: "Select all" selects every card currently loaded on the page,
+    // not just this test's own — on a shared account that would sweep up
+    // another worker's memories along with an Archive action. Same hazard as
+    // "sorts memories by creation time" / "paginates the memory list" above.
+    const [first, second] = await seed.memories(2, { content: seedName('memory-select-all') });
+    await memoriesPage.navigateTo();
+
+    await memoriesPage.selectCard(first.content as string);
+    await expect(memoriesPage.bulkBar).toBeVisible();
+    await memoriesPage.selectAll();
+    await expect(memoriesPage.bulkBar).toContainText('2 selected');
+
+    await memoriesPage.bulkArchive();
+    await expect(memoriesPage.card(first.content as string)).toBeHidden();
+    await expect(memoriesPage.card(second.content as string)).toBeHidden();
+
+    await memoriesPage.showArchived();
+    await expect(memoriesPage.card(first.content as string)).toBeVisible();
+    await expect(memoriesPage.card(second.content as string)).toBeVisible();
+  },
+);
+
+test('bulk moves selected memories to a personality', async ({ memoriesPage, seed, userWithPersonality }) => {
+  const personality = await seed.personality();
+  const [first, second] = await seed.memories(2, { content: seedName('memory-bulk-move') });
+  await memoriesPage.navigateTo();
+
+  await memoriesPage.selectCard(first.content as string);
+  await memoriesPage.selectCard(second.content as string);
+  await memoriesPage.bulkMove(personality.name);
+
+  await expect(memoriesPage.card(first.content as string)).toContainText(personality.name);
+  await expect(memoriesPage.card(second.content as string)).toContainText(personality.name);
+});
+
+test('treats checkpoint summaries as read-only in the Summaries tab', async ({ memoriesPage, page, seed, userWithPersonality }) => {
+  const thread = await seed.thread();
+  const [summary] = await seed.memories(1, {
+    content: seedName('memory-summary'),
+    level: 'summary',
+    chat_id: thread.id,
+  });
+  const content = summary.content as string;
+  await memoriesPage.navigateTo();
+
+  await memoriesPage.showSummaries();
+  await expect(memoriesPage.summariesStatusTab).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByText('conversation checkpoint summaries (read-only here)')).toBeVisible();
+
+  const card = memoriesPage.card(content);
+  await expect(card).toBeVisible();
+  await expect(card.getByLabel('Select memory')).toHaveCount(0);
+  await expect(card.getByRole('button', { name: 'More actions' })).toHaveCount(0);
+  await expect(card).toContainText('Thread checkpoint summary');
+
+  // No bulk bar can appear on this view — there is nothing selectable.
+  await expect(memoriesPage.bulkBar).toBeHidden();
+
+  await memoriesPage.openFocus(content);
+  await expect(
+    page.getByText("Summaries are managed with the conversation checkpoint — they can't be archived or deleted here."),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
+});
+
+test('switches status tabs and updates the URL', async ({ memoriesPage, userWithPersonality }) => {
+  await memoriesPage.navigateTo();
+  await expect(memoriesPage.activeStatusTab).toHaveAttribute('aria-selected', 'true');
+
+  await memoriesPage.showArchived();
+  await expect(userWithPersonality.page).toHaveURL(/status=inactive/);
+  await expect(memoriesPage.archivedStatusTab).toHaveAttribute('aria-selected', 'true');
+
+  await memoriesPage.showSummaries();
+  await expect(userWithPersonality.page).toHaveURL(/status=summaries/);
+  await expect(memoriesPage.summariesStatusTab).toHaveAttribute('aria-selected', 'true');
+
+  await memoriesPage.showActive();
+  await expect(userWithPersonality.page).not.toHaveURL(/status=/);
+  await expect(memoriesPage.activeStatusTab).toHaveAttribute('aria-selected', 'true');
+});
+
+test('deep-links directly to the Archived status tab via the query param', async ({ memoriesPage, seed, userWithPersonality }) => {
+  const [memory] = await seed.memories(1, { content: seedName('memory-status-deep-link') });
+  const content = memory.content as string;
+  await memoriesPage.navigateTo();
+  await memoriesPage.archiveFromMenu(content);
+
+  await memoriesPage.navigateTo('?status=inactive');
+  await expect(memoriesPage.archivedStatusTab).toHaveAttribute('aria-selected', 'true');
+  await expect(memoriesPage.card(content)).toBeVisible();
+});

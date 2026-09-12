@@ -40,6 +40,9 @@ export class MemoriesPage {
     this.mainContent = this.page.locator('#main-content');
     this.filtersRow = this.page.locator('.memories-list__filters');
     this.statusTabs = this.page.getByRole('tablist', { name: 'Memory status' });
+    this.activeStatusTab = this.statusTabs.getByRole('tab', { name: 'Active', exact: true });
+    this.archivedStatusTab = this.statusTabs.getByRole('tab', { name: 'Archived', exact: true });
+    this.summariesStatusTab = this.statusTabs.getByRole('tab', { name: 'Summaries', exact: true });
     this.sortSelect = this.page.locator('.memories-list__filters .memories-list__sort-wrap select');
     this.searchInput = this.page.getByPlaceholder('Search memories…');
     this.minDateInput = this.page.locator('.memories-list__date-wrap input[type="date"]').first();
@@ -54,10 +57,12 @@ export class MemoriesPage {
     this.bulkBar = this.page.getByRole('toolbar', { name: 'Bulk memory actions' });
     this.focusPanel = this.page.getByRole('complementary', { name: 'Memory details' });
     this.focusDialog = this.page.getByRole('dialog', { name: 'Memory details' });
+    this.focusModalBackdrop = this.page.locator('.ui-modal');
   }
 
-  async navigateTo(): Promise<void> {
-    await this.page.goto('/memories');
+  /** `query` is an optional leading-`?` query string, for deep-linking (e.g. `?status=inactive`). */
+  async navigateTo(query = ''): Promise<void> {
+    await this.page.goto(`/memories${query}`);
     await this.shell.dismissAnnouncementIfPresent();
   }
 
@@ -105,6 +110,12 @@ export class MemoriesPage {
 
   readonly statusTabs: Locator;
 
+  readonly activeStatusTab: Locator;
+
+  readonly archivedStatusTab: Locator;
+
+  readonly summariesStatusTab: Locator;
+
   readonly searchInput: Locator;
 
   readonly minDateInput: Locator;
@@ -122,6 +133,13 @@ export class MemoriesPage {
 
   /** Mobile focus popup (`ui-modal` labelled "Memory details"). */
   readonly focusDialog: Locator;
+
+  /**
+   * The mobile focus modal's own backdrop (`ui-modal`'s `backdropClass()`).
+   * Click a corner rather than the center — the center falls on the centered
+   * dialog panel, which stops click propagation.
+   */
+  readonly focusModalBackdrop: Locator;
 
   async openFocus(content: string): Promise<void> {
     await this.card(content).click();
@@ -142,15 +160,15 @@ export class MemoriesPage {
   }
 
   async showArchived(): Promise<void> {
-    await this.statusTabs.getByRole('tab', { name: 'Archived', exact: true }).click();
+    await this.archivedStatusTab.click();
   }
 
   async showActive(): Promise<void> {
-    await this.statusTabs.getByRole('tab', { name: 'Active', exact: true }).click();
+    await this.activeStatusTab.click();
   }
 
   async showSummaries(): Promise<void> {
-    await this.statusTabs.getByRole('tab', { name: 'Summaries', exact: true }).click();
+    await this.summariesStatusTab.click();
   }
 
   readonly sortSelect: Locator;
@@ -224,6 +242,14 @@ export class MemoriesPage {
 
   async selectCard(content: string): Promise<void> {
     await this.card(content).getByLabel('Select memory').check();
+  }
+
+  /**
+   * The bulk bar's own "Select all" checkbox — only rendered once the bulk
+   * bar itself is visible (`selectCard` at least one card first).
+   */
+  async selectAll(): Promise<void> {
+    await this.bulkBar.getByLabel('Select all').check();
   }
 
   async archiveFromMenu(content: string): Promise<void> {
