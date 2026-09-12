@@ -32,6 +32,10 @@ export class ChatPage {
     this.contextBreakdown = this.page.getByLabel('Context breakdown', {
       exact: true,
     });
+    this.contextGaugeTop = this.contextBreakdown.locator('.gauge__top');
+    this.contextGaugeTotal = this.contextBreakdown.locator('.gauge__total');
+    this.contextGaugeBudget = this.contextBreakdown.locator('.gauge__budget');
+    this.contextCostEstimate = this.contextBreakdown.locator('.gauge__cost');
     this.scratchpadTab = this.page.getByLabel('Thread scratchpad');
     this.scratchpadInput = this.page.getByPlaceholder('Capture thread-specific notes');
     this.composerInput = this.page.locator('#chat-composer-input');
@@ -193,6 +197,28 @@ export class ChatPage {
 
   /** Token meter and segment legend for the Context X-ray tab. */
   readonly contextBreakdown: Locator;
+
+  /**
+   * The gauge's first row: token total, budget, and — since #49 extracted it
+   * into `app-context-cost-outlet` — the cost display. Class-based rather than
+   * role-based because the row is a plain layout container with no accessible
+   * name of its own; it exists only so a spec can assert what shares a line.
+   */
+  readonly contextGaugeTop: Locator;
+
+  /** The token total on the gauge's top row. */
+  readonly contextGaugeTotal: Locator;
+
+  /** The "/ <budget> tokens" span that follows the total on the same row. */
+  readonly contextGaugeBudget: Locator;
+
+  /**
+   * What the cost outlet renders. In the public build that is the estimated
+   * input API cost ("Est. $0.007"); the private overlay replaces the same
+   * element with its credit-cost UI, which is why specs assert placement and
+   * shape rather than an exact string.
+   */
+  readonly contextCostEstimate: Locator;
 
   async openLastAssistantContext(): Promise<void> {
     await this.lastAssistantContextAction.click();

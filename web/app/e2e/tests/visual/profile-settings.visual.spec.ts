@@ -1,6 +1,16 @@
 import { test, expect } from '../../fixtures';
 import { commonMasks } from './visual.helpers';
 
+/**
+ * @functional-coverage tests/functional/profile/profile.spec.ts
+ *
+ * Opening the modal, editing identity fields, saving, and the chat-defaults
+ * fieldset are covered behaviourally by the functional profile spec.
+ *
+ * A baseline pins how this looks; it cannot tell you it still works. See
+ * e2e/scripts/check-visual-coverage.mjs.
+ */
+
 test(
   'profile & settings modal, profile tab open',
   { tag: ['@visual', '@mock-only'] },
