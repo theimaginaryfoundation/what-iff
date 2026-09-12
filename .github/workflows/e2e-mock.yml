@@ -10,8 +10,10 @@ name: E2E (mock backend)
 # cannot coordinate with each other at all. The deployed configs share one
 # account and must NOT be sharded; see e2e/README.md.
 on:
-  # Per-commit (PR) runs are desktop-only — see PROJECTS below. Add the
-  # `e2e-full` label to a PR to get the mobile projects on that PR too,
+  # Per-commit (PR) runs are desktop-only for the *functional* suite — see
+  # PROJECTS below. The visual specs are the exception and always run both
+  # Chromium viewports. Add the `e2e-full` label to a PR to
+  # get the mobile projects for the functional suite on that PR too,
   # without waiting for the nightly. `labeled` is in the trigger list for
   # exactly that; the job guard below keeps every *other* label from
   # re-running the suite for no reason.
@@ -89,6 +91,9 @@ env:
   # X always wins — which silently ran desktop-only on a labelled PR while the
   # summary claimed otherwise. The non-empty value has to be the `&&` side.
   PROJECTS: ${{ (github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'e2e-full')) && '--project=chromium-desktop' || '' }}
+  # PROJECTS applies to the functional shards only. The "Run visual specs"
+  # step deliberately passes no --project filter at all — see the comment
+  # there before adding one.
 
 jobs:
   # Did this run touch the frontend? The visual specs compare committed PNGs
@@ -416,8 +421,21 @@ jobs:
       # the same image that rendered their baselines. Unsharded, on their own
       # matrix entry: there are a dozen of them and they are Chromium-only, so
       # splitting them across machines would cost more in setup than it saves.
-      # PROJECTS still applies, so a desktop-only PR run checks the
-      # chromium-desktop baselines and a full run adds chromium-mobile.
+      # No --project filter, deliberately: unlike the functional shards this
+      # step is NOT narrowed by PROJECTS, so both the chromium-desktop and the
+      # chromium-mobile baselines are checked on every frontend run, including
+      # a plain unlabelled PR.
+      #
+      # The mobile baselines are committed alongside the desktop ones, and the
+      # responsive work they exist to protect — the composer, the chat header,
+      # the gallery header — can only regress on a mobile viewport. Behind
+      # `e2e-full` the one project that could catch a responsive regression ran
+      # on merge to main or the next nightly, i.e. after it had landed.
+      #
+      # The cost argument that justifies desktop-only for the functional suite
+      # does not carry here: this is two Chromium projects over a handful of
+      # specs on a single unsharded machine, so the second project is a small
+      # fraction of a matrix entry that is already paid for.
       #
       # Skipped when nothing under web/app/ changed: a baseline
       # is a picture of the Angular app, and a backend-only commit cannot move
@@ -441,7 +459,7 @@ jobs:
         # A distinct filename: `merge-multiple` flattens every shard's blobs
         # into one directory, so two entries writing the default name would
         # collide there and the loser would vanish silently.
-        run: npx playwright test --config e2e/playwright.config.mock-llm.visual.ts --reporter=blob ${{ env.PROJECTS }}
+        run: npx playwright test --config e2e/playwright.config.mock-llm.visual.ts --reporter=blob
         env:
           PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
           PLAYWRIGHT_BLOB_OUTPUT_FILE: blob-report/visual.zip
