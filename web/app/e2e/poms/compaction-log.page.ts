@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import { ConfirmationModal } from './confirmation.modal';
 
-/** The compaction and personality prompt audit page (`/memories/compaction-log`). */
+/** Compaction log tab under Memory Manager (`/memories?tab=compaction-log`). */
 export class CompactionLogPage {
   /**
    * "Restore previous" routes through the app-wide confirmation dialog, so a
@@ -23,7 +23,7 @@ export class CompactionLogPage {
   }
 
   async navigateTo(): Promise<void> {
-    await this.page.goto('/memories/compaction-log');
+    await this.page.goto('/memories?tab=compaction-log');
   }
 
   async expandPromptChanges(): Promise<void> {

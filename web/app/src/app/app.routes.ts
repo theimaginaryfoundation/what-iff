@@ -1,4 +1,5 @@
-import { Routes } from '@angular/router';
+import { inject } from '@angular/core';
+import { Router, Routes } from '@angular/router';
 import { authGuard, guestGuard } from './core/guards/auth.guard';
 import { personalitySetupGuard } from './core/guards/personality-setup.guard';
 import { AppLayoutComponent } from './layout/app-layout.component';
@@ -53,13 +54,15 @@ export const routes: Routes = [
           },
           {
             path: 'merge-history',
-            loadComponent: () => import('./features/memory/memory-merge-history-page.component')
-              .then(m => m.MemoryMergeHistoryPageComponent)
+            redirectTo: () =>
+              inject(Router).createUrlTree(['/memories'], { queryParams: { tab: 'merge-history' } }),
+            pathMatch: 'full',
           },
           {
             path: 'compaction-log',
-            loadComponent: () => import('./features/memory/compaction-log-page.component')
-              .then(m => m.CompactionLogPageComponent)
+            redirectTo: () =>
+              inject(Router).createUrlTree(['/memories'], { queryParams: { tab: 'compaction-log' } }),
+            pathMatch: 'full',
           },
           {
             path: ':id',

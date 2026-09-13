@@ -146,13 +146,22 @@ function makeSeed(client: ApiClient, tracked: Tracked): Seed {
     },
 
     async memories(count, overrides = {}) {
-      const items: MemoryCreateRequest[] = Array.from({ length: count }, (_, i) => ({
-        content: `${seedName('memory')}-${i}`,
-        level: 'global',
-        type: 'Context',
-        starred: false,
-        ...overrides,
-      }));
+      const items: MemoryCreateRequest[] = Array.from({ length: count }, (_, i) => {
+        const item: MemoryCreateRequest = {
+          content: `${seedName('memory')}-${i}`,
+          level: 'global',
+          type: 'Context',
+          starred: false,
+          ...overrides,
+        };
+        // A shared `content` override would make every card match the same
+        // hasText locator (strict-mode violations on select/click). Keep the
+        // override as a readable prefix and uniquify when seeding a batch.
+        if (count > 1 && overrides.content != null) {
+          item.content = `${overrides.content}-${i}`;
+        }
+        return item;
+      });
       const result = await createMemoriesBatch(client, items);
       const created = result.results ?? [];
       for (const memory of created) {

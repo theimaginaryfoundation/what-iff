@@ -1,5 +1,5 @@
 import { CommonModule, DatePipe, UpperCasePipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, input, OnInit, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 
 import { MemoryMergeEvent, MemoryMergeSourceMember } from '../../core/models/memory.model';
@@ -16,6 +16,9 @@ import { MemoryService } from '../../core/services/memory.service';
 export class MemoryMergeHistoryPageComponent implements OnInit {
   private readonly memoryService = inject(MemoryService);
   private readonly router = inject(Router);
+
+  /** When true, hide the standalone page chrome (used as a Memories tab). */
+  readonly embedded = input(false);
 
   readonly events = signal<MemoryMergeEvent[]>([]);
   readonly loading = signal(true);

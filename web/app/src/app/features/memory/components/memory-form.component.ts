@@ -3,11 +3,15 @@ import { ChangeDetectionStrategy, Component, computed, input, output, signal } f
 import { FormsModule } from '@angular/forms';
 
 import { Memory } from '../../../core/models/memory.model';
+import { PersonalityThumbnailCircle } from '../../../core/models/personality.model';
 import { isUserScopedMemoryLevel } from '../helpers/memory-vm.helpers';
 
 export interface MemoryPersonalityOption {
   id: string;
   label: string;
+  accent_color?: string | null;
+  cover_image_url?: string | null;
+  thumbnail_circle?: PersonalityThumbnailCircle | null;
 }
 
 @Component({

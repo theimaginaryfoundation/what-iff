@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -698,6 +699,121 @@ func TestDeleteMemory_WrongOwner(t *testing.T) {
 	require.True(t, exists, "delete by a non-owner must not remove the memory")
 }
 
+func TestDeleteMemoriesBatch_AllOrNoneNotFound(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+
+	created, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{Content: "keep me", Level: models.MemoryLevelGlobal})
+	require.NoError(t, err)
+
+	_, err = ds.DeleteMemoriesBatch(ctx, userID, models.BatchDeleteMemoryInput{
+		IDs:       []uuid.UUID{created.ID, uuid.New()},
+		AllOrNone: true,
+	})
+	require.ErrorIs(t, err, ErrMemoryNotFound)
+
+	exists, err := ds.dbClient.Memory.Query().Where(entmemory.ID(created.ID)).Exist(ctx)
+	require.NoError(t, err)
+	require.True(t, exists, "all_or_none should roll back when any id is missing")
+}
+
+func TestDeleteMemoriesBatch_AllOrNoneHappyPath(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+
+	first, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{Content: "one", Level: models.MemoryLevelGlobal})
+	require.NoError(t, err)
+	second, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{Content: "two", Level: models.MemoryLevelGlobal})
+	require.NoError(t, err)
+
+	result, err := ds.DeleteMemoriesBatch(ctx, userID, models.BatchDeleteMemoryInput{
+		IDs:       []uuid.UUID{first.ID, second.ID},
+		AllOrNone: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, result.DeletedCount)
+}
+
+func TestDeleteMemoriesBatch_PartialSkipsMissing(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+
+	keep, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{Content: "delete me", Level: models.MemoryLevelGlobal})
+	require.NoError(t, err)
+
+	result, err := ds.DeleteMemoriesBatch(ctx, userID, models.BatchDeleteMemoryInput{
+		IDs:       []uuid.UUID{keep.ID, uuid.New()},
+		AllOrNone: false,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.DeletedCount)
+
+	exists, err := ds.dbClient.Memory.Query().Where(entmemory.ID(keep.ID)).Exist(ctx)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+func TestDeleteMemoriesBatch_PartialPropagatesUnexpectedError(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+
+	created, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{Content: "still here", Level: models.MemoryLevelGlobal})
+	require.NoError(t, err)
+
+	require.NoError(t, ds.dbClient.Close())
+
+	_, err = ds.DeleteMemoriesBatch(ctx, userID, models.BatchDeleteMemoryInput{
+		IDs:       []uuid.UUID{created.ID},
+		AllOrNone: false,
+	})
+	require.Error(t, err)
+	require.False(t, errors.Is(err, ErrMemoryNotFound))
+}
+
+func TestDeleteMemoriesBatch_RejectsTooManyIDs(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	ids := make([]uuid.UUID, models.MaxMemoryBatchIDs+1)
+	for i := range ids {
+		ids[i] = uuid.New()
+	}
+
+	_, err := ds.DeleteMemoriesBatch(ctx, uuid.New(), models.BatchDeleteMemoryInput{IDs: ids})
+	require.ErrorIs(t, err, ErrInvalidRequestBody)
+}
+
+func TestPatchMemoriesBatch_RejectsTooManyIDs(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	ids := make([]uuid.UUID, models.MaxMemoryBatchIDs+1)
+	for i := range ids {
+		ids[i] = uuid.New()
+	}
+
+	_, err := ds.PatchMemoriesBatch(ctx, uuid.New(), models.BatchPatchMemoryInput{IDs: ids})
+	require.ErrorIs(t, err, ErrInvalidRequestBody)
+}
+
 // --- GetMemory ---
 
 func TestGetMemory_HappyPath(t *testing.T) {
@@ -888,6 +1004,37 @@ func TestListMemories_FiltersAndPagination(t *testing.T) {
 	badLevel := models.MemoryLevel("bogus")
 	_, err = ds.ListMemories(ctx, userID, 1, 10, models.MemoryFilters{Level: &badLevel})
 	require.Error(t, err)
+}
+
+func TestListMemories_ExcludesSummaryUnlessRequested(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+	chatID := uuid.New()
+	createTestChat(t, ds, chatID, userID)
+
+	_, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{Content: "global memory", Level: models.MemoryLevelGlobal})
+	require.NoError(t, err)
+	summary, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{
+		Content: "checkpoint summary",
+		Level:   models.MemoryLevelSummary,
+		ChatID:  &chatID,
+	})
+	require.NoError(t, err)
+
+	resp, err := ds.ListMemories(ctx, userID, 1, 10, models.MemoryFilters{})
+	require.NoError(t, err)
+	require.Equal(t, 1, resp.TotalCount)
+	require.Equal(t, models.MemoryLevelGlobal, resp.Results[0].(*models.Memory).Level)
+
+	summaryLevel := models.MemoryLevelSummary
+	resp, err = ds.ListMemories(ctx, userID, 1, 10, models.MemoryFilters{Level: &summaryLevel})
+	require.NoError(t, err)
+	require.Equal(t, 1, resp.TotalCount)
+	require.Equal(t, summary.ID, resp.Results[0].(*models.Memory).ID)
 }
 
 func TestListMemories_DefaultsAndSort(t *testing.T) {

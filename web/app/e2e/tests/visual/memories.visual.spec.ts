@@ -1,49 +1,97 @@
 import { test, expect } from '../../fixtures';
+import { commonMasks } from './visual.helpers';
 
 /**
- * @functional-coverage tests/functional/memory/memories.spec.ts
+ * @functional-coverage tests/functional/memory/memories.spec.ts, tests/functional/memory/responsive-layout.spec.ts
  *
- * Listing, filtering, inline edit, delete, sort and pagination of the cards this
- * baseline pictures are covered by the functional memories spec.
+ * Listing, filtering, focus rail/modal, batch actions, and responsive layout for
+ * the Memory Manager screens these baselines picture are covered by the
+ * functional memories + responsive-layout specs.
  *
  * A baseline pins how this looks; it cannot tell you it still works. See
  * e2e/scripts/check-visual-coverage.mjs.
  */
 
 /**
- * The memory list card. The memory feature moved a lot over the last few
- * weeks (merge history, the compaction log link, the import flow) without any
- * pixel contract on the card itself.
+ * Memory Manager shell + list tab. Dates on cards change day-to-day, so
+ * populated screenshots mask `.memory-card__date`.
  *
- * Element-scoped rather than full-page: the page header carries a
- * "<n> memories" count and the toolbar's filter tabs carry per-filter counts,
- * both of which depend on what else a run has seeded. One card, with fixed
- * content, is the part that is genuinely stable.
+ * Uses `userWithPersonality` so personalitySetupGuard does not bounce us
+ * off `/memories` (same pattern as the functional memory suite).
  */
-test(
-  'memory card in the memories list',
-  { tag: ['@visual', '@mock-only'] },
-  async ({ memoriesPage, seed, userWithPersonality }) => {
-    // Fixed content, not the seeded `memory-<id>-0` default: the excerpt is
-    // rendered on the card, so a random suffix would change its glyphs — and
-    // its wrap point — on every run.
-    const content = 'E2E visual memory: the user prefers concise answers.';
-    await seed.memories(1, { content });
+test.describe('memory manager screens', () => {
+  test(
+    'empty state',
+    { tag: ['@visual', '@mock-only'] },
+    async ({ userWithPersonality, memoriesPage, shell }) => {
+      const page = userWithPersonality.page;
+      await shell.dismissAnnouncementIfPresent();
+      await memoriesPage.navigateTo();
+      await shell.dismissAnnouncementIfPresent();
 
-    await memoriesPage.navigateTo();
-    await expect(memoriesPage.heading).toBeVisible();
+      await expect(memoriesPage.heading).toBeVisible();
+      await expect(memoriesPage.emptyMessage).toBeVisible();
 
-    // Exactly one, not merely visible: a `toBeVisible` alone would also pass if
-    // seeding had silently failed and a card with this fixed content survived
-    // from an earlier run.
-    const card = memoriesPage.card(content);
-    await expect(card).toHaveCount(1);
-    await expect(card).toBeVisible();
+      await expect(page).toHaveScreenshot('memory-manager-empty.png', {
+        animations: 'disabled',
+        mask: commonMasks(page),
+        // Sidebar avatar mask + filter chrome can shift a few hundred AA pixels
+        // between CI runners and the amd64 docker baseline image.
+        maxDiffPixelRatio: 0.02,
+      });
+    },
+  );
 
-    await expect(card).toHaveScreenshot('memory-card.png', {
-      animations: 'disabled',
-      // `updatedAt` renders as a date and a clock time on every card.
-      mask: [memoriesPage.cardMetadata(content)],
-    });
-  },
-);
+  test(
+    'populated list with fixed seeded content',
+    { tag: ['@visual', '@mock-only'] },
+    async ({ userWithPersonality, memoriesPage, seed, shell }) => {
+      const page = userWithPersonality.page;
+      // Fixed copy so the baseline does not churn on every run.
+      await seed.memories(1, {
+        content: 'E2E visual memory: prefers concise answers under 150 words.',
+        level: 'global',
+        starred: true,
+      });
+      await seed.memories(1, {
+        content: 'E2E visual memory: birthday is March 3.',
+        level: 'global',
+        starred: false,
+      });
+
+      await shell.dismissAnnouncementIfPresent();
+      await memoriesPage.navigateTo();
+      await shell.dismissAnnouncementIfPresent();
+
+      await expect(memoriesPage.card('prefers concise answers under 150 words')).toBeVisible();
+      await expect(memoriesPage.card('birthday is March 3')).toBeVisible();
+
+      await expect(page).toHaveScreenshot('memory-manager-list.png', {
+        animations: 'disabled',
+        mask: [...commonMasks(page), page.locator('.memory-card__date')],
+        maxDiffPixelRatio: 0.02,
+      });
+    },
+  );
+
+  test(
+    'merge history tab chrome',
+    { tag: ['@visual', '@mock-only'] },
+    async ({ userWithPersonality, memoriesPage, shell }) => {
+      const page = userWithPersonality.page;
+      await shell.dismissAnnouncementIfPresent();
+      await memoriesPage.navigateTo();
+      await shell.dismissAnnouncementIfPresent();
+      await memoriesPage.mergeHistoryTab.click();
+
+      await expect(memoriesPage.mergeHistoryTab).toHaveAttribute('aria-selected', 'true');
+      await expect(page.getByRole('heading', { name: 'Merge history' })).toBeVisible();
+
+      await expect(page).toHaveScreenshot('memory-manager-merge-history.png', {
+        animations: 'disabled',
+        mask: commonMasks(page),
+        maxDiffPixelRatio: 0.02,
+      });
+    },
+  );
+});
