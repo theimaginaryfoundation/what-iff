@@ -4,6 +4,8 @@ export class LoginPage {
   constructor(private readonly page: Page) {
     this.identifierInput = this.page.getByPlaceholder('Enter your username or email');
     this.passwordInput = this.page.getByPlaceholder('Enter your password');
+    this.showPasswordButton = this.page.getByRole('button', { name: 'Show password' });
+    this.hidePasswordButton = this.page.getByRole('button', { name: 'Hide password' });
     this.submitButton = this.page.getByRole('button', { name: 'Sign in' });
     this.errorAlert = this.page.getByRole('alert');
   }
@@ -11,6 +13,12 @@ export class LoginPage {
   readonly identifierInput: Locator;
 
   readonly passwordInput: Locator;
+
+  /** Visible while the password field is masked. */
+  readonly showPasswordButton: Locator;
+
+  /** Visible while the password field is revealed. */
+  readonly hidePasswordButton: Locator;
 
   readonly submitButton: Locator;
 
@@ -34,5 +42,13 @@ export class LoginPage {
     await this.navigateTo();
     await this.fillCredentials(credentials);
     await this.submit();
+  }
+
+  async showPassword(): Promise<void> {
+    await this.showPasswordButton.click();
+  }
+
+  async hidePassword(): Promise<void> {
+    await this.hidePasswordButton.click();
   }
 }
