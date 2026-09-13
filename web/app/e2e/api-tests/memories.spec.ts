@@ -357,7 +357,8 @@ test.describe('memories', () => {
       expect(patched.updated_count).toBe(2);
       for (const memory of patched.results) {
         expect(memory.content).toBe('e2e-api batch-fields updated');
-        expect(memory.confidence).toBe('high');
+        // Response confidence is the stored float anchor for the "high" bucket.
+        expect(memory.confidence).toBe(0.9);
         expect(memory.starred).toBe(true);
       }
 

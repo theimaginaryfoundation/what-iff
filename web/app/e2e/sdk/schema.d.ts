@@ -8816,8 +8816,11 @@ export interface components {
              * @enum {string}
              */
             status?: "active" | "inactive";
-            /** @enum {string} */
-            confidence?: "low" | "medium" | "high";
+            /**
+             * Format: float
+             * @description Stored confidence in [0,1]. Create/patch accept coarse buckets (low/medium/high) that map to anchors 0.3/0.6/0.9; other signals may refine the float over time.
+             */
+            confidence?: number;
             chain_metadata?: {
                 duplicate_count?: number;
                 verified_timestamps_first?: string[];
