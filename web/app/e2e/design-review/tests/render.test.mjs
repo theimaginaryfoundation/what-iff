@@ -110,6 +110,50 @@ test('the browser and Node comparisons start from the same threshold', async () 
   assert.equal(Number(declared), DEFAULT_THRESHOLD);
 });
 
+/**
+ * Guards for the two defects that made the comparison slider unusable.
+ *
+ * Both were invisible to every other check here: the report rendered, the
+ * images were right, the numbers were right, and nothing threw. They only
+ * appeared when someone actually pressed and dragged. Until there is a
+ * browser harness for this page, these assert the exact properties whose
+ * absence caused each one — which is weaker than driving the gesture, but it
+ * is what stands between a silent reintroduction and a caught one.
+ */
+test('screenshots are not natively draggable', async () => {
+  // A press lands on the <img>, and an image is draggable by default, so the
+  // first pointermove started a drag-and-drop, fired `pointercancel`, and
+  // released the pointer capture. The slider moved once and then froze.
+  //
+  // Asserted against the script rather than the rendered HTML: every image
+  // in this report is created at runtime by `imageLayer`, so the document
+  // that ships contains no <img> markup to inspect.
+  const script = await readFile(path.join(TOOL_DIR, 'assets', 'report.js'), 'utf8');
+  const imageLayer = script.match(/function imageLayer\([\s\S]*?\n  \}/)[0];
+
+  assert.match(imageLayer, /draggable: false/);
+});
+
+test('the stage opts out of browser gesture handling', async () => {
+  const css = await readFile(path.join(TOOL_DIR, 'assets', 'report.css'), 'utf8');
+  const stageRule = css.match(/\.stage \{[\s\S]*?\}/)[0];
+
+  // Without this a touch drag is claimed by the browser as a pan, which
+  // cancels the pointer stream exactly like the image drag did.
+  assert.match(stageRule, /touch-action:\s*none/);
+});
+
+test('the slider reveals by clipping, never by resizing', async () => {
+  const script = await readFile(path.join(TOOL_DIR, 'assets', 'report.js'), 'utf8');
+
+  // The revealed layer is positioned inside the clip box, so animating that
+  // box's width scaled the screenshot down into the revealed strip instead
+  // of cutting it off — the two sides stopped lining up and the comparison
+  // became meaningless while still looking plausible.
+  assert.match(script, /clip\.style\.clipPath = `inset\(/);
+  assert.ok(!/clip\.style\.width\s*=/.test(script), 'clip width must not be animated — clip-path is what preserves scale');
+});
+
 test('the title names the pull request when there is one', () => {
   assert.equal(reportTitle(modelWith([], { pr: { number: 42, title: 'Refresh the nav' } })), 'Design review — PR #42: Refresh the nav');
   assert.equal(reportTitle(modelWith([])), 'Design review — redesign');

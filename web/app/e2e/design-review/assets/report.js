@@ -358,7 +358,10 @@
   }
 
   function imageLayer(image, boxWidth, boxHeight, extraClass) {
-    const node = el('img', { src: data.assets[image.asset], alt: '', loading: 'lazy', decoding: 'async' });
+    // `draggable` as well as the CSS rule: the attribute is what actually
+    // stops a native image drag in Firefox, where `-webkit-user-drag` does
+    // nothing, and a started image drag cancels the comparison gesture.
+    const node = el('img', { src: data.assets[image.asset], alt: '', loading: 'lazy', decoding: 'async', draggable: false });
     if (extraClass) node.className = extraClass;
     placeLayer(node, image, boxWidth, boxHeight);
     return node;
@@ -525,14 +528,16 @@
     const readPixels = pixelReader(variant);
 
     function applyPosition() {
+      handle.style.left = `${position * 100}%`;
       if (mode === 'slider') {
-        clip.style.width = `${position * 100}%`;
+        // Reveal by clipping, not by resizing. The layer keeps the full
+        // stage box so it stays pixel-aligned with the "before" underneath;
+        // only how much of it is painted changes.
+        clip.style.clipPath = `inset(0 ${(1 - position) * 100}% 0 0)`;
         clip.style.opacity = '1';
-        handle.style.left = `${position * 100}%`;
       } else if (mode === 'onion') {
-        clip.style.width = '100%';
+        clip.style.clipPath = 'none';
         clip.style.opacity = String(position);
-        handle.style.left = `${position * 100}%`;
       }
     }
 
@@ -584,14 +589,30 @@
       position = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
       applyPosition();
     };
+    // An explicit flag rather than asking `hasPointerCapture` on every move.
+    // Capture answers "does this element own the pointer", which is not the
+    // same question as "is the user dragging" — the browser can take the
+    // pointer away mid-gesture (see `pointercancel` below), and reading
+    // capture state left the handler silently dead with no way to recover.
+    let dragging = false;
+    const endDrag = () => {
+      dragging = false;
+    };
+
     stage.addEventListener('pointerdown', event => {
       if (mode !== 'slider' && mode !== 'onion') return;
-      stage.setPointerCapture(event.pointerId);
+      dragging = true;
+      // Capture is still requested so a drag continuing outside the stage
+      // keeps tracking; it is no longer what the move handler trusts.
+      stage.setPointerCapture?.(event.pointerId);
       track(event);
     });
     stage.addEventListener('pointermove', event => {
-      if (stage.hasPointerCapture?.(event.pointerId)) track(event);
+      if (dragging) track(event);
     });
+    for (const ending of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+      stage.addEventListener(ending, endDrag);
+    }
 
     // The headline figure comes from the model, computed by the generator
     // with the same rule this page uses. Canvas work is therefore deferred

@@ -223,9 +223,32 @@ input[type='range'] { accent-color: var(--accent); width: 108px; }
   border-radius: 8px;
   overflow: hidden;
   cursor: default;
+  /*
+   * Both of these keep a drag alive, and without them the comparison slider
+   * moves once and then freezes.
+   *
+   * A press lands on the screenshot, and an <img> is natively draggable — so
+   * the moment the pointer moves, Chromium starts a drag-and-drop of the
+   * image, fires `pointercancel`, and releases the pointer capture the
+   * handler depends on. `touch-action` is the same failure on a touch
+   * screen: the browser claims the gesture as a pan and cancels the stream.
+   * Selection is disabled for the same reason a text drag would interfere.
+   */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .stage img,
-.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.stage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  -webkit-user-drag: none;
+  /* The stage owns the gesture; layers must never be the pointer target. */
+  pointer-events: none;
+}
 .stage.checker { --stage-bg: transparent; background-image: linear-gradient(45deg, #2a2f3a 25%, transparent 25%), linear-gradient(-45deg, #2a2f3a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #2a2f3a 75%), linear-gradient(-45deg, transparent 75%, #2a2f3a 75%); background-size: 18px 18px; background-position: 0 0, 0 9px, 9px -9px, -9px 0; }
 
 /* Side-by-side is the only mode that is a grid rather than a stack. */
@@ -235,7 +258,17 @@ input[type='range'] { accent-color: var(--accent); width: 108px; }
 .sbs .before figcaption { color: var(--removed); }
 .sbs .after figcaption { color: var(--added); }
 
-/* Slider: the "after" layer is clipped to the handle position. */
+/*
+ * Slider: the "after" layer is revealed up to the handle position.
+ *
+ * The reveal is a `clip-path` on a box that always fills the stage, never a
+ * width on a box that shrinks. Shrinking the box also shrinks the image
+ * inside it — its `width` is a percentage of its positioned parent — so the
+ * whole "after" screenshot squeezed into the revealed strip instead of being
+ * cut off at the handle, and the two sides no longer lined up at all. The
+ * clip path leaves the layer laid out exactly as its "before" counterpart
+ * and hides part of it, which is what a comparison slider has to do.
+ */
 .stage .clip { position: absolute; inset: 0; overflow: hidden; }
 .stage .handle {
   position: absolute;
