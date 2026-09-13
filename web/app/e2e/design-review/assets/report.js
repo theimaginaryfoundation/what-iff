@@ -423,19 +423,26 @@
    * translucent in a region is a real change that an RGB-only test over
    * premultiplied-looking data can miss entirely.
    */
-  function computeDiff(pixels, threshold) {
+  function computeDiff(pixels, threshold, { withOverlay = true } = {}) {
     const { width, height, before, after } = pixels;
     const cutoff = Math.round(threshold * 255);
-    const overlay = new ImageData(width, height);
     const a = before.data;
     const b = after.data;
-    const out = overlay.data;
+    // Only difference mode paints. Every other mode wants the count and
+    // nothing else, and building the image anyway meant allocating a
+    // full-resolution ImageData and writing four bytes per pixel — around
+    // 3.7MB for one desktop screen — to immediately discard it, on every
+    // variant, on every nudge of the sensitivity control.
+    const overlay = withOverlay ? new ImageData(width, height) : null;
+    const out = overlay?.data;
     let changed = 0;
 
     for (let i = 0; i < a.length; i += 4) {
       const delta = Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2]), Math.abs(a[i + 3] - b[i + 3]));
-      if (delta > cutoff) {
-        changed++;
+      const differs = delta > cutoff;
+      if (differs) changed++;
+      if (!out) continue;
+      if (differs) {
         // Solid magenta: the one hue that appears in almost no real UI, so
         // an overlay pixel is never mistaken for content underneath it.
         out[i] = 255;
@@ -562,8 +569,11 @@
           return;
         }
       }
-      const result = computeDiff(pixels, threshold);
-      canvas.getContext('2d').putImageData(result.overlay, 0, 0);
+      // `applyMode` calls back into here whenever difference mode is
+      // selected, so a stage compared without an overlay still gets one the
+      // moment it is actually going to be shown.
+      const result = computeDiff(pixels, threshold, { withOverlay: mode === 'diff' });
+      if (result.overlay) canvas.getContext('2d').putImageData(result.overlay, 0, 0);
       showDelta(result.ratio, threshold !== DEFAULT_THRESHOLD);
     }
 
