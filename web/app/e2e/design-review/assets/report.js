@@ -547,7 +547,12 @@
       if (!pixels) {
         try {
           pixels = await readPixels();
-        } catch {
+        } catch (error) {
+          // Surfaced in the UI *and* logged. The UI text is all a reader
+          // needs, but a malformed baseline is a repository problem someone
+          // will have to go and look at, and "diff unavailable" on its own
+          // does not say which of eleven screens is the broken one.
+          console.warn(`[design review] could not compare ${variant.path}:`, error);
           deltaNode.textContent = 'diff unavailable';
           return;
         }

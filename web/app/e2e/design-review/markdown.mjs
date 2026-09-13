@@ -68,7 +68,7 @@ export function renderMarkdown(model, { reportLink, reportHint } = {}) {
   lines.push(`### Design review · ${headline}`, '');
 
   if (!model.base.sha) {
-    lines.push(`> No merge base with \`${model.base.ref}\` — nothing to compare against, so every screen below reads as new.`, '');
+    lines.push(`> **No merge base with \`${model.base.ref}\`** — ${model.base.reason ?? 'nothing to compare against'}. Every screen below therefore reads as new.`, '');
   }
 
   const moved = model.screens.filter(screen => screen.status !== 'unchanged');

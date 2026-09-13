@@ -84,6 +84,20 @@ the browser, so the report's sensitivity slider can move without a round
 trip. Both implement the same rule from the same default threshold, and a
 test pins the boundary. Changing one means changing the other.
 
+## `gh` is optional everywhere
+
+The only thing the GitHub CLI contributes is the pull request number and
+title in the report's header (`lib/gh.mjs`). A missing `gh`, an
+unauthenticated one, no network, or a branch with no PR all return null and
+cost one header line. The CI workflow never depends on it being present in
+the runner image, and nothing in the HTML, the JSON or the PR comment is
+derived from it.
+
+It is consulted only when the report's head is the checked-out branch.
+Asked for any other ref, `gh pr view` would return the *current* branch's
+pull request and stamp a report about one change with another change's
+title, so the lookup is skipped instead.
+
 ## Known limits
 
 - **Only screens with committed baselines appear.** "No screen changed" is not

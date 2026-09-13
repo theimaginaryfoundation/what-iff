@@ -108,8 +108,22 @@ export function titleize(shot) {
  * never "throw" — a spec written in a shape this doesn't recognise simply
  * contributes no annotation.
  */
+/**
+ * Ceiling on the spec source this will scan.
+ *
+ * The extraction below is a handful of unanchored regexes run repeatedly
+ * over slices of the file, which is fine for a spec (a few kilobytes) and
+ * quadratic-ish on something pathological. No real spec comes close, so a
+ * file past this size is a generated or vendored artifact that happens to
+ * end in `.spec.ts` — and the correct response to it is to contribute no
+ * annotations rather than to spend a minute proving it has none.
+ */
+const MAX_SPEC_BYTES = 512 * 1024;
+
 export async function readSpecAnnotations(root, ref, specPath) {
-  const source = (await readBlob(root, ref, specPath))?.toString('utf8');
+  const blob = await readBlob(root, ref, specPath);
+  if (!blob || blob.length > MAX_SPEC_BYTES) return new Map();
+  const source = blob.toString('utf8');
   if (!source) return new Map();
 
   // Every block comment in the file, with the offset just past its `*/`.

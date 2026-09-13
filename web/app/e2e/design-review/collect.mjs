@@ -9,38 +9,12 @@
  * re-deriving "which screens changed" for themselves and drifting.
  */
 
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import * as git from './lib/git.mjs';
 import { readPngSize } from './lib/png.mjs';
 import { listBaselinePaths, parseBaselinePath, readSpecAnnotations, titleize, PROJECTS } from './lib/screens.mjs';
 import { summarizeImpact, relatedFiles } from './lib/impact.mjs';
 import { diffPngs } from './lib/diff.mjs';
-
-const execFileAsync = promisify(execFile);
-
-/**
- * Pull request context, when this is running somewhere `gh` is authenticated.
- *
- * Entirely optional. The report's whole value proposition is that it works
- * on a local branch before anything is pushed, so an unauthenticated `gh`, a
- * missing `gh`, or a branch with no PR yet all return null and cost the
- * reader nothing but a header line.
- */
-async function readPullRequest(root, headRef) {
-  if (headRef !== git.WORKTREE && !/^[\w./-]+$/.test(String(headRef))) return null;
-  try {
-    const { stdout } = await execFileAsync(
-      'gh',
-      ['pr', 'view', '--json', 'number,title,url,author,headRefName,baseRefName,isDraft,body'],
-      { cwd: root, encoding: 'utf8', timeout: 15_000 },
-    );
-    const pr = JSON.parse(stdout);
-    return { number: pr.number, title: pr.title, url: pr.url, author: pr.author?.login, head: pr.headRefName, base: pr.baseRefName, draft: pr.isDraft };
-  } catch {
-    return null;
-  }
-}
+import { readPullRequest } from './lib/gh.mjs';
 
 /** One rendered image on one side of a comparison, or null if absent there. */
 function toImage(buffer, relPath) {

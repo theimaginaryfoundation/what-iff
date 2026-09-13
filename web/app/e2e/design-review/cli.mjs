@@ -50,8 +50,29 @@ function parseArgs(argv) {
     const arg = argv[i];
     // A `--flag=value` form is accepted alongside `--flag value` because npm
     // run-script arguments get retyped constantly and both are muscle memory.
+    // A lone `--` is what everyone's fingers type after an npm script name,
+    // and npm only eats the first one — so `npm run design:review --` arrives
+    // here as a literal argument. Erroring on it would fail the simplest
+    // possible invocation, so it is skipped as the separator it is.
+    if (arg === '--') continue;
+
     const [flag, inlineValue] = arg.startsWith('--') && arg.includes('=') ? [arg.slice(0, arg.indexOf('=')), arg.slice(arg.indexOf('=') + 1)] : [arg, null];
-    const next = () => inlineValue ?? argv[++i];
+    /**
+     * The value for a flag.
+     *
+     * A following token that is itself a flag is treated as absent rather
+     * than consumed. `--base --open` would otherwise silently compare
+     * against a ref literally named "--open" and swallow the second flag —
+     * a wrong report rather than an error, which is the worst outcome
+     * available here.
+     */
+    const next = () => {
+      if (inlineValue !== null) return inlineValue;
+      const candidate = argv[i + 1];
+      if (candidate === undefined || candidate.startsWith('--')) return undefined;
+      i++;
+      return candidate;
+    };
     switch (flag) {
       case '--base': options.base = next(); break;
       case '--head': options.head = next(); break;
@@ -132,7 +153,8 @@ async function main() {
   process.stdout.write(`  ${changed} changed · ${added} new · ${removed} removed · ${unchanged} unchanged\n`);
   process.stdout.write(`  report ${display(outPath, model.repoRoot)}\n`);
   if (!model.base.sha) {
-    process.stdout.write(`\n  No merge base with ${model.base.ref} — the report shows the current state with nothing to compare against.\n`);
+    process.stdout.write(`\n  No merge base with ${model.base.ref}: ${model.base.reason}\n`);
+    process.stdout.write(`  The report shows the current state, with nothing to compare against.\n`);
   } else if (changed + added + removed === 0) {
     process.stdout.write(`\n  No baseline changed. If you expected one to, the screen may not have a visual spec yet.\n`);
   }

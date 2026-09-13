@@ -65,10 +65,18 @@ export async function resolveBase(root, baseRef, headRef) {
     const sha = (await git(root, ['merge-base', baseRef, head])).trim();
     return { ref: baseRef, sha };
   } catch {
-    // No common ancestor: an orphan branch, a shallow clone whose history
-    // was cut above the fork point, or a base ref that does not exist
-    // locally. Report it instead of silently comparing against nothing.
-    return { ref: baseRef, sha: null };
+    // Failure here has two very different causes that produce an identical
+    // empty report, so they are separated before returning. A typo'd or
+    // unfetched ref is the overwhelmingly common one and is fixable in
+    // seconds — but told only "no merge base", a reader reasonably concludes
+    // their branch is fine and the tool is broken.
+    let reason = 'no common ancestor — an orphan branch, or a clone shallow enough to have cut the fork point';
+    try {
+      await git(root, ['rev-parse', '--verify', `${baseRef}^{commit}`]);
+    } catch {
+      reason = `\`${baseRef}\` does not resolve to a commit here — check the spelling, or fetch it first`;
+    }
+    return { ref: baseRef, sha: null, reason };
   }
 }
 
@@ -108,6 +116,71 @@ export async function readBlob(root, ref, relPath) {
 }
 
 /**
+ * Splits `-z` output into its NUL-delimited fields.
+ *
+ * Every path-bearing git command here is asked for `-z`, which is the only
+ * way to get paths back verbatim. Without it git abbreviates a rename to
+ * `dir/{old => new}/file`, and separately backslash-quotes any path
+ * containing a space, a quote or a non-ASCII byte — so the "path" in the
+ * output is a display string, not a path, and reconstructing the real one
+ * from it is guesswork. An earlier version of this file guessed with a
+ * regex and turned `web/app/src/{billing => payments}/invoice.html` into
+ * `payments}/invoice.html`, a path that does not exist, reported as
+ * modified rather than renamed.
+ */
+function nulFields(output) {
+  const fields = output.split('\0');
+  // A trailing NUL terminates the last record rather than starting a new one.
+  if (fields.at(-1) === '') fields.pop();
+  return fields;
+}
+
+/** `R100`/`C75` carry a similarity score; everything else is a bare letter. */
+const STATUS_NAMES = { R: 'renamed', C: 'renamed', A: 'added', D: 'deleted', M: 'modified', T: 'modified' };
+
+/**
+ * Status per path from `--name-status -z`.
+ *
+ * Rename and copy records span three fields (code, old path, new path);
+ * every other status spans two. The new path is what the report links to.
+ */
+function parseNameStatus(output) {
+  const fields = nulFields(output);
+  const statuses = new Map();
+  for (let i = 0; i < fields.length; ) {
+    const code = fields[i][0];
+    if (code === 'R' || code === 'C') {
+      statuses.set(fields[i + 2], STATUS_NAMES[code]);
+      i += 3;
+    } else {
+      statuses.set(fields[i + 1], STATUS_NAMES[code] ?? 'modified');
+      i += 2;
+    }
+  }
+  return statuses;
+}
+
+/**
+ * Line counts per path from `--numstat -z`.
+ *
+ * A record is `<added>\t<deleted>\t<path>`, except for a rename, where the
+ * path is empty in that field and the old and new paths follow as their own
+ * two fields. `-` for a count means binary, which is every baseline PNG.
+ */
+function parseNumstat(output) {
+  const fields = nulFields(output);
+  const entries = [];
+  for (let i = 0; i < fields.length; ) {
+    const [added, deleted, inlinePath] = fields[i].split('\t');
+    const renamed = inlinePath === '';
+    const file = renamed ? fields[i + 2] : inlinePath;
+    entries.push({ path: file, added: added === '-' ? null : Number(added), deleted: deleted === '-' ? null : Number(deleted) });
+    i += renamed ? 3 : 1;
+  }
+  return entries;
+}
+
+/**
  * Files that differ between `baseSha` and the head, as
  * `{ path, status, added, deleted }`.
  *
@@ -119,48 +192,18 @@ export async function readBlob(root, ref, relPath) {
 export async function changedFiles(root, baseSha, headRef) {
   if (!baseSha) return [];
 
-  const numstatArgs =
-    headRef === WORKTREE
-      ? ['diff', '--numstat', '-M', baseSha, '--']
-      : ['diff', '--numstat', '-M', `${baseSha}..${headRef}`, '--'];
-  const statusArgs =
-    headRef === WORKTREE
-      ? ['diff', '--name-status', '-M', baseSha, '--']
-      : ['diff', '--name-status', '-M', `${baseSha}..${headRef}`, '--'];
-
-  const statusByPath = new Map();
-  for (const line of (await git(root, statusArgs)).split('\n')) {
-    if (!line) continue;
-    const parts = line.split('\t');
-    const code = parts[0][0];
-    // Rename/copy entries carry both the old and the new path; the new one
-    // is what the report links to.
-    const file = parts.length > 2 ? parts[2] : parts[1];
-    statusByPath.set(file, { R: 'renamed', A: 'added', D: 'deleted', M: 'modified' }[code] ?? 'modified');
-  }
-
-  const files = [];
-  for (const line of (await git(root, numstatArgs)).split('\n')) {
-    if (!line) continue;
-    const [added, deleted, ...rest] = line.split('\t');
-    // A rename's numstat path field is "old => new" (or an elided form with
-    // braces); the name-status pass above already recorded the real new
-    // path, so prefer a key it knows.
-    const raw = rest.join('\t');
-    const file = statusByPath.has(raw) ? raw : (raw.match(/\{.*? => (.*?)\}|.* => (.*)/)?.slice(1).find(Boolean) ?? raw);
-    files.push({
-      path: file,
-      status: statusByPath.get(file) ?? 'modified',
-      added: added === '-' ? null : Number(added),
-      deleted: deleted === '-' ? null : Number(deleted),
-    });
-  }
+  const range = headRef === WORKTREE ? [baseSha] : [`${baseSha}..${headRef}`];
+  const statuses = parseNameStatus(await git(root, ['diff', '--name-status', '-z', '-M', ...range, '--']));
+  const files = parseNumstat(await git(root, ['diff', '--numstat', '-z', '-M', ...range, '--'])).map(entry => ({
+    ...entry,
+    status: statuses.get(entry.path) ?? 'modified',
+  }));
 
   // Untracked files exist only when comparing against the working tree, and
   // they are how a brand-new screen's first baseline shows up before anyone
   // has staged it.
   if (headRef === WORKTREE) {
-    const untracked = (await git(root, ['ls-files', '--others', '--exclude-standard'])).split('\n').filter(Boolean);
+    const untracked = nulFields(await git(root, ['ls-files', '--others', '--exclude-standard', '-z']));
     for (const file of untracked) {
       files.push({ path: file, status: 'added', added: null, deleted: null, untracked: true });
     }
