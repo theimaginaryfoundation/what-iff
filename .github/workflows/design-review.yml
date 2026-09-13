@@ -74,7 +74,6 @@ jobs:
       - name: Build the report
         env:
           BASE: ${{ steps.base.outputs.ref }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         working-directory: web/app
         run: |
           node e2e/design-review/cli.mjs \
@@ -82,16 +81,14 @@ jobs:
             --head HEAD \
             --out "$RUNNER_TEMP/design-review.html" \
             --json "$RUNNER_TEMP/design-review.json" \
-            --markdown "$RUNNER_TEMP/design-review.md" \
-            --report-link "$RUN_URL" \
             | tee -a "$GITHUB_STEP_SUMMARY"
-          cat "$RUNNER_TEMP/design-review.md" >> "$GITHUB_STEP_SUMMARY"
 
       # The report is a single self-contained file; downloading the artifact
       # and opening it is the whole workflow for a reviewer. `compression-
       # level: 0` because the PNGs inside are already deflate-compressed and
       # re-compressing them costs time for roughly nothing.
       - name: Upload the report
+        id: upload
         uses: actions/upload-artifact@v4
         with:
           name: design-review
@@ -100,6 +97,26 @@ jobs:
             ${{ runner.temp }}/design-review.json
           retention-days: 14
           compression-level: 0
+
+      # Rendered after the upload, not with the report, so the comment can
+      # link straight at the artifact. `upload-artifact` only knows that URL
+      # once it has finished, and a link to the run page instead would leave
+      # the reader hunting for an "Artifacts" section at the bottom of it.
+      - name: Render the PR comment
+        env:
+          BASE: ${{ steps.base.outputs.ref }}
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        working-directory: web/app
+        run: |
+          node e2e/design-review/cli.mjs \
+            --base "$BASE" \
+            --head HEAD \
+            --out "$RUNNER_TEMP/discard.html" \
+            --markdown "$RUNNER_TEMP/design-review.md" \
+            --report-link "$ARTIFACT_URL" \
+            --run-link "$RUN_URL" >/dev/null
+          cat "$RUNNER_TEMP/design-review.md" >> "$GITHUB_STEP_SUMMARY"
 
       # Skipped for forks — same reasoning as the e2e workflows' identically
       # named steps: a fork PR's token is read-only here, and the alternative

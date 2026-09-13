@@ -32,7 +32,8 @@ Options
   --out <path>     Where to write the report.               (default: .dev/design-review/report.html)
   --json <path>    Also write the underlying model as JSON.
   --markdown <p>   Also write a pull-request-comment summary as markdown.
-  --report-link <url>  URL to link to from that summary (where the report is published).
+  --report-link <url>  Direct download URL for the report, linked from that summary.
+  --run-link <url>     CI run that produced it, linked as secondary context.
   --open           Open the report when it is written.
   --help           Show this.
 
@@ -45,7 +46,7 @@ Examples
 `;
 
 function parseArgs(argv) {
-  const options = { base: 'origin/main', head: WORKTREE, out: null, json: null, markdown: null, reportLink: null, open: false };
+  const options = { base: 'origin/main', head: WORKTREE, out: null, json: null, markdown: null, reportLink: null, runLink: null, open: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     // A `--flag=value` form is accepted alongside `--flag value` because npm
@@ -80,6 +81,7 @@ function parseArgs(argv) {
       case '--json': options.json = next(); break;
       case '--markdown': options.markdown = next(); break;
       case '--report-link': options.reportLink = next(); break;
+      case '--run-link': options.runLink = next(); break;
       case '--open': options.open = true; break;
       case '--help':
       case '-h': options.help = true; break;
@@ -87,7 +89,7 @@ function parseArgs(argv) {
         throw new Error(`Unknown option: ${arg}\n${USAGE}`);
     }
   }
-  for (const key of ['base', 'head', 'out', 'json', 'markdown', 'reportLink']) {
+  for (const key of ['base', 'head', 'out', 'json', 'markdown', 'reportLink', 'runLink']) {
     if (options[key] === undefined) throw new Error(`Option --${key} needs a value.\n${USAGE}`);
   }
   return options;
@@ -144,7 +146,7 @@ async function main() {
   if (options.markdown) {
     const markdownPath = path.resolve(options.markdown);
     await mkdir(path.dirname(markdownPath), { recursive: true });
-    await writeFile(markdownPath, renderMarkdown(model, { reportLink: options.reportLink }), 'utf8');
+    await writeFile(markdownPath, renderMarkdown(model, { reportLink: options.reportLink, runLink: options.runLink }), 'utf8');
     process.stdout.write(`  comment ${display(markdownPath, model.repoRoot)}\n`);
   }
 

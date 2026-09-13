@@ -96,10 +96,23 @@ test('a missing merge base is stated, not silently rendered as "everything is ne
   assert.match(markdown, /No merge base with `origin\/main`/);
 });
 
-test('the report link is included only when there is somewhere to point', () => {
-  assert.ok(!renderMarkdown(model({ screens: [changedScreen] })).includes('Open the before/after report'));
-  assert.match(
-    renderMarkdown(model({ screens: [changedScreen] }), { reportLink: 'https://example.invalid/run/1' }),
-    /\[Open the before\/after report →\]\(https:\/\/example\.invalid\/run\/1\)/,
-  );
+test('the download points at the artifact, not at the run that made it', () => {
+  // The run page hides the artifact behind a scroll and an "Artifacts"
+  // section, which is a poor last step for the one thing this comment
+  // exists to hand over. The run stays available as secondary context.
+  const markdown = renderMarkdown(model({ screens: [changedScreen] }), {
+    reportLink: 'https://example.invalid/runs/1/artifacts/9',
+    runLink: 'https://example.invalid/runs/1',
+  });
+
+  assert.match(markdown, /\[Download the interactive report\]\(https:\/\/example\.invalid\/runs\/1\/artifacts\/9\)/);
+  assert.match(markdown, /\[workflow run\]\(https:\/\/example\.invalid\/runs\/1\)/);
+  // Say what lands, so a bare "download" is not a leap of faith.
+  assert.match(markdown, /zip containing one self-contained HTML file/);
+});
+
+test('no download section when there is nowhere to point', () => {
+  const markdown = renderMarkdown(model({ screens: [changedScreen] }));
+  assert.ok(!markdown.includes('Download the interactive report'));
+  assert.ok(!markdown.includes('workflow run'));
 });

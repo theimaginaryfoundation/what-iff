@@ -53,7 +53,7 @@ function short(filePath) {
   return appIndex === -1 ? filePath : parts.slice(appIndex + 1).join('/');
 }
 
-export function renderMarkdown(model, { reportLink, reportHint } = {}) {
+export function renderMarkdown(model, { reportLink, runLink } = {}) {
   const { summary } = model;
   const touched = summary.changed + summary.added + summary.removed;
   const lines = [];
@@ -116,8 +116,20 @@ export function renderMarkdown(model, { reportLink, reportHint } = {}) {
     lines.push(`<sub>${summary.unchanged} other screen${summary.unchanged === 1 ? '' : 's'} unchanged.</sub>`, '');
   }
 
-  if (reportLink) {
-    lines.push(`**[Open the before/after report →](${reportLink})**${reportHint ? ` ${reportHint}` : ''}`, '');
+  // The download link points straight at the artifact, not at the workflow
+  // run. A run page puts the artifact behind a scroll to the bottom and an
+  // "Artifacts" section most readers will not think to look for, which is a
+  // poor last step for the one thing this comment exists to hand over.
+  if (reportLink || runLink) {
+    const parts = [];
+    if (reportLink) parts.push(`### ⬇️ [Download the interactive report](${reportLink})`);
+    lines.push(...parts, '');
+    // Say what arrives, because a zip that turns out to hold a single HTML
+    // file is a much smaller ask than an unlabelled download implies.
+    lines.push(
+      `A zip containing one self-contained HTML file — open it in any browser, nothing to check out or install. Drag the divider to compare, or switch to side-by-side, onion-skin or pixel-difference.${runLink ? ` ([workflow run](${runLink}))` : ''}`,
+      '',
+    );
   }
 
   lines.push(
