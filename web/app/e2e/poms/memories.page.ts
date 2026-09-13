@@ -294,11 +294,18 @@ export class MemoriesPage {
   }
 
   async bulkMove(destination: string): Promise<void> {
+    const patched = this.page.waitForResponse(
+      r =>
+        r.request().method() === 'POST' &&
+        r.url().includes('/api/memory/batch/patch') &&
+        r.ok(),
+    );
     await this.bulkBar.getByRole('button', { name: 'Move', exact: true }).click();
     await this.page.getByRole('dialog', { name: 'Move memories' }).getByRole('button', {
       name: destination,
       exact: true,
     }).click();
+    await patched;
   }
 
   // --- pagination ----------------------------------------------------------

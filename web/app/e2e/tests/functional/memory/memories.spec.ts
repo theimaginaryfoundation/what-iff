@@ -269,6 +269,8 @@ test(
     // not just this test's own — on a shared account that would sweep up
     // another worker's memories along with an Archive action. Same hazard as
     // "sorts memories by creation time" / "paginates the memory list" above.
+    // seed.memories uniquifies a shared content override across the batch so
+    // card(content) / selectCard stay single-match (see fixtures/index.ts).
     const [first, second] = await seed.memories(2, { content: seedName('memory-select-all') });
     await memoriesPage.navigateTo();
 
@@ -288,7 +290,9 @@ test(
 );
 
 test('bulk moves selected memories to a personality', async ({ memoriesPage, seed, userWithPersonality }) => {
-  const personality = await seed.personality();
+  // Fixture personality is already loaded into the move dialog list.
+  const personality = userWithPersonality.personality;
+  // Shared content override is uniquified per row by seed.memories (count > 1).
   const [first, second] = await seed.memories(2, { content: seedName('memory-bulk-move') });
   await memoriesPage.navigateTo();
 
