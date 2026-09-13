@@ -1870,8 +1870,9 @@ func buildAttachmentLabels(attachments []*models.FileAttachment) []string {
 }
 
 // prepareUserMessage prepares the user message, enriching it with rituals if applicable.
-// The message is prefixed with a [sys:RFC3339] timestamp derived from chatMessage.SentAt.
-// Falls back to time.Now() only when SentAt is zero (e.g. ephemeral/job-constructed messages).
+// The message is prefixed with a [sys:…] timestamp derived from chatMessage.SentAt
+// (see agentMessageTimestampLayout). Falls back to time.Now() only when SentAt is
+// zero (e.g. ephemeral/job-constructed messages).
 func (a *Agent) prepareUserMessage(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage) (string, error) {
 	tz, _ := middleware.GetClientTimezoneFromContext(ctx)
 	normalizedTZ := normalizeTimezoneName(tz)
@@ -1896,14 +1897,21 @@ func (a *Agent) prepareUserMessage(ctx context.Context, userID uuid.UUID, chatMe
 
 var tzLocationCache sync.Map // map[string]*time.Location
 
-// formatUserMessageWithTime prefixes body with a [sys:RFC3339] timestamp tag.
+// agentMessageTimestampLayout is the human-readable stamp injected on user
+// messages as [sys:…]. Weekday short name + local date/time + numeric offset
+// so agents can reason about day-of-week without parsing ISO-8601.
+// Example: "Sun 2026-09-13 08:46:51 -04:00"
+const agentMessageTimestampLayout = "Mon 2006-01-02 15:04:05 -07:00"
+
+// formatUserMessageWithTime prefixes body with a [sys:…] timestamp tag using
+// agentMessageTimestampLayout in the client's timezone.
 // If t is zero the body is returned unchanged (no prefix injected for unknown times).
 func formatUserMessageWithTime(t time.Time, tz string, body string) string {
 	if t.IsZero() {
 		return body
 	}
 	loc := resolveTimezoneLocation(tz)
-	return fmt.Sprintf("[sys:%s] %s", t.In(loc).Format(time.RFC3339), body)
+	return fmt.Sprintf("[sys:%s] %s", t.In(loc).Format(agentMessageTimestampLayout), body)
 }
 
 func normalizeTimezoneName(tz string) string {
