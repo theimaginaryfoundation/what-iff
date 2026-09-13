@@ -1897,10 +1897,12 @@ func (a *Agent) prepareUserMessage(ctx context.Context, userID uuid.UUID, chatMe
 
 var tzLocationCache sync.Map // map[string]*time.Location
 
-// agentMessageTimestampLayout is the human-readable stamp injected on user
-// messages as [sys:…]. Weekday short name + local date/time + numeric offset
-// so agents can reason about day-of-week without parsing ISO-8601.
-// Example: "Sun 2026-09-13 08:46:51 -04:00"
+// agentMessageTimestampLayout is the stable human-readable stamp injected on
+// user messages as [sys:…]. Weekday short name + local date/time + numeric
+// offset so agents can reason about day-of-week without parsing ISO-8601.
+// Example: "Sun 2026-09-13 08:46:51 -04:00". This is intentionally not
+// RFC3339; treat layout changes as a prompt/protocol change (update
+// baseSystemPrompt + docs together).
 const agentMessageTimestampLayout = "Mon 2006-01-02 15:04:05 -07:00"
 
 // formatUserMessageWithTime prefixes body with a [sys:…] timestamp tag using
