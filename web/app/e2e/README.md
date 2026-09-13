@@ -137,6 +137,7 @@ e2e/
   api-tests/  # browserless suite, straight against the API — see below
   docs/
     what-runs-where.md # which config runs what, against which backend, and why
+  design-review/  # before/after HTML report of the screens a branch changes — see below
   scripts/
     visual-docker.sh   # runs tests/visual inside the Playwright Docker image
     check-visual-coverage.mjs # every visual spec must name a functional spec
@@ -705,6 +706,34 @@ with fixed test data — see the comments in `chat.visual.spec.ts` and
 `maxDiffPixelRatio` for a masked region whose _size_ (not content) shifts by
 a few pixels depending on async timing — a last resort after masking, not a
 substitute for it.
+
+### Reviewing a change, rather than guarding against one
+
+The suite above answers "did anything change by accident?". It cannot answer
+"what did we change on purpose, and does it look right?" — and for a design
+change the two come apart completely.
+
+The workflow is: edit the screen, regenerate the baseline, commit both. From
+that commit on, `toHaveScreenshot()` compares the new render against the new
+baseline and passes. The visual report is green and empty; the only surviving
+record of the previous design is a PNG blob in git history that no review tool
+renders. A reviewer is left approving a screen change from a Tailwind class
+diff.
+
+`e2e/design-review/` closes that gap. It reads the baseline at the merge base
+as the "before" and the baseline on the branch as the "after", and writes one
+self-contained HTML file with both, a slider/onion/pixel-difference
+comparison, and a summary of what the branch touched:
+
+```bash
+npm run design:review            # or, from the repo root: make design-review
+```
+
+Because it reads git rather than rendering anything, it needs no backend, no
+browser, no Docker and no `npm install`, and it finishes in about a second.
+It also lists the templates and styles a branch changed that *no* screen
+covers, which is the failure mode the suite itself is structurally unable to
+report. See `e2e/design-review/README.md`.
 
 ### Updating snapshots
 

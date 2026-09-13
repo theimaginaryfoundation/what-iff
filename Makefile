@@ -241,6 +241,18 @@ web: $(WEB_DIR)/node_modules/.stamp ## Run the Angular dev server (:4200)
 web-e2e: $(WEB_DIR)/node_modules/.stamp ## Run Playwright frontend E2E tests (requires the API already running on :8080 — see web/app/e2e/README.md)
 	@cd $(WEB_DIR) && npm run e2e
 
+# Deliberately NOT dependent on node_modules/.stamp. The report reads
+# committed baselines out of git and has no npm dependencies at all, so it
+# runs in a fresh clone in about a second — which is the difference between
+# a tool a designer uses mid-iteration and one they run once and forget.
+.PHONY: design-review
+design-review: ## Before/after HTML of every screen this branch changes (ARGS="--base v1.2.0 --open")
+	@cd $(WEB_DIR) && node e2e/design-review/cli.mjs $(ARGS)
+
+.PHONY: design-review-test
+design-review-test: ## Test the design review report tooling (node --test, no deps, no browser)
+	@cd $(WEB_DIR) && npm run design:review:test
+
 # npm ci runs only when the manifests change, keyed via a stamp file.
 $(WEB_DIR)/node_modules/.stamp: $(WEB_DIR)/package.json $(WEB_DIR)/package-lock.json
 	@cd $(WEB_DIR) && npm ci

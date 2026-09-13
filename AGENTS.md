@@ -44,6 +44,11 @@
 - Backend: Go `testing` with table-driven tests when appropriate. Files end with `_test.go`; test funcs `TestXxx`. Run `go test ./...` or `make test`.
 - Frontend: `cd web/app && npm test`. Runs on Vitest via the `@angular/build:unit-test` builder (jsdom); Karma and Jasmine are gone.
 - Frontend coverage: `make web-unit-coverage` / `make admin-unit-coverage` run the same suites with V8 coverage and rewrite the lcov `SF:` paths to repo-root-relative so Codecov's components match. `make lcov-summary LCOV=<path>` prints a total.
+- Design review: `make design-review` (or `npm run design:review` from `web/app/`) writes a
+  self-contained HTML before/after of every screen the visual suite covers, read from git
+  rather than from a test run — a committed baseline update makes the visual suite pass, so
+  an intentional design change otherwise leaves no trace in any report. See the
+  `design-review` skill and `web/app/e2e/design-review/README.md`.
 - Frontend E2E: Playwright suite in `web/app/e2e/` (`poms/`,
   `fixtures/`, `sdk/`, `tests/{functional,journeys,visual,a11y}`) — run via
   `npm run e2e`/`e2e:mock-llm`/`e2e:local-llm`/`e2e:mock-llm:visual`
