@@ -76,6 +76,31 @@ export class JobService {
     let lastFetchedMessageKey = '';
     let lastUserSyncKey = '';
 
+    /**
+     * Ordering guard for the assistant-row fetches below.
+     *
+     * A single job produces several phases that each carry a result_id --
+     * inference_complete, then compaction_complete, then complete -- and each
+     * one dispatches its own independent getMessage(). Those are separate HTTP
+     * requests with no ordering guarantee between them, so the earlier one can
+     * resolve last. That matters because the row genuinely changes between
+     * phases: context_breakdown is written after the inference phase has
+     * already been observed, so a late inference_complete response carries no
+     * breakdown and, applied on top of the complete response, erases it.
+     *
+     * This is what made the Context X-ray e2e test flaky against a
+     * real-inference backend, where reply latency varies enough to open the
+     * window. `lastFetchedMessageKey` does not help: it suppresses a repeat of
+     * the *same* result_id and phase, and these are different phases.
+     *
+     * Each dispatch takes the next sequence number; a response is applied only
+     * if no newer one has already been applied. Dropping the stale response is
+     * enough for correctness and, unlike cancelling in flight, needs no
+     * restructuring of the surrounding pipeline.
+     */
+    let messageFetchSeq = 0;
+    let appliedMessageSeq = 0;
+
     return timer(0, pollingInterval)
       .pipe(
         switchMap(() =>
@@ -116,8 +141,15 @@ export class JobService {
               return;
             }
             lastFetchedMessageKey = fetchKey;
+            const seq = ++messageFetchSeq;
             this.messageService.getMessage(job.result_id).subscribe({
               next: (message: ChatMessage) => {
+                // Out of order: a newer phase's row has already been applied,
+                // and this older one would overwrite it with staler data.
+                if (seq < appliedMessageSeq) {
+                  return;
+                }
+                appliedMessageSeq = seq;
                 this.messageService.addAssistantMessage(message);
               },
               error: error => {

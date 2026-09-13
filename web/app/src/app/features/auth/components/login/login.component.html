@@ -51,14 +51,30 @@
             <label for="password" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">
               Password
             </label>
-            <input
-              type="password"
-              id="password"
-              formControlName="password"
-              class="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
-              [class.border-red-500]="loginForm.get('password')?.invalid && loginForm.get('password')?.touched"
-              placeholder="Enter your password"
-              required>
+            <div class="login__password-field">
+              <input
+                [type]="passwordVisible() ? 'text' : 'password'"
+                id="password"
+                formControlName="password"
+                autocomplete="current-password"
+                class="login__password-input bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                [class.border-red-500]="loginForm.get('password')?.invalid && loginForm.get('password')?.touched"
+                placeholder="Enter your password"
+                required>
+              <button
+                type="button"
+                class="login__password-toggle text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
+                [attr.aria-label]="passwordVisible() ? 'Hide password' : 'Show password'"
+                [attr.aria-pressed]="passwordVisible()"
+                (mousedown)="$event.preventDefault()"
+                (click)="togglePasswordVisibility()">
+                @if (passwordVisible()) {
+                  <ui-eye-off-icon [size]="18" />
+                } @else {
+                  <ui-eye-icon [size]="18" />
+                }
+              </button>
+            </div>
             @if (loginForm.get('password')?.invalid && loginForm.get('password')?.touched) {
               <div class="mt-2 text-sm text-red-600 dark:text-red-400">
                 @if (loginForm.get('password')?.hasError('required')) {

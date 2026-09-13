@@ -1,6 +1,17 @@
 import { test, expect } from '../../fixtures';
 import { commonMasks } from './visual.helpers';
 
+/**
+ * @functional-coverage tests/functional/personality/personality-list.spec.ts, tests/functional/personality/personality-detail.spec.ts
+ *
+ * The list's empty state and creation flow, and the detail page's rename, prompt
+ * editing, attachments and default-personality behaviour, are covered by the two
+ * functional personality specs.
+ *
+ * A baseline pins how this looks; it cannot tell you it still works. See
+ * e2e/scripts/check-visual-coverage.mjs.
+ */
+
 test.describe('personalities screens', () => {
   test(
     'empty state for a fresh user',

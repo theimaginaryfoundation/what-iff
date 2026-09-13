@@ -56,3 +56,19 @@ test('does not suggest for identifier-style colons', async ({ chatPage, seed, us
   await expect(chatPage.emojiAutocomplete).toBeHidden();
   await expect(chatPage.composerInput).toHaveValue('scope:value');
 });
+
+test('suggests when the colon is immediately after an emoji', async ({ chatPage, seed, userWithPersonality }) => {
+  const thread = await seed.thread(undefined, {
+    personalityId: userWithPersonality.personality.id,
+  });
+  await chatPage.navigateTo(thread.id as string);
+
+  // No space between a prior emoji and the next `:shortcode` — still autocomplete.
+  await chatPage.composerInput.pressSequentially('🦊:fox');
+
+  await expect(chatPage.emojiAutocomplete).toBeVisible();
+  await chatPage.emojiSuggestion(':fox_face:').click();
+
+  await expect(chatPage.composerInput).toHaveValue('🦊🦊');
+  await expect(chatPage.emojiAutocomplete).toBeHidden();
+});

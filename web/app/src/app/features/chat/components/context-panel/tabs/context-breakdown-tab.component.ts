@@ -167,6 +167,26 @@ interface BreakdownRow {
     .gauge__top { align-items: baseline; display: flex; gap: 0.35rem; }
     .gauge__total { color: var(--color-text-primary); font-size: 1.35rem; font-weight: 700; }
     .gauge__budget { color: var(--color-text-muted); font-size: 0.8rem; }
+    /*
+     * The cost trails the total/budget pair at the row's right edge. The rule
+     * has to live here, on the flex *item*, rather than on the .gauge__cost
+     * span inside the outlet: since the cost display was extracted into
+     * app-context-cost-outlet, that element is the flex child and the span is
+     * one level down, where margin-left: auto resolves against a non-flex
+     * parent and does nothing. Keeping it on the host also means any outlet
+     * implementation -- including the private build's credit-cost UI -- lands
+     * in the same place without restating the rule.
+     *
+     * Paired with the right-edge assertion in
+     * e2e/tests/visual/context-xray.visual.spec.ts — change this rule and that
+     * spec fails, which is how the original regression was caught. Keep them
+     * in sync.
+     *
+     * No backticks anywhere in this comment: the styles block is a template
+     * literal, so one would terminate it and fail the build with a "styles
+     * could not be determined statically" compiler error.
+     */
+    .gauge__top app-context-cost-outlet { margin-left: auto; }
 
     .gauge__track {
       background: var(--color-surface-base);

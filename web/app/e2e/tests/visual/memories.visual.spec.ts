@@ -2,6 +2,17 @@ import { test, expect } from '../../fixtures';
 import { commonMasks } from './visual.helpers';
 
 /**
+ * @functional-coverage tests/functional/memory/memories.spec.ts, tests/functional/memory/responsive-layout.spec.ts
+ *
+ * Listing, filtering, focus rail/modal, batch actions, and responsive layout for
+ * the Memory Manager screens these baselines picture are covered by the
+ * functional memories + responsive-layout specs.
+ *
+ * A baseline pins how this looks; it cannot tell you it still works. See
+ * e2e/scripts/check-visual-coverage.mjs.
+ */
+
+/**
  * Memory Manager shell + list tab. Dates on cards change day-to-day, so
  * populated screenshots mask `.memory-card__date`.
  *
