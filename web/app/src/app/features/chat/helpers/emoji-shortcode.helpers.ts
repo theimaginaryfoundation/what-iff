@@ -36,11 +36,13 @@ export interface EmojiSuggestion {
 }
 
 /**
- * A shortcode may only begin at the start of the draft or after whitespace or
- * opening punctuation. That keeps URL-ish and identifier-ish colons (e.g.
- * `https://host/:id`) from ever opening the popup.
+ * A shortcode may begin at the start of the draft or after any character that
+ * is not an identifier / URL continuation (`A-Za-z0-9_/`). That allows triggers
+ * after whitespace, punctuation, and emoji (e.g. `🦊:fo`) while still keeping
+ * URL-ish and identifier-ish colons (e.g. `https://host/:id`, `scope:value`)
+ * from opening the popup.
  */
-const ACTIVE_SHORTCODE = /(^|[\s([{])(:)([A-Za-z0-9_+\-]{1,64})$/;
+const ACTIVE_SHORTCODE = /(^|[^A-Za-z0-9_/])(:)([A-Za-z0-9_+\-]{1,64})$/;
 
 /**
  * Return the in-progress `:shortcode` immediately before the caret, or null when
