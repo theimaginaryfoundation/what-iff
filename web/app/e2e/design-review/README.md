@@ -98,6 +98,23 @@ Asked for any other ref, `gh pr view` would return the *current* branch's
 pull request and stamp a report about one change with another change's
 title, so the lookup is skipped instead.
 
+## Where the classification rules live
+
+Three tables in `lib/impact.mjs` decide what a reader sees, and they are the
+first place to look when the report groups something oddly:
+
+| Constant | Decides |
+|---|---|
+| `CATEGORIES` | What kind of file this is, and how much of it counts as design surface. **Order is precedence** — the first match wins, which is why a baseline PNG is a baseline and not an asset. |
+| `CONTAINER_SEGMENTS` | Path segments that name no feature (`features`, `shared`, `core`…), so the area shown is `personality` rather than `features`. |
+| `STOP_WORDS` | Words too common to mean anything when matching a changed file to a screen. Without them every file "relates to" every screen via `component` or `page`. |
+
+Each is covered by `tests/units.test.mjs`, so a change that alters the
+grouping fails there rather than silently shifting what the report claims.
+Adding a category means deciding its `weight` too: that is what feeds the
+"design surface" percentage, and a new entry defaulting to zero will quietly
+drag that figure down.
+
 ## Known limits
 
 - **Only screens with committed baselines appear.** "No screen changed" is not

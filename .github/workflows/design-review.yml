@@ -1,5 +1,21 @@
 name: Design Review
 
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ This must stay a `pull_request` workflow. Never `pull_request_target`.   │
+# └─────────────────────────────────────────────────────────────────────────┘
+#
+# The job checks out the pull request's head and runs code from it
+# (`node e2e/design-review/cli.mjs`, which reads the working tree and shells
+# out to git). Under `pull_request` that is safe: a fork's token is
+# read-only, so the worst a hostile branch can do is produce a wrong report
+# about itself.
+#
+# `pull_request_target` would run the *same* code from the *same* untrusted
+# branch with a writable token and access to secrets. That is a
+# straightforward code-execution vector, and it is tempting precisely
+# because it is the usual fix for "the comment step is skipped on forks" —
+# which is a limitation this workflow accepts on purpose (see that step).
+#
 # Opt-in, by label. Most PRs do not change a screen, and a report that
 # appears on all of them is one people learn to scroll past — so this runs
 # only where someone has said the visual result is worth looking at.

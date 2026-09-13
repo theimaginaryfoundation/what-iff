@@ -37,11 +37,21 @@ export const WORKTREE = Symbol.for('design-review.worktree');
  * baseline image through stdout, and the default 1MB cap truncates a
  * full-page desktop screenshot into a corrupt buffer rather than failing
  * loudly.
+ *
+ * `timeout` is set because git has no inherent one. A tree scan over a
+ * network filesystem, a repository mid-gc, or an index lock held by another
+ * process will otherwise leave the report hanging with no output and no
+ * upper bound — in CI that is a job that burns its whole limit saying
+ * nothing. A minute is far beyond any healthy invocation here and far short
+ * of a wedged one.
  */
+export const GIT_TIMEOUT_MS = 60_000;
+
 async function git(repoRoot, args, { encoding = 'utf8' } = {}) {
   const { stdout } = await execFileAsync('git', ['-C', repoRoot, ...args], {
     encoding,
     maxBuffer: 64 * 1024 * 1024,
+    timeout: GIT_TIMEOUT_MS,
   });
   return stdout;
 }

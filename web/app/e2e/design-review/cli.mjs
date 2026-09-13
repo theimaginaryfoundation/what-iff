@@ -34,7 +34,7 @@ Options
   --markdown <p>   Also write a pull-request-comment summary as markdown.
   --report-link <url>  Direct download URL for the report, linked from that summary.
   --run-link <url>     CI run that produced it, linked as secondary context.
-  --open           Open the report when it is written.
+  --open           Open the report when it is written (interactive use only).
   --help           Show this.
 
 Examples
@@ -68,7 +68,13 @@ function parseArgs(argv) {
      * available here.
      */
     const next = () => {
-      if (inlineValue !== null) return inlineValue;
+      // `--base=` parses as an inline value of "", which is falsy but not
+      // absent. Passed through it reached git as an empty ref, which does
+      // not error — it resolves to nothing, and the report then claimed
+      // every screen was new. A confidently wrong answer is the worst
+      // outcome available here, so an empty value is treated as no value
+      // and takes the explicit "needs a value" path below.
+      if (inlineValue !== null) return inlineValue === '' ? undefined : inlineValue;
       const candidate = argv[i + 1];
       if (candidate === undefined || candidate.startsWith('--')) return undefined;
       i++;
@@ -163,6 +169,15 @@ async function main() {
   process.stdout.write('\n');
 
   if (options.open) {
+    // Interactive use only. `--open` hands a path to the platform opener,
+    // which is the right thing on a developer's machine and meaningless in
+    // CI — where, if it resolved to anything at all, it would be a process
+    // spawned by a flag nobody meant to pass. Refusing loudly beats
+    // spawning quietly.
+    if (process.env['CI'] || !process.stdout.isTTY) {
+      process.stderr.write('  --open is for interactive use and was ignored (no TTY, or CI is set).\n\n');
+      return;
+    }
     const { execFile } = await import('node:child_process');
     const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
     execFile(opener, [outPath], () => {});

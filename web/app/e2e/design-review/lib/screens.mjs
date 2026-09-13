@@ -18,7 +18,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { WORKTREE, readBlob } from './git.mjs';
+import { WORKTREE, readBlob, GIT_TIMEOUT_MS } from './git.mjs';
 import { readPngSize } from './png.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -77,12 +77,14 @@ export async function listBaselinePaths(root, ref) {
     const { stdout } = await execFileAsync('git', ['-C', root, 'ls-files', '--cached', '--others', '--exclude-standard'], {
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
+      timeout: GIT_TIMEOUT_MS,
     });
     return stdout.split('\n').filter(isBaselinePath);
   }
   const { stdout } = await execFileAsync('git', ['-C', root, 'ls-tree', '-r', '--name-only', ref], {
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
+    timeout: GIT_TIMEOUT_MS,
   });
   return stdout.split('\n').filter(isBaselinePath);
 }

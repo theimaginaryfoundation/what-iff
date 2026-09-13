@@ -115,6 +115,13 @@ function unfilter(type, row, previous, bytesPerPixel) {
  * Chromium writes colour type 2 (no alpha) for screenshots, so that is the
  * path that matters; the others are handled because doing so is a few lines
  * and the alternative is a null return that reads like a bug.
+ *
+ * **This is not a PNG validator.** It reads the shapes a browser produces
+ * and returns null for everything else; it does not verify chunk CRCs, and
+ * it trusts the declared dimensions against the inflated length only far
+ * enough not to read out of bounds. That is the right trade for committed
+ * baselines, which arrive from Playwright through git. Do not point it at
+ * an untrusted PNG from elsewhere without revisiting that.
  */
 export function decodePng(buffer) {
   const size = readPngSize(buffer);
@@ -158,12 +165,17 @@ export function decodePng(buffer) {
   if (raw.length < height * (stride + 1)) return null;
 
   const data = Buffer.alloc(width * height * 4);
-  let previous = null;
   const row = Buffer.alloc(stride);
+  // Two buffers reused for the whole image rather than one allocated per
+  // scanline. A desktop baseline is 720 rows and a full-page one can be
+  // several thousand, so the per-row allocation was that many short-lived
+  // buffers per image, on every image in the report.
+  const previousRow = Buffer.alloc(stride);
+  let hasPrevious = false;
   for (let y = 0; y < height; y++) {
     const start = y * (stride + 1);
     raw.copy(row, 0, start + 1, start + 1 + stride);
-    unfilter(raw[start], row, previous, bytesPerPixel);
+    unfilter(raw[start], row, hasPrevious ? previousRow : null, bytesPerPixel);
 
     // Widen to RGBA so every caller compares the same four channels,
     // whatever the source encoding was.
@@ -181,7 +193,8 @@ export function decodePng(buffer) {
         data[to + 3] = channels === 2 ? row[from + 1] : 255;
       }
     }
-    previous = Buffer.from(row);
+    row.copy(previousRow);
+    hasPrevious = true;
   }
 
   return { width, height, data };
