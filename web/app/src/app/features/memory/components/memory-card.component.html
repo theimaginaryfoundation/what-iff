@@ -40,7 +40,7 @@
         }
       </div>
       <div class="memory-card__top-right">
-        <span class="memory-card__date">{{ memory().updatedAt | date: "MMM d" }}</span>
+        <span class="memory-card__date">{{ memory().createdAt | date: "MMM d" }}</span>
         @if (!readOnly()) {
           <div class="memory-card__menu-wrap">
             <button

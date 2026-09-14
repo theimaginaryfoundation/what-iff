@@ -1122,6 +1122,21 @@ func (d *Datastore) PatchMemoriesBatch(ctx context.Context, userID uuid.UUID, in
 	if len(input.IDs) > models.MaxMemoryBatchIDs {
 		return nil, fmt.Errorf("%w: at most %d memory ids per batch", ErrInvalidRequestBody, models.MaxMemoryBatchIDs)
 	}
+	if patchChangesThreadScope(input.Patch) {
+		hasThreadMemory, err := d.dbClient.Memory.Query().
+			Where(
+				memory.IDIn(input.IDs...),
+				memory.HasOwnerWith(user.ID(userID)),
+				memory.ScopeEQ(memory.ScopeChat),
+			).
+			Exist(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if hasThreadMemory {
+			return nil, fmt.Errorf("%w: thread memories cannot be moved", ErrInvalidRequestBody)
+		}
+	}
 
 	out := make([]*models.Memory, 0, len(input.IDs))
 	for _, id := range input.IDs {
@@ -1140,6 +1155,12 @@ func (d *Datastore) PatchMemoriesBatch(ctx context.Context, userID uuid.UUID, in
 		out = append(out, mem)
 	}
 	return &models.BatchPatchMemoryResult{Results: out, UpdatedCount: len(out)}, nil
+}
+
+// patchChangesThreadScope identifies patches that would detach a Chat-scoped
+// memory from its thread or assign it a personality.
+func patchChangesThreadScope(patch models.MemoryPatch) bool {
+	return patch.SetPinnedPersonalityID || (patch.Level != nil && *patch.Level != models.MemoryLevelThread)
 }
 
 // GetMemory retrieves a memory from the datastore by ID

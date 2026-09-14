@@ -131,6 +131,49 @@ func TestPatchMemoriesBatch_HappyPathMultiple(t *testing.T) {
 	require.True(t, reloaded.Starred, "batch patch must persist, not just echo back the requested change")
 }
 
+func TestPatchMemoriesBatch_RejectsMoveThatIncludesThreadMemoryBeforeWriting(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+	personalityID := uuid.New()
+	createTestPersonality(t, ds, personalityID, userID)
+	chatID := uuid.New()
+	createTestChat(t, ds, chatID, userID)
+
+	global, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{
+		Content: "global",
+		Level:   models.MemoryLevelGlobal,
+	})
+	require.NoError(t, err)
+	thread, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{
+		Content: "thread",
+		Level:   models.MemoryLevelThread,
+		ChatID:  &chatID,
+	})
+	require.NoError(t, err)
+
+	personalityLevel := models.MemoryLevelPersonality
+	result, err := ds.PatchMemoriesBatch(ctx, userID, models.BatchPatchMemoryInput{
+		IDs: []uuid.UUID{global.ID, thread.ID},
+		Patch: models.MemoryPatch{
+			Level:                  &personalityLevel,
+			SetPinnedPersonalityID: true,
+			PinnedPersonalityID:    &personalityID,
+		},
+		AllOrNone: true,
+	})
+	require.ErrorIs(t, err, ErrInvalidRequestBody)
+	require.Nil(t, result)
+
+	reloaded, err := ds.GetMemory(ctx, userID, global.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.MemoryLevelGlobal, reloaded.Level)
+	require.Nil(t, reloaded.PinnedPersonalityID)
+}
+
 func TestPatchMemoriesBatch_AllOrNoneAbortsOnMissingButKeepsEarlierWrites(t *testing.T) {
 	ctx := context.Background()
 	ds, cleanup := newMemoryTestDatastore(t)
