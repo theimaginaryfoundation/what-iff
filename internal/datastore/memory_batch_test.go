@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
 	entmemory "github.com/theimaginaryfoundation/what-iff/ent/memory"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
@@ -172,6 +173,44 @@ func TestPatchMemoriesBatch_RejectsMoveThatIncludesThreadMemoryBeforeWriting(t *
 	require.NoError(t, err)
 	require.Equal(t, models.MemoryLevelGlobal, reloaded.Level)
 	require.Nil(t, reloaded.PinnedPersonalityID)
+}
+
+func TestUpdateMemory_MovingUserMemoryPreservesSourceChat(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+	personalityID := uuid.New()
+	createTestPersonality(t, ds, personalityID, userID)
+	chatID := uuid.New()
+	createTestChat(t, ds, chatID, userID)
+
+	sourceMemory, err := ds.dbClient.Memory.Create().
+		SetContent("user memory with source chat").
+		SetScope(entmemory.ScopeUser).
+		SetOwnerID(userID).
+		SetChatID(chatID).
+		Save(ctx)
+	require.NoError(t, err)
+
+	personalityLevel := models.MemoryLevelPersonality
+	updated, err := ds.UpdateMemory(ctx, userID, sourceMemory.ID, models.MemoryPatch{
+		Level:                  &personalityLevel,
+		SetPinnedPersonalityID: true,
+		PinnedPersonalityID:    &personalityID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, models.MemoryLevelPersonality, updated.Level)
+	require.Equal(t, chatID, updated.ChatID)
+	require.Equal(t, personalityID, *updated.PinnedPersonalityID)
+
+	hasChat, err := ds.dbClient.Memory.Query().
+		Where(entmemory.ID(sourceMemory.ID), entmemory.HasChatWith(entchat.ID(chatID))).
+		Exist(ctx)
+	require.NoError(t, err)
+	require.True(t, hasChat)
 }
 
 func TestPatchMemoriesBatch_AllOrNoneAbortsOnMissingButKeepsEarlierWrites(t *testing.T) {
