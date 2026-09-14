@@ -6,6 +6,8 @@ export type MemoryScopeFilter = 'all' | 'user' | 'chat';
 export type MemoryLevelFilter = 'all' | 'global' | 'personality' | 'thread' | 'summary';
 /** Active / Archived are status filters; Summaries is a dedicated view of checkpoint summaries. */
 export type MemoryStatusFilter = 'active' | 'inactive' | 'summaries';
+/** Persona-filter sentinel for unpinned User memories shared across all personas. */
+export const GLOBAL_PERSONALITY_FILTER = '__global__';
 
 export interface MemoryViewFilters {
   scope: MemoryScopeFilter;
@@ -80,7 +82,11 @@ export function toApiFilters(filters: MemoryViewFilters): MemoryFilters {
   const api: MemoryFilters = {};
   if (filters.query.trim()) api.query = filters.query.trim();
   api.sort = filters.sort;
-  if (filters.personalityId.trim()) api.pinned_personality_ids = [filters.personalityId.trim()];
+  if (filters.personalityId === GLOBAL_PERSONALITY_FILTER) {
+    api.global_only = true;
+  } else if (filters.personalityId.trim()) {
+    api.pinned_personality_ids = [filters.personalityId.trim()];
+  }
   if (filters.chatId.trim()) api.chat_id = filters.chatId.trim();
 
   const dates = normalizeDateRange(filters.minDate, filters.maxDate);
