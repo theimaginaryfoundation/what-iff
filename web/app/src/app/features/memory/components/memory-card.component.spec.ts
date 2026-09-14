@@ -69,6 +69,19 @@ describe('MemoryCardComponent', () => {
     expect(content.tagName.toLowerCase()).toBe('p');
   });
 
+  it('shows the creation date rather than the last-updated date', () => {
+    fixture.componentRef.setInput(
+      'memory',
+      makeVm({
+        createdAt: '2026-05-15T12:00:00Z',
+        updatedAt: '2026-06-15T12:00:00Z',
+      }),
+    );
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.memory-card__date')?.textContent?.trim()).toBe('May 15');
+  });
+
   it('hides checkbox and action menu when read-only', () => {
     fixture.componentRef.setInput('readOnly', true);
     fixture.detectChanges();
