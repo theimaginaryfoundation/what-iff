@@ -40,6 +40,7 @@ func (h *Handler) ListMemories(w http.ResponseWriter, r *http.Request) {
 	searchQuery := queryParams.Get("query")
 	sortParam := strings.TrimSpace(queryParams.Get("sort"))
 	status := strings.TrimSpace(queryParams.Get("status"))
+	scope := strings.TrimSpace(queryParams.Get("scope"))
 	minDateStr := queryParams.Get("min_date")
 	maxDateStr := queryParams.Get("max_date")
 
@@ -128,6 +129,18 @@ func (h *Handler) ListMemories(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		filters.Status = &statusValue
+	}
+	if scope != "" {
+		switch strings.ToLower(scope) {
+		case "user":
+			scope = "User"
+		case "chat":
+			scope = "Chat"
+		default:
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid scope value", nil)
+			return
+		}
+		filters.Scope = &scope
 	}
 
 	if minDateStr != "" {

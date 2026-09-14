@@ -340,13 +340,25 @@ test('treats checkpoint summaries as read-only in the Summaries tab', async ({ m
   await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
 });
 
-test('switches User, Thread, Archived, and Summaries views and updates the URL', async ({ memoriesPage, userWithPersonality }) => {
+test('switches User, Thread, Archived, and Summaries views and updates the URL', async ({ memoriesPage, seed, userWithPersonality }) => {
+  const thread = await seed.thread();
+  const [userMemory] = await seed.memories(1, { content: seedName('user-scope-memory') });
+  const [threadMemory] = await seed.memories(1, {
+    content: seedName('thread-scope-memory'),
+    level: 'thread',
+    chat_id: thread.id,
+  });
+
   await memoriesPage.navigateTo();
   await expect(memoriesPage.userStatusTab).toHaveAttribute('aria-selected', 'true');
+  await expect(memoriesPage.card(userMemory.content as string)).toBeVisible();
+  await expect(memoriesPage.card(threadMemory.content as string)).toBeHidden();
 
   await memoriesPage.showThread();
   await expect(userWithPersonality.page).toHaveURL(/scope=chat/);
   await expect(memoriesPage.threadStatusTab).toHaveAttribute('aria-selected', 'true');
+  await expect(memoriesPage.card(threadMemory.content as string)).toBeVisible();
+  await expect(memoriesPage.card(userMemory.content as string)).toBeHidden();
 
   await memoriesPage.showUser();
   await expect(userWithPersonality.page).toHaveURL(/scope=user/);

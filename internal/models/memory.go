@@ -149,7 +149,7 @@ type BatchCreateMemoryInput struct {
 }
 
 // MaxMemoryBatchIDs bounds one bulk memory operation to prevent pathological
-// transaction/request fan-out. It exceeds the Memory Manager's 24-item page;
+// transaction/request fan-out. It matches the Memory Manager's 100-item page;
 // keep it in sync with MemoryBatch{Delete,Patch}Request.ids.maxItems in
 // openapi.yaml.
 const MaxMemoryBatchIDs = 100

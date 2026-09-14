@@ -169,7 +169,7 @@ export class MemoriesListTabComponent implements OnInit {
     if (status === 'summaries') {
       this.clearSelection();
       this.clearFocus();
-      this.onFilterChanged({ status, level: 'all' });
+      this.onFilterChanged({ status, scope: 'all', level: 'all' });
       this.view.selectAllAssociations();
       return;
     }
@@ -377,7 +377,12 @@ export class MemoriesListTabComponent implements OnInit {
   }
 
   openMoveMenu(ids: string[]): void {
-    const eligibleIDs = ids.filter(id => this.view.memories().find(memory => memory.id === id)?.level !== 'thread');
+    const memoriesByID = new Map(this.view.memories().map(memory => [memory.id, memory]));
+    const eligibleIDs = ids.filter(id => memoriesByID.get(id)?.level !== 'thread');
+    // A stale or mixed selection must not repeatedly retry an invalid thread move.
+    if (eligibleIDs.length !== ids.length) {
+      this.view.setSelectedIds(eligibleIDs);
+    }
     if (eligibleIDs.length === 0) return;
     this.moveTargetIds.set(eligibleIDs);
     this.moveMenuOpen.set(true);
