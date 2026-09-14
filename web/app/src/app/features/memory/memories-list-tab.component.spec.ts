@@ -60,7 +60,7 @@ function makeViewService(
   const selectedIds = signal<string[]>(overrides.selectedIds ?? []);
   const filters = signal<MemoryViewFilters>({ ...DEFAULT_MEMORY_VIEW_FILTERS, ...overrides.filters });
   return {
-    pageSize: 24,
+    pageSize: 100,
     memories,
     totalCount: signal(overrides.totalCount ?? 1),
     currentPage: signal(overrides.currentPage ?? 1),
@@ -102,14 +102,12 @@ function makeMemoryService(
     listMergeEvents: ReturnType<typeof vi.fn>;
     patchMemory: ReturnType<typeof vi.fn>;
     updateMemoryPin: ReturnType<typeof vi.fn>;
-    exportMemories: ReturnType<typeof vi.fn>;
   }> = {},
 ) {
   return {
     listMergeEvents: overrides.listMergeEvents ?? vi.fn().mockReturnValue(of({ results: [], total_count: 0, page: 1 })),
     patchMemory: overrides.patchMemory ?? vi.fn().mockReturnValue(of(SAMPLE_MEMORY)),
     updateMemoryPin: overrides.updateMemoryPin ?? vi.fn().mockReturnValue(of(SAMPLE_MEMORY)),
-    exportMemories: overrides.exportMemories ?? vi.fn().mockReturnValue(of(new Blob())),
   };
 }
 
@@ -366,7 +364,7 @@ describe('MemoriesListTabComponent filters wiring', () => {
 
     expect(view.setFilters).toHaveBeenCalledWith({ query: 'coffee' });
     expect(router.navigate).toHaveBeenCalledWith([], {
-      queryParams: { query: 'coffee', tab: null },
+      queryParams: { query: 'coffee', scope: 'user', tab: null },
       replaceUrl: true,
     });
   });
@@ -517,19 +515,37 @@ describe('MemoriesListTabComponent filters wiring', () => {
 
     expect(view.load).toHaveBeenCalledWith(3);
   });
+
+  it('writes a non-default page to the URL so detail navigation can return to it', async () => {
+    const { component, router, view } = await createComponent({ initialTab: 'memories' });
+
+    component.goToPage(3);
+
+    expect(view.load).toHaveBeenCalledWith(3);
+    expect(router.navigate).toHaveBeenCalledWith([], {
+      queryParams: { page: 3, scope: 'user', tab: 'memories' },
+      replaceUrl: true,
+    });
+  });
 });
 
 describe('MemoriesListTabComponent status tabs and Summaries read-only enforcement', () => {
-  it('drives setStatusFilter from each status tab button', async () => {
+  it('drives the User, Thread, Summaries, and Archived views from their tabs', async () => {
     const { fixture, view } = await createComponent();
     const host = fixture.nativeElement as HTMLElement;
     const tabs = host.querySelectorAll('[role="tab"]');
 
+    (tabs[0] as HTMLButtonElement).click();
+    expect(view.setFilters).toHaveBeenLastCalledWith({ status: 'active', scope: 'user', level: 'all' });
+
     (tabs[1] as HTMLButtonElement).click();
-    expect(view.setFilters).toHaveBeenLastCalledWith({ status: 'inactive', level: 'all' });
+    expect(view.setFilters).toHaveBeenLastCalledWith({ status: 'active', scope: 'chat', level: 'all' });
 
     (tabs[2] as HTMLButtonElement).click();
     expect(view.setFilters).toHaveBeenLastCalledWith({ status: 'summaries', level: 'all' });
+
+    (tabs[3] as HTMLButtonElement).click();
+    expect(view.setFilters).toHaveBeenLastCalledWith({ status: 'inactive', scope: 'all', level: 'all' });
   });
 
   it('on Summaries: clears selection, clears focus, filters, then selects all associations — bypassing personality selection', async () => {
@@ -551,34 +567,14 @@ describe('MemoriesListTabComponent status tabs and Summaries read-only enforceme
     expect(component.focusedId()).toBeNull();
   });
 
-  it('preserves the current level when switching to Active normally', async () => {
-    const view = makeViewService({ filters: { level: 'personality', status: 'inactive' } });
-    const { fixture } = await createComponent({ view });
-    const host = fixture.nativeElement as HTMLElement;
-
-    (host.querySelectorAll('[role="tab"]')[0] as HTMLButtonElement).click();
-
-    expect(view.setFilters).toHaveBeenCalledWith({ status: 'active', level: 'personality' });
-  });
-
-  it('resets a stale level="summary" to "all" instead of leaking it into Active', async () => {
-    const view = makeViewService({ filters: { level: 'summary', status: 'summaries' } });
-    const { fixture } = await createComponent({ view });
-    const host = fixture.nativeElement as HTMLElement;
-
-    (host.querySelectorAll('[role="tab"]')[0] as HTMLButtonElement).click();
-
-    expect(view.setFilters).toHaveBeenCalledWith({ status: 'active', level: 'all' });
-  });
-
   it('reflects the active status tab via aria-selected and the active class', async () => {
     const view = makeViewService({ filters: { status: 'inactive' } });
     const { fixture } = await createComponent({ view });
     const host = fixture.nativeElement as HTMLElement;
     const tabs = Array.from(host.querySelectorAll('[role="tab"]')) as HTMLButtonElement[];
 
-    expect(tabs[1].getAttribute('aria-selected')).toBe('true');
-    expect(tabs[1].classList.contains('memories-list__status--active')).toBe(true);
+    expect(tabs[3].getAttribute('aria-selected')).toBe('true');
+    expect(tabs[3].classList.contains('memories-list__status--active')).toBe(true);
     expect(tabs[0].getAttribute('aria-selected')).toBe('false');
     expect(tabs[0].classList.contains('memories-list__status--active')).toBe(false);
   });
@@ -675,18 +671,6 @@ describe('MemoriesListTabComponent selection and bulk toolbar', () => {
     expect(view.setAllSelected).toHaveBeenCalledWith(false);
   });
 
-  it('clears selection via the toolbar Cancel button', async () => {
-    const view = makeViewService({ selectedIds: ['m-1'] });
-    const { fixture } = await createComponent({ view });
-    const host = fixture.nativeElement as HTMLElement;
-    const buttons = Array.from(host.querySelectorAll('.memories-list__bulk button')) as HTMLButtonElement[];
-    const cancelBtn = buttons.find(b => b.textContent?.trim() === 'Cancel')!;
-
-    cancelBtn.click();
-
-    expect(view.clearSelection).toHaveBeenCalled();
-  });
-
   it('hides the bulk toolbar when nothing is selected', async () => {
     const { fixture } = await createComponent();
     expect((fixture.nativeElement as HTMLElement).querySelector('.memories-list__bulk')).toBeNull();
@@ -702,7 +686,19 @@ describe('MemoriesListTabComponent selection and bulk toolbar', () => {
     expect(host.querySelector('.memories-list__bulk-count')?.textContent).toContain('1 selected');
   });
 
-  it('disables Move, Archive, Export, and Delete while their operations are in-flight, but never Cancel', async () => {
+  it('keeps Archive and Delete but hides Move in the Thread view', async () => {
+    const view = makeViewService({ filters: { scope: 'chat' }, selectedIds: ['m-1'] });
+    const { fixture } = await createComponent({ view });
+    const buttons = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll('.memories-list__bulk button'),
+    ) as HTMLButtonElement[];
+
+    expect(buttons.some(button => button.textContent?.trim() === 'Move')).toBe(false);
+    expect(buttons.some(button => button.textContent?.trim() === 'Archive')).toBe(true);
+    expect(buttons.some(button => button.textContent?.trim() === 'Delete')).toBe(true);
+  });
+
+  it('disables Move, Archive, and Delete while their operations are in-flight', async () => {
     const view = makeViewService({ selectedIds: ['m-1'] });
     const { fixture } = await createComponent({ view });
     view.mutating.set(true);
@@ -713,15 +709,11 @@ describe('MemoriesListTabComponent selection and bulk toolbar', () => {
     const buttons = Array.from(host.querySelectorAll('.memories-list__bulk button')) as HTMLButtonElement[];
     const moveBtn = buttons.find(b => b.textContent?.trim() === 'Move')!;
     const archiveBtn = buttons.find(b => /^(Archive|Unarchive)$/.test(b.textContent?.trim() ?? ''))!;
-    const exportBtn = buttons.find(b => b.textContent?.trim() === 'Export')!;
     const deleteBtn = host.querySelector('.memories-list__bulk-danger') as HTMLButtonElement;
-    const cancelBtn = buttons.find(b => b.textContent?.trim() === 'Cancel')!;
 
     expect(moveBtn.disabled).toBe(true);
     expect(archiveBtn.disabled).toBe(true);
-    expect(exportBtn.disabled).toBe(false);
     expect(deleteBtn.disabled).toBe(true);
-    expect(cancelBtn.disabled).toBe(false);
   });
 
   it('labels the bulk action button Archive outside the Archived tab', async () => {
@@ -947,64 +939,6 @@ describe('MemoriesListTabComponent bulk actions', () => {
 
     expect(component.moveMenuOpen()).toBe(true);
   });
-
-  it('exports memories: creates a download anchor, clicks it, and revokes the URL', async () => {
-    const blob = new Blob(['data']);
-    const memoryService = makeMemoryService({ exportMemories: vi.fn().mockReturnValue(of(blob)) });
-    const { component } = await createComponent({ memoryService });
-
-    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:export');
-    vi.spyOn(URL, 'revokeObjectURL').mockReturnValue(undefined);
-    const click = vi.fn();
-    const anchor = document.createElement('a');
-    const realCreateElement = document.createElement.bind(document);
-    vi.spyOn(anchor, 'click').mockImplementation(click);
-    vi.spyOn(document, 'createElement').mockImplementation(((tagName: string) =>
-      tagName === 'a' ? anchor : realCreateElement(tagName)) as typeof document.createElement);
-
-    component.exportMemories();
-
-    expect(anchor.href).toBe('blob:export');
-    expect(anchor.download).toBe('memories-export.zip');
-    expect(click).toHaveBeenCalled();
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:export');
-    expect(component.exporting()).toBe(false);
-  });
-
-  it('toggles exporting() true then false around an in-flight export', async () => {
-    const exportSubject = new Subject<Blob>();
-    const memoryService = makeMemoryService({ exportMemories: vi.fn().mockReturnValue(exportSubject.asObservable()) });
-    const { component } = await createComponent({ memoryService });
-
-    component.exportMemories();
-    expect(component.exporting()).toBe(true);
-
-    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:x');
-    vi.spyOn(URL, 'revokeObjectURL').mockReturnValue(undefined);
-    const anchor = document.createElement('a');
-    const realCreateElement = document.createElement.bind(document);
-    vi.spyOn(anchor, 'click').mockImplementation(() => {});
-    vi.spyOn(document, 'createElement').mockImplementation(((tagName: string) =>
-      tagName === 'a' ? anchor : realCreateElement(tagName)) as typeof document.createElement);
-
-    exportSubject.next(new Blob(['x']));
-    exportSubject.complete();
-
-    expect(component.exporting()).toBe(false);
-  });
-
-  it('resets exporting() on failure without touching the DOM', async () => {
-    const memoryService = makeMemoryService({
-      exportMemories: vi.fn().mockReturnValue(throwError(() => new Error('fail'))),
-    });
-    const { component } = await createComponent({ memoryService });
-    const createElementSpy = vi.spyOn(document, 'createElement');
-
-    component.exportMemories();
-
-    expect(component.exporting()).toBe(false);
-    expect(createElementSpy).not.toHaveBeenCalled();
-  });
 });
 
 describe('MemoriesListTabComponent per-card single actions', () => {
@@ -1043,7 +977,7 @@ describe('MemoriesListTabComponent per-card single actions', () => {
   it('navigates to the memory detail route on focus-panel edit', async () => {
     const { component, router } = await createComponent();
     component.onFocusEdit('m-1');
-    expect(router.navigate).toHaveBeenCalledWith(['/memories', 'm-1']);
+    expect(router.navigate).toHaveBeenCalledWith(['/memories', 'm-1'], { queryParamsHandling: 'preserve' });
   });
 
   it('tracks pinUpdatingId mid-flight and clears it (reloading) on success', async () => {
@@ -1192,7 +1126,18 @@ describe('MemoriesListTabComponent focus panel wiring and merge events', () => {
 });
 
 describe('MemoriesListTabComponent pagination', () => {
-  it('goes to the next/previous page via the card grid buttons', async () => {
+  it('renders pagination controls directly below the view tabs', async () => {
+    const view = makeViewService({ currentPage: 1, totalPages: 2 });
+    const { fixture } = await createComponent({ view });
+    const host = fixture.nativeElement as HTMLElement;
+    const pagination = host.querySelector('.memories-list__pagination');
+
+    expect(pagination?.getAttribute('aria-label')).toBe('Memory pages');
+    expect(pagination?.textContent).toContain('Page 1 of 2');
+    expect(pagination?.querySelector('button')?.textContent?.trim()).toBe('Previous');
+  });
+
+  it('goes to the next/previous page via the top pager', async () => {
     const view = makeViewService({ currentPage: 2, totalPages: 3 });
     const { fixture } = await createComponent({ view });
     const host = fixture.nativeElement as HTMLElement;

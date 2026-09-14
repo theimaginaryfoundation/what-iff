@@ -1,5 +1,4 @@
-import type { Locator, Page } from '@playwright/test';
-import { test, expect } from '../../../fixtures';
+import { test, expect, type Locator, type Page } from '../../../fixtures';
 import type { MemoriesPage } from '../../../poms';
 
 const MOBILE_WIDTHS = [320, 360, 375, 390, 412, 768, 1023] as const;
@@ -36,13 +35,16 @@ async function expectNoHorizontalScroll(page: Page, width: number): Promise<void
     clientWidth: element.clientWidth,
     scrollWidth: element.scrollWidth,
   }));
-  expect(
-    mainExtent.scrollWidth,
-    `Main content should not require horizontal scrolling at ${width}px`,
-  ).toBeLessThanOrEqual(mainExtent.clientWidth + LAYOUT_TOLERANCE_PX);
+  expect(mainExtent.scrollWidth, `Main content should not require horizontal scrolling at ${width}px`).toBeLessThanOrEqual(
+    mainExtent.clientWidth + LAYOUT_TOLERANCE_PX,
+  );
 }
 
-async function assertCommonLayout(memoriesPage: MemoriesPage, width: number, memoryContent: string): Promise<{
+async function assertCommonLayout(
+  memoriesPage: MemoriesPage,
+  width: number,
+  memoryContent: string,
+): Promise<{
   headingBox: Rect;
   subtitleBox: Rect;
 }> {
@@ -83,7 +85,8 @@ async function assertCommonLayout(memoriesPage: MemoriesPage, width: number, mem
 
   await memoriesPage.mergeHistoryTab.click({ trial: true });
   await memoriesPage.compactionLogTab.click({ trial: true });
-  await memoriesPage.statusTabs.getByRole('tab', { name: 'Active', exact: true }).click({ trial: true });
+  await memoriesPage.statusTabs.getByRole('tab', { name: 'User', exact: true }).click({ trial: true });
+  await memoriesPage.statusTabs.getByRole('tab', { name: 'Thread', exact: true }).click({ trial: true });
   await memoriesPage.statusTabs.getByRole('tab', { name: 'Archived', exact: true }).click({ trial: true });
   await memoriesPage.statusTabs.getByRole('tab', { name: 'Summaries', exact: true }).click({ trial: true });
   await memoriesPage.sortSelect.click({ trial: true });
@@ -195,12 +198,7 @@ test.describe('memories responsive layout contract', () => {
     await expect(memoriesPage.focusPanel.getByRole('button', { name: 'Close details', exact: true })).toBeVisible();
   });
 
-  test('dismisses the mobile memory details modal with the Escape key', async ({
-    memoriesPage,
-    seed,
-    userWithPersonality,
-    page,
-  }) => {
+  test('dismisses the mobile memory details modal with the Escape key', async ({ memoriesPage, seed, userWithPersonality, page }) => {
     const [memory] = await seed.memories(1);
     const memoryContent = memory.content as string;
 
@@ -213,12 +211,7 @@ test.describe('memories responsive layout contract', () => {
     await expect(memoriesPage.focusDialog).toBeHidden();
   });
 
-  test('dismisses the mobile memory details modal by clicking the backdrop', async ({
-    memoriesPage,
-    seed,
-    userWithPersonality,
-    page,
-  }) => {
+  test('dismisses the mobile memory details modal by clicking the backdrop', async ({ memoriesPage, seed, userWithPersonality, page }) => {
     const [memory] = await seed.memories(1);
     const memoryContent = memory.content as string;
 

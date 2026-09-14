@@ -11,14 +11,7 @@ import { PersonaCoverComponent } from '../../personality/picker/persona-cover.co
 @Component({
   selector: 'app-memory-card',
   standalone: true,
-  imports: [
-    DatePipe,
-    FormsModule,
-    GlobeIconComponent,
-    StarIconComponent,
-    PersonaAccentScopeComponent,
-    PersonaCoverComponent,
-  ],
+  imports: [DatePipe, FormsModule, GlobeIconComponent, StarIconComponent, PersonaAccentScopeComponent, PersonaCoverComponent],
   templateUrl: './memory-card.component.html',
   styleUrl: './memory-card.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -116,6 +109,7 @@ export class MemoryCardComponent {
   onMove(event?: Event): void {
     event?.stopPropagation();
     this.menuOpen.set(false);
+    if (this.memory().level === 'thread') return;
     this.move.emit(this.memory().id);
   }
 

@@ -30,6 +30,7 @@ export class MemoryDetailPageComponent implements OnInit {
   readonly pinUpdating = signal(false);
   readonly error = signal<string | null>(null);
   readonly deleteModalOpen = signal(false);
+  readonly restoring = signal(false);
 
   readonly memoryId = computed(() => this.route.snapshot.paramMap.get('id') ?? '');
 
@@ -65,7 +66,7 @@ export class MemoryDetailPageComponent implements OnInit {
   }
 
   goBack(): void {
-    void this.router.navigate(['/memories'], { queryParamsHandling: 'merge' });
+    void this.router.navigate(['/memories'], { queryParamsHandling: 'preserve' });
   }
 
   onPinChange(pinnedPersonalityId: string | null): void {
@@ -94,6 +95,23 @@ export class MemoryDetailPageComponent implements OnInit {
       error: error => {
         this.error.set(error instanceof Error ? error.message : 'Failed to save memory');
         this.saving.set(false);
+      },
+    });
+  }
+
+  restore(): void {
+    const current = this.memory();
+    if (!current || current.status !== 'inactive' || this.restoring()) return;
+
+    this.restoring.set(true);
+    this.memoryService.patchMemory(current.id, { status: 'active' }).subscribe({
+      next: memory => {
+        this.memory.set(memory);
+        this.restoring.set(false);
+      },
+      error: error => {
+        this.error.set(error instanceof Error ? error.message : 'Failed to restore memory');
+        this.restoring.set(false);
       },
     });
   }

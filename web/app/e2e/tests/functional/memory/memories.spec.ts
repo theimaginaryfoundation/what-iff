@@ -63,7 +63,12 @@ test('opens a memory detail page and navigates back', async ({ memoryDetailPage,
   await expect(userWithPersonality.page).toHaveURL(/\/memories$/);
 });
 
-test('edits a memory content from its detail page and the change persists', async ({ memoryDetailPage, page, seed, userWithPersonality }) => {
+test('edits a memory content from its detail page and the change persists', async ({
+  memoryDetailPage,
+  page,
+  seed,
+  userWithPersonality,
+}) => {
   // The detail page's own editor. The card's inline edit and this page's
   // delete are covered above; nothing exercised saving from here — it is a
   // separate form (memory-form.component) from the card's.
@@ -335,9 +340,13 @@ test('treats checkpoint summaries as read-only in the Summaries tab', async ({ m
   await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
 });
 
-test('switches status tabs and updates the URL', async ({ memoriesPage, userWithPersonality }) => {
+test('switches User, Thread, Archived, and Summaries views and updates the URL', async ({ memoriesPage, userWithPersonality }) => {
   await memoriesPage.navigateTo();
-  await expect(memoriesPage.activeStatusTab).toHaveAttribute('aria-selected', 'true');
+  await expect(memoriesPage.userStatusTab).toHaveAttribute('aria-selected', 'true');
+
+  await memoriesPage.showUser();
+  await expect(userWithPersonality.page).toHaveURL(/scope=user/);
+  await expect(memoriesPage.userStatusTab).toHaveAttribute('aria-selected', 'true');
 
   await memoriesPage.showArchived();
   await expect(userWithPersonality.page).toHaveURL(/status=inactive/);
@@ -346,10 +355,6 @@ test('switches status tabs and updates the URL', async ({ memoriesPage, userWith
   await memoriesPage.showSummaries();
   await expect(userWithPersonality.page).toHaveURL(/status=summaries/);
   await expect(memoriesPage.summariesStatusTab).toHaveAttribute('aria-selected', 'true');
-
-  await memoriesPage.showActive();
-  await expect(userWithPersonality.page).not.toHaveURL(/status=/);
-  await expect(memoriesPage.activeStatusTab).toHaveAttribute('aria-selected', 'true');
 });
 
 test('deep-links directly to the Archived status tab via the query param', async ({ memoriesPage, seed, userWithPersonality }) => {

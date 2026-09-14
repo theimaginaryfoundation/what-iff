@@ -20,7 +20,7 @@ export interface MemoryViewFilters {
 }
 
 export const DEFAULT_MEMORY_VIEW_FILTERS: MemoryViewFilters = {
-  scope: 'all',
+  scope: 'user',
   level: 'all',
   status: 'active',
   sort: 'created_desc',
@@ -42,10 +42,7 @@ export function parseQueryParams(params: Params): MemoryViewFilters {
     level = 'all';
   }
 
-  const dates = normalizeDateRange(
-    String(params['min_date'] ?? '').trim(),
-    String(params['max_date'] ?? '').trim(),
-  );
+  const dates = normalizeDateRange(String(params['min_date'] ?? '').trim(), String(params['max_date'] ?? '').trim());
 
   return {
     scope,
@@ -87,8 +84,8 @@ export function toApiFilters(filters: MemoryViewFilters): MemoryFilters {
   if (filters.chatId.trim()) api.chat_id = filters.chatId.trim();
 
   const dates = normalizeDateRange(filters.minDate, filters.maxDate);
-  if (dates.minDate) api.min_date = dates.minDate;
-  if (dates.maxDate) api.max_date = dates.maxDate;
+  if (dates.minDate) api.min_date = `${dates.minDate}T00:00:00.000Z`;
+  if (dates.maxDate) api.max_date = `${dates.maxDate}T23:59:59.999Z`;
 
   if (filters.status === 'summaries') {
     api.level = 'summary';
@@ -97,6 +94,9 @@ export function toApiFilters(filters: MemoryViewFilters): MemoryFilters {
   }
 
   api.status = filters.status;
+  if (filters.scope === 'user') {
+    api.scope = 'User';
+  }
   const resolvedLevel = resolveLevel(filters);
   if (resolvedLevel) {
     api.level = resolvedLevel;
@@ -105,10 +105,7 @@ export function toApiFilters(filters: MemoryViewFilters): MemoryFilters {
 }
 
 /** YYYY-MM-DD only; drops invalid values and clamps an inverted range. */
-export function normalizeDateRange(
-  minDate: string,
-  maxDate: string,
-): { minDate: string; maxDate: string; error: string | null } {
+export function normalizeDateRange(minDate: string, maxDate: string): { minDate: string; maxDate: string; error: string | null } {
   let min = sanitizeIsoDate(minDate);
   let max = sanitizeIsoDate(maxDate);
   let error: string | null = null;
@@ -133,11 +130,7 @@ function sanitizeIsoDate(raw: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return '';
   const [year, month, day] = value.split('-').map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
-  if (
-    date.getUTCFullYear() !== year ||
-    date.getUTCMonth() !== month - 1 ||
-    date.getUTCDate() !== day
-  ) {
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
     return '';
   }
   return value;
