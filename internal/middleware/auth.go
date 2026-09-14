@@ -64,6 +64,18 @@ func AuthMiddleware(client *ent.Client, store *datastore.Datastore, logger *zap.
 						case errors.Is(err, datastore.ErrExternalUsernameInvalid):
 							handlerutils.RespondWithError(w, logger, http.StatusBadRequest, handlerutils.CodeNotSet,
 								"We could not complete sign-in because your account has an invalid username", nil)
+						case errors.Is(err, datastore.ErrEmailExists):
+							// The verified email already belongs to a different account
+							// (its stored identity id differs from this sign-in's). This is
+							// not a server fault, so return a clear 409 rather than a 500.
+							// The datastore logs both identity ids for diagnosis.
+							handlerutils.RespondWithError(w, logger, http.StatusConflict, handlerutils.CodeNotSet,
+								"This email is already linked to a different account. Please sign in using your original method, or contact support if you believe this is an error", nil)
+						case errors.Is(err, datastore.ErrUsernameExists):
+							// A distinct account already holds the username this identity
+							// would use. Also a conflict, not a server fault.
+							handlerutils.RespondWithError(w, logger, http.StatusConflict, handlerutils.CodeNotSet,
+								"We could not complete sign-in because of a username conflict. Please contact support", nil)
 						default:
 							handlerutils.RespondWithError(w, logger, http.StatusInternalServerError, handlerutils.CodeNotSet,
 								"Sign-in failed. Please try again", nil)
