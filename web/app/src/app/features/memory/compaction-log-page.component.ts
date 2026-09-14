@@ -3,12 +3,7 @@ import { ChangeDetectionStrategy, Component, inject, input, OnInit, signal } fro
 import { Router, RouterLink } from '@angular/router';
 import { forkJoin, map, of } from 'rxjs';
 
-import {
-  CheckpointSnapshot,
-  CompactionEvent,
-  CompactionLoadedMemory,
-  MemoryMergeEvent,
-} from '../../core/models/memory.model';
+import { CheckpointSnapshot, CompactionEvent, CompactionLoadedMemory, MemoryMergeEvent } from '../../core/models/memory.model';
 import { Chat } from '../../core/models/chat.model';
 import { Personality, PersonalityPromptChange } from '../../core/models/personality.model';
 import { ChatService } from '../../core/services/chat.service';
@@ -75,22 +70,24 @@ export class CompactionLogPageComponent implements OnInit {
   load(page: number): void {
     this.loading.set(true);
     this.error.set(null);
-    this.memoryService.listCompactionEvents(page, CompactionLogPageComponent.PAGE_SIZE, {
-      chat_id: this.selectedChatID() || undefined,
-      personality_id: this.selectedPersonalityID() || undefined,
-    }).subscribe({
-      next: response => {
-        this.events.set(response.results ?? []);
-        this.page.set(response.page ?? page);
-        this.totalCount.set(response.total_count ?? 0);
-        this.totalPages.set(Math.max(1, Math.ceil((response.total_count ?? 0) / CompactionLogPageComponent.PAGE_SIZE)));
-        this.loading.set(false);
-      },
-      error: err => {
-        this.error.set(err instanceof Error ? err.message : 'Failed to load compaction log');
-        this.loading.set(false);
-      },
-    });
+    this.memoryService
+      .listCompactionEvents(page, CompactionLogPageComponent.PAGE_SIZE, {
+        chat_id: this.selectedChatID() || undefined,
+        personality_id: this.selectedPersonalityID() || undefined,
+      })
+      .subscribe({
+        next: response => {
+          this.events.set(response.results ?? []);
+          this.page.set(response.page ?? page);
+          this.totalCount.set(response.total_count ?? 0);
+          this.totalPages.set(Math.max(1, Math.ceil((response.total_count ?? 0) / CompactionLogPageComponent.PAGE_SIZE)));
+          this.loading.set(false);
+        },
+        error: err => {
+          this.error.set(err instanceof Error ? err.message : 'Failed to load compaction log');
+          this.loading.set(false);
+        },
+      });
   }
 
   private loadPromptChanges(): void {
@@ -107,9 +104,9 @@ export class CompactionLogPageComponent implements OnInit {
     this.promptChangesLoading.set(true);
     this.promptChangesError.set(null);
     const requests = targets.map(personality =>
-      this.personalityService.listPromptChanges(personality.id).pipe(
-        map(changes => changes.map(change => ({ ...change, personality_name: personality.name }))),
-      ),
+      this.personalityService
+        .listPromptChanges(personality.id)
+        .pipe(map(changes => changes.map(change => ({ ...change, personality_name: personality.name })))),
     );
 
     (requests.length ? forkJoin(requests) : of([] as PromptAuditEntry[][])).subscribe({
@@ -226,9 +223,12 @@ export class CompactionLogPageComponent implements OnInit {
 
   mergeTypeLabel(event: MemoryMergeEvent): string {
     switch (event.merge_type) {
-      case 'link': return 'Linked';
-      case 'fold_live': return 'Memories Merged';
-      default: return 'Updated';
+      case 'link':
+        return 'Linked';
+      case 'fold_live':
+        return 'Memories Merged';
+      default:
+        return 'Updated';
     }
   }
 
@@ -288,7 +288,7 @@ export class CompactionLogPageComponent implements OnInit {
   }
 
   openMemory(memoryId: string | null | undefined): void {
-    if (memoryId) void this.router.navigate(['/memories', memoryId]);
+    if (memoryId) void this.router.navigate(['/memories', memoryId], { queryParamsHandling: 'preserve' });
   }
 
   openThread(event: CompactionEvent): void {

@@ -3,17 +3,14 @@ import { finalize, map, of } from 'rxjs';
 
 import { Memory, MemoryPatch } from '../models/memory.model';
 import { MemoryService } from './memory.service';
-import {
-  DEFAULT_MEMORY_VIEW_FILTERS,
-  MemoryViewFilters,
-  toApiFilters,
-} from '../../features/memory/helpers/memory-filter.helpers';
+import { DEFAULT_MEMORY_VIEW_FILTERS, MemoryViewFilters, toApiFilters } from '../../features/memory/helpers/memory-filter.helpers';
 
 @Injectable({ providedIn: 'root' })
 export class MemoryViewService {
   private readonly memoryService = inject(MemoryService);
+  private loadRequestID = 0;
 
-  readonly pageSize = 24;
+  readonly pageSize = 100;
   readonly memories = signal<Memory[]>([]);
   readonly totalCount = signal(0);
   readonly currentPage = signal(1);
@@ -32,19 +29,28 @@ export class MemoryViewService {
   readonly selectedCount = computed(() => this.selectedIds().length);
 
   load(page: number = 1): void {
+    const requestID = ++this.loadRequestID;
     this.loading.set(true);
     this.error.set(null);
     this.currentPage.set(page);
     this.memoryService
       .getMemories(page, this.pageSize, this.toRequestFilters())
-      .pipe(finalize(() => this.loading.set(false)))
+      .pipe(
+        finalize(() => {
+          if (requestID === this.loadRequestID) {
+            this.loading.set(false);
+          }
+        }),
+      )
       .subscribe({
         next: response => {
+          if (requestID !== this.loadRequestID) return;
           this.memories.set(response.results ?? []);
           this.totalCount.set(response.total_count ?? 0);
           this.selectedIds.set([]);
         },
         error: error => {
+          if (requestID !== this.loadRequestID) return;
           this.memories.set([]);
           this.totalCount.set(0);
           this.error.set(error instanceof Error ? error.message : 'Failed to load memories');
@@ -57,9 +63,9 @@ export class MemoryViewService {
     this.load(1);
   }
 
-  applyFilters(filters: MemoryViewFilters): void {
+  applyFilters(filters: MemoryViewFilters, page = 1): void {
     this.filters.set({ ...filters });
-    this.load(1);
+    this.load(page);
   }
 
   clearFilters(): void {
@@ -68,9 +74,7 @@ export class MemoryViewService {
   }
 
   toggleSelection(memoryId: string): void {
-    this.selectedIds.update(current =>
-      current.includes(memoryId) ? current.filter(id => id !== memoryId) : [...current, memoryId],
-    );
+    this.selectedIds.update(current => (current.includes(memoryId) ? current.filter(id => id !== memoryId) : [...current, memoryId]));
   }
 
   setAllSelected(selected: boolean): void {

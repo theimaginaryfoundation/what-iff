@@ -3449,7 +3449,7 @@ export interface paths {
         };
         /**
          * List memories
-         * @description Returns a paginated list of memories for the current user, with optional filtering by chat, level, content, starred state, and date range
+         * @description Returns a paginated list of memories for the current user, with optional filtering by chat, scope, level, content, starred state, lifecycle status, and date range
          */
         get: {
             parameters: {
@@ -3462,6 +3462,8 @@ export interface paths {
                     chat_id?: string;
                     /** @description Filter by memory level */
                     level?: "global" | "personality" | "thread" | "summary";
+                    /** @description Filter by storage scope */
+                    scope?: "User" | "Chat";
                     /** @description Filter by memory type */
                     type?: "Context";
                     /** @description Filter by starred state */
@@ -4089,7 +4091,7 @@ export interface paths {
         };
         /**
          * Get memory by ID
-         * @description Returns a specific memory by its ID
+         * @description Returns an owned memory by ID, including inactive archived or merge-retired memories.
          */
         get: {
             parameters: {

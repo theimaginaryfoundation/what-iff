@@ -2215,7 +2215,7 @@ paths:
   /memory:
     get:
       summary: List memories
-      description: Returns a paginated list of memories for the current user, with optional filtering by chat, level, content, starred state, and date range
+      description: Returns a paginated list of memories for the current user, with optional filtering by chat, scope, level, content, starred state, lifecycle status, and date range
       tags: [Memory Management]
       parameters:
         - name: page
@@ -2245,6 +2245,12 @@ paths:
           schema:
             type: string
             enum: [global, personality, thread, summary]
+        - name: scope
+          in: query
+          description: Filter by storage scope
+          schema:
+            type: string
+            enum: [User, Chat]
         - name: type
           in: query
           description: Filter by memory type
@@ -2666,7 +2672,7 @@ paths:
   /memory/{id}:
     get:
       summary: Get memory by ID
-      description: Returns a specific memory by its ID
+      description: Returns an owned memory by ID, including inactive archived or merge-retired memories.
       tags: [Memory Management]
       parameters:
         - name: id

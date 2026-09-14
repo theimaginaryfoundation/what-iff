@@ -863,7 +863,7 @@ func TestGetMemory_WrongOwner(t *testing.T) {
 	require.Nil(t, got)
 }
 
-func TestGetMemory_InactiveNotReturned(t *testing.T) {
+func TestGetMemory_InactiveReturnedToOwner(t *testing.T) {
 	ctx := context.Background()
 	ds, cleanup := newMemoryTestDatastore(t)
 	defer cleanup()
@@ -878,8 +878,9 @@ func TestGetMemory_InactiveNotReturned(t *testing.T) {
 	require.NoError(t, err)
 
 	got, err := ds.GetMemory(ctx, userID, created.ID)
-	require.ErrorIs(t, err, ErrMemoryNotFound)
-	require.Nil(t, got)
+	require.NoError(t, err)
+	require.Equal(t, created.ID, got.ID)
+	require.Equal(t, models.MemoryStatusInactive, got.Status)
 }
 
 // --- GetMemoryByIDPrefix ---

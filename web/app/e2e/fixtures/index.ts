@@ -412,6 +412,7 @@ export const test = base.extend<Fixtures & InternalFixtures & PomFixtures>({
 });
 
 export { expect };
+export type { Locator, Page } from '@playwright/test';
 // For tests that build their own context: the fixtures only reach pages the
 // `page`/`context` fixtures created, so a page from `browser.newContext()` has
 // to enrol itself. No-op unless `E2E_COVERAGE=1`.

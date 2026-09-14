@@ -109,9 +109,7 @@ describe('MemoryFocusPanelComponent', () => {
     const deleteSpy = vi.spyOn(component.delete, 'emit');
     const archiveSpy = vi.spyOn(component.archive, 'emit');
 
-    const buttons = Array.from(
-      fixture.nativeElement.querySelectorAll('.focus-panel__actions button') as NodeListOf<HTMLButtonElement>,
-    );
+    const buttons = Array.from(fixture.nativeElement.querySelectorAll('.focus-panel__actions button') as NodeListOf<HTMLButtonElement>);
     expect(buttons.map(b => b.textContent?.trim())).toEqual(['Edit', 'Archive', 'Delete']);
 
     buttons[0].click();
@@ -134,8 +132,7 @@ describe('MemoryFocusPanelComponent', () => {
 
   it('emits starChange with the toggled payload from the header star button', () => {
     const starSpy = vi.spyOn(component.starChange, 'emit');
-    const starButton = () =>
-      fixture.nativeElement.querySelector('.focus-panel__icon-btn[aria-label="Star"]') as HTMLButtonElement | null;
+    const starButton = () => fixture.nativeElement.querySelector('.focus-panel__icon-btn[aria-label="Star"]') as HTMLButtonElement | null;
 
     expect(starButton()).toBeTruthy();
     starButton()!.click();
@@ -144,9 +141,7 @@ describe('MemoryFocusPanelComponent', () => {
     fixture.componentRef.setInput('memory', makeVm({ starred: true }));
     fixture.detectChanges();
 
-    const unstarButton = fixture.nativeElement.querySelector(
-      '.focus-panel__icon-btn[aria-label="Unstar"]',
-    ) as HTMLButtonElement;
+    const unstarButton = fixture.nativeElement.querySelector('.focus-panel__icon-btn[aria-label="Unstar"]') as HTMLButtonElement;
     expect(unstarButton).toBeTruthy();
     expect(starButton()).toBeNull();
     unstarButton.click();
@@ -202,6 +197,13 @@ describe('MemoryFocusPanelComponent', () => {
     expect(moveSpy).toHaveBeenCalledWith('m-1');
   });
 
+  it('hides Move for thread memories', () => {
+    fixture.componentRef.setInput('memory', makeVm({ level: 'thread', levelLabel: 'Thread' }));
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.focus-panel__link-btn')).toBeNull();
+  });
+
   it('shows the confidence tooltip with the exact copy on hover/focus', () => {
     const infoButton = fixture.nativeElement.querySelector('.focus-panel__info') as HTMLButtonElement;
 
@@ -249,9 +251,7 @@ describe('MemoryFocusPanelComponent', () => {
     fixture.componentRef.setInput('memory', makeVm({ mergedFromIds: ['abcdef1234567890', 'zzyyxxwwvvuu'] }));
     fixture.detectChanges();
 
-    const links = Array.from(
-      fixture.nativeElement.querySelectorAll('.focus-panel__id-list li a') as NodeListOf<HTMLAnchorElement>,
-    );
+    const links = Array.from(fixture.nativeElement.querySelectorAll('.focus-panel__id-list li a') as NodeListOf<HTMLAnchorElement>);
     expect(links).toHaveLength(2);
     expect(links[0].textContent?.trim()).toBe('abcdef12…');
     expect(links[0].getAttribute('href')).toBe('/memories/abcdef1234567890');
@@ -287,9 +287,7 @@ describe('MemoryFocusPanelComponent', () => {
     ]);
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.querySelector('.focus-panel__event-top strong')?.textContent).toBe(
-      'Linked related memories',
-    );
+    expect(fixture.nativeElement.querySelector('.focus-panel__event-top strong')?.textContent).toBe('Linked related memories');
   });
 
   it('labels a "create" merge event as created from batch', () => {
@@ -306,9 +304,7 @@ describe('MemoryFocusPanelComponent', () => {
     ]);
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.querySelector('.focus-panel__event-top strong')?.textContent).toBe(
-      'Created from batch',
-    );
+    expect(fixture.nativeElement.querySelector('.focus-panel__event-top strong')?.textContent).toBe('Created from batch');
   });
 
   it('falls back to duplicates_folded + 1 for the source count when there are no source_members', () => {
@@ -363,9 +359,7 @@ describe('MemoryFocusPanelComponent', () => {
     ]);
     fixture.detectChanges();
 
-    const members = Array.from(
-      fixture.nativeElement.querySelectorAll('.focus-panel__members li') as NodeListOf<HTMLLIElement>,
-    );
+    const members = Array.from(fixture.nativeElement.querySelectorAll('.focus-panel__members li') as NodeListOf<HTMLLIElement>);
     expect(members).toHaveLength(2);
 
     const link = members[0].querySelector('a') as HTMLAnchorElement;

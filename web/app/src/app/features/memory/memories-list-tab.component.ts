@@ -1,13 +1,5 @@
 import { DOCUMENT } from '@angular/common';
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  DestroyRef,
-  inject,
-  OnInit,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, OnInit, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -30,12 +22,7 @@ import { MemoryCardGridComponent } from './components/memory-card-grid.component
 import { MemoryFocusPanelComponent } from './components/memory-focus-panel.component';
 import { DeleteMemoryModalComponent } from './components/delete-memory-modal.component';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
-import {
-  CalendarIconComponent,
-  ChevDownIconComponent,
-  DownloadIconComponent,
-  SearchIconComponent,
-} from '../../shared/ui/icons/icons';
+import { CalendarIconComponent, ChevDownIconComponent, SearchIconComponent } from '../../shared/ui/icons/icons';
 
 /** Matches memories-list-tab SCSS: rail beside list at >960px, modal below. */
 const DESKTOP_FOCUS_QUERY = '(min-width: 961px)';
@@ -51,7 +38,6 @@ const DESKTOP_FOCUS_QUERY = '(min-width: 961px)';
     ModalComponent,
     CalendarIconComponent,
     ChevDownIconComponent,
-    DownloadIconComponent,
     SearchIconComponent,
   ],
   templateUrl: './memories-list-tab.component.html',
@@ -74,7 +60,6 @@ export class MemoriesListTabComponent implements OnInit {
   readonly moveTargetIds = signal<string[]>([]);
   readonly searchDraft = signal('');
   readonly pinUpdatingId = signal<string | null>(null);
-  readonly exporting = signal(false);
   readonly focusedId = signal<string | null>(null);
   readonly mergeEvents = signal<MemoryMergeEvent[]>([]);
   readonly mergeEventsLoading = signal(false);
@@ -100,9 +85,7 @@ export class MemoriesListTabComponent implements OnInit {
       return acc;
     }, {}),
   );
-  readonly memories = computed(() =>
-    this.view.memories().map(memory => toMemoryCardVm(memory, 220, this.personalityNames())),
-  );
+  readonly memories = computed(() => this.view.memories().map(memory => toMemoryCardVm(memory, 220, this.personalityNames())));
   readonly focusedMemory = computed(() => {
     const id = this.focusedId();
     if (!id) return null;
@@ -111,6 +94,7 @@ export class MemoriesListTabComponent implements OnInit {
   readonly statusFilter = computed(() => this.filters().status);
   readonly isArchivedView = computed(() => this.statusFilter() === 'inactive');
   readonly isSummariesView = computed(() => this.statusFilter() === 'summaries');
+  readonly isThreadView = computed(() => this.filters().scope === 'chat');
   readonly countLabel = computed(() => {
     const n = this.totalCount();
     if (this.isSummariesView()) {
@@ -118,12 +102,8 @@ export class MemoriesListTabComponent implements OnInit {
     }
     return `${n} memor${n === 1 ? 'y' : 'ies'}`;
   });
-  readonly showDesktopFocusRail = computed(
-    () => !!this.focusedMemory() && this.isDesktopFocusLayout(),
-  );
-  readonly showMobileFocusModal = computed(
-    () => !!this.focusedMemory() && !this.isDesktopFocusLayout(),
-  );
+  readonly showDesktopFocusRail = computed(() => !!this.focusedMemory() && this.isDesktopFocusLayout());
+  readonly showMobileFocusModal = computed(() => !!this.focusedMemory() && !this.isDesktopFocusLayout());
 
   ngOnInit(): void {
     this.bindDesktopFocusLayout();
@@ -147,9 +127,10 @@ export class MemoriesListTabComponent implements OnInit {
 
     this.route.queryParams.subscribe(params => {
       const parsed = parseQueryParams(params);
+      const page = parsePage(params['page']);
       this.searchDraft.set(parsed.query);
       this.dateRangeError.set(null);
-      this.view.applyFilters(parsed);
+      this.view.applyFilters(parsed, page);
     });
   }
 
@@ -192,7 +173,13 @@ export class MemoriesListTabComponent implements OnInit {
       this.view.selectAllAssociations();
       return;
     }
-    this.onFilterChanged({ status, level: this.filters().level === 'summary' ? 'all' : this.filters().level });
+    this.onFilterChanged({ status, scope: 'all', level: 'all' });
+  }
+
+  setScopeFilter(scope: 'user' | 'chat'): void {
+    this.clearSelection();
+    this.clearFocus();
+    this.onFilterChanged({ status: 'active', scope, level: 'all' });
   }
 
   setSort(sort: MemorySort): void {
@@ -330,6 +317,15 @@ export class MemoriesListTabComponent implements OnInit {
 
   goToPage(page: number): void {
     this.view.load(page);
+    const filters = serializeFilters(this.filters());
+    void this.router.navigate([], {
+      queryParams: {
+        ...filters,
+        page: page === 1 ? null : page,
+        tab: this.route.snapshot.queryParamMap.get('tab'),
+      },
+      replaceUrl: true,
+    });
   }
 
   onInlineSaveMemory(event: { id: string; content: string }): void {
@@ -340,7 +336,7 @@ export class MemoriesListTabComponent implements OnInit {
   }
 
   onFocusEdit(memoryId: string): void {
-    void this.router.navigate(['/memories', memoryId]);
+    void this.router.navigate(['/memories', memoryId], { queryParamsHandling: 'preserve' });
   }
 
   onMemoryPinChange(event: { id: string; pinnedPersonalityId: string | null }): void {
@@ -381,7 +377,9 @@ export class MemoriesListTabComponent implements OnInit {
   }
 
   openMoveMenu(ids: string[]): void {
-    this.moveTargetIds.set(ids);
+    const eligibleIDs = ids.filter(id => this.view.memories().find(memory => memory.id === id)?.level !== 'thread');
+    if (eligibleIDs.length === 0) return;
+    this.moveTargetIds.set(eligibleIDs);
     this.moveMenuOpen.set(true);
   }
 
@@ -420,25 +418,12 @@ export class MemoriesListTabComponent implements OnInit {
   }
 
   onMoveSelected(): void {
+    if (this.isThreadView()) return;
     this.openMoveMenu([...this.selectedIds()]);
   }
+}
 
-  exportMemories(): void {
-    this.exporting.set(true);
-    this.memoryService.exportMemories().subscribe({
-      next: blob => {
-        const url = URL.createObjectURL(blob);
-        try {
-          const anchor = document.createElement('a');
-          anchor.href = url;
-          anchor.download = 'memories-export.zip';
-          anchor.click();
-        } finally {
-          URL.revokeObjectURL(url);
-          this.exporting.set(false);
-        }
-      },
-      error: () => this.exporting.set(false),
-    });
-  }
+function parsePage(value: unknown): number {
+  const page = Number.parseInt(String(value ?? ''), 10);
+  return Number.isSafeInteger(page) && page > 0 ? page : 1;
 }

@@ -4,7 +4,8 @@
   [class.memory-card--selected]="selected()"
   [class.memory-card--focused]="focused()"
   [class.memory-card--readonly]="readOnly()"
-  (click)="onCardActivate($event)">
+  (click)="onCardActivate($event)"
+>
   @if (!readOnly()) {
     <label class="memory-card__check" (click)="$event.stopPropagation()">
       <input
@@ -12,19 +13,15 @@
         class="memory-card__checkbox"
         [checked]="selected()"
         (change)="onToggleSelect($event)"
-        [attr.aria-label]="'Select memory'" />
+        [attr.aria-label]="'Select memory'"
+      />
     </label>
   }
 
   <div class="memory-card__avatar" aria-hidden="true">
     @if (pinnedPersonality(); as persona) {
-      <persona-accent-scope
-        [personality]="{ id: persona.id, name: persona.label, accent_color: persona.accent_color ?? null }">
-        <persona-cover
-          size="sm"
-          [name]="persona.label"
-          [imageUrl]="persona.cover_image_url"
-          [thumbnailCircle]="persona.thumbnail_circle" />
+      <persona-accent-scope [personality]="{ id: persona.id, name: persona.label, accent_color: persona.accent_color ?? null }">
+        <persona-cover size="sm" [name]="persona.label" [imageUrl]="persona.cover_image_url" [thumbnailCircle]="persona.thumbnail_circle" />
       </persona-accent-scope>
     } @else {
       <span class="memory-card__avatar-fallback" [attr.data-level]="memory().level">
@@ -43,7 +40,7 @@
         }
       </div>
       <div class="memory-card__top-right">
-        <span class="memory-card__date">{{ memory().updatedAt | date:'MMM d' }}</span>
+        <span class="memory-card__date">{{ memory().updatedAt | date: "MMM d" }}</span>
         @if (!readOnly()) {
           <div class="memory-card__menu-wrap">
             <button
@@ -51,22 +48,23 @@
               class="memory-card__menu-btn"
               aria-label="More actions"
               [attr.aria-expanded]="menuOpen()"
-              (click)="toggleMenu($event)">
+              (click)="toggleMenu($event)"
+            >
               ⋮
             </button>
             @if (menuOpen()) {
               <div class="memory-card__menu" role="menu">
                 <button type="button" role="menuitem" (click)="startEdit($event)">Edit</button>
-                <button type="button" role="menuitem" (click)="onMove($event)">Move</button>
+                @if (memory().level !== "thread") {
+                  <button type="button" role="menuitem" (click)="onMove($event)">Move</button>
+                }
                 <button type="button" role="menuitem" (click)="onStar($event)">
-                  {{ memory().starred ? 'Unstar' : 'Star' }}
+                  {{ memory().starred ? "Unstar" : "Star" }}
                 </button>
                 <button type="button" role="menuitem" (click)="onArchive($event)">
-                  {{ isArchivedView() ? 'Unarchive' : 'Archive' }}
+                  {{ isArchivedView() ? "Unarchive" : "Archive" }}
                 </button>
-                <button type="button" role="menuitem" class="memory-card__menu-danger" (click)="onDelete($event)">
-                  Delete
-                </button>
+                <button type="button" role="menuitem" class="memory-card__menu-danger" (click)="onDelete($event)">Delete</button>
               </div>
             }
           </div>
@@ -79,11 +77,7 @@
         @if (showPinControl()) {
           <label class="memory-card__pin-label">
             Pin to personality
-            <select
-              class="memory-card__pin-select"
-              [ngModel]="pinDraft()"
-              [disabled]="pinUpdating()"
-              (ngModelChange)="onPinChange($event)">
+            <select class="memory-card__pin-select" [ngModel]="pinDraft()" [disabled]="pinUpdating()" (ngModelChange)="onPinChange($event)">
               <option [ngValue]="null">All personalities</option>
               @for (personality of personalities(); track personality.id) {
                 <option [ngValue]="personality.id">{{ personality.label }}</option>
@@ -91,12 +85,7 @@
             </select>
           </label>
         }
-        <textarea
-          rows="3"
-          class="memory-card__textarea"
-          [ngModel]="draft()"
-          (ngModelChange)="draft.set($event)"
-        ></textarea>
+        <textarea rows="3" class="memory-card__textarea" [ngModel]="draft()" (ngModelChange)="draft.set($event)"></textarea>
         <div class="memory-card__editor-actions">
           <button type="button" class="memory-card__save" [disabled]="!canSave()" (click)="submitEdit($event)">Save</button>
           <button type="button" class="memory-card__cancel" (click)="cancelEdit($event)">Cancel</button>

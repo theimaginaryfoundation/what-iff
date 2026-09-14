@@ -119,14 +119,14 @@ export class MemoryMergeHistoryPageComponent implements OnInit {
   }
 
   openMemory(event: MemoryMergeEvent): void {
-    void this.router.navigate(['/memories', event.survivor_memory_id]);
+    void this.router.navigate(['/memories', event.survivor_memory_id], { queryParamsHandling: 'preserve' });
   }
 
   openSourceMemory(member: MemoryMergeSourceMember): void {
     if (!member.memory_id) {
       return;
     }
-    void this.router.navigate(['/memories', member.memory_id]);
+    void this.router.navigate(['/memories', member.memory_id], { queryParamsHandling: 'preserve' });
   }
 
   goToPage(page: number): void {

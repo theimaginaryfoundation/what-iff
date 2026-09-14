@@ -15,21 +15,19 @@ export class MemoriesPage {
     this.shell = new AppShell(page);
     this.emptyMessage = this.page.getByText('No memories found.');
     this.deleteDialogHeading = this.page.locator('#delete-memory-title');
-    this.previousPageButton = this.page.getByRole('button', {
+    this.pagination = this.page.getByRole('navigation', { name: 'Memory pages' });
+    this.previousPageButton = this.pagination.getByRole('button', {
       name: 'Previous',
     });
-    this.nextPageButton = this.page.getByRole('button', {
+    this.nextPageButton = this.pagination.getByRole('button', {
       name: 'Next',
     });
-    this.pageIndicator = this.page.getByText(/^Page \d+ of \d+$/);
+    this.pageIndicator = this.pagination.getByText(/^Page \d+ of \d+$/);
     this.heading = this.page.getByRole('heading', {
       name: 'Memory Manager',
       level: 1,
     });
-    this.subtitle = this.page.getByText(
-      'Review and correct saved context that informs your conversations.',
-      { exact: true },
-    );
+    this.subtitle = this.page.getByText('Review and correct saved context that informs your conversations.', { exact: true });
     this.header = this.page.locator('.memories-shell__header');
     this.headerCopy = this.page.locator('.memories-shell__copy');
     this.headerActions = this.page.locator('.memories-shell__tabs');
@@ -40,7 +38,8 @@ export class MemoriesPage {
     this.mainContent = this.page.locator('#main-content');
     this.filtersRow = this.page.locator('.memories-list__filters');
     this.statusTabs = this.page.getByRole('tablist', { name: 'Memory status' });
-    this.activeStatusTab = this.statusTabs.getByRole('tab', { name: 'Active', exact: true });
+    this.userStatusTab = this.statusTabs.getByRole('tab', { name: 'User', exact: true });
+    this.threadStatusTab = this.statusTabs.getByRole('tab', { name: 'Thread', exact: true });
     this.archivedStatusTab = this.statusTabs.getByRole('tab', { name: 'Archived', exact: true });
     this.summariesStatusTab = this.statusTabs.getByRole('tab', { name: 'Summaries', exact: true });
     this.sortSelect = this.page.locator('.memories-list__filters .memories-list__sort-wrap select');
@@ -110,7 +109,9 @@ export class MemoriesPage {
 
   readonly statusTabs: Locator;
 
-  readonly activeStatusTab: Locator;
+  readonly userStatusTab: Locator;
+
+  readonly threadStatusTab: Locator;
 
   readonly archivedStatusTab: Locator;
 
@@ -163,8 +164,12 @@ export class MemoriesPage {
     await this.archivedStatusTab.click();
   }
 
-  async showActive(): Promise<void> {
-    await this.activeStatusTab.click();
+  async showUser(): Promise<void> {
+    await this.userStatusTab.click();
+  }
+
+  async showThread(): Promise<void> {
+    await this.threadStatusTab.click();
   }
 
   async showSummaries(): Promise<void> {
@@ -279,10 +284,13 @@ export class MemoriesPage {
   async moveFromMenu(content: string, destination: string): Promise<void> {
     await this.openCardMenu(content);
     await this.page.getByRole('menuitem', { name: 'Move', exact: true }).click();
-    await this.page.getByRole('dialog', { name: 'Move memories' }).getByRole('button', {
-      name: destination,
-      exact: true,
-    }).click();
+    await this.page
+      .getByRole('dialog', { name: 'Move memories' })
+      .getByRole('button', {
+        name: destination,
+        exact: true,
+      })
+      .click();
   }
 
   async bulkArchive(): Promise<void> {
@@ -295,20 +303,22 @@ export class MemoriesPage {
 
   async bulkMove(destination: string): Promise<void> {
     const patched = this.page.waitForResponse(
-      r =>
-        r.request().method() === 'POST' &&
-        r.url().includes('/api/memory/batch/patch') &&
-        r.ok(),
+      r => r.request().method() === 'POST' && r.url().includes('/api/memory/batch/patch') && r.ok(),
     );
     await this.bulkBar.getByRole('button', { name: 'Move', exact: true }).click();
-    await this.page.getByRole('dialog', { name: 'Move memories' }).getByRole('button', {
-      name: destination,
-      exact: true,
-    }).click();
+    await this.page
+      .getByRole('dialog', { name: 'Move memories' })
+      .getByRole('button', {
+        name: destination,
+        exact: true,
+      })
+      .click();
     await patched;
   }
 
   // --- pagination ----------------------------------------------------------
+
+  readonly pagination: Locator;
 
   readonly previousPageButton: Locator;
 

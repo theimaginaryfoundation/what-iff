@@ -1166,7 +1166,6 @@ func (d *Datastore) GetMemory(ctx context.Context, userID, id uuid.UUID) (*model
 			memory.HasOwnerWith(
 				user.ID(userID),
 			),
-			memory.StatusEQ(memory.StatusActive),
 		).
 		WithChat().
 		Only(ctx)

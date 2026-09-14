@@ -181,7 +181,25 @@ describe('MemoryCardComponent', () => {
     expect(starSpy).toHaveBeenCalledWith({ id: 'm-1', starred: false });
   });
 
-  it('emits move and closes the menu from the Move menu item', () => {
+  it('hides Move for thread memories and refuses a direct move request', () => {
+    const moveSpy = vi.spyOn(component.move, 'emit');
+    const menuButton = fixture.nativeElement.querySelector('.memory-card__menu-btn') as HTMLButtonElement;
+    menuButton.click();
+    fixture.detectChanges();
+
+    const menuItems = Array.from(
+      fixture.nativeElement.querySelectorAll('.memory-card__menu button[role="menuitem"]') as NodeListOf<HTMLButtonElement>,
+    );
+    expect(menuItems.some(button => button.textContent?.trim() === 'Move')).toBe(false);
+    component.onMove();
+
+    expect(moveSpy).not.toHaveBeenCalled();
+    expect(component.menuOpen()).toBe(false);
+  });
+
+  it('emits move for user-scoped memories', () => {
+    fixture.componentRef.setInput('memory', makeVm({ level: 'global' }));
+    fixture.detectChanges();
     const moveSpy = vi.spyOn(component.move, 'emit');
     const menuButton = fixture.nativeElement.querySelector('.memory-card__menu-btn') as HTMLButtonElement;
     menuButton.click();
@@ -189,11 +207,10 @@ describe('MemoryCardComponent', () => {
 
     const moveItem = Array.from(
       fixture.nativeElement.querySelectorAll('.memory-card__menu button[role="menuitem"]') as NodeListOf<HTMLButtonElement>,
-    ).find(btn => btn.textContent?.trim() === 'Move');
+    ).find(button => button.textContent?.trim() === 'Move');
     moveItem!.click();
 
     expect(moveSpy).toHaveBeenCalledWith('m-1');
-    expect(component.menuOpen()).toBe(false);
   });
 
   it('labels the archive menu item Archive by default and emits archive', () => {
@@ -255,22 +272,16 @@ describe('MemoryCardComponent', () => {
 
     const checkbox = fixture.nativeElement.querySelector('.memory-card__checkbox') as HTMLInputElement;
     expect(checkbox.checked).toBe(true);
-    expect(fixture.nativeElement.querySelector('.memory-card')?.classList.contains('memory-card--selected')).toBe(
-      true,
-    );
+    expect(fixture.nativeElement.querySelector('.memory-card')?.classList.contains('memory-card--selected')).toBe(true);
   });
 
   it('reflects the focused input as a host class', () => {
-    expect(fixture.nativeElement.querySelector('.memory-card')?.classList.contains('memory-card--focused')).toBe(
-      false,
-    );
+    expect(fixture.nativeElement.querySelector('.memory-card')?.classList.contains('memory-card--focused')).toBe(false);
 
     fixture.componentRef.setInput('focused', true);
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.querySelector('.memory-card')?.classList.contains('memory-card--focused')).toBe(
-      true,
-    );
+    expect(fixture.nativeElement.querySelector('.memory-card')?.classList.contains('memory-card--focused')).toBe(true);
   });
 
   it('ignores card activation when the event target is an interactive descendant', () => {
@@ -311,9 +322,7 @@ describe('MemoryCardComponent', () => {
     fixture.detectChanges();
 
     expect(fixture.nativeElement.querySelector('.memory-card__editor')).toBeNull();
-    expect(fixture.nativeElement.querySelector('.memory-card__content')?.textContent?.trim()).toBe(
-      'Full memory content',
-    );
+    expect(fixture.nativeElement.querySelector('.memory-card__content')?.textContent?.trim()).toBe('Full memory content');
     expect(component.editing()).toBe(false);
   });
 
@@ -418,9 +427,7 @@ describe('MemoryCardComponent', () => {
   });
 
   it('shows the confidence percent and label in the footer when editable', () => {
-    expect(fixture.nativeElement.querySelector('.memory-card__footer')?.textContent).toContain(
-      '60% · Medium confidence',
-    );
+    expect(fixture.nativeElement.querySelector('.memory-card__footer')?.textContent).toContain('60% · Medium confidence');
   });
 
   it('shows the verified-count badge with its title when set, and hides it when null', () => {

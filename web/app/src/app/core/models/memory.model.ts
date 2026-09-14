@@ -28,6 +28,7 @@ export type MemorySort = 'created_desc' | 'created_asc' | 'updated_desc';
 export interface MemoryFilters {
   chat_id?: string;
   level?: 'global' | 'personality' | 'thread' | 'summary';
+  scope?: 'User' | 'Chat';
   type?: 'Context';
   starred?: boolean;
   pinned_personality_id?: string;
