@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/openai/openai-go/v3/responses"
@@ -31,6 +32,9 @@ func (a *Agent) dispatchToolUse(ctx context.Context, chatCtx *chatContext, use p
 	handler, ok := a.toolHandlers(chatCtx)[use.Name]
 	if !ok {
 		return "", nil, fmt.Errorf("unknown tool: %s", use.Name)
+	}
+	if !json.Valid(use.Input) {
+		return "", nil, fmt.Errorf("invalid arguments for tool %q: malformed JSON", use.Name)
 	}
 	return handler(ctx, use.Input)
 }
