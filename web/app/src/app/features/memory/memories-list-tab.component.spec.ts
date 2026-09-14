@@ -89,6 +89,7 @@ function makeViewService(
     setSelectedIds: vi.fn(),
     clearSelection: vi.fn(),
     selectAllAssociations: vi.fn(),
+    selectGlobalAssociations: vi.fn(),
     setSelectedPersonalityIds: vi.fn(),
     deleteOne: vi.fn(),
     deleteSelected: vi.fn(),
@@ -319,7 +320,7 @@ describe('MemoriesListTabComponent bootstrap / ngOnInit', () => {
     const host = fixture.nativeElement as HTMLElement;
     const select = host.querySelectorAll('.memories-list__filters select')[0] as HTMLSelectElement;
     const options = Array.from(select.querySelectorAll('option'));
-    expect(options.map(o => o.textContent?.trim())).toEqual(['All personas', PERSONALITY_A.name, PERSONALITY_B.name]);
+    expect(options.map(o => o.textContent?.trim())).toEqual(['All personas', 'Global / shared', PERSONALITY_A.name, PERSONALITY_B.name]);
   });
 
   it('falls back to an empty personality list on load error', async () => {
@@ -329,7 +330,7 @@ describe('MemoriesListTabComponent bootstrap / ngOnInit', () => {
     const host = fixture.nativeElement as HTMLElement;
     const select = host.querySelectorAll('.memories-list__filters select')[0] as HTMLSelectElement;
     const options = Array.from(select.querySelectorAll('option'));
-    expect(options.map(o => o.textContent?.trim())).toEqual(['All personas']);
+    expect(options.map(o => o.textContent?.trim())).toEqual(['All personas', 'Global / shared']);
   });
 
   it('applies a second route queryParams emission, overwriting the search box and clearing a stale date error', async () => {
@@ -394,6 +395,20 @@ describe('MemoriesListTabComponent filters wiring', () => {
 
     expect(view.selectAllAssociations).toHaveBeenCalled();
     expect(view.setSelectedPersonalityIds).not.toHaveBeenCalled();
+  });
+
+  it('selects global associations when "Global / shared" is chosen', async () => {
+    const { fixture, view } = await createComponent({ personalities: [PERSONALITY_A] });
+    const host = fixture.nativeElement as HTMLElement;
+    const select = host.querySelectorAll('.memories-list__filters select')[0] as HTMLSelectElement;
+
+    select.value = '__global__';
+    select.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+
+    expect(view.selectGlobalAssociations).toHaveBeenCalled();
+    expect(view.setSelectedPersonalityIds).not.toHaveBeenCalled();
+    expect(view.setFilters).toHaveBeenCalledWith({ personalityId: '__global__' });
   });
 
   it('applies a valid date range without an error', async () => {
