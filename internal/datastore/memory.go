@@ -105,7 +105,7 @@ func toMemoryModel(e *ent.Memory) *models.Memory {
 	}
 
 	// Add chat name if available
-	if e.Edges.Chat != nil {
+	if e.Edges.Chat != nil && e.Edges.Chat.ID != uuid.Nil {
 		memoryModel.ChatID = e.Edges.Chat.ID
 		memoryModel.ChatName = e.Edges.Chat.Name
 	}
@@ -554,6 +554,10 @@ func (d *Datastore) UpdateMemory(ctx context.Context, userID, memoryID uuid.UUID
 	switch {
 	case patch.SetChatID:
 		nextChatID = patch.ChatID
+	case patch.Level != nil && (*patch.Level == models.MemoryLevelGlobal || *patch.Level == models.MemoryLevelPersonality):
+		// Moving a legacy User-scoped memory must detach any stale chat edge.
+		// Chat-scoped memories are rejected by the batch preflight and UI.
+		nextChatID = nil
 	case existing.Edges.Chat != nil:
 		id := existing.Edges.Chat.ID
 		nextChatID = &id

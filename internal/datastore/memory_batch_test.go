@@ -174,6 +174,44 @@ func TestPatchMemoriesBatch_RejectsMoveThatIncludesThreadMemoryBeforeWriting(t *
 	require.Nil(t, reloaded.PinnedPersonalityID)
 }
 
+func TestUpdateMemory_MovingLegacyUserMemoryClearsStaleChat(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+	personalityID := uuid.New()
+	createTestPersonality(t, ds, personalityID, userID)
+	chatID := uuid.New()
+	createTestChat(t, ds, chatID, userID)
+
+	legacy, err := ds.dbClient.Memory.Create().
+		SetContent("legacy user memory").
+		SetScope(entmemory.ScopeUser).
+		SetOwnerID(userID).
+		SetChatID(chatID).
+		Save(ctx)
+	require.NoError(t, err)
+
+	personalityLevel := models.MemoryLevelPersonality
+	updated, err := ds.UpdateMemory(ctx, userID, legacy.ID, models.MemoryPatch{
+		Level:                  &personalityLevel,
+		SetPinnedPersonalityID: true,
+		PinnedPersonalityID:    &personalityID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, models.MemoryLevelPersonality, updated.Level)
+	require.Equal(t, uuid.Nil, updated.ChatID)
+	require.Equal(t, personalityID, *updated.PinnedPersonalityID)
+
+	hasChat, err := ds.dbClient.Memory.Query().
+		Where(entmemory.ID(legacy.ID), entmemory.HasChat()).
+		Exist(ctx)
+	require.NoError(t, err)
+	require.False(t, hasChat)
+}
+
 func TestPatchMemoriesBatch_AllOrNoneAbortsOnMissingButKeepsEarlierWrites(t *testing.T) {
 	ctx := context.Background()
 	ds, cleanup := newMemoryTestDatastore(t)

@@ -1,4 +1,11 @@
-import { DEFAULT_MEMORY_VIEW_FILTERS, normalizeDateRange, parseQueryParams, serializeFilters, toApiFilters } from './memory-filter.helpers';
+import {
+  DEFAULT_MEMORY_VIEW_FILTERS,
+  GLOBAL_PERSONALITY_FILTER,
+  normalizeDateRange,
+  parseQueryParams,
+  serializeFilters,
+  toApiFilters,
+} from './memory-filter.helpers';
 
 describe('memory-filter.helpers', () => {
   it('parses query params into filter model', () => {
@@ -193,6 +200,13 @@ describe('memory-filter.helpers', () => {
   it('maps scope=user to the User storage scope and scope=chat to thread level', () => {
     expect(toApiFilters({ ...DEFAULT_MEMORY_VIEW_FILTERS, scope: 'all' }).level).toBeUndefined();
     expect(toApiFilters({ ...DEFAULT_MEMORY_VIEW_FILTERS, scope: 'user' }).scope).toBe('User');
+  });
+
+  it('maps the Global persona filter to global_only without a personality id', () => {
+    const api = toApiFilters({ ...DEFAULT_MEMORY_VIEW_FILTERS, personalityId: GLOBAL_PERSONALITY_FILTER });
+
+    expect(api.global_only).toBe(true);
+    expect(api.pinned_personality_ids).toBeUndefined();
   });
 
   it('omits blank query/personalityId/chatId and unset dates from api filters', () => {
