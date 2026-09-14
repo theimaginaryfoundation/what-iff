@@ -97,6 +97,7 @@ describe('memory-filter.helpers', () => {
   });
 
   it('defaults status to active and serializes inactive', () => {
+    expect(parseQueryParams({}).scope).toBe('user');
     expect(parseQueryParams({}).status).toBe('active');
     expect(serializeFilters({ ...DEFAULT_MEMORY_VIEW_FILTERS, status: 'inactive' })['status']).toBe('inactive');
     expect(serializeFilters(DEFAULT_MEMORY_VIEW_FILTERS)['status']).toBeUndefined();
@@ -115,7 +116,7 @@ describe('memory-filter.helpers', () => {
       sort: 'bogus',
       status: 'bogus',
     });
-        expect(parsed.scope).toBe('all');
+    expect(parsed.scope).toBe('user');
     expect(parsed.level).toBe('all');
     expect(parsed.sort).toBe('created_desc');
     expect(parsed.status).toBe('active');

@@ -146,7 +146,7 @@ function resolveLevel(filters: MemoryViewFilters): Exclude<MemoryLevelFilter, 'a
 
 function normalizeScope(raw: unknown): MemoryScopeFilter {
   if (raw === 'user' || raw === 'chat') return raw;
-  return 'all';
+  return DEFAULT_MEMORY_VIEW_FILTERS.scope;
 }
 
 function normalizeLevel(raw: unknown): MemoryLevelFilter {

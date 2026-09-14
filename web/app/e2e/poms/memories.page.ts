@@ -15,13 +15,14 @@ export class MemoriesPage {
     this.shell = new AppShell(page);
     this.emptyMessage = this.page.getByText('No memories found.');
     this.deleteDialogHeading = this.page.locator('#delete-memory-title');
-    this.previousPageButton = this.page.getByRole('button', {
+    this.pagination = this.page.getByRole('navigation', { name: 'Memory pages' });
+    this.previousPageButton = this.pagination.getByRole('button', {
       name: 'Previous',
     });
-    this.nextPageButton = this.page.getByRole('button', {
+    this.nextPageButton = this.pagination.getByRole('button', {
       name: 'Next',
     });
-    this.pageIndicator = this.page.getByText(/^Page \d+ of \d+$/);
+    this.pageIndicator = this.pagination.getByText(/^Page \d+ of \d+$/);
     this.heading = this.page.getByRole('heading', {
       name: 'Memory Manager',
       level: 1,
@@ -38,6 +39,7 @@ export class MemoriesPage {
     this.filtersRow = this.page.locator('.memories-list__filters');
     this.statusTabs = this.page.getByRole('tablist', { name: 'Memory status' });
     this.userStatusTab = this.statusTabs.getByRole('tab', { name: 'User', exact: true });
+    this.threadStatusTab = this.statusTabs.getByRole('tab', { name: 'Thread', exact: true });
     this.archivedStatusTab = this.statusTabs.getByRole('tab', { name: 'Archived', exact: true });
     this.summariesStatusTab = this.statusTabs.getByRole('tab', { name: 'Summaries', exact: true });
     this.sortSelect = this.page.locator('.memories-list__filters .memories-list__sort-wrap select');
@@ -109,6 +111,8 @@ export class MemoriesPage {
 
   readonly userStatusTab: Locator;
 
+  readonly threadStatusTab: Locator;
+
   readonly archivedStatusTab: Locator;
 
   readonly summariesStatusTab: Locator;
@@ -162,6 +166,10 @@ export class MemoriesPage {
 
   async showUser(): Promise<void> {
     await this.userStatusTab.click();
+  }
+
+  async showThread(): Promise<void> {
+    await this.threadStatusTab.click();
   }
 
   async showSummaries(): Promise<void> {
@@ -309,6 +317,8 @@ export class MemoriesPage {
   }
 
   // --- pagination ----------------------------------------------------------
+
+  readonly pagination: Locator;
 
   readonly previousPageButton: Locator;
 
