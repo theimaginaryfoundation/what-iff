@@ -371,6 +371,7 @@ test('switches User, Thread, Archived, and Summaries views and updates the URL',
   await memoriesPage.showSummaries();
   await expect(userWithPersonality.page).toHaveURL(/status=summaries/);
   await expect(memoriesPage.summariesStatusTab).toHaveAttribute('aria-selected', 'true');
+  await expect(memoriesPage.threadStatusTab).toHaveAttribute('aria-selected', 'false');
 });
 
 test('deep-links directly to the Archived status tab via the query param', async ({ memoriesPage, seed, userWithPersonality }) => {
