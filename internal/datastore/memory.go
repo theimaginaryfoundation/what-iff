@@ -104,8 +104,8 @@ func toMemoryModel(e *ent.Memory) *models.Memory {
 		memoryModel.PinnedPersonalityID = e.PinnedPersonalityID
 	}
 
-	// Add chat name if available
-	if e.Edges.Chat != nil && e.Edges.Chat.ID != uuid.Nil {
+	// Add source chat details if available.
+	if e.Edges.Chat != nil {
 		memoryModel.ChatID = e.Edges.Chat.ID
 		memoryModel.ChatName = e.Edges.Chat.Name
 	}
@@ -307,16 +307,10 @@ func (d *Datastore) personalityOwnedByUser(ctx context.Context, tx *ent.Tx, user
 func validateLevelInput(input models.CreateMemoryInput) error {
 	switch input.Level {
 	case models.MemoryLevelGlobal:
-		if input.ChatID != nil && *input.ChatID != uuid.Nil {
-			return fmt.Errorf("global memory cannot include chat_id")
-		}
 		if input.PinnedPersonalityID != nil && *input.PinnedPersonalityID != uuid.Nil {
 			return fmt.Errorf("global memory cannot include pinned_personality_id")
 		}
 	case models.MemoryLevelPersonality:
-		if input.ChatID != nil && *input.ChatID != uuid.Nil {
-			return fmt.Errorf("personality memory cannot include chat_id")
-		}
 		if input.PinnedPersonalityID == nil || *input.PinnedPersonalityID == uuid.Nil {
 			return fmt.Errorf("personality memory requires pinned_personality_id")
 		}
@@ -554,10 +548,6 @@ func (d *Datastore) UpdateMemory(ctx context.Context, userID, memoryID uuid.UUID
 	switch {
 	case patch.SetChatID:
 		nextChatID = patch.ChatID
-	case patch.Level != nil && (*patch.Level == models.MemoryLevelGlobal || *patch.Level == models.MemoryLevelPersonality):
-		// Moving a legacy User-scoped memory must detach any stale chat edge.
-		// Chat-scoped memories are rejected by the batch preflight and UI.
-		nextChatID = nil
 	case existing.Edges.Chat != nil:
 		id := existing.Edges.Chat.ID
 		nextChatID = &id
