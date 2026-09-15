@@ -7,6 +7,19 @@
       </p>
     </div>
 
+    <div class="mb-4 border-b border-gray-200 dark:border-gray-700">
+      <nav class="-mb-px flex gap-6">
+        <button
+          (click)="setActiveTab('api-keys')"
+          class="border-b-2 px-1 py-3 text-sm font-medium"
+          [ngClass]="activeTab() === 'api-keys'
+            ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
+            : 'border-transparent text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'">
+          API Keys
+        </button>
+      </nav>
+    </div>
+
     @if (hasAccess()) {
       <div class="mb-4 border-b border-gray-200 dark:border-gray-700">
         <nav class="-mb-px flex gap-6">
@@ -30,6 +43,9 @@
       </div>
     }
 
+    @if (activeTab() === 'api-keys') {
+      <app-integrations-api-keys-tab></app-integrations-api-keys-tab>
+    }
     @if (hasAccess() && activeTab() === 'connectors') {
       <app-integrations-connectors-tab></app-integrations-connectors-tab>
     }
