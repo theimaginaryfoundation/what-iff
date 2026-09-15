@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"testing"
 
 	"github.com/openai/openai-go/v3"
@@ -8,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 	"go.uber.org/zap"
 )
 
@@ -25,6 +27,7 @@ func TestOpenAIChatCompletionsAdapter_SelectsProvider(t *testing.T) {
 	params := openai.ChatCompletionNewParams{Model: shared.ChatModel("mistral-large-latest")}
 
 	adapter, err := a.openAIChatCompletionsAdapter(
+		context.Background(),
 		&chatContext{modelProvider: "mistral", model: "mistral-large-latest"},
 		params,
 		nil,
@@ -34,6 +37,7 @@ func TestOpenAIChatCompletionsAdapter_SelectsProvider(t *testing.T) {
 	require.NotNil(t, adapter)
 
 	_, err = a.openAIChatCompletionsAdapter(
+		context.Background(),
 		&chatContext{modelProvider: "deepseek", model: "deepseek-chat"},
 		openai.ChatCompletionNewParams{Model: shared.ChatModel("deepseek-chat")},
 		nil,
@@ -42,6 +46,7 @@ func TestOpenAIChatCompletionsAdapter_SelectsProvider(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = a.openAIChatCompletionsAdapter(
+		context.Background(),
 		&chatContext{modelProvider: "qwen", model: "qwen-plus"},
 		openai.ChatCompletionNewParams{Model: shared.ChatModel("qwen-plus")},
 		nil,
@@ -50,6 +55,7 @@ func TestOpenAIChatCompletionsAdapter_SelectsProvider(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = a.openAIChatCompletionsAdapter(
+		context.Background(),
 		&chatContext{modelProvider: "xiaomi", model: "mimo-v2.5-pro"},
 		openai.ChatCompletionNewParams{Model: shared.ChatModel("mimo-v2.5-pro")},
 		nil,
@@ -58,6 +64,7 @@ func TestOpenAIChatCompletionsAdapter_SelectsProvider(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = a.openAIChatCompletionsAdapter(
+		context.Background(),
 		&chatContext{modelProvider: string(models.ModelProviderGoogle), model: "gemini-3.5"},
 		openai.ChatCompletionNewParams{Model: shared.ChatModel("gemini-3.5")},
 		nil,
@@ -69,12 +76,13 @@ func TestOpenAIChatCompletionsAdapter_SelectsProvider(t *testing.T) {
 func TestOpenAIChatCompletionsAdapter_MissingAPIKey(t *testing.T) {
 	t.Parallel()
 
-	a := &Agent{logger: zap.NewNop()}
+	a := &Agent{logger: zap.NewNop(), providerKeys: providerkeys.NewRegistry(nil, providerkeys.DeploymentKeys{})}
 	_, err := a.openAIChatCompletionsAdapter(
+		context.Background(),
 		&chatContext{modelProvider: "mistral", model: "mistral-large-latest"},
 		openai.ChatCompletionNewParams{Model: shared.ChatModel("mistral-large-latest")},
 		nil,
 		nil,
 	)
-	require.ErrorContains(t, err, "MISTRAL_API_KEY")
+	require.ErrorContains(t, err, "no Mistral API key is configured for this account")
 }
