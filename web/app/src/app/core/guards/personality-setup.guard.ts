@@ -12,7 +12,9 @@ const EXEMPT_PATH_PREFIXES = [
   '/subscription',
   '/billing',
   '/usage',
-  // Account restoration must be available before a user has a personality.
+  // Import/restore must be available before a user has a personality (fresh users
+  // may want to restore an export or import history first). /experimental → /data.
+  '/data',
   '/experimental',
 ];
 

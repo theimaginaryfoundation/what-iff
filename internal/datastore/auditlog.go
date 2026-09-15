@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/ent/auditlog"
 	"github.com/theimaginaryfoundation/what-iff/internal/apicontext"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
@@ -17,7 +19,12 @@ const (
 	auditCategoryAccountBackup = "account_backup"
 	auditCategoryAccountExport = "account_export"
 	auditCategoryMemoryPack    = "memory_pack"
+	auditCategoryChatImport    = "chat_import"
 )
+
+// accountActivityCategories are the audit categories surfaced on the Import & Export screen's
+// activity log — the user-facing import/export flows.
+var accountActivityCategories = []string{auditCategoryAccountExport, auditCategoryChatImport}
 
 type auditEntry struct {
 	Category      string
@@ -77,6 +84,50 @@ func (d *Datastore) auditMemoryPackImport(ctx context.Context, userID uuid.UUID,
 		SubjectUserID: &sub,
 		Metadata:      meta,
 	})
+}
+
+// AuditChatImport records a ChatGPT/Claude conversation import so it shows on the activity log
+// alongside account export/import. Best-effort, like the other audit writes.
+func (d *Datastore) AuditChatImport(ctx context.Context, userID uuid.UUID, message string, metadata map[string]any) {
+	subject := userID
+	d.writeAuditLog(ctx, auditEntry{
+		Category:      auditCategoryChatImport,
+		Action:        "import",
+		Message:       message,
+		SubjectUserID: &subject,
+		Metadata:      metadata,
+	})
+}
+
+// ListAccountActivity returns the user's recent import/export audit entries, newest first.
+func (d *Datastore) ListAccountActivity(ctx context.Context, userID uuid.UUID, limit int) ([]models.AccountActivityEntry, error) {
+	if d == nil || d.dbClient == nil {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+	rows, err := d.dbClient.AuditLog.Query().
+		Where(
+			auditlog.SubjectUserID(userID),
+			auditlog.CategoryIn(accountActivityCategories...),
+		).
+		Order(auditlog.ByOccurredAt(sql.OrderDesc())).
+		Limit(limit).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.AccountActivityEntry, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, models.AccountActivityEntry{
+			OccurredAt: r.OccurredAt,
+			Category:   r.Category,
+			Action:     r.Action,
+			Message:    r.Message,
+		})
+	}
+	return out, nil
 }
 
 // AuditAccountExport records an account-portability action without storing archive URLs or contents.

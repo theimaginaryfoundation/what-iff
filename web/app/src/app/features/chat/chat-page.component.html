@@ -217,7 +217,6 @@
         class="chat-page__thread-manager"
         [activeThreadId]="session.thread()?.id ?? null"
         [personalities]="personalities()"
-        [importTrigger]="importTrigger()"
         (selectThread)="openThread($event)"
         (newThread)="startConversation()"
       />
