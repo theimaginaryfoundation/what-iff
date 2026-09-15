@@ -107,9 +107,6 @@ func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, us
 	if err := a.requireProviderKey(ctx, models.ModelProviderAnthropic, archivalClaudeModel); err != nil {
 		return err
 	}
-	if a.ClaudeProvider == nil {
-		return fmt.Errorf("ClaudeProvider is nil")
-	}
 
 	prompt := memoryWritePromptText()
 

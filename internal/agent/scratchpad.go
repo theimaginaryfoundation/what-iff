@@ -165,9 +165,6 @@ func (a *Agent) updateScratchpadClaude(ctx context.Context, userID uuid.UUID, ch
 	if err := a.requireProviderKey(ctx, models.ModelProviderAnthropic, archivalClaudeModel); err != nil {
 		return ScratchpadUpdate{}, err
 	}
-	if a.ClaudeProvider == nil {
-		return ScratchpadUpdate{}, fmt.Errorf("ClaudeProvider is nil")
-	}
 	modelContext.Append(provider.SegmentKindUserMessage, provider.RoleUser, prompt, false)
 
 	params := modelContext.BuildClaudeParams(archivalClaudeModel)

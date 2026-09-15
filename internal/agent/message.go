@@ -309,50 +309,48 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 	// OpenAIProvider (set in the struct literal above).
 	a.recallTool = tools.NewRecallTool(ds, &oaiClient, newRecallDistiller(a), a.fileStore, logger)
 
-	if anthropicKey != "" {
-		a.ClaudeProvider = provider.NewClaudeProvider(anthropicKey, tel, cfg.HTTPClient)
-	} else {
-		logger.Info("ANTHROPIC_API_KEY not set; Claude models will be unavailable")
-	}
+	// Every provider client is constructed, whether or not a credential exists
+	// for it at startup.
+	//
+	// Construction used to be conditional, which made "does this process have
+	// an environment variable" and "can this caller use this provider" the same
+	// question — answered once, at boot, for everyone. Once keys belong to
+	// accounts those are different questions: two people on one instance can
+	// differ, and a client that was never built cannot serve either of them.
+	//
+	// The key passed here is only the deployment-level default. Whether a given
+	// request may use the provider is decided by requireProviderKey, and which
+	// credential it carries is decided per request at the transport.
+	a.ClaudeProvider = provider.NewClaudeProvider(anthropicKey, tel, cfg.HTTPClient)
 
-	if cfg.ZAIKey != "" {
-		zaiBaseURL := cfg.ZAIBaseURL
-		if zaiBaseURL == "" {
-			zaiBaseURL = provider.DefaultZAIBaseURL
+	zaiBaseURL := cfg.ZAIBaseURL
+	if zaiBaseURL == "" {
+		zaiBaseURL = provider.DefaultZAIBaseURL
+	}
+	a.ZAIProvider = provider.NewClaudeProviderWithBaseURL(cfg.ZAIKey, zaiBaseURL, tel, cfg.HTTPClient)
+
+	a.GeminiProvider = provider.NewGeminiProvider(cfg.GeminiKey, cfg.GeminiBaseURL, tel, cfg.HTTPClient)
+	a.MistralProvider = provider.NewMistralProvider(cfg.MistralKey, cfg.MistralBaseURL, tel, cfg.HTTPClient)
+	a.DeepSeekProvider = provider.NewDeepSeekProvider(cfg.DeepSeekKey, cfg.DeepSeekBaseURL, tel, cfg.HTTPClient)
+	a.QwenProvider = provider.NewQwenProvider(cfg.QwenKey, cfg.QwenBaseURL, tel, cfg.HTTPClient)
+	a.XiaomiProvider = provider.NewXiaomiProvider(cfg.XiaomiKey, cfg.XiaomiBaseURL, tel, cfg.HTTPClient)
+
+	// Report which providers have no deployment-level default. This is not the
+	// same as "unavailable" any more — an account supplying its own key makes
+	// the provider usable for that account — so it is phrased as what it is.
+	for name, key := range map[string]string{
+		"ANTHROPIC_API_KEY": anthropicKey,
+		"ZAI_API_KEY":       cfg.ZAIKey,
+		"GEMINI_API_KEY":    cfg.GeminiKey,
+		"MISTRAL_API_KEY":   cfg.MistralKey,
+		"DEEPSEEK_API_KEY":  cfg.DeepSeekKey,
+		"QWEN_API_KEY":      cfg.QwenKey,
+		"XIAOMI_API_KEY":    cfg.XiaomiKey,
+	} {
+		if key == "" {
+			logger.Info("no deployment default for provider credential; accounts may still supply their own",
+				zap.String("env_var", name))
 		}
-		a.ZAIProvider = provider.NewClaudeProviderWithBaseURL(cfg.ZAIKey, zaiBaseURL, tel, cfg.HTTPClient)
-	} else {
-		logger.Info("ZAI_API_KEY not set; z.ai GLM models will be unavailable")
-	}
-
-	if cfg.GeminiKey != "" {
-		a.GeminiProvider = provider.NewGeminiProvider(cfg.GeminiKey, cfg.GeminiBaseURL, tel, cfg.HTTPClient)
-	} else {
-		logger.Info("GEMINI_API_KEY not set; Gemini models will be unavailable")
-	}
-
-	if cfg.MistralKey != "" {
-		a.MistralProvider = provider.NewMistralProvider(cfg.MistralKey, cfg.MistralBaseURL, tel, cfg.HTTPClient)
-	} else {
-		logger.Info("MISTRAL_API_KEY not set; Mistral models will be unavailable")
-	}
-
-	if cfg.DeepSeekKey != "" {
-		a.DeepSeekProvider = provider.NewDeepSeekProvider(cfg.DeepSeekKey, cfg.DeepSeekBaseURL, tel, cfg.HTTPClient)
-	} else {
-		logger.Info("DEEPSEEK_API_KEY not set; DeepSeek models will be unavailable")
-	}
-
-	if cfg.QwenKey != "" {
-		a.QwenProvider = provider.NewQwenProvider(cfg.QwenKey, cfg.QwenBaseURL, tel, cfg.HTTPClient)
-	} else {
-		logger.Info("QWEN_API_KEY not set; Qwen models will be unavailable")
-	}
-
-	if cfg.XiaomiKey != "" {
-		a.XiaomiProvider = provider.NewXiaomiProvider(cfg.XiaomiKey, cfg.XiaomiBaseURL, tel, cfg.HTTPClient)
-	} else {
-		logger.Info("XIAOMI_API_KEY not set; Xiaomi MiMo models will be unavailable")
 	}
 
 	if a.localLLM {
@@ -1139,16 +1137,10 @@ func (a *Agent) claudeProviderForModel(ctx context.Context, chatCtx *chatContext
 		if err := a.requireProviderKey(ctx, models.ModelProviderZAI, chatCtx.model); err != nil {
 			return nil, false, err
 		}
-		if a.ZAIProvider == nil {
-			return nil, false, fmt.Errorf("z.ai model %q requested but the z.ai provider is unavailable", chatCtx.model)
-		}
 		return a.ZAIProvider, false, nil
 	}
 	if err := a.requireProviderKey(ctx, models.ModelProviderAnthropic, chatCtx.model); err != nil {
 		return nil, false, err
-	}
-	if a.ClaudeProvider == nil {
-		return nil, false, fmt.Errorf("Claude model %q requested but the Anthropic provider is unavailable", chatCtx.model)
 	}
 	return a.ClaudeProvider, true, nil
 }
@@ -1193,9 +1185,6 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 func (a *Agent) generateAssistantForMessageGemini(ctx context.Context, userID uuid.UUID, chatJob *models.Job, chatMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext) (*models.ChatMessage, *provider.GenerateResponse, error) {
 	if err := a.requireProviderKey(ctx, models.ModelProviderGoogle, chatCtx.model); err != nil {
 		return nil, nil, err
-	}
-	if a.GeminiProvider == nil {
-		return nil, nil, fmt.Errorf("Gemini model %q requested but the Gemini provider is unavailable", chatCtx.model)
 	}
 
 	geminiParams := modelContext.BuildGeminiParams(chatCtx.model)
@@ -1308,32 +1297,20 @@ func (a *Agent) openAIChatCompletionsAdapter(ctx context.Context, chatCtx *chatC
 		if err := a.requireProviderKey(ctx, models.ModelProviderMistral, chatCtx.model); err != nil {
 			return nil, err
 		}
-		if a.MistralProvider == nil {
-			return nil, fmt.Errorf("Mistral model %q requested but the Mistral provider is unavailable", chatCtx.model)
-		}
 		return provider.NewMistralAdapter(a.MistralProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderDeepSeek:
 		if err := a.requireProviderKey(ctx, models.ModelProviderDeepSeek, chatCtx.model); err != nil {
 			return nil, err
-		}
-		if a.DeepSeekProvider == nil {
-			return nil, fmt.Errorf("DeepSeek model %q requested but the DeepSeek provider is unavailable", chatCtx.model)
 		}
 		return provider.NewDeepSeekAdapter(a.DeepSeekProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderQwen:
 		if err := a.requireProviderKey(ctx, models.ModelProviderQwen, chatCtx.model); err != nil {
 			return nil, err
 		}
-		if a.QwenProvider == nil {
-			return nil, fmt.Errorf("Qwen model %q requested but the Qwen provider is unavailable", chatCtx.model)
-		}
 		return provider.NewQwenAdapter(a.QwenProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderXiaomi:
 		if err := a.requireProviderKey(ctx, models.ModelProviderXiaomi, chatCtx.model); err != nil {
 			return nil, err
-		}
-		if a.XiaomiProvider == nil {
-			return nil, fmt.Errorf("Xiaomi model %q requested but the Xiaomi provider is unavailable", chatCtx.model)
 		}
 		return provider.NewXiaomiAdapter(a.XiaomiProvider, params, functionTools, disabledTools), nil
 	default:
