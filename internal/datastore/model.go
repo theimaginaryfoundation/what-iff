@@ -162,6 +162,18 @@ func (d *Datastore) ListModelsDefault(ctx context.Context) ([]*models.Model, err
 // The gated set lives in models.IsExperimentalModelRecord (currently empty —
 // graduated vendors are generally available; add new dogfood vendors there).
 func (d *Datastore) ListModelsForUser(ctx context.Context, userID uuid.UUID) ([]*models.Model, error) {
+	return d.listModelsForUser(ctx, userID, false)
+}
+
+// ListAllModelsForUser is ListModelsForUser without the hide filter, for the
+// screen where hidden models are managed. That screen has to name what it is
+// offering to unhide, and a filtered list would leave it showing identifiers
+// for models it cannot describe.
+func (d *Datastore) ListAllModelsForUser(ctx context.Context, userID uuid.UUID) ([]*models.Model, error) {
+	return d.listModelsForUser(ctx, userID, true)
+}
+
+func (d *Datastore) listModelsForUser(ctx context.Context, userID uuid.UUID, includeHidden bool) ([]*models.Model, error) {
 	all, err := d.ListModels(ctx)
 	if err != nil {
 		return nil, err
@@ -176,6 +188,9 @@ func (d *Datastore) ListModelsForUser(ctx context.Context, userID uuid.UUID) ([]
 	}
 	if !u.EnableExperimentalModels {
 		all = filterVisibleModels(all, false)
+	}
+	if includeHidden {
+		return all, nil
 	}
 	return d.filterHiddenModels(ctx, userID, all), nil
 }

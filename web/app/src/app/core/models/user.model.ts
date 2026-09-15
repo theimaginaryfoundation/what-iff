@@ -76,4 +76,13 @@ export interface UserPreferences {
    * the list wholesale, so send the full set and use `[]` to clear all favorites.
    */
   favorite_model_ids?: string[];
+  /**
+   * Model IDs hidden from this account's model picker. Same contract as
+   * `favorite_model_ids`: omit to leave the stored list alone, send the full
+   * set to replace it, `[]` to unhide everything.
+   *
+   * Visibility only — a hidden model still runs when named directly by an
+   * existing chat, an agent job or the API.
+   */
+  hidden_model_ids?: string[];
 }
