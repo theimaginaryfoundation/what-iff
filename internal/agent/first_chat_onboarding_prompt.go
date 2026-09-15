@@ -7,7 +7,19 @@ import (
 	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 )
 
-const FirstChatGreetingModelName = "claude-haiku-4-5"
+// FirstChatGreetingModelName is the fixed model used to write the welcome
+// message in a user's very first chat.
+//
+// It must name an OpenAI model. The greeting fires automatically on account
+// setup, before the user has chosen anything, so it cannot depend on a
+// provider the account may not have configured — pointing it at Anthropic
+// made the first thing a new self-hosted user saw an "Anthropic API key is
+// not configured" error. OpenAI is the one provider chat already requires,
+// so an OpenAI model is the only choice that is always satisfiable.
+//
+// This must also be a model seeded in models.AvailableModels, because the
+// greeting is resolved through the model catalog by name.
+const FirstChatGreetingModelName = "gpt-5-mini"
 
 // BuildFirstChatGreetingPrompt creates the injected first-chat prompt used to
 // produce an in-character welcome message for new users.
