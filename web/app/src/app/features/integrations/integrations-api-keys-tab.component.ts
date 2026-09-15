@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 
 import { ProviderKeyStatus } from '../../core/models/provider-key.model';
 import { ProviderKeyService } from '../../core/services/provider-key.service';
@@ -28,7 +29,7 @@ const KEY_HELP_URLS: Record<string, string> = {
 @Component({
   selector: 'app-integrations-api-keys-tab',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, RouterLink],
   templateUrl: './integrations-api-keys-tab.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
 })
