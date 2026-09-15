@@ -54,6 +54,9 @@ export class IntegrationsModelsTabComponent implements OnInit {
    */
   canHide = computed(() => this.shownCount() > 1);
 
+  /** True when exactly one model is left visible, so the hint explains why it is locked. */
+  atMinimum = computed(() => this.shownCount() === 1);
+
   ngOnInit(): void {
     this.load();
   }
@@ -79,8 +82,13 @@ export class IntegrationsModelsTabComponent implements OnInit {
   }
 
   toggle(row: ModelRow): void {
+    // Defence only. The last visible row's checkbox is disabled, so reaching
+    // this is a programmatic call rather than something a user can click. It
+    // deliberately does not raise an error message: the constraint is a
+    // permanent property of being at one visible model, and rendering it as an
+    // error left a red banner sitting there for as long as the user stayed at
+    // one — clearable only by going back up to two.
     if (row.shown && !this.canHide()) {
-      this.errorMessage.set('Keep at least one model visible.');
       return;
     }
     const next = this.rows().map(r => (r.model.id === row.model.id ? { ...r, shown: !r.shown } : r));
