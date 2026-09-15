@@ -2,6 +2,7 @@ import type { MockedObject } from "vitest";
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient, withXhr } from '@angular/common/http';
+import { Router } from '@angular/router';
 import { of } from 'rxjs';
 
 import { Chat } from '../../../../core/models/chat.model';
@@ -30,8 +31,10 @@ describe('ThreadListPanelComponent', () => {
     let service: ThreadListService;
     let chatService: ChatServiceMock;
     let confirmationSpy: ConfirmationServiceMock;
+    let router: { navigate: ReturnType<typeof vi.fn> };
 
     beforeEach(async () => {
+        router = { navigate: vi.fn().mockName('Router.navigate') };
         chatService = {
             listChats: vi.fn().mockName("ChatService.listChats"),
             listAllChats: vi.fn().mockName("ChatService.listAllChats"),
@@ -72,6 +75,7 @@ describe('ThreadListPanelComponent', () => {
                 ThreadListService,
                 { provide: ChatService, useValue: chatService },
                 { provide: ConfirmationService, useValue: confirmationSpy },
+                { provide: Router, useValue: router },
             ],
         }).compileComponents();
 
@@ -109,6 +113,14 @@ describe('ThreadListPanelComponent', () => {
         const lastArgs = vi.mocked(chatService.listAllChats).mock.lastCall;
         expect(lastArgs![1]).toEqual(expect.objectContaining({ archived: true }));
         expect(fixture.nativeElement.textContent).toContain('RESTORE?');
+    });
+
+    it('navigates to Import & Export when Import is clicked', () => {
+        const importButton = fixture.nativeElement.querySelector('.panel__import-btn') as HTMLButtonElement;
+        importButton.click();
+
+        expect(router.navigate).toHaveBeenCalledWith(['/data']);
+        expect(fixture.nativeElement.querySelector('app-chat-import-modal')).toBeNull();
     });
 
     it('adds and removes tag chips from the search dropdown', () => {

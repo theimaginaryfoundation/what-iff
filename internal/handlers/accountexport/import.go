@@ -243,6 +243,9 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, sele
 							}
 						}
 					}
+					if h.importConversationSummaryMemories(ctx, userID, parsed, chatIDs) {
+						result.Warnings = append(result.Warnings, "Some thread summaries could not be indexed for search.")
+					}
 				}
 			}
 		}
@@ -341,6 +344,58 @@ func accountImportCounts(result models.AccountImportResult) map[string]int {
 		"memories_imported":      result.Memories.ImportedCount,
 		"memories_skipped":       result.Memories.DuplicateCount,
 	}
+}
+
+// importConversationSummaryMemories restores exported checkpoint summaries as internal Summary
+// memories so find_context can retrieve them after an account import. The Chat checkpoint summary
+// is already durable and authoritative; this indexing work is deliberately best-effort, matching
+// live checkpoint creation and thread rehydration.
+//
+// It returns true when at least one eligible summary could not be indexed.
+func (h *Handler) importConversationSummaryMemories(ctx context.Context, userID uuid.UUID, parsed []exporter.ParsedConversation, chatIDs map[uuid.UUID]uuid.UUID) bool {
+	hadFailure := false
+	for _, candidate := range summaryImportCandidates(parsed, chatIDs) {
+		embeddingVector, err := h.createEmbedding(ctx, candidate.summary)
+		if err != nil {
+			h.logger.Warn("account import: summary embedding failed",
+				zap.String("chat_id", candidate.chatID.String()),
+				zap.Error(err))
+			hadFailure = true
+			continue
+		}
+		if err := h.ds.UpsertChatSummaryMemory(ctx, userID, candidate.chatID, candidate.summary, embeddingVector); err != nil {
+			h.logger.Warn("account import: summary memory upsert failed",
+				zap.String("chat_id", candidate.chatID.String()),
+				zap.Error(err))
+			hadFailure = true
+		}
+	}
+	return hadFailure
+}
+
+type summaryImportCandidate struct {
+	chatID  uuid.UUID
+	summary string
+}
+
+// summaryImportCandidates selects only non-empty exported summaries whose source conversation was
+// resolved to a destination chat. Invalid source IDs and deduped native chats with no import hash
+// have no safe mapping and are ignored.
+func summaryImportCandidates(parsed []exporter.ParsedConversation, chatIDs map[uuid.UUID]uuid.UUID) []summaryImportCandidate {
+	candidates := make([]summaryImportCandidate, 0)
+	for _, conversation := range parsed {
+		sourceID, err := uuid.Parse(conversation.UUID)
+		if err != nil {
+			continue
+		}
+		chatID, found := chatIDs[sourceID]
+		summary := strings.TrimSpace(conversation.WhatiffCheckpointSummary)
+		if !found || summary == "" {
+			continue
+		}
+		candidates = append(candidates, summaryImportCandidate{chatID: chatID, summary: summary})
+	}
+	return candidates
 }
 
 func (h *Handler) writeAccountImportProgress(ctx context.Context, userID, jobID uuid.UUID, progress models.AccountImportProgress) {

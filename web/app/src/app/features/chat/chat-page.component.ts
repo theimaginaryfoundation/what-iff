@@ -149,8 +149,6 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     return null;
   });
   readonly selectedToolCall = signal<ToolCall | null>(null);
-  /** Incremented when an `import` query param arrives (e.g. from the sidebar), to open the import modal in the thread panel. */
-  readonly importTrigger = signal(0);
   readonly checkpointMessageId = signal<string | null>(null);
   readonly personalityExpressions = signal<readonly PersonalityExpression[]>([]);
   readonly copyFeedback = signal<string | null>(null);
@@ -463,17 +461,6 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     this.subscriptions.add(
       this.route.queryParamMap.subscribe(params => {
         this.checkpointMessageId.set(params.get('checkpoint')?.trim() || null);
-        // Open the import modal when navigated here with ?import=… (cross-screen entry from the sidebar).
-        if (params.get('import')?.trim()) {
-          this.importTrigger.update(n => n + 1);
-          void this.router.navigate([], {
-            relativeTo: this.route,
-            queryParams: { import: null },
-            queryParamsHandling: 'merge',
-            replaceUrl: true,
-          });
-          return;
-        }
         const galleryImageId = params.get('galleryImageId')?.trim();
         const welcomeFlag = params.get('welcome')?.trim().toLowerCase() === 'true';
         const routeChatId = this.route.snapshot.paramMap.get('id')?.trim();

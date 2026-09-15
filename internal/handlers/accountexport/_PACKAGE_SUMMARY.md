@@ -33,11 +33,11 @@ Authenticated user account portability: ZIP export by email and additive ZIP imp
 - **Round-trip is idempotent against native data.** Importing an export back into the account it came from does not duplicate threads or memories: each conversation carries its source chat id (`ImportConversation.SourceID`), and the chat dedup skips when a chat with that id already exists for the user even though the native chat has no `import_hash`. Memories the target user already owns keep their original id (via `MemoryIDsOwnedByUser`) so the importer's id-dedup skips them; memories owned elsewhere are still namespaced to `uuid.NewSHA1(targetUser, sourceID)` to keep cross-account restores free of primary-key collisions.
 - Duplicate names in the nested memory ZIP (including names that collide after personality-ID remapping) are rejected instead of being merged.
 - Memory-import progress includes content-free invalid-record reasons; detailed logs identify ZIP entry, line, reason, and a parsed ID when available.
-- Exported checkpoint summaries make threads immediately resumable (`ready` and unarchived); summary-less threads stay archived for lazy rehydration.
+- Exported checkpoint summaries make threads immediately resumable (`ready` and unarchived) and are best-effort indexed as internal Summary-scope memories for `find_context`; summary-less threads stay archived for lazy rehydration.
 - Account-import uploads are staged to temporary files, restored by a bounded detached worker, and deleted regardless of terminal outcome; `AccountImportProgress` carries phases and the terminal result for polling.
 
 ## Testing
-- `import_test.go` covers bounded ZIP reads, archive-entry limits, duplicate nested-memory entries, and reference remapping.
+- `import_test.go` covers bounded ZIP reads, archive-entry limits, duplicate nested-memory entries, reference remapping, and best-effort Summary-scope indexing candidates.
 - `internal/handlers/chat/accountexport_roundtrip_test.go` verifies exported conversations round-trip through the existing importer.
 
 ## Related

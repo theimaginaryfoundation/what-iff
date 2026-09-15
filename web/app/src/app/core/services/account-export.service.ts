@@ -1,9 +1,11 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, catchError, throwError } from 'rxjs';
 
 import { environment } from '@environments/environment';
 import { Job } from '../models/job.model';
+
+export const ACTIVE_ACCOUNT_IMPORT_JOB_STORAGE_KEY = 'whatiff.active-account-import-job';
 
 export interface AccountImportResult {
   conversations?: { imported: number; skipped: number; errors?: string[] };
@@ -57,6 +59,8 @@ export interface AccountActivityEntry {
 export class AccountExportService {
   private readonly http = inject(HttpClient);
   private readonly apiUrl = `${environment.apiUrl}/account/export`;
+  /** The active server-side restore job, retained for this browser tab across route changes. */
+  readonly activeImportJobId = signal<string | null>(this.readActiveImportJob());
 
   enqueue(): Observable<Job> {
     return this.http.post<Job>(this.apiUrl, {}).pipe(catchError(this.handleError));
@@ -79,6 +83,24 @@ export class AccountExportService {
     return this.http.get<Job>(`${environment.apiUrl}/account/import/${id}`).pipe(catchError(this.handleError));
   }
 
+  trackActiveImport(jobID: string): void {
+    this.activeImportJobId.set(jobID);
+    try {
+      sessionStorage.setItem(ACTIVE_ACCOUNT_IMPORT_JOB_STORAGE_KEY, jobID);
+    } catch {
+      // Storage can be unavailable in privacy-restricted browsers; the live service state still survives route changes.
+    }
+  }
+
+  clearActiveImport(): void {
+    this.activeImportJobId.set(null);
+    try {
+      sessionStorage.removeItem(ACTIVE_ACCOUNT_IMPORT_JOB_STORAGE_KEY);
+    } catch {
+      // Nothing else to clean up when browser storage is unavailable.
+    }
+  }
+
   /** Recent import/export activity (audit log), newest first. */
   getActivity(): Observable<AccountActivityEntry[]> {
     return this.http.get<AccountActivityEntry[]>(`${environment.apiUrl}/account/activity`).pipe(catchError(this.handleError));
@@ -87,5 +109,13 @@ export class AccountExportService {
   private handleError(error: any): Observable<never> {
     const message = error.error?.error || error.message || 'Unable to request an account export.';
     return throwError(() => new Error(message));
+  }
+
+  private readActiveImportJob(): string | null {
+    try {
+      return sessionStorage.getItem(ACTIVE_ACCOUNT_IMPORT_JOB_STORAGE_KEY);
+    } catch {
+      return null;
+    }
   }
 }

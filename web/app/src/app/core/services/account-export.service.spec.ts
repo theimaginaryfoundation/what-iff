@@ -4,13 +4,14 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideZonelessChangeDetection } from '@angular/core';
 
 import { environment } from '@environments/environment';
-import { AccountExportService } from './account-export.service';
+import { ACTIVE_ACCOUNT_IMPORT_JOB_STORAGE_KEY, AccountExportService } from './account-export.service';
 
 describe('AccountExportService', () => {
   let service: AccountExportService;
   let http: HttpTestingController;
 
   beforeEach(() => {
+    sessionStorage.clear();
     TestBed.configureTestingModule({
       providers: [AccountExportService, provideZonelessChangeDetection(), provideHttpClient(), provideHttpClientTesting()],
     });
@@ -18,7 +19,10 @@ describe('AccountExportService', () => {
     http = TestBed.inject(HttpTestingController);
   });
 
-  afterEach(() => http.verify());
+  afterEach(() => {
+    http.verify();
+    sessionStorage.clear();
+  });
 
   it('enqueues an account export', () => {
     service.enqueue().subscribe();
@@ -72,5 +76,17 @@ describe('AccountExportService', () => {
       id: 'job-2', user_id: 'user-1', job_type: 'account_import', reference: 'user-1',
       status: 'complete', created_at: '', updated_at: '',
     });
+  });
+
+  it('retains an active import job for the browser session', () => {
+    service.trackActiveImport('import-job-3');
+
+    expect(service.activeImportJobId()).toBe('import-job-3');
+    expect(sessionStorage.getItem(ACTIVE_ACCOUNT_IMPORT_JOB_STORAGE_KEY)).toBe('import-job-3');
+
+    service.clearActiveImport();
+
+    expect(service.activeImportJobId()).toBeNull();
+    expect(sessionStorage.getItem(ACTIVE_ACCOUNT_IMPORT_JOB_STORAGE_KEY)).toBeNull();
   });
 });

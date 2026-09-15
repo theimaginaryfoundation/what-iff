@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, ViewChild, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, ViewChild, computed, effect, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, switchMap, takeWhile, timer } from 'rxjs';
 
@@ -12,23 +13,23 @@ import {
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { AccountArchiveService, ArchiveContents } from './account-archive.service';
 import { ChatImportModalComponent } from '../chat/components/chat-import-modal/chat-import-modal.component';
+import { XIconComponent } from '../../shared/ui/icons/icons';
 
 type ExportPhase = 'idle' | 'queued' | 'building' | 'uploading' | 'complete' | 'failed';
-type ImportPhase = 'idle' | 'inspecting' | 'review' | 'uploading' | 'validating' | 'importing' | 'complete' | 'failed';
+type ImportPhase = 'idle' | 'inspecting' | 'review' | 'queued' | 'uploading' | 'validating' | 'importing' | 'complete' | 'failed';
 
 const TERMINAL_JOB_STATES = ['complete', 'failed', 'cancelled'];
 
 /**
  * The unified Import & Export ("your data") screen. Account export + restore-from-export, promoted
  * from /experimental, with durable structured result reporting and an itemized selection ledger for
- * restores (choose which personalities and threads to bring in; memories are a single toggle).
- *
- * Still to land: the ChatGPT/Claude conversation import migrated off the sidebar popup onto here.
+ * restores (choose which personalities and threads to bring in; memories are a single toggle). An
+ * active account-import job is restored from session storage when the page is recreated.
  */
 @Component({
   selector: 'app-data-portability-page',
   standalone: true,
-  imports: [ChatImportModalComponent],
+  imports: [ChatImportModalComponent, XIconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './data-portability-page.component.html',
 })
@@ -37,6 +38,7 @@ export class DataPortabilityPageComponent {
   private readonly archiveService = inject(AccountArchiveService);
   private readonly confirmationService = inject(ConfirmationService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly router = inject(Router);
 
   @ViewChild('accountImportInput') accountImportInput?: ElementRef<HTMLInputElement>;
 
@@ -66,9 +68,20 @@ export class DataPortabilityPageComponent {
 
   // --- Activity log ---
   readonly activity = signal<AccountActivityEntry[]>([]);
+  private polledImportJobID: string | null = null;
 
   constructor() {
     this.loadActivity();
+    effect(() => {
+      const jobID = this.accountExportService.activeImportJobId();
+      if (!jobID || jobID === this.polledImportJobID) return;
+
+      this.polledImportJobID = jobID;
+      this.importing.set(true);
+      this.importPhase.set('queued');
+      this.importMessage.set('Checking your account import…');
+      this.pollAccountImport(jobID);
+    });
   }
 
   /** (Re)loads the recent import/export activity log. Called on load and after each run completes. */
@@ -90,8 +103,8 @@ export class DataPortabilityPageComponent {
     const confirmed = await this.confirmationService.confirm({
       title: 'Export account data?',
       message:
-        'We’ll prepare a ZIP of your conversations, personalities, and memories, then email a download link to your account address. The link expires after 24 hours.',
-      confirmText: 'Export account data',
+        'Your account details, conversations, personalities, and memories will be included in the export.\n\nWe’ll email a secure download link to your account address. The link expires 24 hours after delivery.\n\nPreparing your export may take some time. We’ll notify you when it’s ready.\n\nTo proceed, click “Confirm export” below.',
+      confirmText: 'Confirm export',
       type: 'warning',
     });
     if (!confirmed) return;
@@ -187,7 +200,7 @@ export class DataPortabilityPageComponent {
     if (includeMemories) parts.push('memories');
     const confirmed = await this.confirmationService.confirm({
       title: 'Import selected data?',
-      message: `This adds ${parts.join(', ')} to this account. Existing matching items are skipped; nothing here is deleted.`,
+      message: `This adds ${formatList(parts)} to this account. Existing matching items are skipped; nothing here is deleted.`,
       confirmText: 'Import selected',
       type: 'warning',
     });
@@ -206,7 +219,7 @@ export class DataPortabilityPageComponent {
       const job = await firstValueFrom(this.accountExportService.importAccount(file, selection));
       this.pendingFile = null;
       this.archive.set(null);
-      this.pollAccountImport(job.id);
+      this.accountExportService.trackActiveImport(job.id);
     } catch (error) {
       this.importing.set(false);
       this.importPhase.set('failed');
@@ -261,6 +274,7 @@ export class DataPortabilityPageComponent {
         next: job => {
           const progress = this.parseImportProgress(job.progress);
           if (job.status === 'complete') {
+            this.accountExportService.clearActiveImport();
             this.importing.set(false);
             this.importPhase.set('complete');
             this.importResult.set(progress?.result ?? progress ?? {});
@@ -268,6 +282,7 @@ export class DataPortabilityPageComponent {
             this.importMessage.set(progress?.message || 'Import complete.');
             this.loadActivity();
           } else if (job.status === 'failed' || job.status === 'cancelled') {
+            this.accountExportService.clearActiveImport();
             this.importing.set(false);
             this.importPhase.set('failed');
             this.importError.set(progress?.message || job.error || 'Your account import could not be completed.');
@@ -384,6 +399,10 @@ export class DataPortabilityPageComponent {
     return isNaN(d.getTime()) ? iso : d.toLocaleString();
   }
 
+  close(): void {
+    void this.router.navigate(['/chat']);
+  }
+
   private errorMessage(error: unknown, fallback: string): string {
     const err = error as { error?: { error?: string; message?: string }; message?: string };
     return err?.error?.error || err?.error?.message || err?.message || fallback;
@@ -399,4 +418,10 @@ function withToggled(set: Set<string>, id: string, checked: boolean): Set<string
     next.delete(id);
   }
   return next;
+}
+
+function formatList(items: string[]): string {
+  if (items.length < 2) return items.join('');
+  if (items.length === 2) return items.join(' and ');
+  return `${items.slice(0, -1).join(', ')}, and ${items.at(-1)}`;
 }
