@@ -3,6 +3,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, switchMap, takeWhile, timer } from 'rxjs';
 
 import {
+  AccountActivityEntry,
   AccountExportService,
   AccountImportProgress,
   AccountImportResult,
@@ -62,6 +63,25 @@ export class DataPortabilityPageComponent {
   readonly nothingSelected = computed(
     () => this.selectedPersonalityIds().size === 0 && this.selectedConversationIds().size === 0 && !this.includeMemories(),
   );
+
+  // --- Activity log ---
+  readonly activity = signal<AccountActivityEntry[]>([]);
+
+  constructor() {
+    this.loadActivity();
+  }
+
+  /** (Re)loads the recent import/export activity log. Called on load and after each run completes. */
+  loadActivity(): void {
+    this.accountExportService
+      .getActivity()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: entries => this.activity.set(entries),
+        // A failed activity fetch is non-fatal — the log just stays as-is.
+        error: () => undefined,
+      });
+  }
 
   // ================= Export =================
 
@@ -210,10 +230,12 @@ export class DataPortabilityPageComponent {
             this.exporting.set(false);
             this.exportPhase.set('complete');
             this.exportMessage.set(progress?.message || 'Your export is ready — check your email for the download link.');
+            this.loadActivity();
           } else if (job.status === 'failed' || job.status === 'cancelled') {
             this.exporting.set(false);
             this.exportPhase.set('failed');
             this.exportMessage.set(progress?.message || job.error || 'Your account export could not be completed.');
+            this.loadActivity();
           } else {
             const phase = (progress?.phase as ExportPhase) ?? 'building';
             this.exportPhase.set(phase);
@@ -244,10 +266,12 @@ export class DataPortabilityPageComponent {
             this.importResult.set(progress?.result ?? progress ?? {});
             this.importWarnings.set(progress?.warnings ?? progress?.result?.warnings ?? []);
             this.importMessage.set(progress?.message || 'Import complete.');
+            this.loadActivity();
           } else if (job.status === 'failed' || job.status === 'cancelled') {
             this.importing.set(false);
             this.importPhase.set('failed');
             this.importError.set(progress?.message || job.error || 'Your account import could not be completed.');
+            this.loadActivity();
           } else {
             const phase = (progress?.phase as ImportPhase) ?? 'importing';
             this.importPhase.set(phase);
@@ -316,6 +340,48 @@ export class DataPortabilityPageComponent {
       default:
         return 'Your account import is queued…';
     }
+  }
+
+  /** Friendly label for an activity row. */
+  activityLabel(entry: AccountActivityEntry): string {
+    if (entry.category === 'chat_import') return 'ChatGPT / Claude import';
+    switch (entry.action) {
+      case 'exported':
+        return 'Account export';
+      case 'imported':
+        return 'Account restore';
+      case 'import_failed':
+        return 'Account restore failed';
+      default:
+        return entry.action;
+    }
+  }
+
+  /** True when an activity row represents a failure (for styling). */
+  activityFailed(entry: AccountActivityEntry): boolean {
+    return entry.action.includes('failed') || /"success":\s*false/.test(entry.message);
+  }
+
+  /** The human message with the appended metadata rendered as a compact "key: value" summary. */
+  activityDetail(entry: AccountActivityEntry): string {
+    const marker = ' | metadata=';
+    const idx = entry.message.indexOf(marker);
+    if (idx < 0) return entry.message;
+    const base = entry.message.slice(0, idx);
+    try {
+      const meta = JSON.parse(entry.message.slice(idx + marker.length)) as Record<string, unknown>;
+      const parts = Object.entries(meta)
+        .filter(([, v]) => typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string')
+        .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`);
+      return parts.length ? `${base} — ${parts.join(', ')}` : base;
+    } catch {
+      return base;
+    }
+  }
+
+  formatWhen(iso: string): string {
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? iso : d.toLocaleString();
   }
 
   private errorMessage(error: unknown, fallback: string): string {

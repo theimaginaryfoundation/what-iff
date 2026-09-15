@@ -43,6 +43,14 @@ export interface AccountImportSelection {
   include_memories: boolean;
 }
 
+/** One row of the user's import/export activity log. */
+export interface AccountActivityEntry {
+  occurred_at: string;
+  category: string;
+  action: string;
+  message: string;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -69,6 +77,11 @@ export class AccountExportService {
 
   getImportStatus(id: string): Observable<Job> {
     return this.http.get<Job>(`${environment.apiUrl}/account/import/${id}`).pipe(catchError(this.handleError));
+  }
+
+  /** Recent import/export activity (audit log), newest first. */
+  getActivity(): Observable<AccountActivityEntry[]> {
+    return this.http.get<AccountActivityEntry[]>(`${environment.apiUrl}/account/activity`).pipe(catchError(this.handleError));
   }
 
   private handleError(error: any): Observable<never> {

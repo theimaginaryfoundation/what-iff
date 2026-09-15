@@ -220,6 +220,31 @@
 
   <!-- ============= Import from ChatGPT / Claude ============= -->
   <section class="rounded-xl border border-(--color-border-default) bg-(--color-surface-card) p-6">
-    <app-chat-import-modal [inline]="true" />
+    <app-chat-import-modal [inline]="true" (imported)="loadActivity()" />
   </section>
+
+  <!-- ============= Recent activity ============= -->
+  @if (activity().length > 0) {
+    <section class="rounded-xl border border-(--color-border-default) bg-(--color-surface-card) p-6">
+      <h2 class="text-lg font-semibold text-(--color-text-primary)">Recent activity</h2>
+      <p class="mt-1 text-sm text-(--color-text-secondary)">
+        Your recent imports and exports — so you can see what ran, what it did, and whether it failed, even after leaving.
+      </p>
+      <ul class="mt-4 flex flex-col divide-y divide-(--color-border-default)">
+        @for (entry of activity(); track entry.occurred_at + entry.action) {
+          <li class="py-3">
+            <div class="flex items-baseline justify-between gap-3">
+              <span
+                class="text-sm font-medium"
+                [class.text-(--color-text-primary)]="!activityFailed(entry)"
+                [class.text-red-700]="activityFailed(entry)"
+              >{{ activityLabel(entry) }}</span>
+              <span class="shrink-0 text-xs text-(--color-text-secondary)">{{ formatWhen(entry.occurred_at) }}</span>
+            </div>
+            <p class="mt-1 break-words text-xs text-(--color-text-secondary)">{{ activityDetail(entry) }}</p>
+          </li>
+        }
+      </ul>
+    </section>
+  }
 </main>

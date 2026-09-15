@@ -11,8 +11,10 @@ Authenticated user account portability: ZIP export by email and additive ZIP imp
   `/account/import` lists which personalities/conversations to restore, plus a memories on/off toggle).
 
 ## Key types and entry points
-- `Handler` — registers `/api/account/export` and `/api/account/import`.
-- `EnqueueExport`, `GetExport`, `ImportAccount`, `GetImport` — HTTP entry points.
+- `Handler` — registers `/api/account/export`, `/api/account/import`, and `/api/account/activity`.
+- `EnqueueExport`, `GetExport`, `ImportAccount`, `GetImport`, `GetActivity` — HTTP entry points.
+- `GetActivity` returns the user's recent import/export audit rows (`ListAccountActivity`) for the
+  screen's activity log — export/import plus ChatGPT/Claude imports (`chat_import` audit category).
 
 ## Dependencies
 - **Inbound:** `internal/server`.

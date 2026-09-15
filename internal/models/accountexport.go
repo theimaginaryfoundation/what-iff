@@ -1,6 +1,10 @@
 package models
 
-import "github.com/google/uuid"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 // JobTypeAccountExport is the Job.job_type for a user's full-account export. It reuses the generic
 // Job entity/queue (like chat_import); the export runs in-process and writes progress onto
@@ -51,6 +55,16 @@ type AccountImportProgress struct {
 type SectionImportCounts struct {
 	Created int `json:"created"`
 	Skipped int `json:"skipped"`
+}
+
+// AccountActivityEntry is one row of a user's import/export activity log, projected from the audit
+// log. The message carries a human-readable summary (with counts appended as metadata) — deliberately
+// unstructured, enough for a user to see what a past import/export did and whether it failed.
+type AccountActivityEntry struct {
+	OccurredAt time.Time `json:"occurred_at"`
+	Category   string    `json:"category"`
+	Action     string    `json:"action"`
+	Message    string    `json:"message"`
 }
 
 // AccountImportSelection narrows which items of an export are restored. It is OPTIONAL on

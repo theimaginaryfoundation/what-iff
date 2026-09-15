@@ -37,6 +37,7 @@ type Store interface {
 	ListDefaultEnabledMCPServers(ctx context.Context, userID uuid.UUID) ([]*models.MCPServer, error)
 	ExportChat(ctx context.Context, userID, chatID uuid.UUID, w io.Writer) error
 	ImportChats(ctx context.Context, userID uuid.UUID, convs []models.ImportConversation, onProgress func(imported, skipped int)) (*models.ImportResult, error)
+	AuditChatImport(ctx context.Context, userID uuid.UUID, message string, metadata map[string]any)
 
 	// Background-job helpers for async conversation import.
 	CreateJob(ctx context.Context, userID uuid.UUID, jobModel models.Job) (*models.Job, error)

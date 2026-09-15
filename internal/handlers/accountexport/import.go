@@ -296,6 +296,17 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, sele
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		// The import context was cancelled before completion (a timeout, or something aborting the
+		// run — memory embedding is the usual long pole). Mark it failed on a fresh context so the
+		// job reaches a terminal state and shows on the activity log with what did land, instead of
+		// silently staying "processing".
+		freshCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		h.failAccountImport(freshCtx, userID, jobID, "Import was interrupted before completing; some memories or thread summaries may not have imported", &result)
+		return
+	}
+
 	h.logger.Info("account import complete",
 		zap.String("user_id", userID.String()),
 		zap.Int("conversations_imported", result.Conversations.Imported),
@@ -359,6 +370,14 @@ func (h *Handler) failAccountImport(ctx context.Context, userID, jobID uuid.UUID
 	if _, err := h.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusFailed, message); err != nil {
 		h.logger.Warn("account import: failed to mark failed", zap.String("job_id", jobID.String()), zap.Error(err))
 	}
+	meta := map[string]any{"success": false, "message": message}
+	if result != nil {
+		meta["conversations_imported"] = result.Conversations.Imported
+		meta["memories_imported"] = result.Memories.ImportedCount
+		meta["personalities_created"] = result.Personalities.Created
+		meta["warnings"] = len(result.Warnings)
+	}
+	h.ds.AuditAccountExport(ctx, userID, "import_failed", "account import failed: "+message, meta)
 }
 
 // importPersonalities creates each exported personality that does not already exist (by name) for the

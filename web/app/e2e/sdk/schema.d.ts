@@ -4531,6 +4531,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/account/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the user's recent import/export activity
+         * @description Returns the user's most recent account export/import and ChatGPT/Claude import events
+         *     (from the audit log), newest first — a lightweight activity log for the Import & Export screen.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Recent activity, newest first */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AccountActivityEntry"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/account/import/{id}": {
         parameters: {
             query?: never;
@@ -8100,6 +8149,17 @@ export interface components {
          * @enum {string}
          */
         JobStatus: "pending" | "processing" | "inference_complete" | "expression_complete" | "compaction_complete" | "complete" | "failed";
+        /** @description One row of the user's import/export activity log (from the audit log). */
+        AccountActivityEntry: {
+            /** Format: date-time */
+            occurred_at?: string;
+            /** @description Audit category, e.g. account_export or chat_import. */
+            category?: string;
+            /** @description e.g. exported, imported, import_failed, import. */
+            action?: string;
+            /** @description Human-readable summary; counts are appended as metadata. */
+            message?: string;
+        };
         /**
          * @example {
          *       "id": "123e4567-e89b-12d3-a456-426614174000",
