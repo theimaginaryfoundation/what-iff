@@ -24,6 +24,12 @@ func CreateEmbedding(ctx context.Context, oaiClient *openai.Client, input string
 	return embeddings[0], nil
 }
 
+// Model is the embedding model every stored vector is produced with. The
+// dimension is fixed in the database schema (vector(1536)), so this cannot be
+// swapped for a model of a different width without a migration and a re-embed
+// of everything already stored.
+const Model = openai.EmbeddingModelTextEmbedding3Small
+
 // CreateEmbeddings calls the OpenAI Embeddings API once for a batch of input text.
 // The returned vectors preserve the input order, regardless of the API response order.
 func CreateEmbeddings(ctx context.Context, oaiClient *openai.Client, inputs []string) ([][]float32, error) {
@@ -35,7 +41,7 @@ func CreateEmbeddings(ctx context.Context, oaiClient *openai.Client, inputs []st
 		Input: openai.EmbeddingNewParamsInputUnion{
 			OfArrayOfStrings: inputs,
 		},
-		Model:          openai.EmbeddingModelTextEmbedding3Small,
+		Model:          Model,
 		Dimensions:     openai.Int(1536),
 		EncodingFormat: "float",
 	})

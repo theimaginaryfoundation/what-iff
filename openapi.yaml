@@ -4560,6 +4560,40 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /provider-usage:
+    get:
+      summary: What each provider key is spent on, and by which model
+      description: |
+        Describes the build, not the account: every caller gets the same answer,
+        and no credential or account state is exposed.
+
+        Exists so the app can tell a user why OpenAI is required even when they
+        chat with another provider, naming the model behind each job rather than
+        gesturing at "supporting features". The list is derived from the same
+        constants the calls themselves use, so it cannot drift from what the
+        server actually does.
+
+        Anthropic's archival entry applies only to Claude chats. Gemini and z.ai
+        chats archive on OpenAI, so no account needs a third provider's key.
+      tags: [Provider Keys]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Per-provider usage
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProviderUsage'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /provider-keys/{provider}:
     put:
       summary: Set this account's key for a provider
@@ -6344,6 +6378,41 @@ components:
         supported:
           type: boolean
           description: Whether a key can be supplied per account yet.
+
+    ProviderJob:
+      type: object
+      description: One piece of work a provider key pays for, and the model that does it.
+      required: [job, model]
+      properties:
+        job:
+          type: string
+          description: What the call accomplishes, in the user's terms.
+          example: Memory extraction and scratchpad updates
+        model:
+          type: string
+          description: |
+            The model that runs it. For chat, where the model is whatever the
+            user selected rather than something the app chose, this reads as a
+            phrase rather than a model id.
+          example: gpt-5.6-luna
+
+    ProviderUsage:
+      type: object
+      description: Everything one provider's key is spent on.
+      required: [provider, jobs]
+      properties:
+        provider:
+          type: string
+          example: openai
+        required:
+          type: boolean
+          description: |
+            The app itself spends this key regardless of which model the user
+            chats with. True for OpenAI only.
+        jobs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProviderJob'
 
     MCPServer:
       type: object

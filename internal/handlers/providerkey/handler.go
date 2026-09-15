@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
 
+	"github.com/theimaginaryfoundation/what-iff/internal/agent"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
@@ -40,6 +41,17 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	r.HandleFunc("", h.ListKeys).Methods("GET")
 	r.HandleFunc("/{provider}", h.SetKey).Methods("PUT")
 	r.HandleFunc("/{provider}", h.DeleteKey).Methods("DELETE")
+
+	// Deliberately its own prefix rather than /provider-keys/usage, which the
+	// {provider} route would otherwise swallow.
+	router.HandleFunc("/provider-usage", h.ListUsage).Methods("GET")
+}
+
+// ListUsage reports what each provider key is spent on and which model does
+// each job. It exposes no account state and no credentials — it is a
+// description of the build, identical for every caller.
+func (h *Handler) ListUsage(w http.ResponseWriter, r *http.Request) {
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, agent.ProviderUsageCatalog())
 }
 
 type setKeyRequest struct {

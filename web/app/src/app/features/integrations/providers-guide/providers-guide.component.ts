@@ -1,59 +1,18 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 
-/** One provider's entry on the guide. */
-interface ProviderGuideEntry {
-  name: string;
-  /** Empty for optional providers; the badge text for required ones. */
-  requirement: string;
-  /** What a key for this provider buys you, in the user's terms. */
-  summary: string;
-  uses: string[];
-}
+import { ProviderUsage } from '../../../core/models/provider-usage.model';
+import { ProviderUsageService } from '../../../core/services/provider-usage.service';
+import { vendorLabel } from '../../../core/utils/provider-vendor';
 
 /**
- * Written from what the code actually calls, not from what the provider lineup
- * suggests. The OpenAI list in particular is the answer to "why does this one
- * say required when I chat with Claude" — every item on it runs regardless of
- * which model the chat itself uses.
+ * Answers "what is my key being spent on, and by which model".
+ *
+ * Everything shown here comes from the server, which builds it from the same
+ * constants the calls use. Writing the list out here instead would create a
+ * second copy to keep in sync — which is exactly how the architecture summary
+ * came to name the wrong archival model for months.
  */
-const PROVIDERS: ProviderGuideEntry[] = [
-  {
-    name: 'OpenAI',
-    requirement: 'Required',
-    summary: 'Used by the app itself, no matter which model you chat with.',
-    uses: [
-      'The welcome message in your first chat',
-      'Creating a personality',
-      'Memory extraction and scratchpad updates',
-      'Conversation summaries at each checkpoint',
-      'Naming chats and reading their mood',
-      'Image generation, expressions and portraits',
-      'Reading file attachments',
-      'Semantic search over your memories',
-      'Scheduling agent jobs',
-    ],
-  },
-  {
-    name: 'Anthropic',
-    requirement: '',
-    summary: 'Adds the Claude models to your picker.',
-    uses: ['Chatting with any Claude model'],
-  },
-  {
-    name: 'Google Gemini',
-    requirement: '',
-    summary: 'Adds the Gemini models to your picker.',
-    uses: ['Chatting with any Gemini model'],
-  },
-  {
-    name: 'z.ai',
-    requirement: '',
-    summary: 'Adds the GLM models to your picker.',
-    uses: ['Chatting with any GLM model'],
-  },
-];
-
 @Component({
   selector: 'app-providers-guide',
   standalone: true,
@@ -61,6 +20,31 @@ const PROVIDERS: ProviderGuideEntry[] = [
   templateUrl: './providers-guide.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
 })
-export class ProvidersGuideComponent {
-  providers = PROVIDERS;
+export class ProvidersGuideComponent implements OnInit {
+  private usageService = inject(ProviderUsageService);
+
+  usage = signal<ProviderUsage[]>([]);
+  isLoading = signal(false);
+  errorMessage = signal('');
+
+  /** Required providers first; the rest keep server order. */
+  ordered = computed(() => [...this.usage()].sort((a, b) => Number(b.required ?? false) - Number(a.required ?? false)));
+
+  ngOnInit(): void {
+    this.isLoading.set(true);
+    this.usageService.list().subscribe({
+      next: usage => {
+        this.usage.set(usage);
+        this.isLoading.set(false);
+      },
+      error: () => {
+        this.errorMessage.set('Could not load what each provider is used for.');
+        this.isLoading.set(false);
+      },
+    });
+  }
+
+  label(provider: string): string {
+    return vendorLabel(provider);
+  }
 }
