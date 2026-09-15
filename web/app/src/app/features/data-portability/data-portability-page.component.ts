@@ -1,24 +1,27 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, ViewChild, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, ViewChild, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, switchMap, takeWhile, timer } from 'rxjs';
 
-import { AccountExportService, AccountImportProgress, AccountImportResult } from '../../core/services/account-export.service';
+import {
+  AccountExportService,
+  AccountImportProgress,
+  AccountImportResult,
+  AccountImportSelection,
+} from '../../core/services/account-export.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
+import { AccountArchiveService, ArchiveContents } from './account-archive.service';
 
 type ExportPhase = 'idle' | 'queued' | 'building' | 'uploading' | 'complete' | 'failed';
-type ImportPhase = 'idle' | 'uploading' | 'validating' | 'importing' | 'complete' | 'failed';
+type ImportPhase = 'idle' | 'inspecting' | 'review' | 'uploading' | 'validating' | 'importing' | 'complete' | 'failed';
 
 const TERMINAL_JOB_STATES = ['complete', 'failed', 'cancelled'];
 
 /**
- * The unified Import & Export ("your data") screen. Promotes the account
- * export/import that used to live behind /experimental into a first-class screen
- * reachable from settings and the fresh-user empty state, with durable,
- * structured result reporting rather than a one-line status string.
+ * The unified Import & Export ("your data") screen. Account export + restore-from-export, promoted
+ * from /experimental, with durable structured result reporting and an itemized selection ledger for
+ * restores (choose which personalities and threads to bring in; memories are a single toggle).
  *
- * Iterating: this first cut covers account export + restore-from-export. Still to
- * land — an itemized personalities/threads selection ledger on restore, and the
- * ChatGPT/Claude conversation import migrated off the sidebar popup onto here.
+ * Still to land: the ChatGPT/Claude conversation import migrated off the sidebar popup onto here.
  */
 @Component({
   selector: 'app-data-portability-page',
@@ -28,6 +31,7 @@ const TERMINAL_JOB_STATES = ['complete', 'failed', 'cancelled'];
 })
 export class DataPortabilityPageComponent {
   private readonly accountExportService = inject(AccountExportService);
+  private readonly archiveService = inject(AccountArchiveService);
   private readonly confirmationService = inject(ConfirmationService);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -45,6 +49,19 @@ export class DataPortabilityPageComponent {
   readonly importResult = signal<AccountImportResult | null>(null);
   readonly importWarnings = signal<string[]>([]);
   readonly importError = signal<string | null>(null);
+
+  // Selection ledger — populated after inspecting a chosen ZIP, before the restore runs.
+  readonly archive = signal<ArchiveContents | null>(null);
+  readonly selectedPersonalityIds = signal<Set<string>>(new Set());
+  readonly selectedConversationIds = signal<Set<string>>(new Set());
+  readonly includeMemories = signal(true);
+  private pendingFile: File | null = null;
+
+  readonly nothingSelected = computed(
+    () => this.selectedPersonalityIds().size === 0 && this.selectedConversationIds().size === 0 && !this.includeMemories(),
+  );
+
+  // ================= Export =================
 
   async requestAccountExport(): Promise<void> {
     if (this.exporting()) return;
@@ -73,33 +90,100 @@ export class DataPortabilityPageComponent {
       });
   }
 
+  // ================= Import: choose + inspect =================
+
   openAccountImportPicker(): void {
-    if (!this.importing()) {
+    if (!this.importing() && this.importPhase() !== 'inspecting') {
       this.accountImportInput?.nativeElement.click();
     }
   }
 
-  async importAccountFile(event: Event): Promise<void> {
+  /** After a ZIP is chosen we read it locally to build the selection ledger, before any upload. */
+  async onArchiveFileChosen(event: Event): Promise<void> {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     input.value = '';
-    if (!file || this.importing()) return;
+    if (!file || this.importing() || this.importPhase() === 'inspecting') return;
 
+    this.resetImportState();
+    this.importPhase.set('inspecting');
+    this.importMessage.set('Reading export…');
+    try {
+      const contents = await this.archiveService.inspect(file);
+      this.pendingFile = file;
+      this.archive.set(contents);
+      // Default to everything selected.
+      this.selectedPersonalityIds.set(new Set(contents.personalities.map(p => p.id)));
+      this.selectedConversationIds.set(new Set(contents.conversations.map(c => c.id)));
+      this.includeMemories.set(contents.hasMemories);
+      this.importPhase.set('review');
+      this.importMessage.set(null);
+    } catch (error) {
+      this.resetImportState();
+      this.importPhase.set('failed');
+      this.importError.set(this.errorMessage(error, 'Could not read that export ZIP.'));
+    }
+  }
+
+  togglePersonality(id: string, checked: boolean): void {
+    this.selectedPersonalityIds.update(set => withToggled(set, id, checked));
+  }
+
+  toggleConversation(id: string, checked: boolean): void {
+    this.selectedConversationIds.update(set => withToggled(set, id, checked));
+  }
+
+  setAllPersonalities(checked: boolean): void {
+    const contents = this.archive();
+    this.selectedPersonalityIds.set(checked && contents ? new Set(contents.personalities.map(p => p.id)) : new Set());
+  }
+
+  setAllConversations(checked: boolean): void {
+    const contents = this.archive();
+    this.selectedConversationIds.set(checked && contents ? new Set(contents.conversations.map(c => c.id)) : new Set());
+  }
+
+  cancelReview(): void {
+    this.resetImportState();
+    this.importPhase.set('idle');
+  }
+
+  // ================= Import: run the selected restore =================
+
+  async startSelectedImport(): Promise<void> {
+    const file = this.pendingFile;
+    if (!file || this.importing() || this.nothingSelected()) return;
+
+    const personalityIds = [...this.selectedPersonalityIds()];
+    const conversationIds = [...this.selectedConversationIds()];
+    const includeMemories = this.includeMemories();
+
+    const parts = [
+      `${personalityIds.length} personalit${personalityIds.length === 1 ? 'y' : 'ies'}`,
+      `${conversationIds.length} thread${conversationIds.length === 1 ? '' : 's'}`,
+    ];
+    if (includeMemories) parts.push('memories');
     const confirmed = await this.confirmationService.confirm({
-      title: 'Import account data?',
-      message:
-        'This adds conversations, personalities, and memories from the WhatIff ZIP to this account. Existing matching data is skipped; nothing in this account is deleted.',
-      confirmText: 'Import account data',
+      title: 'Import selected data?',
+      message: `This adds ${parts.join(', ')} to this account. Existing matching items are skipped; nothing here is deleted.`,
+      confirmText: 'Import selected',
       type: 'warning',
     });
     if (!confirmed) return;
 
-    this.resetImportResult();
+    const selection: AccountImportSelection = {
+      personality_ids: personalityIds,
+      conversation_ids: conversationIds,
+      include_memories: includeMemories,
+    };
+
     this.importing.set(true);
     this.importPhase.set('uploading');
     this.importMessage.set('Uploading account data…');
     try {
-      const job = await firstValueFrom(this.accountExportService.importAccount(file));
+      const job = await firstValueFrom(this.accountExportService.importAccount(file, selection));
+      this.pendingFile = null;
+      this.archive.set(null);
       this.pollAccountImport(job.id);
     } catch (error) {
       this.importing.set(false);
@@ -107,6 +191,8 @@ export class DataPortabilityPageComponent {
       this.importError.set(this.errorMessage(error, 'Unable to import that account export ZIP.'));
     }
   }
+
+  // ================= polling =================
 
   private pollAccountExport(jobID: string): void {
     timer(0, 1500)
@@ -174,11 +260,16 @@ export class DataPortabilityPageComponent {
       });
   }
 
-  private resetImportResult(): void {
+  private resetImportState(): void {
     this.importResult.set(null);
     this.importWarnings.set([]);
     this.importError.set(null);
     this.importMessage.set(null);
+    this.archive.set(null);
+    this.selectedPersonalityIds.set(new Set());
+    this.selectedConversationIds.set(new Set());
+    this.includeMemories.set(true);
+    this.pendingFile = null;
   }
 
   private parseExportProgress(raw?: string): { phase?: string; message?: string } | null {
@@ -229,4 +320,15 @@ export class DataPortabilityPageComponent {
     const err = error as { error?: { error?: string; message?: string }; message?: string };
     return err?.error?.error || err?.error?.message || err?.message || fallback;
   }
+}
+
+/** Returns a new Set with `id` added (checked) or removed (unchecked). */
+function withToggled(set: Set<string>, id: string, checked: boolean): Set<string> {
+  const next = new Set(set);
+  if (checked) {
+    next.add(id);
+  } else {
+    next.delete(id);
+  }
+  return next;
 }

@@ -46,21 +46,112 @@
   <section class="rounded-xl border border-(--color-border-default) bg-(--color-surface-card) p-6">
     <h2 class="text-lg font-semibold text-(--color-text-primary)">Restore from a WhatIff export</h2>
     <p class="mt-1 text-sm text-(--color-text-secondary)">
-      Upload a WhatIff export ZIP to bring its conversations, personalities, and memories into this account. Imports are
+      Upload a WhatIff export ZIP, then choose what to bring into this account. Imports are
       <strong>additive</strong>: existing matching items are skipped and nothing here is deleted.
     </p>
 
-    <div class="mt-5">
-      <input #accountImportInput class="sr-only" type="file" accept=".zip,application/zip" (change)="importAccountFile($event)" />
-      <button
-        type="button"
-        class="rounded-lg border border-(--btn-secondary-border) bg-(--btn-secondary) px-4 py-2 text-sm font-semibold text-(--btn-secondary-text) disabled:cursor-not-allowed disabled:opacity-50"
-        [disabled]="importing()"
-        (click)="openAccountImportPicker()"
-      >
-        {{ importing() ? "Importing…" : "Choose a WhatIff ZIP…" }}
-      </button>
-    </div>
+    <input #accountImportInput class="sr-only" type="file" accept=".zip,application/zip" (change)="onArchiveFileChosen($event)" />
+
+    <!-- pick a file (hidden while reviewing the ledger or importing) -->
+    @if (importPhase() !== 'review' && importPhase() !== 'inspecting' && !importing()) {
+      <div class="mt-5">
+        <button
+          type="button"
+          class="rounded-lg border border-(--btn-secondary-border) bg-(--btn-secondary) px-4 py-2 text-sm font-semibold text-(--btn-secondary-text) disabled:cursor-not-allowed disabled:opacity-50"
+          (click)="openAccountImportPicker()"
+        >
+          Choose a WhatIff ZIP…
+        </button>
+      </div>
+    }
+
+    @if (importPhase() === 'inspecting') {
+      <p class="mt-4 text-sm text-(--color-text-secondary)" role="status">Reading export…</p>
+    }
+
+    <!-- selection ledger -->
+    @if (importPhase() === 'review' && archive(); as contents) {
+      <div class="mt-5 flex flex-col gap-5">
+        <!-- Personalities -->
+        <div>
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-(--color-text-primary)">
+              Personalities ({{ selectedPersonalityIds().size }}/{{ contents.personalities.length }})
+            </h3>
+            @if (contents.personalities.length > 0) {
+              <div class="flex gap-3 text-xs">
+                <button type="button" class="text-(--color-accent) hover:underline" (click)="setAllPersonalities(true)">Select all</button>
+                <button type="button" class="text-(--color-text-secondary) hover:underline" (click)="setAllPersonalities(false)">Clear</button>
+              </div>
+            }
+          </div>
+          @if (contents.personalities.length === 0) {
+            <p class="mt-1 text-sm text-(--color-text-secondary)">None in this export.</p>
+          } @else {
+            <div class="mt-2 max-h-40 overflow-y-auto rounded-lg border border-(--color-border-default) p-2">
+              @for (p of contents.personalities; track p.id) {
+                <label class="flex items-center gap-2 py-1 text-sm text-(--color-text-primary)">
+                  <input type="checkbox" [checked]="selectedPersonalityIds().has(p.id)" (change)="togglePersonality(p.id, $any($event.target).checked)" />
+                  <span class="truncate">{{ p.name }}</span>
+                </label>
+              }
+            </div>
+          }
+        </div>
+
+        <!-- Threads -->
+        <div>
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-(--color-text-primary)">
+              Threads ({{ selectedConversationIds().size }}/{{ contents.conversations.length }})
+            </h3>
+            @if (contents.conversations.length > 0) {
+              <div class="flex gap-3 text-xs">
+                <button type="button" class="text-(--color-accent) hover:underline" (click)="setAllConversations(true)">Select all</button>
+                <button type="button" class="text-(--color-text-secondary) hover:underline" (click)="setAllConversations(false)">Clear</button>
+              </div>
+            }
+          </div>
+          @if (contents.conversations.length === 0) {
+            <p class="mt-1 text-sm text-(--color-text-secondary)">None in this export.</p>
+          } @else {
+            <div class="mt-2 max-h-56 overflow-y-auto rounded-lg border border-(--color-border-default) p-2">
+              @for (c of contents.conversations; track c.id) {
+                <label class="flex items-center gap-2 py-1 text-sm text-(--color-text-primary)">
+                  <input type="checkbox" [checked]="selectedConversationIds().has(c.id)" (change)="toggleConversation(c.id, $any($event.target).checked)" />
+                  <span class="truncate">{{ c.title }}</span>
+                </label>
+              }
+            </div>
+          }
+        </div>
+
+        <!-- Memories (all-or-nothing) -->
+        @if (contents.hasMemories) {
+          <label class="flex items-center gap-2 text-sm text-(--color-text-primary)">
+            <input type="checkbox" [checked]="includeMemories()" (change)="includeMemories.set($any($event.target).checked)" />
+            <span>Include memories</span>
+          </label>
+        }
+
+        <div class="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            class="rounded-lg bg-(--cta) px-4 py-2 text-sm font-semibold text-(--cta-text) disabled:cursor-not-allowed disabled:opacity-50"
+            [disabled]="nothingSelected()"
+            (click)="startSelectedImport()"
+          >Import selected</button>
+          <button
+            type="button"
+            class="rounded-lg border border-(--btn-secondary-border) bg-(--btn-secondary) px-4 py-2 text-sm font-medium text-(--btn-secondary-text)"
+            (click)="cancelReview()"
+          >Cancel</button>
+          @if (nothingSelected()) {
+            <span class="text-xs text-(--color-text-secondary)">Select at least one item to import.</span>
+          }
+        </div>
+      </div>
+    }
 
     <!-- in-progress / non-terminal status -->
     @if (importing() && importMessage()) {

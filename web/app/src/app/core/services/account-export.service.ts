@@ -32,6 +32,17 @@ export interface AccountImportProgress extends AccountImportResult {
   result?: AccountImportResult;
 }
 
+/**
+ * Narrows an account import to chosen items. Sent as a JSON `selection` form field; omitting it
+ * imports everything. IDs are the source ids from the export ZIP (personality ids, conversation
+ * uuids). Memories are all-or-nothing via includeMemories (an account can carry thousands).
+ */
+export interface AccountImportSelection {
+  personality_ids: string[];
+  conversation_ids: string[];
+  include_memories: boolean;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -47,9 +58,12 @@ export class AccountExportService {
     return this.http.get<Job>(`${this.apiUrl}/${id}`).pipe(catchError(this.handleError));
   }
 
-  importAccount(file: File): Observable<Job> {
+  importAccount(file: File, selection?: AccountImportSelection): Observable<Job> {
     const form = new FormData();
     form.append('file', file);
+    if (selection) {
+      form.append('selection', JSON.stringify(selection));
+    }
     return this.http.post<Job>(`${environment.apiUrl}/account/import`, form).pipe(catchError(this.handleError));
   }
 
