@@ -2283,8 +2283,8 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	// Only genuine OpenAI (Responses API) chats can thread checkpoints off a
 	// PreviousResponseID. Anthropic, z.ai (GLM) and Gemini chats all rebuild
 	// context from the DB via the "Claude" checkpoint path, whose summarizer runs
-	// on GPT and whose scratchpad/memory archival runs on the Anthropic provider
-	// (a no-op that logs when ANTHROPIC_API_KEY is unset).
+	// on GPT and whose scratchpad/memory archival follows the chat's own provider
+	// — Claude for Anthropic chats, OpenAI for everything else.
 	if models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model) || models.UsesOpenAIChatCompletionsAPI(chatCtx.modelProvider, chatCtx.model) {
 		a.runCheckpointClaude(ctx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
 	} else {
@@ -2370,9 +2370,23 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	var newScratchpadContent string
 	hasScratchpad := false
 	var scratchpadCtx *provider.ModelContext
+	// Archival provider follows the chat's own provider, not the checkpoint
+	// shape. This path serves Anthropic, z.ai and Gemini chats alike, so binding
+	// it to Anthropic demanded a key that a Gemini or GLM account has no reason
+	// to hold — and the failure was silent: the chat worked while its memory
+	// quietly stopped updating. A genuinely Anthropic chat still archives on
+	// Claude, which is always satisfiable because holding a Claude chat means
+	// holding an Anthropic key. Everything else archives on OpenAI.
+	useClaudeArchival := archivalUsesClaude(chatCtx.modelProvider, chatCtx.model)
 	if chatCtx.chat.PersonalityID != uuid.Nil {
 		scratchpadCtx = archivalCtx.Clone()
-		newScratchpad, err := a.updateScratchpadClaude(ctx, userID, chatCtx, scratchpadCtx)
+		var newScratchpad ScratchpadUpdate
+		var err error
+		if useClaudeArchival {
+			newScratchpad, err = a.updateScratchpadClaude(ctx, userID, chatCtx, scratchpadCtx)
+		} else {
+			newScratchpad, err = a.updateScratchpadFromContext(ctx, userID, chatCtx, scratchpadCtx)
+		}
 		if err != nil {
 			a.logger.Error("failed to update scratchpad during Claude checkpoint", zap.Error(err))
 		} else {
@@ -2390,8 +2404,14 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	// defer both extraction and roll-forward dedupe to the next checkpoint: compaction requires
 	// that delta, and a later checkpoint safely retries it.
 	if hasScratchpad {
-		if err := a.extractMemoriesWithScratchpadDeltaClaude(ctx, userID, chatMessage.ChatID, scratchpadCtx, modelContext, chatCtx, compactionEventID); err != nil {
-			a.logger.Error("failed to extract memories during Claude checkpoint", zap.Error(err))
+		var err error
+		if useClaudeArchival {
+			err = a.extractMemoriesWithScratchpadDeltaClaude(ctx, userID, chatMessage.ChatID, scratchpadCtx, modelContext, chatCtx, compactionEventID)
+		} else {
+			err = a.extractMemoriesWithScratchpadDeltaFromContext(ctx, userID, chatMessage.ChatID, scratchpadCtx, modelContext, chatCtx, compactionEventID)
+		}
+		if err != nil {
+			a.logger.Error("failed to extract memories during rebuilt-context checkpoint", zap.Error(err))
 		}
 	}
 
