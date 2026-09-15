@@ -71,6 +71,9 @@ func normalizeUploadFileNameExtension(fileName string) string {
 }
 
 func (a *OpenAIProvider) DeleteFileAttachment(ctx context.Context, fileID string) error {
+	if a == nil || a.oaiClient == nil {
+		return ErrProviderUnavailable
+	}
 	_, err := a.oaiClient.Files.Delete(ctx, fileID)
 	if err != nil {
 		a.zapLog().Error("failed to delete file attachment from OpenAI", zap.Error(err))
@@ -81,6 +84,12 @@ func (a *OpenAIProvider) DeleteFileAttachment(ctx context.Context, fileID string
 }
 
 func (a *OpenAIProvider) SaveMessageAttachments(ctx context.Context, userID, chatMessageID uuid.UUID, resp *responses.Response) error {
+	// Only the nil receiver is guarded here. A nil client is legitimate: image
+	// generation results are persisted straight from the response and never
+	// touch OpenAI again, so requiring a client would reject a supported call.
+	if a == nil {
+		return ErrProviderUnavailable
+	}
 	for _, output := range resp.Output {
 		switch output.Type {
 		case "image_generation_call":

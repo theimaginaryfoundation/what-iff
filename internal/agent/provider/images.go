@@ -13,6 +13,9 @@ import (
 //
 // The returned string is the raw base64 data (no data: prefix).
 func (a *OpenAIProvider) GenerateImagePNGBase64(ctx context.Context, prompt string) (string, error) {
+	if a == nil || a.oaiClient == nil {
+		return "", ErrProviderUnavailable
+	}
 	return a.GenerateImagePNGBase64WithOptions(ctx, prompt, ImageQualityLow, ImageAspectRatioSquare)
 }
 
@@ -20,6 +23,9 @@ func (a *OpenAIProvider) GenerateImagePNGBase64(ctx context.Context, prompt stri
 //
 // The returned string is the raw base64 data (no data: prefix).
 func (a *OpenAIProvider) GenerateImagePNGBase64WithQuality(ctx context.Context, prompt string, quality ImageQuality) (string, error) {
+	if a == nil || a.oaiClient == nil {
+		return "", ErrProviderUnavailable
+	}
 	return a.GenerateImagePNGBase64WithOptions(ctx, prompt, quality, ImageAspectRatioSquare)
 }
 
@@ -27,6 +33,9 @@ func (a *OpenAIProvider) GenerateImagePNGBase64WithQuality(ctx context.Context, 
 //
 // The returned string is the raw base64 data (no data: prefix).
 func (a *OpenAIProvider) GenerateImagePNGBase64WithOptions(ctx context.Context, prompt string, quality ImageQuality, aspectRatio ImageAspectRatio) (string, error) {
+	if a == nil || a.oaiClient == nil {
+		return "", ErrProviderUnavailable
+	}
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return "", fmt.Errorf("prompt is required")
