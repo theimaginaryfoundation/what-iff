@@ -8,17 +8,20 @@ package providerkey
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
 
+	"github.com/theimaginaryfoundation/what-iff/internal/agent"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
+	"github.com/theimaginaryfoundation/what-iff/internal/providermodels"
 )
 
 // Handler serves the per-account provider-key routes.
@@ -26,13 +29,16 @@ type Handler struct {
 	ds        *datastore.Datastore
 	logger    *zap.Logger
 	resolvers map[string]*providerkeys.Resolver
+	// providerModels is optional; a build without it serves 503 on the listing
+	// route rather than failing to start.
+	providerModels *providermodels.Service
 }
 
 // NewHandler builds the handler. resolvers are keyed by provider and are
 // notified on write; a provider with no resolver still stores fine, it just
 // has no cache to clear.
-func NewHandler(ds *datastore.Datastore, logger *zap.Logger, resolvers map[string]*providerkeys.Resolver) *Handler {
-	return &Handler{ds: ds, logger: logger, resolvers: resolvers}
+func NewHandler(ds *datastore.Datastore, logger *zap.Logger, resolvers map[string]*providerkeys.Resolver, providerModels *providermodels.Service) *Handler {
+	return &Handler{ds: ds, logger: logger, resolvers: resolvers, providerModels: providerModels}
 }
 
 func (h *Handler) RegisterRoutes(router *mux.Router) {
@@ -40,6 +46,60 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	r.HandleFunc("", h.ListKeys).Methods("GET")
 	r.HandleFunc("/{provider}", h.SetKey).Methods("PUT")
 	r.HandleFunc("/{provider}", h.DeleteKey).Methods("DELETE")
+
+	// Deliberately its own prefix rather than /provider-keys/usage, which the
+	// {provider} route would otherwise swallow.
+	router.HandleFunc("/provider-usage", h.ListUsage).Methods("GET")
+	router.HandleFunc("/provider-models/{provider}", h.ListProviderModels).Methods("GET")
+}
+
+// ListProviderModels asks the provider which models it serves, using this
+// account's key.
+//
+// Nothing is filtered away here. Retired and non-chat models are returned with
+// their kind and shutdown date so the caller can decide — the classification is
+// a heuristic over model ids, and hiding a model the heuristic misjudged would
+// make it permanently unreachable rather than merely mislabelled.
+func (h *Handler) ListProviderModels(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		handlerutils.RespondWithError(w, h.logger, http.StatusUnauthorized, handlerutils.CodeNotSet, "Unauthorized", nil)
+		return
+	}
+	if h.providerModels == nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusServiceUnavailable, handlerutils.CodeNotSet, "Model listing is not configured", nil)
+		return
+	}
+
+	providerName := strings.ToLower(strings.TrimSpace(mux.Vars(r)["provider"]))
+	refresh := strings.EqualFold(r.URL.Query().Get("refresh"), "true")
+
+	list, err := h.providerModels.List(r.Context(), userID, providerName, refresh)
+	if err != nil {
+		if errors.Is(err, providermodels.ErrUnsupportedProvider) {
+			handlerutils.RespondWithError(w, h.logger, http.StatusNotImplemented, handlerutils.CodeNotSet,
+				"This build cannot list models for that provider yet", nil)
+			return
+		}
+		// The provider's own error can echo the key back, so the caller gets a
+		// generic message and the detail goes to the log.
+		h.logger.Warn("failed to list provider models",
+			zap.String("provider", providerName),
+			zap.String("user_id", userID.String()),
+			zap.Error(err))
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadGateway, handlerutils.CodeNotSet,
+			"Could not reach that provider to list its models. Check the key and try again.", nil)
+		return
+	}
+
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, list)
+}
+
+// ListUsage reports what each provider key is spent on and which model does
+// each job. It exposes no account state and no credentials — it is a
+// description of the build, identical for every caller.
+func (h *Handler) ListUsage(w http.ResponseWriter, r *http.Request) {
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, agent.ProviderUsageCatalog())
 }
 
 type setKeyRequest struct {
