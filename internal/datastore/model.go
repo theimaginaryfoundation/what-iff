@@ -174,10 +174,42 @@ func (d *Datastore) ListModelsForUser(ctx context.Context, userID uuid.UUID) ([]
 		d.logger.Error(i18n.T1("query.failed", "Entity", "user"), zap.Error(err))
 		return nil, err
 	}
-	if u.EnableExperimentalModels {
-		return all, nil
+	if !u.EnableExperimentalModels {
+		all = filterVisibleModels(all, false)
 	}
-	return filterVisibleModels(all, false), nil
+	return d.filterHiddenModels(ctx, userID, all), nil
+}
+
+// filterHiddenModels drops the models this account has hidden.
+//
+// Applied only to the catalog listing — the picker — and deliberately not to
+// any path that runs a model. Hiding is a preference, so a hidden model still
+// works when something names it directly: an existing chat pinned to it, an
+// agent job, a webhook. Enforcing it at use would mean unchecking a box in
+// settings silently broke a scheduled job days later.
+//
+// A read failure hides nothing rather than everything: the visible consequence
+// of losing preferences should be a longer list, not an empty one.
+func (d *Datastore) filterHiddenModels(ctx context.Context, userID uuid.UUID, in []*models.Model) []*models.Model {
+	prefs, err := d.GetUserPreferences(ctx, userID)
+	if err != nil || prefs == nil || len(prefs.HiddenModelIDs) == 0 {
+		if err != nil {
+			d.logger.Warn("could not read hidden models; showing the full catalog", zap.Error(err))
+		}
+		return in
+	}
+	hidden := make(map[string]bool, len(prefs.HiddenModelIDs))
+	for _, id := range prefs.HiddenModelIDs {
+		hidden[id] = true
+	}
+	out := make([]*models.Model, 0, len(in))
+	for _, m := range in {
+		if m != nil && hidden[m.ID.String()] {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func assertUserCanUseModelTx(ctx context.Context, tx *ent.Tx, userID uuid.UUID, modelID uuid.UUID) error {
