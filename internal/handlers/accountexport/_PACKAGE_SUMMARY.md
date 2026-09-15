@@ -7,6 +7,8 @@ Authenticated user account portability: ZIP export by email and additive ZIP imp
 - Enqueue and track asynchronous, email-only account exports and staged account imports.
 - Build an id-stripped ZIP containing conversations, personalities, memories, and a file inventory.
 - Validate bounded account-import ZIPs and restore the supported sections.
+- Restore all of an export, or a caller-selected subset (an optional `selection` field on
+  `/account/import` lists which personalities/conversations to restore, plus a memories on/off toggle).
 
 ## Key types and entry points
 - `Handler` — registers `/api/account/export` and `/api/account/import`.
@@ -18,6 +20,10 @@ Authenticated user account portability: ZIP export by email and additive ZIP imp
 
 ## Non-obvious decisions
 - Export download URLs are emailed only and never stored on the `Job` response.
+- The import `selection` is optional and backward-compatible: absent ⇒ import everything; present ⇒
+  authoritative (only listed personalities/conversations restore, empty ⇒ none). Unselected
+  personalities are skipped without inflating the `skipped` count (the user opted out, they were not
+  duplicates). Memories are all-or-nothing (an account can carry thousands).
 - Local development uses the filesystem store plus `email.NoopSender`, preserving the production flow without AWS.
 - Files are an inventory only; their bytes are deliberately outside this export format.
 - `conversations.json` remains Anthropic-compatible but carries `whatiff_*` state for account round-trips. Personality IDs are source references only; import maps them to fresh destination IDs before restoring chats.

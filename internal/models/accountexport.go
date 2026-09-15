@@ -1,5 +1,7 @@
 package models
 
+import "github.com/google/uuid"
+
 // JobTypeAccountExport is the Job.job_type for a user's full-account export. It reuses the generic
 // Job entity/queue (like chat_import); the export runs in-process and writes progress onto
 // Job.progress. The download link itself is delivered ONLY by email (a deliberate control: app
@@ -49,4 +51,19 @@ type AccountImportProgress struct {
 type SectionImportCounts struct {
 	Created int `json:"created"`
 	Skipped int `json:"skipped"`
+}
+
+// AccountImportSelection narrows which items of an export are restored. It is OPTIONAL on
+// POST /account/import (sent as a JSON `selection` multipart field); when absent, the whole
+// export is restored (backward-compatible). The IDs are the SOURCE ids as they appear in the
+// export ZIP — personality ids and conversation uuids — which the client reads from the archive
+// to build its selection ledger.
+//
+// A selection that IS present is authoritative: only the listed personalities and conversations
+// are restored (empty list ⇒ none). Memories are all-or-nothing via IncludeMemories, since an
+// account can carry thousands and itemizing them is impractical.
+type AccountImportSelection struct {
+	PersonalityIDs  []uuid.UUID `json:"personality_ids"`
+	ConversationIDs []uuid.UUID `json:"conversation_ids"`
+	IncludeMemories bool        `json:"include_memories"`
 }

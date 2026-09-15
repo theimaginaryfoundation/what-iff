@@ -4455,6 +4455,9 @@ export interface paths {
          *     `GET /account/import/{id}` until terminal status. Its JSON-encoded `progress` contains phase,
          *     section counts, warnings, and the final result. Memory import requires the server to have an
          *     OpenAI key (embeddings are regenerated); when unavailable, memories are skipped.
+         *
+         *     An optional `selection` field narrows what is restored (a partial import). When omitted, the
+         *     whole export is imported (backward-compatible).
          */
         post: {
             parameters: {
@@ -4470,7 +4473,16 @@ export interface paths {
                          * Format: binary
                          * @description The export ZIP.
                          */
-                        file?: string;
+                        file: string;
+                        /**
+                         * @description Optional JSON object narrowing what is restored. Omit to import everything. Shape:
+                         *     `{"personality_ids":["<source-uuid>"],"conversation_ids":["<source-uuid>"],"include_memories":true}`.
+                         *     IDs are the source ids as they appear in the export (personality ids and conversation
+                         *     uuids), which the client reads from the ZIP to build its selection ledger. When present
+                         *     it is authoritative: only the listed personalities and conversations are restored (an
+                         *     empty list restores none), and memories are all-or-nothing via `include_memories`.
+                         */
+                        selection?: string;
                     };
                 };
             };
