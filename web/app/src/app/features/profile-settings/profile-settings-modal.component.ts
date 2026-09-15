@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
 import { AbstractControl, FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
 import { ExternalAuthProvider } from '../../core/auth/external-auth.provider';
@@ -34,6 +35,7 @@ export class ProfileSettingsModalComponent {
   private readonly preferencesService = inject(UserPreferencesService);
   private readonly modelService = inject(ModelService);
   private readonly personalityService = inject(PersonalityService);
+  private readonly router = inject(Router);
 
   readonly tabs: Array<{ id: ProfileSettingsTab; label: string; icon: 'profile' }> = [
     { id: 'profile', label: 'Profile', icon: 'profile' },
@@ -92,6 +94,12 @@ export class ProfileSettingsModalComponent {
 
   close(): void { this.modal.close(); }
   setTab(tab: ProfileSettingsTab): void { this.modal.setTab(tab); }
+
+  /** Closes the modal and opens the Import & Export screen. */
+  goToData(): void {
+    this.close();
+    this.router.navigate(['/data']);
+  }
 
   async onThemeModeChange(mode: ThemeMode): Promise<void> {
     if (this.themeMode() === mode) return;

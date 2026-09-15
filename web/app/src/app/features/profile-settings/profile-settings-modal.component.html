@@ -50,6 +50,10 @@
           </button>
         </div>
 
+        <button class="profile-settings__button profile-settings__data-button" type="button" (click)="goToData()">
+          Import &amp; export your data
+        </button>
+
         <form class="profile-settings__form" [formGroup]="profileForm" (ngSubmit)="saveProfile()">
           <label class="profile-settings__field">
             <span>Email</span>
