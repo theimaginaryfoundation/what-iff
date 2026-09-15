@@ -157,12 +157,27 @@ watch: ## Watch for changes and rebuild (requires entr)
 
 # =============================================================================
 # Local development stack (hybrid: Postgres in Docker, native backend + web)
-# See ADR 0x018. The only manual step is: cp .env.example .env
+# See ADR 0x018. From a fresh clone: make up
 # =============================================================================
 
 COMPOSE ?= docker compose
 DEV_DIR := .dev
 WEB_DIR := web/app
+
+.PHONY: init-env
+init-env: ## Create .env from .env.example with generated secrets (never overwrites)
+	@./scripts/init-env.sh
+
+# One entry point for a fresh clone. Ordering is the point: generated Ent code
+# is gitignored, so `go run ./cmd/api-server` cannot compile before `generate`;
+# and the server needs a reachable database before it seeds. Each step is
+# idempotent, so re-running after a failure is safe.
+.PHONY: up
+up: ## Fresh clone → running API (init-env, generate, db-up, run)
+	@$(MAKE) --no-print-directory init-env
+	@$(MAKE) --no-print-directory generate
+	@$(MAKE) --no-print-directory db-up
+	@$(MAKE) --no-print-directory run
 
 .PHONY: check-env
 check-env: ## Validate local environment (.env, DB settings, secrets, docker)

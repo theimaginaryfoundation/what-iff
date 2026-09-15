@@ -4525,6 +4525,136 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /provider-keys:
+    get:
+      summary: List model-provider key status for the authenticated account
+      description: |
+        Reports every provider in the model catalog and whether this account can
+        reach it. Keys belong to accounts, so two users on one instance see
+        different results.
+
+        `configured` is true when the account can reach the provider at all —
+        through its own stored key (`source: account`) or the deployment-level
+        environment variable (`source: deployment`). `supported` is false for
+        providers whose key cannot yet be supplied per account; those are listed
+        so the whole catalog is visible, but `PUT` rejects them.
+
+        The key itself is never returned. `key_hint` carries the last four
+        characters so a user can tell two of their own keys apart.
+      tags: [Provider Keys]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Provider key status
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProviderKeyStatus'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /provider-keys/{provider}:
+    put:
+      summary: Set this account's key for a provider
+      description: |
+        Stores or replaces the authenticated account's key for one provider. The
+        key is encrypted at rest and takes effect on the next request without a
+        restart.
+      tags: [Provider Keys]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          description: Provider name as reported by `GET /provider-keys`
+          schema:
+            type: string
+            example: openai
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key]
+              properties:
+                key:
+                  type: string
+                  description: The provider API key. Write-only; never returned.
+                  example: sk-...
+      responses:
+        '200':
+          description: Key stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderKeyStatus'
+        '400':
+          description: Unknown provider, or the key was missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '501':
+          description: |
+            This provider does not support per-account keys yet. Storing one
+            would report the provider as configured while its requests still
+            used the deployment credential, so it is refused rather than
+            silently ignored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Remove this account's key for a provider
+      description: |
+        Removes the account's stored key. The account may still reach the
+        provider afterwards through the deployment-level fallback, which the
+        response reports rather than assuming.
+      tags: [Provider Keys]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            example: openai
+      responses:
+        '200':
+          description: Key removed; resulting status returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderKeyStatus'
+        '400':
+          description: Unknown provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /mcp-servers:
     get:
       summary: List configured MCP servers
@@ -6133,6 +6263,39 @@ components:
           description: Scratchpad text to persist for the active personality.
       required:
         - active_scratchpad
+
+    ProviderKeyStatus:
+      type: object
+      description: |
+        Whether the authenticated account can reach one model provider. Never
+        carries the key itself.
+      required: [provider, configured, required, supported]
+      properties:
+        provider:
+          type: string
+          example: openai
+        configured:
+          type: boolean
+          description: The account can reach this provider, by either source.
+        source:
+          type: string
+          description: |
+            Where the usable credential comes from. Empty when not configured.
+          enum: ['', account, deployment]
+        key_hint:
+          type: string
+          description: Last four characters of the account's own key, if set.
+          example: "…4f2a"
+        required:
+          type: boolean
+          description: |
+            The app cannot function without this provider. True for OpenAI,
+            whose key is used by embeddings, summarization, chat naming, mood,
+            expressions and file attachments regardless of the chat model
+            selected.
+        supported:
+          type: boolean
+          description: Whether a key can be supplied per account yet.
 
     MCPServer:
       type: object

@@ -15,15 +15,19 @@ import (
 
 // Handler handles model-related API requests
 type Handler struct {
-	ds     *datastore.Datastore
-	logger *zap.Logger
+	ds        *datastore.Datastore
+	logger    *zap.Logger
+	providers models.ProviderAvailability
 }
 
-// NewHandler creates a new model handler instance
-func NewHandler(ds *datastore.Datastore, logger *zap.Logger) *Handler {
+// NewHandler creates a new model handler instance. providers determines which
+// models are offered: a model whose provider has no configured key fails at
+// send time, so listing it is a choice the server cannot honour.
+func NewHandler(ds *datastore.Datastore, logger *zap.Logger, providers models.ProviderAvailability) *Handler {
 	return &Handler{
-		ds:     ds,
-		logger: logger,
+		ds:        ds,
+		logger:    logger,
+		providers: providers,
 	}
 }
 
@@ -34,9 +38,11 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	modelRouter.HandleFunc("", h.ListModels).Methods("GET")
 }
 
-// ListModels lists models. Authenticated users receive a catalog filtered by
-// enable_experimental_models; unauthenticated callers see the default catalog
-// (experimental providers hidden, same as enable_experimental_models=false).
+// ListModels lists models the caller can actually use. Two filters apply:
+// enable_experimental_models for authenticated users (unauthenticated callers
+// get the default catalog, experimental hidden), and provider availability —
+// models whose provider has no configured credential are omitted rather than
+// offered and then failed at send time.
 func (h *Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -55,5 +61,5 @@ func (h *Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	json.NewEncoder(w).Encode(modelList)
+	json.NewEncoder(w).Encode(h.providers.FilterUsable(ctx, modelList))
 }

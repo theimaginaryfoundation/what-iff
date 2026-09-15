@@ -88,6 +88,10 @@ func (User) Edges() []ent.Edge {
 			Annotations(entsql.OnDelete(entsql.Cascade)),
 		edge.To("mcp_servers", MCPServer.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),
+		// Cascade so deleting an account takes its provider credentials with
+		// it, the same as every other per-user secret here.
+		edge.To("provider_keys", UserProviderKey.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 		edge.To("webhook_tokens", WebhookToken.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),
 		edge.To("system_ritual_bindings", SystemRitualBinding.Type).
