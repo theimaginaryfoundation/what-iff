@@ -84,5 +84,5 @@ func TestOpenAIChatCompletionsAdapter_MissingAPIKey(t *testing.T) {
 		nil,
 		nil,
 	)
-	require.ErrorContains(t, err, "no Mistral API key is configured")
+	require.ErrorContains(t, err, "no Mistral API key is configured for this account")
 }
