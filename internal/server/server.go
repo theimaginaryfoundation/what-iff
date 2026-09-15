@@ -46,6 +46,7 @@ import (
 	appmodels "github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
 	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
+	"github.com/theimaginaryfoundation/what-iff/internal/providermodels"
 	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
@@ -279,7 +280,19 @@ func (s *Server) setupRoutes() {
 	// rather than waiting out the cache. Only OpenAI has one today; the others
 	// still store and list fine, they just have no cache to clear.
 	keyResolvers := map[string]*providerkeys.Resolver{}
-	providerKeyHandler := providerkey.NewHandler(dataStore, s.logger, keyResolvers)
+	// Listing a provider's live catalog uses the caller's own key, so what a
+	// user sees is what their key can actually reach. Only OpenAI has a Lister;
+	// the route answers 501 for the rest rather than pretending.
+	providerModelService := providermodels.NewService(
+		map[string]providermodels.Lister{
+			string(appmodels.ModelProviderOpenAI): &providermodels.OpenAILister{
+				// Same constant the credential transport derives its host from.
+				BaseURL: provider.DefaultOpenAIBaseURL,
+			},
+		},
+		registryKeys{registry: s.providerKeys},
+	)
+	providerKeyHandler := providerkey.NewHandler(dataStore, s.logger, keyResolvers, providerModelService)
 	// Provider availability gates the model list. Under a non-vendor backend
 	// (mock/local, ADR 0x018) every model is served without provider keys, so
 	// this must not filter there — see models.NewProviderAvailability.
@@ -624,4 +637,17 @@ func credentialRules(cfg *Config, keys *providerkeys.Registry) []provider.Creden
 		{BaseURL: orDefault(cfg.QwenBaseURL, provider.DefaultQwenBaseURL), Style: provider.BearerAuthorization, Resolve: resolve(appmodels.ModelProviderQwen)},
 		{BaseURL: orDefault(cfg.XiaomiBaseURL, provider.DefaultXiaomiBaseURL), Style: provider.BearerAuthorization, Resolve: resolve(appmodels.ModelProviderXiaomi)},
 	}
+}
+
+// registryKeys adapts the provider-key registry to the model lister's view of
+// it: the account comes from the request context, so there is nothing to pass.
+type registryKeys struct {
+	registry *providerkeys.Registry
+}
+
+func (r registryKeys) KeyFor(ctx context.Context, provider string) string {
+	if r.registry == nil {
+		return ""
+	}
+	return r.registry.Key(ctx, appmodels.ModelProvider(provider))
 }

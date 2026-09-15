@@ -55,7 +55,7 @@ func newTestRouter(t *testing.T) (*mux.Router, *sql.DB, func()) {
 	require.NoError(t, err)
 
 	r := mux.NewRouter()
-	NewHandler(ds, zap.NewNop(), nil).RegisterRoutes(r)
+	NewHandler(ds, zap.NewNop(), nil, nil).RegisterRoutes(r)
 	return r, db, func() { _ = client.Close(); _ = db.Close() }
 }
 
