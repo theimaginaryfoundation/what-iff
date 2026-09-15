@@ -15,6 +15,7 @@ import {
   providerLabel as formatProviderLabel,
   sortedProviders,
 } from '../../helpers/model-picker.helpers';
+import { ModelTierDisplay } from '../../../../core/services/model-tier-display';
 import { ModelFavoritesService } from '../../services/model-favorites.service';
 
 type VendorStep = 'vendor' | 'model';
@@ -68,16 +69,18 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
             >
               Vendor
             </button>
-            <button
-              type="button"
-              role="tab"
-              class="model-picker__tab"
-              [class.model-picker__tab--active]="viewMode() === 'tier'"
-              [attr.aria-selected]="viewMode() === 'tier'"
-              (click)="setViewMode('tier')"
-            >
-              Tier
-            </button>
+            @if (showTiers) {
+              <button
+                type="button"
+                role="tab"
+                class="model-picker__tab"
+                [class.model-picker__tab--active]="viewMode() === 'tier'"
+                [attr.aria-selected]="viewMode() === 'tier'"
+                (click)="setViewMode('tier')"
+              >
+                Tier
+              </button>
+            }
           </div>
 
           @if (favoritesError(); as favoritesError) {
@@ -406,6 +409,14 @@ export class ModelPickerComponent {
   readonly disabled = input(false);
   readonly selected = output<Model>();
   readonly open = signal(false);
+  private tierDisplay = inject(ModelTierDisplay);
+  /**
+   * Whether to offer tier grouping. Tiers describe a hosted plan's entitlement,
+   * so a build where the user brings their own key hides them and leaves vendor
+   * grouping — the distinction that still means something.
+   */
+  readonly showTiers = this.tierDisplay.enabled();
+
   readonly viewMode = signal<ViewMode>('vendor');
   readonly vendorStep = signal<VendorStep>('vendor');
   readonly activeProvider = signal<string | null>(null);
@@ -476,6 +487,12 @@ export class ModelPickerComponent {
   }
 
   setViewMode(mode: ViewMode): void {
+    // A hidden tab should be unreachable, not merely invisible. Without this a
+    // build with tiers off still has a working tier view that nothing links to,
+    // which is the sort of state that surfaces later as a confusing bug.
+    if (mode === 'tier' && !this.showTiers) {
+      return;
+    }
     this.viewMode.set(mode);
     if (mode === 'vendor') {
       this.resetVendorStep();
@@ -485,6 +502,9 @@ export class ModelPickerComponent {
   }
 
   tierLabel(model: Model): string {
+    if (!this.showTiers) {
+      return '';
+    }
     return modelTierCompactLabel(model.subscription_tier);
   }
 
