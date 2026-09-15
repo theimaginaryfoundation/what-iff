@@ -1,5 +1,6 @@
 
-import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, effect, inject, input, output, signal } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EmptyError, Subject, firstValueFrom, forkJoin, timer } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -67,18 +68,22 @@ function parseImportCount(value: unknown): number | null {
   return Number.isInteger(count) && count >= 0 ? count : null;
 }
 
+/**
+ * ChatGPT/Claude conversation import. Renders either as a modal (legacy trigger) or inline on the
+ * Import & Export screen (`[inline]="true"`) — same flow and services, without the modal chrome.
+ */
 @Component({
   selector: 'app-chat-import-modal',
   standalone: true,
-  imports: [ModalComponent, ChatImportPickerComponent],
+  imports: [ModalComponent, ChatImportPickerComponent, NgTemplateOutlet],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <ui-modal [open]="open()" [labelledBy]="titleId" size="md" (dismiss)="onDismiss()">
-      <div modal-header>
-        <h2 [id]="titleId" class="import__title">Import conversations</h2>
-        <p class="import__subtitle">Bring in your ChatGPT or Claude history. Imported chats land in your archive.</p>
-      </div>
+    <ng-template #headerTpl>
+      <h2 [id]="titleId" class="import__title">Import from ChatGPT or Claude</h2>
+      <p class="import__subtitle">Bring in your ChatGPT or Claude history. Imported chats land in your archive.</p>
+    </ng-template>
 
+    <ng-template #bodyTpl>
       <div class="import">
         @switch (stage()) {
           @case ('done') {
@@ -172,37 +177,58 @@ function parseImportCount(value: unknown): number | null {
           }
         }
       </div>
+    </ng-template>
 
-      <div modal-footer class="import__footer">
-        @if (stage() === 'done' || stage() === 'error') {
-          <button type="button" class="import__btn import__btn--primary" (click)="onDismiss()">Close</button>
-        } @else if (stage() === 'picker') {
-          <button type="button" class="import__btn import__btn--ghost" (click)="skipPicker()">Skip for now</button>
-          <button
-            type="button"
-            class="import__btn import__btn--primary"
-            (click)="prepareSelected()"
-            [disabled]="selectedCount() === 0"
-          >
-            Prepare {{ selectedCount() }} {{ selectedCount() === 1 ? 'thread' : 'threads' }}
-          </button>
-        } @else if (stage() === 'preparing') {
-          <button type="button" class="import__btn import__btn--primary" disabled>Preparing…</button>
+    <ng-template #footerTpl>
+      @if (stage() === 'done' || stage() === 'error') {
+        @if (inline()) {
+          <button type="button" class="import__btn import__btn--primary" (click)="importAnother()">Import another</button>
         } @else {
-          <button type="button" class="import__btn import__btn--ghost" (click)="onDismiss()" [disabled]="stage() === 'uploading'">Cancel</button>
-          <button
-            type="button"
-            class="import__btn import__btn--primary"
-            (click)="startImport()"
-            [disabled]="stage() !== 'ready'"
-          >
-            {{ stage() === 'uploading' || stage() === 'running' ? 'Importing…' : 'Import' }}
-          </button>
+          <button type="button" class="import__btn import__btn--primary" (click)="onDismiss()">Close</button>
         }
-      </div>
-    </ui-modal>
+      } @else if (stage() === 'picker') {
+        <button type="button" class="import__btn import__btn--ghost" (click)="skipPicker()">Skip for now</button>
+        <button
+          type="button"
+          class="import__btn import__btn--primary"
+          (click)="prepareSelected()"
+          [disabled]="selectedCount() === 0"
+        >
+          Prepare {{ selectedCount() }} {{ selectedCount() === 1 ? 'thread' : 'threads' }}
+        </button>
+      } @else if (stage() === 'preparing') {
+        <button type="button" class="import__btn import__btn--primary" disabled>Preparing…</button>
+      } @else {
+        @if (!inline()) {
+          <button type="button" class="import__btn import__btn--ghost" (click)="onDismiss()" [disabled]="stage() === 'uploading'">Cancel</button>
+        }
+        <button
+          type="button"
+          class="import__btn import__btn--primary"
+          (click)="startImport()"
+          [disabled]="stage() !== 'ready'"
+        >
+          {{ stage() === 'uploading' || stage() === 'running' ? 'Importing…' : 'Import' }}
+        </button>
+      }
+    </ng-template>
+
+    @if (inline()) {
+      <section class="import-inline">
+        <div class="import__header"><ng-container [ngTemplateOutlet]="headerTpl" /></div>
+        <ng-container [ngTemplateOutlet]="bodyTpl" />
+        <div class="import__footer"><ng-container [ngTemplateOutlet]="footerTpl" /></div>
+      </section>
+    } @else {
+      <ui-modal [open]="open()" [labelledBy]="titleId" size="md" (dismiss)="onDismiss()">
+        <div modal-header><ng-container [ngTemplateOutlet]="headerTpl" /></div>
+        <ng-container [ngTemplateOutlet]="bodyTpl" />
+        <div modal-footer class="import__footer"><ng-container [ngTemplateOutlet]="footerTpl" /></div>
+      </ui-modal>
+    }
   `,
   styles: [`
+    .import-inline { display: flex; flex-direction: column; gap: 1rem; }
     .import { display: flex; flex-direction: column; gap: 1rem; }
     .import__title { color: var(--color-text-primary); font-size: 1.0625rem; font-weight: 700; margin: 0; }
     .import__subtitle { color: var(--color-text-muted); font-size: 0.8125rem; margin: 0.25rem 0 0; }
@@ -263,8 +289,10 @@ function parseImportCount(value: unknown): number | null {
     .import__btn--primary { background: var(--color-accent); border: 0; color: #fff; }
   `],
 })
-export class ChatImportModalComponent {
+export class ChatImportModalComponent implements OnInit {
   readonly open = input<boolean>(false);
+  /** When true, renders inline (on the Import & Export screen) instead of as a modal. */
+  readonly inline = input<boolean>(false);
   readonly dismiss = output<void>();
   /** Emitted when the import finished and at least one thread was created, so the parent can refresh. */
   readonly imported = output<void>();
@@ -304,8 +332,10 @@ export class ChatImportModalComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   constructor() {
-    // Reset whenever the modal is (re)opened; abort in-flight work when it closes.
+    // Modal mode: reset whenever the modal is (re)opened; abort in-flight work when it closes.
+    // Inline mode drives its own lifecycle from ngOnInit and the "Import another" action.
     effect(() => {
+      if (this.inline()) return;
       if (this.open()) {
         this.reset();
       } else {
@@ -313,6 +343,17 @@ export class ChatImportModalComponent {
       }
     });
     this.destroyRef.onDestroy(() => this.abortInFlightImport());
+  }
+
+  ngOnInit(): void {
+    if (this.inline()) {
+      this.reset();
+    }
+  }
+
+  /** Inline mode: clear a finished/failed run and start over. */
+  importAnother(): void {
+    this.reset();
   }
 
   private abortInFlightImport(): void {

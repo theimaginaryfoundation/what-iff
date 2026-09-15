@@ -10,6 +10,7 @@ import {
 } from '../../core/services/account-export.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { AccountArchiveService, ArchiveContents } from './account-archive.service';
+import { ChatImportModalComponent } from '../chat/components/chat-import-modal/chat-import-modal.component';
 
 type ExportPhase = 'idle' | 'queued' | 'building' | 'uploading' | 'complete' | 'failed';
 type ImportPhase = 'idle' | 'inspecting' | 'review' | 'uploading' | 'validating' | 'importing' | 'complete' | 'failed';
@@ -26,6 +27,7 @@ const TERMINAL_JOB_STATES = ['complete', 'failed', 'cancelled'];
 @Component({
   selector: 'app-data-portability-page',
   standalone: true,
+  imports: [ChatImportModalComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './data-portability-page.component.html',
 })
