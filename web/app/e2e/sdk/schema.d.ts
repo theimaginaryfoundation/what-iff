@@ -8123,6 +8123,14 @@ export interface components {
          *       "default_personality_id": "123e4567-e89b-12d3-a456-426614174003",
          *       "theme": "dark",
          *       "last_seen_announcement": "",
+         *       "hidden_model_ids": {
+         *         "type": "array",
+         *         "description": "Model IDs hidden from this account's model picker. Visibility only —\na hidden model still runs when named directly by an existing chat,\nan agent job or the API, so hiding one cannot silently break\nscheduled work.\n\nOn update: omit to leave unchanged, send [] to unhide everything.\n",
+         *         "items": {
+         *           "type": "string",
+         *           "format": "uuid"
+         *         }
+         *       },
          *       "favorite_model_ids": [
          *         "123e4567-e89b-12d3-a456-426614174002",
          *         "123e4567-e89b-12d3-a456-426614174004"
@@ -8159,6 +8167,15 @@ export interface components {
             /** @description ID of the most recently seen announcement banner; an empty string means none seen */
             last_seen_announcement: string;
             /**
+             * @description Model IDs hidden from this account's model picker. Visibility only —
+             *     a hidden model still runs when named directly by an existing chat,
+             *     an agent job or the API, so hiding one cannot silently break
+             *     scheduled work.
+             *
+             *     On update: omit to leave unchanged, send [] to unhide everything.
+             */
+            hidden_model_ids?: string[];
+            /**
              * @description Model IDs the user has starred in the model picker, in the order they were
              *     added. Favorites are user-global rather than per-personality. Always an array;
              *     an empty array means no favorites. Entries are not re-validated on read, so an
@@ -8179,6 +8196,14 @@ export interface components {
          *       "default_personality_id": "123e4567-e89b-12d3-a456-426614174003",
          *       "theme": "dark",
          *       "last_seen_announcement": "2026-08-release",
+         *       "hidden_model_ids": {
+         *         "type": "array",
+         *         "description": "Model IDs hidden from this account's model picker. Visibility only —\na hidden model still runs when named directly by an existing chat,\nan agent job or the API, so hiding one cannot silently break\nscheduled work.\n\nOn update: omit to leave unchanged, send [] to unhide everything.\n",
+         *         "items": {
+         *           "type": "string",
+         *           "format": "uuid"
+         *         }
+         *       },
          *       "favorite_model_ids": [
          *         "123e4567-e89b-12d3-a456-426614174002",
          *         "123e4567-e89b-12d3-a456-426614174004"
@@ -8213,6 +8238,15 @@ export interface components {
              *     leaves the stored value unchanged. This endpoint cannot clear it.
              */
             last_seen_announcement?: string;
+            /**
+             * @description Model IDs hidden from this account's model picker. Visibility only —
+             *     a hidden model still runs when named directly by an existing chat,
+             *     an agent job or the API, so hiding one cannot silently break
+             *     scheduled work.
+             *
+             *     On update: omit to leave unchanged, send [] to unhide everything.
+             */
+            hidden_model_ids?: string[];
             /**
              * @description Model IDs to star in the model picker. Preserved when absent: omitting the field
              *     (or sending null) leaves the stored list untouched. When present the array

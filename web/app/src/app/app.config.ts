@@ -10,6 +10,7 @@ import { ExternalAuthProvider } from './core/auth/external-auth.provider';
 import { externalAuthProviders } from './extensions/external-auth.providers';
 import { chatSendGateProviders } from './extensions/chat-send-gate.providers';
 import { accessGateProviders } from './extensions/access-gate.providers';
+import { modelTierProviders } from './extensions/model-tier.providers';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -22,11 +23,12 @@ export const appConfig: ApplicationConfig = {
     ...externalAuthProviders,
     ...chatSendGateProviders,
     ...accessGateProviders,
+    ...modelTierProviders,
     {
       provide: APP_INITIALIZER,
       multi: true,
       deps: [ExternalAuthProvider],
       useFactory: (auth: ExternalAuthProvider) => () => auth.configure(),
     },
-  ]
+  ],
 };

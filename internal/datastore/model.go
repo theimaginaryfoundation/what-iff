@@ -162,6 +162,18 @@ func (d *Datastore) ListModelsDefault(ctx context.Context) ([]*models.Model, err
 // The gated set lives in models.IsExperimentalModelRecord (currently empty —
 // graduated vendors are generally available; add new dogfood vendors there).
 func (d *Datastore) ListModelsForUser(ctx context.Context, userID uuid.UUID) ([]*models.Model, error) {
+	return d.listModelsForUser(ctx, userID, false)
+}
+
+// ListAllModelsForUser is ListModelsForUser without the hide filter, for the
+// screen where hidden models are managed. That screen has to name what it is
+// offering to unhide, and a filtered list would leave it showing identifiers
+// for models it cannot describe.
+func (d *Datastore) ListAllModelsForUser(ctx context.Context, userID uuid.UUID) ([]*models.Model, error) {
+	return d.listModelsForUser(ctx, userID, true)
+}
+
+func (d *Datastore) listModelsForUser(ctx context.Context, userID uuid.UUID, includeHidden bool) ([]*models.Model, error) {
 	all, err := d.ListModels(ctx)
 	if err != nil {
 		return nil, err
@@ -174,10 +186,45 @@ func (d *Datastore) ListModelsForUser(ctx context.Context, userID uuid.UUID) ([]
 		d.logger.Error(i18n.T1("query.failed", "Entity", "user"), zap.Error(err))
 		return nil, err
 	}
-	if u.EnableExperimentalModels {
+	if !u.EnableExperimentalModels {
+		all = filterVisibleModels(all, false)
+	}
+	if includeHidden {
 		return all, nil
 	}
-	return filterVisibleModels(all, false), nil
+	return d.filterHiddenModels(ctx, userID, all), nil
+}
+
+// filterHiddenModels drops the models this account has hidden.
+//
+// Applied only to the catalog listing — the picker — and deliberately not to
+// any path that runs a model. Hiding is a preference, so a hidden model still
+// works when something names it directly: an existing chat pinned to it, an
+// agent job, a webhook. Enforcing it at use would mean unchecking a box in
+// settings silently broke a scheduled job days later.
+//
+// A read failure hides nothing rather than everything: the visible consequence
+// of losing preferences should be a longer list, not an empty one.
+func (d *Datastore) filterHiddenModels(ctx context.Context, userID uuid.UUID, in []*models.Model) []*models.Model {
+	prefs, err := d.GetUserPreferences(ctx, userID)
+	if err != nil || prefs == nil || len(prefs.HiddenModelIDs) == 0 {
+		if err != nil {
+			d.logger.Warn("could not read hidden models; showing the full catalog", zap.Error(err))
+		}
+		return in
+	}
+	hidden := make(map[string]bool, len(prefs.HiddenModelIDs))
+	for _, id := range prefs.HiddenModelIDs {
+		hidden[id] = true
+	}
+	out := make([]*models.Model, 0, len(in))
+	for _, m := range in {
+		if m != nil && hidden[m.ID.String()] {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func assertUserCanUseModelTx(ctx context.Context, tx *ent.Tx, userID uuid.UUID, modelID uuid.UUID) error {

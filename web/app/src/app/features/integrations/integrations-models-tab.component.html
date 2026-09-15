@@ -1,0 +1,81 @@
+<div class="space-y-4">
+  <div class="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Models in your picker</h2>
+        <p class="mt-0.5 text-xs text-gray-600 dark:text-gray-400">
+          Uncheck anything you do not want to scroll past. This only changes what the picker shows you — a hidden model keeps working in
+          chats and jobs that already use it.
+        </p>
+      </div>
+      <button
+        type="button"
+        (click)="showAll()"
+        [disabled]="busyId() !== null || shownCount() === rows().length"
+        class="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+      >
+        Show all
+      </button>
+    </div>
+  </div>
+
+  @if (atMinimum()) {
+    <div
+      class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400"
+      role="note"
+    >
+      One model stays visible so the picker is never empty. Show another to hide this one.
+    </div>
+  }
+
+  @if (errorMessage()) {
+    <div
+      class="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300"
+      role="alert"
+    >
+      {{ errorMessage() }}
+    </div>
+  }
+
+  @if (isLoading()) {
+    <p class="text-sm text-gray-600 dark:text-gray-400">Loading models…</p>
+  } @else if (rows().length === 0) {
+    <div class="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+      <p class="text-sm text-gray-600 dark:text-gray-400">No models yet. Add a provider key under API Keys and its models appear here.</p>
+    </div>
+  } @else {
+    @for (group of groups(); track group.provider) {
+      <div class="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+        <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ group.label }}</h3>
+        <ul class="mt-2 space-y-2">
+          @for (row of group.rows; track row.model.id) {
+            <li class="flex items-start gap-3">
+              <input
+                type="checkbox"
+                [id]="'model-' + row.model.id"
+                [checked]="row.shown"
+                [disabled]="busyId() !== null || (row.shown && !canHide())"
+                (change)="toggle(row)"
+                class="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 disabled:opacity-50 dark:border-gray-600"
+              />
+              <label
+                [attr.for]="'model-' + row.model.id"
+                class="min-w-0 flex-1"
+                [class.cursor-pointer]="!(row.shown && !canHide())"
+              >
+                <span class="block text-sm text-gray-900 dark:text-white">
+                  {{ row.model.display_name || row.model.name }}
+                </span>
+                @if (row.model.description) {
+                  <span class="mt-0.5 block text-xs text-gray-600 dark:text-gray-400">
+                    {{ row.model.description }}
+                  </span>
+                }
+              </label>
+            </li>
+          }
+        </ul>
+      </div>
+    }
+  }
+</div>
