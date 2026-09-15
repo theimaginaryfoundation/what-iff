@@ -1,4 +1,11 @@
-import { DEFAULT_MEMORY_VIEW_FILTERS, normalizeDateRange, parseQueryParams, serializeFilters, toApiFilters } from './memory-filter.helpers';
+import {
+  DEFAULT_MEMORY_VIEW_FILTERS,
+  GLOBAL_PERSONALITY_FILTER,
+  normalizeDateRange,
+  parseQueryParams,
+  serializeFilters,
+  toApiFilters,
+} from './memory-filter.helpers';
 
 describe('memory-filter.helpers', () => {
   it('parses query params into filter model', () => {
@@ -73,6 +80,15 @@ describe('memory-filter.helpers', () => {
     });
     expect(api.level).toBe('summary');
     expect(api.status).toBe('active');
+  });
+
+  it('maps the Global persona option to global_only without a personality ID', () => {
+    const api = toApiFilters({
+      ...DEFAULT_MEMORY_VIEW_FILTERS,
+      personalityId: GLOBAL_PERSONALITY_FILTER,
+    });
+    expect(api.global_only).toBe(true);
+    expect(api.pinned_personality_ids).toBeUndefined();
   });
 
   it('clamps inverted date ranges and drops invalid dates', () => {
