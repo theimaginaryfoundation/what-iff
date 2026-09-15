@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
@@ -55,5 +56,18 @@ func (h *Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	toolNames := builtInFunctionToolNames()
+	for _, model := range modelList {
+		model.Capabilities = models.DeriveModelCapabilities(model, toolNames)
+	}
 	json.NewEncoder(w).Encode(modelList)
+}
+
+func builtInFunctionToolNames() []string {
+	specs := agenttools.AgentFunctionToolSpecs(true)
+	names := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		names = append(names, spec.Name)
+	}
+	return names
 }
