@@ -104,6 +104,9 @@ func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID u
 // makes the scratchpad delta (old → new) explicit via context blocks.
 func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, userID, chatID uuid.UUID, modelContext *provider.ModelContext, inferenceModelContext *provider.ModelContext, chatCtx *chatContext, compactionEventID *uuid.UUID) error {
 
+	if err := a.requireProviderKey(ctx, models.ModelProviderAnthropic, archivalClaudeModel); err != nil {
+		return err
+	}
 	if a.ClaudeProvider == nil {
 		return fmt.Errorf("ClaudeProvider is nil")
 	}

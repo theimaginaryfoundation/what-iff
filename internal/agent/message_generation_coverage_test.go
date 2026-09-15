@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 	"go.uber.org/zap"
 )
 
@@ -55,12 +56,16 @@ func TestGenerateAssistantForMessageOpenAI_AdapterErrorIsWrapped(t *testing.T) {
 
 func TestGenerateAssistantForMessageClaude_NoProviderReturnsError(t *testing.T) {
 	t.Parallel()
-	a := &Agent{logger: zap.NewNop()}
+	a := &Agent{logger: zap.NewNop(), providerKeys: providerkeys.NewRegistry(nil, providerkeys.DeploymentKeys{})}
 	chatMessage := &models.ChatMessage{ChatID: uuid.New()}
 	chatCtx := baseChatCtxForGeneration("claude-haiku-4-5", "anthropic")
 
 	_, _, err := a.generateAssistantForMessageClaude(context.Background(), uuid.New(), &models.Job{}, chatMessage, chatCtx, &provider.ModelContext{})
-	require.ErrorContains(t, err, "ANTHROPIC_API_KEY is not configured")
+	// The message has to serve both places a credential can come from: the
+	// account's own key and the deployment environment.
+	require.ErrorContains(t, err, "no Anthropic API key is configured")
+	require.ErrorContains(t, err, "Integrations")
+	require.ErrorContains(t, err, "ANTHROPIC_API_KEY")
 }
 
 func TestGenerateAssistantForMessageClaude_AdapterErrorIsWrapped(t *testing.T) {
@@ -83,12 +88,13 @@ func TestGenerateAssistantForMessageClaude_AdapterErrorIsWrapped(t *testing.T) {
 
 func TestGenerateAssistantForMessageGemini_NoProviderReturnsError(t *testing.T) {
 	t.Parallel()
-	a := &Agent{logger: zap.NewNop()}
+	a := &Agent{logger: zap.NewNop(), providerKeys: providerkeys.NewRegistry(nil, providerkeys.DeploymentKeys{})}
 	chatMessage := &models.ChatMessage{ChatID: uuid.New()}
 	chatCtx := baseChatCtxForGeneration("gemini-3.5", "google")
 
 	_, _, err := a.generateAssistantForMessageGemini(context.Background(), uuid.New(), &models.Job{}, chatMessage, chatCtx, &provider.ModelContext{})
-	require.ErrorContains(t, err, "GEMINI_API_KEY is not configured")
+	require.ErrorContains(t, err, "no Gemini API key is configured")
+	require.ErrorContains(t, err, "GEMINI_API_KEY")
 }
 
 func TestGenerateAssistantForMessageGemini_AdapterErrorIsWrapped(t *testing.T) {
@@ -111,7 +117,7 @@ func TestGenerateAssistantForMessageGemini_AdapterErrorIsWrapped(t *testing.T) {
 
 func TestGenerateAssistantForMessageLocal_NoProviderReturnsError(t *testing.T) {
 	t.Parallel()
-	a := &Agent{logger: zap.NewNop()}
+	a := &Agent{logger: zap.NewNop(), providerKeys: providerkeys.NewRegistry(nil, providerkeys.DeploymentKeys{})}
 	chatMessage := &models.ChatMessage{ChatID: uuid.New()}
 	chatCtx := baseChatCtxForGeneration("local-model", "local")
 
@@ -140,12 +146,13 @@ func TestGenerateAssistantForMessageLocal_AdapterErrorIsWrapped(t *testing.T) {
 
 func TestGenerateAssistantForMessageOpenAIChatCompletions_NoProviderReturnsError(t *testing.T) {
 	t.Parallel()
-	a := &Agent{logger: zap.NewNop()}
+	a := &Agent{logger: zap.NewNop(), providerKeys: providerkeys.NewRegistry(nil, providerkeys.DeploymentKeys{})}
 	chatMessage := &models.ChatMessage{ChatID: uuid.New()}
 	chatCtx := baseChatCtxForGeneration("mistral-large-latest", "mistral")
 
 	_, _, err := a.generateAssistantForMessageOpenAIChatCompletions(context.Background(), uuid.New(), &models.Job{}, chatMessage, chatCtx, &provider.ModelContext{})
-	require.ErrorContains(t, err, "MISTRAL_API_KEY is not configured")
+	require.ErrorContains(t, err, "no Mistral API key is configured")
+	require.ErrorContains(t, err, "MISTRAL_API_KEY")
 }
 
 func TestGenerateAssistantForMessageOpenAIChatCompletions_AdapterErrorIsWrapped(t *testing.T) {
@@ -195,32 +202,32 @@ func TestDispatchAssistantGeneration_RoutesLocalLLM(t *testing.T) {
 
 func TestDispatchAssistantGeneration_RoutesGemini(t *testing.T) {
 	t.Parallel()
-	a := &Agent{logger: zap.NewNop()}
+	a := &Agent{logger: zap.NewNop(), providerKeys: providerkeys.NewRegistry(nil, providerkeys.DeploymentKeys{})}
 	chatMessage := &models.ChatMessage{ChatID: uuid.New()}
 	chatCtx := baseChatCtxForGeneration("gemini-3.5", string(models.ModelProviderGoogle))
 
 	_, _, err := a.dispatchAssistantGeneration(context.Background(), uuid.New(), &models.Job{}, chatMessage, chatCtx, &provider.ModelContext{})
-	require.ErrorContains(t, err, "GEMINI_API_KEY is not configured")
+	require.ErrorContains(t, err, "no Gemini API key is configured")
 }
 
 func TestDispatchAssistantGeneration_RoutesOpenAIChatCompletions(t *testing.T) {
 	t.Parallel()
-	a := &Agent{logger: zap.NewNop()}
+	a := &Agent{logger: zap.NewNop(), providerKeys: providerkeys.NewRegistry(nil, providerkeys.DeploymentKeys{})}
 	chatMessage := &models.ChatMessage{ChatID: uuid.New()}
 	chatCtx := baseChatCtxForGeneration("mistral-large-latest", string(models.ModelProviderMistral))
 
 	_, _, err := a.dispatchAssistantGeneration(context.Background(), uuid.New(), &models.Job{}, chatMessage, chatCtx, &provider.ModelContext{})
-	require.ErrorContains(t, err, "MISTRAL_API_KEY is not configured")
+	require.ErrorContains(t, err, "no Mistral API key is configured")
 }
 
 func TestDispatchAssistantGeneration_RoutesClaude(t *testing.T) {
 	t.Parallel()
-	a := &Agent{logger: zap.NewNop()}
+	a := &Agent{logger: zap.NewNop(), providerKeys: providerkeys.NewRegistry(nil, providerkeys.DeploymentKeys{})}
 	chatMessage := &models.ChatMessage{ChatID: uuid.New()}
 	chatCtx := baseChatCtxForGeneration("claude-haiku-4-5", string(models.ModelProviderAnthropic))
 
 	_, _, err := a.dispatchAssistantGeneration(context.Background(), uuid.New(), &models.Job{}, chatMessage, chatCtx, &provider.ModelContext{})
-	require.ErrorContains(t, err, "ANTHROPIC_API_KEY is not configured")
+	require.ErrorContains(t, err, "no Anthropic API key is configured")
 }
 
 func TestDispatchAssistantGeneration_RoutesOpenAIDefault(t *testing.T) {
@@ -323,7 +330,7 @@ func TestSaveAgentResponse_CreateChatMessageErrorIsWrapped(t *testing.T) {
 
 func TestOpenAIResponseParamsForChat_ToolsDisabled(t *testing.T) {
 	t.Parallel()
-	a := &Agent{logger: zap.NewNop()}
+	a := &Agent{logger: zap.NewNop(), providerKeys: providerkeys.NewRegistry(nil, providerkeys.DeploymentKeys{})}
 	chatCtx := &chatContext{
 		chat:  &models.Chat{ToolsEnabled: false},
 		model: "gpt-5.1",

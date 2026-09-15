@@ -60,10 +60,12 @@ import (
 )
 
 type Server struct {
-	// openAIKeys resolves the OpenAI credential for the account making each
-	// request, falling back to the deployment key. Non-nil only under a vendor
-	// backend; mock/local use the deny-network transport and never carry a
-	// real credential.
+	// providerKeys answers which model providers the account making a request
+	// can use, and with which credential. Non-nil only under a vendor backend;
+	// mock/local serve every model without consulting credentials.
+	providerKeys *providerkeys.Registry
+	// openAIKeys is providerKeys' OpenAI resolver, held separately because the
+	// HTTP transport needs a resolution function rather than a question.
 	openAIKeys *providerkeys.Resolver
 	config     *Config
 	logger     *zap.Logger
@@ -149,13 +151,24 @@ func (s *Server) setupRoutes() {
 		// reaches every one without touching a call site. Scoped to the OpenAI
 		// host so the other OpenAI-compatible providers keep their own
 		// credentials (see openai_credential.go).
-		s.openAIKeys = providerkeys.NewResolver(dataStore, string(appmodels.ModelProviderOpenAI), s.config.OpenAIKey)
+		s.providerKeys = providerkeys.NewRegistry(dataStore, providerkeys.DeploymentKeys{
+			OpenAI:    s.config.OpenAIKey,
+			Anthropic: s.config.AnthropicKey,
+			ZAI:       s.config.ZAIKey,
+			Gemini:    s.config.GeminiKey,
+			Mistral:   s.config.MistralKey,
+			DeepSeek:  s.config.DeepSeekKey,
+			Qwen:      s.config.QwenKey,
+			Xiaomi:    s.config.XiaomiKey,
+		})
+		s.openAIKeys = s.providerKeys.ResolverFor(appmodels.ModelProviderOpenAI)
 		providerHTTPClient = provider.OpenAICredentialHTTPClient(s.openAIKeys.Resolve, nil)
 	}
 
 	agentCfg := agent.AgentConfig{
 		LifecycleContext: s.lifecycleCtx,
 		HTTPClient:       providerHTTPClient,
+		ProviderKeys:     s.providerKeys,
 		LLMBackend:       s.config.LLMBackend,
 		MockLLMMode:      s.config.MockLLMMode,
 		MockLLMFixedResponses: append([]string(nil),
