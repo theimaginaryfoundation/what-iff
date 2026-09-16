@@ -1,43 +1,71 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import { of, throwError } from 'rxjs';
 
+import { ProviderUsage } from '../../../core/models/provider-usage.model';
+import { ProviderUsageService } from '../../../core/services/provider-usage.service';
 import { ProvidersGuideComponent } from './providers-guide.component';
 
 describe('ProvidersGuideComponent', () => {
   let fixture: ComponentFixture<ProvidersGuideComponent>;
 
-  beforeEach(async () => {
+  const usage: ProviderUsage[] = [
+    { provider: 'anthropic', jobs: [{ job: 'Chatting with any Claude model', model: 'the model you pick' }] },
+    {
+      provider: 'openai',
+      required: true,
+      jobs: [{ job: 'Memory extraction and scratchpad updates', model: 'gpt-5.6-luna' }],
+    },
+  ];
+
+  async function render(response: ProviderUsage[] | 'error'): Promise<void> {
+    const service = {
+      list: vi
+        .fn()
+        .mockName('list')
+        .mockReturnValue(response === 'error' ? throwError(() => new Error('boom')) : of(response)),
+    };
+
     await TestBed.configureTestingModule({
       imports: [ProvidersGuideComponent],
-      providers: [provideZonelessChangeDetection(), provideRouter([])],
+      providers: [
+        provideZonelessChangeDetection(),
+        provideRouter([]),
+        { provide: ProviderUsageService, useValue: service },
+      ],
     }).compileComponents();
 
     fixture = TestBed.createComponent(ProvidersGuideComponent);
     fixture.detectChanges();
-  });
-
-  it('marks OpenAI required and the rest optional', () => {
-    const openai = fixture.componentInstance.providers.find(p => p.name === 'OpenAI');
-    expect(openai?.requirement).toBe('Required');
-    expect(fixture.componentInstance.providers.filter(p => p.requirement).length).toBe(1);
-  });
+  }
 
   /**
-   * The page exists to answer "why is OpenAI required when I chat with Claude",
-   * so the answer has to be the specific list of things that run regardless of
-   * the chat model — not a vague sentence.
+   * The page's whole purpose is naming the model behind each job, so the model
+   * column has to actually render — a job list without it is the vague answer
+   * this page replaced.
    */
-  it('lists the work OpenAI does regardless of the chat model', () => {
+  it('names the model behind each job', async () => {
+    await render(usage);
+
     const text = fixture.nativeElement.textContent;
     expect(text).toContain('Memory extraction and scratchpad updates');
-    expect(text).toContain('Conversation summaries at each checkpoint');
-    expect(text).toContain('Semantic search over your memories');
+    expect(text).toContain('gpt-5.6-luna');
   });
 
-  it('renders every provider with its uses', () => {
-    const sections = fixture.nativeElement.querySelectorAll('section');
-    expect(sections.length).toBe(fixture.componentInstance.providers.length);
-    expect(fixture.nativeElement.textContent).toContain('Adds the Gemini models to your picker.');
+  it('puts the required provider first regardless of server order', async () => {
+    await render(usage);
+
+    const headings = Array.from(fixture.nativeElement.querySelectorAll('h2')) as HTMLElement[];
+    expect(headings[0].textContent).toContain('OpenAI');
+    expect(headings[0].textContent).toContain('Required');
+  });
+
+  it('reports a load failure instead of rendering an empty page', async () => {
+    await render('error');
+
+    expect(fixture.nativeElement.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not load what each provider is used for.',
+    );
   });
 });

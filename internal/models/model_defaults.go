@@ -8,6 +8,14 @@ const (
 
 	// LegacyFineTunedModelName is the old fine-tuned model that will be migrated
 	LegacyFineTunedModelName = "ft:gpt-4.1-2025-04-14:sotherden-io:personal-agent:CFNpAx1S"
+
+	// UtilityModelName is the small OpenAI model behind the short, structured
+	// jobs that run around a conversation rather than in it: naming a chat,
+	// picking an expression, building a memory query and parsing an agent-job
+	// schedule. They share one constant because they share one requirement —
+	// cheap and fast — so retiring the model is a single edit rather than a
+	// hunt through four packages.
+	UtilityModelName = "gpt-4.1-nano-2025-04-14"
 )
 
 // ModelProvider identifies which API backend a model is routed through.

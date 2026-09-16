@@ -41,6 +41,10 @@ type ChatMessage struct {
 	Message string `json:"message"`
 }
 
+// memoryQueryModel turns a prompt into a memory search query — a short,
+// structured job that shares its model with chat naming.
+const memoryQueryModel = chatNameModel
+
 var memoryQuerySchema = provider.GenerateSchema[models.MemoryQuery]()
 var memoryExtractionDeveloperMessage = `You can see the previous scratchpad in the earlier developer message and the updated scratchpad in the latest assistant message.
 Use both, along with the recent conversation, to decide what should be written to long-term memory.
@@ -145,7 +149,7 @@ func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, us
 func (a *Agent) getMemoryQuery(ctx context.Context, userID uuid.UUID, prompt string, userMessage string) (models.MemoryQuery, error) {
 
 	params := responses.ResponseNewParams{
-		Model:            "gpt-4.1-nano-2025-04-14",
+		Model:            memoryQueryModel,
 		SafetyIdentifier: openai.String(userID.String()),
 		Temperature:      openai.Float(provider.DefaultTemperature),
 		MaxOutputTokens:  openai.Int(provider.DefaultMaxContentLength),

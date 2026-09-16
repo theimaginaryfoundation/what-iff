@@ -106,7 +106,7 @@ func Parse(ctx context.Context, caller openAICaller, userID uuid.UUID, scheduleI
 	}, "\n")
 
 	params := responses.ResponseNewParams{
-		Model:            "gpt-4.1-nano-2025-04-14",
+		Model:            models.UtilityModelName,
 		SafetyIdentifier: openai.String(userID.String()),
 		Temperature:      openai.Float(0.2),
 		MaxOutputTokens:  openai.Int(800),

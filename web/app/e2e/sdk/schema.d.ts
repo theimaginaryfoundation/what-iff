@@ -6633,6 +6633,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/provider-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What each provider key is spent on, and by which model
+         * @description Describes the build, not the account: every caller gets the same answer,
+         *     and no credential or account state is exposed.
+         *
+         *     Exists so the app can tell a user why OpenAI is required even when they
+         *     chat with another provider, naming the model behind each job rather than
+         *     gesturing at "supporting features". The list is derived from the same
+         *     constants the calls themselves use, so it cannot drift from what the
+         *     server actually does.
+         *
+         *     Anthropic's archival entry applies only to Claude chats. Gemini and z.ai
+         *     chats archive on OpenAI, so no account needs a third provider's key.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Per-provider usage */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderUsage"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/provider-keys/{provider}": {
         parameters: {
             query?: never;
@@ -8524,6 +8582,32 @@ export interface components {
             required: boolean;
             /** @description Whether a key can be supplied per account yet. */
             supported: boolean;
+        };
+        /** @description One piece of work a provider key pays for, and the model that does it. */
+        ProviderJob: {
+            /**
+             * @description What the call accomplishes, in the user's terms.
+             * @example Memory extraction and scratchpad updates
+             */
+            job: string;
+            /**
+             * @description The model that runs it. For chat, where the model is whatever the
+             *     user selected rather than something the app chose, this reads as a
+             *     phrase rather than a model id.
+             * @example gpt-5.6-luna
+             */
+            model: string;
+        };
+        /** @description Everything one provider's key is spent on. */
+        ProviderUsage: {
+            /** @example openai */
+            provider: string;
+            /**
+             * @description The app itself spends this key regardless of which model the user
+             *     chats with. True for OpenAI only.
+             */
+            required?: boolean;
+            jobs: components["schemas"]["ProviderJob"][];
         };
         /** @description User-configured remote MCP server. Authentication token is never returned by API responses. */
         MCPServer: {
