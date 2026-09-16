@@ -16,18 +16,18 @@ type ProviderAvailability struct {
 	// filter is false when provider credentials do not determine which models
 	// work, in which case every model is reported available.
 	filter bool
-	// openAI, when set, is consulted instead of the static entry. OpenAI keys
-	// belong to accounts and can be set at runtime, so availability is a
-	// question about the caller rather than about the process: a user who has
-	// just entered a key expects their models to appear, and a user who has
-	// not should not be offered models that will fail for them.
-	openAI func(context.Context) bool
+	// live, when set, is consulted instead of the static entries. Keys belong
+	// to accounts and can be set at runtime, so availability is a question
+	// about the caller rather than about the process: someone who has just
+	// entered a key expects their models to appear, and someone who has not
+	// should not be offered models that will fail for them.
+	live func(context.Context, ModelProvider) bool
 }
 
-// WithLiveOpenAI returns a copy that asks configured() about the caller rather
-// than using the boot-time value.
-func (p ProviderAvailability) WithLiveOpenAI(configured func(context.Context) bool) ProviderAvailability {
-	p.openAI = configured
+// WithLiveCredentials returns a copy that asks configured() about the caller
+// rather than using the boot-time values.
+func (p ProviderAvailability) WithLiveCredentials(configured func(context.Context, ModelProvider) bool) ProviderAvailability {
+	p.live = configured
 	return p
 }
 
@@ -60,8 +60,8 @@ func (p ProviderAvailability) Available(ctx context.Context, provider ModelProvi
 	if !p.filter {
 		return true
 	}
-	if provider == ModelProviderOpenAI && p.openAI != nil {
-		return p.openAI(ctx)
+	if p.live != nil {
+		return p.live(ctx, provider)
 	}
 	return p.keyed[provider]
 }
@@ -114,15 +114,15 @@ func IsCatalogProvider(name string) bool {
 // SupportsPerAccountKey reports whether a key stored against an account is
 // actually used for that account's requests.
 //
-// Only OpenAI today, for two reasons that have to be fixed together before
-// another provider joins: the shared transport injects a per-request
-// credential for the OpenAI host alone, and every other provider's client is
-// built at boot from an environment variable and left nil when that variable
-// is unset — so there is no client to route an account's key through.
+// True for every provider in the catalog now. It was OpenAI-only while two
+// things were true — the shared transport rewrote credentials for the OpenAI
+// host alone, and every other provider's client was built at boot from an
+// environment variable and left nil without one — so a key stored for anything
+// else would have been accepted and then ignored.
 //
-// Storing a key we would not use, and reporting the provider as configured on
-// that basis, would offer models that fail at send time: the exact behaviour
-// the availability filter exists to remove.
+// Kept rather than deleted because it is the honest place to say no again: a
+// provider added to the catalog whose credential the transport does not yet
+// carry should return false here rather than accept a key it will not use.
 func SupportsPerAccountKey(provider string) bool {
-	return provider == string(ModelProviderOpenAI)
+	return IsCatalogProvider(provider)
 }
