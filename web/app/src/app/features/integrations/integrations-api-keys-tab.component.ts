@@ -1,17 +1,11 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 
 import { ProviderKeyStatus } from '../../core/models/provider-key.model';
+import { vendorLabel } from '../../core/utils/provider-vendor';
 import { ProviderKeyService } from '../../core/services/provider-key.service';
-
-/** Display copy for the providers the catalog ships with. */
-const PROVIDER_LABELS: Record<string, string> = {
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  google: 'Google Gemini',
-  zai: 'z.ai',
-};
 
 /**
  * Where each provider issues keys. Every catalog provider takes a per-account
@@ -28,7 +22,7 @@ const KEY_HELP_URLS: Record<string, string> = {
 @Component({
   selector: 'app-integrations-api-keys-tab',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, RouterLink],
   templateUrl: './integrations-api-keys-tab.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
 })
@@ -56,7 +50,7 @@ export class IntegrationsApiKeysTabComponent implements OnInit {
   }
 
   label(provider: string): string {
-    return PROVIDER_LABELS[provider] ?? provider;
+    return vendorLabel(provider);
   }
 
   helpUrl(provider: string): string | null {

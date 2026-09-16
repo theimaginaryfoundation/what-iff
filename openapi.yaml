@@ -4560,6 +4560,109 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /provider-usage:
+    get:
+      summary: What each provider key is spent on, and by which model
+      description: |
+        Describes the build, not the account: every caller gets the same answer,
+        and no credential or account state is exposed.
+
+        Exists so the app can tell a user why OpenAI is required even when they
+        chat with another provider, naming the model behind each job rather than
+        gesturing at "supporting features". The list is derived from the same
+        constants the calls themselves use, so it cannot drift from what the
+        server actually does.
+
+        Anthropic's archival entry applies only to Claude chats. Gemini and z.ai
+        chats archive on OpenAI, so no account needs a third provider's key.
+      tags: [Provider Keys]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Per-provider usage
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProviderUsage'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /provider-models/{provider}:
+    get:
+      summary: The models a provider actually serves, as seen by this account's key
+      description: |
+        Queries the provider's own catalog with the calling account's key, so
+        "this model does not exist" and "your key cannot reach it" are the same
+        answer for the right reason: what comes back is what this key can use.
+
+        Exists because the app's hand-written catalog rotted — it offered
+        `gpt-5.1-nano` from the open-source release onward, a name OpenAI
+        returns 404 for.
+
+        Nothing is filtered out. Retired and non-chat entries are returned with
+        their `kind` and `retires_on` so the caller decides. `kind` is a
+        heuristic over the model id, because most providers return no
+        capability information at all, and it is wrong at the edges — dropping
+        a misjudged model here would make it permanently unreachable rather
+        than merely mislabelled.
+
+        Results are cached briefly per account. `?refresh=true` bypasses that.
+
+        Only OpenAI is implemented; other providers answer 501.
+      tags: [Provider Keys]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+          example: openai
+        - name: refresh
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Bypass the per-account cache and re-query the provider.
+      responses:
+        '200':
+          description: The provider's catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProviderModel'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '501':
+          description: This build cannot list models for that provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: |
+            The provider could not be reached or rejected the key. The detail is
+            logged rather than returned, because a provider's error body can
+            echo the key back.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /provider-keys/{provider}:
     put:
       summary: Set this account's key for a provider
@@ -6344,6 +6447,67 @@ components:
         supported:
           type: boolean
           description: Whether a key can be supplied per account yet.
+
+    ProviderModel:
+      type: object
+      description: One entry from a provider's own catalog.
+      required: [id, kind, retired]
+      properties:
+        id:
+          type: string
+          description: The model name to send to the provider.
+          example: gpt-5.6-luna
+        kind:
+          type: string
+          description: |
+            Coarse bucket, inferred from the id. A filter to keep a chat picker
+            free of speech and embedding models, not an authoritative
+            capability statement.
+          enum: [chat, embedding, audio, image, moderation, code, legacy, snapshot]
+        retires_on:
+          type: string
+          description: The provider's shutdown date, absent when it has not set one.
+          example: '2026-10-23'
+        retired:
+          type: boolean
+          description: |
+            The shutdown date has passed. Providers keep listing these, so
+            being returned is not evidence a model still works.
+
+    ProviderJob:
+      type: object
+      description: One piece of work a provider key pays for, and the model that does it.
+      required: [job, model]
+      properties:
+        job:
+          type: string
+          description: What the call accomplishes, in the user's terms.
+          example: Memory extraction and scratchpad updates
+        model:
+          type: string
+          description: |
+            The model that runs it. For chat, where the model is whatever the
+            user selected rather than something the app chose, this reads as a
+            phrase rather than a model id.
+          example: gpt-5.6-luna
+
+    ProviderUsage:
+      type: object
+      description: Everything one provider's key is spent on.
+      required: [provider, jobs]
+      properties:
+        provider:
+          type: string
+          example: openai
+        required:
+          type: boolean
+          description: |
+            The app itself spends this key regardless of which model the user
+            chats with. True for OpenAI only.
+        jobs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProviderJob'
 
     MCPServer:
       type: object

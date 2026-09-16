@@ -1,5 +1,6 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 
 import { ProviderKeyStatus } from '../../core/models/provider-key.model';
@@ -28,7 +29,11 @@ describe('IntegrationsApiKeysTabComponent', () => {
 
     await TestBed.configureTestingModule({
       imports: [IntegrationsApiKeysTabComponent],
-      providers: [provideZonelessChangeDetection(), { provide: ProviderKeyService, useValue: providerKeys }],
+      providers: [
+        provideZonelessChangeDetection(),
+        provideRouter([]),
+        { provide: ProviderKeyService, useValue: providerKeys },
+      ],
     }).compileComponents();
 
     fixture = TestBed.createComponent(IntegrationsApiKeysTabComponent);
