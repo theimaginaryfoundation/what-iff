@@ -40,6 +40,19 @@ func (UserPreference) Fields() []ent.Field {
 			Default([]string{}).
 			Comment("Model IDs the user has starred in the model picker, user-global (not per-personality).").
 			Annotations(entsql.Default("[]")),
+		// Subtractive twin of favorite_model_ids. A hide list rather than a
+		// show list so a model added to the catalog is visible by default:
+		// opting in would leave new models dark until someone noticed them,
+		// and the catalog gains models without anyone here doing anything.
+		//
+		// A preference, not a permission. Hiding a model keeps it usable by
+		// anything that names it directly — an existing chat pinned to it, an
+		// agent job, the API — because unchecking a box in settings should not
+		// silently break a scheduled job.
+		field.JSON("hidden_model_ids", []string{}).
+			Default([]string{}).
+			Comment("Model IDs the user has hidden from their model picker, user-global. Visibility only; a hidden model still runs when named directly.").
+			Annotations(entsql.Default("[]")),
 	}
 }
 
