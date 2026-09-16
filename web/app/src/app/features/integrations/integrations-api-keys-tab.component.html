@@ -1,20 +1,42 @@
 <div class="space-y-4">
-  @if (missingRequired()) {
-    <div class="rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-900/20">
-      <h2 class="text-sm font-semibold text-amber-900 dark:text-amber-200">Add an OpenAI key to finish setting up</h2>
-      <p class="mt-1 text-sm text-amber-800 dark:text-amber-300">
-        Chat runs on whichever model you pick, but memory, summaries, chat naming, mood and image features all call OpenAI regardless — so
-        the app needs a key before it can do much. It is your key and your bill: see
-        <a
-          href="https://github.com/theimaginaryfoundation/what-iff#-what-each-provider-is-used-for"
-          target="_blank"
-          rel="noopener"
-          class="underline hover:no-underline"
-          >what each provider is used for</a
-        >.
-      </p>
-    </div>
-  }
+  <!--
+    Always shown, in both states. What OpenAI is used for is not a setup-time
+    detail the user stops needing once a key is saved: it is the answer to "why
+    is this one required when I chat with Claude", and it is the thing to read
+    before deciding whose bill an image or a memory update lands on. Only the
+    heading and the severity styling change once a key is present.
+  -->
+  <div
+    class="rounded-lg border p-4"
+    [ngClass]="
+      missingRequired()
+        ? 'border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/20'
+        : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
+    "
+    role="note"
+  >
+    <h2
+      class="text-sm font-semibold"
+      [ngClass]="missingRequired() ? 'text-amber-900 dark:text-amber-200' : 'text-gray-900 dark:text-white'"
+    >
+      {{ missingRequired() ? "Add an OpenAI key to finish setting up" : "An OpenAI key is always required" }}
+    </h2>
+    <p
+      class="mt-1 text-sm"
+      [ngClass]="missingRequired() ? 'text-amber-800 dark:text-amber-300' : 'text-gray-600 dark:text-gray-400'"
+    >
+      Chat itself runs on whichever model you pick, but OpenAI is called for everything around it — your welcome message,
+      personality creation, memory and scratchpad updates, conversation summaries, chat naming, mood, and image
+      generation. So a key is required even if you mostly chat with another provider. It is your key and your bill: see
+      <a
+        href="https://github.com/theimaginaryfoundation/what-iff#-what-each-provider-is-used-for"
+        target="_blank"
+        rel="noopener"
+        class="underline hover:no-underline"
+        >what each provider is used for</a
+      >.
+    </p>
+  </div>
 
   @if (errorMessage()) {
     <div
