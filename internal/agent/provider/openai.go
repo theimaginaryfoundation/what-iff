@@ -100,6 +100,9 @@ func (c *OpenAIProvider) responsesNewStreaming(
 
 // CallWithRetry implements retry logic for API calls using the Responses API
 func (c *OpenAIProvider) CallWithRetry(ctx context.Context, params responses.ResponseNewParams) (*responses.Response, error) {
+	if c == nil || c.oaiClient == nil {
+		return nil, ErrProviderUnavailable
+	}
 	return c.callWithRetry(ctx, func(ctx context.Context, params responses.ResponseNewParams) (*responses.Response, bool, error) {
 		resp, err := c.responsesNew(ctx, params)
 		return resp, false, err
@@ -184,6 +187,9 @@ func waitForRetry(ctx context.Context, d time.Duration) error {
 }
 
 func (c *OpenAIProvider) CountTokens(text string) (int, error) {
+	if c == nil {
+		return 0, ErrProviderUnavailable
+	}
 	return c.tokenCounter.CountTokens(text)
 }
 

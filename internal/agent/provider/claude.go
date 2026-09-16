@@ -320,6 +320,9 @@ func (c *ClaudeProvider) betaMessagesNewStreaming(
 // Call sends a single Messages API request. Retry handling (429/500/529) is
 // delegated to the Anthropic SDK via WithMaxRetries in NewClaudeProvider.
 func (c *ClaudeProvider) Call(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
+	if c == nil || c.client == nil {
+		return nil, ErrProviderUnavailable
+	}
 	return c.messagesNew(ctx, params)
 }
 
