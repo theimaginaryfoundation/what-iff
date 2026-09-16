@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 	"go.uber.org/zap"
 )
 
@@ -82,12 +83,17 @@ func claudeMessageTextJSONBody(id, text string) string {
 		`"usage":{"input_tokens":5,"output_tokens":7}}`
 }
 
-func TestExtractMemoriesWithScratchpadDeltaClaude_NilProviderReturnsError(t *testing.T) {
+// Renamed from _NilProviderReturnsError: clients are constructed whether or not
+// a credential exists, so a nil provider no longer signals "unconfigured". The
+// question the test asks is unchanged — archival work must refuse to run
+// without a usable credential — but the thing that answers it is now the
+// per-account capability check.
+func TestExtractMemoriesWithScratchpadDeltaClaude_NoCredentialReturnsError(t *testing.T) {
 	t.Parallel()
-	a := &Agent{logger: zap.NewNop()}
+	a := &Agent{logger: zap.NewNop(), providerKeys: providerkeys.NewRegistry(nil, providerkeys.DeploymentKeys{})}
 	err := a.extractMemoriesWithScratchpadDeltaClaude(context.Background(), uuid.New(), uuid.New(),
 		&provider.ModelContext{}, &provider.ModelContext{}, &chatContext{chat: &models.Chat{}}, nil)
-	require.ErrorContains(t, err, "ClaudeProvider is nil")
+	require.ErrorContains(t, err, "no Anthropic API key is configured for this account")
 }
 
 func TestExtractMemoriesWithScratchpadDeltaClaude_ProviderErrorIsWrapped(t *testing.T) {

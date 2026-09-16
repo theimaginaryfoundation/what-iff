@@ -22,6 +22,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
@@ -133,6 +134,10 @@ type Agent struct {
 	// is chosen at construction and swapped via server wiring, so no push detail
 	// reaches this package.
 	pushNotifier pushnotify.Notifier
+	// providerKeys answers, per request, which providers the calling account can
+	// use. Nil under mock/local backends and in tests, where credentials are not
+	// consulted at all.
+	providerKeys *providerkeys.Registry
 	// pushEnabled is true when a real push implementation was wired (a non-nil
 	// PushNotifier). It lets the completion hook skip spawning a detached
 	// goroutine when push is off (the open-source default).
@@ -186,6 +191,10 @@ type AgentConfig struct {
 	// Meter gates and records billable turns. When nil, NewAgent falls back to
 	// metering.NoopMeter (allow-all, no tracking) — the open-source default.
 	Meter metering.Meter
+	// ProviderKeys resolves each account's model-provider credentials. When nil,
+	// provider availability is not checked — the mock and local backends serve
+	// every model without one.
+	ProviderKeys *providerkeys.Registry
 	// PushNotifier delivers a push on autonomous/webhook reply completion. When
 	// nil, NewAgent falls back to pushnotify.NoopNotifier (sends nothing) — the
 	// open-source default.
@@ -270,6 +279,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		chunkPipeline:                newChunkPipelineForMode(cfg.LLMBackend != "vendor", &oaiClient, ds, logger),
 		fileStore:                    fileStore,
 		meter:                        cfg.Meter,
+		providerKeys:                 cfg.ProviderKeys,
 		pushNotifier:                 cfg.PushNotifier,
 		pushEnabled:                  cfg.PushNotifier != nil,
 		runningJobCancels:            make(map[uuid.UUID]runningJobCancel),
@@ -299,50 +309,48 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 	// OpenAIProvider (set in the struct literal above).
 	a.recallTool = tools.NewRecallTool(ds, &oaiClient, newRecallDistiller(a), a.fileStore, logger)
 
-	if anthropicKey != "" {
-		a.ClaudeProvider = provider.NewClaudeProvider(anthropicKey, tel, cfg.HTTPClient)
-	} else {
-		logger.Info("ANTHROPIC_API_KEY not set; Claude models will be unavailable")
-	}
+	// Every provider client is constructed, whether or not a credential exists
+	// for it at startup.
+	//
+	// Construction used to be conditional, which made "does this process have
+	// an environment variable" and "can this caller use this provider" the same
+	// question — answered once, at boot, for everyone. Once keys belong to
+	// accounts those are different questions: two people on one instance can
+	// differ, and a client that was never built cannot serve either of them.
+	//
+	// The key passed here is only the deployment-level default. Whether a given
+	// request may use the provider is decided by requireProviderKey, and which
+	// credential it carries is decided per request at the transport.
+	a.ClaudeProvider = provider.NewClaudeProvider(anthropicKey, tel, cfg.HTTPClient)
 
-	if cfg.ZAIKey != "" {
-		zaiBaseURL := cfg.ZAIBaseURL
-		if zaiBaseURL == "" {
-			zaiBaseURL = provider.DefaultZAIBaseURL
+	zaiBaseURL := cfg.ZAIBaseURL
+	if zaiBaseURL == "" {
+		zaiBaseURL = provider.DefaultZAIBaseURL
+	}
+	a.ZAIProvider = provider.NewClaudeProviderWithBaseURL(cfg.ZAIKey, zaiBaseURL, tel, cfg.HTTPClient)
+
+	a.GeminiProvider = provider.NewGeminiProvider(cfg.GeminiKey, cfg.GeminiBaseURL, tel, cfg.HTTPClient)
+	a.MistralProvider = provider.NewMistralProvider(cfg.MistralKey, cfg.MistralBaseURL, tel, cfg.HTTPClient)
+	a.DeepSeekProvider = provider.NewDeepSeekProvider(cfg.DeepSeekKey, cfg.DeepSeekBaseURL, tel, cfg.HTTPClient)
+	a.QwenProvider = provider.NewQwenProvider(cfg.QwenKey, cfg.QwenBaseURL, tel, cfg.HTTPClient)
+	a.XiaomiProvider = provider.NewXiaomiProvider(cfg.XiaomiKey, cfg.XiaomiBaseURL, tel, cfg.HTTPClient)
+
+	// Report which providers have no deployment-level default. This is not the
+	// same as "unavailable" any more — an account supplying its own key makes
+	// the provider usable for that account — so it is phrased as what it is.
+	for name, key := range map[string]string{
+		"ANTHROPIC_API_KEY": anthropicKey,
+		"ZAI_API_KEY":       cfg.ZAIKey,
+		"GEMINI_API_KEY":    cfg.GeminiKey,
+		"MISTRAL_API_KEY":   cfg.MistralKey,
+		"DEEPSEEK_API_KEY":  cfg.DeepSeekKey,
+		"QWEN_API_KEY":      cfg.QwenKey,
+		"XIAOMI_API_KEY":    cfg.XiaomiKey,
+	} {
+		if key == "" {
+			logger.Info("no deployment default for provider credential; accounts may still supply their own",
+				zap.String("env_var", name))
 		}
-		a.ZAIProvider = provider.NewClaudeProviderWithBaseURL(cfg.ZAIKey, zaiBaseURL, tel, cfg.HTTPClient)
-	} else {
-		logger.Info("ZAI_API_KEY not set; z.ai GLM models will be unavailable")
-	}
-
-	if cfg.GeminiKey != "" {
-		a.GeminiProvider = provider.NewGeminiProvider(cfg.GeminiKey, cfg.GeminiBaseURL, tel, cfg.HTTPClient)
-	} else {
-		logger.Info("GEMINI_API_KEY not set; Gemini models will be unavailable")
-	}
-
-	if cfg.MistralKey != "" {
-		a.MistralProvider = provider.NewMistralProvider(cfg.MistralKey, cfg.MistralBaseURL, tel, cfg.HTTPClient)
-	} else {
-		logger.Info("MISTRAL_API_KEY not set; Mistral models will be unavailable")
-	}
-
-	if cfg.DeepSeekKey != "" {
-		a.DeepSeekProvider = provider.NewDeepSeekProvider(cfg.DeepSeekKey, cfg.DeepSeekBaseURL, tel, cfg.HTTPClient)
-	} else {
-		logger.Info("DEEPSEEK_API_KEY not set; DeepSeek models will be unavailable")
-	}
-
-	if cfg.QwenKey != "" {
-		a.QwenProvider = provider.NewQwenProvider(cfg.QwenKey, cfg.QwenBaseURL, tel, cfg.HTTPClient)
-	} else {
-		logger.Info("QWEN_API_KEY not set; Qwen models will be unavailable")
-	}
-
-	if cfg.XiaomiKey != "" {
-		a.XiaomiProvider = provider.NewXiaomiProvider(cfg.XiaomiKey, cfg.XiaomiBaseURL, tel, cfg.HTTPClient)
-	} else {
-		logger.Info("XIAOMI_API_KEY not set; Xiaomi MiMo models will be unavailable")
 	}
 
 	if a.localLLM {
@@ -1124,22 +1132,22 @@ func (a *Agent) generateAssistantForMessageOpenAI(ctx context.Context, userID uu
 // and reports whether it is native Anthropic. z.ai GLM models share the wire format
 // but use a different client (a.ZAIProvider) and do not support Anthropic-native tool
 // features (web search, beta MCP).
-func (a *Agent) claudeProviderForModel(chatCtx *chatContext) (prov *provider.ClaudeProvider, nativeAnthropic bool, err error) {
+func (a *Agent) claudeProviderForModel(ctx context.Context, chatCtx *chatContext) (prov *provider.ClaudeProvider, nativeAnthropic bool, err error) {
 	if models.IsZAIModel(chatCtx.modelProvider, chatCtx.model) {
-		if a.ZAIProvider == nil {
-			return nil, false, fmt.Errorf("z.ai model %q requested but ZAI_API_KEY is not configured", chatCtx.model)
+		if err := a.requireProviderKey(ctx, models.ModelProviderZAI, chatCtx.model); err != nil {
+			return nil, false, err
 		}
 		return a.ZAIProvider, false, nil
 	}
-	if a.ClaudeProvider == nil {
-		return nil, false, fmt.Errorf("Claude model %q requested but ANTHROPIC_API_KEY is not configured", chatCtx.model)
+	if err := a.requireProviderKey(ctx, models.ModelProviderAnthropic, chatCtx.model); err != nil {
+		return nil, false, err
 	}
 	return a.ClaudeProvider, true, nil
 }
 
 func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uuid.UUID, chatJob *models.Job, chatMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext) (*models.ChatMessage, *provider.GenerateResponse, error) {
 
-	claudeProvider, nativeAnthropic, err := a.claudeProviderForModel(chatCtx)
+	claudeProvider, nativeAnthropic, err := a.claudeProviderForModel(ctx, chatCtx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1175,8 +1183,8 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 // OpenAI-compatible Chat Completions API. It mirrors the Claude path but omits
 // Anthropic-native features (web search, MCP).
 func (a *Agent) generateAssistantForMessageGemini(ctx context.Context, userID uuid.UUID, chatJob *models.Job, chatMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext) (*models.ChatMessage, *provider.GenerateResponse, error) {
-	if a.GeminiProvider == nil {
-		return nil, nil, fmt.Errorf("Gemini model %q requested but GEMINI_API_KEY is not configured", chatCtx.model)
+	if err := a.requireProviderKey(ctx, models.ModelProviderGoogle, chatCtx.model); err != nil {
+		return nil, nil, err
 	}
 
 	geminiParams := modelContext.BuildGeminiParams(chatCtx.model)
@@ -1275,7 +1283,7 @@ func (a *Agent) generateAssistantForMessageOpenAIChatCompletions(ctx context.Con
 	functionTools := openAIChatCompletionFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
 	a.recordToolDefinitionEstimate(modelContext, functionTools)
 
-	adapter, err := a.openAIChatCompletionsAdapter(chatCtx, params, functionTools, policy.disabledTools)
+	adapter, err := a.openAIChatCompletionsAdapter(ctx, chatCtx, params, functionTools, policy.disabledTools)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1283,26 +1291,26 @@ func (a *Agent) generateAssistantForMessageOpenAIChatCompletions(ctx context.Con
 	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, generationOptions{provider: string(chatCtx.modelProvider)})
 }
 
-func (a *Agent) openAIChatCompletionsAdapter(chatCtx *chatContext, params openai.ChatCompletionNewParams, functionTools []openai.ChatCompletionToolUnionParam, disabledTools map[string]bool) (provider.AgentAdapter, error) {
+func (a *Agent) openAIChatCompletionsAdapter(ctx context.Context, chatCtx *chatContext, params openai.ChatCompletionNewParams, functionTools []openai.ChatCompletionToolUnionParam, disabledTools map[string]bool) (provider.AgentAdapter, error) {
 	switch models.ProviderForModel(chatCtx.modelProvider, chatCtx.model) {
 	case models.ModelProviderMistral:
-		if a.MistralProvider == nil {
-			return nil, fmt.Errorf("Mistral model %q requested but MISTRAL_API_KEY is not configured", chatCtx.model)
+		if err := a.requireProviderKey(ctx, models.ModelProviderMistral, chatCtx.model); err != nil {
+			return nil, err
 		}
 		return provider.NewMistralAdapter(a.MistralProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderDeepSeek:
-		if a.DeepSeekProvider == nil {
-			return nil, fmt.Errorf("DeepSeek model %q requested but DEEPSEEK_API_KEY is not configured", chatCtx.model)
+		if err := a.requireProviderKey(ctx, models.ModelProviderDeepSeek, chatCtx.model); err != nil {
+			return nil, err
 		}
 		return provider.NewDeepSeekAdapter(a.DeepSeekProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderQwen:
-		if a.QwenProvider == nil {
-			return nil, fmt.Errorf("Qwen model %q requested but QWEN_API_KEY is not configured", chatCtx.model)
+		if err := a.requireProviderKey(ctx, models.ModelProviderQwen, chatCtx.model); err != nil {
+			return nil, err
 		}
 		return provider.NewQwenAdapter(a.QwenProvider, params, functionTools, disabledTools), nil
 	case models.ModelProviderXiaomi:
-		if a.XiaomiProvider == nil {
-			return nil, fmt.Errorf("Xiaomi model %q requested but XIAOMI_API_KEY is not configured", chatCtx.model)
+		if err := a.requireProviderKey(ctx, models.ModelProviderXiaomi, chatCtx.model); err != nil {
+			return nil, err
 		}
 		return provider.NewXiaomiAdapter(a.XiaomiProvider, params, functionTools, disabledTools), nil
 	default:

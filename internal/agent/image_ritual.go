@@ -70,7 +70,7 @@ func (a *Agent) handleImageGenerateRitual(ctx context.Context, userID uuid.UUID,
 	case models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model):
 		// Selects a.ClaudeProvider (native Anthropic) or a.ZAIProvider (GLM); both
 		// speak the Messages API so the prompt-inference call is identical.
-		claudeProvider, _, provErr := a.claudeProviderForModel(chatCtx)
+		claudeProvider, _, provErr := a.claudeProviderForModel(ctx, chatCtx)
 		if provErr != nil && a.testHooks.ImageRitualClaudeInfer == nil {
 			return nil, nil, provErr
 		}

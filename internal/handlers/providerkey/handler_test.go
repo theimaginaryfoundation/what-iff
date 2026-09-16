@@ -134,19 +134,23 @@ func TestResponsesNeverCarryTheKey(t *testing.T) {
 	require.NotContains(t, rec.Body.String(), secret)
 }
 
-// A provider whose key we would not actually use is refused rather than stored
-// and reported as configured.
-func TestUnsupportedProviderIsRefused(t *testing.T) {
+// Every provider in the catalog now takes a per-account key. This was
+// OpenAI-only while the transport rewrote credentials for one host and the
+// other clients were built from environment variables — storing a key for
+// anything else would have been accepted and then ignored.
+func TestEveryCatalogProviderAcceptsAKey(t *testing.T) {
 	r, db, cleanup := newTestRouter(t)
 	defer cleanup()
 	alice := insertUser(t, db, "alice")
 
-	rec := do(t, r, asUser(http.MethodPut, "/provider-keys/anthropic", `{"key":"sk-ant-1234"}`, alice))
-	require.Equal(t, http.StatusNotImplemented, rec.Code)
+	for _, p := range []string{"openai", "anthropic", "google", "zai"} {
+		rec := do(t, r, asUser(http.MethodPut, "/provider-keys/"+p, `{"key":"sk-`+p+`-1234"}`, alice))
+		require.Equal(t, http.StatusOK, rec.Code, "%s: %s", p, rec.Body.String())
+	}
 
 	var rows int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM user_provider_keys`).Scan(&rows))
-	require.Zero(t, rows, "a refused provider must not leave a row behind")
+	require.Equal(t, 4, rows)
 }
 
 func TestUnknownProviderRejected(t *testing.T) {

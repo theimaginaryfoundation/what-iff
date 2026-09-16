@@ -60,10 +60,12 @@ import (
 )
 
 type Server struct {
-	// openAIKeys resolves the OpenAI credential for the account making each
-	// request, falling back to the deployment key. Non-nil only under a vendor
-	// backend; mock/local use the deny-network transport and never carry a
-	// real credential.
+	// providerKeys answers which model providers the account making a request
+	// can use, and with which credential. Non-nil only under a vendor backend;
+	// mock/local serve every model without consulting credentials.
+	providerKeys *providerkeys.Registry
+	// openAIKeys is providerKeys' OpenAI resolver, held separately because the
+	// HTTP transport needs a resolution function rather than a question.
 	openAIKeys *providerkeys.Resolver
 	config     *Config
 	logger     *zap.Logger
@@ -149,13 +151,29 @@ func (s *Server) setupRoutes() {
 		// reaches every one without touching a call site. Scoped to the OpenAI
 		// host so the other OpenAI-compatible providers keep their own
 		// credentials (see openai_credential.go).
-		s.openAIKeys = providerkeys.NewResolver(dataStore, string(appmodels.ModelProviderOpenAI), s.config.OpenAIKey)
-		providerHTTPClient = provider.OpenAICredentialHTTPClient(s.openAIKeys.Resolve, nil)
+		s.providerKeys = providerkeys.NewRegistry(dataStore, providerkeys.DeploymentKeys{
+			OpenAI:    s.config.OpenAIKey,
+			Anthropic: s.config.AnthropicKey,
+			ZAI:       s.config.ZAIKey,
+			Gemini:    s.config.GeminiKey,
+			Mistral:   s.config.MistralKey,
+			DeepSeek:  s.config.DeepSeekKey,
+			Qwen:      s.config.QwenKey,
+			Xiaomi:    s.config.XiaomiKey,
+		})
+		// One rule per provider, each keyed on the host of the base URL that
+		// provider's client was built from. Deriving the host rather than
+		// pinning it is what keeps the rule and the client from drifting apart
+		// when an endpoint is overridden.
+		s.openAIKeys = s.providerKeys.ResolverFor(appmodels.ModelProviderOpenAI)
+		providerHTTPClient = provider.CredentialHTTPClient(
+			credentialRules(s.config, s.providerKeys), nil)
 	}
 
 	agentCfg := agent.AgentConfig{
 		LifecycleContext: s.lifecycleCtx,
 		HTTPClient:       providerHTTPClient,
+		ProviderKeys:     s.providerKeys,
 		LLMBackend:       s.config.LLMBackend,
 		MockLLMMode:      s.config.MockLLMMode,
 		MockLLMFixedResponses: append([]string(nil),
@@ -261,9 +279,6 @@ func (s *Server) setupRoutes() {
 	// rather than waiting out the cache. Only OpenAI has one today; the others
 	// still store and list fine, they just have no cache to clear.
 	keyResolvers := map[string]*providerkeys.Resolver{}
-	if s.openAIKeys != nil {
-		keyResolvers[string(appmodels.ModelProviderOpenAI)] = s.openAIKeys
-	}
 	providerKeyHandler := providerkey.NewHandler(dataStore, s.logger, keyResolvers)
 	// Provider availability gates the model list. Under a non-vendor backend
 	// (mock/local, ADR 0x018) every model is served without provider keys, so
@@ -273,11 +288,11 @@ func (s *Server) setupRoutes() {
 		s.config.OpenAIKey, s.config.AnthropicKey, s.config.ZAIKey, s.config.GeminiKey,
 		s.config.MistralKey, s.config.DeepSeekKey, s.config.QwenKey, s.config.XiaomiKey,
 	)
-	if s.openAIKeys != nil {
-		// Offer OpenAI models to accounts that can actually reach OpenAI —
-		// their own key or the deployment fallback — so adding a key makes
-		// them appear without a restart.
-		modelProviders = modelProviders.WithLiveOpenAI(s.openAIKeys.Configured)
+	if s.providerKeys != nil {
+		// Offer each account the models it can actually reach — its own key or
+		// the deployment fallback — so adding a key makes them appear without
+		// a restart, for every provider rather than only OpenAI.
+		modelProviders = modelProviders.WithLiveCredentials(s.providerKeys.Configured)
 	}
 	modelHandler := model.NewHandler(dataStore, s.logger, modelProviders)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)
@@ -578,4 +593,35 @@ func (s *Server) recordHTTP(ctx context.Context, method, route string, status in
 		attribute.String("http.status_class", httpStatusClass(status)),
 	)
 	s.telemetry.Metrics.RecordTime(ctx, "http_server_request_duration", duration, attrs)
+}
+
+// credentialRules pairs each provider's configured endpoint with the credential
+// style it expects and the resolver that answers per account.
+//
+// Anthropic and z.ai share a wire format but not a host; the OpenAI-compatible
+// providers share a header but not a key. Both facts are why the rule travels
+// with the host rather than being inferred from either one.
+func credentialRules(cfg *Config, keys *providerkeys.Registry) []provider.CredentialRule {
+	orDefault := func(configured, fallback string) string {
+		if strings.TrimSpace(configured) != "" {
+			return configured
+		}
+		return fallback
+	}
+	resolve := func(p appmodels.ModelProvider) provider.OpenAIKeyResolver {
+		if r := keys.ResolverFor(p); r != nil {
+			return r.Resolve
+		}
+		return nil
+	}
+	return []provider.CredentialRule{
+		{BaseURL: provider.DefaultOpenAIBaseURL, Style: provider.BearerAuthorization, Resolve: resolve(appmodels.ModelProviderOpenAI)},
+		{BaseURL: provider.DefaultAnthropicBaseURL, Style: provider.AnthropicAPIKey, Resolve: resolve(appmodels.ModelProviderAnthropic)},
+		{BaseURL: orDefault(cfg.ZAIBaseURL, provider.DefaultZAIBaseURL), Style: provider.AnthropicAPIKey, Resolve: resolve(appmodels.ModelProviderZAI)},
+		{BaseURL: orDefault(cfg.GeminiBaseURL, provider.DefaultGeminiBaseURL), Style: provider.BearerAuthorization, Resolve: resolve(appmodels.ModelProviderGoogle)},
+		{BaseURL: orDefault(cfg.MistralBaseURL, provider.DefaultMistralBaseURL), Style: provider.BearerAuthorization, Resolve: resolve(appmodels.ModelProviderMistral)},
+		{BaseURL: orDefault(cfg.DeepSeekBaseURL, provider.DefaultDeepSeekBaseURL), Style: provider.BearerAuthorization, Resolve: resolve(appmodels.ModelProviderDeepSeek)},
+		{BaseURL: orDefault(cfg.QwenBaseURL, provider.DefaultQwenBaseURL), Style: provider.BearerAuthorization, Resolve: resolve(appmodels.ModelProviderQwen)},
+		{BaseURL: orDefault(cfg.XiaomiBaseURL, provider.DefaultXiaomiBaseURL), Style: provider.BearerAuthorization, Resolve: resolve(appmodels.ModelProviderXiaomi)},
+	}
 }

@@ -162,8 +162,8 @@ func (a *Agent) updateScratchpadClaude(ctx context.Context, userID uuid.UUID, ch
 		return ScratchpadUpdate{}, fmt.Errorf("failed to get personality by ID: %w", err)
 	}
 	prompt := buildUpdateScratchpadPrompt(personalityModel)
-	if a.ClaudeProvider == nil {
-		return ScratchpadUpdate{}, fmt.Errorf("ClaudeProvider is nil")
+	if err := a.requireProviderKey(ctx, models.ModelProviderAnthropic, archivalClaudeModel); err != nil {
+		return ScratchpadUpdate{}, err
 	}
 	modelContext.Append(provider.SegmentKindUserMessage, provider.RoleUser, prompt, false)
 

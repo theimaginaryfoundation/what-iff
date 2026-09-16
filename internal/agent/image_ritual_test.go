@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 )
 
 func TestHandleImageGenerateRitual_InvalidNilInputs(t *testing.T) {
@@ -155,12 +156,14 @@ func TestHandleImageGenerateRitual_Claude_NoProvider(t *testing.T) {
 	mc := &provider.ModelContext{}
 	mc.Append(provider.SegmentKindUserMessage, provider.RoleUser, "x", false)
 
-	a := &Agent{ClaudeProvider: nil}
+	// A registry with no keys is what production looks like for an account that
+	// has not supplied one, and it is what makes the error explain itself.
+	a := &Agent{ClaudeProvider: nil, providerKeys: providerkeys.NewRegistry(nil, providerkeys.DeploymentKeys{})}
 	_, _, err := a.handleImageGenerateRitual(ctx, uid, &models.ChatMessage{ChatID: chatID}, &chatContext{
 		model: "claude-sonnet-4-6",
 		chat:  &models.Chat{ID: chatID},
 	}, mc)
-	require.ErrorContains(t, err, "ANTHROPIC_API_KEY is not configured")
+	require.ErrorContains(t, err, "no Anthropic API key is configured for this account")
 }
 
 func TestHandleImageGenerateRitual_EmptyPrompt(t *testing.T) {
