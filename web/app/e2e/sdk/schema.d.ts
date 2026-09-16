@@ -6669,7 +6669,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ProviderUsage"][];
+                        "application/json": components["schemas"]["ProviderUsageReport"];
                     };
                 };
                 /** @description Unauthorized */
@@ -8715,6 +8715,24 @@ export interface components {
              * @example gpt-5.6-luna
              */
             model: string;
+        };
+        /**
+         * @description How provider keys work on this deployment, with what each is spent on.
+         *
+         *     `accounts_supply_keys` travels with the job list because the two are
+         *     read together: what a key is spent on only tells you what to expect
+         *     once you know whose key it is. An interface that tells a reader they
+         *     are billed for a key their operator supplied is worse than one that
+         *     says nothing.
+         */
+        ProviderUsageReport: {
+            /**
+             * @description Whether an individual account supplies its own provider
+             *     credentials. False where the operator supplies them, in which case
+             *     an account can neither store a key nor direct spending of one.
+             */
+            accounts_supply_keys: boolean;
+            providers: components["schemas"]["ProviderUsage"][];
         };
         /** @description Everything one provider's key is spent on. */
         ProviderUsage: {

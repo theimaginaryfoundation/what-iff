@@ -4584,9 +4584,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ProviderUsage'
+                $ref: '#/components/schemas/ProviderUsageReport'
         '401':
           description: Unauthorized
           content:
@@ -6490,6 +6488,29 @@ components:
             user selected rather than something the app chose, this reads as a
             phrase rather than a model id.
           example: gpt-5.6-luna
+
+    ProviderUsageReport:
+      type: object
+      description: |
+        How provider keys work on this deployment, with what each is spent on.
+
+        `accounts_supply_keys` travels with the job list because the two are
+        read together: what a key is spent on only tells you what to expect
+        once you know whose key it is. An interface that tells a reader they
+        are billed for a key their operator supplied is worse than one that
+        says nothing.
+      required: [accounts_supply_keys, providers]
+      properties:
+        accounts_supply_keys:
+          type: boolean
+          description: |
+            Whether an individual account supplies its own provider
+            credentials. False where the operator supplies them, in which case
+            an account can neither store a key nor direct spending of one.
+        providers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProviderUsage'
 
     ProviderUsage:
       type: object

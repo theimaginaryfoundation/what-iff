@@ -10,7 +10,7 @@ import { ProvidersGuideComponent } from './providers-guide.component';
 describe('ProvidersGuideComponent', () => {
   let fixture: ComponentFixture<ProvidersGuideComponent>;
 
-  const usage: ProviderUsage[] = [
+  const providers: ProviderUsage[] = [
     { provider: 'anthropic', jobs: [{ job: 'Chatting with any Claude model', model: 'the model you pick' }] },
     {
       provider: 'openai',
@@ -19,12 +19,16 @@ describe('ProvidersGuideComponent', () => {
     },
   ];
 
-  async function render(response: ProviderUsage[] | 'error'): Promise<void> {
+  async function render(response: { accounts_supply_keys: boolean } | 'error'): Promise<void> {
     const service = {
       list: vi
         .fn()
         .mockName('list')
-        .mockReturnValue(response === 'error' ? throwError(() => new Error('boom')) : of(response)),
+        .mockReturnValue(
+          response === 'error'
+            ? throwError(() => new Error('boom'))
+            : of({ accounts_supply_keys: response.accounts_supply_keys, providers }),
+        ),
     };
 
     await TestBed.configureTestingModule({
@@ -46,7 +50,7 @@ describe('ProvidersGuideComponent', () => {
    * this page replaced.
    */
   it('names the model behind each job', async () => {
-    await render(usage);
+    await render({ accounts_supply_keys: true });
 
     const text = fixture.nativeElement.textContent;
     expect(text).toContain('Memory extraction and scratchpad updates');
@@ -54,7 +58,7 @@ describe('ProvidersGuideComponent', () => {
   });
 
   it('puts the required provider first regardless of server order', async () => {
-    await render(usage);
+    await render({ accounts_supply_keys: true });
 
     const headings = Array.from(fixture.nativeElement.querySelectorAll('h2')) as HTMLElement[];
     expect(headings[0].textContent).toContain('OpenAI');
@@ -67,5 +71,23 @@ describe('ProvidersGuideComponent', () => {
     expect(fixture.nativeElement.querySelector('[role="alert"]')?.textContent).toContain(
       'Could not load what each provider is used for.',
     );
+  });
+
+  /**
+   * The billing sentence is a claim about someone's money. Where the operator
+   * supplies the keys, telling the reader they are billed for them is worse
+   * than saying nothing at all.
+   */
+  it('does not claim the reader is billed when the operator supplies the keys', async () => {
+    await render({ accounts_supply_keys: false });
+
+    const text = fixture.nativeElement.textContent;
+    expect(text).not.toContain('billed to your own account');
+    expect(text).toContain("this deployment's provider keys");
+  });
+
+  it('claims it when the reader does supply them', async () => {
+    await render({ accounts_supply_keys: true });
+    expect(fixture.nativeElement.textContent).toContain('billed to your own account');
   });
 });

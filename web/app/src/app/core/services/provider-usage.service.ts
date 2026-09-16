@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
-import { ProviderUsage } from '../models/provider-usage.model';
+import { ProviderUsageReport } from '../models/provider-usage.model';
 
 /**
  * What each provider key is spent on, as reported by the server.
@@ -16,7 +16,7 @@ import { ProviderUsage } from '../models/provider-usage.model';
 export class ProviderUsageService {
   private http = inject(HttpClient);
 
-  list(): Observable<ProviderUsage[]> {
-    return this.http.get<ProviderUsage[]>(`${environment.apiUrl}/provider-usage`);
+  list(): Observable<ProviderUsageReport> {
+    return this.http.get<ProviderUsageReport>(`${environment.apiUrl}/provider-usage`);
   }
 }

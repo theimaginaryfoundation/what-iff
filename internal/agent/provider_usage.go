@@ -4,6 +4,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/embedding"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerpolicy"
 )
 
 // ProviderJob is one piece of work a provider key pays for, and the model that
@@ -20,6 +21,17 @@ type ProviderUsage struct {
 	Jobs     []ProviderJob `json:"jobs"`
 }
 
+// ProviderUsageReport describes how provider keys work on this deployment.
+//
+// AccountsSupplyKeys travels with the job list because the two are read
+// together: what a key is spent on only tells you what to expect if you also
+// know whose key it is. A page that says "billed to your own account" where the
+// operator pays is worse than one that says nothing.
+type ProviderUsageReport struct {
+	AccountsSupplyKeys bool            `json:"accounts_supply_keys"`
+	Providers          []ProviderUsage `json:"providers"`
+}
+
 // chatModelPlaceholder stands in where the model is whatever the user picked,
 // rather than something the app chose.
 const chatModelPlaceholder = "the model you pick"
@@ -32,7 +44,14 @@ const chatModelPlaceholder = "the model you pick"
 // docs/ARCHITECTURE_SUMMARY.md came to claim archival runs on gpt-5-mini long
 // after the code moved to gpt-5.6-luna. A second copy of this mapping is a
 // second thing to forget.
-func ProviderUsageCatalog() []ProviderUsage {
+func ProviderUsageCatalog() ProviderUsageReport {
+	return ProviderUsageReport{
+		AccountsSupplyKeys: providerpolicy.AccountsSupplyKeys(),
+		Providers:          providerUsageProviders(),
+	}
+}
+
+func providerUsageProviders() []ProviderUsage {
 	return []ProviderUsage{
 		{
 			Provider: string(models.ModelProviderOpenAI),

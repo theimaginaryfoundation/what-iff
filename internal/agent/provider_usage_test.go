@@ -11,7 +11,7 @@ import (
 func TestProviderUsageCatalog_OpenAIIsTheOnlyRequiredProvider(t *testing.T) {
 	t.Parallel()
 
-	catalog := ProviderUsageCatalog()
+	catalog := ProviderUsageCatalog().Providers
 	required := []string{}
 	for _, p := range catalog {
 		if p.Required {
@@ -27,7 +27,7 @@ func TestProviderUsageCatalog_OpenAIIsTheOnlyRequiredProvider(t *testing.T) {
 func TestProviderUsageCatalog_EveryJobNamesAModel(t *testing.T) {
 	t.Parallel()
 
-	for _, p := range ProviderUsageCatalog() {
+	for _, p := range ProviderUsageCatalog().Providers {
 		require.NotEmptyf(t, p.Jobs, "provider %q lists no jobs", p.Provider)
 		for _, j := range p.Jobs {
 			require.NotEmptyf(t, j.Job, "provider %q has a job with no description", p.Provider)
@@ -43,7 +43,7 @@ func TestProviderUsageCatalog_ReadsTheLiveConstants(t *testing.T) {
 	t.Parallel()
 
 	jobs := map[string]string{}
-	for _, p := range ProviderUsageCatalog() {
+	for _, p := range ProviderUsageCatalog().Providers {
 		for _, j := range p.Jobs {
 			jobs[j.Job] = j.Model
 		}
@@ -52,5 +52,5 @@ func TestProviderUsageCatalog_ReadsTheLiveConstants(t *testing.T) {
 	require.Equal(t, FirstChatGreetingModelName, jobs["The welcome message in your first chat"])
 	require.Equal(t, archivalOpenAIModel, jobs["Memory extraction and scratchpad updates"])
 	require.Equal(t, archivalClaudeModel, jobs["Memory and scratchpad updates, for Claude chats only"])
-	require.Equal(t, models.UtilityModelName, jobs["Naming chats and picking expressions"])
+	require.Equal(t, chatNameModel, jobs["Naming chats and picking expressions"])
 }
