@@ -44,6 +44,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	appmodels "github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
@@ -58,17 +59,18 @@ import (
 )
 
 type Server struct {
-	// openAICredential is the live OpenAI key for every OpenAI-family SDK
-	// client. Non-nil only under a vendor backend; mock/local use the
-	// deny-network transport and never carry a real credential.
-	openAICredential *provider.OpenAICredential
-	config           *Config
-	logger           *zap.Logger
-	telemetry        *telemetry.Telemetry
-	router           *mux.Router
-	server           *http.Server
-	db               *ent.Client
-	sqlDB            *sql.DB
+	// openAIKeys resolves the OpenAI credential for the account making each
+	// request, falling back to the deployment key. Non-nil only under a vendor
+	// backend; mock/local use the deny-network transport and never carry a
+	// real credential.
+	openAIKeys *providerkeys.Resolver
+	config     *Config
+	logger     *zap.Logger
+	telemetry  *telemetry.Telemetry
+	router     *mux.Router
+	server     *http.Server
+	db         *ent.Client
+	sqlDB      *sql.DB
 
 	agentJobScheduler       *agentjobscheduler.Manager
 	agentJobSchedulerCancel context.CancelFunc
@@ -140,14 +142,14 @@ func (s *Server) setupRoutes() {
 		providerHTTPClient = provider.DenyNetworkHTTPClient()
 	} else {
 		// Vendor path: route OpenAI-family clients through a transport that
-		// applies the current key per request. The SDK client value is copied
-		// into six independent holders, so there is no single field to
-		// reassign when the key changes; injecting at the transport they all
-		// share means a new key takes effect on the next request with no
-		// restart. Scoped to the OpenAI host so the other OpenAI-compatible
-		// providers keep their own credentials (see openai_credential.go).
-		s.openAICredential = provider.NewOpenAICredential(s.config.OpenAIKey)
-		providerHTTPClient = provider.OpenAICredentialHTTPClient(s.openAICredential, nil)
+		// resolves the key per request from the account making it. The SDK
+		// client value is copied into six independent holders, so there is no
+		// single field to reassign; resolving at the transport they all share
+		// reaches every one without touching a call site. Scoped to the OpenAI
+		// host so the other OpenAI-compatible providers keep their own
+		// credentials (see openai_credential.go).
+		s.openAIKeys = providerkeys.NewResolver(dataStore, string(appmodels.ModelProviderOpenAI), s.config.OpenAIKey)
+		providerHTTPClient = provider.OpenAICredentialHTTPClient(s.openAIKeys.Resolve, nil)
 	}
 
 	agentCfg := agent.AgentConfig{
@@ -262,10 +264,11 @@ func (s *Server) setupRoutes() {
 		s.config.OpenAIKey, s.config.AnthropicKey, s.config.ZAIKey, s.config.GeminiKey,
 		s.config.MistralKey, s.config.DeepSeekKey, s.config.QwenKey, s.config.XiaomiKey,
 	)
-	if s.openAICredential != nil {
-		// Follow runtime key changes, so entering a key makes its models
-		// appear without a restart.
-		modelProviders = modelProviders.WithLiveOpenAI(s.openAICredential.Configured)
+	if s.openAIKeys != nil {
+		// Offer OpenAI models to accounts that can actually reach OpenAI —
+		// their own key or the deployment fallback — so adding a key makes
+		// them appear without a restart.
+		modelProviders = modelProviders.WithLiveOpenAI(s.openAIKeys.Configured)
 	}
 	modelHandler := model.NewHandler(dataStore, s.logger, modelProviders)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)

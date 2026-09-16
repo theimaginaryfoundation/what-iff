@@ -1,5 +1,7 @@
 package models
 
+import "context"
+
 // ProviderAvailability reports which model providers the process is configured
 // to reach.
 //
@@ -14,16 +16,17 @@ type ProviderAvailability struct {
 	// filter is false when provider credentials do not determine which models
 	// work, in which case every model is reported available.
 	filter bool
-	// openAI, when set, is consulted instead of the static entry. The OpenAI
-	// key can be supplied at runtime rather than only at boot, and the catalog
-	// has to follow: a user who has just entered a key expects models to
-	// appear without restarting the server.
-	openAI func() bool
+	// openAI, when set, is consulted instead of the static entry. OpenAI keys
+	// belong to accounts and can be set at runtime, so availability is a
+	// question about the caller rather than about the process: a user who has
+	// just entered a key expects their models to appear, and a user who has
+	// not should not be offered models that will fail for them.
+	openAI func(context.Context) bool
 }
 
-// WithLiveOpenAI returns a copy that asks configured() for OpenAI availability
-// on every call rather than using the boot-time value.
-func (p ProviderAvailability) WithLiveOpenAI(configured func() bool) ProviderAvailability {
+// WithLiveOpenAI returns a copy that asks configured() about the caller rather
+// than using the boot-time value.
+func (p ProviderAvailability) WithLiveOpenAI(configured func(context.Context) bool) ProviderAvailability {
 	p.openAI = configured
 	return p
 }
@@ -51,13 +54,14 @@ func NewProviderAvailability(vendorBackend bool, openAI, anthropic, zai, gemini,
 	}
 }
 
-// Available reports whether models from this provider can actually be used.
-func (p ProviderAvailability) Available(provider ModelProvider) bool {
+// Available reports whether the caller can actually use models from this
+// provider.
+func (p ProviderAvailability) Available(ctx context.Context, provider ModelProvider) bool {
 	if !p.filter {
 		return true
 	}
 	if provider == ModelProviderOpenAI && p.openAI != nil {
-		return p.openAI()
+		return p.openAI(ctx)
 	}
 	return p.keyed[provider]
 }
@@ -65,13 +69,13 @@ func (p ProviderAvailability) Available(provider ModelProvider) bool {
 // FilterUsable returns only the models whose provider is reachable. It returns
 // a non-nil empty slice rather than nil so callers encoding straight to JSON
 // emit [] instead of null.
-func (p ProviderAvailability) FilterUsable(in []*Model) []*Model {
+func (p ProviderAvailability) FilterUsable(ctx context.Context, in []*Model) []*Model {
 	out := make([]*Model, 0, len(in))
 	for _, m := range in {
 		if m == nil {
 			continue
 		}
-		if p.Available(ProviderForModel(m.Provider, m.Name)) {
+		if p.Available(ctx, ProviderForModel(m.Provider, m.Name)) {
 			out = append(out, m)
 		}
 	}

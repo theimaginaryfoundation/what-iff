@@ -61,5 +61,5 @@ func (h *Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	json.NewEncoder(w).Encode(h.providers.FilterUsable(modelList))
+	json.NewEncoder(w).Encode(h.providers.FilterUsable(ctx, modelList))
 }
