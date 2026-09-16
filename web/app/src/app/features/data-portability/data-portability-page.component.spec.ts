@@ -7,6 +7,7 @@ import { ACTIVE_ACCOUNT_IMPORT_JOB_STORAGE_KEY, AccountExportService } from '../
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { AccountArchiveService } from './account-archive.service';
 import { DataPortabilityPageComponent } from './data-portability-page.component';
+import { ExportDeliveryService } from '../../extensions/export-delivery.service';
 
 describe('DataPortabilityPageComponent', () => {
   let router: { navigate: ReturnType<typeof vi.fn> };
@@ -37,6 +38,16 @@ describe('DataPortabilityPageComponent', () => {
         { provide: ConfirmationService, useValue: confirmation },
         { provide: AccountArchiveService, useValue: { inspect: vi.fn() } },
         { provide: AccountExportService, useValue: accountExport },
+        {
+          provide: ExportDeliveryService,
+          useValue: {
+            copy: {
+              description: 'Local export description',
+              confirmation: 'Local export confirmation',
+              completed: 'Local export complete',
+            },
+          },
+        },
       ],
     })
       .overrideComponent(DataPortabilityPageComponent, { set: { template: '' } })
@@ -70,7 +81,7 @@ describe('DataPortabilityPageComponent', () => {
     );
   });
 
-  it('explains secure asynchronous export delivery before confirmation', async () => {
+  it('uses the build-specific export delivery copy before confirmation', async () => {
     const fixture = TestBed.createComponent(DataPortabilityPageComponent);
 
     await fixture.componentInstance.requestAccountExport();
@@ -78,7 +89,7 @@ describe('DataPortabilityPageComponent', () => {
     expect(confirmation.confirm).toHaveBeenCalledWith(
       expect.objectContaining({
         confirmText: 'Confirm export',
-        message: expect.stringContaining('link expires 24 hours after delivery'),
+        message: 'Local export confirmation',
       }),
     );
   });

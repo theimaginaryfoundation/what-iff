@@ -14,6 +14,7 @@ import { ConfirmationService } from '../../core/services/confirmation.service';
 import { AccountArchiveService, ArchiveContents } from './account-archive.service';
 import { ChatImportModalComponent } from '../chat/components/chat-import-modal/chat-import-modal.component';
 import { XIconComponent } from '../../shared/ui/icons/icons';
+import { ExportDeliveryService } from '../../extensions/export-delivery.service';
 
 type ExportPhase = 'idle' | 'queued' | 'building' | 'uploading' | 'complete' | 'failed';
 type ImportPhase = 'idle' | 'inspecting' | 'review' | 'queued' | 'uploading' | 'validating' | 'importing' | 'complete' | 'failed';
@@ -37,6 +38,8 @@ export class DataPortabilityPageComponent {
   private readonly accountExportService = inject(AccountExportService);
   private readonly archiveService = inject(AccountArchiveService);
   private readonly confirmationService = inject(ConfirmationService);
+  /** Build swap-point: hosted overlays replace the public/local delivery copy. */
+  readonly exportDelivery = inject(ExportDeliveryService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly router = inject(Router);
 
@@ -102,8 +105,7 @@ export class DataPortabilityPageComponent {
     if (this.exporting()) return;
     const confirmed = await this.confirmationService.confirm({
       title: 'Export account data?',
-      message:
-        'Your account details, conversations, personalities, and memories will be included in the export.\n\nWe’ll email a secure download link to your account address. The link expires 24 hours after delivery.\n\nPreparing your export may take some time. We’ll notify you when it’s ready.\n\nTo proceed, click “Confirm export” below.',
+      message: this.exportDelivery.copy.confirmation,
       confirmText: 'Confirm export',
       type: 'warning',
     });
@@ -242,7 +244,7 @@ export class DataPortabilityPageComponent {
           if (job.status === 'complete') {
             this.exporting.set(false);
             this.exportPhase.set('complete');
-            this.exportMessage.set(progress?.message || 'Your export is ready — check your email for the download link.');
+            this.exportMessage.set(progress?.message || this.exportDelivery.copy.completed);
             this.loadActivity();
           } else if (job.status === 'failed' || job.status === 'cancelled') {
             this.exporting.set(false);
