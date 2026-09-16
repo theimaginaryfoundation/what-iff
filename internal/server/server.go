@@ -305,6 +305,16 @@ func (s *Server) setupRoutes() {
 		registryKeys{registry: s.providerKeys},
 	)
 	providerKeyHandler := providerkey.NewHandler(dataStore, s.logger, keyResolvers, providerModelService)
+
+	// Seeding an account's model list needs to know which providers that account
+	// can reach. Injected rather than imported: the registry reads through the
+	// datastore, so a direct dependency would cycle.
+	dataStore.SetProviderConfigured(func(ctx context.Context, p string) bool {
+		if s.providerKeys == nil {
+			return true
+		}
+		return s.providerKeys.Configured(ctx, appmodels.ModelProvider(p))
+	})
 	// Provider availability gates the model list. Under a non-vendor backend
 	// (mock/local, ADR 0x018) every model is served without provider keys, so
 	// this must not filter there — see models.NewProviderAvailability.

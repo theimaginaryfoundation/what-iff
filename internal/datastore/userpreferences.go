@@ -55,6 +55,16 @@ func toUserPreferencesModel(e *ent.UserPreference) *models.UserPreferences {
 	} else {
 		prefs.HiddenModelIDs = []string{}
 	}
+	if e.AddedModelIds != nil {
+		prefs.AddedModelIDs = e.AddedModelIds
+	} else {
+		prefs.AddedModelIDs = []string{}
+	}
+	if e.SeenModelIds != nil {
+		prefs.SeenModelIDs = e.SeenModelIds
+	} else {
+		prefs.SeenModelIDs = []string{}
+	}
 
 	return &prefs
 }
@@ -156,6 +166,12 @@ func (d *Datastore) UpdateUserPreferences(ctx context.Context, userID uuid.UUID,
 	// alone, [] is an explicit "unhide everything".
 	if prefs.HiddenModelIDs != nil {
 		update.SetHiddenModelIds(prefs.HiddenModelIDs)
+	}
+	if prefs.AddedModelIDs != nil {
+		update.SetAddedModelIds(prefs.AddedModelIDs)
+	}
+	if prefs.SeenModelIDs != nil {
+		update.SetSeenModelIds(prefs.SeenModelIDs)
 	}
 
 	_, err = update.Save(ctx)

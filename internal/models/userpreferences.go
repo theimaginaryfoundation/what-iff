@@ -23,4 +23,16 @@ type UserPreferences struct {
 	// when named directly, so hiding one cannot silently break an existing chat
 	// or a scheduled job.
 	HiddenModelIDs []string `json:"hidden_model_ids"`
+	// AddedModelIDs is the account's own list of models — what add and remove
+	// in the Models tab operate on. Same nil-vs-empty contract as the two
+	// above.
+	//
+	// The picker shows AddedModelIDs minus HiddenModelIDs. Removing a model
+	// takes it off this list and costs a search to undo; hiding keeps it here
+	// and is one click to reverse.
+	AddedModelIDs []string `json:"added_model_ids"`
+	// SeenModelIDs is every model this account has ever been offered. It is
+	// what tells a model the account has never seen apart from one it removed
+	// on purpose — the first gets added, the second stays gone.
+	SeenModelIDs []string `json:"seen_model_ids"`
 }

@@ -189,10 +189,52 @@ func (d *Datastore) listModelsForUser(ctx context.Context, userID uuid.UUID, inc
 	if !u.EnableExperimentalModels {
 		all = filterVisibleModels(all, false)
 	}
+	// Seeding runs before either filter. An account whose providers have never
+	// been seeded has an empty list, and filtering an empty list against the
+	// catalog would show nothing at all.
+	prefs, err := d.GetUserPreferences(ctx, userID)
+	if err != nil {
+		// Same fail-open rule as the filters below: losing preferences should
+		// cost curation, not the catalog.
+		d.logger.Warn("could not read preferences while listing models; showing the full catalog", zap.Error(err))
+		return all, nil
+	}
+	prefs = d.seedProviderModels(ctx, userID, prefs, all, func(provider string) bool {
+		return d.canReachProvider(ctx, provider)
+	})
+
+	all = filterToAddedModels(all, prefs)
 	if includeHidden {
 		return all, nil
 	}
-	return d.filterHiddenModels(ctx, userID, all), nil
+	return filterHidden(all, prefs), nil
+}
+
+// filterToAddedModels narrows the catalog to the account's own list.
+//
+// An account that has never been offered anything passes everything through:
+// that is the window before the first seed, and the case where seeding failed,
+// and showing the whole catalog is the better failure.
+//
+// An account that HAS been offered models and holds an empty list is a
+// different thing entirely — it removed them — so the empty list is honoured.
+// Reading only the added list would conflate the two and refill a picker
+// somebody deliberately emptied.
+func filterToAddedModels(in []*models.Model, prefs *models.UserPreferences) []*models.Model {
+	if prefs == nil || len(prefs.SeenModelIDs) == 0 {
+		return in
+	}
+	added := make(map[string]bool, len(prefs.AddedModelIDs))
+	for _, id := range prefs.AddedModelIDs {
+		added[id] = true
+	}
+	out := make([]*models.Model, 0, len(in))
+	for _, m := range in {
+		if m != nil && added[m.ID.String()] {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // filterHiddenModels drops the models this account has hidden.
@@ -207,10 +249,25 @@ func (d *Datastore) listModelsForUser(ctx context.Context, userID uuid.UUID, inc
 // of losing preferences should be a longer list, not an empty one.
 func (d *Datastore) filterHiddenModels(ctx context.Context, userID uuid.UUID, in []*models.Model) []*models.Model {
 	prefs, err := d.GetUserPreferences(ctx, userID)
-	if err != nil || prefs == nil || len(prefs.HiddenModelIDs) == 0 {
-		if err != nil {
-			d.logger.Warn("could not read hidden models; showing the full catalog", zap.Error(err))
-		}
+	if err != nil {
+		d.logger.Warn("could not read hidden models; showing the full catalog", zap.Error(err))
+		return in
+	}
+	return filterHidden(in, prefs)
+}
+
+// filterHidden drops the models this account has hidden from its picker.
+//
+// Applied only to the catalog listing — the picker — and deliberately not to
+// any path that runs a model. Hiding is a preference, so a hidden model still
+// works when something names it directly: an existing chat pinned to it, an
+// agent job, a webhook. Enforcing it at use would mean unchecking a box in
+// settings silently broke a scheduled job days later.
+//
+// Absent preferences hide nothing rather than everything: the visible
+// consequence of losing them should be a longer list, not an empty one.
+func filterHidden(in []*models.Model, prefs *models.UserPreferences) []*models.Model {
+	if prefs == nil || len(prefs.HiddenModelIDs) == 0 {
 		return in
 	}
 	hidden := make(map[string]bool, len(prefs.HiddenModelIDs))

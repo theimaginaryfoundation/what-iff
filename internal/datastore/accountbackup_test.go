@@ -60,6 +60,8 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			experimental_memory_dedupe_chain bool NOT NULL DEFAULT false,
 			favorite_model_ids json NOT NULL DEFAULT '[]',
 			hidden_model_ids json NOT NULL DEFAULT '[]',
+			added_model_ids json NOT NULL DEFAULT '[]',
+			seen_model_ids json NOT NULL DEFAULT '[]',
 			user_preferences uuid NOT NULL UNIQUE,
 			default_model uuid NOT NULL,
 			default_personality uuid
