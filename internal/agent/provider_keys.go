@@ -4,13 +4,19 @@ import (
 	"context"
 	"fmt"
 
+	"go.uber.org/zap"
+
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
-// providerLabel and providerEnvVar describe a provider in user-facing errors.
-// Both halves matter: a credential can come from the account or from the
-// deployment environment, so an error that names only one of them sends half
-// of readers to the wrong place.
+// providerLabels names a provider for humans, plus the environment variable an
+// operator would set.
+//
+// The two are used in different places on purpose. The label goes in the error
+// returned to the caller, which states a fact about their account. The
+// environment variable goes only to the server log, where the operator is: an
+// end user cannot act on it, and on a hosted deployment they are not the person
+// who would.
 var providerLabels = map[models.ModelProvider]struct{ name, envVar string }{
 	models.ModelProviderOpenAI:    {"OpenAI", "OPENAI_API_KEY"},
 	models.ModelProviderAnthropic: {"Anthropic", "ANTHROPIC_API_KEY"},
@@ -43,10 +49,19 @@ func (a *Agent) requireProviderKey(ctx context.Context, p models.ModelProvider, 
 	}
 	label, ok := providerLabels[p]
 	if !ok {
-		return fmt.Errorf("model %q requested but its provider is not configured", modelName)
+		return fmt.Errorf("model %q is unavailable: its provider is not configured", modelName)
 	}
-	return fmt.Errorf(
-		"%s model %q requested but no %s API key is configured — add one under Integrations → API Keys, or set %s on the server",
-		label.name, modelName, label.name, label.envVar,
-	)
+	// Operator-facing remediation goes to the log, not to the caller. Which
+	// remedy is even correct differs by deployment — supplying your own key is
+	// a self-hosted affordance, not a hosted one — so naming one in a shared
+	// error would be wrong for half of them. What to do about it is the
+	// interface's job; this states what is true.
+	if a.logger != nil {
+		a.logger.Warn("model request blocked: provider credential missing",
+			zap.String("provider", string(p)),
+			zap.String("model", modelName),
+			zap.String("deployment_env_var", label.envVar))
+	}
+	return fmt.Errorf("%s model %q is unavailable: no %s API key is configured for this account",
+		label.name, modelName, label.name)
 }

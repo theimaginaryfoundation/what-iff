@@ -163,7 +163,7 @@ func TestHandleImageGenerateRitual_Claude_NoProvider(t *testing.T) {
 		model: "claude-sonnet-4-6",
 		chat:  &models.Chat{ID: chatID},
 	}, mc)
-	require.ErrorContains(t, err, "no Anthropic API key is configured")
+	require.ErrorContains(t, err, "no Anthropic API key is configured for this account")
 }
 
 func TestHandleImageGenerateRitual_EmptyPrompt(t *testing.T) {
