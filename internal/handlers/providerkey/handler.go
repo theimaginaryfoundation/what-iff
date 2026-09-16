@@ -22,6 +22,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 	"github.com/theimaginaryfoundation/what-iff/internal/providermodels"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerpolicy"
 )
 
 // Handler serves the per-account provider-key routes.
@@ -74,6 +75,16 @@ func (h *Handler) ListProviderModels(w http.ResponseWriter, r *http.Request) {
 	providerName := strings.ToLower(strings.TrimSpace(mux.Vars(r)["provider"]))
 	refresh := strings.EqualFold(r.URL.Query().Get("refresh"), "true")
 
+	// Listing a provider's catalog spends a credential and reveals what that
+	// credential can reach. Where the operator supplies the keys, neither is the
+	// account's to direct — it would be one user spending the operator's key and
+	// reading back the operator's model access.
+	if !providerpolicy.AccountsSupplyKeys() {
+		handlerutils.RespondWithError(w, h.logger, http.StatusNotImplemented, handlerutils.CodeNotSet,
+			"Listing a provider's models is not available on this deployment", nil)
+		return
+	}
+
 	list, err := h.providerModels.List(r.Context(), userID, providerName, refresh)
 	if err != nil {
 		if errors.Is(err, providermodels.ErrUnsupportedProvider) {
@@ -93,6 +104,18 @@ func (h *Handler) ListProviderModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, list)
+}
+
+// accountMaySupplyKey answers whether this account may hold its own credential
+// for a provider: the deployment must allow per-account keys at all, and the
+// provider must support them.
+//
+// Both halves report through the same flag so the rest of the system has one
+// thing to read. The write path already refuses an unsupported provider, so a
+// deployment whose operator supplies the keys rejects stores without a second
+// check, and the interface hides what it cannot offer without a second seam.
+func accountMaySupplyKey(provider string) bool {
+	return providerpolicy.AccountsSupplyKeys() && models.SupportsPerAccountKey(provider)
 }
 
 // ListUsage reports what each provider key is spent on and which model does
@@ -154,7 +177,7 @@ func (h *Handler) ListKeys(w http.ResponseWriter, r *http.Request) {
 		st := providerStatus{
 			Provider:  name,
 			Required:  p == models.ModelProviderOpenAI,
-			Supported: models.SupportsPerAccountKey(name),
+			Supported: accountMaySupplyKey(name),
 		}
 		if info, ok := byProvider[name]; ok {
 			st.Configured = true
@@ -185,11 +208,17 @@ func (h *Handler) SetKey(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Unknown provider", nil)
 		return
 	}
-	if !models.SupportsPerAccountKey(provider) {
-		// Storing it would report the provider as configured while its
-		// requests still used the deployment credential, or failed outright.
+	if !accountMaySupplyKey(provider) {
+		// Two reasons land here — the provider has no per-account support, or
+		// this deployment's operator supplies the credentials — and the
+		// response deliberately does not distinguish them. Storing the key
+		// either way would report the provider as configured while its requests
+		// used a different credential.
+		//
+		// No remedy in the text: what to do next differs by deployment, so it
+		// belongs to whatever interface is talking to a person.
 		handlerutils.RespondWithError(w, h.logger, http.StatusNotImplemented, handlerutils.CodeNotSet,
-			"Per-account keys are not supported for this provider yet; set it in the server environment instead", nil)
+			"This account cannot supply its own key for that provider", nil)
 		return
 	}
 
@@ -253,7 +282,7 @@ func (h *Handler) DeleteKey(w http.ResponseWriter, r *http.Request) {
 	st := providerStatus{
 		Provider:  provider,
 		Required:  provider == string(models.ModelProviderOpenAI),
-		Supported: models.SupportsPerAccountKey(provider),
+		Supported: accountMaySupplyKey(provider),
 	}
 	if res != nil && res.Configured(ctx) {
 		st.Configured = true

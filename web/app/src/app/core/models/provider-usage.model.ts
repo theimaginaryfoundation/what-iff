@@ -11,3 +11,14 @@ export interface ProviderUsage {
   required?: boolean;
   jobs: ProviderJob[];
 }
+
+/** How provider keys work on this deployment, with what each is spent on. */
+export interface ProviderUsageReport {
+  /**
+   * Whether the person reading this supplies the keys. Travels with the job
+   * list because the two are read together: what a key is spent on only tells
+   * you what to expect once you know whose key it is.
+   */
+  accounts_supply_keys: boolean;
+  providers: ProviderUsage[];
+}

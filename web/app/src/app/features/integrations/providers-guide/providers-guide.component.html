@@ -3,8 +3,12 @@
     <div class="mb-6">
       <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">What each provider is used for</h1>
       <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
-        Every key you add is your own, billed to your own account. This is what the app spends it on, and which model
-        does each job.
+        @if (accountsSupplyKeys()) {
+          Every key you add is your own, billed to your own account. This is what the app spends it on, and which model
+          does each job.
+        } @else {
+          This is what this deployment's provider keys are spent on, and which model does each job.
+        }
       </p>
     </div>
 

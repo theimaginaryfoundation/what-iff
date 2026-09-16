@@ -38,6 +38,10 @@ describe('personalitySetupGuard', () => {
         return result as unknown as boolean | UrlTree;
     }
 
+    it('lets the providers explainer through during setup', async () => {
+        expect(await runGuard('/providers')).toBe(true);
+    });
+
     it('allows personality routes without checking the API', async () => {
         const value = await runGuard('/personality');
         expect(value).toBe(true);

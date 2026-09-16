@@ -9,6 +9,7 @@
 
     <div class="mb-4 border-b border-gray-200 dark:border-gray-700">
       <nav class="-mb-px flex gap-6">
+        @if (canSupplyKeys()) {
         <button
           (click)="setActiveTab('api-keys')"
           class="border-b-2 px-1 py-3 text-sm font-medium"
@@ -17,6 +18,7 @@
             : 'border-transparent text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'">
           API Keys
         </button>
+        }
         <button
           (click)="setActiveTab('models')"
           class="border-b-2 px-1 py-3 text-sm font-medium"
@@ -46,7 +48,7 @@
       </nav>
     </div>
 
-    @if (activeTab() === 'api-keys') {
+    @if (canSupplyKeys() && activeTab() === 'api-keys') {
       <app-integrations-api-keys-tab></app-integrations-api-keys-tab>
     }
     @if (activeTab() === 'models') {

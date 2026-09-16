@@ -9,6 +9,9 @@ const EXEMPT_PATH_PREFIXES = [
   '/personality',
   '/personalities',
   '/profile',
+  // Same reason as the key guard: the explanation of what each provider is for
+  // has to be readable while someone is still setting up.
+  '/providers',
   '/subscription',
   '/billing',
   '/usage',

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { take } from 'rxjs';
 
 import { ProviderUsage } from '../../../core/models/provider-usage.model';
 import { ProviderUsageService } from '../../../core/services/provider-usage.service';
@@ -24,6 +25,12 @@ export class ProvidersGuideComponent implements OnInit {
   private usageService = inject(ProviderUsageService);
 
   usage = signal<ProviderUsage[]>([]);
+  /**
+   * Whether the reader supplies the keys. Drives one sentence, but the wrong
+   * one is a claim about someone's money — a page telling a reader they are
+   * billed for a key their operator supplied is worse than saying nothing.
+   */
+  accountsSupplyKeys = signal(false);
   isLoading = signal(false);
   errorMessage = signal('');
 
@@ -32,9 +39,10 @@ export class ProvidersGuideComponent implements OnInit {
 
   ngOnInit(): void {
     this.isLoading.set(true);
-    this.usageService.list().subscribe({
-      next: usage => {
-        this.usage.set(usage);
+    this.usageService.list().pipe(take(1)).subscribe({
+      next: report => {
+        this.usage.set(report.providers ?? []);
+        this.accountsSupplyKeys.set(report.accounts_supply_keys);
         this.isLoading.set(false);
       },
       error: () => {

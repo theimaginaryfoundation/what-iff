@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/apicontext"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerpolicy"
 )
 
 // cacheTTL bounds how long a key change takes to reach in-flight work that
@@ -65,6 +66,14 @@ func (r *Resolver) Resolve(ctx context.Context) string {
 	if r == nil {
 		return ""
 	}
+	// Where the operator supplies the credentials, a stored account key is not
+	// consulted at all. The API refuses to store one, but a key can predate a
+	// deployment changing its answer, and silently spending it afterwards would
+	// bill the wrong party for as long as nobody noticed.
+	if !providerpolicy.AccountsSupplyKeys() {
+		return r.fallback
+	}
+
 	userID, ok := apicontext.UserIDFrom(ctx)
 	if !ok || r.ds == nil {
 		return r.fallback

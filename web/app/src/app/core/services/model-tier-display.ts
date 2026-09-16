@@ -32,3 +32,19 @@ export class HiddenModelTierDisplay extends ModelTierDisplay {
     return false;
   }
 }
+
+/**
+ * Shows tiers. Ships here rather than in the build that uses it, because the
+ * implementation is a constant — there is no logic to keep private, and asking
+ * the other build to write its own leaves the swap-point file as the only place
+ * the two answers can disagree.
+ *
+ * Nothing in this build binds it. It exists so binding it is one line, and so
+ * both answers are exercised by the tests in this repo rather than only one.
+ */
+@Injectable()
+export class ShownModelTierDisplay extends ModelTierDisplay {
+  enabled(): boolean {
+    return true;
+  }
+}
