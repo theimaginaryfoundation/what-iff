@@ -13,8 +13,16 @@ const PROVIDER_LABELS: Record<string, string> = {
   zai: 'z.ai',
 };
 
+/**
+ * Where each provider issues keys. Every catalog provider takes a per-account
+ * key now, so every one of them needs somewhere to send a user who does not
+ * have one yet.
+ */
 const KEY_HELP_URLS: Record<string, string> = {
   openai: 'https://platform.openai.com/api-keys',
+  anthropic: 'https://console.anthropic.com/settings/keys',
+  google: 'https://aistudio.google.com/apikey',
+  zai: 'https://z.ai/manage-apikey/apikey-list',
 };
 
 @Component({
