@@ -121,6 +121,20 @@ var AvailableModels = []ModelConfig{
 		},
 	*/
 	{
+		Name:        "claude-opus-5",
+		DisplayName: "Claude Opus 5",
+		Description: "Anthropic's most capable Opus-tier model. Adaptive thinking, strong at complex analysis and coding, with a 1M token context window.",
+		ToolSupport: true,
+		Provider:    ModelProviderAnthropic,
+	},
+	{
+		Name:        "claude-sonnet-5",
+		DisplayName: "Claude Sonnet 5",
+		Description: "Anthropic's balanced model for everyday work. Adaptive thinking with a 1M token context window.",
+		ToolSupport: true,
+		Provider:    ModelProviderAnthropic,
+	},
+	{
 		Name:        "claude-sonnet-4-6",
 		DisplayName: "Claude Sonnet 4.6",
 		Description: "Anthropic's best balance of speed and intelligence with extended thinking capabilities. Ideal for most tasks.",
@@ -137,6 +151,13 @@ var AvailableModels = []ModelConfig{
 
 	// z.ai GLM models (routed through z.ai's Anthropic-compatible Messages API).
 	{
+		Name:        "glm-5.3",
+		DisplayName: "GLM-5.3",
+		Description: "z.ai's flagship GLM model. Natively multimodal with a 1M token context window.",
+		ToolSupport: true,
+		Provider:    ModelProviderZAI,
+	},
+	{
 		Name:        "glm-5.2",
 		DisplayName: "GLM-5.2",
 		Description: "z.ai's flagship GLM model. A strong, low-cost general-purpose model routed through z.ai's Anthropic-compatible API.",
@@ -145,6 +166,13 @@ var AvailableModels = []ModelConfig{
 	},
 
 	// Google Gemini models (routed through Google's OpenAI-compatible Chat Completions API).
+	{
+		Name:        "gemini-3.8-flash",
+		DisplayName: "Gemini 3.8 Flash",
+		Description: "Google's most capable Flash model. Built for long-horizon agentic work and complex workflows.",
+		ToolSupport: true,
+		Provider:    ModelProviderGoogle,
+	},
 	{
 		Name:        "gemini-3.5-flash",
 		DisplayName: "Gemini 3.5 Flash",

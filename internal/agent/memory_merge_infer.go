@@ -262,7 +262,7 @@ func (a *Agent) inferMemoryMergeGroupsOpenAI(ctx context.Context, userID uuid.UU
 		Model:            archivalOpenAIModel,
 		SafetyIdentifier: openai.String(userID.String()),
 		MaxOutputTokens:  openai.Int(memoryMergeMaxOutputTokens),
-		ServiceTier:      responses.ResponseNewParamsServiceTierFlex,
+		ServiceTier:      openAIServiceTier(responses.ResponseNewParamsServiceTierFlex),
 		Instructions:     openai.String(instructions),
 		Input: responses.ResponseNewParamsInputUnion{
 			OfInputItemList: inputItems,

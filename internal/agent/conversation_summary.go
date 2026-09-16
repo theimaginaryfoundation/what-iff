@@ -50,7 +50,7 @@ func buildCheckpointSummaryParams(userID uuid.UUID, existingSummary string, src 
 		Model:            archivalOpenAIModel,
 		SafetyIdentifier: openai.String(userID.String()),
 		MaxOutputTokens:  openai.Int(checkpointSummaryMaxTokens),
-		ServiceTier:      responses.ResponseNewParamsServiceTierFlex,
+		ServiceTier:      openAIServiceTier(responses.ResponseNewParamsServiceTierFlex),
 		Instructions:     openai.String(checkpointConversationSummaryInstructions),
 	}
 
