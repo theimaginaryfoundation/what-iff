@@ -55,6 +55,13 @@ describe('apiKeySetupGuard', () => {
         expect(providerKeys.listStatuses).not.toHaveBeenCalled();
     });
 
+    // The key screen links here to explain what a key is spent on. Gating it
+    // makes that link bounce back to the screen it was offered from, while
+    // someone is deciding whether to paste a credential in.
+    it('lets the providers explainer through so the key screen\'s own link works', async () => {
+        expect(await runGuard('/providers')).toBe(true);
+    });
+
     it('lets the profile screen through so sign-out stays reachable', async () => {
         expect(await runGuard('/profile')).toBe(true);
         expect(providerKeys.listStatuses).not.toHaveBeenCalled();

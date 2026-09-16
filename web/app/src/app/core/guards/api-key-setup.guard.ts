@@ -10,7 +10,15 @@ import { ProviderKeyService } from '../services/provider-key.service';
  * Settings and profile stay open so a signed-in user is never trapped: the key
  * screen itself lives under /integrations, and sign-out lives under /profile.
  */
-const EXEMPT_PATH_PREFIXES = ['/integrations', '/profile'];
+const EXEMPT_PATH_PREFIXES = [
+  '/integrations',
+  '/profile',
+  // The key screen links here to explain why a key is needed and what it is
+  // spent on. Gating it makes that link bounce back to the screen it was
+  // offered from, at exactly the moment someone is deciding whether to paste a
+  // credential in.
+  '/providers',
+];
 
 function isExemptPath(url: string | undefined | null): boolean {
   if (!url) {
