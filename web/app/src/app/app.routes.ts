@@ -188,6 +188,11 @@ export const routes: Routes = [
           .then(m => m.IntegrationsComponent)
       },
       {
+        path: 'providers',
+        loadComponent: () => import('./features/integrations/providers-guide/providers-guide.component')
+          .then(m => m.ProvidersGuideComponent)
+      },
+      {
         path: 'gallery',
         loadComponent: () => import('./features/gallery/gallery-page.component')
           .then(m => m.GalleryPageComponent)
