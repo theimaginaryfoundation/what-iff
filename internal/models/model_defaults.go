@@ -101,13 +101,6 @@ var AvailableModels = []ModelConfig{
 		ToolSupport: true,
 		Provider:    ModelProviderOpenAI,
 	},
-	{
-		Name:        "gpt-5.1-nano",
-		DisplayName: "GPT-5.1 Nano",
-		Description: "Ultra-fast, lightweight GPT-5.1 variant for high-throughput applications. Best price-performance ratio.",
-		ToolSupport: true,
-		Provider:    ModelProviderOpenAI,
-	},
 
 	// Anthropic Claude models
 	/*

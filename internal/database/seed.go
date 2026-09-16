@@ -20,8 +20,23 @@ import (
 	"go.uber.org/zap"
 )
 
-var legacyModelNames = []string{
+// retiredModelNames are models that must not remain selectable. On every boot,
+// migrateLegacyModels repoints any account default or chat still using one at
+// the default model and soft-deletes the row; ensureAllModels then skips
+// soft-deleted rows, so a retirement sticks across restarts and upgrades.
+//
+// Retirement covers two cases: a model the deployment has moved off of, and a
+// model that never existed in the first place.
+var retiredModelNames = []string{
 	appmodels.LegacyFineTunedModelName,
+
+	// gpt-5.1-nano was seeded from the open-source release onward but is not a
+	// model OpenAI serves — a request for it returns 404 model_not_found, with
+	// no aliasing to a real snapshot the way genuine names get. Anyone who
+	// picked it out of the catalog had every send fail. OpenAI does ship
+	// gpt-5-nano, gpt-5.4-nano and gpt-4.1-nano, so the name reads like a blend
+	// of gpt-5.1 and gpt-5-nano rather than a deliberate entry.
+	"gpt-5.1-nano",
 }
 
 // EnsureSeedData makes sure critical reference data exists before serving requests.
@@ -113,7 +128,7 @@ func migrateLegacyModels(ctx context.Context, client *ent.Client, logger *zap.Lo
 
 	legacyModels, err := client.Model.Query().
 		Where(
-			model.NameIn(legacyModelNames...),
+			model.NameIn(retiredModelNames...),
 			model.Deleted(false),
 		).
 		All(ctx)
