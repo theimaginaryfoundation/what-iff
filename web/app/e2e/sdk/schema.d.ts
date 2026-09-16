@@ -6574,6 +6574,196 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/provider-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List model-provider key status for the authenticated account
+         * @description Reports every provider in the model catalog and whether this account can
+         *     reach it. Keys belong to accounts, so two users on one instance see
+         *     different results.
+         *
+         *     `configured` is true when the account can reach the provider at all —
+         *     through its own stored key (`source: account`) or the deployment-level
+         *     environment variable (`source: deployment`). `supported` is false for
+         *     providers whose key cannot yet be supplied per account; those are listed
+         *     so the whole catalog is visible, but `PUT` rejects them.
+         *
+         *     The key itself is never returned. `key_hint` carries the last four
+         *     characters so a user can tell two of their own keys apart.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Provider key status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderKeyStatus"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/provider-keys/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set this account's key for a provider
+         * @description Stores or replaces the authenticated account's key for one provider. The
+         *     key is encrypted at rest and takes effect on the next request without a
+         *     restart.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Provider name as reported by `GET /provider-keys` */
+                    provider: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * @description The provider API key. Write-only; never returned.
+                         * @example sk-...
+                         */
+                        key: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Key stored */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderKeyStatus"];
+                    };
+                };
+                /** @description Unknown provider, or the key was missing */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /**
+                 * @description This provider does not support per-account keys yet. Storing one
+                 *     would report the provider as configured while its requests still
+                 *     used the deployment credential, so it is refused rather than
+                 *     silently ignored.
+                 */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Remove this account's key for a provider
+         * @description Removes the account's stored key. The account may still reach the
+         *     provider afterwards through the deployment-level fallback, which the
+         *     response reports rather than assuming.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    provider: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Key removed; resulting status returned */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderKeyStatus"];
+                    };
+                };
+                /** @description Unknown provider */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mcp-servers": {
         parameters: {
             query?: never;
@@ -8271,6 +8461,35 @@ export interface components {
         PatchChatContextRequest: {
             /** @description Scratchpad text to persist for the active personality. */
             active_scratchpad: string;
+        };
+        /**
+         * @description Whether the authenticated account can reach one model provider. Never
+         *     carries the key itself.
+         */
+        ProviderKeyStatus: {
+            /** @example openai */
+            provider: string;
+            /** @description The account can reach this provider, by either source. */
+            configured: boolean;
+            /**
+             * @description Where the usable credential comes from. Empty when not configured.
+             * @enum {string}
+             */
+            source?: "" | "account" | "deployment";
+            /**
+             * @description Last four characters of the account's own key, if set.
+             * @example …4f2a
+             */
+            key_hint?: string;
+            /**
+             * @description The app cannot function without this provider. True for OpenAI,
+             *     whose key is used by embeddings, summarization, chat naming, mood,
+             *     expressions and file attachments regardless of the chat model
+             *     selected.
+             */
+            required: boolean;
+            /** @description Whether a key can be supplied per account yet. */
+            supported: boolean;
         };
         /** @description User-configured remote MCP server. Authentication token is never returned by API responses. */
         MCPServer: {

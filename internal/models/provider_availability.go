@@ -81,3 +81,48 @@ func (p ProviderAvailability) FilterUsable(ctx context.Context, in []*Model) []*
 	}
 	return out
 }
+
+// catalogProviders is every provider the seeded model catalog uses. It is
+// derived from AvailableModels rather than hand-listed so a provider added to
+// the catalog appears in the integrations screen without a second edit.
+func CatalogProviders() []ModelProvider {
+	seen := make(map[ModelProvider]bool, len(AvailableModels))
+	out := make([]ModelProvider, 0, 4)
+	for _, m := range AvailableModels {
+		p := ProviderForModel(string(m.Provider), m.Name)
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	return out
+}
+
+// IsCatalogProvider reports whether name is a provider the catalog uses. Used
+// to reject unknown providers on write rather than storing a key nothing will
+// ever read.
+func IsCatalogProvider(name string) bool {
+	for _, p := range CatalogProviders() {
+		if string(p) == name {
+			return true
+		}
+	}
+	return false
+}
+
+// SupportsPerAccountKey reports whether a key stored against an account is
+// actually used for that account's requests.
+//
+// Only OpenAI today, for two reasons that have to be fixed together before
+// another provider joins: the shared transport injects a per-request
+// credential for the OpenAI host alone, and every other provider's client is
+// built at boot from an environment variable and left nil when that variable
+// is unset — so there is no client to route an account's key through.
+//
+// Storing a key we would not use, and reporting the provider as configured on
+// that basis, would offer models that fail at send time: the exact behaviour
+// the availability filter exists to remove.
+func SupportsPerAccountKey(provider string) bool {
+	return provider == string(ModelProviderOpenAI)
+}

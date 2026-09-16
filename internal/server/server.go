@@ -33,6 +33,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/model"
 	moodhandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/mood"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/personality"
+	"github.com/theimaginaryfoundation/what-iff/internal/handlers/providerkey"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/ritual"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/role"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/search"
@@ -256,6 +257,14 @@ func (s *Server) setupRoutes() {
 	}
 	accountExportHandler := accountexport.NewHandler(dataStore, s.logger, fileStore, exportSender, s.config.OpenAIKey)
 	mcpServerHandler := mcpserver.NewHandler(dataStore, s.logger)
+	// Resolvers are notified when a key changes so the next request uses it
+	// rather than waiting out the cache. Only OpenAI has one today; the others
+	// still store and list fine, they just have no cache to clear.
+	keyResolvers := map[string]*providerkeys.Resolver{}
+	if s.openAIKeys != nil {
+		keyResolvers[string(appmodels.ModelProviderOpenAI)] = s.openAIKeys
+	}
+	providerKeyHandler := providerkey.NewHandler(dataStore, s.logger, keyResolvers)
 	// Provider availability gates the model list. Under a non-vendor backend
 	// (mock/local, ADR 0x018) every model is served without provider keys, so
 	// this must not filter there — see models.NewProviderAvailability.
@@ -331,6 +340,7 @@ func (s *Server) setupRoutes() {
 	memoryHandler.RegisterRoutes(authRouter)
 	accountExportHandler.RegisterRoutes(authRouter)
 	mcpServerHandler.RegisterRoutes(authRouter)
+	providerKeyHandler.RegisterRoutes(authRouter)
 	modelRouter := apiRouter.PathPrefix("/model").Subrouter()
 	modelRouter.Use(middleware.OptionalAuthMiddleware(s.db, dataStore, s.logger))
 	modelRouter.HandleFunc("", modelHandler.ListModels).Methods("GET")
