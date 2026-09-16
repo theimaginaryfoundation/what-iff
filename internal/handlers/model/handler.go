@@ -50,8 +50,16 @@ func (h *Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 		modelList []*models.Model
 		err       error
 	)
+	// include_hidden serves the management screen, which has to name the models
+	// it is offering to unhide. Everything else — the picker included — gets the
+	// filtered list.
+	includeHidden := r.URL.Query().Get("include_hidden") == "true"
 	if userID, ok := middleware.GetUserIDFromContext(ctx); ok {
-		modelList, err = h.ds.ListModelsForUser(ctx, userID)
+		if includeHidden {
+			modelList, err = h.ds.ListAllModelsForUser(ctx, userID)
+		} else {
+			modelList, err = h.ds.ListModelsForUser(ctx, userID)
+		}
 	} else {
 		modelList, err = h.ds.ListModelsDefault(ctx)
 	}

@@ -5807,6 +5807,18 @@ components:
         last_seen_announcement:
           type: string
           description: ID of the most recently seen announcement banner; an empty string means none seen
+        hidden_model_ids:
+          type: array
+          description: |
+            Model IDs hidden from this account's model picker. Visibility only —
+            a hidden model still runs when named directly by an existing chat,
+            an agent job or the API, so hiding one cannot silently break
+            scheduled work.
+
+            On update: omit to leave unchanged, send [] to unhide everything.
+          items:
+            type: string
+            format: uuid
         favorite_model_ids:
           type: array
           items:
@@ -5833,6 +5845,18 @@ components:
         default_personality_id: "123e4567-e89b-12d3-a456-426614174003"
         theme: "dark"
         last_seen_announcement: ""
+        hidden_model_ids:
+          type: array
+          description: |
+            Model IDs hidden from this account's model picker. Visibility only —
+            a hidden model still runs when named directly by an existing chat,
+            an agent job or the API, so hiding one cannot silently break
+            scheduled work.
+
+            On update: omit to leave unchanged, send [] to unhide everything.
+          items:
+            type: string
+            format: uuid
         favorite_model_ids:
           - "123e4567-e89b-12d3-a456-426614174002"
           - "123e4567-e89b-12d3-a456-426614174004"
@@ -5874,6 +5898,18 @@ components:
             ID of the most recently seen announcement banner. Preserved when absent: only a
             non-empty value is written, so omitting this field or sending an empty string
             leaves the stored value unchanged. This endpoint cannot clear it.
+        hidden_model_ids:
+          type: array
+          description: |
+            Model IDs hidden from this account's model picker. Visibility only —
+            a hidden model still runs when named directly by an existing chat,
+            an agent job or the API, so hiding one cannot silently break
+            scheduled work.
+
+            On update: omit to leave unchanged, send [] to unhide everything.
+          items:
+            type: string
+            format: uuid
         favorite_model_ids:
           type: array
           items:
@@ -5896,6 +5932,18 @@ components:
         default_personality_id: "123e4567-e89b-12d3-a456-426614174003"
         theme: "dark"
         last_seen_announcement: "2026-08-release"
+        hidden_model_ids:
+          type: array
+          description: |
+            Model IDs hidden from this account's model picker. Visibility only —
+            a hidden model still runs when named directly by an existing chat,
+            an agent job or the API, so hiding one cannot silently break
+            scheduled work.
+
+            On update: omit to leave unchanged, send [] to unhide everything.
+          items:
+            type: string
+            format: uuid
         favorite_model_ids:
           - "123e4567-e89b-12d3-a456-426614174002"
           - "123e4567-e89b-12d3-a456-426614174004"

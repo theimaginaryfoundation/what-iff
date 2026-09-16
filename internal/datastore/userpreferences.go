@@ -50,6 +50,11 @@ func toUserPreferencesModel(e *ent.UserPreference) *models.UserPreferences {
 	} else {
 		prefs.FavoriteModelIDs = []string{}
 	}
+	if e.HiddenModelIds != nil {
+		prefs.HiddenModelIDs = e.HiddenModelIds
+	} else {
+		prefs.HiddenModelIDs = []string{}
+	}
 
 	return &prefs
 }
@@ -146,6 +151,11 @@ func (d *Datastore) UpdateUserPreferences(ctx context.Context, userID uuid.UUID,
 	// does not need the pointer treatment the scalar fields above would require.
 	if prefs.FavoriteModelIDs != nil {
 		update.SetFavoriteModelIds(prefs.FavoriteModelIDs)
+	}
+	// Same nil-vs-empty distinction as favorites: absent leaves the stored list
+	// alone, [] is an explicit "unhide everything".
+	if prefs.HiddenModelIDs != nil {
+		update.SetHiddenModelIds(prefs.HiddenModelIDs)
 	}
 
 	_, err = update.Save(ctx)

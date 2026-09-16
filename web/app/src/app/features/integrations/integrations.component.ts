@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { AccessGate } from '../../core/services/access-gate';
 import { IntegrationsApiKeysTabComponent } from './integrations-api-keys-tab.component';
 import { IntegrationsConnectorsTabComponent } from './integrations-connectors-tab.component';
+import { IntegrationsModelsTabComponent } from './integrations-models-tab.component';
 import { IntegrationsWebhooksTabComponent } from './integrations-webhooks-tab.component';
 
 @Component({
@@ -13,17 +14,18 @@ import { IntegrationsWebhooksTabComponent } from './integrations-webhooks-tab.co
     CommonModule,
     IntegrationsApiKeysTabComponent,
     IntegrationsConnectorsTabComponent,
-    IntegrationsWebhooksTabComponent
+    IntegrationsModelsTabComponent,
+    IntegrationsWebhooksTabComponent,
   ],
   templateUrl: './integrations.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrls: ['./integrations.component.scss']
+  styleUrls: ['./integrations.component.scss'],
 })
 export class IntegrationsComponent implements OnInit {
   private router = inject(Router);
   private accessGate = inject(AccessGate);
 
-  activeTab = signal<'api-keys' | 'connectors' | 'webhooks'>('api-keys');
+  activeTab = signal<'api-keys' | 'models' | 'connectors' | 'webhooks'>('api-keys');
   /** True when access-gated features (connectors) are available. */
   hasAccess = signal(false);
 
@@ -33,17 +35,17 @@ export class IntegrationsComponent implements OnInit {
     const wantsKeySetup = this.router.parseUrl(this.router.url).queryParams['setup'] === 'api-key';
 
     this.accessGate.hasAccess().subscribe({
-      next: (ok) => {
+      next: ok => {
         this.hasAccess.set(ok);
         if (ok && !wantsKeySetup) this.activeTab.set('connectors');
       },
       error: () => {
         this.hasAccess.set(false);
-      }
+      },
     });
   }
 
-  setActiveTab(tab: 'api-keys' | 'connectors' | 'webhooks'): void {
+  setActiveTab(tab: 'api-keys' | 'models' | 'connectors' | 'webhooks'): void {
     this.activeTab.set(tab);
   }
 }
