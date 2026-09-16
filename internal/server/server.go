@@ -42,6 +42,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/webhook"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
+	appmodels "github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
 	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
@@ -239,7 +240,15 @@ func (s *Server) setupRoutes() {
 	}
 	accountExportHandler := accountexport.NewHandler(dataStore, s.logger, fileStore, exportSender, s.config.OpenAIKey)
 	mcpServerHandler := mcpserver.NewHandler(dataStore, s.logger)
-	modelHandler := model.NewHandler(dataStore, s.logger)
+	// Provider availability gates the model list. Under a non-vendor backend
+	// (mock/local, ADR 0x018) every model is served without provider keys, so
+	// this must not filter there — see models.NewProviderAvailability.
+	modelProviders := appmodels.NewProviderAvailability(
+		s.config.LLMBackend == "" || s.config.LLMBackend == "vendor",
+		s.config.OpenAIKey, s.config.AnthropicKey, s.config.ZAIKey, s.config.GeminiKey,
+		s.config.MistralKey, s.config.DeepSeekKey, s.config.QwenKey, s.config.XiaomiKey,
+	)
+	modelHandler := model.NewHandler(dataStore, s.logger, modelProviders)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)
 	chatHandler := chat.NewHandler(dataStore, s.logger, agent, chat.HandlerConfig{
 		RequireBilling: s.config.RequireBilling,
