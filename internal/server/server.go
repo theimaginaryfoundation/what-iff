@@ -283,7 +283,15 @@ func (s *Server) setupRoutes() {
 	// Resolvers are notified when a key changes so the next request uses it
 	// rather than waiting out the cache. Only OpenAI has one today; the others
 	// still store and list fine, they just have no cache to clear.
-	keyResolvers := map[string]*providerkeys.Resolver{}
+	// Resolvers, keyed by provider, so the key screen can tell "nobody has
+	// configured this" from "the deployment's key covers you".
+	//
+	// This map was previously built empty and never filled, which made the
+	// deployment fallback invisible: an install that set OPENAI_API_KEY the way
+	// the README describes was reported as unconfigured, and the setup guard
+	// then redirected every navigation back to the key screen. The credential
+	// itself worked the whole time — only the report of it was wrong.
+	keyResolvers := buildKeyResolvers(s.providerKeys)
 	// Listing a provider's live catalog uses the caller's own key, so what a
 	// user sees is what their key can actually reach. Only OpenAI has a Lister;
 	// the route answers 501 for the rest rather than pretending.
@@ -654,4 +662,24 @@ func (r registryKeys) KeyFor(ctx context.Context, provider string) string {
 		return ""
 	}
 	return r.registry.Key(ctx, appmodels.ModelProvider(provider))
+}
+
+// buildKeyResolvers maps each catalog provider to its resolver, so the key
+// screen can tell "nobody has configured this" from "the deployment's key
+// covers you".
+//
+// Extracted because getting it wrong is silent. This map was previously built
+// empty and never filled: an install that set OPENAI_API_KEY the way the README
+// describes was reported as unconfigured, and the setup guard then redirected
+// every navigation back to the key screen. The credential worked the whole
+// time — only the report of it was wrong, which is the hardest kind of thing to
+// notice from the code.
+func buildKeyResolvers(keys *providerkeys.Registry) map[string]*providerkeys.Resolver {
+	out := map[string]*providerkeys.Resolver{}
+	for _, p := range appmodels.CatalogProviders() {
+		if res := keys.ResolverFor(p); res != nil {
+			out[string(p)] = res
+		}
+	}
+	return out
 }
