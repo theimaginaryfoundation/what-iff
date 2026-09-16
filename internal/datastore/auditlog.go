@@ -3,6 +3,7 @@ package datastore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -19,15 +20,18 @@ const (
 	auditCategoryQuota         = "quota"
 	auditCategoryAccountBackup = "account_backup"
 	auditCategoryAccountExport = "account_export"
+	auditCategoryAccountImport = "account_import"
 	auditCategoryMemoryPack    = "memory_pack"
 	auditCategoryChatImport    = "chat_import"
 )
 
 // accountActivityCategories are the audit categories surfaced on the Import & Export screen's
 // activity log — the user-facing import/export flows.
-var accountActivityCategories = []string{auditCategoryAccountExport, auditCategoryChatImport}
+var accountActivityCategories = []string{auditCategoryAccountExport, auditCategoryAccountImport, auditCategoryChatImport}
 
 const auditMetadataMarker = " | metadata="
+
+var errAccountActivityDatastoreUnavailable = errors.New("account activity datastore is not initialized")
 
 type auditEntry struct {
 	Category      string
@@ -105,7 +109,7 @@ func (d *Datastore) AuditChatImport(ctx context.Context, userID uuid.UUID, messa
 // ListAccountActivity returns the user's recent import/export audit entries, newest first.
 func (d *Datastore) ListAccountActivity(ctx context.Context, userID uuid.UUID, limit int) ([]models.AccountActivityEntry, error) {
 	if d == nil || d.dbClient == nil {
-		return nil, nil
+		return nil, errAccountActivityDatastoreUnavailable
 	}
 	if limit <= 0 || limit > 100 {
 		limit = 25
@@ -155,6 +159,18 @@ func (d *Datastore) AuditAccountExport(ctx context.Context, userID uuid.UUID, ac
 	subject := userID
 	d.writeAuditLog(ctx, auditEntry{
 		Category:      auditCategoryAccountExport,
+		Action:        action,
+		Message:       message,
+		SubjectUserID: &subject,
+		Metadata:      metadata,
+	})
+}
+
+// AuditAccountImport records an account-import lifecycle event without storing archive URLs or contents.
+func (d *Datastore) AuditAccountImport(ctx context.Context, userID uuid.UUID, action, message string, metadata map[string]any) {
+	subject := userID
+	d.writeAuditLog(ctx, auditEntry{
+		Category:      auditCategoryAccountImport,
 		Action:        action,
 		Message:       message,
 		SubjectUserID: &subject,

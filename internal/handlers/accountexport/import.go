@@ -319,7 +319,7 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, sele
 	if _, err := h.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusComplete, ""); err != nil {
 		h.logger.Warn("account import: failed to mark complete", zap.String("job_id", jobID.String()), zap.Error(err))
 	}
-	h.ds.AuditAccountExport(ctx, userID, "imported", "user imported account export", map[string]any{
+	h.ds.AuditAccountImport(ctx, userID, "imported", "user imported account export", map[string]any{
 		"conversations_imported": result.Conversations.Imported,
 		"memories_imported":      result.Memories.ImportedCount,
 		"personalities_created":  result.Personalities.Created,
@@ -432,7 +432,7 @@ func (h *Handler) failAccountImport(ctx context.Context, userID, jobID uuid.UUID
 		meta["personalities_created"] = result.Personalities.Created
 		meta["warnings"] = len(result.Warnings)
 	}
-	h.ds.AuditAccountExport(ctx, userID, "import_failed", "account import failed: "+message, meta)
+	h.ds.AuditAccountImport(ctx, userID, "import_failed", "account import failed: "+message, meta)
 }
 
 // importPersonalities creates each exported personality that does not already exist (by name) for the

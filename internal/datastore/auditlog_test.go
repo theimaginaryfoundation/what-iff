@@ -1,9 +1,28 @@
 package datastore
 
 import (
+	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/google/uuid"
 )
+
+func TestListAccountActivityRejectsUninitializedDatastore(t *testing.T) {
+	_, err := (*Datastore)(nil).ListAccountActivity(t.Context(), uuid.New(), 25)
+	if !errors.Is(err, errAccountActivityDatastoreUnavailable) {
+		t.Fatalf("ListAccountActivity error = %v, want %v", err, errAccountActivityDatastoreUnavailable)
+	}
+}
+
+func TestAccountActivityCategoriesIncludeAccountImport(t *testing.T) {
+	for _, category := range accountActivityCategories {
+		if category == auditCategoryAccountImport {
+			return
+		}
+	}
+	t.Fatalf("account activity categories = %v, want %q", accountActivityCategories, auditCategoryAccountImport)
+}
 
 func TestAccountActivityMessage(t *testing.T) {
 	t.Parallel()

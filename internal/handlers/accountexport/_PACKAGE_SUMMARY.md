@@ -14,7 +14,8 @@ Authenticated user account portability: ZIP export by email and additive ZIP imp
 - `Handler` — registers `/api/account/export`, `/api/account/import`, and `/api/account/activity`.
 - `EnqueueExport`, `GetExport`, `ImportAccount`, `GetImport`, `GetActivity` — HTTP entry points.
 - `GetActivity` returns the user's recent import/export audit rows (`ListAccountActivity`) for the
-  screen's activity log — export/import plus ChatGPT/Claude imports (`chat_import` audit category).
+  screen's activity log — account exports (`account_export`), account restores (`account_import`),
+  and ChatGPT/Claude imports (`chat_import`).
   The datastore exposes safe display metadata as a structured field rather than making the client
   interpret the persisted audit-message encoding.
 

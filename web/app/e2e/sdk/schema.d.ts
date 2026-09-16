@@ -8153,7 +8153,7 @@ export interface components {
         AccountActivityEntry: {
             /** Format: date-time */
             occurred_at?: string;
-            /** @description Audit category, e.g. account_export or chat_import. */
+            /** @description Audit category, e.g. account_export, account_import, or chat_import. */
             category?: string;
             /** @description e.g. exported, imported, import_failed, import. */
             action?: string;
