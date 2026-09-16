@@ -6691,6 +6691,99 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/provider-models/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The models a provider actually serves, as seen by this account's key
+         * @description Queries the provider's own catalog with the calling account's key, so
+         *     "this model does not exist" and "your key cannot reach it" are the same
+         *     answer for the right reason: what comes back is what this key can use.
+         *
+         *     Exists because the app's hand-written catalog rotted — it offered
+         *     `gpt-5.1-nano` from the open-source release onward, a name OpenAI
+         *     returns 404 for.
+         *
+         *     Nothing is filtered out. Retired and non-chat entries are returned with
+         *     their `kind` and `retires_on` so the caller decides. `kind` is a
+         *     heuristic over the model id, because most providers return no
+         *     capability information at all, and it is wrong at the edges — dropping
+         *     a misjudged model here would make it permanently unreachable rather
+         *     than merely mislabelled.
+         *
+         *     Results are cached briefly per account. `?refresh=true` bypasses that.
+         *
+         *     Only OpenAI is implemented; other providers answer 501.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Bypass the per-account cache and re-query the provider. */
+                    refresh?: boolean;
+                };
+                header?: never;
+                path: {
+                    /** @example openai */
+                    provider: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The provider's catalog */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderModel"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description This build cannot list models for that provider */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /**
+                 * @description The provider could not be reached or rejected the key. The detail is
+                 *     logged rather than returned, because a provider's error body can
+                 *     echo the key back.
+                 */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/provider-keys/{provider}": {
         parameters: {
             query?: never;
@@ -8582,6 +8675,31 @@ export interface components {
             required: boolean;
             /** @description Whether a key can be supplied per account yet. */
             supported: boolean;
+        };
+        /** @description One entry from a provider's own catalog. */
+        ProviderModel: {
+            /**
+             * @description The model name to send to the provider.
+             * @example gpt-5.6-luna
+             */
+            id: string;
+            /**
+             * @description Coarse bucket, inferred from the id. A filter to keep a chat picker
+             *     free of speech and embedding models, not an authoritative
+             *     capability statement.
+             * @enum {string}
+             */
+            kind: "chat" | "embedding" | "audio" | "image" | "moderation" | "code" | "legacy" | "snapshot";
+            /**
+             * @description The provider's shutdown date, absent when it has not set one.
+             * @example 2026-10-23
+             */
+            retires_on?: string;
+            /**
+             * @description The shutdown date has passed. Providers keep listing these, so
+             *     being returned is not evidence a model still works.
+             */
+            retired: boolean;
         };
         /** @description One piece of work a provider key pays for, and the model that does it. */
         ProviderJob: {
