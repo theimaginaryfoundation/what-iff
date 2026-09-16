@@ -35,6 +35,16 @@ class FakeModelFavoritesService {
     }
 }
 
+
+/**
+ * Turns tier grouping on for one fixture. The default build hides tiers — they
+ * describe a hosted plan's entitlement — so a test about tier behaviour has to
+ * say which build it is describing.
+ */
+function enableTiers(fixture: ComponentFixture<ModelPickerComponent>): void {
+  (fixture.componentInstance as unknown as { showTiers: boolean }).showTiers = true;
+}
+
 describe('ModelPickerComponent', () => {
     let fixture: ComponentFixture<ModelPickerComponent>;
     let favorites: FakeModelFavoritesService;
@@ -182,6 +192,9 @@ describe('ModelPickerComponent', () => {
     });
 
     it('shows tier list then drills into models like vendor', () => {
+        // Tier grouping only exists where a subscription does; the default build
+        // hides it (see core/services/model-tier-display.ts).
+        enableTiers(fixture);
         fixture.componentRef.setInput('selectedId', null);
         fixture.detectChanges();
 
@@ -205,6 +218,7 @@ describe('ModelPickerComponent', () => {
     });
 
     it('drills to the selected model tier when opening the tier tab', () => {
+        enableTiers(fixture);
         fixture.nativeElement.querySelector('.model-picker__trigger').click();
         fixture.detectChanges();
 
