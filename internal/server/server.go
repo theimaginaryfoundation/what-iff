@@ -47,6 +47,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
 	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 	"github.com/theimaginaryfoundation/what-iff/internal/providermodels"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerpolicy"
 	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
@@ -213,6 +214,9 @@ func (s *Server) setupRoutes() {
 	// Optional feature-entitlement gate (linked privately; nil in the open-source
 	// build, where every feature is available). Registered via a blank import in
 	// cmd/api-server, same as the meter.
+	if providerpolicy.New != nil {
+		providerpolicy.Active = providerpolicy.New()
+	}
 	if featuregate.New != nil {
 		featuregate.Active = featuregate.New(dataStore)
 	}
