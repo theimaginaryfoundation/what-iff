@@ -178,3 +178,4 @@ web/app/public/version.json
 /ent/*
 !/ent/schema
 !/ent/generate.go
+personality-compare.md

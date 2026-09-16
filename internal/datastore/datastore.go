@@ -1,6 +1,7 @@
 package datastore
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -17,6 +18,27 @@ type Datastore struct {
 	logger      *zap.Logger
 	metrics     *telemetry.Metrics
 	tokenCrypto *tokenCrypto
+	// providerConfigured reports whether the calling account can reach a
+	// provider. Injected rather than imported: the provider-key registry reads
+	// through this package, so depending on it here would cycle.
+	//
+	// nil means "assume reachable", which is the fail-open answer — an account
+	// seeing a model it cannot yet use is a better failure than an empty picker.
+	providerConfigured func(ctx context.Context, provider string) bool
+}
+
+// SetProviderConfigured injects the provider-reachability check used when
+// seeding an account's model list. Called once at wiring time.
+func (d *Datastore) SetProviderConfigured(fn func(ctx context.Context, provider string) bool) {
+	d.providerConfigured = fn
+}
+
+// canReachProvider is the nil-safe form of providerConfigured.
+func (d *Datastore) canReachProvider(ctx context.Context, provider string) bool {
+	if d.providerConfigured == nil {
+		return true
+	}
+	return d.providerConfigured(ctx, provider)
 }
 
 // NewDatastore creates a new Datastore.

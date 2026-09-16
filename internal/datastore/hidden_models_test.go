@@ -32,6 +32,8 @@ func hiddenModelsSchema(t *testing.T, db *sql.DB) {
 			experimental_memory_dedupe_chain bool NOT NULL DEFAULT false,
 			favorite_model_ids json NOT NULL DEFAULT '[]',
 			hidden_model_ids json NOT NULL DEFAULT '[]',
+			added_model_ids json NOT NULL DEFAULT '[]',
+			seen_model_ids json NOT NULL DEFAULT '[]',
 			user_preferences uuid UNIQUE REFERENCES users(id) ON DELETE CASCADE,
 			default_model uuid,
 			default_personality uuid)`,
