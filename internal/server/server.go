@@ -58,13 +58,17 @@ import (
 )
 
 type Server struct {
-	config    *Config
-	logger    *zap.Logger
-	telemetry *telemetry.Telemetry
-	router    *mux.Router
-	server    *http.Server
-	db        *ent.Client
-	sqlDB     *sql.DB
+	// openAICredential is the live OpenAI key for every OpenAI-family SDK
+	// client. Non-nil only under a vendor backend; mock/local use the
+	// deny-network transport and never carry a real credential.
+	openAICredential *provider.OpenAICredential
+	config           *Config
+	logger           *zap.Logger
+	telemetry        *telemetry.Telemetry
+	router           *mux.Router
+	server           *http.Server
+	db               *ent.Client
+	sqlDB            *sql.DB
 
 	agentJobScheduler       *agentjobscheduler.Manager
 	agentJobSchedulerCancel context.CancelFunc
@@ -134,6 +138,16 @@ func (s *Server) setupRoutes() {
 	var providerHTTPClient *http.Client
 	if s.config.LLMBackend != "vendor" {
 		providerHTTPClient = provider.DenyNetworkHTTPClient()
+	} else {
+		// Vendor path: route OpenAI-family clients through a transport that
+		// applies the current key per request. The SDK client value is copied
+		// into six independent holders, so there is no single field to
+		// reassign when the key changes; injecting at the transport they all
+		// share means a new key takes effect on the next request with no
+		// restart. Scoped to the OpenAI host so the other OpenAI-compatible
+		// providers keep their own credentials (see openai_credential.go).
+		s.openAICredential = provider.NewOpenAICredential(s.config.OpenAIKey)
+		providerHTTPClient = provider.OpenAICredentialHTTPClient(s.openAICredential, nil)
 	}
 
 	agentCfg := agent.AgentConfig{
@@ -248,6 +262,11 @@ func (s *Server) setupRoutes() {
 		s.config.OpenAIKey, s.config.AnthropicKey, s.config.ZAIKey, s.config.GeminiKey,
 		s.config.MistralKey, s.config.DeepSeekKey, s.config.QwenKey, s.config.XiaomiKey,
 	)
+	if s.openAICredential != nil {
+		// Follow runtime key changes, so entering a key makes its models
+		// appear without a restart.
+		modelProviders = modelProviders.WithLiveOpenAI(s.openAICredential.Configured)
+	}
 	modelHandler := model.NewHandler(dataStore, s.logger, modelProviders)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)
 	chatHandler := chat.NewHandler(dataStore, s.logger, agent, chat.HandlerConfig{

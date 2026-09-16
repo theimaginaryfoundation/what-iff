@@ -14,6 +14,18 @@ type ProviderAvailability struct {
 	// filter is false when provider credentials do not determine which models
 	// work, in which case every model is reported available.
 	filter bool
+	// openAI, when set, is consulted instead of the static entry. The OpenAI
+	// key can be supplied at runtime rather than only at boot, and the catalog
+	// has to follow: a user who has just entered a key expects models to
+	// appear without restarting the server.
+	openAI func() bool
+}
+
+// WithLiveOpenAI returns a copy that asks configured() for OpenAI availability
+// on every call rather than using the boot-time value.
+func (p ProviderAvailability) WithLiveOpenAI(configured func() bool) ProviderAvailability {
+	p.openAI = configured
+	return p
 }
 
 // NewProviderAvailability builds availability from the configured keys.
@@ -43,6 +55,9 @@ func NewProviderAvailability(vendorBackend bool, openAI, anthropic, zai, gemini,
 func (p ProviderAvailability) Available(provider ModelProvider) bool {
 	if !p.filter {
 		return true
+	}
+	if provider == ModelProviderOpenAI && p.openAI != nil {
+		return p.openAI()
 	}
 	return p.keyed[provider]
 }
