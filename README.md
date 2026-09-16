@@ -79,14 +79,16 @@ The fastest way to run the full stack locally is Docker Compose.
 **Prerequisites:** Docker, and at least one model provider API key (e.g. OpenAI).
 
 ```bash
-# 1. Set the required secrets. docker-compose.yml ships no fallbacks — the server
-#    refuses to boot on a missing, short (<32 char), or default-looking value.
-export OPENAI_API_KEY="your-api-key-here"
-export JWT_SECRET="$(openssl rand -hex 32)"
-export JWT_REFRESH_SECRET="$(openssl rand -hex 32)"
-export TOKEN_ENCRYPTION_SECRET="$(openssl rand -hex 32)"
+# 1. Create .env with generated secrets. docker-compose.yml ships no fallbacks —
+#    the server refuses to boot on a missing, short (<32 char), or
+#    default-looking value, so these are generated for you. Never overwrites an
+#    existing .env.
+make init-env
 
-# 2. Start the stack (runs migrations and seeds a default model automatically)
+# 2. Add your OpenAI key to .env
+#    OPENAI_API_KEY=sk-...
+
+# 3. Start the stack (runs migrations and seeds the model catalog automatically)
 docker compose up --build
 ```
 
@@ -102,13 +104,21 @@ docker compose up --build
 
 Run the backend and frontend directly for a faster inner loop.
 
-**Backend** (Go 1.27+, a running PostgreSQL 16 with pgvector):
+**Backend** (Go 1.27+, Docker for Postgres):
 
 ```bash
-go run ./cmd/api-server
-# Connects to Postgres, enables pgvector, runs non-destructive migrations
-# (AUTO_MIGRATE=true), seeds a default model, and serves on :8080.
+make up
+# init-env  → .env with generated secrets (skipped if .env exists)
+# generate  → Ent code; it is gitignored, so this must run before the first build
+# db-up     → Postgres 16 + pgvector in Docker, waits for healthy
+# run       → connects, runs non-destructive migrations (AUTO_MIGRATE=true),
+#             seeds the model catalog, and serves on :8080
 ```
+
+Each step is idempotent, so re-running after a failure is safe. To run the steps
+yourself, `make help` lists them all. If port 8080 is taken, set `SERVER_PORT`
+in `.env` — note that the web app's dev build points at `:8080` in
+`web/app/src/environments/environment.ts` and needs the same change.
 
 **Frontend** (Node.js 20+):
 
