@@ -53,17 +53,21 @@ func (d *Datastore) GetChatMessagesForSummary(ctx context.Context, userID, chatI
 // GetChatRehydrationState returns just the rehydration lifecycle state for a chat (cheap; no edges).
 // Returns ErrChatNotFound when the chat does not exist or is not owned by the user.
 func (d *Datastore) GetChatRehydrationState(ctx context.Context, userID, chatID uuid.UUID) (string, error) {
-	state, err := d.dbClient.Chat.Query().
+	// Read the row rather than scanning the column directly: the field is
+	// optional and unset on every natively created chat, and a direct string
+	// scan cannot convert NULL. Ent maps an unset optional string to "", which
+	// is already the documented value for "no rehydration needed".
+	c, err := d.dbClient.Chat.Query().
 		Where(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))).
 		Select(entchat.FieldRehydrationState).
-		String(ctx)
+		Only(ctx)
 	if ent.IsNotFound(err) {
 		return "", ErrChatNotFound
 	}
 	if err != nil {
 		return "", err
 	}
-	return state, nil
+	return c.RehydrationState, nil
 }
 
 // SetChatRehydrationState writes the lazy-summarization lifecycle state for a chat
