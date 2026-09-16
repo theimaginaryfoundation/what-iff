@@ -5895,7 +5895,11 @@ components:
           description: e.g. exported, imported, import_failed, import.
         message:
           type: string
-          description: Human-readable summary; counts are appended as metadata.
+          description: Human-readable summary.
+        metadata:
+          type: object
+          description: Structured safe-to-display counts and outcome fields for the activity row.
+          additionalProperties: true
 
     Job:
       type: object

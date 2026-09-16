@@ -51,6 +51,7 @@ export interface AccountActivityEntry {
   category: string;
   action: string;
   message: string;
+  metadata?: Record<string, unknown>;
 }
 
 @Injectable({

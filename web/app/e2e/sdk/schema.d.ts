@@ -8157,8 +8157,12 @@ export interface components {
             category?: string;
             /** @description e.g. exported, imported, import_failed, import. */
             action?: string;
-            /** @description Human-readable summary; counts are appended as metadata. */
+            /** @description Human-readable summary. */
             message?: string;
+            /** @description Structured safe-to-display counts and outcome fields for the activity row. */
+            metadata?: {
+                [key: string]: unknown;
+            };
         };
         /**
          * @example {

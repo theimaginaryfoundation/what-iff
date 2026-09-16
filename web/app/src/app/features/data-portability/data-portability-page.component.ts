@@ -376,24 +376,15 @@ export class DataPortabilityPageComponent {
 
   /** True when an activity row represents a failure (for styling). */
   activityFailed(entry: AccountActivityEntry): boolean {
-    return entry.action.includes('failed') || /"success":\s*false/.test(entry.message);
+    return entry.action.includes('failed') || entry.metadata?.['success'] === false;
   }
 
-  /** The human message with the appended metadata rendered as a compact "key: value" summary. */
+  /** The human message with structured activity metadata rendered as a compact "key: value" summary. */
   activityDetail(entry: AccountActivityEntry): string {
-    const marker = ' | metadata=';
-    const idx = entry.message.indexOf(marker);
-    if (idx < 0) return entry.message;
-    const base = entry.message.slice(0, idx);
-    try {
-      const meta = JSON.parse(entry.message.slice(idx + marker.length)) as Record<string, unknown>;
-      const parts = Object.entries(meta)
-        .filter(([, v]) => typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string')
-        .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`);
-      return parts.length ? `${base} — ${parts.join(', ')}` : base;
-    } catch {
-      return base;
-    }
+    const parts = Object.entries(entry.metadata ?? {})
+      .filter(([, v]) => typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string')
+      .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`);
+    return parts.length ? `${entry.message} — ${parts.join(', ')}` : entry.message;
   }
 
   formatWhen(iso: string): string {

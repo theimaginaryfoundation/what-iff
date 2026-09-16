@@ -58,13 +58,14 @@ type SectionImportCounts struct {
 }
 
 // AccountActivityEntry is one row of a user's import/export activity log, projected from the audit
-// log. The message carries a human-readable summary (with counts appended as metadata) — deliberately
-// unstructured, enough for a user to see what a past import/export did and whether it failed.
+// log. Message is the human-readable summary; Metadata contains its structured, safe-to-display
+// fields (counts and outcome) extracted by the datastore from the persisted audit row.
 type AccountActivityEntry struct {
-	OccurredAt time.Time `json:"occurred_at"`
-	Category   string    `json:"category"`
-	Action     string    `json:"action"`
-	Message    string    `json:"message"`
+	OccurredAt time.Time      `json:"occurred_at"`
+	Category   string         `json:"category"`
+	Action     string         `json:"action"`
+	Message    string         `json:"message"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
 // AccountImportSelection narrows which items of an export are restored. It is OPTIONAL on

@@ -94,6 +94,20 @@ describe('DataPortabilityPageComponent', () => {
     );
   });
 
+  it('renders activity outcome and detail from structured metadata', () => {
+    const fixture = TestBed.createComponent(DataPortabilityPageComponent);
+    const failedEntry = {
+      occurred_at: '2026-09-16T12:00:00Z',
+      category: 'account_export',
+      action: 'completed',
+      message: 'Account export completed',
+      metadata: { success: false, exported_count: 2 },
+    };
+
+    expect(fixture.componentInstance.activityFailed(failedEntry)).toBe(true);
+    expect(fixture.componentInstance.activityDetail(failedEntry)).toBe('Account export completed — success: false, exported count: 2');
+  });
+
   it('resumes an active account import after returning to the page', async () => {
     sessionStorage.setItem(ACTIVE_ACCOUNT_IMPORT_JOB_STORAGE_KEY, 'import-job-1');
     accountExport.activeImportJobId.set('import-job-1');

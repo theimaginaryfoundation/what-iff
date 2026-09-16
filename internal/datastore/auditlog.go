@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
@@ -26,6 +27,8 @@ const (
 // activity log — the user-facing import/export flows.
 var accountActivityCategories = []string{auditCategoryAccountExport, auditCategoryChatImport}
 
+const auditMetadataMarker = " | metadata="
+
 type auditEntry struct {
 	Category      string
 	Action        string
@@ -41,7 +44,7 @@ func (d *Datastore) writeAuditLog(ctx context.Context, e auditEntry) {
 	msg := e.Message
 	if len(e.Metadata) > 0 {
 		if b, err := json.Marshal(e.Metadata); err == nil && len(b) > 0 {
-			msg = fmt.Sprintf("%s | metadata=%s", msg, string(b))
+			msg = fmt.Sprintf("%s%s%s", msg, auditMetadataMarker, string(b))
 		}
 	}
 	var actor *uuid.UUID
@@ -120,14 +123,31 @@ func (d *Datastore) ListAccountActivity(ctx context.Context, userID uuid.UUID, l
 	}
 	out := make([]models.AccountActivityEntry, 0, len(rows))
 	for _, r := range rows {
+		message, metadata := accountActivityMessage(r.Message)
 		out = append(out, models.AccountActivityEntry{
 			OccurredAt: r.OccurredAt,
 			Category:   r.Category,
 			Action:     r.Action,
-			Message:    r.Message,
+			Message:    message,
+			Metadata:   metadata,
 		})
 	}
 	return out, nil
+}
+
+// accountActivityMessage separates the legacy persisted audit-message representation into the
+// human-readable text and structured fields for the account-activity API. Invalid legacy metadata
+// stays in Message so the user still sees the original audit entry.
+func accountActivityMessage(message string) (string, map[string]any) {
+	idx := strings.Index(message, auditMetadataMarker)
+	if idx < 0 {
+		return message, nil
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(message[idx+len(auditMetadataMarker):]), &metadata); err != nil {
+		return message, nil
+	}
+	return message[:idx], metadata
 }
 
 // AuditAccountExport records an account-portability action without storing archive URLs or contents.
