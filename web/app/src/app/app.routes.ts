@@ -1,6 +1,7 @@
 import { inject } from '@angular/core';
 import { Router, Routes } from '@angular/router';
 import { authGuard, guestGuard } from './core/guards/auth.guard';
+import { apiKeySetupGuard } from './core/guards/api-key-setup.guard';
 import { personalitySetupGuard } from './core/guards/personality-setup.guard';
 import { AppLayoutComponent } from './layout/app-layout.component';
 import { privateChildRoutes } from './extensions/private-routes';
@@ -17,7 +18,7 @@ export const routes: Routes = [
   {
     path: '',
     component: AppLayoutComponent,
-    canActivateChild: [authGuard, personalitySetupGuard],
+    canActivateChild: [authGuard, apiKeySetupGuard, personalitySetupGuard],
     children: [
       {
         path: '',
