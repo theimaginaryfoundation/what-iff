@@ -48,6 +48,12 @@ describe('AccountArchiveService', () => {
     expect(contents.hasMemories).toBe(false);
   });
 
+  it('rejects an oversized file before decompressing it', async () => {
+    // A fake File that only reports a size — inspect() must throw on the size guard before loadAsync.
+    const huge = { size: 100 * 1024 * 1024 + 1, name: 'big.zip', type: 'application/zip' } as unknown as File;
+    await expect(svc.inspect(huge)).rejects.toThrow(/too large/i);
+  });
+
   it('rejects a file without a manifest (not a WhatIff export)', async () => {
     const file = await makeZip({ 'conversations.json': '[]' });
     await expect(svc.inspect(file)).rejects.toThrow(/does not look like a WhatIff export/);

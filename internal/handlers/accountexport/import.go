@@ -31,7 +31,34 @@ var (
 	errMemoryImportUnavailable = errors.New("memory import unavailable: OpenAI API key is not configured")
 	// errDuplicateMemoryArchiveEntry marks malformed nested memory ZIPs with repeated entry names.
 	errDuplicateMemoryArchiveEntry = errors.New("duplicate memory archive entry")
+
+	// Selection-validation sentinels, mapped to HTTP status codes by the handler.
+	errSelectionTooLarge     = errors.New("selection payload too large")
+	errSelectionInvalidJSON  = errors.New("selection is not valid JSON")
+	errSelectionTooManyItems = errors.New("selection has too many items")
 )
+
+// parseImportSelection parses and bounds the optional multipart `selection` field. It returns
+// (nil, nil) when absent (import everything), and a sentinel error otherwise so the caller can map
+// it to the right status code. Bounding happens before the archive is validated, so an oversized or
+// high-cardinality selection is rejected cheaply.
+func parseImportSelection(raw string) (*models.AccountImportSelection, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if len(raw) > maxSelectionBytes {
+		return nil, errSelectionTooLarge
+	}
+	var sel models.AccountImportSelection
+	if err := json.Unmarshal([]byte(raw), &sel); err != nil {
+		return nil, errSelectionInvalidJSON
+	}
+	if len(sel.PersonalityIDs) > maxSelectionIDs || len(sel.ConversationIDs) > maxSelectionIDs {
+		return nil, errSelectionTooManyItems
+	}
+	return &sel, nil
+}
 
 // ImportAccount stages an export ZIP and enqueues its additive restore. The job outlives the HTTP
 // request and records a user-safe AccountImportProgress snapshot for polling clients.
@@ -68,14 +95,17 @@ func (h *Handler) ImportAccount(w http.ResponseWriter, r *http.Request) {
 	// Optional selection ledger: which personalities/conversations to restore, and whether to
 	// include memories. Absent ⇒ import everything (backward-compatible). Parsed before staging so
 	// a malformed selection fails fast without consuming disk.
-	var selection *models.AccountImportSelection
-	if raw := strings.TrimSpace(r.FormValue("selection")); raw != "" {
-		var sel models.AccountImportSelection
-		if err := json.Unmarshal([]byte(raw), &sel); err != nil {
-			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid selection (expected JSON)", err)
-			return
+	selection, selErr := parseImportSelection(r.FormValue("selection"))
+	if selErr != nil {
+		status, msg := http.StatusBadRequest, "Invalid selection (expected JSON)"
+		switch {
+		case errors.Is(selErr, errSelectionTooLarge):
+			status, msg = http.StatusRequestEntityTooLarge, "Selection is too large"
+		case errors.Is(selErr, errSelectionTooManyItems):
+			msg = "Selection has too many items"
 		}
-		selection = &sel
+		handlerutils.RespondWithError(w, h.logger, status, handlerutils.CodeNotSet, msg, nil)
+		return
 	}
 
 	file, _, err := r.FormFile("file")
@@ -243,6 +273,7 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, sele
 							}
 						}
 					}
+					h.writeAccountImportProgress(ctx, userID, jobID, progressForAccountImport("importing", "Indexing thread summaries.", result))
 					if h.importConversationSummaryMemories(ctx, userID, parsed, chatIDs) {
 						result.Warnings = append(result.Warnings, "Some thread summaries could not be indexed for search.")
 					}
@@ -346,28 +377,74 @@ func accountImportCounts(result models.AccountImportResult) map[string]int {
 	}
 }
 
+const (
+	// summaryEmbedBatchSize bounds one OpenAI embeddings request during summary indexing (mirrors
+	// memoryImportBatchSize). One request per conversation was the P1 timeout risk.
+	summaryEmbedBatchSize = 200
+	// maxSummariesIndexed caps how many exported summaries we index in a single import so a very
+	// large restore cannot spend most of the import window here. The summaries themselves are already
+	// restored on the chats (durable); only their best-effort search index is bounded.
+	maxSummariesIndexed = 2000
+)
+
 // importConversationSummaryMemories restores exported checkpoint summaries as internal Summary
 // memories so find_context can retrieve them after an account import. The Chat checkpoint summary
 // is already durable and authoritative; this indexing work is deliberately best-effort, matching
 // live checkpoint creation and thread rehydration.
 //
-// It returns true when at least one eligible summary could not be indexed.
+// Embeddings are generated in bounded batches (not one request per conversation) and the total is
+// capped, so a large restore cannot exhaust the import window on summary indexing. Each summary is
+// upserted in its own transaction, so a partial failure never corrupts the ones that succeeded.
+//
+// It returns true when at least one eligible summary could not be indexed (including any dropped by
+// the cap or an early cancellation), so the caller can surface a best-effort partial-result warning.
 func (h *Handler) importConversationSummaryMemories(ctx context.Context, userID uuid.UUID, parsed []exporter.ParsedConversation, chatIDs map[uuid.UUID]uuid.UUID) bool {
+	return indexSummaryMemories(ctx, userID, summaryImportCandidates(parsed, chatIDs),
+		h.createEmbeddings, h.ds.UpsertChatSummaryMemory, h.logger)
+}
+
+// indexSummaryMemories embeds and upserts the given summary candidates in bounded batches, capped at
+// maxSummariesIndexed, stopping cleanly on context cancellation. The embed/upsert dependencies are
+// injected so the batching, cap, and cancellation behaviour are unit-testable without OpenAI or a DB.
+// Returns true when at least one candidate was not indexed (batch/upsert failure, the cap, or an
+// early cancellation) so the caller can surface a best-effort partial-result warning.
+func indexSummaryMemories(
+	ctx context.Context,
+	userID uuid.UUID,
+	candidates []summaryImportCandidate,
+	embed func(context.Context, []string) ([][]float32, error),
+	upsert func(context.Context, uuid.UUID, uuid.UUID, string, []float32) error,
+	logger *zap.Logger,
+) bool {
 	hadFailure := false
-	for _, candidate := range summaryImportCandidates(parsed, chatIDs) {
-		embeddingVector, err := h.createEmbedding(ctx, candidate.summary)
-		if err != nil {
-			h.logger.Warn("account import: summary embedding failed",
-				zap.String("chat_id", candidate.chatID.String()),
-				zap.Error(err))
+	if len(candidates) > maxSummariesIndexed {
+		candidates = candidates[:maxSummariesIndexed]
+		hadFailure = true // the remainder is intentionally not indexed
+	}
+
+	for start := 0; start < len(candidates); start += summaryEmbedBatchSize {
+		if ctx.Err() != nil {
+			return true // stop cleanly on cancellation; the caller reports the partial result
+		}
+		batch := candidates[start:min(start+summaryEmbedBatchSize, len(candidates))]
+
+		inputs := make([]string, len(batch))
+		for i, c := range batch {
+			inputs[i] = c.summary
+		}
+		vectors, err := embed(ctx, inputs)
+		if err != nil || len(vectors) != len(batch) {
+			logger.Warn("account import: summary embedding batch failed",
+				zap.Int("batch_size", len(batch)), zap.Error(err))
 			hadFailure = true
 			continue
 		}
-		if err := h.ds.UpsertChatSummaryMemory(ctx, userID, candidate.chatID, candidate.summary, embeddingVector); err != nil {
-			h.logger.Warn("account import: summary memory upsert failed",
-				zap.String("chat_id", candidate.chatID.String()),
-				zap.Error(err))
-			hadFailure = true
+		for i, c := range batch {
+			if err := upsert(ctx, userID, c.chatID, c.summary, vectors[i]); err != nil {
+				logger.Warn("account import: summary memory upsert failed",
+					zap.String("chat_id", c.chatID.String()), zap.Error(err))
+				hadFailure = true
+			}
 		}
 	}
 	return hadFailure

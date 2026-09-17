@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
@@ -439,6 +440,31 @@ func (d *Datastore) UpdateJobStatus(ctx context.Context, userID, id uuid.UUID, s
 	}
 
 	return toJobModel(entJob), nil
+}
+
+// FailInterruptedJobs marks non-terminal (pending/processing) jobs of the given types, not updated
+// since olderThan, as failed. It is meant to run once at startup: these jobs run in detached
+// in-process workers, so one left non-terminal after a restart is orphaned — its worker died with the
+// previous process — and would otherwise stay "processing" forever (and be re-polled by a client that
+// resumes progress).
+//
+// The olderThan (staleness) bound keeps this safe when more than one API instance runs: an import
+// that is genuinely in flight on another instance refreshes updated_at as it writes progress, so it
+// stays newer than olderThan and is never clobbered. Callers should pass a threshold comfortably past
+// the longest job timeout. Returns the number of jobs reconciled.
+func (d *Datastore) FailInterruptedJobs(ctx context.Context, jobTypes []string, olderThan time.Time, message string) (int, error) {
+	if d == nil || d.dbClient == nil || len(jobTypes) == 0 {
+		return 0, nil
+	}
+	return d.dbClient.Job.Update().
+		Where(
+			job.JobTypeIn(jobTypes...),
+			job.StatusIn(job.Status(string(models.JobStatusPending)), job.Status(string(models.JobStatusProcessing))),
+			job.UpdatedAtLT(olderThan),
+		).
+		SetStatus(job.Status(string(models.JobStatusFailed))).
+		SetError(message).
+		Save(ctx)
 }
 
 // UpdateJobProgress writes an opaque JSON progress payload for a job owned by the user.

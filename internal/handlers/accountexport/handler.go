@@ -53,6 +53,12 @@ const (
 	maxImportExpandedBytes = 250 << 20 // 250 MiB
 	// importMultipartMemory keeps only form metadata in memory; the file part spools to a temp file.
 	importMultipartMemory = 1 << 20 // 1 MiB
+	// maxSelectionBytes bounds the JSON `selection` field so a caller cannot force large allocations
+	// and UUID parsing before the archive is even validated.
+	maxSelectionBytes = 1 << 20 // 1 MiB
+	// maxSelectionIDs bounds each id array in a selection. An export cannot contain more selectable
+	// items than the archive entry cap, so anything larger is malformed.
+	maxSelectionIDs = maxImportEntries
 )
 
 // Handler serves the account export/import endpoints.
