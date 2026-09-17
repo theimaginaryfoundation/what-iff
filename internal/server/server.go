@@ -42,6 +42,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/webhook"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
 	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
@@ -116,6 +117,20 @@ func (s *Server) setupRoutes() {
 	dataStore, err := datastore.NewDatastore(s.db, s.sqlDB, s.logger, s.config.TokenEncryptionSecret, s.telemetry.Metrics)
 	if err != nil {
 		s.logger.Fatal("failed to configure token encryption", zap.Error(err))
+	}
+
+	// Reconcile account import/export jobs orphaned by a previous restart. They run in detached
+	// in-process workers, so any left non-terminal can never finish; mark them failed instead of
+	// leaving them "processing" forever (a client that resumes progress would otherwise poll them
+	// indefinitely). The 1h staleness bound is well past the 30m import timeout, so a live import on
+	// another instance (whose progress writes keep updated_at fresh) is never clobbered.
+	if n, rerr := dataStore.FailInterruptedJobs(context.Background(),
+		[]string{models.JobTypeAccountImport, models.JobTypeAccountExport},
+		time.Now().Add(-time.Hour),
+		"Interrupted by a server restart"); rerr != nil {
+		s.logger.Warn("startup: failed to reconcile interrupted import/export jobs", zap.Error(rerr))
+	} else if n > 0 {
+		s.logger.Info("startup: marked interrupted import/export jobs failed", zap.Int("count", n))
 	}
 
 	fileStore, err := storage.NewFileStore(context.Background(), s.config.S3FileBucket, s.config.AWSRegion, s.logger)

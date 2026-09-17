@@ -1,5 +1,6 @@
 import { Location } from '@angular/common';
-import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, output, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 
 import { Chat } from '../../../../core/models/chat.model';
@@ -8,7 +9,6 @@ import { ThreadListService } from '../../../../core/services/thread-list.service
 import { ConfirmationService } from '../../../../core/services/confirmation.service';
 import { ModalComponent } from '../../../../shared/ui/modal/modal.component';
 import { ThreadRowComponent } from './thread-row.component';
-import { ChatImportModalComponent } from '../chat-import-modal/chat-import-modal.component';
 
 const MAX_THREAD_TAGS = 10;
 const MAX_THREAD_TAG_LENGTH = 10;
@@ -18,7 +18,7 @@ type ThreadListTab = 'active' | 'archived';
 @Component({
   selector: 'app-thread-list-panel',
   standalone: true,
-  imports: [ModalComponent, ThreadRowComponent, TooltipDirective, ChatImportModalComponent],
+  imports: [ModalComponent, ThreadRowComponent, TooltipDirective],
   template: `
     <aside class="panel" aria-label="Threads">
       <header class="panel__header">
@@ -38,7 +38,7 @@ type ThreadListTab = 'active' | 'archived';
               aria-label="Import Conversations"
               uiTooltip="Import Conversations"
               placement="left"
-              (click)="importOpen.set(true); onThreadListTab('archived')"
+              (click)="navigateToData()"
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="2,10 2,12 12,12 12,10"/>
@@ -309,11 +309,6 @@ type ThreadListTab = 'active' | 'archived';
       </div>
     </ui-modal>
 
-    <app-chat-import-modal
-      [open]="importOpen()"
-      (dismiss)="onImportClosed()"
-      (imported)="onConversationsImported()"
-    />
   `,
   styles: [`
     .panel {
@@ -907,12 +902,9 @@ type ThreadListTab = 'active' | 'archived';
 export class ThreadListPanelComponent implements OnInit {
   readonly activeThreadId = input<string | null>(null);
   readonly personalities = input<readonly Personality[]>([]);
-  /** Monotonic counter; each increment (e.g. from a sidebar import action) opens the import modal. */
-  readonly importTrigger = input<number>(0);
   readonly selectThread = output<string>();
   readonly newThread = output<void>();
   readonly threadListTab = signal<ThreadListTab>('active');
-  readonly importOpen = signal(false);
   readonly selectedTagFilters = signal<string[]>([]);
   readonly tagDropdownFocused = signal(false);
   readonly tagEditThread = signal<Chat | null>(null);
@@ -967,24 +959,17 @@ export class ThreadListPanelComponent implements OnInit {
   });
 
   private readonly location = inject(Location);
+  private readonly router = inject(Router);
   private readonly confirmation = inject(ConfirmationService);
-  private lastImportTrigger = 0;
 
-  constructor(readonly threads: ThreadListService) {
-    effect(() => {
-      const trigger = this.importTrigger();
-      if (trigger > 0 && trigger !== this.lastImportTrigger) {
-        this.lastImportTrigger = trigger;
-        // Imports land in the archive — switch there before the modal opens so the
-        // underlying list is already the right place when the user closes it.
-        this.onThreadListTab('archived');
-        this.importOpen.set(true);
-      }
-    });
-  }
+  constructor(readonly threads: ThreadListService) {}
 
   goBack(): void {
     this.location.back();
+  }
+
+  navigateToData(): void {
+    void this.router.navigate(['/data']);
   }
 
   ngOnInit(): void {
@@ -994,23 +979,6 @@ export class ThreadListPanelComponent implements OnInit {
   onThreadListTab(tab: ThreadListTab): void {
     this.threadListTab.set(tab);
     this.threads.setArchivedPanelOnly(tab === 'archived');
-  }
-
-  /** After an import completes, surface the freshly created (archived) threads. */
-  onConversationsImported(): void {
-    this.onThreadListTab('archived');
-    // Force reload even when we were already on the archived tab (setArchivedPanelOnly no-ops then).
-    void this.threads.refresh();
-  }
-
-  /**
-   * Closing the importer always lands on the Archived tab (imports are archived by default) and
-   * refreshes so newly imported threads appear without a full page reload.
-   */
-  onImportClosed(): void {
-    this.importOpen.set(false);
-    this.onThreadListTab('archived');
-    void this.threads.refresh();
   }
 
   async rename(thread: Chat, name: string): Promise<void> {

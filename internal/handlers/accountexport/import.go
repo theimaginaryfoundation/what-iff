@@ -31,7 +31,34 @@ var (
 	errMemoryImportUnavailable = errors.New("memory import unavailable: OpenAI API key is not configured")
 	// errDuplicateMemoryArchiveEntry marks malformed nested memory ZIPs with repeated entry names.
 	errDuplicateMemoryArchiveEntry = errors.New("duplicate memory archive entry")
+
+	// Selection-validation sentinels, mapped to HTTP status codes by the handler.
+	errSelectionTooLarge     = errors.New("selection payload too large")
+	errSelectionInvalidJSON  = errors.New("selection is not valid JSON")
+	errSelectionTooManyItems = errors.New("selection has too many items")
 )
+
+// parseImportSelection parses and bounds the optional multipart `selection` field. It returns
+// (nil, nil) when absent (import everything), and a sentinel error otherwise so the caller can map
+// it to the right status code. Bounding happens before the archive is validated, so an oversized or
+// high-cardinality selection is rejected cheaply.
+func parseImportSelection(raw string) (*models.AccountImportSelection, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if len(raw) > maxSelectionBytes {
+		return nil, errSelectionTooLarge
+	}
+	var sel models.AccountImportSelection
+	if err := json.Unmarshal([]byte(raw), &sel); err != nil {
+		return nil, errSelectionInvalidJSON
+	}
+	if len(sel.PersonalityIDs) > maxSelectionIDs || len(sel.ConversationIDs) > maxSelectionIDs {
+		return nil, errSelectionTooManyItems
+	}
+	return &sel, nil
+}
 
 // ImportAccount stages an export ZIP and enqueues its additive restore. The job outlives the HTTP
 // request and records a user-safe AccountImportProgress snapshot for polling clients.
@@ -62,6 +89,22 @@ func (h *Handler) ImportAccount(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid multipart form (expected multipart/form-data with a 'file' field)", err)
+		return
+	}
+
+	// Optional selection ledger: which personalities/conversations to restore, and whether to
+	// include memories. Absent ⇒ import everything (backward-compatible). Parsed before staging so
+	// a malformed selection fails fast without consuming disk.
+	selection, selErr := parseImportSelection(r.FormValue("selection"))
+	if selErr != nil {
+		status, msg := http.StatusBadRequest, "Invalid selection (expected JSON)"
+		switch {
+		case errors.Is(selErr, errSelectionTooLarge):
+			status, msg = http.StatusRequestEntityTooLarge, "Selection is too large"
+		case errors.Is(selErr, errSelectionTooManyItems):
+			msg = "Selection has too many items"
+		}
+		handlerutils.RespondWithError(w, h.logger, status, handlerutils.CodeNotSet, msg, nil)
 		return
 	}
 
@@ -116,13 +159,13 @@ func (h *Handler) ImportAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handedOff = true
-	go h.runAccountImport(userID, job.ID, tmpPath)
+	go h.runAccountImport(userID, job.ID, tmpPath, selection)
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusAccepted, job)
 }
 
 // runAccountImport owns the staged archive after the response returns. It serializes expensive
 // restores per API process and always removes the temporary file.
-func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string) {
+func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, selection *models.AccountImportSelection) {
 	defer func() {
 		if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
 			h.logger.Warn("account import: failed to remove temp file", zap.String("path", tmpPath), zap.Error(err))
@@ -189,7 +232,7 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string) {
 
 	// Personalities must precede conversations and memories: account exports carry source
 	// personality IDs in both places, while every imported account receives fresh destination IDs.
-	personalityCounts, personalityIDs := h.importPersonalities(ctx, userID, zr)
+	personalityCounts, personalityIDs := h.importPersonalities(ctx, userID, zr, selection)
 	result.Personalities = personalityCounts
 	h.writeAccountImportProgress(ctx, userID, jobID, progressForAccountImport("importing", "Importing conversations.", result))
 
@@ -203,6 +246,9 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string) {
 			h.logger.Warn("account import: conversations.json parse failed", zap.Error(perr))
 			result.Warnings = append(result.Warnings, "Conversations could not be imported from the export.")
 		} else {
+			if selection != nil {
+				parsed = filterSelectedConversations(parsed, selection.ConversationIDs)
+			}
 			convs := toImportConversations(parsed, personalityIDs)
 			if res, ierr := h.ds.ImportChats(ctx, userID, convs, nil); ierr != nil {
 				h.logger.Error("account import: conversation import failed", zap.Error(ierr))
@@ -227,6 +273,10 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string) {
 							}
 						}
 					}
+					h.writeAccountImportProgress(ctx, userID, jobID, progressForAccountImport("importing", "Indexing thread summaries.", result))
+					if h.importConversationSummaryMemories(ctx, userID, parsed, chatIDs) {
+						result.Warnings = append(result.Warnings, "Some thread summaries could not be indexed for search.")
+					}
 				}
 			}
 		}
@@ -234,47 +284,61 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string) {
 		result.Warnings = append(result.Warnings, "The export did not contain conversations.")
 	}
 
-	h.writeAccountImportProgress(ctx, userID, jobID, progressForAccountImport("importing", "Importing memories.", result))
 	// Memories — nested memories.zip through the existing memory importer (needs embeddings).
-	if mb, ok, readErr := readZipEntry(zr, "memories.zip", maxImportExpandedBytes); readErr != nil {
-		result.Warnings = append(result.Warnings, "Memories could not be read from the export.")
-	} else if ok {
-		if h.oaiClient == nil {
-			h.logger.Warn("account import: skipping memories (OpenAI key not configured)")
-			result.Warnings = append(result.Warnings, "Memories were skipped because embedding generation is unavailable.")
-		} else if mzr, zerr := zip.NewReader(bytes.NewReader(mb), int64(len(mb))); zerr != nil {
-			h.logger.Warn("account import: memories.zip is not a valid ZIP", zap.Error(zerr))
-			result.Warnings = append(result.Warnings, "Memories could not be imported from the export.")
-		} else if zerr := validateImportArchive(mzr); zerr != nil {
-			h.logger.Warn("account import: memories.zip exceeds safety limits", zap.Error(zerr))
-			result.Warnings = append(result.Warnings, "Memories could not be imported because the archive exceeds safety limits.")
-		} else {
-			resolveNative := func(ids []uuid.UUID) (map[uuid.UUID]struct{}, error) {
-				return h.ds.MemoryIDsOwnedByUser(ctx, userID, ids)
-			}
-			remapped, remapErr := remapMemoryArchive(mzr, userID, chatIDs, personalityIDs, resolveNative)
-			if remapErr != nil {
-				h.logger.Warn("account import: could not remap memory references", zap.Error(remapErr))
+	// Skipped entirely when the selection opts out (memories are a single all-or-nothing toggle).
+	if selection == nil || selection.IncludeMemories {
+		h.writeAccountImportProgress(ctx, userID, jobID, progressForAccountImport("importing", "Importing memories.", result))
+		if mb, ok, readErr := readZipEntry(zr, "memories.zip", maxImportExpandedBytes); readErr != nil {
+			result.Warnings = append(result.Warnings, "Memories could not be read from the export.")
+		} else if ok {
+			if h.oaiClient == nil {
+				h.logger.Warn("account import: skipping memories (OpenAI key not configured)")
+				result.Warnings = append(result.Warnings, "Memories were skipped because embedding generation is unavailable.")
+			} else if mzr, zerr := zip.NewReader(bytes.NewReader(mb), int64(len(mb))); zerr != nil {
+				h.logger.Warn("account import: memories.zip is not a valid ZIP", zap.Error(zerr))
 				result.Warnings = append(result.Warnings, "Memories could not be imported from the export.")
+			} else if zerr := validateImportArchive(mzr); zerr != nil {
+				h.logger.Warn("account import: memories.zip exceeds safety limits", zap.Error(zerr))
+				result.Warnings = append(result.Warnings, "Memories could not be imported because the archive exceeds safety limits.")
 			} else {
-				mzr, zerr = zip.NewReader(bytes.NewReader(remapped), int64(len(remapped)))
-				if zerr != nil {
-					h.logger.Warn("account import: remapped memory archive is invalid", zap.Error(zerr))
+				resolveNative := func(ids []uuid.UUID) (map[uuid.UUID]struct{}, error) {
+					return h.ds.MemoryIDsOwnedByUser(ctx, userID, ids)
+				}
+				remapped, remapErr := remapMemoryArchive(mzr, userID, chatIDs, personalityIDs, resolveNative)
+				if remapErr != nil {
+					h.logger.Warn("account import: could not remap memory references", zap.Error(remapErr))
 					result.Warnings = append(result.Warnings, "Memories could not be imported from the export.")
 				} else {
-					// The importer returns a partial result on error; keep it either way.
-					// Batch embeddings avoid one remote request per memory for large account restores.
-					res, merr := h.ds.ImportMemoriesWithBatchEmbeddings(ctx, userID, mzr, h.createEmbedding, h.createEmbeddings)
-					if merr != nil {
-						h.logger.Error("account import: memory import failed", zap.Error(merr))
-						result.Warnings = append(result.Warnings, "Some memories could not be imported.")
+					mzr, zerr = zip.NewReader(bytes.NewReader(remapped), int64(len(remapped)))
+					if zerr != nil {
+						h.logger.Warn("account import: remapped memory archive is invalid", zap.Error(zerr))
+						result.Warnings = append(result.Warnings, "Memories could not be imported from the export.")
+					} else {
+						// The importer returns a partial result on error; keep it either way.
+						// Batch embeddings avoid one remote request per memory for large account restores.
+						res, merr := h.ds.ImportMemoriesWithBatchEmbeddings(ctx, userID, mzr, h.createEmbedding, h.createEmbeddings)
+						if merr != nil {
+							h.logger.Error("account import: memory import failed", zap.Error(merr))
+							result.Warnings = append(result.Warnings, "Some memories could not be imported.")
+						}
+						result.Memories = res
 					}
-					result.Memories = res
 				}
 			}
+		} else {
+			result.Warnings = append(result.Warnings, "The export did not contain memories.")
 		}
-	} else {
-		result.Warnings = append(result.Warnings, "The export did not contain memories.")
+	}
+
+	if err := ctx.Err(); err != nil {
+		// The import context was cancelled before completion (a timeout, or something aborting the
+		// run — memory embedding is the usual long pole). Mark it failed on a fresh context so the
+		// job reaches a terminal state and shows on the activity log with what did land, instead of
+		// silently staying "processing".
+		freshCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		h.failAccountImport(freshCtx, userID, jobID, "Import was interrupted before completing; some memories or thread summaries may not have imported", &result)
+		return
 	}
 
 	h.logger.Info("account import complete",
@@ -286,7 +350,7 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string) {
 	if _, err := h.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusComplete, ""); err != nil {
 		h.logger.Warn("account import: failed to mark complete", zap.String("job_id", jobID.String()), zap.Error(err))
 	}
-	h.ds.AuditAccountExport(ctx, userID, "imported", "user imported account export", map[string]any{
+	h.ds.AuditAccountImport(ctx, userID, "imported", "user imported account export", map[string]any{
 		"conversations_imported": result.Conversations.Imported,
 		"memories_imported":      result.Memories.ImportedCount,
 		"personalities_created":  result.Personalities.Created,
@@ -311,6 +375,104 @@ func accountImportCounts(result models.AccountImportResult) map[string]int {
 		"memories_imported":      result.Memories.ImportedCount,
 		"memories_skipped":       result.Memories.DuplicateCount,
 	}
+}
+
+const (
+	// summaryEmbedBatchSize bounds one OpenAI embeddings request during summary indexing (mirrors
+	// memoryImportBatchSize). One request per conversation was the P1 timeout risk.
+	summaryEmbedBatchSize = 200
+	// maxSummariesIndexed caps how many exported summaries we index in a single import so a very
+	// large restore cannot spend most of the import window here. The summaries themselves are already
+	// restored on the chats (durable); only their best-effort search index is bounded.
+	maxSummariesIndexed = 2000
+)
+
+// importConversationSummaryMemories restores exported checkpoint summaries as internal Summary
+// memories so find_context can retrieve them after an account import. The Chat checkpoint summary
+// is already durable and authoritative; this indexing work is deliberately best-effort, matching
+// live checkpoint creation and thread rehydration.
+//
+// Embeddings are generated in bounded batches (not one request per conversation) and the total is
+// capped, so a large restore cannot exhaust the import window on summary indexing. Each summary is
+// upserted in its own transaction, so a partial failure never corrupts the ones that succeeded.
+//
+// It returns true when at least one eligible summary could not be indexed (including any dropped by
+// the cap or an early cancellation), so the caller can surface a best-effort partial-result warning.
+func (h *Handler) importConversationSummaryMemories(ctx context.Context, userID uuid.UUID, parsed []exporter.ParsedConversation, chatIDs map[uuid.UUID]uuid.UUID) bool {
+	return indexSummaryMemories(ctx, userID, summaryImportCandidates(parsed, chatIDs),
+		h.createEmbeddings, h.ds.UpsertChatSummaryMemory, h.logger)
+}
+
+// indexSummaryMemories embeds and upserts the given summary candidates in bounded batches, capped at
+// maxSummariesIndexed, stopping cleanly on context cancellation. The embed/upsert dependencies are
+// injected so the batching, cap, and cancellation behaviour are unit-testable without OpenAI or a DB.
+// Returns true when at least one candidate was not indexed (batch/upsert failure, the cap, or an
+// early cancellation) so the caller can surface a best-effort partial-result warning.
+func indexSummaryMemories(
+	ctx context.Context,
+	userID uuid.UUID,
+	candidates []summaryImportCandidate,
+	embed func(context.Context, []string) ([][]float32, error),
+	upsert func(context.Context, uuid.UUID, uuid.UUID, string, []float32) error,
+	logger *zap.Logger,
+) bool {
+	hadFailure := false
+	if len(candidates) > maxSummariesIndexed {
+		candidates = candidates[:maxSummariesIndexed]
+		hadFailure = true // the remainder is intentionally not indexed
+	}
+
+	for start := 0; start < len(candidates); start += summaryEmbedBatchSize {
+		if ctx.Err() != nil {
+			return true // stop cleanly on cancellation; the caller reports the partial result
+		}
+		batch := candidates[start:min(start+summaryEmbedBatchSize, len(candidates))]
+
+		inputs := make([]string, len(batch))
+		for i, c := range batch {
+			inputs[i] = c.summary
+		}
+		vectors, err := embed(ctx, inputs)
+		if err != nil || len(vectors) != len(batch) {
+			logger.Warn("account import: summary embedding batch failed",
+				zap.Int("batch_size", len(batch)), zap.Error(err))
+			hadFailure = true
+			continue
+		}
+		for i, c := range batch {
+			if err := upsert(ctx, userID, c.chatID, c.summary, vectors[i]); err != nil {
+				logger.Warn("account import: summary memory upsert failed",
+					zap.String("chat_id", c.chatID.String()), zap.Error(err))
+				hadFailure = true
+			}
+		}
+	}
+	return hadFailure
+}
+
+type summaryImportCandidate struct {
+	chatID  uuid.UUID
+	summary string
+}
+
+// summaryImportCandidates selects only non-empty exported summaries whose source conversation was
+// resolved to a destination chat. Invalid source IDs and deduped native chats with no import hash
+// have no safe mapping and are ignored.
+func summaryImportCandidates(parsed []exporter.ParsedConversation, chatIDs map[uuid.UUID]uuid.UUID) []summaryImportCandidate {
+	candidates := make([]summaryImportCandidate, 0)
+	for _, conversation := range parsed {
+		sourceID, err := uuid.Parse(conversation.UUID)
+		if err != nil {
+			continue
+		}
+		chatID, found := chatIDs[sourceID]
+		summary := strings.TrimSpace(conversation.WhatiffCheckpointSummary)
+		if !found || summary == "" {
+			continue
+		}
+		candidates = append(candidates, summaryImportCandidate{chatID: chatID, summary: summary})
+	}
+	return candidates
 }
 
 func (h *Handler) writeAccountImportProgress(ctx context.Context, userID, jobID uuid.UUID, progress models.AccountImportProgress) {
@@ -340,14 +502,32 @@ func (h *Handler) failAccountImport(ctx context.Context, userID, jobID uuid.UUID
 	if _, err := h.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusFailed, message); err != nil {
 		h.logger.Warn("account import: failed to mark failed", zap.String("job_id", jobID.String()), zap.Error(err))
 	}
+	meta := map[string]any{"success": false, "message": message}
+	if result != nil {
+		meta["conversations_imported"] = result.Conversations.Imported
+		meta["memories_imported"] = result.Memories.ImportedCount
+		meta["personalities_created"] = result.Personalities.Created
+		meta["warnings"] = len(result.Warnings)
+	}
+	h.ds.AuditAccountImport(ctx, userID, "import_failed", "account import failed: "+message, meta)
 }
 
 // importPersonalities creates each exported personality that does not already exist (by name) for the
 // target user, with a fresh ID. It returns the source-to-destination map needed to reconnect
 // conversations and pinned memories even when a personality was already present in the account.
-func (h *Handler) importPersonalities(ctx context.Context, userID uuid.UUID, zr *zip.Reader) (models.SectionImportCounts, map[uuid.UUID]uuid.UUID) {
+func (h *Handler) importPersonalities(ctx context.Context, userID uuid.UUID, zr *zip.Reader, selection *models.AccountImportSelection) (models.SectionImportCounts, map[uuid.UUID]uuid.UUID) {
 	var counts models.SectionImportCounts
 	ids := make(map[uuid.UUID]uuid.UUID)
+
+	// When a selection is present, only its listed personalities are restored. Unselected ones are
+	// silently skipped (not counted as "skipped" — the user chose not to import them).
+	var selected map[uuid.UUID]struct{}
+	if selection != nil {
+		selected = make(map[uuid.UUID]struct{}, len(selection.PersonalityIDs))
+		for _, id := range selection.PersonalityIDs {
+			selected[id] = struct{}{}
+		}
+	}
 
 	existing, err := h.ds.ExportPersonalityInputs(ctx, userID)
 	if err != nil {
@@ -378,6 +558,12 @@ func (h *Handler) importPersonalities(ctx context.Context, userID uuid.UUID, zr 
 		sourceID := pf.ID
 		if sourceID == uuid.Nil {
 			sourceID = personalityIDFromArchivePath(zf.Name)
+		}
+
+		if selected != nil {
+			if _, want := selected[sourceID]; !want {
+				continue
+			}
 		}
 
 		name := strings.TrimSpace(pf.Name)
@@ -411,6 +597,26 @@ func (h *Handler) importPersonalities(ctx context.Context, userID uuid.UUID, zr 
 		counts.Created++
 	}
 	return counts, ids
+}
+
+// filterSelectedConversations keeps only the parsed conversations whose source uuid is listed in
+// the selection. Entries with an unparseable uuid are dropped when a selection is active.
+func filterSelectedConversations(parsed []exporter.ParsedConversation, ids []uuid.UUID) []exporter.ParsedConversation {
+	want := make(map[uuid.UUID]struct{}, len(ids))
+	for _, id := range ids {
+		want[id] = struct{}{}
+	}
+	out := make([]exporter.ParsedConversation, 0, len(want))
+	for _, c := range parsed {
+		id, err := uuid.Parse(strings.TrimSpace(c.UUID))
+		if err != nil {
+			continue
+		}
+		if _, ok := want[id]; ok {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // toImportConversations maps decoded conversations.json entries to the datastore import model,

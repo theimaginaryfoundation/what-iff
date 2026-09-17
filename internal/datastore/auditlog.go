@@ -3,9 +3,13 @@ package datastore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
+	"entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/ent/auditlog"
 	"github.com/theimaginaryfoundation/what-iff/internal/apicontext"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
@@ -16,8 +20,18 @@ const (
 	auditCategoryQuota         = "quota"
 	auditCategoryAccountBackup = "account_backup"
 	auditCategoryAccountExport = "account_export"
+	auditCategoryAccountImport = "account_import"
 	auditCategoryMemoryPack    = "memory_pack"
+	auditCategoryChatImport    = "chat_import"
 )
+
+// accountActivityCategories are the audit categories surfaced on the Import & Export screen's
+// activity log — the user-facing import/export flows.
+var accountActivityCategories = []string{auditCategoryAccountExport, auditCategoryAccountImport, auditCategoryChatImport}
+
+const auditMetadataMarker = " | metadata="
+
+var errAccountActivityDatastoreUnavailable = errors.New("account activity datastore is not initialized")
 
 type auditEntry struct {
 	Category      string
@@ -34,7 +48,7 @@ func (d *Datastore) writeAuditLog(ctx context.Context, e auditEntry) {
 	msg := e.Message
 	if len(e.Metadata) > 0 {
 		if b, err := json.Marshal(e.Metadata); err == nil && len(b) > 0 {
-			msg = fmt.Sprintf("%s | metadata=%s", msg, string(b))
+			msg = fmt.Sprintf("%s%s%s", msg, auditMetadataMarker, string(b))
 		}
 	}
 	var actor *uuid.UUID
@@ -79,11 +93,84 @@ func (d *Datastore) auditMemoryPackImport(ctx context.Context, userID uuid.UUID,
 	})
 }
 
+// AuditChatImport records a ChatGPT/Claude conversation import so it shows on the activity log
+// alongside account export/import. Best-effort, like the other audit writes.
+func (d *Datastore) AuditChatImport(ctx context.Context, userID uuid.UUID, message string, metadata map[string]any) {
+	subject := userID
+	d.writeAuditLog(ctx, auditEntry{
+		Category:      auditCategoryChatImport,
+		Action:        "import",
+		Message:       message,
+		SubjectUserID: &subject,
+		Metadata:      metadata,
+	})
+}
+
+// ListAccountActivity returns the user's recent import/export audit entries, newest first.
+func (d *Datastore) ListAccountActivity(ctx context.Context, userID uuid.UUID, limit int) ([]models.AccountActivityEntry, error) {
+	if d == nil || d.dbClient == nil {
+		return nil, errAccountActivityDatastoreUnavailable
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+	rows, err := d.dbClient.AuditLog.Query().
+		Where(
+			auditlog.SubjectUserID(userID),
+			auditlog.CategoryIn(accountActivityCategories...),
+		).
+		Order(auditlog.ByOccurredAt(sql.OrderDesc())).
+		Limit(limit).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.AccountActivityEntry, 0, len(rows))
+	for _, r := range rows {
+		message, metadata := accountActivityMessage(r.Message)
+		out = append(out, models.AccountActivityEntry{
+			OccurredAt: r.OccurredAt,
+			Category:   r.Category,
+			Action:     r.Action,
+			Message:    message,
+			Metadata:   metadata,
+		})
+	}
+	return out, nil
+}
+
+// accountActivityMessage separates the legacy persisted audit-message representation into the
+// human-readable text and structured fields for the account-activity API. Invalid legacy metadata
+// stays in Message so the user still sees the original audit entry.
+func accountActivityMessage(message string) (string, map[string]any) {
+	idx := strings.Index(message, auditMetadataMarker)
+	if idx < 0 {
+		return message, nil
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(message[idx+len(auditMetadataMarker):]), &metadata); err != nil {
+		return message, nil
+	}
+	return message[:idx], metadata
+}
+
 // AuditAccountExport records an account-portability action without storing archive URLs or contents.
 func (d *Datastore) AuditAccountExport(ctx context.Context, userID uuid.UUID, action, message string, metadata map[string]any) {
 	subject := userID
 	d.writeAuditLog(ctx, auditEntry{
 		Category:      auditCategoryAccountExport,
+		Action:        action,
+		Message:       message,
+		SubjectUserID: &subject,
+		Metadata:      metadata,
+	})
+}
+
+// AuditAccountImport records an account-import lifecycle event without storing archive URLs or contents.
+func (d *Datastore) AuditAccountImport(ctx context.Context, userID uuid.UUID, action, message string, metadata map[string]any) {
+	subject := userID
+	d.writeAuditLog(ctx, auditEntry{
+		Category:      auditCategoryAccountImport,
 		Action:        action,
 		Message:       message,
 		SubjectUserID: &subject,

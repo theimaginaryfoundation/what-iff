@@ -276,6 +276,11 @@ export class PersonalitiesPageComponent implements OnInit {
     this.generatePersonalityModal.show();
   }
 
+  /** Fresh users with an existing export/history can jump straight to Import & Export. */
+  goToImport(): void {
+    this.router.navigate(['/data']);
+  }
+
   openCreate(): void {
     this.createForm.set({ name: '', system_prompt: '' });
     this.createErrorMessage.set(null);

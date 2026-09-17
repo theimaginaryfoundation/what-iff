@@ -192,10 +192,18 @@ export const routes: Routes = [
           .then(m => m.GalleryPageComponent)
       },
       {
-        // Deliberately unlinked: pre-release features are available only by direct URL.
+        // Unified Import & Export ("your data") screen: account export + restore,
+        // reachable from settings and the fresh-user empty state.
+        path: 'data',
+        loadComponent: () => import('./features/data-portability/data-portability-page.component')
+          .then(m => m.DataPortabilityPageComponent)
+      },
+      {
+        // Account export/import graduated from here to /data; keep the old
+        // direct URL working for anyone who bookmarked it.
         path: 'experimental',
-        loadComponent: () => import('./features/experimental/experimental-page.component')
-          .then(m => m.ExperimentalPageComponent)
+        redirectTo: '/data',
+        pathMatch: 'full'
       },
       {
         path: 'image-gallery',
