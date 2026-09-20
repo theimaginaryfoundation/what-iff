@@ -2008,8 +2008,35 @@ func (a *Agent) assertGenerationProducedOutput(providerName string, chatCtx *cha
 	// generated text that extraction dropped; zero means nothing came back at all.
 	a.logger.Error("model returned an empty response; failing the turn instead of persisting a blank assistant message", fields...)
 
+	// A max-tokens truncation is a distinct, common cause with a distinct remedy, so it
+	// gets its own user-facing message instead of the generic "empty response" dump. It
+	// happens when the whole output budget is spent on non-text content — extended
+	// reasoning or a long/partial tool call — and generation is cut off before any reply
+	// text is emitted. There is nothing to clip (no text block was produced), and the
+	// budget is a fixed cap (DefaultMaxContentLength), not a setting that can "truncate
+	// instead of fail". Retrying usually succeeds because the tool-use path shortens.
+	if isTruncationStopReason(stopReason) {
+		return fmt.Errorf("%s response was cut off at the length limit before any reply text was produced "+
+			"(the turn used its entire %d-token output budget on tool use or reasoning); please try again",
+			providerName, result.OutputTokens)
+	}
+
 	return fmt.Errorf("%s model returned an empty response (stop_reason=%s, output_tokens=%d)",
 		providerName, stopReason, result.OutputTokens)
+}
+
+// isTruncationStopReason reports whether a provider's verbatim stop reason indicates
+// the response was cut off at the output-token limit. Anthropic (and z.ai GLM, which
+// rides the Anthropic path) report "max_tokens"; the OpenAI Responses API reports
+// "max_output_tokens" via IncompleteDetails.Reason. Kept provider-neutral so both the
+// Claude/GLM and OpenAI empty-turn paths surface the same clearer message.
+func isTruncationStopReason(stopReason string) bool {
+	switch strings.TrimSpace(stopReason) {
+	case "max_tokens", "max_output_tokens":
+		return true
+	default:
+		return false
+	}
 }
 
 // saveAgentResponse saves the agent's response message and tool calls using the
