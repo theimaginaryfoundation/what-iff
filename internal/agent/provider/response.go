@@ -19,11 +19,13 @@ type GenerateResponse struct {
 	CreatedAt int64
 	Text      string
 	// StopReason is the provider's own account of why generation ended, verbatim and
-	// un-normalised ("end_turn", "max_tokens", "refusal", "incomplete", …). It is
-	// diagnostic only — nothing branches on it — but without it a turn that ends without
-	// usable text is indistinguishable from one that ends normally, which is exactly the
-	// case that used to be persisted as a blank assistant message. Empty when the
-	// provider reports nothing.
+	// un-normalised ("end_turn", "max_tokens", "max_output_tokens", "refusal",
+	// "incomplete", …). Without it a turn that ends without usable text is
+	// indistinguishable from one that ends normally, which is exactly the case that used
+	// to be persisted as a blank assistant message. The empty-turn guard
+	// (assertGenerationProducedOutput) reads it to tell an output-length truncation apart
+	// from other empty causes and surface a clearer message (see isTruncationStopReason);
+	// otherwise nothing branches on it. Empty when the provider reports nothing.
 	StopReason string
 }
 
