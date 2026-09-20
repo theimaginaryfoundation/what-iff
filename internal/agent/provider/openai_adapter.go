@@ -121,6 +121,18 @@ func (a *OpenAIAdapter) AppendToolResults(results []ToolResult) {
 func (a *OpenAIAdapter) ForceFinalResponse(ctx context.Context) (*GenerateResponse, error) {
 	a.params.Tools = nil
 
+	// Re-thread previous_response_id to the most recent response, mirroring Call's
+	// entry logic. Call sets params.PreviousResponseID at the *start* of a request
+	// and only advances a.previousResponseID *after* it returns, so params.PreviousResponseID
+	// lags one round behind. AppendToolResults has since staged the newest round's
+	// function_call_output items in params.Input; those outputs belong to a.previousResponseID
+	// (the just-completed response), not the stale id still sitting in params. Without this,
+	// the forced call pairs the newest outputs against the previous round's response and OpenAI
+	// rejects it with "No tool output found for function call <id>" (400 on `input`).
+	if a.previousResponseID != "" {
+		a.params.PreviousResponseID = openai.String(a.previousResponseID)
+	}
+
 	var messages []responses.ResponseInputItemUnionParam
 	if a.params.Input.OfInputItemList != nil {
 		messages = a.params.Input.OfInputItemList

@@ -46,9 +46,23 @@ func streamChatCompletion(
 	defer stream.Close()
 
 	acc := openai.ChatCompletionAccumulator{}
+	// The accumulator SUMS chunk.Usage across every chunk (see
+	// ChatCompletionAccumulator.accumulateDelta: `cc.Usage.X += chunk.Usage.X`).
+	// That is correct for OpenAI, which reports usage only in the final chunk, but
+	// wrong for providers whose OpenAI-compatible streaming repeats usage on every
+	// chunk. Gemini emits a full, cumulative usage block on each SSE chunk, so the
+	// summed total is inflated by roughly the chunk count (an 80k prompt reported as
+	// 300k once the response is long enough). Capture the usage from the last chunk
+	// that carries it and use that as the authoritative total instead of the sum.
+	var finalUsage openai.CompletionUsage
+	var sawUsage bool
 	for stream.Next() {
 		chunk := stream.Current()
 		acc.AddChunk(chunk)
+		if chunkCarriesUsage(chunk.Usage) {
+			finalUsage = chunk.Usage
+			sawUsage = true
+		}
 		if len(chunk.Choices) > 0 {
 			if d := chunk.Choices[0].Delta.Content; d != "" {
 				if onTextDelta != nil {
@@ -63,7 +77,16 @@ func streamChatCompletion(
 	if acc.ChatCompletion.ID == "" {
 		return nil, fmt.Errorf("chat completion stream finished with no chunks")
 	}
+	if sawUsage {
+		acc.ChatCompletion.Usage = finalUsage
+	}
 	return &acc.ChatCompletion, nil
+}
+
+// chunkCarriesUsage reports whether a streamed chunk's usage block was populated
+// (as opposed to the zero value the SDK leaves on chunks that omit usage).
+func chunkCarriesUsage(u openai.CompletionUsage) bool {
+	return u.PromptTokens != 0 || u.CompletionTokens != 0 || u.TotalTokens != 0
 }
 
 // chatCompletionTokenUsage safely extracts prompt/completion token counts from a
