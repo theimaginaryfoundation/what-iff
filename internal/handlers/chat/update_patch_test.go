@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -51,6 +52,9 @@ func (f *fakeStore) DeleteChat(ctx context.Context, userID, id uuid.UUID) error 
 	return errors.New("not implemented")
 }
 func (f *fakeStore) ListChatMessages(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (f *fakeStore) ListChatMessagesBefore(ctx context.Context, userID, chatID uuid.UUID, beforeSentAt time.Time, beforeID uuid.UUID, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error) {
 	return nil, errors.New("not implemented")
 }
 func (f *fakeStore) GetChatMessage(ctx context.Context, userID, messageID uuid.UUID) (*models.ChatMessage, error) {

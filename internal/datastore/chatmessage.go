@@ -620,7 +620,19 @@ func (d *Datastore) GetChatMessage(ctx context.Context, userID, id uuid.UUID) (*
 // ListChatMessages returns a newest-first, offset-paginated list of chat messages for a specific
 // chat. It backs the chat UI, which displays the newest messages first while loading history.
 func (d *Datastore) ListChatMessages(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error) {
-	return d.listChatMessages(ctx, userID, chatID, pageNum, pageSize, time.Time{}, uuid.Nil, false, filters)
+	return d.listChatMessages(ctx, userID, chatID, pageNum, pageSize, time.Time{}, uuid.Nil, false, time.Time{}, uuid.Nil, filters)
+}
+
+// ListChatMessagesBefore returns the descending (newest-first) page of messages strictly older
+// than the (sent_at, id) cursor. It powers scroll-back and jump-to-bookmark: keyset pagination
+// lets the caller vary the batch size freely (e.g. a large jump fetch) without the offset math
+// that page-number pagination couples to a fixed page size. The response's NextCursor continues
+// the walk. Passing zero cursor values fetches the newest page (same as page 1).
+func (d *Datastore) ListChatMessagesBefore(ctx context.Context, userID, chatID uuid.UUID, beforeSentAt time.Time, beforeID uuid.UUID, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error) {
+	if beforeSentAt.IsZero() != (beforeID == uuid.Nil) {
+		return nil, fmt.Errorf("message cursor requires both sent time and message ID")
+	}
+	return d.listChatMessages(ctx, userID, chatID, 1, pageSize, time.Time{}, uuid.Nil, false, beforeSentAt, beforeID, filters)
 }
 
 // ListChatMessagesAfter returns the next chronological page after (afterSentAt, afterID).
@@ -633,13 +645,13 @@ func (d *Datastore) ListChatMessagesAfter(ctx context.Context, userID, chatID uu
 	if pageSize > maxChronologicalMessagePageSize {
 		return nil, fmt.Errorf("chronological message page size must not exceed %d", maxChronologicalMessagePageSize)
 	}
-	return d.listChatMessages(ctx, userID, chatID, 1, pageSize, afterSentAt, afterID, true, filters)
+	return d.listChatMessages(ctx, userID, chatID, 1, pageSize, afterSentAt, afterID, true, time.Time{}, uuid.Nil, filters)
 }
 
 // listChatMessages shares authorization, filters, and exact totals for the two message views.
 // chronological pages are strictly ascending by (sent_at, id) after their keyset position; the UI
 // view is descending and offset-paginated.
-func (d *Datastore) listChatMessages(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, afterSentAt time.Time, afterID uuid.UUID, chronological bool, filters models.ChatMessageFilters) (*models.PaginatedResponse, error) {
+func (d *Datastore) listChatMessages(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, afterSentAt time.Time, afterID uuid.UUID, chronological bool, beforeSentAt time.Time, beforeID uuid.UUID, filters models.ChatMessageFilters) (*models.PaginatedResponse, error) {
 	// Start transaction
 	tx, err := d.dbClient.Tx(ctx)
 	if err != nil {
@@ -742,14 +754,22 @@ func (d *Datastore) listChatMessages(ctx context.Context, userID, chatID uuid.UU
 			Limit(pageSize).
 			Order(ent.Asc(chatmessage.FieldSentAt), ent.Asc(chatmessage.FieldID))
 	} else {
-		if pageNum < 1 {
-			pageNum = 1
+		query = query.Order(ent.Desc(chatmessage.FieldSentAt), ent.Desc(chatmessage.FieldID))
+		if !beforeSentAt.IsZero() {
+			// Keyset ("before") pagination: strictly older than the cursor, newest-first. Decoupled
+			// from a fixed page size, so callers can vary the batch size (e.g. a large
+			// jump-to-bookmark fetch) without the offset math page-number pagination requires.
+			query = query.Where(chatmessage.Or(
+				chatmessage.SentAtLT(beforeSentAt),
+				chatmessage.And(chatmessage.SentAtEQ(beforeSentAt), chatmessage.IDLT(beforeID)),
+			)).Limit(pageSize)
+		} else {
+			if pageNum < 1 {
+				pageNum = 1
+			}
+			offset := (pageNum - 1) * pageSize
+			query = query.Offset(offset).Limit(pageSize)
 		}
-		offset := (pageNum - 1) * pageSize
-		query = query.
-			Offset(offset).
-			Limit(pageSize).
-			Order(ent.Desc(chatmessage.FieldSentAt), ent.Desc(chatmessage.FieldID))
 	}
 
 	// Execute query
@@ -768,6 +788,14 @@ func (d *Datastore) listChatMessages(ctx context.Context, userID, chatID uuid.UU
 		chatMessageModels[i] = toChatMessageModel(entChatMessage)
 	}
 
+	// The descending UI view exposes a keyset cursor for continuing older: the (sent_at, id) of
+	// the oldest row in this batch. Empty when the batch is empty (nothing older to fetch).
+	var nextCursor string
+	if !chronological && len(entChatMessages) > 0 {
+		oldest := entChatMessages[len(entChatMessages)-1]
+		nextCursor = models.EncodeMessageCursor(oldest.SentAt, oldest.ID)
+	}
+
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		d.logger.Error(i18n.T("tx.commit_failed"), zap.Error(err))
@@ -778,6 +806,7 @@ func (d *Datastore) listChatMessages(ctx context.Context, userID, chatID uuid.UU
 		Results:    chatMessageModels,
 		TotalCount: totalCount,
 		Page:       pageNum,
+		NextCursor: nextCursor,
 	}, nil
 }
 

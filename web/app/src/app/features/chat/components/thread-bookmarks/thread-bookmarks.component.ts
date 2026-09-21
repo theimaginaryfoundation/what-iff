@@ -38,7 +38,7 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
             <div class="tb__head">Bookmarks · {{ bookmarks().length }}</div>
             <ul class="tb__list">
               @for (b of bookmarks(); track b.id; let index = $index) {
-                <li>
+                <li class="tb__row">
                   <button
                     type="button"
                     class="tb__item"
@@ -53,6 +53,16 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
                     </span>
                     <span class="tb__snippet">{{ b.snippet || '(no text)' }}</span>
                     <time class="tb__time" [attr.datetime]="b.sent_at">{{ b.sent_at | date: 'MMM d' }}</time>
+                  </button>
+                  <button
+                    type="button"
+                    class="tb__remove"
+                    tabindex="-1"
+                    [attr.aria-label]="'Remove bookmark: ' + (b.snippet || 'this message')"
+                    title="Remove bookmark"
+                    (click)="removeBookmark(b, $event)"
+                  >
+                    <ui-star-icon [size]="13" [filled]="true" />
                   </button>
                 </li>
               }
@@ -109,6 +119,8 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
 
     .tb__list { display: grid; list-style: none; margin: 0; padding: 0 0.35rem 0.35rem; }
 
+    .tb__row { align-items: center; display: flex; gap: 0.15rem; }
+
     .tb__item {
       align-items: center;
       background: transparent;
@@ -116,13 +128,33 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
       border-radius: 0.45rem;
       cursor: pointer;
       display: grid;
+      flex: 1 1 auto;
       gap: 0.5rem;
       grid-template-columns: auto minmax(0, 1fr) auto;
+      min-width: 0;
       padding: 0.4rem 0.4rem;
       text-align: left;
-      width: 100%;
     }
     .tb__item:hover { background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+
+    .tb__remove {
+      align-items: center;
+      background: transparent;
+      border: 0;
+      border-radius: 0.45rem;
+      color: var(--bookmark-gold);
+      cursor: pointer;
+      display: inline-flex;
+      flex: 0 0 auto;
+      justify-content: center;
+      opacity: 0.7;
+      padding: 0.35rem;
+    }
+    .tb__remove:hover,
+    .tb__remove:focus-visible {
+      background: color-mix(in srgb, var(--bookmark-gold) 16%, transparent);
+      opacity: 1;
+    }
 
     .tb__badge {
       background: color-mix(in srgb, var(--color-accent) 55%, var(--color-surface-base));
@@ -150,6 +182,7 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
 export class ThreadBookmarksComponent {
   readonly bookmarks = input<MessageBookmark[]>([]);
   readonly jump = output<MessageBookmark>();
+  readonly remove = output<MessageBookmark>();
 
   readonly open = signal(false);
   readonly activeIndex = signal(0);
@@ -175,6 +208,16 @@ export class ThreadBookmarksComponent {
   select(bookmark: MessageBookmark): void {
     this.jump.emit(bookmark);
     this.close(true);
+  }
+
+  /**
+   * Remove a bookmark straight from the list — no need to scroll back to the message. The menu
+   * stays open so several can be cleared in a row; the parent refreshes the list, which drops the
+   * row. `stopPropagation` keeps the row's jump handler from also firing.
+   */
+  removeBookmark(bookmark: MessageBookmark, event: Event): void {
+    event.stopPropagation();
+    this.remove.emit(bookmark);
   }
 
   onMenuKeydown(event: KeyboardEvent, currentIndex: number): void {

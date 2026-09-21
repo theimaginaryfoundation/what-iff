@@ -86,7 +86,7 @@
           </div>
         </div>
         <div class="chat-page__title-actions">
-          <app-thread-bookmarks [bookmarks]="bookmarks()" (jump)="jumpToBookmark($event)" />
+          <app-thread-bookmarks [bookmarks]="bookmarks()" (jump)="jumpToBookmark($event)" (remove)="removeBookmarkFromNavigator($event)" />
           <button type="button" class="chat-page__export" (click)="exportActiveChat()" aria-label="Export thread">
             <ui-file-icon [size]="12" />
             <span>Export</span>
@@ -99,7 +99,7 @@
         @if (session.error()) {
           <p class="chat-page__error" role="alert">{{ session.error() }}</p>
         }
-        @if (copyFeedback() || exportFeedback(); as status) {
+        @if (copyFeedback() || exportFeedback() || bookmarkJumpStatus(); as status) {
           <p class="chat-page__status" role="status" aria-live="polite">{{ status }}</p>
         }
       </header>

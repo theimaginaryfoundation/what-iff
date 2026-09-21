@@ -219,6 +219,9 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     return map;
   });
   readonly exportFeedback = signal<string | null>(null);
+  /** Transient status while locating/loading a bookmark target (shown in the header status line). */
+  readonly bookmarkJumpStatus = signal<string | null>(null);
+  private clearBookmarkJumpStatusTimer: ReturnType<typeof setTimeout> | null = null;
   readonly editingThreadName = signal(false);
   readonly threadNameDraft = signal('');
   readonly threadSummary = signal('');
@@ -496,6 +499,10 @@ export class ChatPageComponent implements OnInit, OnDestroy {
       clearTimeout(this.clearCopyFeedbackTimer);
       this.clearCopyFeedbackTimer = null;
     }
+    if (this.clearBookmarkJumpStatusTimer) {
+      clearTimeout(this.clearBookmarkJumpStatusTimer);
+      this.clearBookmarkJumpStatusTimer = null;
+    }
     this.contextPanel.setDesktopVisible(false);
     this.document.removeEventListener('visibilitychange', this.onReturnToApp);
     const view = this.document.defaultView;
@@ -705,10 +712,50 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     );
   }
 
-  // Jump to a bookmark from the navigator: load older pages until it's present, then scroll.
+  // Jump to a bookmark from the navigator: load older batches until it's present, then scroll to
+  // it. A visible status communicates progress and clears on success (the flash is the success
+  // cue) or reports failure so the click never looks like it did nothing.
   async jumpToBookmark(bookmark: MessageBookmark): Promise<void> {
-    await this.session.loadOlderMessagesUntil(bookmark.id);
-    this.messageList()?.scrollToMessage(bookmark.id);
+    if (this.clearBookmarkJumpStatusTimer) {
+      clearTimeout(this.clearBookmarkJumpStatusTimer);
+      this.clearBookmarkJumpStatusTimer = null;
+    }
+    this.bookmarkJumpStatus.set('Locating bookmark…');
+    try {
+      const found = await this.session.loadOlderMessagesUntil(bookmark.id);
+      if (!found) {
+        this.setBookmarkJumpStatus('Could not locate that bookmark.');
+        return;
+      }
+      this.messageList()?.scrollToMessage(bookmark.id);
+      this.bookmarkJumpStatus.set(null);
+    } catch {
+      this.setBookmarkJumpStatus('Could not locate that bookmark.');
+    }
+  }
+
+  private setBookmarkJumpStatus(message: string): void {
+    this.bookmarkJumpStatus.set(message);
+    if (this.clearBookmarkJumpStatusTimer) {
+      clearTimeout(this.clearBookmarkJumpStatusTimer);
+    }
+    this.clearBookmarkJumpStatusTimer = setTimeout(() => {
+      this.bookmarkJumpStatus.set(null);
+      this.clearBookmarkJumpStatusTimer = null;
+    }, 4000);
+  }
+
+  // Remove a bookmark straight from the navigator dropdown, so there's no need to scroll back to
+  // the message to un-star it. Reuses the same toggle path as the message-row star.
+  removeBookmarkFromNavigator(bookmark: MessageBookmark): void {
+    const chatId = this.session.thread()?.id;
+    if (!chatId) return;
+    this.subscriptions.add(
+      this.messageService.setBookmark(chatId, bookmark.id, false).subscribe({
+        next: () => this.refreshBookmarks(chatId),
+        error: () => this.refreshBookmarks(chatId),
+      }),
+    );
   }
 
   exportActiveChat(): void {

@@ -20,6 +20,7 @@ import {
   AUTOSAVE_DEBOUNCE_MS,
   CHAT_PENDING_ASSISTANT_MESSAGE_ID,
   CODE_BLOCK_CHUNK_SIZE,
+  MESSAGE_JUMP_PAGE_SIZE,
   MESSAGE_LIST_PAGE_SIZE,
   STREAMING_INTERVAL_MS,
   STREAMING_SCROLL_CHECK_INTERVAL,
@@ -48,8 +49,14 @@ export class ChatSessionService implements OnDestroy {
   private readonly _pendingAssistantDraftText = signal('');
 
   private activeThreadId: string | null = null;
-  private messagesPage = 1;
   private messagesTotalCount = 0;
+  /**
+   * Keyset token for the batch of messages immediately older than the oldest loaded one. Set from
+   * each response's `next_cursor`; null when the oldest message in the thread is loaded. Older
+   * loads (scroll-back and jump-to-bookmark) walk this cursor instead of doing page-offset math,
+   * so the batch size can vary freely without gaps.
+   */
+  private olderCursor: string | null = null;
   /** Baseline for detecting checkpoints that land *after* the initial thread load. */
   private lastCheckpointAt = '';
   private checkpointBaselineInitialized = false;
@@ -158,8 +165,8 @@ export class ChatSessionService implements OnDestroy {
 
     const requestedThreadId = threadId;
     this.activeThreadId = threadId;
-    this.messagesPage = 1;
     this.messagesTotalCount = 0;
+    this.olderCursor = null;
     this.lastCheckpointAt = '';
     this.checkpointBaselineInitialized = false;
     this.hasMoreOlderMessages.set(false);
@@ -203,8 +210,8 @@ export class ChatSessionService implements OnDestroy {
       this.messageService.listMessages(threadId, 1, MESSAGE_LIST_PAGE_SIZE).subscribe({
         next: response => {
           if (!this.isActiveThread(requestedThreadId)) return;
-          this.messagesPage = 1;
           this.messagesTotalCount = response.total_count ?? response.results.length;
+          this.olderCursor = response.next_cursor ?? null;
           this.hasMoreOlderMessages.set(this.messages().length < this.messagesTotalCount);
           this._loading.set(false);
           // Adopt the loaded thread's newest checkpoint as the baseline so only
@@ -298,8 +305,8 @@ export class ChatSessionService implements OnDestroy {
       this.messageService.listMessages(threadId, 1, MESSAGE_LIST_PAGE_SIZE).subscribe({
         next: response => {
           if (!this.isActiveThread(threadId)) return;
-          this.messagesPage = 1;
           this.messagesTotalCount = response.total_count ?? response.results.length;
+          this.olderCursor = response.next_cursor ?? null;
           this.hasMoreOlderMessages.set(this.messages().length < this.messagesTotalCount);
           this.resumePendingJobIfNeeded(threadId);
           this.markActiveThreadRead(threadId);
@@ -328,22 +335,21 @@ export class ChatSessionService implements OnDestroy {
 
   loadOlderMessages(): void {
     const threadId = this.activeThreadId;
-    if (!threadId || this.loadingOlderMessages() || !this.hasMoreOlderMessages()) {
+    if (!threadId || this.loadingOlderMessages() || !this.hasMoreOlderMessages() || !this.olderCursor) {
       return;
     }
-    const nextPage = this.messagesPage + 1;
     this.loadingOlderMessages.set(true);
     this.messageService
-      .listMessages(threadId, nextPage, MESSAGE_LIST_PAGE_SIZE)
+      .listMessages(threadId, 1, MESSAGE_LIST_PAGE_SIZE, undefined, this.olderCursor)
       .pipe(finalize(() => this.loadingOlderMessages.set(false)))
       .subscribe({
         next: response => {
           if (!this.isActiveThread(threadId)) {
             return;
           }
-          this.messagesPage = nextPage;
+          this.olderCursor = response.next_cursor ?? null;
           this.messagesTotalCount = response.total_count ?? this.messagesTotalCount;
-          this.hasMoreOlderMessages.set(this.messages().length < this.messagesTotalCount);
+          this.hasMoreOlderMessages.set(!!this.olderCursor && this.messages().length < this.messagesTotalCount);
         },
         error: () => {
           if (!this.isActiveThread(threadId)) {
@@ -354,31 +360,34 @@ export class ChatSessionService implements OnDestroy {
   }
 
   /**
-   * Load successive older pages until `messageId` is present in the list, or there are no more
-   * pages / a page cap is hit. Resolves to whether the message is now loaded. Powers jumping to
-   * a bookmark that lives on an older, not-yet-loaded page.
+   * Load successive older batches until `messageId` is present in the list, or there is nothing
+   * older left / a batch cap is hit. Resolves to whether the message is now loaded. Powers jumping
+   * to a bookmark that lives on an older, not-yet-loaded batch.
+   *
+   * Uses the larger jump batch and keyset cursor so a far-back target resolves in a handful of
+   * roundtrips instead of dozens of small pages. The cap is on *batches*, not messages, so with a
+   * 200-message batch it still reaches thousands of messages back.
    */
-  loadOlderMessagesUntil(messageId: string, maxPages = 60): Promise<boolean> {
+  loadOlderMessagesUntil(messageId: string, maxBatches = 40): Promise<boolean> {
     const threadId = this.activeThreadId;
     const isLoaded = () => this.messages().some(m => m.id === messageId);
     if (!threadId || isLoaded()) {
       return Promise.resolve(isLoaded());
     }
     return new Promise<boolean>(resolve => {
-      let remaining = maxPages;
+      let remaining = maxBatches;
       const step = (): void => {
         if (isLoaded()) {
           resolve(true);
           return;
         }
-        if (!this.hasMoreOlderMessages() || remaining-- <= 0) {
+        if (!this.hasMoreOlderMessages() || !this.olderCursor || remaining-- <= 0) {
           resolve(isLoaded());
           return;
         }
-        const nextPage = this.messagesPage + 1;
         this.loadingOlderMessages.set(true);
         this.messageService
-          .listMessages(threadId, nextPage, MESSAGE_LIST_PAGE_SIZE)
+          .listMessages(threadId, 1, MESSAGE_JUMP_PAGE_SIZE, undefined, this.olderCursor)
           .pipe(finalize(() => this.loadingOlderMessages.set(false)))
           .subscribe({
             next: response => {
@@ -386,9 +395,9 @@ export class ChatSessionService implements OnDestroy {
                 resolve(false);
                 return;
               }
-              this.messagesPage = nextPage;
+              this.olderCursor = response.next_cursor ?? null;
               this.messagesTotalCount = response.total_count ?? this.messagesTotalCount;
-              this.hasMoreOlderMessages.set(this.messages().length < this.messagesTotalCount);
+              this.hasMoreOlderMessages.set(!!this.olderCursor && this.messages().length < this.messagesTotalCount);
               step();
             },
             error: () => resolve(isLoaded()),
@@ -400,8 +409,8 @@ export class ChatSessionService implements OnDestroy {
 
   clearActive(): void {
     this.activeThreadId = null;
-    this.messagesPage = 1;
     this.messagesTotalCount = 0;
+    this.olderCursor = null;
     this.hasMoreOlderMessages.set(false);
     this.loadingOlderMessages.set(false);
     this._thread.set(null);
