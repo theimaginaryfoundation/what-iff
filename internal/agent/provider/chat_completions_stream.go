@@ -37,6 +37,22 @@ func streamChatCompletion(
 	params openai.ChatCompletionNewParams,
 	onTextDelta func(delta string),
 ) (*openai.ChatCompletion, error) {
+	return streamChatCompletionCapturing(ctx, client, params, onTextDelta, nil)
+}
+
+// streamChatCompletionCapturing is streamChatCompletion plus an optional
+// onToolCallDelta hook, invoked with the raw JSON of each streamed tool-call
+// delta (and its index). ChatCompletionAccumulator keeps only standard fields, so
+// non-standard ones — notably Gemini's extra_content.google.thought_signature,
+// which Google requires echoed back on the assistant tool-call turn — are lost
+// unless captured here from the raw delta. Non-Gemini callers pass nil.
+func streamChatCompletionCapturing(
+	ctx context.Context,
+	client *openai.Client,
+	params openai.ChatCompletionNewParams,
+	onTextDelta func(delta string),
+	onToolCallDelta func(index int64, raw string),
+) (*openai.ChatCompletion, error) {
 	// This helper always requests final usage because token accounting drives
 	// usage metering and telemetry. OpenAI-compatible APIs send complete usage
 	// only in the final empty chunk when explicitly requested. Providers that
@@ -64,9 +80,15 @@ func streamChatCompletion(
 			sawUsage = true
 		}
 		if len(chunk.Choices) > 0 {
-			if d := chunk.Choices[0].Delta.Content; d != "" {
-				if onTextDelta != nil {
-					onTextDelta(d)
+			delta := chunk.Choices[0].Delta
+			if d := delta.Content; d != "" && onTextDelta != nil {
+				onTextDelta(d)
+			}
+			if onToolCallDelta != nil {
+				for _, tc := range delta.ToolCalls {
+					if raw := tc.RawJSON(); raw != "" {
+						onToolCallDelta(tc.Index, raw)
+					}
 				}
 			}
 		}

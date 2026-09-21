@@ -1149,6 +1149,13 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 	// (see `loadImageBytesForClaude`); otherwise the user turn falls back to text-only.
 	claudeParams := modelContext.BuildClaudeParams(chatCtx.model)
 
+	// GLM/z.ai models think by default and cannot disable it; without an explicit
+	// budget reasoning eats the whole output cap and the turn truncates before any
+	// answer. Give them a bounded thinking budget and a raised output cap.
+	if models.IsZAIModel(chatCtx.modelProvider, chatCtx.model) {
+		provider.ApplyZAIThinkingBudget(&claudeParams)
+	}
+
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
 	// Anthropic-native features (beta MCP, native web search) are not available on
 	// z.ai's compatible endpoint — gate them to native Anthropic only.

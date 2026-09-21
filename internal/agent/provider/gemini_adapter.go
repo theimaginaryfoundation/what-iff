@@ -31,6 +31,13 @@ type GeminiAdapter struct {
 	callSeq          int
 	lastRequested    []ToolUse
 	textDeltaHandler func(delta string)
+	// thought signatures recovered from the most recent streamed response, keyed
+	// by tool-call index; re-attached to the assistant tool-call replay turn
+	// because Gemini rejects a follow-up request that omits them. Empty/nil for
+	// non-streaming calls, where the response's own raw JSON already carries them.
+	// No locking: the adapter is owned by one agent-loop goroutine for the turn
+	// (see the type doc), so this field is written and read by that goroutine only.
+	lastThoughtSignatures map[int64]string
 }
 
 // NewGeminiAdapter constructs a GeminiAdapter from pre-built params. functionTools
@@ -107,7 +114,7 @@ func (a *GeminiAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse,
 	)
 
 	// Persist a Gemini-compat assistant turn so AppendToolResults can match tool_call_id.
-	a.params.Messages = append(a.params.Messages, geminiAssistantToolCallMessage(resp.Choices[0].Message))
+	a.params.Messages = append(a.params.Messages, geminiAssistantToolCallMessage(resp.Choices[0].Message, a.lastThoughtSignatures))
 	return nil, toolUses, nil
 }
 
@@ -157,10 +164,21 @@ func (a *GeminiAdapter) ForceFinalResponse(ctx context.Context) (*GenerateRespon
 }
 
 // call streams when a text-delta handler is set, else issues a non-streaming request.
+// The streaming path also captures per-tool-call thought signatures (dropped by the
+// accumulator) for the tool-call replay turn; the non-streaming response carries them
+// in its own raw JSON, so lastThoughtSignatures is cleared there.
 func (a *GeminiAdapter) call(ctx context.Context) (*openai.ChatCompletion, error) {
 	if a.textDeltaHandler != nil {
-		return a.provider.CallStreaming(ctx, a.params, a.textDeltaHandler)
+		resp, thoughtSignatures, err := a.provider.CallStreaming(ctx, a.params, a.textDeltaHandler)
+		if err != nil {
+			// Do not retain signatures from a failed call.
+			a.lastThoughtSignatures = nil
+			return nil, err
+		}
+		a.lastThoughtSignatures = thoughtSignatures
+		return resp, nil
 	}
+	a.lastThoughtSignatures = nil
 	return a.provider.Call(ctx, a.params)
 }
 

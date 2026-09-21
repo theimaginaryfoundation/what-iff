@@ -66,19 +66,42 @@ func (c *OpenAIProvider) responsesNewStreaming(
 
 	for stream.Next() {
 		ev := stream.Current()
-		if ev.Type == "response.output_text.delta" {
+		switch ev.Type {
+		case "response.output_text.delta":
 			if onTextDelta != nil && ev.Delta != "" {
 				onTextDelta(ev.Delta)
 			}
 			if ev.Delta != "" {
 				deltaEmitted = true
 			}
-			continue
-		}
-		if ev.Type == "response.completed" {
-			completed := ev.AsResponseCompleted()
-			resp := completed.Response
+		case "response.completed":
+			resp := ev.AsResponseCompleted().Response
 			finalResp = &resp
+		case "response.incomplete":
+			// A truncated-but-valid terminal response (e.g. max_output_tokens
+			// spent on reasoning by a model like Sol, or a content filter).
+			// This is not a failure: the non-streaming path already treats it as
+			// a real response and surfaces IncompleteDetails.Reason through
+			// GenerateResponse.StopReason. Failing the whole turn here was the
+			// root cause of the opaque "stream finished without response.completed
+			// event" errors (issue #132).
+			resp := ev.AsResponseIncomplete().Response
+			finalResp = &resp
+			c.zapLog().Warn("openai responses stream returned incomplete response",
+				zap.String("response_id", resp.ID),
+				zap.String("status", string(resp.Status)),
+				zap.String("incomplete_reason", resp.IncompleteDetails.Reason),
+				zap.Bool("delta_emitted", deltaEmitted))
+		case "response.failed":
+			resp := ev.AsResponseFailed().Response
+			return nil, deltaEmitted, fmt.Errorf(
+				"openai responses stream failed: %s (code %q, response_id %q)",
+				strings.TrimSpace(resp.Error.Message), string(resp.Error.Code), resp.ID)
+		case "error":
+			errEv := ev.AsError()
+			return nil, deltaEmitted, fmt.Errorf(
+				"openai responses stream error: %s (code %q, param %q)",
+				strings.TrimSpace(errEv.Message), errEv.Code, errEv.Param)
 		}
 	}
 
@@ -92,7 +115,13 @@ func (c *OpenAIProvider) responsesNewStreaming(
 		return nil, deltaEmitted, err
 	}
 	if finalResp == nil {
-		return nil, deltaEmitted, fmt.Errorf("stream finished without response.completed event")
+		// The stream ended cleanly (stream.Err() is nil) but never delivered a
+		// terminal response event — no completed/incomplete/failed and no error.
+		// That points at a truncated or dropped stream (proxy/LB timeout,
+		// mid-stream disconnect) rather than a provider-signalled outcome.
+		return nil, deltaEmitted, fmt.Errorf(
+			"openai responses stream ended without a terminal event (no response.completed/incomplete/failed/error); likely a truncated or dropped stream (delta_emitted=%t)",
+			deltaEmitted)
 	}
 	recordProviderTokenUsage(ctx, c.tel, finalResp.Usage.InputTokens, finalResp.Usage.OutputTokens)
 	return finalResp, deltaEmitted, nil

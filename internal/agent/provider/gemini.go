@@ -9,6 +9,7 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
+	"github.com/tidwall/gjson"
 )
 
 // DefaultGeminiBaseURL is Google's OpenAI-compatible Chat Completions endpoint.
@@ -74,13 +75,35 @@ func (c *GeminiProvider) Call(ctx context.Context, params openai.ChatCompletionN
 // CallStreaming streams a Chat Completions request, forwarding text deltas to
 // onTextDelta and recording token-usage metrics on success (mirroring the
 // non-streaming completionsNew path).
-func (c *GeminiProvider) CallStreaming(ctx context.Context, params openai.ChatCompletionNewParams, onTextDelta func(delta string)) (*openai.ChatCompletion, error) {
-	resp, err := streamChatCompletion(ctx, c.client, params, onTextDelta)
+//
+// It also returns the per-tool-call thought signatures (keyed by the streamed
+// tool-call index) recovered from the raw deltas. The accumulator drops Gemini's
+// extra_content.google.thought_signature, but Google 400s a follow-up request
+// whose assistant tool-call turn omits it ("Function call is missing a
+// thought_signature"), so the adapter must re-attach it on replay. Empty when the
+// turn made no tool calls.
+//
+// Keying by the streamed tool-call index relies on that index matching the
+// position of the same tool call in the accumulated message's ToolCalls slice —
+// true for the contiguous 0-based indices Google emits, and how the accumulator
+// itself groups deltas. The re-attach site tolerates a missing key (no signature
+// added), so a sparse/reordered index degrades to the pre-fix behaviour rather
+// than mis-associating.
+func (c *GeminiProvider) CallStreaming(ctx context.Context, params openai.ChatCompletionNewParams, onTextDelta func(delta string)) (*openai.ChatCompletion, map[int64]string, error) {
+	thoughtSignatures := map[int64]string{}
+	resp, err := streamChatCompletionCapturing(ctx, c.client, params, onTextDelta, func(index int64, raw string) {
+		if _, seen := thoughtSignatures[index]; seen {
+			return
+		}
+		if sig := gjson.Get(raw, "extra_content.google.thought_signature").String(); sig != "" {
+			thoughtSignatures[index] = sig
+		}
+	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	recordChatCompletionUsage(ctx, c.tel, resp)
-	return resp, nil
+	return resp, thoughtSignatures, nil
 }
 
 // ToGenerateResponse converts a Chat Completion into the provider-agnostic type.
