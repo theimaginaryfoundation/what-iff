@@ -56,15 +56,19 @@ func normalizeGeminiToolUses(uses []ToolUse) []ToolUse {
 
 // geminiAssistantToolCallMessage builds the assistant turn Gemini expects after tool_calls:
 // non-empty content, stable tool_call ids, and preserved extra_content (thought_signature).
-func geminiAssistantToolCallMessage(msg openai.ChatCompletionMessage) openai.ChatCompletionMessageParamUnion {
+// thoughtSignatures (keyed by tool-call index) supplies the
+// extra_content.google.thought_signature to re-attach when the source tool call
+// carries no raw JSON of its own — the streamed case, where the accumulator
+// dropped it. Pass nil when unavailable (non-streaming turns keep it in raw JSON).
+func geminiAssistantToolCallMessage(msg openai.ChatCompletionMessage, thoughtSignatures map[int64]string) openai.ChatCompletionMessageParamUnion {
 	p := msg.ToAssistantMessageParam()
 	if len(p.ToolCalls) > 0 && assistantContentEmpty(p.Content) {
 		p.Content.OfString = openai.String(geminiToolCallContentPlaceholder)
 	}
 	if len(msg.ToolCalls) > 0 {
 		p.ToolCalls = make([]openai.ChatCompletionMessageToolCallUnionParam, 0, len(msg.ToolCalls))
-		for _, tc := range msg.ToolCalls {
-			p.ToolCalls = append(p.ToolCalls, geminiToolCallToParam(tc))
+		for i, tc := range msg.ToolCalls {
+			p.ToolCalls = append(p.ToolCalls, geminiToolCallToParam(tc, thoughtSignatures[int64(i)]))
 		}
 	}
 	return openai.ChatCompletionMessageParamUnion{OfAssistant: &p}
@@ -72,7 +76,7 @@ func geminiAssistantToolCallMessage(msg openai.ChatCompletionMessage) openai.Cha
 
 // geminiToolCallToParam converts a response tool call to request params while preserving
 // Gemini-specific fields such as extra_content.google.thought_signature.
-func geminiToolCallToParam(tc openai.ChatCompletionMessageToolCallUnion) openai.ChatCompletionMessageToolCallUnionParam {
+func geminiToolCallToParam(tc openai.ChatCompletionMessageToolCallUnion, thoughtSignature string) openai.ChatCompletionMessageToolCallUnionParam {
 	raw := tc.RawJSON()
 	if raw == "" {
 		// RawJSON is empty for tool calls assembled by ChatCompletionAccumulator
@@ -82,9 +86,9 @@ func geminiToolCallToParam(tc openai.ChatCompletionMessageToolCallUnion) openai.
 		// "unexpected end of JSON input" (jsontext.Value marshalling empty bytes).
 		// Gemini streams every chat turn, so this is the path that image-gen (and any
 		// other tool call) reliably takes. Reconstruct the param from the decoded
-		// fields instead; thought signatures are already absent in the accumulated
-		// case, so nothing extra is dropped.
-		return geminiToolCallParamFromFields(tc)
+		// fields instead, re-attaching the thought signature the accumulator dropped
+		// (Google rejects a follow-up whose function call omits it).
+		return geminiToolCallParamFromFields(tc, thoughtSignature)
 	}
 	name := gjson.Get(raw, "function.name").String()
 	stableID := geminiToolCallID(name, gjson.Get(raw, "id").String())
@@ -106,8 +110,10 @@ func geminiToolCallToParam(tc openai.ChatCompletionMessageToolCallUnion) openai.
 // from a response union's decoded fields, giving the union a concrete variant
 // (OfFunction/OfCustom) so it marshals from that variant rather than from an empty
 // raw-JSON override. Function arguments default to "{}" when empty because Gemini's
-// compat layer rejects assistant tool calls with no arguments payload.
-func geminiToolCallParamFromFields(tc openai.ChatCompletionMessageToolCallUnion) openai.ChatCompletionMessageToolCallUnionParam {
+// compat layer rejects assistant tool calls with no arguments payload. A non-empty
+// thoughtSignature is re-attached as extra_content.google.thought_signature, matching
+// the shape Google emits and requires echoed back (function calls only).
+func geminiToolCallParamFromFields(tc openai.ChatCompletionMessageToolCallUnion, thoughtSignature string) openai.ChatCompletionMessageToolCallUnionParam {
 	if tc.Type == "custom" {
 		return openai.ChatCompletionMessageToolCallUnionParam{
 			OfCustom: &openai.ChatCompletionMessageCustomToolCallParam{
@@ -123,15 +129,23 @@ func geminiToolCallParamFromFields(tc openai.ChatCompletionMessageToolCallUnion)
 	if strings.TrimSpace(args) == "" {
 		args = "{}"
 	}
-	return openai.ChatCompletionMessageToolCallUnionParam{
-		OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-			ID: geminiToolCallID(tc.Function.Name, tc.ID),
-			Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
-				Name:      tc.Function.Name,
-				Arguments: args,
-			},
+	fn := &openai.ChatCompletionMessageFunctionToolCallParam{
+		ID: geminiToolCallID(tc.Function.Name, tc.ID),
+		Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+			Name:      tc.Function.Name,
+			Arguments: args,
 		},
 	}
+	if strings.TrimSpace(thoughtSignature) != "" {
+		// fn is freshly constructed above, so it owns all extra fields here —
+		// nothing else has set any to merge with.
+		fn.SetExtraFields(map[string]any{
+			"extra_content": map[string]any{
+				"google": map[string]any{"thought_signature": thoughtSignature},
+			},
+		})
+	}
+	return openai.ChatCompletionMessageToolCallUnionParam{OfFunction: fn}
 }
 
 func geminiToolCallHasThoughtSignature(tc openai.ChatCompletionMessageToolCallUnion) bool {

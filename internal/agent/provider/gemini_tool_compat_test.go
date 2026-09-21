@@ -47,7 +47,7 @@ func TestGeminiAssistantToolCallMessage_PlaceholderContentAndStableID(t *testing
 		Role:      "assistant",
 		ToolCalls: []openai.ChatCompletionMessageToolCallUnion{tc},
 	}
-	param := geminiAssistantToolCallMessage(msg)
+	param := geminiAssistantToolCallMessage(msg, nil)
 	require.NotNil(t, param.OfAssistant)
 	require.Equal(t, geminiToolCallContentPlaceholder, param.OfAssistant.Content.OfString.Value)
 	require.Len(t, param.OfAssistant.ToolCalls, 1)
@@ -117,7 +117,7 @@ func TestGeminiToolCallToParam_StreamAccumulatedMarshals(t *testing.T) {
 	}
 	require.Empty(t, tc.RawJSON(), "accumulated tool calls have no raw JSON")
 
-	param := geminiToolCallToParam(tc)
+	param := geminiToolCallToParam(tc, "")
 	out, err := param.MarshalJSON()
 	require.NoError(t, err)
 	require.Contains(t, string(out), `"name":"generate_image"`)
@@ -146,7 +146,7 @@ func TestGeminiAssistantToolCallMessage_StreamAccumulatedMarshals(t *testing.T) 
 		Role:      "assistant",
 		ToolCalls: []openai.ChatCompletionMessageToolCallUnion{tc},
 	}
-	param := geminiAssistantToolCallMessage(msg)
+	param := geminiAssistantToolCallMessage(msg, nil)
 	out, err := param.MarshalJSON()
 	require.NoError(t, err)
 	body := string(out)
@@ -169,9 +169,62 @@ func TestGeminiToolCallToParam_CustomStreamAccumulatedMarshals(t *testing.T) {
 	}
 	require.Empty(t, tc.RawJSON())
 
-	param := geminiToolCallToParam(tc)
+	param := geminiToolCallToParam(tc, "")
 	out, err := param.MarshalJSON()
 	require.NoError(t, err)
 	require.Contains(t, string(out), `"name":"run_code"`)
 	require.Contains(t, string(out), "print(1)")
+}
+
+// TestGeminiToolCallToParam_ReattachesThoughtSignature pins the fix for Google's
+// "Function call is missing a thought_signature" 400: the accumulator drops
+// extra_content during streaming, so the signature captured from the raw delta must
+// be re-attached to the reconstructed function-call param on replay.
+func TestGeminiToolCallToParam_ReattachesThoughtSignature(t *testing.T) {
+	t.Parallel()
+	tc := openai.ChatCompletionMessageToolCallUnion{
+		ID:   "call_img",
+		Type: "function",
+		Function: openai.ChatCompletionMessageFunctionToolCallFunction{
+			Name:      "generate_image",
+			Arguments: `{"prompt":"a fox"}`,
+		},
+	}
+	require.Empty(t, tc.RawJSON())
+
+	param := geminiToolCallToParam(tc, "sig-xyz")
+	out, err := param.MarshalJSON()
+	require.NoError(t, err)
+	body := string(out)
+	require.Contains(t, body, `"name":"generate_image"`)
+	require.Contains(t, body, "thought_signature")
+	require.Contains(t, body, "sig-xyz")
+	// Shape must match what Google emits: extra_content.google.thought_signature.
+	require.Contains(t, body, `"extra_content"`)
+	require.Contains(t, body, `"google"`)
+}
+
+// TestGeminiAssistantToolCallMessage_MapsSignatureByIndex verifies the per-index
+// signature map lands on the matching tool call.
+func TestGeminiAssistantToolCallMessage_MapsSignatureByIndex(t *testing.T) {
+	t.Parallel()
+	mk := func(name, args string) openai.ChatCompletionMessageToolCallUnion {
+		return openai.ChatCompletionMessageToolCallUnion{
+			Type:     "function",
+			Function: openai.ChatCompletionMessageFunctionToolCallFunction{Name: name, Arguments: args},
+		}
+	}
+	msg := openai.ChatCompletionMessage{
+		Role: "assistant",
+		ToolCalls: []openai.ChatCompletionMessageToolCallUnion{
+			mk("first_tool", `{"a":1}`),
+			mk("generate_image", `{"prompt":"fox"}`),
+		},
+	}
+	param := geminiAssistantToolCallMessage(msg, map[int64]string{1: "sig-second"})
+	require.Len(t, param.OfAssistant.ToolCalls, 2)
+
+	out, err := param.MarshalJSON()
+	require.NoError(t, err)
+	require.Contains(t, string(out), "sig-second")
 }
