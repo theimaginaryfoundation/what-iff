@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/exporter"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"go.uber.org/zap"
 )
 
 func TestReadZipEntryDistinguishesMissingAndOversizedEntries(t *testing.T) {
@@ -234,5 +236,50 @@ func TestProgressForAccountImportIncludesCountsAndTerminalResult(t *testing.T) {
 	}
 	if got, want := progress.Counts["memories_skipped"], 7; got != want {
 		t.Fatalf("memories_skipped = %d, want %d", got, want)
+	}
+}
+
+func TestSummaryImportCandidates(t *testing.T) {
+	sourceWithSummary := uuid.New()
+	sourceBlankSummary := uuid.New()
+	destination := uuid.New()
+
+	got := summaryImportCandidates(
+		[]exporter.ParsedConversation{
+			{UUID: sourceWithSummary.String(), WhatiffCheckpointSummary: "  durable thread context  "},
+			{UUID: sourceBlankSummary.String(), WhatiffCheckpointSummary: " \n "},
+			{UUID: "not-a-uuid", WhatiffCheckpointSummary: "ignored"},
+			{UUID: uuid.New().String(), WhatiffCheckpointSummary: "no destination"},
+		},
+		map[uuid.UUID]uuid.UUID{
+			sourceWithSummary:  destination,
+			sourceBlankSummary: uuid.New(),
+		},
+	)
+
+	if len(got) != 1 {
+		t.Fatalf("candidate count = %d, want 1", len(got))
+	}
+	if got[0].chatID != destination {
+		t.Errorf("candidate chat ID = %s, want %s", got[0].chatID, destination)
+	}
+	if got[0].summary != "durable thread context" {
+		t.Errorf("candidate summary = %q, want trimmed content", got[0].summary)
+	}
+}
+
+func TestImportConversationSummaryMemoriesContinuesOnEmbeddingFailure(t *testing.T) {
+	sourceID := uuid.New()
+	handler := &Handler{logger: zap.NewNop()}
+
+	failed := handler.importConversationSummaryMemories(
+		t.Context(),
+		uuid.New(),
+		[]exporter.ParsedConversation{{UUID: sourceID.String(), WhatiffCheckpointSummary: "A thread summary"}},
+		map[uuid.UUID]uuid.UUID{sourceID: uuid.New()},
+	)
+
+	if !failed {
+		t.Fatal("expected unavailable embedding generation to be reported as a non-fatal indexing failure")
 	}
 }

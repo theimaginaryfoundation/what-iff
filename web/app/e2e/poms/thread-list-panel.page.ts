@@ -310,19 +310,12 @@ export class ThreadListPanel {
     await this.page.getByRole('button', { name: 'Cancel', exact: true }).click();
   }
 
-  /**
-   * Opens the conversation-import modal. The panel's own header button is
-   * `display: none` below 768px, where the sidebar quick action of the same
-   * name is the only way in.
-   */
+  /** Opens the Import & Export screen from the panel header action. */
   async openImport(): Promise<void> {
     const headerButton = this.panel.getByRole('button', {
       name: 'Import Conversations',
     });
-    if (await headerButton.isVisible().catch(() => false)) {
-      await headerButton.click();
-      return;
-    }
-    await this.shell.quickAction('Import Conversations');
+    await headerButton.click();
+    await this.page.waitForURL(/\/data$/);
   }
 }

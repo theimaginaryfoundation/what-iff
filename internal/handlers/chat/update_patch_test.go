@@ -141,6 +141,8 @@ func (f *fakeStore) FindLatestActiveChatMessageJob(ctx context.Context, userID, 
 func (f *fakeStore) ImportChats(ctx context.Context, userID uuid.UUID, convs []models.ImportConversation, onProgress func(imported, skipped int)) (*models.ImportResult, error) {
 	return nil, errors.New("not implemented")
 }
+func (f *fakeStore) AuditChatImport(ctx context.Context, userID uuid.UUID, message string, metadata map[string]any) {
+}
 func (f *fakeStore) CreateJob(ctx context.Context, userID uuid.UUID, jobModel models.Job) (*models.Job, error) {
 	jobModel.ID = uuid.New()
 	return &jobModel, nil

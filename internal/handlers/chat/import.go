@@ -258,6 +258,13 @@ func (h *Handler) runChatImport(ctx context.Context, userID, jobID uuid.UUID, tm
 	if _, err := h.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusComplete, ""); err != nil {
 		h.logger.Error("chat import: failed to mark job complete", zap.String("job_id", jobID.String()), zap.Error(err))
 	}
+	h.ds.AuditChatImport(ctx, userID, "imported "+format+" conversation history", map[string]any{
+		"source":   format,
+		"imported": result.Imported,
+		"skipped":  result.Skipped,
+		"total":    total,
+		"errors":   totalErrors,
+	})
 
 	if total > 0 && result.Imported == 0 && result.Skipped == total {
 		h.logger.Info("chat import completed: all conversations already imported (dedup)",
@@ -281,6 +288,7 @@ func (h *Handler) failImportJob(ctx context.Context, userID, jobID uuid.UUID, ms
 	if _, err := h.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusFailed, msg); err != nil {
 		h.logger.Error("chat import: failed to mark job failed", zap.String("job_id", jobID.String()), zap.Error(err))
 	}
+	h.ds.AuditChatImport(ctx, userID, "conversation import failed: "+msg, map[string]any{"success": false})
 }
 
 // writeImportProgress persists a progress snapshot, logging (but not failing) on error.

@@ -53,6 +53,12 @@ const (
 	maxImportExpandedBytes = 250 << 20 // 250 MiB
 	// importMultipartMemory keeps only form metadata in memory; the file part spools to a temp file.
 	importMultipartMemory = 1 << 20 // 1 MiB
+	// maxSelectionBytes bounds the JSON `selection` field so a caller cannot force large allocations
+	// and UUID parsing before the archive is even validated.
+	maxSelectionBytes = 1 << 20 // 1 MiB
+	// maxSelectionIDs bounds each id array in a selection. An export cannot contain more selectable
+	// items than the archive entry cap, so anything larger is malformed.
+	maxSelectionIDs = maxImportEntries
 )
 
 // Handler serves the account export/import endpoints.
@@ -95,6 +101,24 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	r.HandleFunc("/export/{id}", h.GetExport).Methods("GET")
 	r.HandleFunc("/import", h.ImportAccount).Methods("POST")
 	r.HandleFunc("/import/{id}", h.GetImport).Methods("GET")
+	r.HandleFunc("/activity", h.GetActivity).Methods("GET")
+}
+
+// GetActivity returns the user's recent import/export activity, newest first, for the activity log
+// on the Import & Export screen.
+func (h *Handler) GetActivity(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		handlerutils.RespondWithError(w, h.logger, http.StatusUnauthorized, handlerutils.CodeNotSet, "Unauthorized", nil)
+		return
+	}
+	entries, err := h.ds.ListAccountActivity(r.Context(), userID, 25)
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to load activity", err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, entries)
 }
 
 // GetImport returns an account-import Job, including its JSON-encoded AccountImportProgress.

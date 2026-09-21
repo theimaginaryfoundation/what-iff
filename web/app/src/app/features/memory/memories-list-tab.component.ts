@@ -14,6 +14,7 @@ import {
   parseQueryParams,
   serializeFilters,
   normalizeDateRange,
+  GLOBAL_PERSONALITY_FILTER,
   MemoryViewFilters,
   MemoryStatusFilter,
 } from './helpers/memory-filter.helpers';
@@ -76,6 +77,7 @@ export class MemoriesListTabComponent implements OnInit {
   readonly selectedIds = this.view.selectedIds;
   readonly selectedCount = this.view.selectedCount;
   readonly allSelected = this.view.allSelected;
+  readonly globalPersonalityFilter = GLOBAL_PERSONALITY_FILTER;
   readonly deleting = this.view.deleting;
   readonly mutating = this.view.mutating;
 
@@ -192,7 +194,9 @@ export class MemoriesListTabComponent implements OnInit {
 
   onPersonalityFilterChange(personalityId: string): void {
     this.onFilterChanged({ personalityId });
-    if (personalityId) {
+    if (personalityId === GLOBAL_PERSONALITY_FILTER) {
+      this.view.selectGlobalAssociations();
+    } else if (personalityId) {
       this.view.setSelectedPersonalityIds([personalityId]);
     } else {
       this.view.selectAllAssociations();

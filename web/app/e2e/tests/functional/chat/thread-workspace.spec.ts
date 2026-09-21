@@ -130,15 +130,12 @@ test('shows a reply’s token breakdown from its Context action', async ({ chatP
   await expect(chatPage.contextCostOutlet).toHaveCount(1);
 });
 
-test('opens the import-conversations modal and cancels', async ({ chatImportModal, threadListPanel, userWithPersonality }) => {
+test('opens the Import & Export screen from Thread Manager', async ({ chatImportModal, threadListPanel, userWithPersonality }) => {
   await threadListPanel.navigateTo();
   await threadListPanel.openImport();
 
   await expect(chatImportModal.heading).toBeVisible();
   await expect(chatImportModal.importButton).toBeDisabled();
-
-  await chatImportModal.cancel();
-  await expect(chatImportModal.heading).toBeHidden();
 });
 
 test('creates, edits and deletes a thread memory from the context panel', async ({ chatPage, page, seed, userWithPersonality }) => {

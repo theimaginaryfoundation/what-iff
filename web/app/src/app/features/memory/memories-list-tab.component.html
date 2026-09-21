@@ -28,6 +28,7 @@
         <span>Persona</span>
         <select [value]="filters().personalityId" (change)="onPersonalityFilterChange($any($event.target).value)">
           <option value="">All personas</option>
+          <option [value]="globalPersonalityFilter">Global / shared</option>
           @for (personality of personalities(); track personality.id) {
             <option [value]="personality.id">{{ personality.label }}</option>
           }

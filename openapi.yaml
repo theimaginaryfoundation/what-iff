@@ -2897,6 +2897,9 @@ paths:
         `GET /account/import/{id}` until terminal status. Its JSON-encoded `progress` contains phase,
         section counts, warnings, and the final result. Memory import requires the server to have an
         OpenAI key (embeddings are regenerated); when unavailable, memories are skipped.
+
+        An optional `selection` field narrows what is restored (a partial import). When omitted, the
+        whole export is imported (backward-compatible).
       tags: [Account Export]
       security:
         - bearerAuth: []
@@ -2906,11 +2909,21 @@ paths:
           multipart/form-data:
             schema:
               type: object
+              required: [file]
               properties:
                 file:
                   type: string
                   format: binary
                   description: The export ZIP.
+                selection:
+                  type: string
+                  description: |
+                    Optional JSON object narrowing what is restored. Omit to import everything. Shape:
+                    `{"personality_ids":["<source-uuid>"],"conversation_ids":["<source-uuid>"],"include_memories":true}`.
+                    IDs are the source ids as they appear in the export (personality ids and conversation
+                    uuids), which the client reads from the ZIP to build its selection ledger. When present
+                    it is authoritative: only the listed personalities and conversations are restored (an
+                    empty list restores none), and memories are all-or-nothing via `include_memories`.
       responses:
         '202':
           description: Import enqueued
@@ -2932,6 +2945,31 @@ paths:
                 $ref: '#/components/schemas/Error'
         '413':
           description: Import file too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /account/activity:
+    get:
+      summary: List the user's recent import/export activity
+      description: |
+        Returns the user's most recent account export/import and ChatGPT/Claude import events
+        (from the audit log), newest first — a lightweight activity log for the Import & Export screen.
+      tags: [Account Export]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Recent activity, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountActivityEntry'
+        '401':
+          description: Unauthorized
           content:
             application/json:
               schema:
@@ -5841,6 +5879,27 @@ components:
         - complete
         - failed
       example: "pending"
+
+    AccountActivityEntry:
+      type: object
+      description: One row of the user's import/export activity log (from the audit log).
+      properties:
+        occurred_at:
+          type: string
+          format: date-time
+        category:
+          type: string
+          description: Audit category, e.g. account_export, account_import, or chat_import.
+        action:
+          type: string
+          description: e.g. exported, imported, import_failed, import.
+        message:
+          type: string
+          description: Human-readable summary.
+        metadata:
+          type: object
+          description: Structured safe-to-display counts and outcome fields for the activity row.
+          additionalProperties: true
 
     Job:
       type: object

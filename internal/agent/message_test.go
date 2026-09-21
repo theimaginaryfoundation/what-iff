@@ -144,15 +144,38 @@ func TestAssertGenerationProducedOutput(t *testing.T) {
 	a := &Agent{logger: zap.NewNop()}
 	chatCtx := &chatContext{model: "claude-sonnet-4-6", modelProvider: "anthropic"}
 
-	t.Run("empty text with no attachments fails the turn", func(t *testing.T) {
+	// A max-tokens truncation is the common cause and gets its own clearer, actionable
+	// message (see isTruncationStopReason) instead of the generic stop_reason dump.
+	t.Run("max_tokens truncation fails with a clear, actionable message", func(t *testing.T) {
 		err := a.assertGenerationProducedOutput("anthropic", chatCtx,
 			&provider.GenerateResponse{ID: "msg_1", StopReason: "max_tokens", OutputTokens: 4096}, nil)
 
 		require.Error(t, err)
-		// The message has to carry the two fields that separate "generated text we failed
-		// to extract" from "nothing came back", since that is the whole diagnostic value.
-		require.Contains(t, err.Error(), "max_tokens")
-		require.Contains(t, err.Error(), "4096")
+		require.Contains(t, err.Error(), "cut off")
+		require.Contains(t, err.Error(), "please try again")
+		require.Contains(t, err.Error(), "4096", "output_tokens still names the budget that was consumed")
+		require.NotContains(t, err.Error(), "empty response", "truncation must not use the generic message")
+	})
+
+	// OpenAI reports the same condition as "max_output_tokens"; it routes to the same message.
+	t.Run("openai max_output_tokens truncation uses the truncation message", func(t *testing.T) {
+		err := a.assertGenerationProducedOutput("openai", chatCtx,
+			&provider.GenerateResponse{ID: "msg_1b", StopReason: "max_output_tokens", OutputTokens: 8192}, nil)
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cut off")
+	})
+
+	// A non-truncation empty turn (extraction dropped the text, or nothing came back) keeps
+	// the diagnostic dump: the two fields that separate those causes are the whole value.
+	t.Run("non-truncation empty turn keeps the diagnostic message", func(t *testing.T) {
+		err := a.assertGenerationProducedOutput("anthropic", chatCtx,
+			&provider.GenerateResponse{ID: "msg_1c", StopReason: "end_turn", OutputTokens: 128}, nil)
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "empty response")
+		require.Contains(t, err.Error(), "end_turn")
+		require.Contains(t, err.Error(), "128")
 	})
 
 	t.Run("unreported stop reason is still named", func(t *testing.T) {

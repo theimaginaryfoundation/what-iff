@@ -65,6 +65,14 @@
           (click)="openCreate()"
         >Create Manually</button>
       </div>
+      <p class="mt-3 text-sm text-(--color-text-secondary)">
+        Already have a WhatIff export, or history from ChatGPT or Claude?
+        <button
+          type="button"
+          class="font-semibold text-(--color-accent) underline underline-offset-2 hover:brightness-95"
+          (click)="goToImport()"
+        >Import it instead</button>
+      </p>
     </div>
   }
 </section>

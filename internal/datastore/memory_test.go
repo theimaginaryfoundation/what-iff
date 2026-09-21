@@ -178,12 +178,22 @@ func TestValidateLevelInput(t *testing.T) {
 	require.NoError(t, validateLevelInput(global))
 
 	chatID := uuid.New()
+	globalWithSourceChat := models.CreateMemoryInput{Content: "x", Level: models.MemoryLevelGlobal, ChatID: &chatID}
+	require.NoError(t, validateLevelInput(globalWithSourceChat))
+
 	thread := models.CreateMemoryInput{Content: "x", Level: models.MemoryLevelThread, ChatID: &chatID}
 	require.NoError(t, validateLevelInput(thread))
 
 	pinned := uuid.New()
 	personality := models.CreateMemoryInput{Content: "x", Level: models.MemoryLevelPersonality, PinnedPersonalityID: &pinned}
 	require.NoError(t, validateLevelInput(personality))
+	personalityWithSourceChat := models.CreateMemoryInput{
+		Content:             "x",
+		Level:               models.MemoryLevelPersonality,
+		ChatID:              &chatID,
+		PinnedPersonalityID: &pinned,
+	}
+	require.NoError(t, validateLevelInput(personalityWithSourceChat))
 
 	invalidThread := models.CreateMemoryInput{Content: "x", Level: models.MemoryLevelThread}
 	require.Error(t, validateLevelInput(invalidThread))
