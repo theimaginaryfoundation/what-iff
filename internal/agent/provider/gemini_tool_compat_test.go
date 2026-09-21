@@ -99,3 +99,79 @@ func TestGeminiAdapter_toolNameForResult(t *testing.T) {
 	require.Equal(t, "generate_image", a.toolNameForResult("generate_image", 0))
 	require.Equal(t, "generate_image", a.toolNameForResult("wrong", 0))
 }
+
+// TestGeminiToolCallToParam_StreamAccumulatedMarshals reproduces the malformed-request
+// bug from image-gen turns: Gemini streams, so tool calls come from
+// ChatCompletionAccumulator with an empty RawJSON. The SDK's ToParam() then set an
+// empty marshal override, which failed on the next request with "unexpected end of
+// JSON input". Rebuilding from fields must marshal cleanly.
+func TestGeminiToolCallToParam_StreamAccumulatedMarshals(t *testing.T) {
+	t.Parallel()
+	tc := openai.ChatCompletionMessageToolCallUnion{
+		ID:   "call_img",
+		Type: "function",
+		Function: openai.ChatCompletionMessageFunctionToolCallFunction{
+			Name:      "generate_image",
+			Arguments: "",
+		},
+	}
+	require.Empty(t, tc.RawJSON(), "accumulated tool calls have no raw JSON")
+
+	param := geminiToolCallToParam(tc)
+	out, err := param.MarshalJSON()
+	require.NoError(t, err)
+	require.Contains(t, string(out), `"name":"generate_image"`)
+	// Empty arguments default to an empty object so the compat layer accepts the turn.
+	require.Contains(t, string(out), `"arguments":"{}"`)
+	// A non-empty id is preserved verbatim.
+	require.Contains(t, string(out), `"id":"call_img"`)
+}
+
+// TestGeminiAssistantToolCallMessage_StreamAccumulatedMarshals is the end-to-end
+// repro: the whole assistant tool-call message (as replayed on the next round) must
+// marshal without the jsontext "unexpected end of JSON input" error.
+func TestGeminiAssistantToolCallMessage_StreamAccumulatedMarshals(t *testing.T) {
+	t.Parallel()
+	tc := openai.ChatCompletionMessageToolCallUnion{
+		ID:   "call_img",
+		Type: "function",
+		Function: openai.ChatCompletionMessageFunctionToolCallFunction{
+			Name:      "generate_image",
+			Arguments: `{"prompt":"a fox"}`,
+		},
+	}
+	require.Empty(t, tc.RawJSON())
+
+	msg := openai.ChatCompletionMessage{
+		Role:      "assistant",
+		ToolCalls: []openai.ChatCompletionMessageToolCallUnion{tc},
+	}
+	param := geminiAssistantToolCallMessage(msg)
+	out, err := param.MarshalJSON()
+	require.NoError(t, err)
+	body := string(out)
+	require.Contains(t, body, `"name":"generate_image"`)
+	require.Contains(t, body, "a fox")
+	require.Contains(t, body, `"id":"call_img"`)
+}
+
+// TestGeminiToolCallToParam_CustomStreamAccumulatedMarshals covers the custom-tool
+// variant of the same accumulated path.
+func TestGeminiToolCallToParam_CustomStreamAccumulatedMarshals(t *testing.T) {
+	t.Parallel()
+	tc := openai.ChatCompletionMessageToolCallUnion{
+		ID:   "call_custom",
+		Type: "custom",
+		Custom: openai.ChatCompletionMessageCustomToolCallCustom{
+			Name:  "run_code",
+			Input: "print(1)",
+		},
+	}
+	require.Empty(t, tc.RawJSON())
+
+	param := geminiToolCallToParam(tc)
+	out, err := param.MarshalJSON()
+	require.NoError(t, err)
+	require.Contains(t, string(out), `"name":"run_code"`)
+	require.Contains(t, string(out), "print(1)")
+}

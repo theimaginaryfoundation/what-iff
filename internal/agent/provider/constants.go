@@ -12,6 +12,20 @@ const (
 	shortMessageThreshold = 100
 )
 
+// z.ai GLM thinking budget.
+//
+// GLM models think by default and the thinking CANNOT be disabled via the API
+// (confirmed against z.ai docs). Left unbounded, reasoning spends the entire
+// DefaultMaxContentLength output cap and the turn truncates
+// (stop_reason=max_tokens) before emitting any answer text. On the zai path we
+// therefore set an explicit thinking budget and raise the output cap so reasoning
+// and answer both fit: a 4096-token reasoning budget on top of the usual 8192
+// answer budget every other vendor gets, for 12288 total.
+const (
+	ZAIThinkingBudgetTokens = 4096
+	ZAIMaxOutputTokens      = DefaultMaxContentLength + ZAIThinkingBudgetTokens
+)
+
 // TextOnlyChatCompletionsImageFallback replaces image-only user turns when rendering for
 // Chat Completions providers that reject vision input (MiMo, DeepSeek; non-vision Qwen/Mistral ids).
 const TextOnlyChatCompletionsImageFallback = "[The user attached one or more images. This model does not support vision — ask them to describe the image or switch to a vision-capable model if visual analysis is required.]"

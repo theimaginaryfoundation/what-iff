@@ -75,7 +75,16 @@ func geminiAssistantToolCallMessage(msg openai.ChatCompletionMessage) openai.Cha
 func geminiToolCallToParam(tc openai.ChatCompletionMessageToolCallUnion) openai.ChatCompletionMessageToolCallUnionParam {
 	raw := tc.RawJSON()
 	if raw == "" {
-		return tc.ToParam()
+		// RawJSON is empty for tool calls assembled by ChatCompletionAccumulator
+		// during streaming — the accumulator rebuilds them from deltas and does not
+		// preserve the raw bytes. The SDK's own ToParam() sets the marshal override
+		// to that empty string, which then fails on the next request with
+		// "unexpected end of JSON input" (jsontext.Value marshalling empty bytes).
+		// Gemini streams every chat turn, so this is the path that image-gen (and any
+		// other tool call) reliably takes. Reconstruct the param from the decoded
+		// fields instead; thought signatures are already absent in the accumulated
+		// case, so nothing extra is dropped.
+		return geminiToolCallParamFromFields(tc)
 	}
 	name := gjson.Get(raw, "function.name").String()
 	stableID := geminiToolCallID(name, gjson.Get(raw, "id").String())
@@ -91,6 +100,38 @@ func geminiToolCallToParam(tc openai.ChatCompletionMessageToolCallUnion) openai.
 	var out openai.ChatCompletionMessageToolCallUnionParam
 	param.SetJSON([]byte(raw), &out)
 	return out
+}
+
+// geminiToolCallParamFromFields reconstructs a request tool-call param directly
+// from a response union's decoded fields, giving the union a concrete variant
+// (OfFunction/OfCustom) so it marshals from that variant rather than from an empty
+// raw-JSON override. Function arguments default to "{}" when empty because Gemini's
+// compat layer rejects assistant tool calls with no arguments payload.
+func geminiToolCallParamFromFields(tc openai.ChatCompletionMessageToolCallUnion) openai.ChatCompletionMessageToolCallUnionParam {
+	if tc.Type == "custom" {
+		return openai.ChatCompletionMessageToolCallUnionParam{
+			OfCustom: &openai.ChatCompletionMessageCustomToolCallParam{
+				ID: geminiToolCallID(tc.Custom.Name, tc.ID),
+				Custom: openai.ChatCompletionMessageCustomToolCallCustomParam{
+					Name:  tc.Custom.Name,
+					Input: tc.Custom.Input,
+				},
+			},
+		}
+	}
+	args := tc.Function.Arguments
+	if strings.TrimSpace(args) == "" {
+		args = "{}"
+	}
+	return openai.ChatCompletionMessageToolCallUnionParam{
+		OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+			ID: geminiToolCallID(tc.Function.Name, tc.ID),
+			Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+				Name:      tc.Function.Name,
+				Arguments: args,
+			},
+		},
+	}
 }
 
 func geminiToolCallHasThoughtSignature(tc openai.ChatCompletionMessageToolCallUnion) bool {
