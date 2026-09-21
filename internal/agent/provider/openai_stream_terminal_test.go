@@ -66,6 +66,34 @@ func TestResponsesNewStreaming_FailedEventReturnsDescriptiveError(t *testing.T) 
 	require.Contains(t, err.Error(), "resp_fail")
 }
 
+func TestResponsesNewStreaming_FailedAfterDeltasKeepsDeltaEmitted(t *testing.T) {
+	// A failure that lands after visible text must still surface a descriptive
+	// error, and must report deltaEmitted=true so the retry guard in
+	// callWithRetry does not re-issue a call whose output the user already saw.
+	respJSON := `{"id":"resp_fail2","object":"response","created_at":1,"model":"test",` +
+		`"status":"failed","error":{"code":"server_error","message":"died mid-stream"},` +
+		`"output":[],"usage":{"input_tokens":1,"output_tokens":3,"total_tokens":4}}`
+	frames := []string{
+		`{"type":"response.output_text.delta","delta":"half an ","sequence_number":1}`,
+		`{"type":"response.output_text.delta","delta":"answer","sequence_number":2}`,
+		`{"type":"response.failed","sequence_number":3,"response":` + respJSON + `}`,
+	}
+	srv := sseServer(t, frames)
+	defer srv.Close()
+
+	var deltas []string
+	resp, deltaEmitted, err := newTestOpenAIProvider(srv.URL).responsesNewStreaming(
+		context.Background(),
+		responses.ResponseNewParams{Model: "test"},
+		func(d string) { deltas = append(deltas, d) },
+	)
+	require.Error(t, err)
+	require.Nil(t, resp)
+	require.True(t, deltaEmitted)
+	require.Equal(t, []string{"half an ", "answer"}, deltas)
+	require.Contains(t, err.Error(), "died mid-stream")
+}
+
 func TestResponsesNewStreaming_ErrorEventReturnsDescriptiveError(t *testing.T) {
 	frames := []string{
 		`{"type":"error","sequence_number":1,"code":"rate_limit_exceeded","message":"slow down","param":"model"}`,
