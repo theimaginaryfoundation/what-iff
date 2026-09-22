@@ -163,6 +163,43 @@ func TestCreateChatMessage_HappyPathNoContextItems(t *testing.T) {
 	require.Empty(t, created.AdditionalContext)
 }
 
+func TestCreateChatMessage_ModelReasoningRoundTrips(t *testing.T) {
+	ds, cleanup := newChatMessageTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createCMTestUser(t, ds)
+	modelID := createCMTestModel(t, ds)
+	chatID := createCMTestChat(t, ds, userID, modelID)
+
+	reasoning := "  first I considered X\n\nthen Y  "
+	created, err := ds.CreateChatMessage(ctx, userID, models.ChatMessage{
+		ChatID:         chatID,
+		Message:        "assistant reply",
+		Origin:         models.MessageOriginAssistant,
+		ModelReasoning: &reasoning,
+	})
+	require.NoError(t, err)
+
+	got, err := ds.GetChatMessage(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.ModelReasoning)
+	require.Equal(t, "first I considered X\n\nthen Y", *got.ModelReasoning)
+
+	// Blank reasoning is not stored.
+	blank := "   "
+	created, err = ds.CreateChatMessage(ctx, userID, models.ChatMessage{
+		ChatID:         chatID,
+		Message:        "no thoughts",
+		Origin:         models.MessageOriginAssistant,
+		ModelReasoning: &blank,
+	})
+	require.NoError(t, err)
+	got, err = ds.GetChatMessage(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Nil(t, got.ModelReasoning)
+}
+
 func TestCreateChatMessage_ChatNotFound(t *testing.T) {
 	ds, cleanup := newChatMessageTestDatastore(t)
 	defer cleanup()

@@ -108,6 +108,10 @@ type ClaudeAdapter struct {
 	rawBetaMessages    []*anthropic.BetaMessage
 	textDeltaHandler   func(delta string)
 
+	// reasoning collects thinking blocks from every non-beta call this turn.
+	reasoning reasoningLog
+	// liveReasoning streams thinking deltas as they arrive (see SetReasoningStream).
+	liveReasoning reasoningRelay
 	// truncationFallback, when set, is applied once to params and the call re-issued
 	// if a response is cut off at max_tokens before any reply text (see
 	// SetTruncationFallback). Cleared after use so a turn retries at most once.
@@ -191,7 +195,7 @@ func (a *ClaudeAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse,
 
 	toolUses := extractClaudeToolUses(msg)
 	if len(toolUses) == 0 {
-		return a.provider.ToGenerateResponse(msg), nil, nil
+		return a.toGenerateResponse(msg), nil, nil
 	}
 
 	// Persist assistant loop context for the next Call: replay native web search blocks
@@ -261,7 +265,7 @@ func (a *ClaudeAdapter) ForceFinalResponse(ctx context.Context) (*GenerateRespon
 	if err != nil {
 		return nil, WrapSafetyViolationError(models.SafetyViolationProviderAnthropic, fmt.Errorf("Anthropic final-response call failed: %w", err))
 	}
-	return a.provider.ToGenerateResponse(msg), nil
+	return a.toGenerateResponse(msg), nil
 }
 
 // SetTruncationFallback installs a one-shot params adjustment for when a response is
@@ -276,13 +280,14 @@ func (a *ClaudeAdapter) SetTruncationFallback(fn func(params *anthropic.MessageN
 
 // callMessages issues one non-beta Messages call (streaming when a delta handler is
 // set), applying the truncation fallback at most once, and records the response's
-// web-search results and raw message.
+// web-search results, raw message, and reasoning.
 func (a *ClaudeAdapter) callMessages(ctx context.Context) (*anthropic.Message, error) {
 	msg, err := a.callMessagesOnce(ctx)
 	if err == nil && a.truncationFallback != nil && claudeTruncatedWithoutText(msg) {
 		fallback := a.truncationFallback
 		a.truncationFallback = nil
 		fallback(&a.params)
+		a.liveReasoning.reset()
 		msg, err = a.callMessagesOnce(ctx)
 	}
 	if err != nil {
@@ -290,14 +295,33 @@ func (a *ClaudeAdapter) callMessages(ctx context.Context) (*anthropic.Message, e
 	}
 	a.webSearchCompleted += countWebSearchToolResultsInMessage(msg)
 	a.rawMessages = append(a.rawMessages, msg)
+	a.reasoning.add(ExtractClaudeThinking(msg))
 	return msg, nil
 }
 
 func (a *ClaudeAdapter) callMessagesOnce(ctx context.Context) (*anthropic.Message, error) {
+	a.liveReasoning.beginCall()
 	if a.textDeltaHandler != nil {
-		return a.provider.CallWithRetryStreaming(ctx, a.params, a.textDeltaHandler)
+		var live ReasoningStream
+		if a.liveReasoning.enabled() {
+			live = ReasoningStream{OnDelta: a.liveReasoning.delta, OnReset: a.liveReasoning.reset}
+		}
+		return a.provider.CallWithRetryStreamingReasoning(ctx, a.params, a.textDeltaHandler, live)
 	}
 	return a.provider.Call(ctx, a.params)
+}
+
+// SetReasoningStream streams thinking deltas live on streaming, non-beta calls (z.ai
+// GLM; native Anthropic never enables thinking, and the beta MCP path is
+// Anthropic-only). Implements ReasoningStreamer.
+func (a *ClaudeAdapter) SetReasoningStream(stream ReasoningStream) {
+	a.liveReasoning = reasoningRelay{stream: stream, kept: &a.reasoning}
+}
+
+func (a *ClaudeAdapter) toGenerateResponse(msg *anthropic.Message) *GenerateResponse {
+	resp := a.provider.ToGenerateResponse(msg)
+	resp.Reasoning = a.reasoning.String()
+	return resp
 }
 
 // AllRawMessages returns Anthropic message payloads observed this turn.

@@ -48,7 +48,8 @@ func TestClaudeAdapter_TruncationFallbackRetriesOnce(t *testing.T) {
 	require.Empty(t, uses)
 	require.Equal(t, 1, fallbacks)
 	require.Equal(t, "made it", resp.Text)
-	// The discarded truncated attempt is not recorded as a raw message.
+	// The discarded truncated attempt contributes neither reasoning nor a raw message.
+	require.Equal(t, "short thought", resp.Reasoning)
 	require.Len(t, a.AllRawMessages(), 1)
 
 	require.NotContains(t, string(requestBody(0)), `"output_config"`)
@@ -84,6 +85,7 @@ func TestClaudeAdapter_NoFallbackWithoutTruncation(t *testing.T) {
 	resp, _, err := a.Call(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, "fine", resp.Text)
+	require.Empty(t, resp.Reasoning)
 }
 
 func chatCompletionReasoningTextJSON(id, reasoning, text, finish string) string {
@@ -122,6 +124,7 @@ func TestXiaomiAdapter_TruncationRetriesWithThinkingDisabled(t *testing.T) {
 	resp, _, err := a.Call(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, "answer without thinking", resp.Text)
+	require.Empty(t, resp.Reasoning, "the discarded truncated attempt's reasoning is dropped")
 
 	thinking := func(i int) any {
 		var body map[string]any
