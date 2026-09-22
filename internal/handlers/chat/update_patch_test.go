@@ -30,6 +30,28 @@ type fakeStore struct {
 	getModelByNameFn       func(ctx context.Context, name string) (*models.Model, error)
 	isFirstChatFn          func(ctx context.Context, userID, chatID uuid.UUID) (bool, error)
 	countAllMessagesFn     func(ctx context.Context, userID uuid.UUID, cap int) (int, error)
+	forkChatFn             func(ctx context.Context, userID uuid.UUID, params models.ForkChatParams) (*models.ForkChatResult, error)
+	listChatBranchesFn     func(ctx context.Context, userID, chatID uuid.UUID) ([]models.ChatBranchSummary, error)
+	getChatNameFn          func(ctx context.Context, userID, chatID uuid.UUID) (string, error)
+}
+
+func (f *fakeStore) ForkChat(ctx context.Context, userID uuid.UUID, params models.ForkChatParams) (*models.ForkChatResult, error) {
+	if f.forkChatFn != nil {
+		return f.forkChatFn(ctx, userID, params)
+	}
+	return nil, errors.New("not implemented")
+}
+func (f *fakeStore) ListChatBranches(ctx context.Context, userID, chatID uuid.UUID) ([]models.ChatBranchSummary, error) {
+	if f.listChatBranchesFn != nil {
+		return f.listChatBranchesFn(ctx, userID, chatID)
+	}
+	return nil, errors.New("not implemented")
+}
+func (f *fakeStore) GetChatName(ctx context.Context, userID, chatID uuid.UUID) (string, error) {
+	if f.getChatNameFn != nil {
+		return f.getChatNameFn(ctx, userID, chatID)
+	}
+	return "", errors.New("not implemented")
 }
 
 func (f *fakeStore) CreateChat(ctx context.Context, userID uuid.UUID, chat models.Chat) (*models.Chat, error) {

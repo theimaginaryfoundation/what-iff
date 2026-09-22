@@ -35,12 +35,14 @@ type Handler struct {
 	// messageAgent is used by CreateChatMessage; it defaults to agent but can be overridden for tests.
 	messageAgent MessageAgent
 	welcomeAgent WelcomeMessageAgent
-	cfg          HandlerConfig
+	// branchAgent summarizes branches whose parent checkpoint can't be reused; nil when agent is nil.
+	branchAgent BranchAgent
+	cfg         HandlerConfig
 }
 
 // NewHandler creates a new assistant handler instance
 func NewHandler(ds Store, logger *zap.Logger, agent *agent.Agent, cfg HandlerConfig) *Handler {
-	return &Handler{
+	h := &Handler{
 		ds:           ds,
 		logger:       logger,
 		agent:        agent,
@@ -48,6 +50,10 @@ func NewHandler(ds Store, logger *zap.Logger, agent *agent.Agent, cfg HandlerCon
 		welcomeAgent: agent,
 		cfg:          cfg,
 	}
+	if agent != nil {
+		h.branchAgent = agent
+	}
+	return h
 }
 
 // RegisterRoutes registers all chat-related routes
@@ -90,4 +96,6 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	chatRouter.HandleFunc("/{id}/mark-read", h.MarkChatRead).Methods("POST")
 	chatRouter.HandleFunc("/{id}", h.DeleteChat).Methods("DELETE")
 	chatRouter.HandleFunc("/{id}/export", h.ExportChat).Methods("GET")
+	chatRouter.HandleFunc("/{id}/fork", h.ForkChat).Methods("POST")
+	chatRouter.HandleFunc("/{id}/lineage", h.GetChatLineage).Methods("GET")
 }

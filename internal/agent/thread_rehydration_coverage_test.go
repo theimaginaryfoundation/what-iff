@@ -241,7 +241,7 @@ func TestRunThreadRehydration_LoadMessagesFailureCallsFailRehydration(t *testing
 
 	a := newTestAgent(ds)
 	require.NotPanics(t, func() {
-		a.runThreadRehydration(context.Background(), uuid.New(), uuid.New(), uuid.New())
+		a.runThreadRehydration(context.Background(), uuid.New(), uuid.New(), uuid.New(), rehydrationOptions{seedMemories: true})
 	})
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -265,7 +265,7 @@ func TestRunThreadRehydration_ShortThreadMarksReadyWithoutSummarizing(t *testing
 
 	a := newTestAgent(ds) // OpenAIProvider/memoryTool nil -> extractAndStoreImportedMemories is a no-op
 	require.NotPanics(t, func() {
-		a.runThreadRehydration(context.Background(), uuid.New(), uuid.New(), uuid.New())
+		a.runThreadRehydration(context.Background(), uuid.New(), uuid.New(), uuid.New(), rehydrationOptions{seedMemories: true})
 	})
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -286,7 +286,7 @@ func TestRunThreadRehydration_LongThreadMockLLMUsesDeterministicSummary(t *testi
 	a := newTestAgent(ds)
 	a.mockLLM = true // nonVendorLLM() -> deterministic fake summary, no OpenAIProvider needed
 	require.NotPanics(t, func() {
-		a.runThreadRehydration(context.Background(), uuid.New(), uuid.New(), uuid.New())
+		a.runThreadRehydration(context.Background(), uuid.New(), uuid.New(), uuid.New(), rehydrationOptions{seedMemories: true})
 	})
 	require.NoError(t, mock.ExpectationsWereMet())
 }

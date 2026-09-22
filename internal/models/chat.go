@@ -60,6 +60,10 @@ type Chat struct {
 	// IsFirstChat is an internal-only flag set by CreateChat to indicate whether
 	// this row is the user's first chat at creation time.
 	IsFirstChat bool `json:"-"`
+	// ForkedFromChatID / ForkedFromMessageID record branch lineage ("What if…" forks): the thread
+	// and message this chat diverged from. Nil for non-branch threads; the parent may be deleted.
+	ForkedFromChatID    *uuid.UUID `json:"forked_from_chat_id,omitempty"`
+	ForkedFromMessageID *uuid.UUID `json:"forked_from_message_id,omitempty"`
 }
 
 // ChatFilters defines filters for listing chats

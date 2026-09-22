@@ -68,6 +68,16 @@ func (Chat) Fields() []ent.Field {
 		field.String("rehydration_state").
 			Optional().
 			Comment("Lazy-summarization lifecycle for imported threads: ''/'pending'/'processing'/'ready'/'failed'. Empty means no rehydration needed (e.g. native threads)"),
+		// Branch lineage ("What if…" forks). Plain columns, not edges, so a branch outlives its
+		// parent: deleting the original thread must not cascade into (or orphan-null) its branches.
+		field.UUID("forked_from_chat_id", uuid.UUID{}).
+			Optional().
+			Nillable().
+			Comment("Thread this chat was branched from; nil for non-branch threads. The parent may since have been deleted"),
+		field.UUID("forked_from_message_id", uuid.UUID{}).
+			Optional().
+			Nillable().
+			Comment("Message in the parent thread at which this branch diverged"),
 	}
 }
 
@@ -103,6 +113,7 @@ func (Chat) Indexes() []ent.Index {
 		index.Fields("name"),
 		index.Edges("owner").Fields("last_message_time"),
 		index.Edges("owner").Fields("import_hash").Unique(),
+		index.Edges("owner").Fields("forked_from_chat_id"),
 	}
 }
 
