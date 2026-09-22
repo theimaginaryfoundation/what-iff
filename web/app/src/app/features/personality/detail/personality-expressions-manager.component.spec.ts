@@ -176,7 +176,8 @@ describe('PersonalityExpressionsManagerComponent', () => {
         }
 
         async function init(progress?: string): Promise<void> {
-            mediaJobs.refreshActiveJob.mockReturnValue(of(active));
+            const mode = progress ? 'candidates' : 'default';
+            mediaJobs.refreshActiveJob.mockReturnValue(of({ ...active, expression_mode: mode }));
             jobService.getJob.mockReturnValue(of(job(progress)));
             fixture = TestBed.createComponent(PersonalityExpressionsManagerComponent);
             component = fixture.componentInstance;
@@ -198,6 +199,7 @@ describe('PersonalityExpressionsManagerComponent', () => {
             expect(component.isGenerateOpen()).toBe(false);
             expect(component.defaultGridRunning()).toBe(true);
             expect(component.generateButtonLabel()).toBe('Generating…');
+            expect(jobService.getJob).not.toHaveBeenCalled();
         });
     });
 

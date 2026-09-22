@@ -35,3 +35,12 @@ func TestGenerateExpressionCandidates_NotConfigured(t *testing.T) {
 	_, err := (&Agent{}).GenerateExpressionCandidates(context.Background(), uuid.New(), uuid.New(), ExpressionGridKeys, nil)
 	require.ErrorContains(t, err, "agent not configured")
 }
+
+func TestIsExpressionCandidatesProgress(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, IsExpressionCandidatesProgress(`{"mode":"candidates","expressions":[]}`))
+	require.False(t, IsExpressionCandidatesProgress(""))
+	require.False(t, IsExpressionCandidatesProgress(`{"phase":"importing"}`))
+	require.False(t, IsExpressionCandidatesProgress(`not json`))
+}

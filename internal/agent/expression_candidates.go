@@ -26,6 +26,17 @@ var ErrExpressionReferenceImageNotFound = errors.New("reference image not found"
 // ErrExpressionImagesDisabled is returned when the personality's image style is "none".
 var ErrExpressionImagesDisabled = errors.New("image generation is disabled for this personality (image style is none)")
 
+// IsExpressionCandidatesProgress reports whether a Job.Progress payload belongs to a candidate run.
+func IsExpressionCandidatesProgress(progress string) bool {
+	if progress == "" {
+		return false
+	}
+	var p struct {
+		Mode string `json:"mode"`
+	}
+	return json.Unmarshal([]byte(progress), &p) == nil && p.Mode == ExpressionCandidatesMode
+}
+
 // ExpressionCandidate is one generated portrait that has been uploaded to the gallery
 // (pinned to the personality) but not assigned to an expression slot.
 type ExpressionCandidate struct {

@@ -8931,6 +8931,11 @@ export interface components {
             personality_id?: string | null;
             personality_name?: string | null;
             flow_id?: string | null;
+            /**
+             * @description For `expression_grid` jobs only: `default` assigns the default 3×3 grid; `candidates` is an unassigned candidate run owned by the expressions Generate modal.
+             * @enum {string}
+             */
+            expression_mode?: "default" | "candidates";
             error?: string;
         };
         PersonalityMediaJobConflict: {

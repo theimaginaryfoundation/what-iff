@@ -150,3 +150,45 @@ func TestGenerateExpressionCandidates_EnqueueErrorMapping(t *testing.T) {
 		})
 	}
 }
+
+func TestGetActiveMediaJob_ExpressionMode(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		progress string
+		want     string
+	}{
+		{"default grid", "", "default"},
+		{"candidate run", `{"mode":"candidates","expressions":["happy"]}`, "candidates"},
+		{"unrelated progress", `{"phase":"importing"}`, "default"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			personalityID := uuid.New()
+			store := &fakeStore{
+				findActivePersonalityMediaJobFn: func(context.Context, uuid.UUID) (*models.Job, error) {
+					return &models.Job{
+						ID:        uuid.New(),
+						JobType:   agent.JobTypeExpressionGrid,
+						Reference: personalityID.String(),
+						Status:    models.JobStatusProcessing,
+						Progress:  tc.progress,
+					}, nil
+				},
+			}
+			h := NewHandler(store, zap.NewNop(), nil)
+			router := mux.NewRouter()
+			h.RegisterRoutes(router)
+			req := httptest.NewRequest(http.MethodGet, "/personality/active-media-job", nil)
+			req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, uuid.New()))
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			var got models.ActivePersonalityMediaJob
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+			require.Equal(t, tc.want, got.ExpressionMode)
+		})
+	}
+}

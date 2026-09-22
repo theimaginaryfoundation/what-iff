@@ -7104,6 +7104,12 @@ components:
         flow_id:
           type: string
           nullable: true
+        expression_mode:
+          type: string
+          enum: [default, candidates]
+          description: >-
+            For `expression_grid` jobs only: `default` assigns the default 3×3 grid; `candidates` is an
+            unassigned candidate run owned by the expressions Generate modal.
         error:
           type: string
       required:

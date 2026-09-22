@@ -11,6 +11,11 @@ export interface ActivePersonalityMediaJob {
   personality_id?: string;
   personality_name?: string;
   flow_id?: string;
+  /**
+   * For `expression_grid` jobs: `default` assigns the default grid; `candidates` is an unassigned
+   * run owned by the expressions Generate modal.
+   */
+  expression_mode?: 'default' | 'candidates';
   error?: string;
 }
 

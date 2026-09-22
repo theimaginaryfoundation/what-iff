@@ -405,25 +405,21 @@ export class PersonalityExpressionsManagerComponent implements OnInit {
       .subscribe(job => {
         if (job?.job_type !== 'expression_grid' || job.personality_id !== this.personalityId()) return;
         if (job.status === 'complete' || job.status === 'failed') return;
-        // Candidate runs (from the Generate modal) and default-grid runs share the job type;
-        // the progress payload tells them apart.
+        if (job.expression_mode !== 'candidates') {
+          this.defaultGridRunning.set(true);
+          this.resumeGridPoll(job.job_id);
+          return;
+        }
+        // A Generate-modal run: fetch the job for its names/reference and reopen the modal.
         this.jobs
           .getJob(job.job_id)
           .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             next: full => {
               const candidates = parseExpressionCandidatesProgress(full.progress);
-              if (candidates) {
-                this.generateModal()?.resume(job.job_id, candidates);
-                this.isGenerateOpen.set(true);
-              } else {
-                this.defaultGridRunning.set(true);
-                this.resumeGridPoll(job.job_id);
-              }
-            },
-            error: () => {
-              this.defaultGridRunning.set(true);
-              this.resumeGridPoll(job.job_id);
+              if (!candidates) return;
+              this.generateModal()?.resume(job.job_id, candidates);
+              this.isGenerateOpen.set(true);
             },
           });
       });
