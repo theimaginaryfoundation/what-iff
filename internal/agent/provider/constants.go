@@ -27,7 +27,7 @@ const (
 )
 
 // TextOnlyChatCompletionsImageFallback replaces image-only user turns when rendering for
-// Chat Completions providers that reject vision input (MiMo, DeepSeek; non-vision Qwen/Mistral ids).
+// Chat Completions providers that reject vision input (DeepSeek; pre-2.6 MiMo and non-vision Qwen/Mistral ids).
 const TextOnlyChatCompletionsImageFallback = "[The user attached one or more images. This model does not support vision — ask them to describe the image or switch to a vision-capable model if visual analysis is required.]"
 
 // ExpressionPortraitContinuityPointerNote is appended to developer continuity text when a

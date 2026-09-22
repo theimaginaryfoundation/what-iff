@@ -124,6 +124,17 @@ func TestChatCompletionsSupportsVision(t *testing.T) {
 		{provider: "mistral", model: "codestral-latest", want: false},
 		{provider: "deepseek", model: "deepseek-chat", want: false},
 		{provider: "xiaomi", model: "mimo-v2.5-pro", want: false},
+		{provider: "xiaomi", model: "mimo-v2-flash", want: false},
+		{provider: "xiaomi", model: "mimo-7b-rl", want: false},
+		{provider: "xiaomi", model: "mimo-v2.10", want: true},
+		{provider: "xiaomi", model: "mimo-v2.6", want: true},
+		{provider: "xiaomi", model: "mimo-v2.6-pro", want: true},
+		{provider: "xiaomi", model: "MiMo-2.6-Flash", want: true},
+		{provider: "xiaomi", model: "mimo-v3", want: true},
+		{provider: "xiaomi", model: "mimo-v2-omni", want: true},
+		{provider: "xiaomi", model: "", want: false},
+		// Provider gating: a MiMo-looking id under another provider is not treated as MiMo.
+		{provider: "deepseek", model: "mimo-v2.6", want: false},
 	}
 	for _, tt := range tests {
 		tt := tt

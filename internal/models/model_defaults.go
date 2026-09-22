@@ -1,6 +1,10 @@
 package models
 
-import "strings"
+import (
+	"regexp"
+	"strconv"
+	"strings"
+)
 
 const (
 	// DefaultModelName specifies which model from AvailableModels to use as the default
@@ -283,8 +287,8 @@ func UsesOpenAIChatCompletionsAPI(provider, name string) bool {
 }
 
 // ChatCompletionsSupportsVision reports whether an OpenAI-compatible Chat Completions
-// model accepts multimodal image input. Gemini (google) always does; Qwen and Mistral
-// are matched by model-id heuristics. DeepSeek and MiMo are text-only today.
+// model accepts multimodal image input. Gemini (google) always does; Qwen, Mistral and
+// Xiaomi MiMo are matched by model-id heuristics. DeepSeek is text-only today.
 //
 // TODO: replace heuristics with a per-model allows_images (or similar) DB flag when
 // admin model management grows a vision capability field.
@@ -296,9 +300,39 @@ func ChatCompletionsSupportsVision(provider, name string) bool {
 		return qwenModelSupportsVision(name)
 	case ModelProviderMistral:
 		return mistralModelSupportsVision(name)
+	case ModelProviderXiaomi:
+		return xiaomiModelSupportsVision(name)
 	default:
 		return false
 	}
+}
+
+// mimoVersionPattern captures the major/minor version from MiMo model ids such as
+// "mimo-v2.6", "mimo-v2.6-pro" or "MiMo-2.6". The trailing guard keeps parameter-size
+// ids like "mimo-7b-rl" from being read as version 7.
+var mimoVersionPattern = regexp.MustCompile(`mimo-v?(\d+)(?:\.(\d+))?(?:[^0-9a-z.]|$)`)
+
+// xiaomiModelSupportsVision matches MiMo ids that accept image input: the 2.6+ line
+// (issue #143) and explicit omni/VL variants. mimo-v2.5-pro and older ids stay
+// text-only so they keep the image-stripping fallback.
+func xiaomiModelSupportsVision(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	if n == "" {
+		return false
+	}
+	if strings.Contains(n, "omni") || strings.Contains(n, "-vl") {
+		return true
+	}
+	m := mimoVersionPattern.FindStringSubmatch(n)
+	if m == nil {
+		return false
+	}
+	major, _ := strconv.Atoi(m[1])
+	minor := 0
+	if m[2] != "" {
+		minor, _ = strconv.Atoi(m[2])
+	}
+	return major > 2 || (major == 2 && minor >= 6)
 }
 
 func qwenModelSupportsVision(name string) bool {

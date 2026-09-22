@@ -1269,14 +1269,10 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 // generateAssistantForMessageOpenAIChatCompletions drives a chat turn through an
 // OpenAI-compatible Chat Completions API (Mistral, DeepSeek, Qwen, Xiaomi MiMo).
 // Text-only models strip multimodal segments via PrepareForTextOnlyChatCompletions;
-// vision-capable models (Gemini on its own path; Qwen 3.7+/Mistral medium+ heuristics
-// here) keep images. Gemini uses a separate path for tool-call compatibility.
+// vision-capable models (Gemini on its own path; Qwen 3.7+/Mistral medium+/MiMo 2.6+
+// heuristics here) keep images. Gemini uses a separate path for tool-call compatibility.
 func (a *Agent) generateAssistantForMessageOpenAIChatCompletions(ctx context.Context, userID uuid.UUID, chatJob *models.Job, chatMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext) (*models.ChatMessage, *provider.GenerateResponse, error) {
-	renderCtx := modelContext.Clone()
-	if !models.ChatCompletionsSupportsVision(chatCtx.modelProvider, chatCtx.model) {
-		renderCtx.PrepareForTextOnlyChatCompletions()
-	}
-	params := renderCtx.BuildOpenAIChatCompletionParams(chatCtx.model)
+	params := buildOpenAIChatCompletionsParams(chatCtx, modelContext)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
 	functionTools := openAIChatCompletionFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
@@ -1288,6 +1284,18 @@ func (a *Agent) generateAssistantForMessageOpenAIChatCompletions(ctx context.Con
 	}
 
 	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, generationOptions{provider: string(chatCtx.modelProvider)})
+}
+
+// buildOpenAIChatCompletionsParams renders the model context for an OpenAI-compatible
+// Chat Completions turn. Image payloads are kept only when the model accepts vision
+// input (models.ChatCompletionsSupportsVision); otherwise they are stripped so a
+// text-only model never receives image parts it would reject.
+func buildOpenAIChatCompletionsParams(chatCtx *chatContext, modelContext *provider.ModelContext) openai.ChatCompletionNewParams {
+	renderCtx := modelContext.Clone()
+	if !models.ChatCompletionsSupportsVision(chatCtx.modelProvider, chatCtx.model) {
+		renderCtx.PrepareForTextOnlyChatCompletions()
+	}
+	return renderCtx.BuildOpenAIChatCompletionParams(chatCtx.model)
 }
 
 func (a *Agent) openAIChatCompletionsAdapter(chatCtx *chatContext, params openai.ChatCompletionNewParams, functionTools []openai.ChatCompletionToolUnionParam, disabledTools map[string]bool) (provider.AgentAdapter, error) {
