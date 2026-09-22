@@ -1,5 +1,5 @@
 
-import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, input, output, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, Injector, afterNextRender, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
 
 import { ChatMessage } from '../../../../core/models/message.model';
 import { ToolCall } from '../../../../core/models/toolcall.model';
@@ -229,6 +229,7 @@ export class MessageListComponent {
   private lastScrollTop = 0;
   private lastCheckpointMessageId: string | null = null;
   private readonly groupsLengthForScrollRestore = computed(() => this.groups().length);
+  private readonly injector = inject(Injector);
 
   constructor() {
     effect(() => {
@@ -306,35 +307,53 @@ export class MessageListComponent {
   }
 
   /**
-   * Scroll a message into view and briefly flash it, resolving to whether it succeeded. Retries
-   * every frame up to `timeoutMs` so it works whether the target is already rendered or was just
-   * loaded — a jump to a far-back bookmark can prepend hundreds of bubbles, and rendering them
-   * takes well over the old ~0.5s window, which used to make the first jump silently give up.
-   * Resolves false if the message never renders within the budget.
+   * Scroll a message into view and briefly flash it, resolving to whether it succeeded. Works
+   * whether the target is already rendered or was just loaded — a jump to a far-back bookmark can
+   * prepend hundreds of bubbles, and their render is a separate async step from the fetch that the
+   * caller already awaited. Rather than blindly polling, wait on Angular's render lifecycle:
+   * `afterNextRender` fires once the just-loaded rows are in the DOM. A bounded frame poll backs it
+   * up so a pathological case (no render actually scheduled) resolves false instead of hanging.
    */
   scrollToMessage(messageId: string, timeoutMs = 8000): Promise<boolean> {
     // Stop following the tail up front so a large prepend's render can't bounce the view back to
     // the bottom while we wait for the target element to appear.
     this.stickyToBottom.set(false);
-    const deadline = performance.now() + timeoutMs;
     return new Promise<boolean>(resolve => {
-      const tryScroll = (): void => {
+      let settled = false;
+      const finish = (ok: boolean): void => {
+        if (settled) return;
+        settled = true;
+        resolve(ok);
+      };
+      const tryScroll = (): boolean => {
         const container = this.scrollContainer()?.nativeElement;
         const target = container?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
-        if (container && target) {
-          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          target.classList.add('message-flash');
-          setTimeout(() => target.classList.remove('message-flash'), 1800);
-          resolve(true);
-          return;
-        }
+        if (!container || !target) return false;
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.add('message-flash');
+        setTimeout(() => target.classList.remove('message-flash'), 1800);
+        finish(true);
+        return true;
+      };
+
+      // Fast path: already on screen.
+      if (tryScroll()) return;
+
+      // Primary: the prepend that just landed is pending a render; scroll the moment it commits.
+      afterNextRender(() => tryScroll(), { injector: this.injector });
+
+      // Safety net: if that render never produces the target, don't spin forever.
+      const deadline = performance.now() + timeoutMs;
+      const poll = (): void => {
+        if (settled) return;
+        if (tryScroll()) return;
         if (performance.now() < deadline) {
-          requestAnimationFrame(tryScroll);
+          requestAnimationFrame(poll);
         } else {
-          resolve(false);
+          finish(false);
         }
       };
-      requestAnimationFrame(tryScroll);
+      requestAnimationFrame(poll);
     });
   }
 
