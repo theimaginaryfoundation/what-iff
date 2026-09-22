@@ -230,6 +230,10 @@ export class MessageListComponent {
   private lastCheckpointMessageId: string | null = null;
   private readonly groupsLengthForScrollRestore = computed(() => this.groups().length);
   private readonly injector = inject(Injector);
+  // True while an explicit jump (e.g. to a bookmark) is loading + scrolling. Suppresses the
+  // auto-scroll-to-bottom: a jump prepends older batches, which grows the group count and would
+  // otherwise trip the tail digest and snap the reader back to the bottom mid-jump.
+  private isJumping = false;
 
   constructor() {
     effect(() => {
@@ -245,6 +249,10 @@ export class MessageListComponent {
       const digest = this.tailScrollDigest();
       if (!digest) return;
       if (!this.stickyToBottom()) return;
+      // An in-progress jump prepends older batches (growing the group count / digest) while the
+      // reader is anchored at the bottom; don't let that yank them back down before we land on
+      // the target. The signal deps above are still read, so normal tail auto-scroll resumes after.
+      if (this.isJumping) return;
       if (digest === this.lastAppliedScrollDigest) return;
       const tail = lastMessageInGroups(this.groups());
       const tailId = tail?.id ?? null;
@@ -371,7 +379,9 @@ export class MessageListComponent {
     const scrollTop = target.scrollTop;
     const distanceFromBottom = target.scrollHeight - scrollTop - target.clientHeight;
     this.isNearBottom.set(distanceFromBottom < 96);
-    this.stickyToBottom.set(distanceFromBottom <= AUTO_SCROLL_BOTTOM_EPSILON_PX);
+    // While jumping, keep sticky off: a prepend that lands the reader momentarily near the bottom
+    // must not re-arm the auto-scroll and fight the jump.
+    this.stickyToBottom.set(!this.isJumping && distanceFromBottom <= AUTO_SCROLL_BOTTOM_EPSILON_PX);
     // Infinite scroll-up: pull older history as the user nears the top so scrolling back
     // through a long thread is continuous instead of a button-click-per-page grind. Only when
     // actively scrolling *up* — otherwise the initial auto-scroll-to-bottom (and the anchor
@@ -379,9 +389,23 @@ export class MessageListComponent {
     // trigger spurious loads.
     const scrollingUp = scrollTop < this.lastScrollTop;
     this.lastScrollTop = scrollTop;
-    if (scrollingUp && scrollTop <= OLDER_LOAD_THRESHOLD_PX) {
+    if (!this.isJumping && scrollingUp && scrollTop <= OLDER_LOAD_THRESHOLD_PX) {
       this.requestLoadOlder();
     }
+  }
+
+  /**
+   * Bracket an explicit jump (e.g. to a bookmark). `beginJump` stops following the tail so the
+   * older batches the jump loads can't snap the view back to the bottom; `endJump` re-enables
+   * normal tail-following once we've landed (or the jump failed). Always pair them.
+   */
+  beginJump(): void {
+    this.isJumping = true;
+    this.stickyToBottom.set(false);
+  }
+
+  endJump(): void {
+    this.isJumping = false;
   }
 
   /** Record the first message currently in view and its viewport position, to re-pin after prepend. */

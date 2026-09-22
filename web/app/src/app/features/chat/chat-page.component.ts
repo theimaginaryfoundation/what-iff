@@ -725,13 +725,18 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     }
     this.bookmarkJumpPending.set(true);
     this.bookmarkJumpStatus.set('Jumping to bookmark…');
+    // Stop following the tail for the whole jump (load + scroll), not just the scroll: the older
+    // batches prepend while the reader sits at the bottom, and without this they'd snap the view
+    // back down before we reach the target.
+    const list = this.messageList();
+    list?.beginJump();
     try {
       const found = await this.session.loadOlderMessagesUntil(bookmark.id);
       if (!found) {
         this.failBookmarkJump();
         return;
       }
-      const scrolled = (await this.messageList()?.scrollToMessage(bookmark.id)) ?? false;
+      const scrolled = (await list?.scrollToMessage(bookmark.id)) ?? false;
       if (!scrolled) {
         this.failBookmarkJump();
         return;
@@ -740,6 +745,8 @@ export class ChatPageComponent implements OnInit, OnDestroy {
       this.bookmarkJumpStatus.set(null);
     } catch {
       this.failBookmarkJump();
+    } finally {
+      list?.endJump();
     }
   }
 
