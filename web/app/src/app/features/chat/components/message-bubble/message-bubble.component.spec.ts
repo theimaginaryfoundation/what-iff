@@ -126,6 +126,81 @@ describe('MessageBubbleComponent', () => {
     });
 });
 
+describe('MessageBubbleComponent branching', () => {
+    let fixture: ComponentFixture<MessageBubbleComponent>;
+
+    beforeEach(async () => {
+        await TestBed.configureTestingModule({
+            imports: [MessageBubbleComponent],
+            providers: [provideZonelessChangeDetection(), provideMarkdown()],
+        }).compileComponents();
+        fixture = TestBed.createComponent(MessageBubbleComponent);
+        fixture.componentRef.setInput('displayContent', 'Hello');
+    });
+
+    it('offers "What if…" on user messages and "Branch" on replies, emitting the message', () => {
+        const spy = vi.fn();
+        fixture.componentInstance.branch.subscribe(spy);
+
+        fixture.componentRef.setInput('message', message('User'));
+        fixture.detectChanges();
+        const userBtn = fixture.nativeElement.querySelector('.bubble__branch') as HTMLButtonElement;
+        expect(userBtn.textContent).toContain('What if…');
+        userBtn.click();
+        expect(spy).toHaveBeenCalledWith(expect.objectContaining({ id: 'm1', origin: 'User' }));
+
+        fixture.componentRef.setInput('message', message('Assistant'));
+        fixture.detectChanges();
+        expect((fixture.nativeElement.querySelector('.bubble__branch') as HTMLElement).textContent).toContain('Branch');
+    });
+
+    it('hides the branch action when disabled or for optimistic/placeholder rows', () => {
+        fixture.componentRef.setInput('message', message('User'));
+        fixture.componentRef.setInput('branchingEnabled', false);
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.bubble__branch')).toBeNull();
+
+        fixture.componentRef.setInput('branchingEnabled', true);
+        fixture.componentRef.setInput('message', { ...message('User'), id: 'temp-123' });
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.bubble__branch')).toBeNull();
+
+        fixture.componentRef.setInput('message', { ...message('User'), id: 'error-9' });
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.bubble__branch')).toBeNull();
+
+        fixture.componentRef.setInput('message', pendingAssistantMessage());
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.bubble__branch')).toBeNull();
+    });
+
+    it('shows a branch marker listing branches and opens one', () => {
+        const spy = vi.fn();
+        fixture.componentInstance.openBranch.subscribe(spy);
+        fixture.componentRef.setInput('message', message('Assistant'));
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.bubble__branches')).toBeNull();
+
+        const branches = [
+            { id: 'b1', name: 'What if: Lisbon', forked_from_message_id: 'm1', created_at: '2026-01-02T00:00:00Z' },
+            { id: 'b2', name: 'What if: Porto', forked_from_message_id: 'm1', created_at: '2026-01-01T00:00:00Z' },
+        ];
+        fixture.componentRef.setInput('branches', branches);
+        fixture.detectChanges();
+
+        const marker = fixture.nativeElement.querySelector('.bubble__branches') as HTMLElement;
+        expect(marker.querySelector('summary')?.textContent).toContain('2 branches');
+        const items = marker.querySelectorAll('.bubble__branches-item');
+        expect(items.length).toBe(2);
+        (items[1] as HTMLButtonElement).click();
+        expect(spy).toHaveBeenCalledWith(branches[1]);
+
+        fixture.componentRef.setInput('branches', [branches[0]]);
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.bubble__branches summary')?.textContent).toContain('1 branch');
+    });
+});
+
 function message(origin: ChatMessage['origin']): ChatMessage {
     return {
         id: 'm1',

@@ -18,6 +18,7 @@ import { RitualViewService } from '../../core/services/ritual-view.service';
 import {
   ArrowLeftIconComponent,
   ArrowRightIconComponent,
+  BranchIconComponent,
   GearIconComponent,
   PlusIconComponent,
   SearchIconComponent,
@@ -58,6 +59,7 @@ const SIDEBAR_THREAD_AVATAR_SIZE = 30;
     AppSidebarHeaderComponent,
     ArrowLeftIconComponent,
     ArrowRightIconComponent,
+    BranchIconComponent,
     GearIconComponent,
     PlusIconComponent,
     SearchIconComponent,

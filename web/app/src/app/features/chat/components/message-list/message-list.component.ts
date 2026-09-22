@@ -2,6 +2,7 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, input, output, signal, viewChild } from '@angular/core';
 
 import { ChatMessage } from '../../../../core/models/message.model';
+import { ChatBranchSummary } from '../../../../core/models/chat.model';
 import { ToolCall } from '../../../../core/models/toolcall.model';
 import { GroupedItem } from '../../helpers/message-grouping.helpers';
 import { MessageGroupComponent } from '../message-group/message-group.component';
@@ -55,6 +56,10 @@ interface AssistantVisual {
                 (showContext)="showContext.emit($event)"
                 (toggleBookmark)="toggleBookmark.emit($event)"
                 (retryUserMessage)="retryUserMessage.emit($event)"
+                [branchesByMessage]="branchesByMessage()"
+                [branchingEnabled]="branchingEnabled()"
+                (branch)="branch.emit($event)"
+                (openBranch)="openBranch.emit($event)"
               />
             }
             @case ('tool-call-group') {
@@ -206,6 +211,11 @@ export class MessageListComponent {
   readonly toggleBookmark = output<ChatMessage>();
   readonly openToolCallDetail = output<ToolCall>();
   readonly retryUserMessage = output<ChatMessage>();
+  /** Branches keyed by the message they were taken from ("What if…" lineage). */
+  readonly branchesByMessage = input<ReadonlyMap<string, readonly ChatBranchSummary[]>>(new Map());
+  readonly branchingEnabled = input(true);
+  readonly branch = output<ChatMessage>();
+  readonly openBranch = output<ChatBranchSummary>();
   readonly scrollToBottomRequested = output<void>();
   readonly scrollContainer = viewChild<ElementRef<HTMLElement>>('scrollContainer');
 

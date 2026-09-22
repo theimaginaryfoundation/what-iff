@@ -23,8 +23,46 @@ export interface Chat {
    * restored (unarchived) and its summary is generated in the background.
    */
   rehydration_state?: string;
+  /** Set on "What if…" branches: the thread this chat was branched from (may since be deleted). */
+  forked_from_chat_id?: string;
+  /** Set on branches: the message in the parent thread where this branch diverged. */
+  forked_from_message_id?: string;
   created_at: string;
   updated_at: string;
+}
+
+/** Request body for `POST /chat/{id}/fork`. */
+export interface ForkChatRequest {
+  message_id: string;
+  /** Keep the branch-point message (default true); false ends the branch just before it. */
+  include_message?: boolean;
+  name?: string;
+}
+
+export interface ForkChatResponse {
+  chat: Chat;
+  copied_messages: number;
+}
+
+/** A thread branched directly off another thread. */
+export interface ChatBranchSummary {
+  id: string;
+  name: string;
+  forked_from_message_id?: string;
+  last_message_time?: string;
+  created_at: string;
+}
+
+/** `GET /chat/{id}/lineage`: where a thread came from and what branched off it. */
+export interface ChatLineage {
+  parent: {
+    id: string;
+    message_id?: string;
+    /** Empty when the parent was deleted. */
+    name?: string;
+    deleted: boolean;
+  } | null;
+  branches: ChatBranchSummary[];
 }
 
 export interface ChatFilters {

@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 
 import { ChatMessage } from '../../../../core/models/message.model';
+import { ChatBranchSummary } from '../../../../core/models/chat.model';
 import { AuthImagePipe } from '../../../../core/pipes/auth-image.pipe';
 import { MessageBubbleComponent } from '../message-bubble/message-bubble.component';
 
@@ -94,6 +95,10 @@ interface AssistantVisual {
             (copy)="copy.emit($event)"
             (showContext)="showContext.emit($event)"
             (toggleBookmark)="toggleBookmark.emit($event)"
+            [branches]="branchesByMessage().get(message.id) ?? noBranches"
+            [branchingEnabled]="branchingEnabled()"
+            (branch)="branch.emit($event)"
+            (openBranch)="openBranch.emit($event)"
           />
         }
         @if (userGenerationError(); as errInfo) {
@@ -421,6 +426,12 @@ export class MessageGroupComponent {
   readonly showContext = output<ChatMessage>();
   readonly toggleBookmark = output<ChatMessage>();
   readonly retryUserMessage = output<ChatMessage>();
+  /** Branches keyed by the message they were taken from. */
+  readonly branchesByMessage = input<ReadonlyMap<string, readonly ChatBranchSummary[]>>(new Map());
+  readonly branchingEnabled = input(true);
+  readonly branch = output<ChatMessage>();
+  readonly openBranch = output<ChatBranchSummary>();
+  protected readonly noBranches: readonly ChatBranchSummary[] = [];
 
   /** When false, hide the entire assistant image column (expression, portrait, thinking). */
   readonly showAssistantAvatar = computed(() => this.assistantVisual()?.expressionsEnabled !== false);

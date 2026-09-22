@@ -2,15 +2,16 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 
 import { ChatMessage } from '../../../../core/models/message.model';
+import { ChatBranchSummary } from '../../../../core/models/chat.model';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../../chat.constants';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
-import { StarIconComponent } from '../../../../shared/ui/icons/icons';
+import { BranchIconComponent, StarIconComponent } from '../../../../shared/ui/icons/icons';
 import { MessageContentComponent } from '../message-content/message-content.component';
 
 @Component({
   selector: 'app-message-bubble',
   standalone: true,
-  imports: [MessageContentComponent, TooltipDirective, StarIconComponent],
+  imports: [MessageContentComponent, TooltipDirective, StarIconComponent, BranchIconComponent],
   template: `
     <article
       class="bubble"
@@ -39,6 +40,24 @@ import { MessageContentComponent } from '../message-content/message-content.comp
           }
         </div>
       }
+      @if (branches().length && !isPendingPlaceholder()) {
+        <details class="bubble__branches">
+          <summary class="bubble__branches-toggle" [attr.aria-label]="branchCountLabel() + ' from this message'">
+            <ui-branch-icon [size]="11" />
+            <span>{{ branchCountLabel() }}</span>
+          </summary>
+          <ul class="bubble__branches-list" role="list">
+            @for (b of branches(); track b.id) {
+              <li>
+                <button type="button" class="bubble__branches-item" (click)="openBranch.emit(b)">
+                  <span class="bubble__branches-name">{{ b.name }}</span>
+                  <span class="bubble__branches-date">{{ shortDate(b.last_message_time || b.created_at) }}</span>
+                </button>
+              </li>
+            }
+          </ul>
+        </details>
+      }
       @if (!isPendingPlaceholder()) {
         <div class="bubble__meta" [class.bubble__meta--assistant]="message().origin === 'Assistant'">
           <div class="bubble__meta-start">
@@ -59,6 +78,18 @@ import { MessageContentComponent } from '../message-content/message-content.comp
               <ui-star-icon [size]="12" [filled]="!!message().bookmarked" />
               <span>{{ message().bookmarked ? 'Saved' : 'Save' }}</span>
             </button>
+            @if (canBranch()) {
+              <button
+                type="button"
+                class="bubble__branch"
+                [attr.aria-label]="branchActionTitle()"
+                [title]="branchActionTitle()"
+                (click)="branch.emit(message())"
+              >
+                <ui-branch-icon [size]="12" />
+                <span>{{ message().origin === 'User' ? 'What if…' : 'Branch' }}</span>
+              </button>
+            }
           </div>
           <div class="bubble__meta-end">
             @if (hasContextBreakdown()) {
@@ -249,6 +280,104 @@ import { MessageContentComponent } from '../message-content/message-content.comp
     .bubble__bookmark:hover,
     .bubble__bookmark:focus-visible { opacity: 1; }
 
+    .bubble__branch {
+      align-items: center;
+      border: 1px solid var(--color-border-base);
+      border-radius: 999px;
+      color: var(--color-text-muted);
+      display: inline-flex;
+      flex-shrink: 0;
+      gap: 0.2rem;
+      opacity: 0.8;
+      padding: 0.125rem 0.375rem;
+      transition: background 150ms ease, color 150ms ease, opacity 150ms ease;
+    }
+
+    .bubble__branch:hover,
+    .bubble__branch:focus-visible {
+      background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+      color: var(--color-accent);
+      opacity: 1;
+    }
+
+    .bubble__branches {
+      font-size: 0.6875rem;
+      margin-top: 0.25rem;
+      position: relative;
+    }
+
+    .bubble--user .bubble__branches {
+      align-self: flex-end;
+      text-align: right;
+    }
+
+    .bubble__branches-toggle {
+      align-items: center;
+      border: 1px dashed color-mix(in srgb, var(--color-accent) 45%, var(--color-border-base));
+      border-radius: 999px;
+      color: var(--color-accent);
+      cursor: pointer;
+      display: inline-flex;
+      gap: 0.25rem;
+      list-style: none;
+      padding: 0.0625rem 0.4375rem;
+      user-select: none;
+    }
+
+    .bubble__branches-toggle::-webkit-details-marker { display: none; }
+
+    .bubble__branches[open] .bubble__branches-toggle {
+      background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+      border-style: solid;
+    }
+
+    .bubble__branches-list {
+      background: var(--color-surface-card, var(--color-surface-base));
+      border: 1px solid var(--color-border-base);
+      border-radius: 0.5rem;
+      box-shadow: 0 6px 18px rgb(0 0 0 / 0.18);
+      display: flex;
+      flex-direction: column;
+      margin-top: 0.25rem;
+      max-width: min(20rem, 80vw);
+      min-width: 12rem;
+      padding: 0.25rem;
+      position: absolute;
+      z-index: 5;
+    }
+
+    .bubble--user .bubble__branches-list { right: 0; }
+
+    .bubble__branches-item {
+      align-items: baseline;
+      border-radius: 0.375rem;
+      color: var(--color-text-primary);
+      display: flex;
+      gap: 0.5rem;
+      justify-content: space-between;
+      padding: 0.375rem 0.5rem;
+      text-align: left;
+      width: 100%;
+    }
+
+    .bubble__branches-item:hover,
+    .bubble__branches-item:focus-visible {
+      background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+    }
+
+    .bubble__branches-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .bubble__branches-date {
+      color: var(--color-text-muted);
+      flex-shrink: 0;
+      font-size: 0.625rem;
+    }
+
     .bubble__bookmark--active {
       border-color: color-mix(in srgb, var(--bookmark-gold) 50%, var(--color-border-base));
       color: var(--bookmark-gold);
@@ -328,6 +457,30 @@ export class MessageBubbleComponent {
   readonly copy = output<ChatMessage>();
   readonly toggleBookmark = output<ChatMessage>();
   readonly showContext = output<ChatMessage>();
+  /** Branches taken off this message (rendered as an always-visible marker). */
+  readonly branches = input<readonly ChatBranchSummary[]>([]);
+  /** False hides the branch action (e.g. while a reply is generating or on archived threads). */
+  readonly branchingEnabled = input(true);
+  /** "What if…" on a user message (re-ask differently) or "Branch" on a reply (continue from it). */
+  readonly branch = output<ChatMessage>();
+  readonly openBranch = output<ChatBranchSummary>();
+
+  readonly canBranch = computed(() => {
+    const m = this.message();
+    // Optimistic ("temp-") and local error ("error-") rows have no server id to branch from.
+    return this.branchingEnabled() && !this.isPendingPlaceholder() && !/^(temp|error)-/.test(m.id);
+  });
+
+  readonly branchActionTitle = computed(() =>
+    this.message().origin === 'User'
+      ? 'What if you had said something else? Start a branch here and rewrite this message'
+      : 'Start a new branch that continues from this reply',
+  );
+
+  readonly branchCountLabel = computed(() => {
+    const n = this.branches().length;
+    return `${n} branch${n === 1 ? '' : 'es'}`;
+  });
 
   /** True for assistant replies that captured a Context X-ray snapshot. */
   readonly hasContextBreakdown = computed(() => {
