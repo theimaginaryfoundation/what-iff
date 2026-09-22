@@ -406,6 +406,14 @@ export class MessageListComponent {
 
   endJump(): void {
     this.isJumping = false;
+    // Critical: while jumping, the auto-scroll effect bailed at the sticky check every time, so it
+    // never advanced lastAppliedScrollDigest past the pre-jump (small group-count) value. The
+    // batches the jump prepended grew the group count, so the digest now differs — and the moment
+    // the smooth scroll's first onScroll re-arms stickyToBottom near the bottom, the effect would
+    // see that difference and snap to the bottom. We've deliberately parked away from the tail, so
+    // mark the current tail state as already-applied (and hold sticky off) to defuse that snap.
+    this.lastAppliedScrollDigest = this.tailScrollDigest();
+    this.stickyToBottom.set(false);
   }
 
   /** Record the first message currently in view and its viewport position, to re-pin after prepend. */
