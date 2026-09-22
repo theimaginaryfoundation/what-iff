@@ -306,27 +306,36 @@ export class MessageListComponent {
   }
 
   /**
-   * Scroll a message into view and briefly flash it. Retries across a few animation frames so
-   * it works whether the target is already rendered or was just loaded (e.g. jumping to a
-   * bookmark on an older page). No-op if the message never renders within the window.
+   * Scroll a message into view and briefly flash it, resolving to whether it succeeded. Retries
+   * every frame up to `timeoutMs` so it works whether the target is already rendered or was just
+   * loaded — a jump to a far-back bookmark can prepend hundreds of bubbles, and rendering them
+   * takes well over the old ~0.5s window, which used to make the first jump silently give up.
+   * Resolves false if the message never renders within the budget.
    */
-  scrollToMessage(messageId: string): void {
-    let attempts = 0;
-    const tryScroll = (): void => {
-      const container = this.scrollContainer()?.nativeElement;
-      const target = container?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
-      if (container && target) {
-        this.stickyToBottom.set(false);
-        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        target.classList.add('message-flash');
-        setTimeout(() => target.classList.remove('message-flash'), 1800);
-        return;
-      }
-      if (attempts++ < 30) {
-        requestAnimationFrame(tryScroll);
-      }
-    };
-    requestAnimationFrame(tryScroll);
+  scrollToMessage(messageId: string, timeoutMs = 8000): Promise<boolean> {
+    // Stop following the tail up front so a large prepend's render can't bounce the view back to
+    // the bottom while we wait for the target element to appear.
+    this.stickyToBottom.set(false);
+    const deadline = performance.now() + timeoutMs;
+    return new Promise<boolean>(resolve => {
+      const tryScroll = (): void => {
+        const container = this.scrollContainer()?.nativeElement;
+        const target = container?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
+        if (container && target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          target.classList.add('message-flash');
+          setTimeout(() => target.classList.remove('message-flash'), 1800);
+          resolve(true);
+          return;
+        }
+        if (performance.now() < deadline) {
+          requestAnimationFrame(tryScroll);
+        } else {
+          resolve(false);
+        }
+      };
+      requestAnimationFrame(tryScroll);
+    });
   }
 
   requestLoadOlder(): void {

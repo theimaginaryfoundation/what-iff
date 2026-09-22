@@ -42,6 +42,7 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
                   <button
                     type="button"
                     class="tb__item"
+                    [class.tb__item--pending]="isPending(b.id)"
                     role="menuitem"
                     [attr.tabindex]="activeIndex() === index ? 0 : -1"
                     (click)="select(b)"
@@ -57,16 +58,21 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
                   <button
                     type="button"
                     class="tb__remove"
+                    [class.tb__remove--pending]="isPending(b.id)"
                     tabindex="-1"
-                    [attr.aria-label]="'Remove bookmark: ' + (b.snippet || 'this message')"
-                    title="Remove bookmark"
-                    (click)="removeBookmark(b, $event)"
+                    [attr.aria-pressed]="isPending(b.id)"
+                    [attr.aria-label]="(isPending(b.id) ? 'Restore bookmark: ' : 'Remove bookmark: ') + (b.snippet || 'this message')"
+                    [title]="isPending(b.id) ? 'Restore bookmark' : 'Remove bookmark'"
+                    (click)="toggleRemoval(b, $event)"
                   >
-                    <ui-star-icon [size]="13" [filled]="true" />
+                    <ui-star-icon [size]="13" [filled]="!isPending(b.id)" />
                   </button>
                 </li>
               }
             </ul>
+            @if (pendingRemovals().size) {
+              <p class="tb__hint">Unstarred bookmarks are removed when you close this menu.</p>
+            }
           </div>
         }
       </div>
@@ -136,6 +142,8 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
       text-align: left;
     }
     .tb__item:hover { background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+    .tb__item--pending .tb__snippet { color: var(--color-text-muted); text-decoration: line-through; }
+    .tb__item--pending { opacity: 0.6; }
 
     .tb__remove {
       align-items: center;
@@ -154,6 +162,16 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
     .tb__remove:focus-visible {
       background: color-mix(in srgb, var(--bookmark-gold) 16%, transparent);
       opacity: 1;
+    }
+    /* Marked for removal: hollow star, muted, so it reads as "will be removed" but is still here. */
+    .tb__remove--pending { color: var(--color-text-muted); opacity: 1; }
+
+    .tb__hint {
+      color: var(--color-text-muted);
+      font-size: 0.625rem;
+      line-height: 1.3;
+      margin: 0;
+      padding: 0.35rem 0.75rem 0.15rem;
     }
 
     .tb__badge {
@@ -182,10 +200,13 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
 export class ThreadBookmarksComponent {
   readonly bookmarks = input<MessageBookmark[]>([]);
   readonly jump = output<MessageBookmark>();
-  readonly remove = output<MessageBookmark>();
+  /** Emitted once, on menu close, with the ids the user left un-starred (empty emits are skipped). */
+  readonly commitRemovals = output<string[]>();
 
   readonly open = signal(false);
   readonly activeIndex = signal(0);
+  /** Ids the user has un-starred but not yet committed — removed only when the menu closes. */
+  readonly pendingRemovals = signal<Set<string>>(new Set());
 
   private readonly trigger = viewChild<ElementRef<HTMLButtonElement>>('trigger');
   private readonly menuItems = viewChildren<ElementRef<HTMLButtonElement>>('menuItem');
@@ -199,6 +220,9 @@ export class ThreadBookmarksComponent {
   }
 
   close(returnFocus = false): void {
+    if (this.open()) {
+      this.flushPendingRemovals();
+    }
     this.open.set(false);
     if (returnFocus) {
       queueMicrotask(() => this.trigger()?.nativeElement.focus());
@@ -210,14 +234,40 @@ export class ThreadBookmarksComponent {
     this.close(true);
   }
 
+  isPending(id: string): boolean {
+    return this.pendingRemovals().has(id);
+  }
+
   /**
-   * Remove a bookmark straight from the list — no need to scroll back to the message. The menu
-   * stays open so several can be cleared in a row; the parent refreshes the list, which drops the
-   * row. `stopPropagation` keeps the row's jump handler from also firing.
+   * Toggle a bookmark's "remove" state without saving yet — the star hollows and the row dims but
+   * stays in the list. Nothing is persisted until the menu closes, so a mis-click 100s of messages
+   * back is freely undoable (click again to restore) instead of an instant, obnoxious auto-save.
+   * `stopPropagation` keeps the row's jump handler from also firing.
    */
-  removeBookmark(bookmark: MessageBookmark, event: Event): void {
+  toggleRemoval(bookmark: MessageBookmark, event: Event): void {
     event.stopPropagation();
-    this.remove.emit(bookmark);
+    this.pendingRemovals.update(current => {
+      const next = new Set(current);
+      if (next.has(bookmark.id)) {
+        next.delete(bookmark.id);
+      } else {
+        next.add(bookmark.id);
+      }
+      return next;
+    });
+  }
+
+  /** Commit queued removals to the parent (once) and reset, e.g. when the menu closes. */
+  private flushPendingRemovals(): void {
+    const pending = this.pendingRemovals();
+    if (pending.size === 0) return;
+    // Only commit ids still present in the current list, in case it changed underneath us.
+    const present = new Set(this.bookmarks().map(b => b.id));
+    const ids = [...pending].filter(id => present.has(id));
+    this.pendingRemovals.set(new Set());
+    if (ids.length > 0) {
+      this.commitRemovals.emit(ids);
+    }
   }
 
   onMenuKeydown(event: KeyboardEvent, currentIndex: number): void {

@@ -86,7 +86,7 @@
           </div>
         </div>
         <div class="chat-page__title-actions">
-          <app-thread-bookmarks [bookmarks]="bookmarks()" (jump)="jumpToBookmark($event)" (remove)="removeBookmarkFromNavigator($event)" />
+          <app-thread-bookmarks [bookmarks]="bookmarks()" (jump)="jumpToBookmark($event)" (commitRemovals)="commitBookmarkRemovals($event)" />
           <button type="button" class="chat-page__export" (click)="exportActiveChat()" aria-label="Export thread">
             <ui-file-icon [size]="12" />
             <span>Export</span>
@@ -99,7 +99,7 @@
         @if (session.error()) {
           <p class="chat-page__error" role="alert">{{ session.error() }}</p>
         }
-        @if (copyFeedback() || exportFeedback() || bookmarkJumpStatus(); as status) {
+        @if (copyFeedback() || exportFeedback(); as status) {
           <p class="chat-page__status" role="status" aria-live="polite">{{ status }}</p>
         }
       </header>
@@ -159,6 +159,15 @@
               <ui-layers-icon [size]="14" />
             </button>
           </nav>
+
+          @if (bookmarkJumpStatus(); as status) {
+            <div class="chat-page__jump-toast" role="status" aria-live="polite">
+              @if (bookmarkJumpPending()) {
+                <span class="chat-page__jump-spinner" aria-hidden="true"></span>
+              }
+              <span>{{ status }}</span>
+            </div>
+          }
 
           <app-message-list
             [conversationId]="session.thread()?.id ?? null"
