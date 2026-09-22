@@ -19,3 +19,19 @@ func TestEnqueueExpressionGridJob_NilDatastoreReturnsError(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorContains(t, err, "agent not configured")
 }
+
+func TestEnqueueExpressionCandidatesJob_NilDatastoreReturnsError(t *testing.T) {
+	t.Parallel()
+
+	a := &Agent{}
+	job, err := a.EnqueueExpressionCandidatesJob(context.Background(), uuid.New(), uuid.New(), ExpressionGridKeys, nil)
+	require.Nil(t, job)
+	require.ErrorContains(t, err, "agent not configured")
+}
+
+func TestGenerateExpressionCandidates_NotConfigured(t *testing.T) {
+	t.Parallel()
+
+	_, err := (&Agent{}).GenerateExpressionCandidates(context.Background(), uuid.New(), uuid.New(), ExpressionGridKeys, nil)
+	require.ErrorContains(t, err, "agent not configured")
+}

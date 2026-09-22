@@ -35,3 +35,31 @@ func TestBuildImageGenerateParams_AspectRatioMapsToSize(t *testing.T) {
 		})
 	}
 }
+
+func TestEditImagePNGBase64WithQuality_Validation(t *testing.T) {
+	t.Parallel()
+	p := &OpenAIProvider{}
+	_, err := p.EditImagePNGBase64WithQuality(context.Background(), "  ", ImageQualityMedium, []byte{1}, "image/png")
+	require.ErrorContains(t, err, "prompt is required")
+	_, err = p.EditImagePNGBase64WithQuality(context.Background(), "a cat", ImageQualityMedium, nil, "image/png")
+	require.ErrorContains(t, err, "reference image is required")
+}
+
+func TestBuildImageEditParams(t *testing.T) {
+	t.Parallel()
+	params := buildImageEditParams("a cat", ImageQualityMedium, []byte{1, 2, 3}, "image/jpeg")
+	require.Equal(t, ImageEngine, string(params.Model))
+	require.Equal(t, "medium", string(params.Quality))
+	require.Equal(t, "1024x1024", string(params.Size))
+	require.Equal(t, "png", string(params.OutputFormat))
+	named, ok := params.Image.OfFile.(interface{ Filename() string })
+	require.True(t, ok)
+	require.Equal(t, "reference.jpg", named.Filename())
+
+	// Unknown MIME types fall back to PNG naming.
+	params = buildImageEditParams("a cat", ImageQualityLow, []byte{1}, "image/heic")
+	named, ok = params.Image.OfFile.(interface{ Filename() string })
+	require.True(t, ok)
+	require.Equal(t, "reference.png", named.Filename())
+	require.Equal(t, "low", string(params.Quality))
+}

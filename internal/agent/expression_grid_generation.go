@@ -48,15 +48,58 @@ Treat metaphorical or poetic language as tone and mood instruction, not as speci
 Express personality through facial expression, posture, clothing, styling, lighting, and composition. Include physical appearance, build, distinguishing features, art style, and a restrained palette description with 2–3 color anchors. 
 Output only the prose paragraph.`
 
-const expressionGridCanvasInstructions = `Render as a single square image: a 3×3 grid of nine equally-sized portrait panels on one flush canvas.
+// expressionGridCanvasTemplate is the canvas prompt; %s is the row-major layout built from the requested keys.
+const expressionGridCanvasTemplate = `Render as a single square image: a 3×3 grid of nine equally-sized portrait panels on one flush canvas.
 
 Requirements:
-- Nine panels in a perfect 3×3 layout (row-major: happy | content | sad; angry | surprised | confused; tired | in-love | thinking).
+- Nine panels in a perfect 3×3 layout (row-major: %s).
 - Panels must meet edge-to-edge with NO gutters, NO margins, NO white strips or blank gaps between cells — dividing lines (if any) must be hair-thin and drawn inside the art, not empty whitespace.
 - Do not add outer margins or padding around the grid; artwork fills the square edge-to-edge.
+- Do not render any text, captions, or labels in the panels.
 - The same character appears in every panel with consistent design; square composition, readable faces, consistent lighting and style.
 
 Match the character design described in the preceding paragraph.`
+
+// expressionGridReferenceInstructions is appended when a reference image is sent to the image model.
+const expressionGridReferenceInstructions = `The attached image is a style and character reference: match its art style, rendering technique, palette, and character design as closely as possible. Do not copy its composition or framing — produce the 3×3 expression grid described above.`
+
+// buildExpressionGridCanvasInstructions renders the canvas prompt for nine row-major expression keys.
+// Keys are humanized ("in-love" → "in love") since the image model reads them as prose.
+func buildExpressionGridCanvasInstructions(keys []string) string {
+	rows := make([]string, 0, 3)
+	for r := 0; r < 3; r++ {
+		cells := make([]string, 0, 3)
+		for c := 0; c < 3; c++ {
+			if idx := r*3 + c; idx < len(keys) {
+				cells = append(cells, humanizeExpressionKey(keys[idx]))
+			}
+		}
+		rows = append(rows, strings.Join(cells, " | "))
+	}
+	return fmt.Sprintf(expressionGridCanvasTemplate, strings.Join(rows, "; "))
+}
+
+// truncateExpressionGridPrompt caps the image prompt at the model's accepted length.
+func truncateExpressionGridPrompt(prompt string) string {
+	if len(prompt) > 16000 {
+		return prompt[:16000]
+	}
+	return prompt
+}
+
+// humanizeExpressionKey turns a URL-safe key into prompt prose.
+func humanizeExpressionKey(key string) string {
+	return strings.NewReplacer("-", " ", "_", " ").Replace(strings.TrimSpace(key))
+}
+
+// expressionGridReference is an optional reference image for grid generation.
+type expressionGridReference struct {
+	bytes []byte
+	mime  string
+	// sendToImageModel also passes the reference to the image model (edit endpoint),
+	// not only to the likeness pass.
+	sendToImageModel bool
+}
 
 // GenerateDefaultExpressionGrid runs likeness (nano) + one medium-quality square image generation,
 // splices the 3×3 grid into PNG cells, uploads all nine cells, and upserts each expression key.
@@ -68,15 +111,8 @@ Match the character design described in the preceding paragraph.`
 //     are unchanged — callers may retry; subsequent runs overwrite keys that succeed again.
 //   - HTTP handlers may skip work when all default keys already have images unless force=true (see personality handler).
 func (a *Agent) GenerateDefaultExpressionGrid(ctx context.Context, userID, personalityID uuid.UUID) ([]models.PersonalityExpression, error) {
-	if a == nil || a.ds == nil || a.OpenAIProvider == nil {
-		return nil, fmt.Errorf("expression grid: agent not configured")
-	}
-	// Mock/local mode: deliberate denial — grid generation is inference + image calls.
-	if a.nonVendorLLM() {
-		return nil, fmt.Errorf("expression grid generation is disabled under LLM_BACKEND=mock/local")
-	}
-	if a.fileStore == nil {
-		return nil, fmt.Errorf("expression grid: file store not configured")
+	if err := a.checkExpressionGridConfigured(); err != nil {
+		return nil, err
 	}
 
 	person, err := a.ds.GetPersonality(ctx, userID, personalityID)
@@ -94,35 +130,90 @@ func (a *Agent) GenerateDefaultExpressionGrid(ctx context.Context, userID, perso
 
 	ctx = telemetry.WithCallPath(ctx, telemetry.CallPathExpressionGrid)
 
-	// Resolve reference image bytes from the cover image when available.
-	var referenceImageBytes []byte
-	var referenceImageMIME string
+	// The cover image, when present, grounds the likeness pass only.
+	var ref expressionGridReference
 	if person.CoverImageID != nil {
-		// GetFileAttachment already enforces user ownership; an error here means
-		// the attachment is missing or cross-user, so we skip gracefully.
-		coverAtt, err := a.ds.GetFileAttachment(ctx, userID, *person.CoverImageID)
+		ref.bytes, ref.mime = a.loadExpressionReferenceImage(ctx, userID, *person.CoverImageID)
+	}
+
+	cells, err := a.generateExpressionGridCells(ctx, person, ExpressionGridKeys, ref)
+	if err != nil {
+		return nil, err
+	}
+
+	for i, key := range ExpressionGridKeys {
+		imgID, err := a.uploadExpressionCellAttachment(ctx, userID, personalityID, key, cells[i])
 		if err != nil {
-			a.logger.Warn("expression grid: failed to load cover image for reference; proceeding without it",
-				zap.String("cover_image_id", person.CoverImageID.String()),
-				zap.Error(err))
-		} else if coverAtt != nil {
-			// ResolveAttachmentImageBytes returns (bytes, mimeType); key-miss errors are
-			// logged internally at debug level, so we warn only when bytes are empty.
-			rawBytes, rawMIME := storage.ResolveAttachmentImageBytes(ctx, a.logger, a.fileStore, userID, coverAtt, false)
-			if len(rawBytes) > maxExpressionReferenceImageBytes {
-				a.logger.Warn("expression grid: reference image exceeds size limit; proceeding without reference",
-					zap.String("cover_image_id", person.CoverImageID.String()),
-					zap.Int("bytes", len(rawBytes)),
-					zap.Int("limit", maxExpressionReferenceImageBytes))
-			} else if len(rawBytes) == 0 {
-				a.logger.Warn("expression grid: cover image resolved to empty bytes; proceeding without reference",
-					zap.String("cover_image_id", person.CoverImageID.String()))
-			}
-			referenceImageBytes, referenceImageMIME = capExpressionReferenceImage(rawBytes, rawMIME)
+			return nil, fmt.Errorf("expression %q: %w", key, err)
+		}
+		req := models.UpdatePersonalityExpressionRequest{
+			ImageSet: true,
+			ImageID:  &imgID,
+		}
+		if _, err := a.ds.UpsertPersonalityExpression(ctx, userID, personalityID, key, req); err != nil {
+			return nil, fmt.Errorf("expression %q: upsert expression: %w", key, err)
 		}
 	}
 
-	likeness, err := a.inferExpressionGridLikeness(ctx, strings.TrimSpace(person.SystemPrompt), referenceImageBytes, referenceImageMIME)
+	out, err := a.ds.ListPersonalityExpressions(ctx, userID, personalityID)
+	if err != nil {
+		return nil, fmt.Errorf("list expressions after grid: %w", err)
+	}
+	return out, nil
+}
+
+func (a *Agent) checkExpressionGridConfigured() error {
+	if a == nil || a.ds == nil || a.OpenAIProvider == nil {
+		return fmt.Errorf("expression grid: agent not configured")
+	}
+	// Mock/local mode: deliberate denial — grid generation is inference + image calls.
+	if a.nonVendorLLM() {
+		return fmt.Errorf("expression grid generation is disabled under LLM_BACKEND=mock/local")
+	}
+	if a.fileStore == nil {
+		return fmt.Errorf("expression grid: file store not configured")
+	}
+	return nil
+}
+
+// loadExpressionReferenceImage resolves an owned image attachment to bytes for use as a reference.
+// Falls back to the thumbnail when the full image exceeds maxExpressionReferenceImageBytes.
+// Returns nil bytes (and logs) when the image cannot be used; callers proceed without a reference.
+func (a *Agent) loadExpressionReferenceImage(ctx context.Context, userID, attachmentID uuid.UUID) ([]byte, string) {
+	// GetFileAttachment already enforces user ownership; an error here means
+	// the attachment is missing or cross-user, so we skip gracefully.
+	att, err := a.ds.GetFileAttachment(ctx, userID, attachmentID)
+	if err != nil || att == nil {
+		a.logger.Warn("expression grid: failed to load reference image; proceeding without it",
+			zap.String("image_id", attachmentID.String()),
+			zap.Error(err))
+		return nil, ""
+	}
+	// ResolveAttachmentImageBytes returns (bytes, mimeType); key-miss errors are
+	// logged internally at debug level, so we warn only when bytes are empty.
+	rawBytes, rawMIME := storage.ResolveAttachmentImageBytes(ctx, a.logger, a.fileStore, userID, att, false)
+	if len(rawBytes) > maxExpressionReferenceImageBytes {
+		a.logger.Info("expression grid: reference image exceeds size limit; using thumbnail",
+			zap.String("image_id", attachmentID.String()),
+			zap.Int("bytes", len(rawBytes)),
+			zap.Int("limit", maxExpressionReferenceImageBytes))
+		rawBytes, rawMIME = storage.ResolveAttachmentImageBytes(ctx, a.logger, a.fileStore, userID, att, true)
+	}
+	if len(rawBytes) == 0 {
+		a.logger.Warn("expression grid: reference image resolved to empty bytes; proceeding without reference",
+			zap.String("image_id", attachmentID.String()))
+	}
+	return capExpressionReferenceImage(rawBytes, rawMIME)
+}
+
+// generateExpressionGridCells runs the likeness pass and one grid image call for nine row-major keys,
+// returning nine PNG cells in the same order as keys.
+func (a *Agent) generateExpressionGridCells(ctx context.Context, person *models.Personality, keys []string, ref expressionGridReference) ([][]byte, error) {
+	if len(keys) != 9 {
+		return nil, fmt.Errorf("expression grid: expected 9 keys, got %d", len(keys))
+	}
+
+	likeness, err := a.inferExpressionGridLikeness(ctx, strings.TrimSpace(person.SystemPrompt), ref.bytes, ref.mime)
 	if err != nil {
 		return nil, err
 	}
@@ -131,19 +222,30 @@ func (a *Agent) GenerateDefaultExpressionGrid(ctx context.Context, userID, perso
 		a.logger.Warn("expression grid: empty likeness segment; using fallback prose")
 	}
 
-	canvasInstructions := expressionGridCanvasInstructions
+	canvasInstructions := buildExpressionGridCanvasInstructions(keys)
 	if person.ImageStyle != "" && person.ImageStyle != "auto" {
 		canvasInstructions += "\n\nArt style: " + person.ImageStyle
 	}
 
-	fullPrompt := strings.TrimSpace(likeness) + "\n\n" + canvasInstructions
-	if len(fullPrompt) > 16000 {
-		fullPrompt = fullPrompt[:16000]
-	}
+	fullPrompt := truncateExpressionGridPrompt(strings.TrimSpace(likeness) + "\n\n" + canvasInstructions)
 
-	b64PNG, err := a.OpenAIProvider.GenerateImagePNGBase64WithQuality(ctx, fullPrompt, provider.ImageQualityMedium)
-	if err != nil {
-		return nil, fmt.Errorf("generate grid image: %w", err)
+	var b64PNG string
+	if ref.sendToImageModel && len(ref.bytes) > 0 {
+		refPrompt := truncateExpressionGridPrompt(fullPrompt + "\n\n" + expressionGridReferenceInstructions)
+		b64PNG, err = a.OpenAIProvider.EditImagePNGBase64WithQuality(ctx, refPrompt, provider.ImageQualityMedium, ref.bytes, ref.mime)
+		if err != nil {
+			// The reference is best-effort: a rejected edit (model/format/moderation) should not
+			// sink the run, so fall back to prompt-only generation (likeness already saw the image).
+			a.logger.Warn("expression grid: reference-image generation failed; falling back to prompt-only",
+				zap.Error(err))
+			b64PNG = ""
+		}
+	}
+	if b64PNG == "" {
+		b64PNG, err = a.OpenAIProvider.GenerateImagePNGBase64WithQuality(ctx, fullPrompt, provider.ImageQualityMedium)
+		if err != nil {
+			return nil, fmt.Errorf("generate grid image: %w", err)
+		}
 	}
 	raw, err := base64.StdEncoding.DecodeString(b64PNG)
 	if err != nil {
@@ -157,19 +259,7 @@ func (a *Agent) GenerateDefaultExpressionGrid(ctx context.Context, userID, perso
 	if len(cells) != 9 {
 		return nil, fmt.Errorf("slice grid: expected 9 cells, got %d", len(cells))
 	}
-
-	for i := range ExpressionGridKeys {
-		key := ExpressionGridKeys[i]
-		if err := a.uploadPersonalityExpressionCell(ctx, userID, personalityID, key, cells[i]); err != nil {
-			return nil, fmt.Errorf("expression %q: %w", key, err)
-		}
-	}
-
-	out, err := a.ds.ListPersonalityExpressions(ctx, userID, personalityID)
-	if err != nil {
-		return nil, fmt.Errorf("list expressions after grid: %w", err)
-	}
-	return out, nil
+	return cells, nil
 }
 
 // inferExpressionGridLikeness produces a prose paragraph describing the character's appearance
@@ -231,10 +321,11 @@ func (a *Agent) inferExpressionGridLikeness(ctx context.Context, systemPrompt st
 	return strings.TrimSpace(resp.OutputText()), nil
 }
 
-// uploadPersonalityExpressionCell persists one grid cell image in S3 (not file_content).
-func (a *Agent) uploadPersonalityExpressionCell(ctx context.Context, userID, personalityID uuid.UUID, expressionKey string, pngBytes []byte) error {
+// uploadExpressionCellAttachment persists one grid cell image in S3 (not file_content) as a
+// personality-pinned gallery attachment and returns its ID. It does not assign the expression slot.
+func (a *Agent) uploadExpressionCellAttachment(ctx context.Context, userID, personalityID uuid.UUID, expressionKey string, pngBytes []byte) (uuid.UUID, error) {
 	if len(pngBytes) == 0 {
-		return fmt.Errorf("empty cell png")
+		return uuid.Nil, fmt.Errorf("empty cell png")
 	}
 	name := fmt.Sprintf("expression-%s.png", expressionKey)
 
@@ -244,16 +335,16 @@ func (a *Agent) uploadPersonalityExpressionCell(ctx context.Context, userID, per
 		PersonalityID: &personalityID,
 	})
 	if err != nil {
-		return fmt.Errorf("create file attachment: %w", err)
+		return uuid.Nil, fmt.Errorf("create file attachment: %w", err)
 	}
 	if created == nil {
-		return fmt.Errorf("create file attachment: nil model")
+		return uuid.Nil, fmt.Errorf("create file attachment: nil model")
 	}
 
 	s3Key := storage.FileKeyForPersonality(userID, personalityID, created.ID, name)
 	if err := a.fileStore.UploadFile(ctx, s3Key, pngBytes, "image/png"); err != nil {
 		_ = a.ds.DeleteFileAttachment(ctx, userID, created.ID)
-		return fmt.Errorf("upload full image: %w", err)
+		return uuid.Nil, fmt.Errorf("upload full image: %w", err)
 	}
 	if err := a.ds.SetFileAttachmentS3Key(ctx, userID, created.ID, s3Key); err != nil {
 		if delErr := a.fileStore.DeleteFile(ctx, s3Key); delErr != nil {
@@ -267,7 +358,7 @@ func (a *Agent) uploadPersonalityExpressionCell(ctx context.Context, userID, per
 				zap.String("attachment_id", created.ID.String()),
 				zap.Error(delErr))
 		}
-		return fmt.Errorf("persist file attachment s3 key: %w", err)
+		return uuid.Nil, fmt.Errorf("persist file attachment s3 key: %w", err)
 	}
 	thumb, err := imageutil.GenerateThumbnail(pngBytes, imageutil.DefaultThumbnailMaxPx)
 	if err == nil && len(thumb) > 0 {
@@ -283,15 +374,7 @@ func (a *Agent) uploadPersonalityExpressionCell(ctx context.Context, userID, per
 			zap.Error(err))
 	}
 
-	imgID := created.ID
-	req := models.UpdatePersonalityExpressionRequest{
-		ImageSet: true,
-		ImageID:  &imgID,
-	}
-	if _, err := a.ds.UpsertPersonalityExpression(ctx, userID, personalityID, expressionKey, req); err != nil {
-		return fmt.Errorf("upsert expression: %w", err)
-	}
-	return nil
+	return created.ID, nil
 }
 
 func imageToRGBA(img image.Image) *image.RGBA {
