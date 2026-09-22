@@ -377,7 +377,7 @@ func (d *Datastore) ListPersonalities(ctx context.Context, userID uuid.UUID, pag
 	for i, entPersonality := range entPersonalities {
 		personalityIDs[i] = entPersonality.ID
 	}
-	statsByPersonalityID, err := d.personalityUsageStats(ctx, tx, userID, personalityIDs)
+	statsByPersonalityID, err := d.personalityUsageStats(ctx, tx.Chat, userID, personalityIDs)
 	if err != nil {
 		d.logger.Error("failed to query personality usage stats", zap.Error(err))
 		if rerr := tx.Rollback(); rerr != nil {
@@ -409,12 +409,27 @@ func (d *Datastore) ListPersonalities(ctx context.Context, userID uuid.UUID, pag
 	}, nil
 }
 
-func (d *Datastore) personalityUsageStats(ctx context.Context, tx *ent.Tx, userID uuid.UUID, personalityIDs []uuid.UUID) (map[uuid.UUID]models.PersonalityUsageStats, error) {
+// GetPersonalityUsageStats returns the usage stats (non-archived thread count
+// and last-used time) for a single personality owned by userID, computed the
+// same way ListPersonalities computes them for each page entry.
+//
+// GetPersonality deliberately does not include stats: it sits on hot agent
+// paths (every message send) that never read them. HTTP handlers that return a
+// single personality to the client call this to fill models.Personality.Stats.
+func (d *Datastore) GetPersonalityUsageStats(ctx context.Context, userID, personalityID uuid.UUID) (models.PersonalityUsageStats, error) {
+	statsByPersonalityID, err := d.personalityUsageStats(ctx, d.dbClient.Chat, userID, []uuid.UUID{personalityID})
+	if err != nil {
+		return models.PersonalityUsageStats{}, err
+	}
+	return statsByPersonalityID[personalityID], nil
+}
+
+func (d *Datastore) personalityUsageStats(ctx context.Context, chats *ent.ChatClient, userID uuid.UUID, personalityIDs []uuid.UUID) (map[uuid.UUID]models.PersonalityUsageStats, error) {
 	if len(personalityIDs) == 0 {
 		return personalityUsageStatsFromChats(personalityIDs, nil), nil
 	}
 
-	entChats, err := tx.Chat.Query().
+	entChats, err := chats.Query().
 		Where(
 			entchat.HasOwnerWith(user.ID(userID)),
 			entchat.Archived(false),
