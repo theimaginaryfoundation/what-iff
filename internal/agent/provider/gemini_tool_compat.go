@@ -12,6 +12,7 @@ package provider
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
@@ -19,6 +20,12 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+// geminiToolCallContentPlaceholder is the internal content we put on an outbound
+// assistant tool-call turn whose content was empty (Gemini rejects empty content
+// there). It is provider-request plumbing only and must never become user-visible
+// assistant text — but the model sees it as its own prior output and can imitate
+// it, echoing it back as response text. geminiToolCallEchoFilter and
+// stripGeminiToolCallEcho remove such echoes; both key off this single constant.
 const geminiToolCallContentPlaceholder = "[tool call]"
 
 // geminiToolCallID returns a stable tool-call id for Gemini's OpenAI-compatible API.
@@ -172,4 +179,94 @@ func assistantContentEmpty(content openai.ChatCompletionAssistantMessageParamCon
 		return false
 	}
 	return len(content.OfArrayOfContentParts) == 0
+}
+
+// geminiMessagesCarryToolCallPlaceholder reports whether any assistant turn in the
+// outbound messages contains geminiToolCallContentPlaceholder — i.e. whether the
+// model has been shown the placeholder as its own output and may echo it. Only
+// assistant turns count: a user who types the same string gives the model nothing
+// to imitate as assistant output, so their text never arms the echo filter.
+func geminiMessagesCarryToolCallPlaceholder(messages []openai.ChatCompletionMessageParamUnion) bool {
+	for _, m := range messages {
+		if m.OfAssistant == nil {
+			continue
+		}
+		c := m.OfAssistant.Content
+		if !param.IsOmitted(c.OfString) && strings.Contains(c.OfString.Value, geminiToolCallContentPlaceholder) {
+			return true
+		}
+		for _, part := range c.OfArrayOfContentParts {
+			if part.OfText != nil && strings.Contains(part.OfText.Text, geminiToolCallContentPlaceholder) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// splitLeadingGeminiToolCallEcho strips any run of leading placeholder echoes
+// (optionally whitespace-separated) from s. undecided is true when what remains
+// after the stripped echoes is empty/whitespace or a proper prefix of the
+// placeholder, so a streaming caller must wait for more text before deciding.
+// Only leading echoes are removed: a placeholder later in the text is the model
+// discussing or quoting it, not imitating the empty tool-call turn.
+func splitLeadingGeminiToolCallEcho(s string) (rest string, undecided bool) {
+	for {
+		body := strings.TrimLeftFunc(s, unicode.IsSpace)
+		if body == "" || (len(body) < len(geminiToolCallContentPlaceholder) && strings.HasPrefix(geminiToolCallContentPlaceholder, body)) {
+			return s, true
+		}
+		if !strings.HasPrefix(body, geminiToolCallContentPlaceholder) {
+			return s, false
+		}
+		s = body[len(geminiToolCallContentPlaceholder):]
+	}
+}
+
+// stripGeminiToolCallEcho removes leading placeholder echoes from a complete
+// response text (the non-streamed / final GenerateResponse.Text path).
+func stripGeminiToolCallEcho(text string) string {
+	rest, _ := splitLeadingGeminiToolCallEcho(text)
+	return strings.TrimSpace(rest)
+}
+
+// geminiToolCallEchoFilter wraps a text-delta handler for one streamed response,
+// dropping placeholder echoes at the start of that response before they reach the
+// draft stream (and, via the concatenated deltas, the persisted assistant message).
+// It buffers only while the leading text could still be an echo, then passes every
+// later delta straight through. Call Flush when the stream ends.
+type geminiToolCallEchoFilter struct {
+	next    func(delta string)
+	leading bool
+	pending string
+}
+
+func newGeminiToolCallEchoFilter(next func(delta string)) *geminiToolCallEchoFilter {
+	return &geminiToolCallEchoFilter{next: next, leading: true}
+}
+
+// HandleDelta implements the text-delta handler signature.
+func (f *geminiToolCallEchoFilter) HandleDelta(delta string) {
+	if !f.leading {
+		f.next(delta)
+		return
+	}
+	rest, undecided := splitLeadingGeminiToolCallEcho(f.pending + delta)
+	if undecided {
+		f.pending = rest
+		return
+	}
+	f.leading = false
+	f.pending = ""
+	f.next(rest)
+}
+
+// Flush forwards any held-back text that turned out not to be an echo (e.g. a
+// response that is literally "[tool" or whitespace).
+func (f *geminiToolCallEchoFilter) Flush() {
+	if f.pending != "" {
+		f.next(f.pending)
+		f.pending = ""
+	}
+	f.leading = false
 }
