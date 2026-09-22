@@ -766,6 +766,27 @@ func TestListChatMessagesBefore_KeysetWalk(t *testing.T) {
 	require.Empty(t, page3.NextCursor)
 }
 
+func TestClampMessagePageSize(t *testing.T) {
+	cases := []struct {
+		name string
+		in   int
+		want int
+	}{
+		{"zero uses default", 0, defaultMessagePageSize},
+		{"negative uses default", -5, defaultMessagePageSize},
+		{"one is kept", 1, 1},
+		{"typical is kept", 200, 200},
+		{"at max is kept", maxMessagePageSize, maxMessagePageSize},
+		{"above max is clamped", maxMessagePageSize + 1, maxMessagePageSize},
+		{"huge is clamped", 1_000_000, maxMessagePageSize},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, clampMessagePageSize(tc.in))
+		})
+	}
+}
+
 func TestListChatMessagesBefore_CursorRequiresBothSentAtAndID(t *testing.T) {
 	ds, cleanup := newChatMessageTestDatastore(t)
 	defer cleanup()

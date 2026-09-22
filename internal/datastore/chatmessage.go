@@ -27,6 +27,29 @@ import (
 
 const maxChronologicalMessagePageSize = 32
 
+const (
+	// defaultMessagePageSize is used when a non-positive batch size is requested.
+	defaultMessagePageSize = 10
+	// maxMessagePageSize bounds the descending (UI) keyset batch so a large or malicious `limit`
+	// can't request an unbounded page. Matches the OpenAPI documented maximum for
+	// GET /chat/{id}/chat-message.
+	maxMessagePageSize = 500
+)
+
+// clampMessagePageSize bounds a requested descending-view batch size to [1, maxMessagePageSize],
+// substituting the default for a non-positive request. Unlike the chronological agent path (which
+// errors on an oversized page), the cursor path is user-facing via the `limit` query param, so it
+// clamps rather than failing the request.
+func clampMessagePageSize(pageSize int) int {
+	if pageSize < 1 {
+		return defaultMessagePageSize
+	}
+	if pageSize > maxMessagePageSize {
+		return maxMessagePageSize
+	}
+	return pageSize
+}
+
 // Convert from Ent ChatMessage to model
 func toChatMessageModel(e *ent.ChatMessage) *models.ChatMessage {
 	if e == nil {
@@ -632,7 +655,7 @@ func (d *Datastore) ListChatMessagesBefore(ctx context.Context, userID, chatID u
 	if beforeSentAt.IsZero() != (beforeID == uuid.Nil) {
 		return nil, fmt.Errorf("message cursor requires both sent time and message ID")
 	}
-	return d.listChatMessages(ctx, userID, chatID, 1, pageSize, time.Time{}, uuid.Nil, false, beforeSentAt, beforeID, filters)
+	return d.listChatMessages(ctx, userID, chatID, 1, clampMessagePageSize(pageSize), time.Time{}, uuid.Nil, false, beforeSentAt, beforeID, filters)
 }
 
 // ListChatMessagesAfter returns the next chronological page after (afterSentAt, afterID).
