@@ -58,6 +58,14 @@ export class ChatSessionService implements OnDestroy {
   private readonly jobRenderedDeltaIndex = new Map<string, number>();
   private autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly subscriptions = new Subscription();
+  /**
+   * Job polls owned by the active thread. Torn down on every thread switch: a slow turn for
+   * the previous thread (e.g. an imported thread stalled behind the rehydration gate) must not
+   * keep writing its draft deltas / completion into the single pending-assistant slot, which
+   * the newly active thread renders as its own reply (#144). Returning to the thread resumes
+   * polling via resumePendingJobIfNeeded.
+   */
+  private threadJobSubscriptions = new Subscription();
 
   readonly thread: Signal<Chat | null> = this._thread.asReadonly();
   readonly messages: Signal<ChatMessage[]> = toSignal(this.messageService.messages$, { initialValue: [] });
@@ -157,6 +165,7 @@ export class ChatSessionService implements OnDestroy {
     if (threadId === this.activeThreadId) return;
 
     const requestedThreadId = threadId;
+    this.stopThreadJobPolling();
     this.activeThreadId = threadId;
     this.messagesPage = 1;
     this.messagesTotalCount = 0;
@@ -399,6 +408,7 @@ export class ChatSessionService implements OnDestroy {
   }
 
   clearActive(): void {
+    this.stopThreadJobPolling();
     this.activeThreadId = null;
     this.messagesPage = 1;
     this.messagesTotalCount = 0;
@@ -436,7 +446,9 @@ export class ChatSessionService implements OnDestroy {
   ): Promise<ChatSendMessageResult> {
     const chat = this._thread();
     const message = text.trim();
-    if (!chat || !message || this.isGenerating()) {
+    // `_thread` still holds the previous thread until the new one's getChat resolves; never
+    // let a send in that window post to the thread the user just navigated away from.
+    if (!chat || !this.isActiveThread(chat.id) || !message || this.isGenerating()) {
       return { status: 'skipped' };
     }
 
@@ -457,18 +469,28 @@ export class ChatSessionService implements OnDestroy {
         rituals: ritualPayload,
       }));
     } catch (error) {
+      this.draftService.saveDraft(chat.id, message);
+      if (!isHttpErrorResponse(error)) {
+        console.warn('[chat.sendMessage] send failed with non-HTTP error', error);
+      }
+      if (!this.isActiveThread(chat.id)) {
+        // The user switched threads while the POST was in flight; the unsent text is kept as
+        // that thread's saved draft and must not surface in the now-active thread's composer.
+        return { status: 'failed', error };
+      }
       this.expectingAssistantResponse = false;
       this._activeChatJobId.set(null);
       this.expectedAssistantAfterUserMessageId = null;
       this.draft.set(message);
       this._error.set(apiErrorMessage(error, 'Failed to send message'));
-      this.draftService.saveDraft(chat.id, message);
-      if (!isHttpErrorResponse(error)) {
-        console.warn('[chat.sendMessage] send failed with non-HTTP error', error);
-      }
       return { status: 'failed', error };
     }
 
+    if (!this.isActiveThread(chat.id)) {
+      // Switched threads mid-POST: the turn belongs to the previous thread, whose job is picked
+      // up by resumePendingJobIfNeeded when the user returns. Leave the active thread alone.
+      return { status: 'sent' };
+    }
     this._error.set(null);
     this.expectedAssistantAfterUserMessageId = response.id;
     if (response.job_id) {
@@ -485,7 +507,7 @@ export class ChatSessionService implements OnDestroy {
 
   async retryUserMessage(message: ChatMessage): Promise<void> {
     const chat = this._thread();
-    if (!chat || message.origin !== 'User' || this.isGenerating()) return;
+    if (!chat || !this.isActiveThread(chat.id) || message.origin !== 'User' || this.isGenerating()) return;
 
     this.expectingAssistantResponse = true;
     this._error.set(null);
@@ -496,6 +518,7 @@ export class ChatSessionService implements OnDestroy {
         this.startAssistantJobPolling(response.job_id, chat.id);
       }
     } catch (error) {
+      if (!this.isActiveThread(chat.id)) return;
       this.expectingAssistantResponse = false;
       this._error.set(apiErrorMessage(error, 'Retry failed'));
     }
@@ -513,15 +536,20 @@ export class ChatSessionService implements OnDestroy {
       this.streamingService.clearMessageState(CHAT_PENDING_ASSISTANT_MESSAGE_ID);
     }
     this.jobRenderedDeltaIndex.set(jobId, 0);
-    this.subscriptions.add(
+    // Every session write below is scoped to the thread this job belongs to: the
+    // pending-assistant slot, streaming id and expectation flags are shared across threads.
+    this.threadJobSubscriptions.add(
       this.jobService
         .pollJob(jobId, chatId)
         .pipe(
           finalize(() => {
-            this.finishPendingDraftStream(this._cancelRequestedJobId() !== jobId);
             this.jobRenderedDeltaIndex.delete(jobId);
+            if (!this.isActiveThread(chatId)) return;
+            this.finishPendingDraftStream(this._cancelRequestedJobId() !== jobId);
           }),
           finalize(() => {
+            this.sendGate.refresh();
+            if (!this.isActiveThread(chatId)) return;
             if (this._activeChatJobId() === jobId) {
               this._activeChatJobId.set(null);
               this._activeJobPhase.set(null);
@@ -531,16 +559,25 @@ export class ChatSessionService implements OnDestroy {
             }
             this.expectingAssistantResponse = false;
             this.expectedAssistantAfterUserMessageId = null;
-            this.sendGate.refresh();
           }),
         )
         .subscribe({
-          next: job => this.handleJobProgressSnapshot(job),
+          next: job => {
+            if (!this.isActiveThread(chatId)) return;
+            this.handleJobProgressSnapshot(job);
+          },
           error: err => {
+            if (!this.isActiveThread(chatId)) return;
             this._error.set(apiErrorMessage(err, 'Failed to process message'));
           },
         }),
     );
+  }
+
+  /** Ends the current thread's job polls (the server-side jobs keep running). */
+  private stopThreadJobPolling(): void {
+    this.threadJobSubscriptions.unsubscribe();
+    this.threadJobSubscriptions = new Subscription();
   }
 
   cancelStreaming(): void {
@@ -621,11 +658,17 @@ export class ChatSessionService implements OnDestroy {
 
   setPersonality(id: string | null): void {
     const chat = this._thread();
-    if (!chat) return;
+    if (!chat || !this.isActiveThread(chat.id)) return;
     this.subscriptions.add(
       this.chatService.patchChat(chat.id, { personality_id: id ?? undefined }).subscribe({
-        next: updated => this._thread.set(updated),
-        error: err => this._error.set(apiErrorMessage(err, 'Failed to update personality')),
+        next: updated => {
+          if (!this.isActiveThread(chat.id)) return;
+          this._thread.set(updated);
+        },
+        error: err => {
+          if (!this.isActiveThread(chat.id)) return;
+          this._error.set(apiErrorMessage(err, 'Failed to update personality'));
+        },
       }),
     );
   }
@@ -633,7 +676,7 @@ export class ChatSessionService implements OnDestroy {
   /** Pins a generation mode on the thread, or clears to Auto when moodId is null. */
   setActiveMood(moodId: string | null): void {
     const chat = this._thread();
-    if (!chat) return;
+    if (!chat || !this.isActiveThread(chat.id)) return;
     const patch =
       moodId === null
         ? { clear_active_mood: true }
@@ -641,10 +684,14 @@ export class ChatSessionService implements OnDestroy {
     this.subscriptions.add(
       this.chatService.patchChat(chat.id, patch).subscribe({
         next: updated => {
+          if (!this.isActiveThread(chat.id)) return;
           this._error.set(null);
           this._thread.set(updated);
         },
-        error: err => this._error.set(apiErrorMessage(err, 'Failed to update mode')),
+        error: err => {
+          if (!this.isActiveThread(chat.id)) return;
+          this._error.set(apiErrorMessage(err, 'Failed to update mode'));
+        },
       }),
     );
   }
@@ -652,10 +699,13 @@ export class ChatSessionService implements OnDestroy {
   setThreadName(name: string): void {
     const chat = this._thread();
     const trimmedName = name.trim();
-    if (!chat || !trimmedName || trimmedName === chat.name) return;
+    if (!chat || !this.isActiveThread(chat.id) || !trimmedName || trimmedName === chat.name) return;
     this.subscriptions.add(
       this.chatService.patchChat(chat.id, { name: trimmedName }).subscribe({
-        next: updated => this._thread.set(updated),
+        next: updated => {
+          if (!this.isActiveThread(chat.id)) return;
+          this._thread.set(updated);
+        },
       }),
     );
   }
@@ -672,6 +722,7 @@ export class ChatSessionService implements OnDestroy {
     if (this.autosaveTimer) {
       clearTimeout(this.autosaveTimer);
     }
+    this.threadJobSubscriptions.unsubscribe();
     this.subscriptions.unsubscribe();
     this.streamingService.destroy();
   }
@@ -783,9 +834,11 @@ export class ChatSessionService implements OnDestroy {
   }
 
   private requestCancelForJob(jobId: string): void {
+    const threadId = this.activeThreadId;
     this.subscriptions.add(
       this.jobService.cancelJob(jobId).subscribe({
         error: err => {
+          if (threadId === null || !this.isActiveThread(threadId)) return;
           if (this._cancelRequestedJobId() === jobId) {
             this._cancelRequestedJobId.set(null);
           }
