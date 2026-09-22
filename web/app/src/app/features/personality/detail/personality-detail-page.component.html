@@ -151,6 +151,7 @@
       <app-personality-expressions-manager
         [personalityId]="personality.id"
         [expressions]="expressions()"
+        [coverImageId]="personality.cover_image_id"
         [expressionsEnabled]="personality.expressions_enabled ?? true"
         [expressionsToggleUpdating]="expressionsEnabledUpdating()"
         (expressionsChanged)="onExpressionsChanged($event)"

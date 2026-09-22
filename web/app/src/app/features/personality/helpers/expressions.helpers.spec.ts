@@ -1,5 +1,5 @@
 import { PersonalityExpression } from '../../../core/models/personality.model';
-import { DEFAULT_EXPRESSION_SUGGESTIONS, isDefaultExpressionGridComplete, isValidExpressionKey, mergeManifestWithAssignments, missingExpressions, slotsFromPersistedExpressions, } from './expressions.helpers';
+import { DEFAULT_EXPRESSION_SUGGESTIONS, expressionKeyFromName, expressionNameFromKey, isDefaultExpressionGridComplete, isValidExpressionKey, mergeManifestWithAssignments, missingExpressions, slotsFromPersistedExpressions, } from './expressions.helpers';
 
 function makeExpression(overrides: Partial<PersonalityExpression> = {}): PersonalityExpression {
     return {
@@ -93,5 +93,32 @@ describe('isValidExpressionKey', () => {
         expect(isValidExpressionKey('with spaces')).toBe(false);
         expect(isValidExpressionKey('')).toBe(false);
         expect(isValidExpressionKey('a'.repeat(65))).toBe(false);
+    });
+});
+
+describe('expressionKeyFromName', () => {
+    it('slugs free text into a valid key', () => {
+        expect(expressionKeyFromName('  Big Grin! ')).toBe('big-grin');
+        expect(expressionKeyFromName('in love')).toBe('in-love');
+        expect(expressionKeyFromName('wry_smile')).toBe('wry_smile');
+        expect(expressionKeyFromName('--Déjà   vu--')).toBe('dj-vu');
+        expect(isValidExpressionKey(expressionKeyFromName('Smug 2'))).toBe(true);
+    });
+
+    it('returns empty when nothing usable remains', () => {
+        expect(expressionKeyFromName('!!!')).toBe('');
+        expect(expressionKeyFromName('   ')).toBe('');
+    });
+
+    it('caps keys at 64 characters', () => {
+        expect(expressionKeyFromName('a'.repeat(80)).length).toBe(64);
+    });
+});
+
+describe('expressionNameFromKey', () => {
+    it('round-trips default keys through the name field', () => {
+        for (const key of DEFAULT_EXPRESSION_SUGGESTIONS) {
+            expect(expressionKeyFromName(expressionNameFromKey(key))).toBe(key);
+        }
     });
 });

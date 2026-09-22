@@ -3,7 +3,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient, withXhr } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { NEVER, of } from 'rxjs';
 
 import { PersonalityExpressionsManagerComponent } from './personality-expressions-manager.component';
 import { PersonalityExpression } from '../../../core/models/personality.model';
@@ -11,7 +11,9 @@ import { ExpressionAssignmentService } from '../../../core/services/expression-a
 import { ImageGalleryService } from '../../../core/services/image-gallery.service';
 import { PersonalityMediaJobService } from '../../../core/services/personality-media-job.service';
 import { PersonalityService } from '../../../core/services/personality.service';
-import { DEFAULT_EXPRESSION_SUGGESTIONS } from '../helpers/expressions.helpers';
+import { JobService } from '../../../core/services/job.service';
+import { Job } from '../../../core/models/job.model';
+import { ActivePersonalityMediaJob } from '../../../core/models/personality-media-job.model';
 
 function makeExpression(overrides: Partial<PersonalityExpression> = {}): PersonalityExpression {
     return {
@@ -30,7 +32,8 @@ describe('PersonalityExpressionsManagerComponent', () => {
     let component: PersonalityExpressionsManagerComponent;
     let assignment: Pick<MockedObject<ExpressionAssignmentService>, 'assignFromGallery' | 'setLabel' | 'clear' | 'remove'>;
     let imageGallery: Pick<MockedObject<ImageGalleryService>, 'listImages' | 'getImageUrl'>;
-    let mediaJobs: Pick<MockedObject<PersonalityMediaJobService>, 'refreshActiveJob' | 'startExpressionGrid' | 'pollUntilTerminal' | 'activeJob$'>;
+    let jobService: { getJob: ReturnType<typeof vi.fn> };
+    let mediaJobs: Pick<MockedObject<PersonalityMediaJobService>, 'refreshActiveJob' | 'startExpressionCandidates' | 'pollUntilTerminal' | 'activeJob$'>;
 
     const expressions: PersonalityExpression[] = [
         {
@@ -60,11 +63,13 @@ describe('PersonalityExpressionsManagerComponent', () => {
 
         mediaJobs = {
             refreshActiveJob: vi.fn().mockName("PersonalityMediaJobService.refreshActiveJob"),
-            startExpressionGrid: vi.fn().mockName("PersonalityMediaJobService.startExpressionGrid"),
+            startExpressionCandidates: vi.fn().mockName("PersonalityMediaJobService.startExpressionCandidates"),
             pollUntilTerminal: vi.fn().mockName("PersonalityMediaJobService.pollUntilTerminal"),
             activeJob$: of(null)
-        } as unknown as Pick<MockedObject<PersonalityMediaJobService>, 'refreshActiveJob' | 'startExpressionGrid' | 'pollUntilTerminal' | 'activeJob$'>;
+        } as unknown as Pick<MockedObject<PersonalityMediaJobService>, 'refreshActiveJob' | 'startExpressionCandidates' | 'pollUntilTerminal' | 'activeJob$'>;
         mediaJobs.refreshActiveJob.mockReturnValue(of(null));
+        mediaJobs.pollUntilTerminal.mockReturnValue(NEVER);
+        jobService = { getJob: vi.fn().mockName('JobService.getJob') };
 
         await TestBed.configureTestingModule({
             imports: [PersonalityExpressionsManagerComponent],
@@ -75,6 +80,7 @@ describe('PersonalityExpressionsManagerComponent', () => {
                 { provide: ExpressionAssignmentService, useValue: assignment },
                 { provide: ImageGalleryService, useValue: imageGallery },
                 { provide: PersonalityMediaJobService, useValue: mediaJobs },
+                { provide: JobService, useValue: jobService },
                 { provide: PersonalityService, useValue: {
                         listExpressions: vi.fn().mockName("PersonalityService.listExpressions")
                     } },
@@ -130,26 +136,69 @@ describe('PersonalityExpressionsManagerComponent', () => {
         expect(component.slotImageUrl(happy)).toBe('/api/image-gallery/img-1?size=thumbnail');
     });
 
-    it('uses Regenerate label when the full default grid is complete', () => {
-        const fullGrid: PersonalityExpression[] = [...DEFAULT_EXPRESSION_SUGGESTIONS].map((key, i) => makeExpression({
-            expression_key: key,
-            image_id: `img-${i}`,
-            image_url: `https://example.com/${key}.png`,
-        }));
-        fixture.componentRef.setInput('expressions', fullGrid);
-        fixture.detectChanges();
-        expect(component.defaultGridComplete()).toBe(true);
-        expect(component.gridButtonLabel()).toContain('Regenerate');
+    it('opens the Generate modal from the Generate button', () => {
+        expect(component.generateButtonLabel()).toBe('Generate');
+        component.openGenerate();
+        expect(component.isGenerateOpen()).toBe(true);
     });
 
-    it('uses Generate label when the grid is incomplete or empty', () => {
-        expect(component.defaultGridComplete()).toBe(false);
-        expect(component.gridButtonLabel()).toContain('Generate');
+    it('closes the modal and emits the refreshed list after the modal saves', () => {
+        let emitted: readonly PersonalityExpression[] | undefined;
+        component.expressionsChanged.subscribe(value => { emitted = value; });
+        component.openGenerate();
+        const rows = [makeExpression({ expression_key: 'smug', image_id: 'img-9' })];
+        component.onGenerateSaved(rows);
+        expect(component.isGenerateOpen()).toBe(false);
+        expect(emitted).toEqual(rows);
+    });
 
-        fixture.componentRef.setInput('expressions', []);
-        fixture.detectChanges();
-        expect(component.defaultGridComplete()).toBe(false);
-        expect(component.gridButtonLabel()).toContain('Generate');
+    it('disables add-expression while the Generate modal is busy', () => {
+        component.generateBusy.set(true);
+        expect(component.gridGenerating()).toBe(true);
+        component.generateBusy.set(false);
+        expect(component.gridGenerating()).toBe(false);
+    });
+
+    describe('resuming an active expression_grid job', () => {
+        const active: ActivePersonalityMediaJob = {
+            job_id: 'job-1',
+            job_type: 'expression_grid',
+            reference: 'p-1',
+            status: 'processing',
+            personality_id: 'p-1',
+        };
+
+        function job(progress?: string): Job {
+            return {
+                id: 'job-1', user_id: 'u', job_type: 'expression_grid', reference: 'p-1', status: 'processing',
+                progress, created_at: '', updated_at: '',
+            };
+        }
+
+        async function init(progress?: string): Promise<void> {
+            mediaJobs.refreshActiveJob.mockReturnValue(of(active));
+            jobService.getJob.mockReturnValue(of(job(progress)));
+            fixture = TestBed.createComponent(PersonalityExpressionsManagerComponent);
+            component = fixture.componentInstance;
+            fixture.componentRef.setInput('personalityId', 'p-1');
+            fixture.componentRef.setInput('expressions', expressions);
+            fixture.detectChanges();
+            await fixture.whenStable();
+        }
+
+        it('reopens the Generate modal for a candidate run', async () => {
+            await init(JSON.stringify({ mode: 'candidates', expressions: ['happy', 'content', 'sad', 'angry', 'surprised', 'confused', 'tired', 'in-love', 'smug'] }));
+            expect(component.isGenerateOpen()).toBe(true);
+            expect(component.defaultGridRunning()).toBe(false);
+            expect(mediaJobs.pollUntilTerminal).toHaveBeenCalledWith('job-1');
+        });
+
+        it('shows Generating… for a default-grid run', async () => {
+            await init(undefined);
+            expect(component.isGenerateOpen()).toBe(false);
+            expect(component.defaultGridRunning()).toBe(true);
+            expect(component.generateButtonLabel()).toBe('Generating…');
+        });
     });
 
     it('shows no slots when the expression list is empty', () => {
