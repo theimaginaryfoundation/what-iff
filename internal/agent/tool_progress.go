@@ -43,6 +43,14 @@ type jobToolProgress struct {
 
 	mu      sync.Mutex
 	entries []models.ChatTurnToolCall
+	// pending is the newest snapshot not yet written; the writer goroutine always takes the
+	// latest, so writes can't land out of order and a burst of updates coalesces into one.
+	pending string
+
+	wake      chan struct{} // capacity 1: "there is something pending"
+	stop      chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 // newChatToolProgress builds the recorder for a chat turn, or nil when there is no datastore.
@@ -65,7 +73,7 @@ func newJobToolProgress(persistParent context.Context, ds jobProgressWriter, log
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &jobToolProgress{
+	p := &jobToolProgress{
 		persistParent: persistParent,
 		ds:            ds,
 		logger:        logger,
@@ -73,6 +81,65 @@ func newJobToolProgress(persistParent context.Context, ds jobProgressWriter, log
 		jobID:         job.ID,
 		beforeTool:    beforeTool,
 		now:           time.Now,
+		wake:          make(chan struct{}, 1),
+		stop:          make(chan struct{}),
+		done:          make(chan struct{}),
+	}
+	go p.writeLoop()
+	return p
+}
+
+// Close writes the final snapshot and stops the writer. Call it once the agent loop returns.
+// The wait is bounded, so a stuck write can't hold up the end of the turn. Safe on nil and to
+// call twice.
+func (p *jobToolProgress) Close() {
+	if p == nil {
+		return
+	}
+	p.closeOnce.Do(func() { close(p.stop) })
+	select {
+	case <-p.done:
+	case <-time.After(toolProgressPersistTimeout + time.Second):
+		p.logger.Warn("chat turn progress writer did not finish in time", zap.String("job_id", p.jobID.String()))
+	}
+}
+
+// writeLoop persists snapshots off the agent loop goroutine: progress is cosmetic, so a slow
+// datastore must never hold up tool execution or streaming.
+func (p *jobToolProgress) writeLoop() {
+	defer close(p.done)
+	// An unrecovered panic in this goroutine would take down the whole server over a cosmetic
+	// feature; log it and stop writing progress for this turn instead.
+	defer func() {
+		if r := recover(); r != nil {
+			p.logger.Error("chat turn progress writer panicked", zap.String("job_id", p.jobID.String()), zap.Any("panic", r))
+		}
+	}()
+	for {
+		select {
+		case <-p.wake:
+			p.writePending()
+		case <-p.stop:
+			p.writePending()
+			return
+		}
+	}
+}
+
+func (p *jobToolProgress) writePending() {
+	p.mu.Lock()
+	payload := p.pending
+	p.pending = ""
+	p.mu.Unlock()
+	p.persist(payload)
+}
+
+// schedule hands the newest snapshot to the writer without blocking. Call with p.mu held.
+func (p *jobToolProgress) scheduleLocked() {
+	p.pending = p.snapshotLocked()
+	select {
+	case p.wake <- struct{}{}:
+	default: // a wake-up is already queued; the writer will pick up this newer snapshot
 	}
 }
 
@@ -93,9 +160,8 @@ func (p *jobToolProgress) Started(round int, use provider.ToolUse) {
 		Round:     round,
 		StartedAt: p.now().UTC(),
 	})
-	payload := p.snapshotLocked()
+	p.scheduleLocked()
 	p.mu.Unlock()
-	p.persist(payload)
 }
 
 // Finished marks the running entry for result.ID complete (or error) with an output preview.
@@ -123,9 +189,8 @@ func (p *jobToolProgress) Finished(result provider.ToolResult) {
 	}
 	entry.Output = tools.TruncateRunes(result.Output, toolProgressPreviewRunes)
 	entry.FinishedAt = &finishedAt
-	payload := p.snapshotLocked()
+	p.scheduleLocked()
 	p.mu.Unlock()
-	p.persist(payload)
 }
 
 func (p *jobToolProgress) snapshotLocked() string {
@@ -138,7 +203,7 @@ func (p *jobToolProgress) snapshotLocked() string {
 }
 
 // persist is best-effort: the timeline is cosmetic, so a failed write is logged and the turn
-// carries on. It runs on the loop goroutine, bounded by toolProgressPersistTimeout.
+// carries on. It runs on the writer goroutine, bounded by toolProgressPersistTimeout.
 func (p *jobToolProgress) persist(payload string) {
 	if payload == "" {
 		return

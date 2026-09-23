@@ -1086,6 +1086,9 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 		draftBuffer.Flush()
 		draftBuffer.MarkRoundBoundary()
 	})
+	if progress := chatCtx.toolProgress; progress != nil {
+		defer progress.Close()
+	}
 
 	result, toolCalls, generatedAttachments, err := a.handleAgentLoop(ctx, chatCtx, adapter)
 	if err != nil {
@@ -1407,6 +1410,9 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 		draftBuffer.Flush()
 		draftBuffer.MarkRoundBoundary()
 	})
+	if progress := chatCtx.toolProgress; progress != nil {
+		defer progress.Close()
+	}
 
 	result, toolCalls, generatedAttachments, err := a.handleAgentLoop(ctx, chatCtx, adapter)
 	if err != nil {

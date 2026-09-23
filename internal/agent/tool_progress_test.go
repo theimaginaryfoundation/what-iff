@@ -22,23 +22,34 @@ type fakeProgressWriter struct {
 	mu       sync.Mutex
 	payloads []string
 	err      error
+	// gate, when set, blocks each write until it can receive (simulates a slow datastore).
+	gate chan struct{}
 }
 
 func (f *fakeProgressWriter) UpdateJobProgress(_ context.Context, _, _ uuid.UUID, progress string) error {
+	if f.gate != nil {
+		<-f.gate
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.payloads = append(f.payloads, progress)
 	return f.err
 }
 
-func (f *fakeProgressWriter) decoded(t *testing.T) []models.ChatTurnProgress {
+func (f *fakeProgressWriter) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.payloads)
+}
+
+// latest decodes the most recent write.
+func (f *fakeProgressWriter) latest(t *testing.T) models.ChatTurnProgress {
 	t.Helper()
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	out := make([]models.ChatTurnProgress, len(f.payloads))
-	for i, p := range f.payloads {
-		require.NoError(t, json.Unmarshal([]byte(p), &out[i]))
-	}
+	require.NotEmpty(t, f.payloads, "no progress written")
+	var out models.ChatTurnProgress
+	require.NoError(t, json.Unmarshal([]byte(f.payloads[len(f.payloads)-1]), &out))
 	return out
 }
 
@@ -54,12 +65,8 @@ func TestJobToolProgress_StartedThenFinished(t *testing.T) {
 	p.now = func() time.Time { clock = clock.Add(time.Second); return clock }
 
 	p.Started(1, provider.ToolUse{ID: "call-1", Name: "list_memories", Input: []byte(`{"q":"fox"}`)})
-	p.Finished(provider.ToolResult{ID: "call-1", Output: `{"items":[]}`})
-
-	snaps := w.decoded(t)
-	require.Len(t, snaps, 2)
-
-	running := snaps[0].ToolCalls
+	require.Eventually(t, func() bool { return w.count() >= 1 }, time.Second, 5*time.Millisecond)
+	running := w.latest(t).ToolCalls
 	require.Len(t, running, 1)
 	assert.Equal(t, "call-1", running[0].ID)
 	assert.Equal(t, "list_memories", running[0].Name)
@@ -68,7 +75,9 @@ func TestJobToolProgress_StartedThenFinished(t *testing.T) {
 	assert.Equal(t, 1, running[0].Round)
 	assert.Nil(t, running[0].FinishedAt)
 
-	done := snaps[1].ToolCalls
+	p.Finished(provider.ToolResult{ID: "call-1", Output: `{"items":[]}`})
+	p.Close()
+	done := w.latest(t).ToolCalls
 	require.Len(t, done, 1)
 	assert.Equal(t, models.ChatTurnToolComplete, done[0].Status)
 	assert.Equal(t, `{"items":[]}`, done[0].Output)
@@ -84,10 +93,9 @@ func TestJobToolProgress_ErrorResultAndOrdering(t *testing.T) {
 	p.Finished(provider.ToolResult{ID: "a", Output: "ok"})
 	p.Started(0, provider.ToolUse{ID: "b", Name: "second"})
 	p.Finished(provider.ToolResult{ID: "b", Output: "boom", IsErr: true})
+	p.Close()
 
-	snaps := w.decoded(t)
-	require.Len(t, snaps, 4)
-	final := snaps[3].ToolCalls
+	final := w.latest(t).ToolCalls
 	require.Len(t, final, 2)
 	assert.Equal(t, []string{"first", "second"}, []string{final[0].Name, final[1].Name})
 	assert.Equal(t, models.ChatTurnToolComplete, final[0].Status)
@@ -99,7 +107,8 @@ func TestJobToolProgress_FinishedForUnknownCallIsIgnored(t *testing.T) {
 	w := &fakeProgressWriter{}
 	p := newJobToolProgress(context.Background(), w, zap.NewNop(), testChatJob(), nil)
 	p.Finished(provider.ToolResult{ID: "never-started", Output: "x"})
-	assert.Empty(t, w.payloads)
+	p.Close()
+	assert.Zero(t, w.count())
 }
 
 func TestJobToolProgress_TruncatesPreviewsRuneSafely(t *testing.T) {
@@ -109,8 +118,9 @@ func TestJobToolProgress_TruncatesPreviewsRuneSafely(t *testing.T) {
 
 	p.Started(0, provider.ToolUse{ID: "a", Name: "big", Input: []byte(long)})
 	p.Finished(provider.ToolResult{ID: "a", Output: long})
+	p.Close()
 
-	final := w.decoded(t)[1].ToolCalls[0]
+	final := w.latest(t).ToolCalls[0]
 	for _, s := range []string{final.Input, final.Output} {
 		assert.True(t, utf8.ValidString(s))
 		assert.LessOrEqual(t, utf8.RuneCountInString(s), toolProgressPreviewRunes+1) // + ellipsis
@@ -120,15 +130,58 @@ func TestJobToolProgress_TruncatesPreviewsRuneSafely(t *testing.T) {
 
 func TestJobToolProgress_FlushesBufferedTextBeforeRecordingStart(t *testing.T) {
 	w := &fakeProgressWriter{}
-	var order []string
-	p := newJobToolProgress(context.Background(), w, zap.NewNop(), testChatJob(), func() {
-		w.mu.Lock()
-		order = append(order, "flush", "writes-so-far:"+string(rune('0'+len(w.payloads))))
-		w.mu.Unlock()
+	var p *jobToolProgress
+	entriesAtFlush := -1
+	p = newJobToolProgress(context.Background(), w, zap.NewNop(), testChatJob(), func() {
+		p.mu.Lock()
+		entriesAtFlush = len(p.entries)
+		p.mu.Unlock()
 	})
 	p.Started(0, provider.ToolUse{ID: "a", Name: "t"})
-	assert.Equal(t, []string{"flush", "writes-so-far:0"}, order)
-	assert.Len(t, w.payloads, 1)
+	p.Close()
+	assert.Equal(t, 0, entriesAtFlush, "buffered text is flushed before the tool row exists")
+	assert.Len(t, w.latest(t).ToolCalls, 1)
+}
+
+func TestJobToolProgress_SlowDatastoreDoesNotBlockTheLoop(t *testing.T) {
+	w := &fakeProgressWriter{gate: make(chan struct{})}
+	p := newJobToolProgress(context.Background(), w, zap.NewNop(), testChatJob(), nil)
+
+	start := time.Now()
+	p.Started(0, provider.ToolUse{ID: "a", Name: "first"})
+	p.Finished(provider.ToolResult{ID: "a", Output: "ok"})
+	p.Started(0, provider.ToolUse{ID: "b", Name: "second"})
+	p.Finished(provider.ToolResult{ID: "b", Output: "ok"})
+	assert.Less(t, time.Since(start), 100*time.Millisecond, "recording must not wait on the datastore")
+
+	close(w.gate) // datastore recovers
+	p.Close()
+	final := w.latest(t).ToolCalls
+	require.Len(t, final, 2, "the newest snapshot is written, nothing is lost")
+	assert.Equal(t, models.ChatTurnToolComplete, final[1].Status)
+	assert.LessOrEqual(t, w.count(), 2, "updates made while a write was stuck coalesce into one")
+}
+
+type panickingProgressWriter struct{}
+
+func (panickingProgressWriter) UpdateJobProgress(context.Context, uuid.UUID, uuid.UUID, string) error {
+	panic("datastore exploded")
+}
+
+func TestJobToolProgress_WriterPanicDoesNotCrashOrHang(t *testing.T) {
+	p := newJobToolProgress(context.Background(), panickingProgressWriter{}, zap.NewNop(), testChatJob(), nil)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		p.Started(0, provider.ToolUse{ID: "a", Name: "t"})
+		p.Finished(provider.ToolResult{ID: "a", Output: "ok"})
+		p.Close()
+	}()
+	select {
+	case <-done:
+	case <-time.After(toolProgressPersistTimeout + 2*time.Second):
+		t.Fatal("recording or Close hung after the writer panicked")
+	}
 }
 
 func TestJobToolProgress_WriteFailureIsBestEffort(t *testing.T) {
@@ -137,19 +190,24 @@ func TestJobToolProgress_WriteFailureIsBestEffort(t *testing.T) {
 	assert.NotPanics(t, func() {
 		p.Started(0, provider.ToolUse{ID: "a", Name: "t"})
 		p.Finished(provider.ToolResult{ID: "a", Output: "ok"})
+		p.Close()
 	})
-	assert.Len(t, w.payloads, 2)
+	assert.GreaterOrEqual(t, w.count(), 1)
 }
 
-func TestJobToolProgress_NilSafety(t *testing.T) {
-	var p *jobToolProgress
+func TestJobToolProgress_NilSafetyAndIdempotentClose(t *testing.T) {
+	var nilP *jobToolProgress
 	assert.NotPanics(t, func() {
-		p.Started(0, provider.ToolUse{ID: "a"})
-		p.Finished(provider.ToolResult{ID: "a"})
+		nilP.Started(0, provider.ToolUse{ID: "a"})
+		nilP.Finished(provider.ToolResult{ID: "a"})
+		nilP.Close()
 	})
 	assert.Nil(t, newJobToolProgress(context.Background(), &fakeProgressWriter{}, nil, nil, nil))
 	assert.Nil(t, newJobToolProgress(context.Background(), nil, nil, testChatJob(), nil))
 	assert.Nil(t, (&Agent{logger: zap.NewNop()}).newChatToolProgress(testChatJob(), nil), "nil datastore must not become a non-nil interface")
+
+	p := newJobToolProgress(context.Background(), &fakeProgressWriter{}, nil, testChatJob(), nil)
+	assert.NotPanics(t, func() { p.Close(); p.Close() })
 }
 
 func TestExecuteToolUses_RecordsLiveToolProgress(t *testing.T) {
@@ -176,10 +234,8 @@ func TestExecuteToolUses_RecordsLiveToolProgress(t *testing.T) {
 		{ID: "u2", Name: "bad_tool", Input: []byte(`{"x":1}`)},
 	})
 
-	snaps := w.decoded(t)
-	require.Len(t, snaps, 4, "one write per start and per finish")
-	assert.Equal(t, models.ChatTurnToolRunning, snaps[0].ToolCalls[0].Status)
-	final := snaps[3].ToolCalls
+	chatCtx.toolProgress.Close()
+	final := w.latest(t).ToolCalls
 	require.Len(t, final, 2)
 	assert.Equal(t, models.ChatTurnToolComplete, final[0].Status)
 	assert.Equal(t, `{"ok":true}`, final[0].Output)
