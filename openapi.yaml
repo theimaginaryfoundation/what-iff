@@ -4117,18 +4117,27 @@ paths:
             format: uuid
         - name: page
           in: query
-          description: Page number (default 1)
+          description: Page number (default 1). Ignored when `cursor` is supplied.
           schema:
             type: integer
             minimum: 1
             default: 1
+        - name: cursor
+          in: query
+          description: >-
+            Opaque keyset token (a `next_cursor` from a prior response) for fetching the batch of
+            messages strictly older than it, newest-first. Decouples batch size from page-offset
+            math, so scroll-back and jump-to-bookmark can request large batches without gaps. When
+            present, `page` is ignored.
+          schema:
+            type: string
         - name: limit
           in: query
           description: Number of items per page (default 10)
           schema:
             type: integer
             minimum: 1
-            maximum: 100
+            maximum: 500
             default: 10
         - name: origin
           in: query
@@ -6691,6 +6700,15 @@ components:
           type: string
           format: date-time
           description: Timestamp when the file attachment was created
+        source:
+          type: string
+          enum: [generated, imported]
+          description: >-
+            Server-derived origin class used by the gallery's Generated/Imported
+            filter. `generated` = attached to an assistant message or produced by a
+            generation pipeline (expression grid, portrait); `imported` = uploaded by
+            the user (gallery import, personality upload, user chat message).
+            Omitted when the server could not determine it.
       required:
         - id
         - user_id
@@ -7864,6 +7882,12 @@ components:
           type: integer
         page:
           type: integer
+        next_cursor:
+          type: string
+          description: >-
+            Opaque keyset token for continuing a cursor-paginated view past the last row in this
+            response (absent when there is nothing more). Only the descending chat-message view
+            sets it.
       example:
         results: []
         total_count: 25

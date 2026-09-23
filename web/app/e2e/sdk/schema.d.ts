@@ -6048,8 +6048,10 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    /** @description Page number (default 1) */
+                    /** @description Page number (default 1). Ignored when `cursor` is supplied. */
                     page?: number;
+                    /** @description Opaque keyset token (a `next_cursor` from a prior response) for fetching the batch of messages strictly older than it, newest-first. Decouples batch size from page-offset math, so scroll-back and jump-to-bookmark can request large batches without gaps. When present, `page` is ignored. */
+                    cursor?: string;
                     /** @description Number of items per page (default 10) */
                     limit?: number;
                     /** @description Filter by message origin */
@@ -8699,6 +8701,11 @@ export interface components {
              * @description Timestamp when the file attachment was created
              */
             created_at: string;
+            /**
+             * @description Server-derived origin class used by the gallery's Generated/Imported filter. `generated` = attached to an assistant message or produced by a generation pipeline (expression grid, portrait); `imported` = uploaded by the user (gallery import, personality upload, user chat message). Omitted when the server could not determine it.
+             * @enum {string}
+             */
+            source?: "generated" | "imported";
         };
         FileAttachmentPersonality: {
             /** Format: uuid */
@@ -9361,6 +9368,8 @@ export interface components {
             results?: Record<string, never>[];
             total_count?: number;
             page?: number;
+            /** @description Opaque keyset token for continuing a cursor-paginated view past the last row in this response (absent when there is nothing more). Only the descending chat-message view sets it. */
+            next_cursor?: string;
         };
         /**
          * @example {

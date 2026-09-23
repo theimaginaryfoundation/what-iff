@@ -107,6 +107,11 @@ type ClaudeAdapter struct {
 	rawMessages        []*anthropic.Message
 	rawBetaMessages    []*anthropic.BetaMessage
 	textDeltaHandler   func(delta string)
+
+	// truncationFallback, when set, is applied once to params and the call re-issued
+	// if a response is cut off at max_tokens before any reply text (see
+	// SetTruncationFallback). Cleared after use so a turn retries at most once.
+	truncationFallback func(params *anthropic.MessageNewParams)
 }
 
 // ClaudeMCPConfig contains Anthropic-beta MCP server definitions and corresponding toolsets.
@@ -179,20 +184,10 @@ func (a *ClaudeAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse,
 		return nil, toolUses, nil
 	}
 
-	var (
-		msg *anthropic.Message
-		err error
-	)
-	if a.textDeltaHandler != nil {
-		msg, err = a.provider.CallWithRetryStreaming(ctx, a.params, a.textDeltaHandler)
-	} else {
-		msg, err = a.provider.Call(ctx, a.params)
-	}
+	msg, err := a.callMessages(ctx)
 	if err != nil {
 		return nil, nil, WrapSafetyViolationError(models.SafetyViolationProviderAnthropic, fmt.Errorf("Anthropic API call failed: %w", err))
 	}
-	a.webSearchCompleted += countWebSearchToolResultsInMessage(msg)
-	a.rawMessages = append(a.rawMessages, msg)
 
 	toolUses := extractClaudeToolUses(msg)
 	if len(toolUses) == 0 {
@@ -262,21 +257,47 @@ func (a *ClaudeAdapter) ForceFinalResponse(ctx context.Context) (*GenerateRespon
 		anthropic.NewTextBlock("Please provide your best final response based on the information gathered so far without additional tool calls."),
 	))
 
-	var (
-		msg *anthropic.Message
-		err error
-	)
-	if a.textDeltaHandler != nil {
-		msg, err = a.provider.CallWithRetryStreaming(ctx, a.params, a.textDeltaHandler)
-	} else {
-		msg, err = a.provider.Call(ctx, a.params)
-	}
+	msg, err := a.callMessages(ctx)
 	if err != nil {
 		return nil, WrapSafetyViolationError(models.SafetyViolationProviderAnthropic, fmt.Errorf("Anthropic final-response call failed: %w", err))
 	}
+	return a.provider.ToGenerateResponse(msg), nil
+}
+
+// SetTruncationFallback installs a one-shot params adjustment for when a response is
+// cut off at max_tokens before producing any reply text. The truncated response is
+// discarded (no text deltas were streamed, so nothing reached the user), fn is applied
+// to the adapter's params — and stays applied for the rest of the turn — and the call
+// is re-issued once. Used on the z.ai path to drop GLM's reasoning effort, since its
+// thinking cannot be turned off.
+func (a *ClaudeAdapter) SetTruncationFallback(fn func(params *anthropic.MessageNewParams)) {
+	a.truncationFallback = fn
+}
+
+// callMessages issues one non-beta Messages call (streaming when a delta handler is
+// set), applying the truncation fallback at most once, and records the response's
+// web-search results and raw message.
+func (a *ClaudeAdapter) callMessages(ctx context.Context) (*anthropic.Message, error) {
+	msg, err := a.callMessagesOnce(ctx)
+	if err == nil && a.truncationFallback != nil && claudeTruncatedWithoutText(msg) {
+		fallback := a.truncationFallback
+		a.truncationFallback = nil
+		fallback(&a.params)
+		msg, err = a.callMessagesOnce(ctx)
+	}
+	if err != nil {
+		return nil, err
+	}
 	a.webSearchCompleted += countWebSearchToolResultsInMessage(msg)
 	a.rawMessages = append(a.rawMessages, msg)
-	return a.provider.ToGenerateResponse(msg), nil
+	return msg, nil
+}
+
+func (a *ClaudeAdapter) callMessagesOnce(ctx context.Context) (*anthropic.Message, error) {
+	if a.textDeltaHandler != nil {
+		return a.provider.CallWithRetryStreaming(ctx, a.params, a.textDeltaHandler)
+	}
+	return a.provider.Call(ctx, a.params)
 }
 
 // AllRawMessages returns Anthropic message payloads observed this turn.

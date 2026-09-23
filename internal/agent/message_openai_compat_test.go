@@ -78,3 +78,66 @@ func TestOpenAIChatCompletionsAdapter_MissingAPIKey(t *testing.T) {
 	)
 	require.ErrorContains(t, err, "MISTRAL_API_KEY")
 }
+
+// userImageParts returns the image_url parts of every user message in params.
+func userImageParts(params openai.ChatCompletionNewParams) []openai.ChatCompletionContentPartImageParam {
+	var out []openai.ChatCompletionContentPartImageParam
+	for _, msg := range params.Messages {
+		if msg.OfUser == nil {
+			continue
+		}
+		for _, part := range msg.OfUser.Content.OfArrayOfContentParts {
+			if part.OfImageURL != nil {
+				out = append(out, *part.OfImageURL)
+			}
+		}
+	}
+	return out
+}
+
+// Regression for #143: MiMo 2.6 accepts image input, so the rendered Chat
+// Completions request must keep the user's image as an OpenAI-style image_url
+// part. Text-only models (older MiMo, DeepSeek) must still have images stripped.
+func TestBuildOpenAIChatCompletionsParams_ImageGating(t *testing.T) {
+	t.Parallel()
+
+	newCtx := func() *provider.ModelContext {
+		mc := &provider.ModelContext{}
+		mc.Append(provider.SegmentKindSystemPrompt, provider.RoleDeveloper, "sys", true)
+		mc.AppendUserMessage(provider.RoleUser, "what is in this picture?", []provider.UserMessageImage{
+			{RawBytes: []byte{0x89, 0x50, 0x4e, 0x47}, MediaType: "image/png"},
+		}, false)
+		return mc
+	}
+
+	tests := []struct {
+		provider   string
+		model      string
+		wantImages bool
+	}{
+		{provider: "xiaomi", model: "mimo-v2.6", wantImages: true},
+		{provider: "xiaomi", model: "mimo-v2.6-pro", wantImages: true},
+		{provider: "xiaomi", model: "mimo-v2.5-pro", wantImages: false},
+		{provider: "deepseek", model: "deepseek-chat", wantImages: false},
+		{provider: "qwen", model: "qwen3.7-plus", wantImages: true},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.provider+"/"+tt.model, func(t *testing.T) {
+			t.Parallel()
+			mc := newCtx()
+			params := buildOpenAIChatCompletionsParams(&chatContext{modelProvider: tt.provider, model: tt.model}, mc)
+
+			require.Equal(t, shared.ChatModel(tt.model), params.Model)
+			parts := userImageParts(params)
+			if tt.wantImages {
+				require.Len(t, parts, 1)
+				require.Equal(t, "data:image/png;base64,iVBORw==", parts[0].ImageURL.URL)
+			} else {
+				require.Empty(t, parts)
+			}
+			// The source context is never mutated by rendering.
+			require.Len(t, mc.Segments[1].UserImages, 1)
+		})
+	}
+}

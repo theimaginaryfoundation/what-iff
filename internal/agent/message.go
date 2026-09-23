@@ -28,6 +28,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -1149,11 +1150,12 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 	// (see `loadImageBytesForClaude`); otherwise the user turn falls back to text-only.
 	claudeParams := modelContext.BuildClaudeParams(chatCtx.model)
 
-	// GLM/z.ai models think by default and cannot disable it; without an explicit
-	// budget reasoning eats the whole output cap and the turn truncates before any
-	// answer. Give them a bounded thinking budget and a raised output cap.
-	if models.IsZAIModel(chatCtx.modelProvider, chatCtx.model) {
-		provider.ApplyZAIThinkingBudget(&claudeParams)
+	// GLM/z.ai models always think and ignore a thinking budget; left alone, reasoning
+	// can eat the whole output cap and the turn truncates before any answer. Bound it
+	// with output_config.effort and a raised cap (see provider.ZAIReasoningEffort).
+	zai := models.IsZAIModel(chatCtx.modelProvider, chatCtx.model)
+	if zai {
+		provider.ApplyZAIReasoningEffort(&claudeParams, provider.ZAIReasoningEffort)
 	}
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
@@ -1168,6 +1170,16 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 	a.recordToolDefinitionEstimate(modelContext, claudeFunctionTools)
 	webSearchEnabled := policy.toolsEnabled && nativeAnthropic && !policy.disabledTools[tools.ToolNameWebSearch]
 	adapter := provider.NewClaudeAdapter(claudeProvider, claudeParams, claudeFunctionTools, webSearchEnabled, mcpConfig, policy.disabledTools)
+	if zai {
+		adapter.SetTruncationFallback(func(params *anthropic.MessageNewParams) {
+			a.logger.Warn("z.ai response truncated before any reply text; retrying at lower reasoning effort",
+				zap.String("model", chatCtx.model),
+				zap.String("chat_id", chatMessage.ChatID.String()),
+				zap.String("effort", provider.ZAIFallbackReasoningEffort),
+			)
+			provider.ApplyZAIReasoningEffort(params, provider.ZAIFallbackReasoningEffort)
+		})
+	}
 
 	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, generationOptions{
 		provider: "Claude",
@@ -1269,14 +1281,10 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 // generateAssistantForMessageOpenAIChatCompletions drives a chat turn through an
 // OpenAI-compatible Chat Completions API (Mistral, DeepSeek, Qwen, Xiaomi MiMo).
 // Text-only models strip multimodal segments via PrepareForTextOnlyChatCompletions;
-// vision-capable models (Gemini on its own path; Qwen 3.7+/Mistral medium+ heuristics
-// here) keep images. Gemini uses a separate path for tool-call compatibility.
+// vision-capable models (Gemini on its own path; Qwen 3.7+/Mistral medium+/MiMo 2.6+
+// heuristics here) keep images. Gemini uses a separate path for tool-call compatibility.
 func (a *Agent) generateAssistantForMessageOpenAIChatCompletions(ctx context.Context, userID uuid.UUID, chatJob *models.Job, chatMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext) (*models.ChatMessage, *provider.GenerateResponse, error) {
-	renderCtx := modelContext.Clone()
-	if !models.ChatCompletionsSupportsVision(chatCtx.modelProvider, chatCtx.model) {
-		renderCtx.PrepareForTextOnlyChatCompletions()
-	}
-	params := renderCtx.BuildOpenAIChatCompletionParams(chatCtx.model)
+	params := buildOpenAIChatCompletionsParams(chatCtx, modelContext)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
 	functionTools := openAIChatCompletionFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
@@ -1288,6 +1296,18 @@ func (a *Agent) generateAssistantForMessageOpenAIChatCompletions(ctx context.Con
 	}
 
 	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, generationOptions{provider: string(chatCtx.modelProvider)})
+}
+
+// buildOpenAIChatCompletionsParams renders the model context for an OpenAI-compatible
+// Chat Completions turn. Image payloads are kept only when the model accepts vision
+// input (models.ChatCompletionsSupportsVision); otherwise they are stripped so a
+// text-only model never receives image parts it would reject.
+func buildOpenAIChatCompletionsParams(chatCtx *chatContext, modelContext *provider.ModelContext) openai.ChatCompletionNewParams {
+	renderCtx := modelContext.Clone()
+	if !models.ChatCompletionsSupportsVision(chatCtx.modelProvider, chatCtx.model) {
+		renderCtx.PrepareForTextOnlyChatCompletions()
+	}
+	return renderCtx.BuildOpenAIChatCompletionParams(chatCtx.model)
 }
 
 func (a *Agent) openAIChatCompletionsAdapter(chatCtx *chatContext, params openai.ChatCompletionNewParams, functionTools []openai.ChatCompletionToolUnionParam, disabledTools map[string]bool) (provider.AgentAdapter, error) {
@@ -2020,8 +2040,10 @@ func (a *Agent) assertGenerationProducedOutput(providerName string, chatCtx *cha
 	// happens when the whole output budget is spent on non-text content — extended
 	// reasoning or a long/partial tool call — and generation is cut off before any reply
 	// text is emitted. There is nothing to clip (no text block was produced), and the
-	// budget is a fixed cap (DefaultMaxContentLength), not a setting that can "truncate
-	// instead of fail". Retrying usually succeeds because the tool-use path shortens.
+	// budget is a fixed cap, not a setting that can "truncate instead of fail". The
+	// always-on reasoning providers (z.ai GLM, MiMo) have already retried the call once
+	// with reasoning cut back before reaching here; a manual retry usually succeeds
+	// because the tool-use path shortens.
 	if isTruncationStopReason(stopReason) {
 		return fmt.Errorf("%s response was cut off at the length limit before any reply text was produced "+
 			"(the turn used its entire %d-token output budget on tool use or reasoning); please try again",
@@ -2035,11 +2057,12 @@ func (a *Agent) assertGenerationProducedOutput(providerName string, chatCtx *cha
 // isTruncationStopReason reports whether a provider's verbatim stop reason indicates
 // the response was cut off at the output-token limit. Anthropic (and z.ai GLM, which
 // rides the Anthropic path) report "max_tokens"; the OpenAI Responses API reports
-// "max_output_tokens" via IncompleteDetails.Reason. Kept provider-neutral so both the
-// Claude/GLM and OpenAI empty-turn paths surface the same clearer message.
+// "max_output_tokens" via IncompleteDetails.Reason; Chat Completions providers (Xiaomi
+// MiMo) report finish_reason "length". Kept provider-neutral so every empty-turn path
+// surfaces the same clearer message.
 func isTruncationStopReason(stopReason string) bool {
 	switch strings.TrimSpace(stopReason) {
-	case "max_tokens", "max_output_tokens":
+	case "max_tokens", "max_output_tokens", "length":
 		return true
 	default:
 		return false

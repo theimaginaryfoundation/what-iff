@@ -2,7 +2,11 @@ package datastore
 
 import (
 	"context"
+	"regexp"
 	"sort"
+	"strings"
+
+	"entgo.io/ent/dialect/sql"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/ent/chat"
@@ -63,8 +67,78 @@ func toFileAttachmentModel(e *ent.FileAttachment) *models.FileAttachment {
 			},
 		}
 	}
+	fileAttachmentModel.Source = classifyFileAttachmentSource(e)
 
 	return &fileAttachmentModel
+}
+
+// generatedUnlinkedImageName matches the fixed names used by generation
+// pipelines that persist images without a chat message: expression grid cells
+// (expression_grid_generation.go) and personality portraits
+// (personality_portrait_generation.go).
+var generatedUnlinkedImageName = regexp.MustCompile(`(?i)^(expression-[a-z0-9_-]+|personality-portrait)\.png$`)
+
+// classifyFileAttachmentSource derives the gallery Generated/Imported class.
+// A linked chat message is decisive: assistant-origin messages carry tool and
+// ritual output, user-origin messages carry the user's own uploads. Unlinked
+// rows are generated only when they carry a generation pipeline's fixed name;
+// everything else (gallery imports, personality uploads) is imported. Returns
+// "" when the chat message edge was not eager-loaded, since the origin is then
+// unknown.
+func classifyFileAttachmentSource(e *ent.FileAttachment) models.FileAttachmentSource {
+	msg, err := e.Edges.ChatMessageOrErr()
+	if ent.IsNotLoaded(err) {
+		return ""
+	}
+	if msg != nil {
+		if msg.Origin == entchatmessage.OriginAssistant {
+			return models.FileAttachmentSourceGenerated
+		}
+		return models.FileAttachmentSourceImported
+	}
+	if strings.HasPrefix(strings.ToLower(e.FileType), models.ImageMIMEPrefix) &&
+		generatedUnlinkedImageName.MatchString(strings.TrimSpace(e.Name)) {
+		return models.FileAttachmentSourceGenerated
+	}
+	return models.FileAttachmentSourceImported
+}
+
+// excludeReferenceCopies keeps only the earliest row per (owner, s3_key).
+// CreateFileAttachmentReference clones s3_key onto a new row each time a
+// gallery image is reused in a chat; without this the gallery lists those
+// clones (whose chat/personality links differ from the original, so they
+// classify differently) and per-page dedupe cannot see across page boundaries.
+// Rows with an empty/NULL s3_key never match and are always kept.
+func excludeReferenceCopies() predicate.FileAttachment {
+	return func(s *sql.Selector) {
+		s.Where(sql.P(func(b *sql.Builder) {
+			b.WriteString("NOT EXISTS (SELECT 1 FROM ")
+			b.WriteString(entfileattachment.Table)
+			b.WriteString(" AS fa_orig WHERE fa_orig.")
+			b.WriteString(entfileattachment.OwnerColumn)
+			b.WriteString(" = ")
+			b.WriteString(s.C(entfileattachment.OwnerColumn))
+			b.WriteString(" AND fa_orig.")
+			b.WriteString(entfileattachment.FieldS3Key)
+			b.WriteString(" = ")
+			b.WriteString(s.C(entfileattachment.FieldS3Key))
+			b.WriteString(" AND ")
+			b.WriteString(s.C(entfileattachment.FieldS3Key))
+			b.WriteString(" <> '' AND (fa_orig.")
+			b.WriteString(entfileattachment.FieldCreatedAt)
+			b.WriteString(" < ")
+			b.WriteString(s.C(entfileattachment.FieldCreatedAt))
+			b.WriteString(" OR (fa_orig.")
+			b.WriteString(entfileattachment.FieldCreatedAt)
+			b.WriteString(" = ")
+			b.WriteString(s.C(entfileattachment.FieldCreatedAt))
+			b.WriteString(" AND fa_orig.")
+			b.WriteString(entfileattachment.FieldID)
+			b.WriteString(" < ")
+			b.WriteString(s.C(entfileattachment.FieldID))
+			b.WriteString(")))")
+		}))
+	}
 }
 
 // CreateFileAttachment persists a new file attachment to the datastore
@@ -369,6 +443,10 @@ func (d *Datastore) ListFileAttachments(ctx context.Context, userID uuid.UUID, p
 			predicates = append(predicates, entfileattachment.Not(entfileattachment.IDIn(expressionImageIDs...)))
 		}
 		query = query.Where(entfileattachment.And(predicates...))
+	}
+
+	if filters.ExcludeReferenceCopies {
+		query = query.Where(excludeReferenceCopies())
 	}
 
 	if filters.MinDate != nil {

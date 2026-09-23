@@ -1,5 +1,5 @@
 
-import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, input, output, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, Injector, afterNextRender, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
 
 import { ChatMessage } from '../../../../core/models/message.model';
 import { ToolCall } from '../../../../core/models/toolcall.model';
@@ -229,6 +229,11 @@ export class MessageListComponent {
   private lastScrollTop = 0;
   private lastCheckpointMessageId: string | null = null;
   private readonly groupsLengthForScrollRestore = computed(() => this.groups().length);
+  private readonly injector = inject(Injector);
+  // True while an explicit jump (e.g. to a bookmark) is loading + scrolling. Suppresses the
+  // auto-scroll-to-bottom: a jump prepends older batches, which grows the group count and would
+  // otherwise trip the tail digest and snap the reader back to the bottom mid-jump.
+  private isJumping = false;
 
   constructor() {
     effect(() => {
@@ -244,6 +249,10 @@ export class MessageListComponent {
       const digest = this.tailScrollDigest();
       if (!digest) return;
       if (!this.stickyToBottom()) return;
+      // An in-progress jump prepends older batches (growing the group count / digest) while the
+      // reader is anchored at the bottom; don't let that yank them back down before we land on
+      // the target. The signal deps above are still read, so normal tail auto-scroll resumes after.
+      if (this.isJumping) return;
       if (digest === this.lastAppliedScrollDigest) return;
       const tail = lastMessageInGroups(this.groups());
       const tailId = tail?.id ?? null;
@@ -306,27 +315,54 @@ export class MessageListComponent {
   }
 
   /**
-   * Scroll a message into view and briefly flash it. Retries across a few animation frames so
-   * it works whether the target is already rendered or was just loaded (e.g. jumping to a
-   * bookmark on an older page). No-op if the message never renders within the window.
+   * Scroll a message into view and briefly flash it, resolving to whether it succeeded. Works
+   * whether the target is already rendered or was just loaded — a jump to a far-back bookmark can
+   * prepend hundreds of bubbles, and their render is a separate async step from the fetch that the
+   * caller already awaited. Rather than blindly polling, wait on Angular's render lifecycle:
+   * `afterNextRender` fires once the just-loaded rows are in the DOM. A bounded frame poll backs it
+   * up so a pathological case (no render actually scheduled) resolves false instead of hanging.
    */
-  scrollToMessage(messageId: string): void {
-    let attempts = 0;
-    const tryScroll = (): void => {
-      const container = this.scrollContainer()?.nativeElement;
-      const target = container?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
-      if (container && target) {
-        this.stickyToBottom.set(false);
+  scrollToMessage(messageId: string, timeoutMs = 8000): Promise<boolean> {
+    // Stop following the tail up front so a large prepend's render can't bounce the view back to
+    // the bottom while we wait for the target element to appear.
+    this.stickyToBottom.set(false);
+    return new Promise<boolean>(resolve => {
+      let settled = false;
+      const finish = (ok: boolean): void => {
+        if (settled) return;
+        settled = true;
+        resolve(ok);
+      };
+      const tryScroll = (): boolean => {
+        const container = this.scrollContainer()?.nativeElement;
+        const target = container?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
+        if (!container || !target) return false;
         target.scrollIntoView({ behavior: 'smooth', block: 'center' });
         target.classList.add('message-flash');
         setTimeout(() => target.classList.remove('message-flash'), 1800);
-        return;
-      }
-      if (attempts++ < 30) {
-        requestAnimationFrame(tryScroll);
-      }
-    };
-    requestAnimationFrame(tryScroll);
+        finish(true);
+        return true;
+      };
+
+      // Fast path: already on screen.
+      if (tryScroll()) return;
+
+      // Primary: the prepend that just landed is pending a render; scroll the moment it commits.
+      afterNextRender(() => tryScroll(), { injector: this.injector });
+
+      // Safety net: if that render never produces the target, don't spin forever.
+      const deadline = performance.now() + timeoutMs;
+      const poll = (): void => {
+        if (settled) return;
+        if (tryScroll()) return;
+        if (performance.now() < deadline) {
+          requestAnimationFrame(poll);
+        } else {
+          finish(false);
+        }
+      };
+      requestAnimationFrame(poll);
+    });
   }
 
   requestLoadOlder(): void {
@@ -343,7 +379,9 @@ export class MessageListComponent {
     const scrollTop = target.scrollTop;
     const distanceFromBottom = target.scrollHeight - scrollTop - target.clientHeight;
     this.isNearBottom.set(distanceFromBottom < 96);
-    this.stickyToBottom.set(distanceFromBottom <= AUTO_SCROLL_BOTTOM_EPSILON_PX);
+    // While jumping, keep sticky off: a prepend that lands the reader momentarily near the bottom
+    // must not re-arm the auto-scroll and fight the jump.
+    this.stickyToBottom.set(!this.isJumping && distanceFromBottom <= AUTO_SCROLL_BOTTOM_EPSILON_PX);
     // Infinite scroll-up: pull older history as the user nears the top so scrolling back
     // through a long thread is continuous instead of a button-click-per-page grind. Only when
     // actively scrolling *up* — otherwise the initial auto-scroll-to-bottom (and the anchor
@@ -351,9 +389,31 @@ export class MessageListComponent {
     // trigger spurious loads.
     const scrollingUp = scrollTop < this.lastScrollTop;
     this.lastScrollTop = scrollTop;
-    if (scrollingUp && scrollTop <= OLDER_LOAD_THRESHOLD_PX) {
+    if (!this.isJumping && scrollingUp && scrollTop <= OLDER_LOAD_THRESHOLD_PX) {
       this.requestLoadOlder();
     }
+  }
+
+  /**
+   * Bracket an explicit jump (e.g. to a bookmark). `beginJump` stops following the tail so the
+   * older batches the jump loads can't snap the view back to the bottom; `endJump` re-enables
+   * normal tail-following once we've landed (or the jump failed). Always pair them.
+   */
+  beginJump(): void {
+    this.isJumping = true;
+    this.stickyToBottom.set(false);
+  }
+
+  endJump(): void {
+    this.isJumping = false;
+    // Critical: while jumping, the auto-scroll effect bailed at the sticky check every time, so it
+    // never advanced lastAppliedScrollDigest past the pre-jump (small group-count) value. The
+    // batches the jump prepended grew the group count, so the digest now differs — and the moment
+    // the smooth scroll's first onScroll re-arms stickyToBottom near the bottom, the effect would
+    // see that difference and snap to the bottom. We've deliberately parked away from the tail, so
+    // mark the current tail state as already-applied (and hold sticky off) to defuse that snap.
+    this.lastAppliedScrollDigest = this.tailScrollDigest();
+    this.stickyToBottom.set(false);
   }
 
   /** Record the first message currently in view and its viewport position, to re-pin after prepend. */
