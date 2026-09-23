@@ -258,6 +258,15 @@ personality wizard. Not testable hermetically; would need the same
 real-vendor-key-gated, opt-in pattern as item 11 in "Constraints" above.
 Not scheduling this until that pattern exists for _any_ AI-generation flow.
 
+- [x] The **Generate** modal up to the image call — default names, the name
+      rules (empty / duplicate-after-normalization), the reference-image
+      gallery picker, and the real enqueue → background job → failure round
+      trip surfacing in the modal (the mock backend's image gate fails the
+      job) — `functional/personality/expression-generate.spec.ts`, plus a
+      baseline in `visual/personalities.visual.spec.ts`. The keep/discard
+      review and save need real candidates, so they live in the component's
+      unit specs.
+
 ## Notes for whoever picks up an item
 
 - No `data-testid` attributes exist anywhere in this app yet — everything

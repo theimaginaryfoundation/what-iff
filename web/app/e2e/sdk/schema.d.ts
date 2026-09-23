@@ -3140,6 +3140,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/personality/{id}/expressions/generate-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate candidate expression portraits for custom keys
+         * @description Primary integration: the personality expressions "Generate" modal. Enqueues a background `expression_grid` job that renders nine portraits — one 3×3 image for nine caller-chosen expression keys in row-major order — and uploads each panel as a gallery image pinned to the personality **without assigning any expression slot**. When `reference_image_id` is set, the image grounds both the likeness pass and the image model (style/character reference); if the reference call is rejected the run falls back to prompt-only generation. Poll `GET /jobs/{id}`; on `complete`, the job's `progress` is a JSON-encoded `ExpressionCandidatesProgress` whose `candidates` list maps each key to its image. Assign keepers with `PUT /personality/{id}/expressions/{expression_key}` (`image_id`) and delete rejects via `DELETE /image-gallery/{id}`. Shares the single per-user personality media-job slot. Not quota-metered (~$0.01 per run).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Personality ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["GenerateExpressionCandidatesRequest"];
+                };
+            };
+            responses: {
+                /** @description Candidate generation job enqueued */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PersonalityMediaJobResponse"];
+                    };
+                };
+                /** @description Invalid personality ID, keys (not nine unique URL-safe keys), or reference ID; or the personality's image style is none */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Personality or reference image not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A personality media job is already active */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PersonalityMediaJobConflict"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/personality/{id}/expressions/{expression_key}": {
         parameters: {
             query?: never;
@@ -8868,6 +8950,49 @@ export interface components {
             /** Format: uuid */
             reference_image_id?: string;
         };
+        /**
+         * @example {
+         *       "expressions": [
+         *         "happy",
+         *         "content",
+         *         "sad",
+         *         "angry",
+         *         "surprised",
+         *         "confused",
+         *         "tired",
+         *         "in-love",
+         *         "thinking"
+         *       ],
+         *       "reference_image_id": "123e4567-e89b-12d3-a456-426614174000"
+         *     }
+         */
+        GenerateExpressionCandidatesRequest: {
+            /** @description Nine URL-safe expression keys in row-major 3×3 grid order. */
+            expressions: string[];
+            /**
+             * Format: uuid
+             * @description Optional owned gallery image used as a style/character reference.
+             */
+            reference_image_id?: string | null;
+        };
+        ExpressionCandidate: {
+            /** @description Expression key this panel was generated for. */
+            expression_key: string;
+            /**
+             * Format: uuid
+             * @description Gallery image (pinned to the personality) holding the unassigned portrait.
+             */
+            image_id: string;
+        };
+        /** @description Decoded shape of `Job.progress` for candidate runs (`POST /personality/{id}/expressions/generate-candidates`). Written at enqueue without `candidates`; rewritten with `candidates` before the job reaches `complete`. */
+        ExpressionCandidatesProgress: {
+            /** @enum {string} */
+            mode: "candidates";
+            expressions: string[];
+            /** Format: uuid */
+            reference_image_id?: string;
+            candidates?: components["schemas"]["ExpressionCandidate"][];
+        };
         PersonalityMediaJobResponse: {
             /** Format: uuid */
             job_id: string;
@@ -8884,6 +9009,11 @@ export interface components {
             personality_id?: string | null;
             personality_name?: string | null;
             flow_id?: string | null;
+            /**
+             * @description For `expression_grid` jobs only: `default` assigns the default 3×3 grid; `candidates` is an unassigned candidate run owned by the expressions Generate modal.
+             * @enum {string}
+             */
+            expression_mode?: "default" | "candidates";
             error?: string;
         };
         PersonalityMediaJobConflict: {
