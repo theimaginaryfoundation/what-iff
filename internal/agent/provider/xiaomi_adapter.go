@@ -25,10 +25,19 @@ type XiaomiProvider struct {
 // Completions API. When a text-delta handler is set the turn streams token
 // deltas; otherwise it falls back to a single non-streaming request. The full
 // assistant text is always available via GenerateResponse.
+//
+// Because MiMo always reasons and has no reasoning budget, a call that is cut off at
+// the length limit before any reply text is transparently re-issued once with
+// thinking disabled (see call); a second truncation is returned as-is, with
+// StopReason "length", for the agent's empty-turn guard to report.
 type XiaomiAdapter struct {
 	provider         *XiaomiProvider
 	params           openai.ChatCompletionNewParams
 	textDeltaHandler func(delta string)
+
+	// thinkingDisabled records that a truncated call already triggered the
+	// thinking-off retry, so a turn retries at most once and later rounds stay off.
+	thinkingDisabled bool
 }
 
 func NewXiaomiProvider(apiKey, baseURL string, tel *telemetry.Telemetry, httpClient *http.Client) *XiaomiProvider {
@@ -72,6 +81,12 @@ func NewXiaomiAdapter(provider *XiaomiProvider, params openai.ChatCompletionNewP
 		}
 		params.Tools = append(params.Tools, t)
 	}
+	// MiMo reasons by default and bills reasoning against the same cap as the answer,
+	// with no budget knob — give it the raised reasoning-model cap. Only the generic
+	// default (or no cap) is raised; a caller that chose some other cap keeps it.
+	if limit := params.MaxCompletionTokens; !limit.Valid() || limit.Value == DefaultMaxContentLength {
+		params.MaxCompletionTokens = openai.Int(ReasoningMaxOutputTokens)
+	}
 	return &XiaomiAdapter{provider: provider, params: params}
 }
 
@@ -107,8 +122,22 @@ func (a *XiaomiAdapter) ForceFinalResponse(ctx context.Context) (*GenerateRespon
 	return a.toGenerateResponse(resp), nil
 }
 
-// call streams when a text-delta handler is set, else issues a non-streaming request.
+// call issues one request. MiMo has no reasoning budget, so when a response is cut off
+// at the length limit before any reply text (the whole cap went to reasoning), it is
+// discarded — no text deltas were streamed — and re-issued once with thinking disabled;
+// thinking then stays off for the rest of the turn.
 func (a *XiaomiAdapter) call(ctx context.Context) (*openai.ChatCompletion, error) {
+	resp, err := a.callOnce(ctx)
+	if err == nil && !a.thinkingDisabled && chatCompletionTruncatedWithoutText(resp) {
+		a.thinkingDisabled = true
+		a.params.SetExtraFields(map[string]any{"thinking": map[string]any{"type": "disabled"}})
+		resp, err = a.callOnce(ctx)
+	}
+	return resp, err
+}
+
+// callOnce streams when a text-delta handler is set, else issues a non-streaming request.
+func (a *XiaomiAdapter) callOnce(ctx context.Context) (*openai.ChatCompletion, error) {
 	if a.textDeltaHandler != nil {
 		return a.provider.CallStreaming(ctx, a.params, a.textDeltaHandler)
 	}
@@ -127,5 +156,6 @@ func (a *XiaomiAdapter) toGenerateResponse(resp *openai.ChatCompletion) *Generat
 		Text:         ExtractChatCompletionText(resp),
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
+		StopReason:   chatCompletionFinishReason(resp),
 	}
 }

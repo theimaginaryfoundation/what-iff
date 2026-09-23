@@ -463,6 +463,13 @@ func ExtractClaudeText(msg *anthropic.Message) string {
 	return strings.Join(parts, "\n\n")
 }
 
+// claudeTruncatedWithoutText reports whether msg was cut off at the output cap before
+// producing any reply text — the whole budget went to thinking or a (likely partial)
+// tool call. Such a response is unusable as-is.
+func claudeTruncatedWithoutText(msg *anthropic.Message) bool {
+	return msg != nil && msg.StopReason == anthropic.StopReasonMaxTokens && strings.TrimSpace(ExtractClaudeText(msg)) == ""
+}
+
 // ExtractClaudeBetaText concatenates all text blocks in a beta response.
 func ExtractClaudeBetaText(msg *anthropic.BetaMessage) string {
 	if msg == nil {

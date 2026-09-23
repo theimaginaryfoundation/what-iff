@@ -237,14 +237,15 @@ func (m *ModelContext) BuildClaudeParamsWithMaxTokens(model string, maxTokens in
 	}
 }
 
-// ApplyZAIThinkingBudget enables an explicit GLM/z.ai thinking budget on params and
-// raises the output cap so reasoning plus answer both fit (see the ZAI* constants).
-// Callers apply this only on the zai path; on native Anthropic we set no thinking
-// param, so reasoning stays off. Mutates params in place.
-func ApplyZAIThinkingBudget(params *anthropic.MessageNewParams) {
+// ApplyZAIReasoningEffort bounds GLM/z.ai reasoning on params: it raises the output
+// cap to ReasoningMaxOutputTokens and sets output_config.effort (see the reasoning
+// constants for why effort, not a thinking budget). Callers apply this only on the zai
+// path; native Anthropic sets neither, so reasoning stays off there. Mutates params in
+// place; a nil params is a no-op.
+func ApplyZAIReasoningEffort(params *anthropic.MessageNewParams, effort anthropic.OutputConfigEffort) {
 	if params == nil {
 		return
 	}
-	params.MaxTokens = ZAIMaxOutputTokens
-	params.Thinking = anthropic.ThinkingConfigParamOfEnabled(ZAIThinkingBudgetTokens)
+	params.MaxTokens = ReasoningMaxOutputTokens
+	params.OutputConfig.Effort = effort
 }
