@@ -4377,6 +4377,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /chat/{chatId}/active-job:
+    get:
+      summary: Active job for a chat
+      description: >-
+        Returns the newest non-terminal chat_message job for any user turn in this chat, if
+        any, with the user message it answers. Lets a client returning to a thread resume a
+        running turn without first deciding which user message is unanswered.
+      tags: [Chat Messages]
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Active job present
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActiveChatMessageJob'
+        '204':
+          description: No active job
+        '400':
+          description: Invalid chat ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /webhooks/chat/{chatId}/messages:
     post:
       summary: Send webhook message to chat
@@ -6501,6 +6538,10 @@ components:
         status:
           type: string
           enum: [pending, processing, inference_complete, expression_complete, compaction_complete, complete, cancelled, failed]
+        message_id:
+          type: string
+          format: uuid
+          description: The user turn this job answers. Set by GET /chat/{chatId}/active-job.
 
     WebhookToken:
       type: object

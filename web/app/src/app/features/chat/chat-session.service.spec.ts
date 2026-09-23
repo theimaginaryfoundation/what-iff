@@ -19,10 +19,10 @@ import { CHAT_PENDING_ASSISTANT_MESSAGE_ID, MESSAGE_JUMP_PAGE_SIZE } from './cha
 describe('ChatSessionService', () => {
     type ChatServiceMock = Pick<MockedObject<ChatService>, 'createChat' | 'getChat' | 'patchChat' | 'setLastChatId' | 'markChatRead'>;
     type ThreadListServiceMock = Pick<MockedObject<ThreadListService>, 'clearUnreadForThread'>;
-    type MessageServiceMock = Pick<MockedObject<MessageService>, 'clearMessages' | 'listMessages' | 'reconcileLatestPage' | 'sendMessage' | 'retryUserMessage' | 'setCurrentChatId' | 'markAssistantMessagesRead' | 'messages$'>;
+    type MessageServiceMock = Pick<MockedObject<MessageService>, 'clearMessages' | 'listMessages' | 'reconcileLatestPage' | 'sendMessage' | 'retryUserMessage' | 'setCurrentChatId' | 'markAssistantMessagesRead' | 'getMessage' | 'addMessageToList' | 'messages$'>;
     type ChatStreamingServiceMock = Pick<MockedObject<ChatStreamingService>, 'appendServerChunks' | 'clearMessageState' | 'completeStreaming' | 'configure' | 'destroy' | 'getDisplayMessage' | 'getDisplayRevision' | 'setCompletionCallback' | 'startStreaming' | 'stopStreaming'>;
     type DraftMessageServiceMock = Pick<MockedObject<DraftMessageService>, 'clearDraft' | 'getDraft' | 'saveDraft'>;
-    type JobServiceMock = Pick<MockedObject<JobService>, 'pollJob' | 'getActiveChatMessageJob' | 'isJobBeingPolled' | 'cancelJob'>;
+    type JobServiceMock = Pick<MockedObject<JobService>, 'pollJob' | 'getActiveChatJob' | 'isJobBeingPolled' | 'cancelJob'>;
     type ChatSendGateMock = Pick<MockedObject<ChatSendGate>, 'refresh'>;
 
     let service: ChatSessionService;
@@ -34,6 +34,13 @@ describe('ChatSessionService', () => {
     let jobService: JobServiceMock;
     let sendGate: ChatSendGateMock;
     let messages$: BehaviorSubject<ChatMessage[]>;
+
+    /** An assistant row arriving now is not treated as the reply to a pending turn. */
+    function expectLateAssistantNotStreamed(): void {
+        streamingService.startStreaming.mockClear();
+        messages$.next([message('late-assistant', 'Assistant')]);
+        expect(streamingService.startStreaming).not.toHaveBeenCalled();
+    }
 
     const chat: Chat = {
         id: 'chat-1',
@@ -70,6 +77,8 @@ describe('ChatSessionService', () => {
             retryUserMessage: vi.fn().mockName("MessageService.retryUserMessage"),
             setCurrentChatId: vi.fn().mockName("MessageService.setCurrentChatId"),
             markAssistantMessagesRead: vi.fn().mockName("MessageService.markAssistantMessagesRead"),
+            getMessage: vi.fn().mockName("MessageService.getMessage"),
+            addMessageToList: vi.fn().mockName("MessageService.addMessageToList"),
             messages$: messages$.asObservable()
         } as unknown as MessageServiceMock;
         streamingService = {
@@ -91,12 +100,12 @@ describe('ChatSessionService', () => {
         } as unknown as DraftMessageServiceMock;
         jobService = {
             pollJob: vi.fn().mockName("JobService.pollJob"),
-            getActiveChatMessageJob: vi.fn().mockName("JobService.getActiveChatMessageJob"),
+            getActiveChatJob: vi.fn().mockName("JobService.getActiveChatJob"),
             isJobBeingPolled: vi.fn().mockName("JobService.isJobBeingPolled"),
             cancelJob: vi.fn().mockName("JobService.cancelJob")
         } as unknown as JobServiceMock;
         jobService.isJobBeingPolled.mockReturnValue(false);
-        jobService.getActiveChatMessageJob.mockReturnValue(of(null));
+        jobService.getActiveChatJob.mockReturnValue(of(null));
         jobService.cancelJob.mockReturnValue(of({
             id: 'job-1',
             user_id: 'user-1',
@@ -166,10 +175,10 @@ describe('ChatSessionService', () => {
         expect(sendGate.refresh).toHaveBeenCalled();
     });
 
-    it('clears expectingAssistantResponse when job polling finalizes without assistant message', async () => {
+    it('stops expecting a reply when job polling finalizes without assistant message', async () => {
         service.setActive('chat-1');
         await service.sendMessage('hello');
-        expect(service['expectingAssistantResponse']).toBe(false);
+        expectLateAssistantNotStreamed();
     });
 
     it('sends a message and starts job polling', async () => {
@@ -286,7 +295,8 @@ describe('ChatSessionService', () => {
 
     it('cancels active streaming', () => {
         service.setActive('chat-1');
-        service['expectingAssistantResponse'] = true;
+        jobService.pollJob.mockReturnValue(new Subject<any>() as any);
+        service.startAssistantJobPolling('job-1', 'chat-1');
         messages$.next([message('assistant-1', 'Assistant')]);
 
         service.cancelStreaming();
@@ -349,8 +359,15 @@ describe('ChatSessionService', () => {
     });
 
     it('falls back to stopping local streaming when no active job id exists', () => {
+        // The reply is still animating in after its job's bookkeeping was already cleared.
+        const job$ = new Subject<any>();
+        jobService.pollJob.mockReturnValue(job$ as any);
         service.setActive('chat-1');
-        service['_streamingMessageId'].set('assistant-1');
+        service.startAssistantJobPolling('job-1', 'chat-1');
+        messages$.next([message('assistant-1', 'Assistant')]);
+        job$.complete();
+        expect(service.assistantJobPending()).toBe(false);
+        streamingService.stopStreaming.mockClear();
 
         service.cancelGeneration();
 
@@ -359,42 +376,81 @@ describe('ChatSessionService', () => {
     });
 
     it('does not resume polling for terminal active-job snapshots', () => {
-        const user = message('user-1', 'User');
-        messages$.next([user]);
-        jobService.getActiveChatMessageJob.mockReturnValue(of({ job_id: 'job-1', status: 'cancelled' }));
+        messages$.next([message('user-1', 'User')]);
+        jobService.getActiveChatJob.mockReturnValue(of({ job_id: 'job-1', status: 'cancelled', message_id: 'user-1' }));
         service.setActive('chat-1');
 
-        expect(jobService.getActiveChatMessageJob).toHaveBeenCalledWith('chat-1', 'user-1');
+        expect(jobService.getActiveChatJob).toHaveBeenCalledWith('chat-1');
         expect(jobService.pollJob).not.toHaveBeenCalled();
         expect(service.assistantJobPending()).toBe(false);
     });
 
-    it('does not resume polling when assistant reply exists but messages are transiently misordered', () => {
-        const assistant = message('assistant-1', 'Assistant', { sent_at: '2024-01-01T00:00:02Z' });
-        const user = message('user-1', 'User', { sent_at: '2024-01-01T00:00:01Z' });
-        messages$.next([assistant, user]);
-        jobService.getActiveChatMessageJob.mockReturnValue(of({ job_id: 'job-1', status: 'processing' }));
+    it('does not resume polling when the server reports no running turn for the thread', () => {
+        // The server is authoritative: a list that "looks" unanswered (or misordered) does not
+        // start a poll on its own.
+        messages$.next([message('user-1', 'User')]);
+        jobService.getActiveChatJob.mockReturnValue(of(null));
 
         service.setActive('chat-1');
 
-        expect(jobService.getActiveChatMessageJob).not.toHaveBeenCalled();
+        expect(jobService.getActiveChatJob).toHaveBeenCalledWith('chat-1');
         expect(jobService.pollJob).not.toHaveBeenCalled();
         expect(service.assistantJobPending()).toBe(false);
     });
 
-    it('does not resume polling when newest user turn already has assistant reply despite list-order mismatch', () => {
-        const olderUser = message('user-older', 'User', { sent_at: '2024-01-01T00:00:01Z' });
-        const newestUser = message('user-new', 'User', { sent_at: '2024-01-01T00:00:05Z' });
-        const newestAssistant = message('assistant-new', 'Assistant', { sent_at: '2024-01-01T00:00:06Z' });
-        // Deliberately misordered payload where newest user is not the last user in array order.
-        messages$.next([newestAssistant, newestUser, olderUser]);
-        jobService.getActiveChatMessageJob.mockReturnValue(of({ job_id: 'job-1', status: 'processing' }));
+    it('resumes a running turn even when the loaded page already ends in an assistant message', () => {
+        // e.g. a webhook/assistant-mode message landed after the user's turn; the old
+        // "newest user turn has no reply" heuristic would have skipped this running job.
+        messageService.listMessages.mockImplementation(() => {
+            messages$.next([message('user-1', 'User'), message('assistant-webhook', 'Assistant')]);
+            return of({ results: [], page: 1, total_count: 2 });
+        });
+        jobService.getActiveChatJob.mockReturnValue(of({ job_id: 'job-1', status: 'processing', message_id: 'user-1' }));
+        jobService.pollJob.mockReturnValue(new Subject<any>() as any);
 
         service.setActive('chat-1');
 
-        expect(jobService.getActiveChatMessageJob).not.toHaveBeenCalled();
+        expect(jobService.pollJob).toHaveBeenCalledWith('job-1', 'chat-1');
+        expect(service.assistantJobPending()).toBe(true);
+        expect(messageService.getMessage).not.toHaveBeenCalled();
+    });
+
+    it("loads the running turn's user message when it is missing from the page", () => {
+        // Sent from another tab/device after this page was loaded.
+        messageService.listMessages.mockImplementation(() => {
+            messages$.next([message('user-old', 'User'), message('assistant-old', 'Assistant')]);
+            return of({ results: [], page: 1, total_count: 2 });
+        });
+        const newTurn = message('user-new', 'User');
+        messageService.getMessage.mockReturnValue(of(newTurn));
+        jobService.getActiveChatJob.mockReturnValue(of({ job_id: 'job-2', status: 'pending', message_id: 'user-new' }));
+        jobService.pollJob.mockReturnValue(new Subject<any>() as any);
+
+        service.setActive('chat-1');
+
+        expect(messageService.getMessage).toHaveBeenCalledWith('user-new');
+        expect(messageService.addMessageToList).toHaveBeenCalledWith(newTurn);
+        expect(jobService.pollJob).toHaveBeenCalledWith('job-2', 'chat-1');
+    });
+
+    it("does not look up the thread's job again while this tab is already polling one", async () => {
+        service.setActive('chat-1');
+        jobService.pollJob.mockReturnValue(new Subject<any>() as any);
+        await service.sendMessage('hello');
+        jobService.getActiveChatJob.mockClear();
+
+        service.syncActiveThread(true);
+
+        expect(jobService.getActiveChatJob).not.toHaveBeenCalled();
+    });
+
+    it('ignores a failed active-job lookup', () => {
+        jobService.getActiveChatJob.mockReturnValue(throwError(() => new Error('offline')));
+
+        service.setActive('chat-1');
+
         expect(jobService.pollJob).not.toHaveBeenCalled();
-        expect(service.assistantJobPending()).toBe(false);
+        expect(service.error()).toBeNull();
     });
 
     it('bumps the context checkpoint token when a checkpoint lands after load', () => {
@@ -585,8 +641,179 @@ describe('ChatSessionService', () => {
         const result = await service.sendMessage('hello');
         expect(isChatSendSucceeded(result)).toBe(true);
         expect(service.error()).toBe('poll failed');
-        expect(service['expectingAssistantResponse']).toBe(false);
         expect(service.assistantJobPending()).toBe(false);
+        expectLateAssistantNotStreamed();
+    });
+
+    describe('thread switch while a job is in flight (#144)', () => {
+        // Thread A = "Riven" (chat-1, e.g. an imported thread whose turn is stalled
+        // behind the rehydration gate); thread B = "Maggie" (chat-2).
+        let jobA$: Subject<any>;
+        let jobB$: Subject<any>;
+
+        function jobSnapshot(id: string, overrides: Record<string, unknown> = {}) {
+            return {
+                id,
+                user_id: 'user-1',
+                status: 'processing',
+                job_type: 'chat_message',
+                reference: `${id}-user`,
+                created_at: '',
+                updated_at: '',
+                ...overrides,
+            };
+        }
+
+        beforeEach(() => {
+            jobA$ = new Subject<any>();
+            jobB$ = new Subject<any>();
+            chatService.getChat.mockImplementation(id => of(id === 'chat-2' ? secondChat : chat));
+            draftService.getDraft.mockReturnValue(null);
+            jobService.pollJob.mockImplementation(jobId => (jobId === 'job-A' ? jobA$ : jobB$) as any);
+            messageService.sendMessage.mockImplementation(chatId =>
+                of(chatId === 'chat-2'
+                    ? { id: 'user-B', job_id: 'job-B', type: 'chat_message' }
+                    : { id: 'user-A', job_id: 'job-A', type: 'chat_message' }),
+            );
+        });
+
+        it('does not render the previous thread\'s reply into the newly active thread\'s pending bubble', async () => {
+            service.setActive('chat-1');
+            expect(isChatSendSucceeded(await service.sendMessage('continue, Riven'))).toBe(true);
+
+            service.setActive('chat-2');
+            expect(isChatSendSucceeded(await service.sendMessage('hi Maggie'))).toBe(true);
+            expect(service.assistantJobPending()).toBe(true);
+            streamingService.appendServerChunks.mockClear();
+
+            // Thread A's slow turn starts streaming only after the user moved to thread B.
+            jobA$.next(jobSnapshot('job-A', { draft_deltas: ['Riven reply'] }));
+
+            expect(service.pendingAssistantDraftText()).toBe('');
+            expect(streamingService.appendServerChunks).not.toHaveBeenCalled();
+
+            jobB$.next(jobSnapshot('job-B', { draft_deltas: ['Maggie reply'] }));
+            expect(service.pendingAssistantDraftText()).toBe('Maggie reply');
+            expect(streamingService.appendServerChunks).toHaveBeenCalledTimes(1);
+            expect(streamingService.appendServerChunks).toHaveBeenCalledWith(CHAT_PENDING_ASSISTANT_MESSAGE_ID, ['Maggie reply']);
+        });
+
+        it('does not let the previous thread\'s job completion tear down the active thread\'s turn', async () => {
+            service.setActive('chat-1');
+            await service.sendMessage('continue, Riven');
+            service.setActive('chat-2');
+            await service.sendMessage('hi Maggie');
+            jobB$.next(jobSnapshot('job-B', { draft_deltas: ['Maggie reply'] }));
+            sendGate.refresh.mockClear();
+
+            jobA$.next(jobSnapshot('job-A', { status: 'complete', result_id: 'assistant-A' }));
+            jobA$.complete();
+
+            expect(service.assistantJobPending()).toBe(true);
+            expect(service.pendingAssistantDraftText()).toBe('Maggie reply');
+            expect(service.streamingMessageId()).toBe(CHAT_PENDING_ASSISTANT_MESSAGE_ID);
+            expect(service.error()).toBeNull();
+        });
+
+        it('stops polling the previous thread\'s job when the active thread changes', async () => {
+            service.setActive('chat-1');
+            await service.sendMessage('continue, Riven');
+            expect(jobA$.observed).toBe(true);
+
+            service.setActive('chat-2');
+
+            expect(jobA$.observed).toBe(false);
+            expect(service.assistantJobPending()).toBe(false);
+            expect(service.isGenerating()).toBe(false);
+        });
+
+        it('ignores a send that resolves after the user switched threads', async () => {
+            const post$ = new Subject<any>();
+            messageService.sendMessage.mockReturnValue(post$ as any);
+            service.setActive('chat-1');
+            const pending = service.sendMessage('continue, Riven');
+
+            service.setActive('chat-2');
+            post$.next({ id: 'user-A', job_id: 'job-A', type: 'chat_message' });
+            post$.complete();
+            expect(isChatSendSucceeded(await pending)).toBe(true);
+
+            expect(jobService.pollJob).not.toHaveBeenCalled();
+            expect(service.assistantJobPending()).toBe(false);
+            expectLateAssistantNotStreamed();
+        });
+
+        it('does not restore a failed send\'s text into the newly active thread\'s composer', async () => {
+            const post$ = new Subject<any>();
+            messageService.sendMessage.mockReturnValue(post$ as any);
+            service.setActive('chat-1');
+            const pending = service.sendMessage('continue, Riven');
+
+            service.setActive('chat-2');
+            post$.error(new Error('network down'));
+            expect(isChatSendFailed(await pending)).toBe(true);
+
+            expect(service.draft()).toBe('');
+            expect(service.error()).toBeNull();
+            // The unsent text is still preserved for the thread it was written in.
+            expect(draftService.saveDraft).toHaveBeenCalledWith('chat-1', 'continue, Riven');
+        });
+
+        it('does not post to the previous thread while the new thread is still loading', async () => {
+            const secondChat$ = new Subject<Chat>();
+            chatService.getChat.mockImplementation(id => (id === 'chat-2' ? secondChat$ : of(chat)));
+            service.setActive('chat-1');
+            service.setActive('chat-2');
+            // Sidebar/URL already show chat-2, but its metadata has not arrived yet.
+            expect(service.thread()?.id).toBe('chat-1');
+            service.draft.set('hi Maggie');
+
+            const result = await service.sendMessage('hi Maggie');
+
+            expect(result.status).toBe('skipped');
+            expect(messageService.sendMessage).not.toHaveBeenCalled();
+            expect(service.draft()).toBe('hi Maggie');
+
+            secondChat$.next(secondChat);
+            expect(isChatSendSucceeded(await service.sendMessage('hi Maggie'))).toBe(true);
+            expect(messageService.sendMessage).toHaveBeenCalledWith('chat-2', expect.objectContaining({ message: 'hi Maggie' }));
+        });
+
+        it('ignores thread patches that resolve after the user switched threads', async () => {
+            const patch$ = new Subject<Chat>();
+            chatService.patchChat.mockReturnValue(patch$);
+            service.setActive('chat-1');
+            service.setPersonality('personality-riven');
+
+            service.setActive('chat-2');
+            patch$.next({ ...chat, personality_id: 'personality-riven' });
+
+            expect(service.thread()).toEqual(secondChat);
+            expect(isChatSendSucceeded(await service.sendMessage('hi Maggie'))).toBe(true);
+            expect(messageService.sendMessage).toHaveBeenCalledWith('chat-2', expect.anything());
+            expect(messageService.sendMessage).not.toHaveBeenCalledWith('chat-1', expect.anything());
+        });
+
+        it('resumes the previous thread\'s job polling when navigating back to it', async () => {
+            service.setActive('chat-1');
+            await service.sendMessage('continue, Riven');
+            service.setActive('chat-2');
+            expect(jobA$.observed).toBe(false);
+
+            messageService.listMessages.mockImplementation(() => {
+                messages$.next([message('user-A', 'User')]);
+                return of({ results: [message('user-A', 'User')], page: 1, total_count: 1 });
+            });
+            jobService.getActiveChatJob.mockReturnValue(of({ job_id: 'job-A', status: 'processing', message_id: 'user-A' } as any));
+            jobService.pollJob.mockClear();
+
+            service.setActive('chat-1');
+
+            expect(jobService.pollJob).toHaveBeenCalledWith('job-A', 'chat-1');
+            expect(service.assistantJobPending()).toBe(true);
+            jobA$.next(jobSnapshot('job-A', { draft_deltas: ['Riven reply'] }));
+            expect(service.pendingAssistantDraftText()).toBe('Riven reply');
+        });
     });
 });
 
