@@ -210,11 +210,11 @@ export class JobService {
   }
 
   /**
-   * Latest non-terminal chat_message job for a user turn, if any (e.g. resume after refresh).
+   * Latest non-terminal chat_message job for any user turn in the chat, if any. Used to pick a
+   * running turn back up when the user returns to a thread (switch back, refresh, tab focus).
    */
-  getActiveChatMessageJob(chatId: string, messageId: string): Observable<ActiveChatMessageJob | null> {
-    const url = `${this.chatApiUrl}/${chatId}/chat-message/${messageId}/active-job`;
-    return this.http.get<ActiveChatMessageJob>(url, { observe: 'response' }).pipe(
+  getActiveChatJob(chatId: string): Observable<ActiveChatMessageJob | null> {
+    return this.http.get<ActiveChatMessageJob>(`${this.chatApiUrl}/${chatId}/active-job`, { observe: 'response' }).pipe(
       map((res: HttpResponse<ActiveChatMessageJob>) => (res.status === 204 ? null : res.body)),
       catchError(this.handleError),
     );

@@ -25,7 +25,6 @@ import {
   STREAMING_SCROLL_CHECK_INTERVAL,
 } from './chat.constants';
 import { isHttpErrorResponse } from './helpers/chat-send.helpers';
-import { lastUserTurnWithGenerationError } from './helpers/message-grouping.helpers';
 import { ChatSendMessageResult } from './chat-send-result';
 import { ChatSendGate } from './services/chat-send-gate';
 
@@ -759,26 +758,47 @@ export class ChatSessionService implements OnDestroy {
     return this.activeThreadId === threadId;
   }
 
+  /**
+   * Picks a running turn back up when the user (re)enters a thread: switching back from another
+   * thread, a refresh, or a tab-focus sync. Job polls are scoped to the active thread (#144), so
+   * this is the only way a turn that kept running while the user was elsewhere gets its
+   * typing placeholder and streaming back. The server is asked for the thread's active job
+   * directly rather than inferring an "unanswered" user turn from the loaded page.
+   */
   private resumePendingJobIfNeeded(threadId: string): void {
-    if (!this.isActiveThread(threadId)) return;
-    // Snapshot from the same stream the UI uses (avoids relying on getMessages(),
-    // which may be absent on UX-V2's slimmer MessageService after merges).
+    if (!this.isActiveThread(threadId) || this.assistantJobPending()) return;
+    this.subscriptions.add(
+      this.jobService.getActiveChatJob(threadId).subscribe({
+        next: active => {
+          if (!this.isActiveThread(threadId) || !active?.job_id) return;
+          if (isTerminalJobStatus(active.status)) return;
+          if (active.message_id) this.ensureUserTurnLoaded(threadId, active.message_id);
+          this.startAssistantJobPolling(active.job_id, threadId);
+        },
+        error: () => {
+          // Best-effort: the thread still renders; a later sync can resume.
+        },
+      }),
+    );
+  }
+
+  /**
+   * The running turn's user message can be missing from the loaded page (e.g. it was sent from
+   * another tab after this one loaded); fetch it so the typing placeholder has a turn to answer.
+   */
+  private ensureUserTurnLoaded(threadId: string, messageId: string): void {
+    // Snapshot from the same stream the UI renders.
     this.subscriptions.add(
       this.messageService.messages$.pipe(take(1)).subscribe(messages => {
-        if (!this.isActiveThread(threadId)) return;
-        const lastUser = this.latestUserTurn(messages);
-        if (!lastUser) return;
-        if (this.hasAssistantReplyForUserTurn(messages, lastUser)) return;
-        if (lastUserTurnWithGenerationError(messages) !== null) {
-          return;
-        }
-
+        if (messages.some(message => message.id === messageId)) return;
         this.subscriptions.add(
-          this.jobService.getActiveChatMessageJob(threadId, lastUser.id).subscribe({
-            next: active => {
-              if (!this.isActiveThread(threadId) || !active?.job_id) return;
-              if (isTerminalJobStatus(active.status)) return;
-              this.startAssistantJobPolling(active.job_id, threadId);
+          this.messageService.getMessage(messageId).subscribe({
+            next: message => {
+              if (!this.isActiveThread(threadId)) return;
+              this.messageService.addMessageToList(message);
+            },
+            error: () => {
+              // Best-effort: polling still delivers the reply.
             },
           }),
         );
@@ -867,42 +887,6 @@ export class ChatSessionService implements OnDestroy {
     return assistantIdx > userIdx;
   }
 
-  private hasAssistantReplyForUserTurn(messages: readonly ChatMessage[], userMessage: ChatMessage): boolean {
-    if (userMessage.origin !== 'User') return false;
-    if (userMessage.response_id && messages.some(message => message.origin === 'Assistant' && message.id === userMessage.response_id)) {
-      return true;
-    }
-    if (messages.some(message => message.origin === 'Assistant' && message.response_id === userMessage.id)) {
-      return true;
-    }
-    const userSentAtMs = Date.parse(userMessage.sent_at);
-    if (Number.isNaN(userSentAtMs)) {
-      return false;
-    }
-    return messages.some(message => {
-      if (message.origin !== 'Assistant') return false;
-      const assistantSentAtMs = Date.parse(message.sent_at);
-      return !Number.isNaN(assistantSentAtMs) && assistantSentAtMs >= userSentAtMs;
-    });
-  }
-
-  private latestUserTurn(messages: readonly ChatMessage[]): ChatMessage | null {
-    let best: ChatMessage | null = null;
-    let bestSentAtMs = Number.NEGATIVE_INFINITY;
-    for (const message of messages) {
-      if (message.origin !== 'User') continue;
-      const sentAtMs = Date.parse(message.sent_at);
-      if (Number.isNaN(sentAtMs)) {
-        if (!best) best = message;
-        continue;
-      }
-      if (sentAtMs >= bestSentAtMs) {
-        best = message;
-        bestSentAtMs = sentAtMs;
-      }
-    }
-    return best;
-  }
 }
 
 function toUploadedAttachments(attachments: readonly PendingFileAttachment[]): FileAttachment[] | undefined {

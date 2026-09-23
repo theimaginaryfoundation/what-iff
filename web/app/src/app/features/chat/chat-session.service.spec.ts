@@ -19,10 +19,10 @@ import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from './chat.constants';
 describe('ChatSessionService', () => {
     type ChatServiceMock = Pick<MockedObject<ChatService>, 'createChat' | 'getChat' | 'patchChat' | 'setLastChatId' | 'markChatRead'>;
     type ThreadListServiceMock = Pick<MockedObject<ThreadListService>, 'clearUnreadForThread'>;
-    type MessageServiceMock = Pick<MockedObject<MessageService>, 'clearMessages' | 'listMessages' | 'reconcileLatestPage' | 'sendMessage' | 'retryUserMessage' | 'setCurrentChatId' | 'markAssistantMessagesRead' | 'messages$'>;
+    type MessageServiceMock = Pick<MockedObject<MessageService>, 'clearMessages' | 'listMessages' | 'reconcileLatestPage' | 'sendMessage' | 'retryUserMessage' | 'setCurrentChatId' | 'markAssistantMessagesRead' | 'getMessage' | 'addMessageToList' | 'messages$'>;
     type ChatStreamingServiceMock = Pick<MockedObject<ChatStreamingService>, 'appendServerChunks' | 'clearMessageState' | 'completeStreaming' | 'configure' | 'destroy' | 'getDisplayMessage' | 'getDisplayRevision' | 'setCompletionCallback' | 'startStreaming' | 'stopStreaming'>;
     type DraftMessageServiceMock = Pick<MockedObject<DraftMessageService>, 'clearDraft' | 'getDraft' | 'saveDraft'>;
-    type JobServiceMock = Pick<MockedObject<JobService>, 'pollJob' | 'getActiveChatMessageJob' | 'isJobBeingPolled' | 'cancelJob'>;
+    type JobServiceMock = Pick<MockedObject<JobService>, 'pollJob' | 'getActiveChatJob' | 'isJobBeingPolled' | 'cancelJob'>;
     type ChatSendGateMock = Pick<MockedObject<ChatSendGate>, 'refresh'>;
 
     let service: ChatSessionService;
@@ -70,6 +70,8 @@ describe('ChatSessionService', () => {
             retryUserMessage: vi.fn().mockName("MessageService.retryUserMessage"),
             setCurrentChatId: vi.fn().mockName("MessageService.setCurrentChatId"),
             markAssistantMessagesRead: vi.fn().mockName("MessageService.markAssistantMessagesRead"),
+            getMessage: vi.fn().mockName("MessageService.getMessage"),
+            addMessageToList: vi.fn().mockName("MessageService.addMessageToList"),
             messages$: messages$.asObservable()
         } as unknown as MessageServiceMock;
         streamingService = {
@@ -91,12 +93,12 @@ describe('ChatSessionService', () => {
         } as unknown as DraftMessageServiceMock;
         jobService = {
             pollJob: vi.fn().mockName("JobService.pollJob"),
-            getActiveChatMessageJob: vi.fn().mockName("JobService.getActiveChatMessageJob"),
+            getActiveChatJob: vi.fn().mockName("JobService.getActiveChatJob"),
             isJobBeingPolled: vi.fn().mockName("JobService.isJobBeingPolled"),
             cancelJob: vi.fn().mockName("JobService.cancelJob")
         } as unknown as JobServiceMock;
         jobService.isJobBeingPolled.mockReturnValue(false);
-        jobService.getActiveChatMessageJob.mockReturnValue(of(null));
+        jobService.getActiveChatJob.mockReturnValue(of(null));
         jobService.cancelJob.mockReturnValue(of({
             id: 'job-1',
             user_id: 'user-1',
@@ -359,42 +361,81 @@ describe('ChatSessionService', () => {
     });
 
     it('does not resume polling for terminal active-job snapshots', () => {
-        const user = message('user-1', 'User');
-        messages$.next([user]);
-        jobService.getActiveChatMessageJob.mockReturnValue(of({ job_id: 'job-1', status: 'cancelled' }));
+        messages$.next([message('user-1', 'User')]);
+        jobService.getActiveChatJob.mockReturnValue(of({ job_id: 'job-1', status: 'cancelled', message_id: 'user-1' }));
         service.setActive('chat-1');
 
-        expect(jobService.getActiveChatMessageJob).toHaveBeenCalledWith('chat-1', 'user-1');
+        expect(jobService.getActiveChatJob).toHaveBeenCalledWith('chat-1');
         expect(jobService.pollJob).not.toHaveBeenCalled();
         expect(service.assistantJobPending()).toBe(false);
     });
 
-    it('does not resume polling when assistant reply exists but messages are transiently misordered', () => {
-        const assistant = message('assistant-1', 'Assistant', { sent_at: '2024-01-01T00:00:02Z' });
-        const user = message('user-1', 'User', { sent_at: '2024-01-01T00:00:01Z' });
-        messages$.next([assistant, user]);
-        jobService.getActiveChatMessageJob.mockReturnValue(of({ job_id: 'job-1', status: 'processing' }));
+    it('does not resume polling when the server reports no running turn for the thread', () => {
+        // The server is authoritative: a list that "looks" unanswered (or misordered) does not
+        // start a poll on its own.
+        messages$.next([message('user-1', 'User')]);
+        jobService.getActiveChatJob.mockReturnValue(of(null));
 
         service.setActive('chat-1');
 
-        expect(jobService.getActiveChatMessageJob).not.toHaveBeenCalled();
+        expect(jobService.getActiveChatJob).toHaveBeenCalledWith('chat-1');
         expect(jobService.pollJob).not.toHaveBeenCalled();
         expect(service.assistantJobPending()).toBe(false);
     });
 
-    it('does not resume polling when newest user turn already has assistant reply despite list-order mismatch', () => {
-        const olderUser = message('user-older', 'User', { sent_at: '2024-01-01T00:00:01Z' });
-        const newestUser = message('user-new', 'User', { sent_at: '2024-01-01T00:00:05Z' });
-        const newestAssistant = message('assistant-new', 'Assistant', { sent_at: '2024-01-01T00:00:06Z' });
-        // Deliberately misordered payload where newest user is not the last user in array order.
-        messages$.next([newestAssistant, newestUser, olderUser]);
-        jobService.getActiveChatMessageJob.mockReturnValue(of({ job_id: 'job-1', status: 'processing' }));
+    it('resumes a running turn even when the loaded page already ends in an assistant message', () => {
+        // e.g. a webhook/assistant-mode message landed after the user's turn; the old
+        // "newest user turn has no reply" heuristic would have skipped this running job.
+        messageService.listMessages.mockImplementation(() => {
+            messages$.next([message('user-1', 'User'), message('assistant-webhook', 'Assistant')]);
+            return of({ results: [], page: 1, total_count: 2 });
+        });
+        jobService.getActiveChatJob.mockReturnValue(of({ job_id: 'job-1', status: 'processing', message_id: 'user-1' }));
+        jobService.pollJob.mockReturnValue(new Subject<any>() as any);
 
         service.setActive('chat-1');
 
-        expect(jobService.getActiveChatMessageJob).not.toHaveBeenCalled();
+        expect(jobService.pollJob).toHaveBeenCalledWith('job-1', 'chat-1');
+        expect(service.assistantJobPending()).toBe(true);
+        expect(messageService.getMessage).not.toHaveBeenCalled();
+    });
+
+    it("loads the running turn's user message when it is missing from the page", () => {
+        // Sent from another tab/device after this page was loaded.
+        messageService.listMessages.mockImplementation(() => {
+            messages$.next([message('user-old', 'User'), message('assistant-old', 'Assistant')]);
+            return of({ results: [], page: 1, total_count: 2 });
+        });
+        const newTurn = message('user-new', 'User');
+        messageService.getMessage.mockReturnValue(of(newTurn));
+        jobService.getActiveChatJob.mockReturnValue(of({ job_id: 'job-2', status: 'pending', message_id: 'user-new' }));
+        jobService.pollJob.mockReturnValue(new Subject<any>() as any);
+
+        service.setActive('chat-1');
+
+        expect(messageService.getMessage).toHaveBeenCalledWith('user-new');
+        expect(messageService.addMessageToList).toHaveBeenCalledWith(newTurn);
+        expect(jobService.pollJob).toHaveBeenCalledWith('job-2', 'chat-1');
+    });
+
+    it("does not look up the thread's job again while this tab is already polling one", async () => {
+        service.setActive('chat-1');
+        jobService.pollJob.mockReturnValue(new Subject<any>() as any);
+        await service.sendMessage('hello');
+        jobService.getActiveChatJob.mockClear();
+
+        service['resumePendingJobIfNeeded']('chat-1');
+
+        expect(jobService.getActiveChatJob).not.toHaveBeenCalled();
+    });
+
+    it('ignores a failed active-job lookup', () => {
+        jobService.getActiveChatJob.mockReturnValue(throwError(() => new Error('offline')));
+
+        service.setActive('chat-1');
+
         expect(jobService.pollJob).not.toHaveBeenCalled();
-        expect(service.assistantJobPending()).toBe(false);
+        expect(service.error()).toBeNull();
     });
 
     it('bumps the context checkpoint token when a checkpoint lands after load', () => {
@@ -713,7 +754,7 @@ describe('ChatSessionService', () => {
                 messages$.next([message('user-A', 'User')]);
                 return of({ results: [message('user-A', 'User')], page: 1, total_count: 1 });
             });
-            jobService.getActiveChatMessageJob.mockReturnValue(of({ job_id: 'job-A', status: 'processing' } as any));
+            jobService.getActiveChatJob.mockReturnValue(of({ job_id: 'job-A', status: 'processing', message_id: 'user-A' } as any));
             jobService.pollJob.mockClear();
 
             service.setActive('chat-1');
