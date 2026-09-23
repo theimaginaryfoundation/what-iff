@@ -3,7 +3,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient, withXhr } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { NEVER, of } from 'rxjs';
+import { NEVER, Subject, of, throwError } from 'rxjs';
 
 import { PersonalityExpressionsManagerComponent } from './personality-expressions-manager.component';
 import { PersonalityExpression } from '../../../core/models/personality.model';
@@ -11,6 +11,8 @@ import { ExpressionAssignmentService } from '../../../core/services/expression-a
 import { ImageGalleryService } from '../../../core/services/image-gallery.service';
 import { PersonalityMediaJobService } from '../../../core/services/personality-media-job.service';
 import { PersonalityService } from '../../../core/services/personality.service';
+import { By } from '@angular/platform-browser';
+import { ExpressionGenerateModalComponent } from './expression-generate-modal.component';
 import { JobService } from '../../../core/services/job.service';
 import { Job } from '../../../core/models/job.model';
 import { ActivePersonalityMediaJob } from '../../../core/models/personality-media-job.model';
@@ -159,6 +161,23 @@ describe('PersonalityExpressionsManagerComponent', () => {
         expect(component.gridGenerating()).toBe(false);
     });
 
+    it('wires the Generate modal outputs (dismiss, busyChange, saved)', () => {
+        let emitted: readonly PersonalityExpression[] | undefined;
+        component.expressionsChanged.subscribe(v => { emitted = v; });
+        const modal = fixture.debugElement.query(By.directive(ExpressionGenerateModalComponent)).componentInstance as ExpressionGenerateModalComponent;
+        component.openGenerate();
+        modal.busyChange.emit(true);
+        expect(component.generateBusy()).toBe(true);
+        modal.busyChange.emit(false);
+        modal.dismiss.emit();
+        expect(component.isGenerateOpen()).toBe(false);
+        component.openGenerate();
+        const rows = [makeExpression({ expression_key: 'smug', image_id: 'img-9' })];
+        modal.saved.emit(rows);
+        expect(component.isGenerateOpen()).toBe(false);
+        expect(emitted).toEqual(rows);
+    });
+
     describe('resuming an active expression_grid job', () => {
         const active: ActivePersonalityMediaJob = {
             job_id: 'job-1',
@@ -200,6 +219,114 @@ describe('PersonalityExpressionsManagerComponent', () => {
             expect(component.defaultGridRunning()).toBe(true);
             expect(component.generateButtonLabel()).toBe('Generating…');
             expect(jobService.getJob).not.toHaveBeenCalled();
+        });
+
+        it('does not reopen the modal when the candidate job progress is unparseable', async () => {
+            mediaJobs.refreshActiveJob.mockReturnValue(of({ ...active, expression_mode: 'candidates' }));
+            jobService.getJob.mockReturnValue(of(job('not json')));
+            fixture = TestBed.createComponent(PersonalityExpressionsManagerComponent);
+            component = fixture.componentInstance;
+            fixture.componentRef.setInput('personalityId', 'p-1');
+            fixture.componentRef.setInput('expressions', expressions);
+            fixture.detectChanges();
+            await fixture.whenStable();
+            expect(jobService.getJob).toHaveBeenCalledWith('job-1');
+            expect(component.isGenerateOpen()).toBe(false);
+            expect(mediaJobs.pollUntilTerminal).not.toHaveBeenCalled();
+        });
+
+        async function initWith(activeJob: ActivePersonalityMediaJob | null): Promise<void> {
+            mediaJobs.refreshActiveJob.mockReturnValue(of(activeJob));
+            fixture = TestBed.createComponent(PersonalityExpressionsManagerComponent);
+            component = fixture.componentInstance;
+            fixture.componentRef.setInput('personalityId', 'p-1');
+            fixture.componentRef.setInput('expressions', expressions);
+            fixture.detectChanges();
+            await fixture.whenStable();
+        }
+
+        it('ignores jobs for another personality or of another type', async () => {
+            await initWith({ ...active, personality_id: 'p-2' });
+            await initWith({ ...active, job_type: 'personality_portrait' });
+            expect(component.defaultGridRunning()).toBe(false);
+            expect(mediaJobs.pollUntilTerminal).not.toHaveBeenCalled();
+        });
+
+        it('ignores terminal jobs', async () => {
+            await initWith({ ...active, status: 'complete' });
+            await initWith({ ...active, status: 'failed' });
+            expect(component.defaultGridRunning()).toBe(false);
+            expect(mediaJobs.pollUntilTerminal).not.toHaveBeenCalled();
+            expect(jobService.getJob).not.toHaveBeenCalled();
+        });
+
+        describe('default-grid poll', () => {
+            let poll$: Subject<Job>;
+            let listExpressions: ReturnType<typeof vi.fn>;
+
+            beforeEach(async () => {
+                poll$ = new Subject<Job>();
+                mediaJobs.pollUntilTerminal.mockReturnValue(poll$);
+                listExpressions = TestBed.inject(PersonalityService).listExpressions as unknown as ReturnType<typeof vi.fn>;
+                await initWith({ ...active, expression_mode: 'default' });
+                expect(component.defaultGridRunning()).toBe(true);
+            });
+
+            it('blocks opening the Generate modal while running', () => {
+                component.openGenerate();
+                expect(component.isGenerateOpen()).toBe(false);
+            });
+
+            it('ignores non-terminal updates', () => {
+                poll$.next(job());
+                expect(component.defaultGridRunning()).toBe(true);
+            });
+
+            it('reloads and emits the list when the job completes', () => {
+                const rows = [makeExpression({ expression_key: 'sad', image_id: 'i' })];
+                listExpressions.mockReturnValue(of(rows));
+                let emitted: readonly PersonalityExpression[] | undefined;
+                component.expressionsChanged.subscribe(v => { emitted = v; });
+                poll$.next({ ...job(), status: 'complete' });
+                expect(listExpressions).toHaveBeenCalledWith('p-1');
+                expect(component.defaultGridRunning()).toBe(false);
+                expect(emitted).toEqual(rows);
+            });
+
+            it('surfaces a reload failure', () => {
+                listExpressions.mockReturnValue(throwError(() => new Error('reload boom')));
+                poll$.next({ ...job(), status: 'complete' });
+                expect(component.defaultGridRunning()).toBe(false);
+                expect(component.errorMessage()).toBe('reload boom');
+            });
+
+            it('surfaces a reload failure without a message', () => {
+                listExpressions.mockReturnValue(throwError(() => ({})));
+                poll$.next({ ...job(), status: 'complete' });
+                expect(component.errorMessage()).toBe('Failed to reload expressions.');
+            });
+
+            it('surfaces a failed job', () => {
+                poll$.next({ ...job(), status: 'failed', error: 'grid boom' });
+                expect(component.defaultGridRunning()).toBe(false);
+                expect(component.errorMessage()).toBe('grid boom');
+            });
+
+            it('uses a fallback message for a failed job without error', () => {
+                poll$.next({ ...job(), status: 'failed' });
+                expect(component.errorMessage()).toBe('Expression grid generation failed.');
+            });
+
+            it('surfaces a poll error', () => {
+                poll$.error(new Error('poll boom'));
+                expect(component.defaultGridRunning()).toBe(false);
+                expect(component.errorMessage()).toBe('poll boom');
+            });
+
+            it('uses a fallback message for a poll error without message', () => {
+                poll$.error({});
+                expect(component.errorMessage()).toBe('Generation failed.');
+            });
         });
     });
 

@@ -2,11 +2,12 @@ import { test, expect } from '../../fixtures';
 import { commonMasks } from './visual.helpers';
 
 /**
- * @functional-coverage tests/functional/personality/personality-list.spec.ts, tests/functional/personality/personality-detail.spec.ts
+ * @functional-coverage tests/functional/personality/personality-list.spec.ts, tests/functional/personality/personality-detail.spec.ts, tests/functional/personality/expression-generate.spec.ts
  *
  * The list's empty state and creation flow, and the detail page's rename, prompt
  * editing, attachments and default-personality behaviour, are covered by the two
- * functional personality specs.
+ * functional personality specs; the Generate expressions modal's names, name rules
+ * and reference picker by expression-generate.spec.ts.
  *
  * A baseline pins how this looks; it cannot tell you it still works. See
  * e2e/scripts/check-visual-coverage.mjs.
@@ -62,6 +63,31 @@ test.describe('personalities screens', () => {
         // own styling slightly after the badge text renders — a small,
         // observed-in-practice trailing race rather than a masking gap.
         maxDiffPixelRatio: 0.02,
+      });
+    },
+  );
+
+  test(
+    'generate expressions modal',
+    { tag: ['@visual', '@mock-only'] },
+    async ({ authenticatedPage: page, personalitiesPage, personalityDetailPage, shell }) => {
+      await shell.dismissAnnouncementIfPresent();
+      await personalitiesPage.navigateTo();
+      await shell.dismissAnnouncementIfPresent();
+      await personalitiesPage.openCreateManually();
+      await personalitiesPage.createManually('E2E Visual Expressions', 'You are used only for visual regression testing.');
+      await expect(page).toHaveURL(/\/personality\/[^/]+$/);
+
+      await personalityDetailPage.openGenerate();
+      await expect(personalityDetailPage.generateDialog).toBeVisible();
+      await expect(personalityDetailPage.generateNames).toHaveCount(9);
+      // One invalid cell, so the baseline pins the error styling as well as the idle grid.
+      await personalityDetailPage.generateNames.nth(4).fill('');
+      await expect(personalityDetailPage.generateCell(4).getByText('Name required')).toBeVisible();
+      await personalityDetailPage.generateNames.nth(4).blur();
+
+      await expect(personalityDetailPage.generateDialog).toHaveScreenshot('generate-expressions-modal.png', {
+        animations: 'disabled',
       });
     },
   );

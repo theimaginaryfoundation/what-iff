@@ -57,4 +57,14 @@ describe('mediaJobBannerCopy', () => {
     const copy = mediaJobBannerCopy({ ...candidateRun, expression_mode: 'default' }, 'p1');
     expect(copy?.title).toContain('default expressions');
   });
+
+  it('describes portrait jobs', () => {
+    expect(mediaJobBannerCopy({ ...candidateRun, job_type: 'personality_portrait' })?.title).toBe('Generating personality portrait…');
+  });
+
+  it('describes default runs for another personality with the one-job hint', () => {
+    const copy = mediaJobBannerCopy({ ...candidateRun, expression_mode: 'default', personality_name: '  ' }, 'p2');
+    expect(copy?.title).toBe('Generating expressions for this personality');
+    expect(copy?.hint).toContain('Only one image job');
+  });
 });
