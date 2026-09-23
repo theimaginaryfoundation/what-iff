@@ -81,6 +81,11 @@ type ChatMessage struct {
 	// (segment-by-segment token estimates + budget). Set on assistant messages when captured
 	// at generation time; nil on user messages and older assistant messages.
 	ContextBreakdown *modeltypes.ContextBreakdown `json:"context_breakdown,omitempty"`
+	// ModelReasoning is the provider-reported reasoning/thinking text for an assistant turn
+	// (GLM thinking blocks, MiMo reasoning_content), joined across the turn's tool rounds.
+	// Display-only: the context builder never replays it to the model. Nil when the
+	// provider reported none.
+	ModelReasoning *string `json:"model_reasoning,omitempty"`
 	// LastErrorMessage is set when async generation failed for this user turn; cleared on successful delivery.
 	LastErrorMessage *string `json:"last_error_message,omitempty"`
 	// CheckpointCompletedAt is set on assistant messages after a successful checkpoint (scratchpad, memories, summary).

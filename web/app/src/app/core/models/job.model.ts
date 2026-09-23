@@ -28,6 +28,11 @@ export interface Job {
    * Incremental assistant text chunks emitted while inference is still in progress.
    */
   draft_deltas?: string[];
+  /**
+   * Live model reasoning chunks (GLM, MiMo). Unlike draft_deltas this can be reset
+   * (emptied and re-sent) when a truncated call is retried — render the whole array.
+   */
+  draft_reasoning?: string[];
   created_at: string;
   updated_at: string;
 }

@@ -651,3 +651,42 @@ func TestRecordCancelledChatUsage_NilArgsAreNoOp(t *testing.T) {
 		a.recordCancelledChatUsage(context.Background(), &models.Job{}, &models.ChatMessage{}, nil, nil, metering.Decision{}, errCoverageTestSentinel, nil)
 	})
 }
+
+func TestJobDraftReasoningBuffer_FlushesToDraftReasoning(t *testing.T) {
+	t.Parallel()
+
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	mock.ExpectExec("UPDATE .*jobs.*draft_reasoning.*").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	job := &models.Job{ID: uuid.New(), UserID: uuid.New()}
+	b := newJobDraftReasoningBuffer(context.Background(), ds, zap.NewNop(), job, 3, time.Hour)
+	b.HandleDelta("hmm!")
+	require.Empty(t, b.pending)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestJobDraftReasoningBuffer_ResetDropsPendingAndClearsColumn(t *testing.T) {
+	t.Parallel()
+
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	mock.ExpectExec("UPDATE .*jobs.*draft_reasoning.*").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	job := &models.Job{ID: uuid.New(), UserID: uuid.New()}
+	b := newJobDraftReasoningBuffer(context.Background(), ds, zap.NewNop(), job, 999, time.Hour)
+	b.HandleDelta("abandoned attempt") // below threshold: buffered, not persisted
+	b.ResetReasoning()
+	require.Empty(t, b.pending)
+	require.Empty(t, b.allText)
+	b.Flush() // nothing left to write
+	require.NoError(t, mock.ExpectationsWereMet())
+
+	var nilBuf *jobDraftDeltaBuffer
+	require.NotPanics(t, func() { nilBuf.ResetReasoning() })
+	require.NotPanics(t, func() { (&jobDraftDeltaBuffer{}).ResetReasoning() })
+}

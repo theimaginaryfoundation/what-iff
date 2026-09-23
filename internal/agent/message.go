@@ -930,6 +930,23 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 	draftBuffer := newJobDraftDeltaBuffer(a.lifecycleCtx, a.ds, a.logger, chatJob, jobDraftDeltaFlushMinChars, jobDraftDeltaFlushMaxWait)
 	adapter.SetTextDeltaHandler(draftBuffer.HandleDelta)
 	defer draftBuffer.Flush()
+	// Stream reasoning live too, so always-on reasoning models (GLM, MiMo) show
+	// something while they think instead of a bare typing indicator.
+	if streamer, ok := adapter.(provider.ReasoningStreamer); ok {
+		reasoningBuffer := newJobDraftReasoningBuffer(a.lifecycleCtx, a.ds, a.logger, chatJob, jobDraftDeltaFlushMinChars, jobDraftDeltaFlushMaxWait)
+		streamer.SetReasoningStream(provider.ReasoningStream{
+			OnDelta: reasoningBuffer.HandleDelta,
+			OnReset: reasoningBuffer.ResetReasoning,
+		})
+		defer reasoningBuffer.Flush()
+		// Buffers flush on the next delta, not on a timer, so the reasoning tail would
+		// otherwise sit unpersisted once the model switches to its reply. Flushing it on
+		// each text delta is free when nothing is pending.
+		adapter.SetTextDeltaHandler(func(delta string) {
+			reasoningBuffer.Flush()
+			draftBuffer.HandleDelta(delta)
+		})
+	}
 
 	result, toolCalls, generatedAttachments, err := a.handleAgentLoop(ctx, chatCtx, adapter)
 	if err != nil {
@@ -1563,6 +1580,10 @@ type jobDraftDeltaBuffer struct {
 	jobID         uuid.UUID
 	minChunkChars int
 	maxWait       time.Duration
+	// appendChunks persists a flushed chunk; defaults to AppendJobDraftDeltas (reply
+	// text). The reasoning buffer targets AppendJobDraftReasoning instead.
+	appendChunks func(ctx context.Context, userID, jobID uuid.UUID, chunks []string) error
+	field        string
 
 	mu        sync.Mutex
 	pending   string
@@ -1598,7 +1619,49 @@ func newJobDraftDeltaBuffer(
 		jobID:         job.ID,
 		minChunkChars: minChunkChars,
 		maxWait:       maxWait,
+		appendChunks:  ds.AppendJobDraftDeltas,
+		field:         "draft_deltas",
 		lastFlush:     time.Now(),
+	}
+}
+
+// newJobDraftReasoningBuffer is newJobDraftDeltaBuffer targeting the job's
+// draft_reasoning, so live model reasoning reaches the polling client the same way
+// reply text does.
+func newJobDraftReasoningBuffer(
+	persistParent context.Context,
+	ds *datastore.Datastore,
+	logger *zap.Logger,
+	job *models.Job,
+	minChunkChars int,
+	maxWait time.Duration,
+) *jobDraftDeltaBuffer {
+	b := newJobDraftDeltaBuffer(persistParent, ds, logger, job, minChunkChars, maxWait)
+	if b.ds != nil {
+		b.appendChunks = ds.AppendJobDraftReasoning
+		b.field = "draft_reasoning"
+	}
+	return b
+}
+
+// ResetReasoning discards everything buffered and persisted so far and empties the
+// job's draft_reasoning. Only meaningful on a reasoning buffer: it is the
+// ReasoningStream.OnReset hook, fired when a streamed attempt is discarded.
+func (b *jobDraftDeltaBuffer) ResetReasoning() {
+	if b == nil || b.ds == nil {
+		return
+	}
+	b.mu.Lock()
+	b.pending = ""
+	b.allText = ""
+	b.lastFlush = time.Now()
+	b.mu.Unlock()
+	writeCtx, cancel := context.WithTimeout(b.persistParent, jobDraftDeltaPersistTimeout)
+	defer cancel()
+	if err := b.ds.ResetJobDraftReasoning(writeCtx, b.userID, b.jobID); err != nil && b.logger != nil {
+		b.logger.Warn("failed to reset job draft reasoning",
+			zap.String("job_id", b.jobID.String()),
+			zap.Error(err))
 	}
 }
 
@@ -1644,8 +1707,9 @@ func (b *jobDraftDeltaBuffer) persist(chunk string) {
 	}
 	writeCtx, cancel := context.WithTimeout(b.persistParent, jobDraftDeltaPersistTimeout)
 	defer cancel()
-	if err := b.ds.AppendJobDraftDeltas(writeCtx, b.userID, b.jobID, []string{chunk}); err != nil && b.logger != nil {
-		b.logger.Warn("failed to append job draft delta",
+	if err := b.appendChunks(writeCtx, b.userID, b.jobID, []string{chunk}); err != nil && b.logger != nil {
+		b.logger.Warn("failed to append job draft chunk",
+			zap.String("field", b.field),
 			zap.String("job_id", b.jobID.String()),
 			zap.Int("chunk_chars", len(chunk)),
 			zap.Error(err))
@@ -2079,6 +2143,7 @@ func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID,
 		Origin:                models.MessageOriginAssistant,
 		ResponseID:            &result.ID,
 		Tokens:                result.OutputTokens,
+		ModelReasoning:        nonEmptyStringPtr(result.Reasoning),
 		GenerationModel:       generationModel,
 		GenerationPersonality: generationPersonality,
 		GenerationMoodID:      generationMoodID,
@@ -2808,4 +2873,12 @@ func (a *Agent) recordCancelledChatUsage(
 			zap.String("message_id", partialMsg.ID.String()),
 			zap.Error(err))
 	}
+}
+
+// nonEmptyStringPtr returns a pointer to s, or nil when s is blank.
+func nonEmptyStringPtr(s string) *string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return &s
 }

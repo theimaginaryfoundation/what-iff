@@ -134,6 +134,12 @@ func toChatMessageModel(e *ent.ChatMessage) *models.ChatMessage {
 		}
 	}
 
+	if e.ModelReasoning != nil {
+		if r := strings.TrimSpace(*e.ModelReasoning); r != "" {
+			chatMessage.ModelReasoning = &r
+		}
+	}
+
 	if e.LastErrorMessage != nil {
 		msg := strings.TrimSpace(*e.LastErrorMessage)
 		if msg != "" {
@@ -312,6 +318,11 @@ func (d *Datastore) CreateChatMessage(ctx context.Context, userID uuid.UUID, cha
 	}
 	if chatMessage.GenerationMoodID != nil && *chatMessage.GenerationMoodID != uuid.Nil {
 		create.SetGenerationMoodID(*chatMessage.GenerationMoodID)
+	}
+	if chatMessage.ModelReasoning != nil {
+		if r := strings.TrimSpace(*chatMessage.ModelReasoning); r != "" {
+			create.SetModelReasoning(r)
+		}
 	}
 
 	if !chatMessage.SentAt.IsZero() {

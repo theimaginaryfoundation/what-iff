@@ -35,6 +35,50 @@ describe('MessageBubbleComponent', () => {
         expect(fixture.nativeElement.querySelector('.bubble__meta')?.classList).toContain('bubble__meta--assistant');
     });
 
+    it('shows model reasoning in a collapsed disclosure for assistant messages only', () => {
+        // No reasoning → no disclosure.
+        fixture.componentRef.setInput('message', { ...message('Assistant') });
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.bubble__reasoning')).toBeNull();
+
+        fixture.componentRef.setInput('message', {
+            ...message('Assistant'),
+            model_reasoning: '  First I weighed X.\n\nThen Y.  ',
+        });
+        fixture.detectChanges();
+        const details = fixture.nativeElement.querySelector('details.bubble__reasoning') as HTMLDetailsElement;
+        expect(details).not.toBeNull();
+        expect(details.open).toBe(false);
+        expect(details.querySelector('summary')?.textContent).toContain('Thought process');
+        expect(details.querySelector('.bubble__reasoning-text')?.textContent).toBe('First I weighed X.\n\nThen Y.');
+        // Sits above the reply body.
+        expect(details.nextElementSibling?.classList).toContain('bubble__body');
+
+        // User messages never show it, even if the field is somehow present.
+        fixture.componentRef.setInput('message', { ...message('User'), model_reasoning: 'nope' });
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.bubble__reasoning')).toBeNull();
+    });
+
+    it('shows live reasoning open while thinking, then settles collapsed once the reply streams', () => {
+        fixture.componentRef.setInput('message', { ...pendingAssistantMessage(), model_reasoning: 'Considering it' });
+        fixture.componentRef.setInput('displayContent', '');
+        fixture.detectChanges();
+
+        const details = () => fixture.nativeElement.querySelector('details.bubble__reasoning') as HTMLDetailsElement;
+        expect(details().open).toBe(true);
+        expect(details().classList).toContain('bubble__reasoning--live');
+        expect(details().querySelector('summary')?.textContent).toContain('Thinking…');
+        // The typing dots stay: the reply itself hasn't started.
+        expect(fixture.nativeElement.querySelector('.bubble__pending-dots')).not.toBeNull();
+
+        fixture.componentRef.setInput('displayContent', 'Here is my answer');
+        fixture.detectChanges();
+        expect(details().open).toBe(false);
+        expect(details().classList).not.toContain('bubble__reasoning--live');
+        expect(details().querySelector('summary')?.textContent).toContain('Thought process');
+    });
+
     it('labels the speaker and emits copy events', () => {
         const spy = vi.fn().mockName('copy');
         fixture.componentInstance.copy.subscribe(spy);

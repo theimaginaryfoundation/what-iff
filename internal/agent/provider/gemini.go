@@ -91,13 +91,16 @@ func (c *GeminiProvider) Call(ctx context.Context, params openai.ChatCompletionN
 // than mis-associating.
 func (c *GeminiProvider) CallStreaming(ctx context.Context, params openai.ChatCompletionNewParams, onTextDelta func(delta string)) (*openai.ChatCompletion, map[int64]string, error) {
 	thoughtSignatures := map[int64]string{}
-	resp, err := streamChatCompletionCapturing(ctx, c.client, params, onTextDelta, func(index int64, raw string) {
-		if _, seen := thoughtSignatures[index]; seen {
-			return
-		}
-		if sig := gjson.Get(raw, "extra_content.google.thought_signature").String(); sig != "" {
-			thoughtSignatures[index] = sig
-		}
+	resp, err := streamChatCompletionCapturing(ctx, c.client, params, chatCompletionStreamHooks{
+		onTextDelta: onTextDelta,
+		onToolCallDelta: func(index int64, raw string) {
+			if _, seen := thoughtSignatures[index]; seen {
+				return
+			}
+			if sig := gjson.Get(raw, "extra_content.google.thought_signature").String(); sig != "" {
+				thoughtSignatures[index] = sig
+			}
+		},
 	})
 	if err != nil {
 		return nil, nil, err
