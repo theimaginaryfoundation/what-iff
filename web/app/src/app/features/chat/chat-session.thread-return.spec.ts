@@ -138,6 +138,73 @@ describe('ChatSessionService — returning to a thread with a running turn', () 
         http.expectOne(`${api}/job/job-2`).flush({ id: 'job-2', status: 'processing', job_type: 'chat_message', reference: 'user-2' });
     });
 
+    it('runs a focus sync that arrived mid-turn once this tab\'s reply has landed', async () => {
+        const messages = TestBed.inject(MessageService);
+        const flushMessageFetches = () =>
+            http.match(r => r.url.startsWith(`${api}/chat/chat-message/`)).forEach(r =>
+                r.flush(r.request.url.endsWith('asst-1')
+                    ? assistantMsg('asst-1', 'chat-B', '2026-09-23T10:00:05Z')
+                    : userMsg('user-1', 'chat-B', '2026-09-23T10:00:00Z')));
+        service.setActive('chat-B');
+        flushList('chat-B', []);
+        noActiveJob('chat-B');
+
+        const send = service.sendMessage('first');
+        http.expectOne(`${api}/chat/chat-B/chat-message`).flush({ id: 'user-1', job_id: 'job-1', type: 'chat_message' });
+        await send;
+        await vi.advanceTimersByTimeAsync(0);
+        http.expectOne(`${api}/job/job-1`).flush({ id: 'job-1', status: 'processing', job_type: 'chat_message', reference: 'user-1' });
+
+        // Another tab sends "user-2" while this tab is still generating: hold the sync.
+        service.syncActiveThread(true);
+        http.expectNone(r => r.url === `${api}/chat/chat-B/chat-message`);
+
+        // Reply lands; post-inference phases (expression, summarization) keep job-1 pending.
+        await vi.advanceTimersByTimeAsync(2000);
+        http.expectOne(`${api}/job/job-1`).flush({
+            id: 'job-1', status: 'inference_complete', job_type: 'chat_message', reference: 'user-1', result_id: 'asst-1',
+        });
+        flushMessageFetches();
+        TestBed.tick();
+        // Still animating the reply in: keep holding.
+        expect(service.isStreaming()).toBe(true);
+        http.expectNone(r => r.url === `${api}/chat/chat-B/chat-message`);
+
+        const streaming = TestBed.inject(ChatStreamingService) as unknown as { setCompletionCallback: ReturnType<typeof vi.fn> };
+        const onStreamComplete = streaming.setCompletionCallback.mock.calls[0][0] as (id: string) => void;
+        onStreamComplete(service.streamingMessageId()!);
+        TestBed.tick();
+
+        // job-1 is still in post-inference, which must not hold the sync or the resume.
+        expect(service.assistantJobPending()).toBe(true);
+        http.expectOne(r => r.url === `${api}/chat/chat-B/chat-message`).flush({
+            results: [userMsg('user-2', 'chat-B', '2026-09-23T10:01:00Z'), assistantMsg('asst-1', 'chat-B', '2026-09-23T10:00:05Z'),
+                userMsg('user-1', 'chat-B', '2026-09-23T10:00:00Z')],
+            page: 1, total_count: 3,
+        });
+        activeJobLookup('chat-B').flush({ job_id: 'job-2', status: 'processing', message_id: 'user-2' });
+
+        expect(messages.getMessages().map(m => m.id)).toContain('user-2');
+        await vi.advanceTimersByTimeAsync(0);
+        http.expectOne(`${api}/job/job-2`).flush({
+            id: 'job-2', status: 'processing', job_type: 'chat_message', reference: 'user-2', draft_deltas: ['Hel'],
+        });
+        expect(service.isGenerating()).toBe(true);
+        expect(service.pendingAssistantDraftText()).toBe('Hel');
+
+        // job-1 finishing its post-inference phases must not wipe job-2's in-progress draft.
+        await vi.advanceTimersByTimeAsync(2000);
+        http.expectOne(`${api}/job/job-1`).flush({
+            id: 'job-1', status: 'complete', job_type: 'chat_message', reference: 'user-1', result_id: 'asst-1',
+        });
+        flushMessageFetches();
+        http.expectOne(`${api}/job/job-2`).flush({
+            id: 'job-2', status: 'processing', job_type: 'chat_message', reference: 'user-2', draft_deltas: ['Hel', 'lo'],
+        });
+        expect(service.pendingAssistantDraftText()).toBe('Hello');
+        expect(service.isGenerating()).toBe(true);
+    });
+
     it('does not resume when nothing is running for the thread', () => {
         service.setActive('chat-B');
         flushList('chat-B', [

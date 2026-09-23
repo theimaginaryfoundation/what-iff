@@ -1,4 +1,4 @@
-import { Injectable, OnDestroy, Signal, WritableSignal, computed, effect, inject, signal } from '@angular/core';
+import { Injectable, OnDestroy, Signal, WritableSignal, computed, effect, inject, signal, untracked } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { firstValueFrom, Subscription, finalize } from 'rxjs';
 import { take } from 'rxjs/operators';
@@ -65,6 +65,12 @@ export class ChatSessionService implements OnDestroy {
    * polling via resumePendingJobIfNeeded.
    */
   private threadJobSubscriptions = new Subscription();
+  /**
+   * A tab-return sync that arrived while this tab was still generating (inference running or
+   * the reply animating in). Replayed once that settles; otherwise a turn sent from another tab
+   * in the meantime would stay invisible until the next focus event.
+   */
+  private deferredSync: { threadId: string; nearBottom: boolean } | null = null;
 
   readonly thread: Signal<Chat | null> = this._thread.asReadonly();
   readonly messages: Signal<ChatMessage[]> = toSignal(this.messageService.messages$, { initialValue: [] });
@@ -91,6 +97,11 @@ export class ChatSessionService implements OnDestroy {
   private readonly inferenceGenerating = computed(
     () => this.assistantJobPending() && !isPostInferencePhase(this._activeJobPhase()),
   );
+  /**
+   * True while this tab's own reply is still landing (core inference running, including while a
+   * cancel winds down, or the reply animating in). Tab-return syncs and job resumes wait for it.
+   */
+  private readonly holdsThreadSync = computed(() => this.inferenceGenerating() || this.isStreaming());
   /** True while the assistant is generating (core inference pending and/or UI streaming). */
   readonly isGenerating = computed(() => (this.inferenceGenerating() && !this.isCancellationPending()) || this.isStreaming());
   /** Keep composer disabled while generation is in progress. */
@@ -158,6 +169,11 @@ export class ChatSessionService implements OnDestroy {
         }
       }, AUTOSAVE_DEBOUNCE_MS);
     });
+
+    effect(() => {
+      if (this.holdsThreadSync()) return;
+      untracked(() => this.flushDeferredSync());
+    });
   }
 
   setActive(threadId: string): void {
@@ -165,6 +181,7 @@ export class ChatSessionService implements OnDestroy {
 
     const requestedThreadId = threadId;
     this.stopThreadJobPolling();
+    this.deferredSync = null;
     this.activeThreadId = threadId;
     this.messagesPage = 1;
     this.messagesTotalCount = 0;
@@ -243,28 +260,26 @@ export class ChatSessionService implements OnDestroy {
   }
 
   /**
-   * Re-pull the active thread's latest messages + metadata in place — no list
-   * clear, no loading flash. Used when the tab regains focus/visibility so
-   * messages produced in another tab (or by a background job) appear without a
-   * manual page refresh. The message-list replace flows through the checkpoint
-   * subscription, so a background turn's new summary/scratchpad refreshes too.
-   *
-   * No-op while this tab has its own in-flight job or streaming: the job poller
-   * already keeps it current, and we must not disturb that state.
-   */
-  /**
    * Refresh the active thread after a tab-return/focus without destroying the user's scrollback.
    * Thread metadata (name/summary) always refreshes. Messages are reconciled non-destructively:
    * messages already loaded are updated in place and anything new is appended — older loaded
    * pages and the scroll position are preserved. A full reload only happens when more than a
    * page arrived while away (a gap) AND the user is following at the bottom; a user reading
    * history is never yanked back to the present.
+   *
+   * While this tab is generating, the sync is deferred rather than dropped: the job poller owns
+   * the list until the reply lands, and the sync runs once it settles. Post-inference phases
+   * (expression, summarization) do not defer it — they can run for minutes, and the composer is
+   * already unlocked for them.
    */
   syncActiveThread(nearBottom: boolean): void {
     const threadId = this.activeThreadId;
-    if (!threadId || this.assistantJobPending() || this.isStreaming()) {
+    if (!threadId) return;
+    if (this.holdsThreadSync()) {
+      this.deferredSync = { threadId, nearBottom };
       return;
     }
+    this.deferredSync = null;
 
     this.subscriptions.add(
       this.chatService.getChat(threadId).subscribe({
@@ -298,6 +313,13 @@ export class ChatSessionService implements OnDestroy {
         },
       }),
     );
+  }
+
+  private flushDeferredSync(): void {
+    const pending = this.deferredSync;
+    if (!pending) return;
+    this.deferredSync = null;
+    if (this.isActiveThread(pending.threadId)) this.syncActiveThread(pending.nearBottom);
   }
 
   /** Destructive reload to the newest page (used only when a gap makes a merge unsafe). */
@@ -408,6 +430,7 @@ export class ChatSessionService implements OnDestroy {
 
   clearActive(): void {
     this.stopThreadJobPolling();
+    this.deferredSync = null;
     this.activeThreadId = null;
     this.messagesPage = 1;
     this.messagesTotalCount = 0;
@@ -544,6 +567,9 @@ export class ChatSessionService implements OnDestroy {
           finalize(() => {
             this.jobRenderedDeltaIndex.delete(jobId);
             if (!this.isActiveThread(chatId)) return;
+            // A job superseded while in its post-inference phases (a newer turn was sent or
+            // resumed) no longer owns the pending-assistant slot; leave the newer draft alone.
+            if (this._activeChatJobId() !== jobId) return;
             this.finishPendingDraftStream(this._cancelRequestedJobId() !== jobId);
           }),
           finalize(() => {
@@ -766,7 +792,9 @@ export class ChatSessionService implements OnDestroy {
    * directly rather than inferring an "unanswered" user turn from the loaded page.
    */
   private resumePendingJobIfNeeded(threadId: string): void {
-    if (!this.isActiveThread(threadId) || this.assistantJobPending()) return;
+    // A job still in its post-inference phases doesn't block picking up a newer turn (e.g. one
+    // sent from another tab); startAssistantJobPolling skips a job that is already being polled.
+    if (!this.isActiveThread(threadId) || this.holdsThreadSync()) return;
     this.subscriptions.add(
       this.jobService.getActiveChatJob(threadId).subscribe({
         next: active => {
