@@ -46,6 +46,8 @@ export class ChatSessionService implements OnDestroy {
   private readonly _loading = signal(false);
   private readonly _error = signal<string | null>(null);
   private readonly _pendingAssistantDraftText = signal('');
+  /** Live model reasoning for the pending reply; replaced wholesale on each job snapshot. */
+  private readonly _pendingAssistantDraftReasoning = signal('');
 
   private activeThreadId: string | null = null;
   private messagesPage = 1;
@@ -66,6 +68,7 @@ export class ChatSessionService implements OnDestroy {
   readonly loading = this._loading.asReadonly();
   readonly error = this._error.asReadonly();
   readonly pendingAssistantDraftText = this._pendingAssistantDraftText.asReadonly();
+  readonly pendingAssistantDraftReasoning = this._pendingAssistantDraftReasoning.asReadonly();
   readonly draft: WritableSignal<string> = signal('');
   readonly model: Signal<Model | null> = this._model.asReadonly();
   readonly personalityId = computed(() => this._thread()?.personality_id ?? null);
@@ -167,6 +170,7 @@ export class ChatSessionService implements OnDestroy {
     this._loading.set(true);
     this._error.set(null);
     this._pendingAssistantDraftText.set('');
+    this._pendingAssistantDraftReasoning.set('');
     this.streamingService.clearMessageState(CHAT_PENDING_ASSISTANT_MESSAGE_ID);
     this.expectedAssistantAfterUserMessageId = null;
     this.jobRenderedDeltaIndex.clear();
@@ -411,6 +415,7 @@ export class ChatSessionService implements OnDestroy {
     this._activeJobPhase.set(null);
     this._cancelRequestedJobId.set(null);
     this._pendingAssistantDraftText.set('');
+    this._pendingAssistantDraftReasoning.set('');
     this.streamingService.clearMessageState(CHAT_PENDING_ASSISTANT_MESSAGE_ID);
     this.expectedAssistantAfterUserMessageId = null;
     this.jobRenderedDeltaIndex.clear();
@@ -510,6 +515,7 @@ export class ChatSessionService implements OnDestroy {
     this._activeJobPhase.set(null);
     if (this._cancelRequestedJobId() !== jobId) {
       this._pendingAssistantDraftText.set('');
+      this._pendingAssistantDraftReasoning.set('');
       this.streamingService.clearMessageState(CHAT_PENDING_ASSISTANT_MESSAGE_ID);
     }
     this.jobRenderedDeltaIndex.set(jobId, 0);
@@ -573,6 +579,7 @@ export class ChatSessionService implements OnDestroy {
     }
     if (opts.clearPendingDraft && messageId === CHAT_PENDING_ASSISTANT_MESSAGE_ID) {
       this._pendingAssistantDraftText.set('');
+      this._pendingAssistantDraftReasoning.set('');
     }
     this.expectingAssistantResponse = false;
     this.expectedAssistantAfterUserMessageId = null;
@@ -747,6 +754,15 @@ export class ChatSessionService implements OnDestroy {
     if (cancelPendingForJob && job.status === 'cancelled') {
       this._cancelRequestedJobId.set(null);
     }
+    // Reasoning is rendered from the whole array each snapshot (not a cursor like the
+    // text below): the server resets it when a truncated call is retried. Only the
+    // active job drives it, and a pending cancel freezes it like the text draft. Past
+    // `processing` the server has already cleared the draft; keep showing the last
+    // snapshot until the saved message (which carries model_reasoning) replaces it.
+    const inferenceRunning = job.status === 'pending' || job.status === 'processing';
+    if (this._activeChatJobId() === job.id && !cancelPendingForJob && inferenceRunning) {
+      this._pendingAssistantDraftReasoning.set((job.draft_reasoning ?? []).join(''));
+    }
     const draftDeltas = job.draft_deltas ?? [];
     if (draftDeltas.length === 0) return;
     const jobId = job.id;
@@ -778,6 +794,7 @@ export class ChatSessionService implements OnDestroy {
     }
     if (clearPendingDraft) {
       this._pendingAssistantDraftText.set('');
+      this._pendingAssistantDraftReasoning.set('');
       this.streamingService.clearMessageState(CHAT_PENDING_ASSISTANT_MESSAGE_ID);
     }
   }

@@ -240,6 +240,38 @@ describe('ChatSessionService', () => {
         expect(streamingService.appendServerChunks).toHaveBeenCalledWith(CHAT_PENDING_ASSISTANT_MESSAGE_ID, ['Part 1']);
     });
 
+    it('mirrors live draft reasoning wholesale per snapshot, including a server reset', async () => {
+        const activeJob$ = new Subject<any>();
+        jobService.pollJob.mockReturnValue(activeJob$ as any);
+        service.setActive('chat-1');
+
+        const result = await service.sendMessage('hello');
+        expect(isChatSendSucceeded(result)).toBe(true);
+
+        const snapshot = (status: string, draft_reasoning?: string[]) => ({
+            id: 'job-1',
+            user_id: 'user-1',
+            status,
+            job_type: 'chat_message',
+            reference: 'user-msg',
+            draft_reasoning,
+            created_at: '',
+            updated_at: '',
+        });
+
+        activeJob$.next(snapshot('processing', ['Let me ', 'think']));
+        expect(service.pendingAssistantDraftReasoning()).toBe('Let me think');
+
+        // Truncated attempt discarded server-side: the array restarts, and so does the draft.
+        activeJob$.next(snapshot('processing', ['Fresh start']));
+        expect(service.pendingAssistantDraftReasoning()).toBe('Fresh start');
+
+        // Past processing the server has cleared the draft; the last snapshot stays up
+        // until the saved message replaces the placeholder.
+        activeJob$.next({ ...snapshot('inference_complete'), result_id: 'assistant-1' });
+        expect(service.pendingAssistantDraftReasoning()).toBe('Fresh start');
+    });
+
     it('stops reporting generating once core inference completes, before post-inference phases', async () => {
         const activeJob$ = new Subject<any>();
         jobService.pollJob.mockReturnValue(activeJob$ as any);

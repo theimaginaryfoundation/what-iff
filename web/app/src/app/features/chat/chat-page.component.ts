@@ -118,6 +118,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
       const pending = pendingAssistantPlaceholderMessage({
         chatId: threadId,
         draftText: this.session.pendingAssistantDraftText(),
+        draftReasoning: this.session.pendingAssistantDraftReasoning(),
         generationPersonality: name,
         thinkingImageUrl: this.selectedPersonality()?.expressions_enabled === false
           ? null

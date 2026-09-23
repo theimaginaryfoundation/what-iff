@@ -133,6 +133,8 @@ const CHAT_PENDING_ASSISTANT_PLACEHOLDER_SENT_AT = '1970-01-01T00:00:00.000Z';
 export function pendingAssistantPlaceholderMessage(opts: {
   chatId: string;
   draftText: string;
+  /** Live model reasoning streamed so far (GLM, MiMo); empty when none. */
+  draftReasoning?: string;
   generationPersonality: string;
   thinkingImageUrl: string | null;
 }): ChatMessage {
@@ -140,6 +142,7 @@ export function pendingAssistantPlaceholderMessage(opts: {
     id: CHAT_PENDING_ASSISTANT_MESSAGE_ID,
     chat_id: opts.chatId,
     message: opts.draftText,
+    model_reasoning: opts.draftReasoning || undefined,
     origin: 'Assistant',
     sent_at: CHAT_PENDING_ASSISTANT_PLACEHOLDER_SENT_AT,
     generation_personality: opts.generationPersonality,

@@ -28,17 +28,18 @@ func toJobModel(e *ent.Job) *models.Job {
 	}
 
 	return &models.Job{
-		ID:          e.ID,
-		UserID:      e.Edges.Owner.ID,
-		JobType:     e.JobType,
-		Reference:   e.Reference,
-		Status:      models.JobStatus(e.Status),
-		Error:       e.Error,
-		ResultID:    resultID,
-		DraftDeltas: append([]string(nil), e.DraftDeltas...),
-		Progress:    e.Progress,
-		CreatedAt:   e.CreatedAt,
-		UpdatedAt:   e.UpdatedAt,
+		ID:             e.ID,
+		UserID:         e.Edges.Owner.ID,
+		JobType:        e.JobType,
+		Reference:      e.Reference,
+		Status:         models.JobStatus(e.Status),
+		Error:          e.Error,
+		ResultID:       resultID,
+		DraftDeltas:    append([]string(nil), e.DraftDeltas...),
+		DraftReasoning: append([]string(nil), e.DraftReasoning...),
+		Progress:       e.Progress,
+		CreatedAt:      e.CreatedAt,
+		UpdatedAt:      e.UpdatedAt,
 	}
 }
 
@@ -500,11 +501,42 @@ func (d *Datastore) AppendJobDraftDeltas(ctx context.Context, userID, id uuid.UU
 	return nil
 }
 
-// ClearJobDraftDeltas removes any in-progress draft chunks from a job.
+// AppendJobDraftReasoning appends incremental reasoning chunks to a job's draft_reasoning.
+// Same single-row, owner-scoped shape as AppendJobDraftDeltas.
+func (d *Datastore) AppendJobDraftReasoning(ctx context.Context, userID, id uuid.UUID, chunks []string) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	if _, err := d.dbClient.Job.Update().
+		Where(job.ID(id), job.HasOwnerWith(user.ID(userID))).
+		AppendDraftReasoning(chunks).
+		Save(ctx); err != nil {
+		d.logger.Error(i18n.T1("update.failed", "Entity", "job draft_reasoning"), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// ResetJobDraftReasoning empties a job's draft_reasoning without touching its text
+// draft. Used when a truncated call is discarded and retried, so the abandoned
+// attempt's reasoning stops showing.
+func (d *Datastore) ResetJobDraftReasoning(ctx context.Context, userID, id uuid.UUID) error {
+	if _, err := d.dbClient.Job.Update().
+		Where(job.ID(id), job.HasOwnerWith(user.ID(userID))).
+		ClearDraftReasoning().
+		Save(ctx); err != nil {
+		d.logger.Error(i18n.T1("update.failed", "Entity", "job draft_reasoning"), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// ClearJobDraftDeltas removes any in-progress draft chunks — text and reasoning — from a job.
 func (d *Datastore) ClearJobDraftDeltas(ctx context.Context, userID, id uuid.UUID) error {
 	_, err := d.dbClient.Job.Update().
 		Where(job.ID(id), job.HasOwnerWith(user.ID(userID))).
 		ClearDraftDeltas().
+		ClearDraftReasoning().
 		Save(ctx)
 	if err != nil {
 		d.logger.Error(i18n.T1("update.failed", "Entity", "job draft_deltas"), zap.Error(err))
@@ -594,8 +626,9 @@ func (d *Datastore) finalizeChatJobWithPartial(
 
 	// Phase 2: consume current draft deltas into a partial assistant message (if any).
 	partialText := strings.Join(entJob.DraftDeltas, "")
+	partialReasoning := strings.Join(entJob.DraftReasoning, "")
 	resultID, err := d.consumeDraftDeltasToMessageTx(
-		ctx, tx, chatID, partialText, generationModel, generationPersonality, generationMoodID,
+		ctx, tx, chatID, partialText, partialReasoning, generationModel, generationPersonality, generationMoodID,
 	)
 	if err != nil {
 		d.rollbackTx(tx)
@@ -649,8 +682,8 @@ func (d *Datastore) loadOwnedJobTx(ctx context.Context, tx *ent.Tx, userID, jobI
 }
 
 func (d *Datastore) finalizeTerminalPartialIdempotentTx(ctx context.Context, tx *ent.Tx, entJob *ent.Job) (*uuid.UUID, error) {
-	if len(entJob.DraftDeltas) > 0 {
-		if _, err := tx.Job.UpdateOneID(entJob.ID).SetDraftDeltas([]string{}).Save(ctx); err != nil {
+	if len(entJob.DraftDeltas) > 0 || len(entJob.DraftReasoning) > 0 {
+		if _, err := tx.Job.UpdateOneID(entJob.ID).SetDraftDeltas([]string{}).ClearDraftReasoning().Save(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -665,7 +698,7 @@ func (d *Datastore) consumeDraftDeltasToMessageTx(
 	ctx context.Context,
 	tx *ent.Tx,
 	chatID uuid.UUID,
-	partialText, generationModel, generationPersonality string,
+	partialText, partialReasoning, generationModel, generationPersonality string,
 	generationMoodID *uuid.UUID,
 ) (*uuid.UUID, error) {
 	if strings.TrimSpace(partialText) == "" {
@@ -684,6 +717,10 @@ func (d *Datastore) consumeDraftDeltasToMessageTx(
 	}
 	if generationMoodID != nil && *generationMoodID != uuid.Nil {
 		createMsg.SetGenerationMoodID(*generationMoodID)
+	}
+	// Keep the reasoning that led up to the partial reply (e.g. the user hit Stop).
+	if r := strings.TrimSpace(partialReasoning); r != "" {
+		createMsg.SetModelReasoning(r)
 	}
 	entMsg, err := createMsg.Save(ctx)
 	if err != nil {
@@ -707,7 +744,8 @@ func (d *Datastore) updateJobToTerminalTx(
 	jobUpdate := tx.Job.Update().
 		Where(job.ID(jobID), job.HasOwnerWith(user.ID(userID))).
 		SetStatus(terminalStatus).
-		SetDraftDeltas([]string{})
+		SetDraftDeltas([]string{}).
+		ClearDraftReasoning()
 	switch terminalStatus {
 	case job.StatusFailed:
 		jobUpdate.SetError(failureMessage)

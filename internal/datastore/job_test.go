@@ -33,6 +33,7 @@ func createJobTestSchema(t *testing.T, db *sql.DB) {
 		error text,
 		result_id uuid,
 		draft_deltas json,
+		draft_reasoning json,
 		progress text,
 		user_jobs uuid NOT NULL,
 		FOREIGN KEY (user_jobs) REFERENCES users(id)
@@ -723,6 +724,7 @@ func TestFinalizeCancelledChatJobWithPartial_WithDraftDeltasCreatesMessage(t *te
 	jobModel.DraftDeltas = []string{"Hello ", "world"}
 	created, err := ds.CreateJob(ctx, userID, jobModel)
 	require.NoError(t, err)
+	require.NoError(t, ds.AppendJobDraftReasoning(ctx, userID, created.ID, []string{"thinking ", "it over"}))
 
 	moodID := uuid.New()
 	gotJob, resultID, err := ds.FinalizeCancelledChatJobWithPartial(ctx, userID, created.ID, chatID, "gpt-test", "Vix", &moodID)
@@ -730,6 +732,7 @@ func TestFinalizeCancelledChatJobWithPartial_WithDraftDeltasCreatesMessage(t *te
 	require.Equal(t, models.JobStatusCancelled, gotJob.Status)
 	require.Empty(t, gotJob.Error)
 	require.Empty(t, gotJob.DraftDeltas)
+	require.Empty(t, gotJob.DraftReasoning)
 	require.NotNil(t, resultID)
 	require.NotNil(t, gotJob.ResultID)
 	require.Equal(t, *resultID, *gotJob.ResultID)
@@ -738,6 +741,41 @@ func TestFinalizeCancelledChatJobWithPartial_WithDraftDeltasCreatesMessage(t *te
 	require.NoError(t, err)
 	require.Equal(t, "Hello world", msg.Message)
 	require.Equal(t, "gpt-test", msg.GenerationModel)
+	require.NotNil(t, msg.ModelReasoning, "a stopped reply keeps the reasoning that led to it")
+	require.Equal(t, "thinking it over", *msg.ModelReasoning)
+}
+
+func TestJobDraftReasoning_AppendResetAndClear(t *testing.T) {
+	ds, cleanup := newFinalizeChatJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createJobTestUser(t, ds)
+	jobModel := baseJobModel()
+	jobModel.JobType = "chat_message"
+	jobModel.DraftDeltas = []string{"reply"}
+	created, err := ds.CreateJob(ctx, userID, jobModel)
+	require.NoError(t, err)
+
+	require.NoError(t, ds.AppendJobDraftReasoning(ctx, userID, created.ID, []string{"a", "b"}))
+	got, err := ds.GetJob(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"a", "b"}, got.DraftReasoning)
+
+	// Reset empties reasoning only; the text draft is untouched.
+	require.NoError(t, ds.ResetJobDraftReasoning(ctx, userID, created.ID))
+	got, err = ds.GetJob(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Empty(t, got.DraftReasoning)
+	require.Equal(t, []string{"reply"}, got.DraftDeltas)
+
+	// ClearJobDraftDeltas clears both.
+	require.NoError(t, ds.AppendJobDraftReasoning(ctx, userID, created.ID, []string{"c"}))
+	require.NoError(t, ds.ClearJobDraftDeltas(ctx, userID, created.ID))
+	got, err = ds.GetJob(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Empty(t, got.DraftReasoning)
+	require.Empty(t, got.DraftDeltas)
 }
 
 func TestFinalizeFailedChatJobWithPartial_NoDraftDeltasNoMessage(t *testing.T) {
@@ -1092,6 +1130,7 @@ func createPartialJobTestTables(t *testing.T, ds *Datastore) {
 			error text,
 			result_id uuid,
 			draft_deltas json,
+			draft_reasoning json,
 			progress text,
 			created_at datetime NOT NULL,
 			updated_at datetime NOT NULL,
@@ -1108,6 +1147,7 @@ func createPartialJobTestTables(t *testing.T, ds *Datastore) {
 			generation_model text,
 			generation_personality text,
 			generation_expression_reasoning text,
+			model_reasoning text,
 			last_error_message text,
 			checkpoint_completed_at datetime,
 			context_breakdown json,

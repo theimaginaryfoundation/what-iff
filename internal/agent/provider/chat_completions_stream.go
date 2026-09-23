@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/tidwall/gjson"
 )
 
 // streamChatCompletion drives a streaming Chat Completions request, forwarding
@@ -37,21 +38,31 @@ func streamChatCompletion(
 	params openai.ChatCompletionNewParams,
 	onTextDelta func(delta string),
 ) (*openai.ChatCompletion, error) {
-	return streamChatCompletionCapturing(ctx, client, params, onTextDelta, nil)
+	return streamChatCompletionCapturing(ctx, client, params, chatCompletionStreamHooks{onTextDelta: onTextDelta})
 }
 
-// streamChatCompletionCapturing is streamChatCompletion plus an optional
-// onToolCallDelta hook, invoked with the raw JSON of each streamed tool-call
-// delta (and its index). ChatCompletionAccumulator keeps only standard fields, so
-// non-standard ones — notably Gemini's extra_content.google.thought_signature,
-// which Google requires echoed back on the assistant tool-call turn — are lost
-// unless captured here from the raw delta. Non-Gemini callers pass nil.
+// chatCompletionStreamHooks are the optional per-chunk callbacks for
+// streamChatCompletionCapturing; nil hooks are skipped.
+type chatCompletionStreamHooks struct {
+	// onTextDelta receives incremental assistant content.
+	onTextDelta func(delta string)
+	// onToolCallDelta receives the raw JSON of each streamed tool-call delta (and its index).
+	onToolCallDelta func(index int64, raw string)
+	// onReasoningDelta receives incremental reasoning_content — the non-standard field
+	// DeepSeek-style reasoning models (Xiaomi MiMo) stream their reasoning in.
+	onReasoningDelta func(delta string)
+}
+
+// streamChatCompletionCapturing is streamChatCompletion with the full hook set.
+// ChatCompletionAccumulator keeps only standard fields, so non-standard ones —
+// Gemini's extra_content.google.thought_signature, which Google requires echoed
+// back on the assistant tool-call turn, and MiMo's reasoning_content — are lost
+// unless captured here from the raw delta.
 func streamChatCompletionCapturing(
 	ctx context.Context,
 	client *openai.Client,
 	params openai.ChatCompletionNewParams,
-	onTextDelta func(delta string),
-	onToolCallDelta func(index int64, raw string),
+	hooks chatCompletionStreamHooks,
 ) (*openai.ChatCompletion, error) {
 	// This helper always requests final usage because token accounting drives
 	// usage metering and telemetry. OpenAI-compatible APIs send complete usage
@@ -81,14 +92,19 @@ func streamChatCompletionCapturing(
 		}
 		if len(chunk.Choices) > 0 {
 			delta := chunk.Choices[0].Delta
-			if d := delta.Content; d != "" && onTextDelta != nil {
-				onTextDelta(d)
+			if d := delta.Content; d != "" && hooks.onTextDelta != nil {
+				hooks.onTextDelta(d)
 			}
-			if onToolCallDelta != nil {
+			if hooks.onToolCallDelta != nil {
 				for _, tc := range delta.ToolCalls {
 					if raw := tc.RawJSON(); raw != "" {
-						onToolCallDelta(tc.Index, raw)
+						hooks.onToolCallDelta(tc.Index, raw)
 					}
+				}
+			}
+			if hooks.onReasoningDelta != nil {
+				if d := gjson.Get(delta.RawJSON(), "reasoning_content").String(); d != "" {
+					hooks.onReasoningDelta(d)
 				}
 			}
 		}
@@ -103,6 +119,16 @@ func streamChatCompletionCapturing(
 		acc.ChatCompletion.Usage = finalUsage
 	}
 	return &acc.ChatCompletion, nil
+}
+
+// ChatCompletionReasoning returns the non-standard reasoning_content from the first
+// choice of a non-streamed Chat Completions response ("" when absent). Streamed
+// responses lose it in the accumulator; capture those via onReasoningDelta instead.
+func ChatCompletionReasoning(resp *openai.ChatCompletion) string {
+	if resp == nil || len(resp.Choices) == 0 {
+		return ""
+	}
+	return gjson.Get(resp.Choices[0].Message.RawJSON(), "reasoning_content").String()
 }
 
 // chatCompletionFinishReason returns the first choice's finish_reason ("stop",
