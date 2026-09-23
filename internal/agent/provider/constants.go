@@ -12,18 +12,26 @@ const (
 	shortMessageThreshold = 100
 )
 
-// z.ai GLM thinking budget.
+// Always-on reasoning models (z.ai GLM, Xiaomi MiMo).
 //
-// GLM models think by default and the thinking CANNOT be disabled via the API
-// (confirmed against z.ai docs). Left unbounded, reasoning spends the entire
-// DefaultMaxContentLength output cap and the turn truncates
-// (stop_reason=max_tokens) before emitting any answer text. On the zai path we
-// therefore set an explicit thinking budget and raise the output cap so reasoning
-// and answer both fit: a 4096-token reasoning budget on top of the usual 8192
-// answer budget every other vendor gets, for 12288 total.
+// These models reason before answering and the reasoning is billed against the same
+// output cap as the answer. Neither honors a reasoning token budget: z.ai GLM ignores
+// thinking.budget_tokens (and rejects disabling thinking), MiMo ignores both
+// budget_tokens and reasoning_effort (verified live 2026-09-22). So:
+//
+//   - Both get ReasoningMaxOutputTokens instead of DefaultMaxContentLength, leaving
+//     room for reasoning on top of the usual answer budget.
+//   - GLM's only working lever is output_config.effort. Left unset z.ai behaves like
+//     "max"; "high" cut reasoning roughly 5x in testing, so it is the default
+//     (ZAIReasoningEffort). z.ai accepts only low/high/max — "medium" is rejected.
+//     If a call still truncates before any reply text, the turn retries it once at
+//     ZAIFallbackReasoningEffort.
+//   - MiMo can switch thinking off (thinking.type=disabled), so on a truncated call
+//     it retries once with thinking disabled.
 const (
-	ZAIThinkingBudgetTokens = 4096
-	ZAIMaxOutputTokens      = DefaultMaxContentLength + ZAIThinkingBudgetTokens
+	ReasoningMaxOutputTokens   = 2 * DefaultMaxContentLength
+	ZAIReasoningEffort         = "high"
+	ZAIFallbackReasoningEffort = "low"
 )
 
 // TextOnlyChatCompletionsImageFallback replaces image-only user turns when rendering for

@@ -105,6 +105,22 @@ func streamChatCompletionCapturing(
 	return &acc.ChatCompletion, nil
 }
 
+// chatCompletionFinishReason returns the first choice's finish_reason ("stop",
+// "length", "tool_calls", …), or "" when there is none.
+func chatCompletionFinishReason(resp *openai.ChatCompletion) string {
+	if resp == nil || len(resp.Choices) == 0 {
+		return ""
+	}
+	return resp.Choices[0].FinishReason
+}
+
+// chatCompletionTruncatedWithoutText reports whether resp was cut off at the length
+// limit before producing any reply text — the whole output cap went to reasoning or a
+// (necessarily partial) tool call. Such a response is unusable as-is.
+func chatCompletionTruncatedWithoutText(resp *openai.ChatCompletion) bool {
+	return chatCompletionFinishReason(resp) == "length" && ExtractChatCompletionText(resp) == ""
+}
+
 // chunkCarriesUsage reports whether a streamed chunk's usage block was populated
 // (as opposed to the zero value the SDK leaves on chunks that omit usage).
 func chunkCarriesUsage(u openai.CompletionUsage) bool {
