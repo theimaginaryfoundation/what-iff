@@ -53,6 +53,8 @@ export interface ChatMessage {
   generation_expression_image_url?: string;
   generation_expression_label?: string | null;
   generation_expression_reasoning?: string | null;
+  /** Reasoning/thinking the model reported for this assistant turn (GLM, MiMo). Display-only. */
+  model_reasoning?: string | null;
   sent_at: string;
   attachments?: FileAttachment[];
   rituals?: Ritual[];

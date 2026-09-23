@@ -6034,6 +6034,15 @@ components:
           description: Incremental assistant text chunks emitted while inference is in progress.
           items:
             type: string
+        draft_reasoning:
+          type: array
+          description: >-
+            Incremental model reasoning chunks emitted while inference is in progress (z.ai GLM,
+            Xiaomi MiMo). Display-only. Unlike draft_deltas this can be reset (emptied and
+            re-sent) when a truncated call is retried, so clients should render the whole
+            array on each poll rather than appending by cursor.
+          items:
+            type: string
         progress:
           type: string
           description: |
@@ -6485,6 +6494,14 @@ components:
           type: string
           nullable: true
           description: Short classifier rationale for why this expression portrait was chosen
+        model_reasoning:
+          type: string
+          nullable: true
+          description: >-
+            Reasoning/thinking text the model reported for this assistant turn (e.g. z.ai GLM
+            thinking blocks, Xiaomi MiMo reasoning_content), joined across the turn's tool
+            rounds. Display-only; never replayed to the model. Omitted when the provider
+            reported none.
         last_error_message:
           type: string
           nullable: true

@@ -8338,6 +8338,8 @@ export interface components {
             result_id?: string;
             /** @description Incremental assistant text chunks emitted while inference is in progress. */
             draft_deltas?: string[];
+            /** @description Incremental model reasoning chunks emitted while inference is in progress (z.ai GLM, Xiaomi MiMo). Display-only. Unlike draft_deltas this can be reset (emptied and re-sent) when a truncated call is retried, so clients should render the whole array on each poll rather than appending by cursor. */
+            draft_reasoning?: string[];
             /**
              * @description Optional JSON-encoded progress payload for long-running jobs. Opaque to clients except per
              *     job_type. For `chat_import` it is `{phase, source, total, imported, skipped}`; for
@@ -8610,6 +8612,8 @@ export interface components {
             generation_expression_label?: string | null;
             /** @description Short classifier rationale for why this expression portrait was chosen */
             generation_expression_reasoning?: string | null;
+            /** @description Reasoning/thinking text the model reported for this assistant turn (e.g. z.ai GLM thinking blocks, Xiaomi MiMo reasoning_content), joined across the turn's tool rounds. Display-only; never replayed to the model. Omitted when the provider reported none. */
+            model_reasoning?: string | null;
             /** @description User-visible async generation failure for this user turn; cleared after a successful reply */
             last_error_message?: string | null;
             /**

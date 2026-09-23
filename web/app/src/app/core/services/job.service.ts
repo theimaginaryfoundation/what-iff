@@ -121,7 +121,8 @@ export class JobService {
               a.status === b.status &&
               (a.result_id ?? '') === (b.result_id ?? '') &&
               (a.error ?? '') === (b.error ?? '') &&
-              serializeDraftDeltas(a.draft_deltas) === serializeDraftDeltas(b.draft_deltas)
+              serializeDraftDeltas(a.draft_deltas) === serializeDraftDeltas(b.draft_deltas) &&
+              serializeDraftDeltas(a.draft_reasoning) === serializeDraftDeltas(b.draft_reasoning)
             );
           },
         ),

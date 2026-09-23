@@ -233,6 +233,7 @@ func (c *ClaudeProvider) messagesNewStreaming(
 	ctx context.Context,
 	params anthropic.MessageNewParams,
 	onTextDelta func(delta string),
+	onThinkingDelta func(delta string),
 ) (*anthropic.Message, bool, error) {
 	stream := c.client.Messages.NewStreaming(ctx, params)
 	defer stream.Close()
@@ -251,6 +252,7 @@ func (c *ClaudeProvider) messagesNewStreaming(
 		if handleClaudeTextDeltaEvent(ev, onTextDelta) {
 			deltaEmitted = true
 		}
+		handleClaudeThinkingDeltaEvent(ev, onThinkingDelta)
 	}
 
 	if err := stream.Err(); err != nil {
@@ -336,9 +338,48 @@ func (c *ClaudeProvider) CallWithRetryStreaming(
 	params anthropic.MessageNewParams,
 	onTextDelta func(delta string),
 ) (*anthropic.Message, error) {
+	return c.CallWithRetryStreamingReasoning(ctx, params, onTextDelta, ReasoningStream{})
+}
+
+// CallWithRetryStreamingReasoning is CallWithRetryStreaming that also forwards
+// thinking deltas to reasoning.OnDelta. The retry loop only refuses to retry once
+// *text* has streamed, so a transient failure mid-thinking is still retried; in that
+// case reasoning.OnReset fires before the next attempt so the consumer drops the
+// abandoned attempt's partial thinking instead of showing it twice.
+func (c *ClaudeProvider) CallWithRetryStreamingReasoning(
+	ctx context.Context,
+	params anthropic.MessageNewParams,
+	onTextDelta func(delta string),
+	reasoning ReasoningStream,
+) (*anthropic.Message, error) {
+	onThinking, beforeAttempt := retryAwareThinking(reasoning)
 	return callClaudeWithRetry(ctx, func(ctx context.Context) (*anthropic.Message, bool, error) {
-		return c.messagesNewStreaming(ctx, params, onTextDelta)
+		beforeAttempt()
+		return c.messagesNewStreaming(ctx, params, onTextDelta, onThinking)
 	})
+}
+
+// retryAwareThinking adapts reasoning for a retry loop: onThinking forwards deltas
+// (nil when nobody listens), and beforeAttempt — called at the top of every attempt —
+// fires OnReset if the previous attempt streamed any thinking.
+func retryAwareThinking(reasoning ReasoningStream) (onThinking func(string), beforeAttempt func()) {
+	streamed := false
+	if reasoning.OnDelta != nil {
+		onThinking = func(d string) {
+			streamed = true
+			reasoning.OnDelta(d)
+		}
+	}
+	beforeAttempt = func() {
+		if !streamed {
+			return
+		}
+		streamed = false
+		if reasoning.OnReset != nil {
+			reasoning.OnReset()
+		}
+	}
+	return onThinking, beforeAttempt
 }
 
 // CallBetaWithRetryStreaming calls the beta streaming Messages API and forwards text deltas to onTextDelta.
@@ -410,6 +451,20 @@ func handleClaudeTextDeltaEvent(ev anthropic.MessageStreamEventUnion, onTextDelt
 	return true
 }
 
+// handleClaudeThinkingDeltaEvent forwards a thinking_delta's text to onThinkingDelta.
+func handleClaudeThinkingDeltaEvent(ev anthropic.MessageStreamEventUnion, onThinkingDelta func(delta string)) {
+	if onThinkingDelta == nil {
+		return
+	}
+	contentDelta, ok := ev.AsAny().(anthropic.ContentBlockDeltaEvent)
+	if !ok {
+		return
+	}
+	if thinking, ok := contentDelta.Delta.AsAny().(anthropic.ThinkingDelta); ok && thinking.Thinking != "" {
+		onThinkingDelta(thinking.Thinking)
+	}
+}
+
 func handleClaudeBetaTextDeltaEvent(ev anthropic.BetaRawMessageStreamEventUnion, onTextDelta func(delta string)) bool {
 	if onTextDelta == nil {
 		return false
@@ -458,6 +513,23 @@ func ExtractClaudeText(msg *anthropic.Message) string {
 	for _, block := range msg.Content {
 		if tb, ok := block.AsAny().(anthropic.TextBlock); ok && tb.Text != "" {
 			parts = append(parts, tb.Text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// ExtractClaudeThinking concatenates the thinking blocks in the response content.
+// Native Anthropic turns carry none (we never enable thinking there); z.ai GLM always
+// thinks, so this is where its reasoning chain lives. Redacted thinking is skipped —
+// it is encrypted and has nothing to show.
+func ExtractClaudeThinking(msg *anthropic.Message) string {
+	if msg == nil {
+		return ""
+	}
+	var parts []string
+	for _, block := range msg.Content {
+		if tb, ok := block.AsAny().(anthropic.ThinkingBlock); ok && strings.TrimSpace(tb.Thinking) != "" {
+			parts = append(parts, tb.Thinking)
 		}
 	}
 	return strings.Join(parts, "\n\n")

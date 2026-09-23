@@ -39,13 +39,23 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
   OpenAI Responses gets `input_image` with the OpenAI **`file_id`** from upload.
   **Claude** uses **`UserMessageImage.RawBytes`** when set (see **`loadImageBytesForClaude`**); otherwise **`renderClaudeContext`** falls back to **text-only** for that turn.
   **`HydrateUserMessageImages`** can prefetch bytes from storage for reuse.
-- **Xiaomi MiMo (Chat Completions):** `XiaomiAdapter` always reasons (returned as the non-standard `reasoning_content`) and honors **neither** `budget_tokens` nor `reasoning_effort` — only `thinking: {"type":"disabled"}`.
+- **Xiaomi MiMo (Chat Completions):** `XiaomiAdapter` always reasons, streams it as the non-standard `reasoning_content`, and honors **neither** `budget_tokens` nor `reasoning_effort` — only `thinking: {"type":"disabled"}`.
   The adapter raises `MaxCompletionTokens` to `ReasoningMaxOutputTokens`, and when a call finishes with `finish_reason: "length"` and no reply text it is discarded and re-issued once with thinking disabled (which then stays off for the rest of the turn).
   `GenerateResponse.StopReason` carries `finish_reason`.
+- **Model reasoning capture:** `GenerateResponse.Reasoning` carries the turn's reasoning text for display — joined across **every** tool round via the embedded `reasoningLog`, not just the final call.
+  Sources: GLM `thinking` blocks (`ExtractClaudeThinking`, non-beta path) and MiMo `reasoning_content` (non-streamed via `ChatCompletionReasoning`; streamed via the `onReasoningDelta` hook on `streamChatCompletionCapturing`, since `ChatCompletionAccumulator` drops non-standard fields).
+  A truncated-and-retried attempt's reasoning is dropped.
+  Other providers leave it empty.
+  Reasoning is never replayed into model context.
+  **Live streaming:** `ClaudeAdapter` and `XiaomiAdapter` implement the optional `ReasoningStreamer` (`SetReasoningStream(ReasoningStream{OnDelta, OnReset})`) on streaming calls; `reasoningRelay` keeps the live draft identical to the saved text (round separators) and, on reset, clears it and re-sends the kept rounds.
+  Resets fire on the truncation fallback and — Claude path only, via `retryAwareThinking` in `CallWithRetryStreamingReasoning` — on a transport retry after thinking streamed (the retry loop only refuses once *text* has streamed).
+  Chat Completions streams are never replayed by the SDK, so MiMo needs no transport reset.
+  Observed live: z.ai streams thinking incrementally at `max` but at `high` it is short enough to arrive in one burst right before text.
 - **Unified iteration:** `AgentAdapter` + `ToolUse` / `ToolResult` for the multi-round agent loop.
 - **`GenerateResponse`:** Normalized completion type from either provider.
   Carries **`StopReason`** — the provider's own verbatim account of why generation ended (`end_turn`, `max_tokens`, `refusal`, `incomplete`, …), sourced from `Message.StopReason` on Anthropic and from `IncompleteDetails.Reason` (falling back to `Status`) on the Responses API, and from `finish_reason` on the Xiaomi Chat Completions adapter (`length` = truncated).
   The agent's empty-turn guard reads it to surface a clearer truncation message.
+  Also carries **`Reasoning`** (see "Model reasoning capture").
 - **`TokenCounter` + carry-over selection:** Token budget and `SelectCarryOverTurns` for history trimming.
 - **Inference metrics:** `responsesNew` / `messagesNew` are the only SDK call sites for OpenAI Responses and Anthropic Messages; they call `recordProviderTokenUsage` (`tel.Metrics`, `call_path` from context).
   `ModelContext.EstimatedTokensBySegment` supports segment-level token estimates for telemetry.

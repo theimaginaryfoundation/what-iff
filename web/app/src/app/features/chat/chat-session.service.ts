@@ -84,6 +84,7 @@ export class ChatSessionService implements OnDestroy {
   readonly loading = this._loading.asReadonly();
   readonly error = this._error.asReadonly();
   readonly pendingAssistantDraftText = this.turn.pendingAssistantDraftText;
+  readonly pendingAssistantDraftReasoning = this.turn.pendingAssistantDraftReasoning;
   readonly draft: WritableSignal<string> = signal('');
   readonly model: Signal<Model | null> = this._model.asReadonly();
   readonly personalityId = computed(() => this._thread()?.personality_id ?? null);

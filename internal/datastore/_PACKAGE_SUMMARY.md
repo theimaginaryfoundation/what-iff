@@ -64,7 +64,11 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   `ListChats` search matches chat **name**, **checkpoint_summary**, and individual **tags** (JSON array) with case-insensitive substring predicates.
   Favorite-count checks are a **best-effort UI guard** (non-locking count check, not a strict datastore invariant under races).
 - **Agent jobs:** `UpdateAgentJobSchedule` (`agentjob.go`) sets status back to **active** and clears **last_error** when the job was **complete** or **failed** and the new schedule still has a **next_run_at**, so the in-process scheduler (which only schedules **active** jobs) picks it up again.
+- **Live reasoning draft:** `Job.draft_reasoning` mirrors `draft_deltas` for model reasoning (`AppendJobDraftReasoning`).
+  Unlike the text draft it can be emptied mid-turn (`ResetJobDraftReasoning`) when a truncated attempt is retried, so clients render it wholesale per poll.
+  `ClearJobDraftDeltas` and the terminal-finalize paths clear both drafts.
 - **Streamed chat failures:** `FinalizeCancelledChatJobWithPartial` and `FinalizeFailedChatJobWithPartial` atomically consume `draft_deltas` into an assistant message when text was streamed before termination, set the terminal job status/result, and clear the draft buffer.
+  Any `draft_reasoning` streamed alongside is carried onto that partial message's `model_reasoning`.
   A failed (rather than cancelled) chat job retains its error for the user-turn failure banner.
 - **`SetAgentJobOverrides`:** `personality_id` must belong to the job owner; `model_id` must exist in the global model catalog.
   Partial updates use `models.SetAgentJobOverridesPatch` so omitted JSON fields are not overwritten.

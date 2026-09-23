@@ -32,6 +32,10 @@ type Job struct {
 	ResultID  *uuid.UUID `json:"result_id,omitempty"`
 	// DraftDeltas are incremental assistant text chunks emitted while inference is in progress.
 	DraftDeltas []string `json:"draft_deltas,omitempty"`
+	// DraftReasoning are incremental model reasoning chunks emitted while inference is in
+	// progress (GLM/MiMo). Display-only. Reset (emptied) when a truncated call is retried,
+	// so clients should render the whole slice each poll rather than appending by cursor.
+	DraftReasoning []string `json:"draft_reasoning,omitempty"`
 	// Progress is an optional JSON-encoded payload for long-running jobs (e.g. chat import counts).
 	// Clients should treat it as opaque and parse per job_type.
 	Progress  string    `json:"progress,omitempty"`
