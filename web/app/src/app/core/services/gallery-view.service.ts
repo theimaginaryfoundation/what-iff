@@ -1,4 +1,5 @@
 import { computed, Injectable, signal, inject } from '@angular/core';
+import { Subscription } from 'rxjs';
 import { finalize } from 'rxjs/operators';
 
 import { FileAttachment } from '../models/file-attachment.model';
@@ -32,6 +33,14 @@ export class GalleryViewService {
   readonly selectedPersonalityIds = signal<string[]>([]);
   readonly importRequestTick = signal(0);
 
+  /**
+   * The single in-flight list request (first page or load-more). A reload cancels
+   * it so a response for a superseded filter/page can never land on top of the
+   * new result set (appending a stale page, or advancing currentPage past a page
+   * that was never loaded).
+   */
+  private inflight: Subscription | null = null;
+
   readonly filteredImages = computed(() => {
     const base = applyGalleryFilters(this.images(), this.filters());
     const mode = this.associationFilterMode();
@@ -64,13 +73,15 @@ export class GalleryViewService {
   });
 
   loadInitial(): void {
+    // Cancel first: its finalize resets the loading flags, which we then set anew.
+    this.cancelInflight();
     this.currentPage.set(1);
     this.error.set(null);
     this.isLoading.set(true);
     const activeFilters = this.filters();
     const associationMode = this.associationFilterMode();
     const personalityId = activeFilters.personalityId === 'all' ? undefined : activeFilters.personalityId;
-    this.galleryService
+    this.inflight = this.galleryService
       .listImages(1, this.pageSize, { name: activeFilters.query, personalityId, globalOnly: associationMode === 'global' })
       .pipe(finalize(() => this.isLoading.set(false)))
       .subscribe({
@@ -95,7 +106,7 @@ export class GalleryViewService {
     const associationMode = this.associationFilterMode();
     const personalityId = activeFilters.personalityId === 'all' ? undefined : activeFilters.personalityId;
     this.isLoadingMore.set(true);
-    this.galleryService
+    this.inflight = this.galleryService
       .listImages(nextPage, this.pageSize, { name: activeFilters.query, personalityId, globalOnly: associationMode === 'global' })
       .pipe(finalize(() => this.isLoadingMore.set(false)))
       .subscribe({
@@ -112,8 +123,15 @@ export class GalleryViewService {
   }
 
   setFilters(partial: Partial<GalleryFilters>): void {
-    this.filters.update(current => ({ ...current, ...partial }));
-    this.loadInitial();
+    const previous = this.filters();
+    const next = { ...previous, ...partial };
+    this.filters.set(next);
+    // source and dateRange are applied client-side by filteredImages over the rows
+    // already loaded; refetching for them only threw away loaded pages, so a
+    // toggle and toggle-back showed a different set than before.
+    if (next.query !== previous.query || next.personalityId !== previous.personalityId) {
+      this.loadInitial();
+    }
   }
 
   setSelectedPersonalityIds(ids: readonly string[]): void {
@@ -192,6 +210,11 @@ export class GalleryViewService {
     if (this.selectedImageId() === id) {
       this.selectedImageId.set(null);
     }
+  }
+
+  private cancelInflight(): void {
+    this.inflight?.unsubscribe();
+    this.inflight = null;
   }
 
   upsertImage(image: FileAttachment): void {

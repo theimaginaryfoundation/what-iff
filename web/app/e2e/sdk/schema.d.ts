@@ -8617,6 +8617,11 @@ export interface components {
              * @description Timestamp when the file attachment was created
              */
             created_at: string;
+            /**
+             * @description Server-derived origin class used by the gallery's Generated/Imported filter. `generated` = attached to an assistant message or produced by a generation pipeline (expression grid, portrait); `imported` = uploaded by the user (gallery import, personality upload, user chat message). Omitted when the server could not determine it.
+             * @enum {string}
+             */
+            source?: "generated" | "imported";
         };
         FileAttachmentPersonality: {
             /** Format: uuid */
