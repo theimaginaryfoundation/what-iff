@@ -133,6 +133,20 @@ func (s *Server) setupRoutes() {
 		s.logger.Info("startup: marked interrupted import/export jobs failed", zap.Int("count", n))
 	}
 
+	// Same for chat turns. A chat_message job whose worker died with the previous process stays
+	// non-terminal forever, and a client returning to its thread resumes it — a permanently stuck
+	// "thinking" reply. No chat turn runs anywhere near 30 minutes, so the bound leaves turns in
+	// flight on another instance alone. They are marked failed (not cancelled) so the thread shows
+	// the turn's failure banner instead of silently dropping it.
+	if n, rerr := dataStore.FailInterruptedJobs(context.Background(),
+		[]string{agent.JobTypeChatMessage},
+		time.Now().Add(-30*time.Minute),
+		"Interrupted by a server restart"); rerr != nil {
+		s.logger.Warn("startup: failed to reconcile interrupted chat jobs", zap.Error(rerr))
+	} else if n > 0 {
+		s.logger.Info("startup: marked interrupted chat jobs failed", zap.Int("count", n))
+	}
+
 	fileStore, err := storage.NewFileStore(context.Background(), s.config.S3FileBucket, s.config.AWSRegion, s.logger)
 	if err != nil {
 		s.logger.Fatal("failed to initialize S3 file store", zap.Error(err))

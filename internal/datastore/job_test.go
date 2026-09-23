@@ -1254,3 +1254,63 @@ func TestFindLatestActiveChatJob(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, got)
 }
+
+func TestStopHelpers_ClearEveryActiveChatJobInThread(t *testing.T) {
+	ds, cleanup := newFinalizeChatJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createJobTestUser(t, ds)
+	chatA, chatB := uuid.New(), uuid.New()
+	createTestChat(t, ds, chatA, userID)
+	createTestChat(t, ds, chatB, userID)
+	turnA1 := createJobTestUserMessage(t, ds, chatA)
+	turnA2 := createJobTestUserMessage(t, ds, chatA)
+	turnB := createJobTestUserMessage(t, ds, chatB)
+
+	done := createActiveChatMessageJob(t, ds, userID, turnA1.String(), models.JobStatusComplete)
+	orphan := createActiveChatMessageJob(t, ds, userID, turnA1.String(), models.JobStatusProcessing)
+	newest := createActiveChatMessageJob(t, ds, userID, turnA2.String(), models.JobStatusPending)
+	otherThread := createActiveChatMessageJob(t, ds, userID, turnB.String(), models.JobStatusProcessing)
+
+	chatID, err := ds.ChatIDForChatJob(ctx, userID, orphan.ID)
+	require.NoError(t, err)
+	require.Equal(t, chatA, chatID)
+	stranger := createJobTestUser(t, ds)
+	_, err = ds.ChatIDForChatJob(ctx, stranger, orphan.ID)
+	require.ErrorIs(t, err, ErrJobNotFound)
+
+	ids, err := ds.ListActiveChatJobIDsForChat(ctx, userID, chatA)
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{newest.ID, orphan.ID}, ids, "active jobs in the thread, newest first; finished and other-thread jobs excluded")
+
+	for _, id := range ids {
+		changed, err := ds.MarkChatJobCancelled(ctx, userID, id)
+		require.NoError(t, err)
+		require.True(t, changed)
+	}
+	for _, id := range ids {
+		st, err := ds.JobStatus(ctx, userID, id)
+		require.NoError(t, err)
+		require.Equal(t, models.JobStatusCancelled, st)
+	}
+
+	// Terminal jobs are left alone, and the thread no longer reports a running turn.
+	changed, err := ds.MarkChatJobCancelled(ctx, userID, done.ID)
+	require.NoError(t, err)
+	require.False(t, changed)
+	st, err := ds.JobStatus(ctx, userID, done.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.JobStatusComplete, st)
+	got, err := ds.FindLatestActiveChatJob(ctx, userID, chatA)
+	require.NoError(t, err)
+	require.Nil(t, got)
+
+	// Another user cannot cancel the jobs, and the other thread is untouched.
+	changed, err = ds.MarkChatJobCancelled(ctx, stranger, otherThread.ID)
+	require.NoError(t, err)
+	require.False(t, changed)
+	st, err = ds.JobStatus(ctx, userID, otherThread.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.JobStatusProcessing, st)
+}
