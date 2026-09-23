@@ -512,6 +512,13 @@
   object-position: center top;
 }
 
+.app-sidebar__thread-branch {
+  color: var(--color-accent);
+  display: inline-flex;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
 .app-sidebar__thread-name {
   flex: 1;
   min-width: 0;

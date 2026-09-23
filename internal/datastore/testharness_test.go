@@ -57,6 +57,7 @@ func newTestDatastore(t *testing.T, schemas ...func(*testing.T, *sql.DB)) (*Data
 		schema(t, db)
 	}
 	ensureChatMessageBookmarkedTestColumn(t, db)
+	ensureChatForkTestColumns(t, db)
 
 	drv := entsql.OpenDB(dialect.SQLite, db)
 	client := ent.NewClient(ent.Driver(drv))

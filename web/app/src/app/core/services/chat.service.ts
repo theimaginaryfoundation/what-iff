@@ -8,7 +8,10 @@ import {
   Chat,
   ChatContext,
   ChatFilters,
+  ChatLineage,
   CreateChatRequest,
+  ForkChatRequest,
+  ForkChatResponse,
   PatchChatContextRequest,
   PatchChatRequest,
   UpdateChatRequest
@@ -182,6 +185,20 @@ export class ChatService {
         }),
         catchError(this.handleError)
       );
+  }
+
+  /** Branch a thread at a message ("What if…"). The new thread is added to the cached list. */
+  forkChat(chatId: string, request: ForkChatRequest): Observable<ForkChatResponse> {
+    return this.http.post<ForkChatResponse>(`${this.apiUrl}/${chatId}/fork`, request).pipe(
+      tap(res => this.cacheCreatedChat(res.chat)),
+      catchError(err => this.handleError(err)),
+    );
+  }
+
+  /** A thread's branch lineage: its parent (if a branch) and the branches taken off it. */
+  getChatLineage(chatId: string): Observable<ChatLineage> {
+    return this.http.get<ChatLineage>(`${this.apiUrl}/${chatId}/lineage`)
+      .pipe(catchError(this.handleError));
   }
 
   getChatContext(chatId: string): Observable<ChatContext> {

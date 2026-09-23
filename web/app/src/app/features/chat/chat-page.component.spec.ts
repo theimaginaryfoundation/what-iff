@@ -27,7 +27,7 @@ describe('ChatPageComponent', () => {
     let fixture: ComponentFixture<ChatPageComponent>;
     let params$: BehaviorSubject<ReturnType<typeof convertToParamMap>>;
     let queryParams$: BehaviorSubject<ReturnType<typeof convertToParamMap>>;
-    type ChatServiceMock = Pick<MockedObject<ChatService>, 'createChat' | 'createWelcomeMessage' | 'getChat' | 'getChatContext' | 'getLastChatId' | 'listChats' | 'patchChat' | 'setLastChatId' | 'clearLastChatId' | 'exportChat' | 'markChatRead' | 'listAllChats'>;
+    type ChatServiceMock = Pick<MockedObject<ChatService>, 'createChat' | 'createWelcomeMessage' | 'getChat' | 'getChatContext' | 'getLastChatId' | 'listChats' | 'patchChat' | 'setLastChatId' | 'clearLastChatId' | 'exportChat' | 'markChatRead' | 'listAllChats' | 'getChatLineage' | 'forkChat'>;
     type ImageGalleryServiceMock = Pick<MockedObject<ImageGalleryService>, 'referenceImage' | 'getImageUrl'>;
     type FileAttachmentServiceMock = Pick<MockedObject<FileAttachmentService>, 'uploadChatFileAttachment'>;
     type MessageServiceMock = Pick<MockedObject<MessageService>, 'clearMessages' | 'listMessages' | 'listBookmarks' | 'sendMessage' | 'setCurrentChatId' | 'markAssistantMessagesRead' | 'messages$'>;
@@ -62,7 +62,9 @@ describe('ChatPageComponent', () => {
             clearLastChatId: vi.fn().mockName("ChatService.clearLastChatId"),
             exportChat: vi.fn().mockName("ChatService.exportChat"),
             markChatRead: vi.fn().mockName("ChatService.markChatRead"),
-            listAllChats: vi.fn().mockName("ChatService.listAllChats")
+            listAllChats: vi.fn().mockName("ChatService.listAllChats"),
+            getChatLineage: vi.fn().mockName("ChatService.getChatLineage"),
+            forkChat: vi.fn().mockName("ChatService.forkChat")
         } as unknown as ChatServiceMock;
         messageService = {
             clearMessages: vi.fn().mockName("MessageService.clearMessages"),
@@ -115,6 +117,7 @@ describe('ChatPageComponent', () => {
         } as unknown as RouterMock;
 
         chatService.getChat.mockReturnValue(of(chat));
+        chatService.getChatLineage.mockReturnValue(of({ parent: null, branches: [] }));
         chatService.getChatContext.mockReturnValue(of({
             chat_id: 'chat-1',
             active_scratchpad: '',
@@ -280,6 +283,39 @@ describe('ChatPageComponent', () => {
         const modal = fixture.nativeElement.querySelector('.chat-page__summary-modal') as HTMLElement | null;
         expect(modal).not.toBeNull();
         expect(modal?.textContent).toContain('Heaven\'s Gate recruited through escalating commitment.');
+    });
+
+    it('shows no branch banner for an original thread', () => {
+        fixture.detectChanges();
+        expect(chatService.getChatLineage).toHaveBeenCalledWith('chat-1');
+        expect(fixture.nativeElement.querySelector('.chat-page__branch-bar')).toBeNull();
+    });
+
+    it('renders a branch banner and opens the original at the branch point', () => {
+        chatService.getChatLineage.mockReturnValue(of({
+            parent: { id: 'parent-1', message_id: 'msg-9', name: 'Trip plans', deleted: false },
+            branches: [],
+        }));
+        fixture.detectChanges();
+
+        const bar = fixture.nativeElement.querySelector('.chat-page__branch-bar') as HTMLElement;
+        expect(bar).not.toBeNull();
+        expect(bar.textContent).toContain('Branched from “Trip plans”');
+
+        (bar.querySelector('.chat-page__branch-link') as HTMLButtonElement).click();
+        expect(router.navigate).toHaveBeenCalledWith(['/chat', 'parent-1'], { queryParams: { focus: 'msg-9' } });
+    });
+
+    it('renders a deleted-parent banner without a link', () => {
+        chatService.getChatLineage.mockReturnValue(of({
+            parent: { id: 'parent-1', deleted: true },
+            branches: [],
+        }));
+        fixture.detectChanges();
+
+        const bar = fixture.nativeElement.querySelector('.chat-page__branch-bar') as HTMLElement;
+        expect(bar.textContent).toContain('since been deleted');
+        expect(bar.querySelector('.chat-page__branch-link')).toBeNull();
     });
 
     it('closes the active thread and returns to the thread manager', async () => {

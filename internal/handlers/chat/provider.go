@@ -18,6 +18,9 @@ type Store interface {
 	UpdatePersonalityScratchpad(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
 	UpdateChat(ctx context.Context, userID uuid.UUID, chat models.Chat) (*models.Chat, error)
 	DeleteChat(ctx context.Context, userID, id uuid.UUID) error
+	ForkChat(ctx context.Context, userID uuid.UUID, params models.ForkChatParams) (*models.ForkChatResult, error)
+	ListChatBranches(ctx context.Context, userID, chatID uuid.UUID) ([]models.ChatBranchSummary, error)
+	GetChatName(ctx context.Context, userID, chatID uuid.UUID) (string, error)
 
 	// Related resources used by chat endpoints.
 	ListChatMessages(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)

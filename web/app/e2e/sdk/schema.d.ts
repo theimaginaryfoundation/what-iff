@@ -5588,6 +5588,157 @@ export interface paths {
         };
         trace?: never;
     };
+    "/chat/{id}/fork": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Branch a chat ("What if…")
+         * @description Creates a new thread that shares this thread's history up to `message_id` and then diverges. Copies thread settings (model, personality, mood, tools, tags, MCP servers) and message text and generation metadata; does not copy attachments, tool calls, context snapshots, bookmarks, or thread-scoped memories. If the parent's latest checkpoint summary covers turns after the branch point, the branch is created with `rehydration_state: pending` and its copied prefix is re-summarized in the background (without re-seeding memories); inference on the branch waits for that summary like a restored imported thread. The parent is not modified.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Parent chat ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ForkChatRequest"];
+                };
+            };
+            responses: {
+                /** @description Branch created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ForkChatResponse"];
+                    };
+                };
+                /** @description Invalid chat ID, message ID, or name */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Chat not found, or the message is not in this chat */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Failed to create the branch */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/{id}/lineage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a chat's branch lineage
+         * @description Returns where this thread was branched from (`parent`, null for original threads; `deleted` when the parent no longer exists) and the branches taken directly off it (newest first), so the UI can show a "branched from" banner and per-message branch markers.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Chat ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Lineage for the chat */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ChatLineage"];
+                    };
+                };
+                /** @description Invalid chat ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Chat not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chat/{id}/export": {
         parameters: {
             query?: never;
@@ -8331,10 +8482,62 @@ export interface components {
             is_favorite?: boolean;
             /** @description When true, the thread is in the archive and omitted from default list responses */
             archived?: boolean;
+            /**
+             * Format: uuid
+             * @description Set on "What if…" branches: the thread this chat was branched from. The parent may since have been deleted (see `GET /chat/{id}/lineage`).
+             */
+            forked_from_chat_id?: string;
+            /**
+             * Format: uuid
+             * @description Set on branches — the message in the parent thread where this branch diverged.
+             */
+            forked_from_message_id?: string;
             /** Format: date-time */
             created_at?: string;
             /** Format: date-time */
             updated_at?: string;
+        };
+        ForkChatRequest: {
+            /**
+             * Format: uuid
+             * @description Branch point — a message in the parent thread.
+             */
+            message_id: string;
+            /**
+             * @description Keep the branch-point message in the branch (continue after it). False ends the branch just before it, for re-asking a user turn differently.
+             * @default true
+             */
+            include_message: boolean;
+            /** @description Optional branch name; defaults to "What if: <parent name>". */
+            name?: string;
+        };
+        ForkChatResponse: {
+            chat: components["schemas"]["Chat"];
+            /** @description How many parent messages the branch starts with. */
+            copied_messages: number;
+        };
+        ChatBranchSummary: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: uuid */
+            forked_from_message_id?: string;
+            /** Format: date-time */
+            last_message_time?: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ChatLineage: {
+            parent: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                message_id?: string;
+                /** @description Empty when the parent was deleted. */
+                name?: string;
+                deleted: boolean;
+            } | null;
+            branches: components["schemas"]["ChatBranchSummary"][];
         };
         ChatContext: {
             /** Format: uuid */

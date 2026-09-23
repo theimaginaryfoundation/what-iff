@@ -9,12 +9,12 @@ import { AuthImagePipe } from '../../../../core/pipes/auth-image.pipe';
 import { personalityCoverUrl } from '../../../personality/helpers/cover-image.helpers';
 import { personalityAccent } from '../../../personality/helpers/personality-vm.helpers';
 import { thumbnailCircleToImageStyle } from '../../../../shared/ui/avatar/avatar-thumbnail.helpers';
-import { StarIconComponent, TrashIconComponent } from '../../../../shared/ui/icons/icons';
+import { BranchIconComponent, StarIconComponent, TrashIconComponent } from '../../../../shared/ui/icons/icons';
 
 @Component({
   selector: 'app-thread-row',
   standalone: true,
-  imports: [CommonModule, AsyncPipe, AuthImagePipe, StarIconComponent, TrashIconComponent],
+  imports: [CommonModule, AsyncPipe, AuthImagePipe, StarIconComponent, TrashIconComponent, BranchIconComponent],
   template: `
     <tr
       class="thread-row"
@@ -85,6 +85,11 @@ import { StarIconComponent, TrashIconComponent } from '../../../../shared/ui/ico
             (keydown.shift.f10)="deleteThread.emit(thread())"
             [attr.aria-label]="'Open thread ' + thread().name"
           >
+            @if (thread().forked_from_chat_id) {
+              <span class="thread-row__branch" title="Branched from another thread" aria-label="Branch">
+                <ui-branch-icon [size]="12" />
+              </span>
+            }
             <span class="thread-row__name">{{ thread().name }}</span>
             @if (thread().unread_count && thread().unread_count! > 0) {
               <span class="thread-row__badge">{{ thread().unread_count }}</span>
@@ -185,6 +190,13 @@ import { StarIconComponent, TrashIconComponent } from '../../../../shared/ui/ico
     .thread-row__title {
       min-width: 14rem;
       width: 32%;
+    }
+
+    .thread-row__branch {
+      color: var(--color-accent);
+      display: inline-flex;
+      flex-shrink: 0;
+      opacity: 0.85;
     }
 
     .thread-row__name {

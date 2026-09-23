@@ -58,6 +58,8 @@ func toChatModel(e *ent.Chat) *models.Chat {
 		chatModel.ImportHash = &h
 	}
 	chatModel.RehydrationState = e.RehydrationState
+	chatModel.ForkedFromChatID = e.ForkedFromChatID
+	chatModel.ForkedFromMessageID = e.ForkedFromMessageID
 
 	if e.ResponseID != "" {
 		chatModel.ResponseID = &e.ResponseID

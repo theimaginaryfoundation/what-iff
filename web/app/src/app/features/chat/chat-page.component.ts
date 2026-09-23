@@ -37,6 +37,7 @@ import {
   pendingAssistantPlaceholderMessage,
 } from './helpers/message-grouping.helpers';
 import { ChatSessionService } from './chat-session.service';
+import { ChatBranchingService, FOCUS_MESSAGE_QUERY_PARAM } from './services/chat-branching.service';
 import { isChatSendFailed, isChatSendSucceeded } from './chat-send-result';
 import { ChatSendGate } from './services/chat-send-gate';
 import { ChatSendOutletComponent } from '../../extensions/chat-send-outlet.component';
@@ -45,7 +46,7 @@ import { ThreadListPanelComponent } from './components/thread-list-panel/thread-
 import { ContextPanelService, ContextPanelTab } from './services/context-panel.service';
 import { ScratchpadService } from './services/scratchpad.service';
 import { ContextPanelToggleComponent } from './components/context-panel/context-panel-toggle.component';
-import { BrainIconComponent, ChevDownIconComponent, EditIconComponent, FileIconComponent, LayersIconComponent, NoteIconComponent, WrenchIconComponent, XIconComponent } from '../../shared/ui/icons/icons';
+import { BranchIconComponent, BrainIconComponent, ChevDownIconComponent, EditIconComponent, FileIconComponent, LayersIconComponent, NoteIconComponent, WrenchIconComponent, XIconComponent } from '../../shared/ui/icons/icons';
 import { thumbnailCircleToCirclePreviewTransform } from '../../shared/ui/avatar/avatar-thumbnail.helpers';
 import { personalityAccent, personalityAccentSurface } from '../personality/helpers/personality-vm.helpers';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from './chat.constants';
@@ -72,6 +73,7 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
     AuthImagePipe,
     ThreadListPanelComponent,
     ContextPanelToggleComponent,
+    BranchIconComponent,
     BrainIconComponent,
     ChevDownIconComponent,
     EditIconComponent,
@@ -81,13 +83,14 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
     WrenchIconComponent,
     XIconComponent,
   ],
-  providers: [ChatSessionService],
+  providers: [ChatSessionService, ChatBranchingService],
   templateUrl: './chat-page.component.html',
   styleUrl: './chat-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ChatPageComponent implements OnInit, OnDestroy {
   readonly session = inject(ChatSessionService);
+  readonly branching = inject(ChatBranchingService);
   readonly sendGate = inject(ChatSendGate);
   private readonly chatService = inject(ChatService);
   private readonly fileAttachmentService = inject(FileAttachmentService);
@@ -136,6 +139,17 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   /** Complete bookmark list for the active thread (for the navigator), loaded from the API. */
   readonly bookmarks = signal<MessageBookmark[]>([]);
   private readonly messageList = viewChild(MessageListComponent);
+
+  /** A message to scroll to once its thread has loaded (e.g. "view the original" from a branch). */
+  private readonly pendingFocus = signal<{ chatId: string; messageId: string } | null>(null);
+  private readonly focusMessageWhenLoaded = effect(() => {
+    const focus = this.pendingFocus();
+    if (!focus) return;
+    const thread = this.session.thread();
+    if (!thread || thread.id !== focus.chatId || this.session.loading()) return;
+    this.pendingFocus.set(null);
+    void this.focusMessage(focus.messageId);
+  });
   /** Most recent assistant message that captured a Context X-ray, or null. */
   readonly latestContextMessage = computed(() => {
     const messages = this.session.messages();
@@ -461,6 +475,10 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     this.subscriptions.add(
       this.route.queryParamMap.subscribe(params => {
         this.checkpointMessageId.set(params.get('checkpoint')?.trim() || null);
+        const focusMessageId = params.get(FOCUS_MESSAGE_QUERY_PARAM)?.trim();
+        if (focusMessageId) {
+          this.pendingFocus.set({ chatId: this.route.snapshot.paramMap.get('id')?.trim() ?? '', messageId: focusMessageId });
+        }
         const galleryImageId = params.get('galleryImageId')?.trim();
         const welcomeFlag = params.get('welcome')?.trim().toLowerCase() === 'true';
         const routeChatId = this.route.snapshot.paramMap.get('id')?.trim();
@@ -703,6 +721,17 @@ export class ChatPageComponent implements OnInit, OnDestroy {
         error: () => this.refreshBookmarks(chatId),
       }),
     );
+  }
+
+  private async focusMessage(messageId: string): Promise<void> {
+    await this.session.loadOlderMessagesUntil(messageId);
+    this.messageList()?.scrollToMessage(messageId);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { [FOCUS_MESSAGE_QUERY_PARAM]: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 
   // Jump to a bookmark from the navigator: load older pages until it's present, then scroll.

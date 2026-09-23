@@ -805,6 +805,11 @@
                     <ui-user-icon [size]="14" />
                   }
                 </span>
+                @if (thread.forked_from_chat_id) {
+                  <span class="app-sidebar__thread-branch" title="Branched from another thread" aria-label="Branch">
+                    <ui-branch-icon [size]="11" />
+                  </span>
+                }
                 <span class="app-sidebar__thread-name">{{ thread.name }}</span>
                 @if (thread.unread_count && thread.unread_count > 0) {
                   <span class="app-sidebar__thread-badge" [attr.aria-label]="thread.unread_count + ' unread messages'">
@@ -862,6 +867,11 @@
                     <ui-user-icon [size]="14" />
                   }
                 </span>
+                @if (thread.forked_from_chat_id) {
+                  <span class="app-sidebar__thread-branch" title="Branched from another thread" aria-label="Branch">
+                    <ui-branch-icon [size]="11" />
+                  </span>
+                }
                 <span class="app-sidebar__thread-name">{{ thread.name }}</span>
                 @if (thread.unread_count && thread.unread_count > 0) {
                   <span class="app-sidebar__thread-badge" [attr.aria-label]="thread.unread_count + ' unread messages'">

@@ -102,7 +102,28 @@
         @if (copyFeedback() || exportFeedback(); as status) {
           <p class="chat-page__status" role="status" aria-live="polite">{{ status }}</p>
         }
+        @if (branching.creating()) {
+          <p class="chat-page__status" role="status" aria-live="polite">Creating branch…</p>
+        } @else if (branching.error(); as branchError) {
+          <p class="chat-page__error" role="alert">{{ branchError }}</p>
+        }
       </header>
+      @if (branching.bannerText(); as bannerText) {
+        <div class="chat-page__branch-bar" role="note">
+          <ui-branch-icon [size]="13" />
+          <span class="chat-page__branch-text">{{ bannerText }}</span>
+          @if (branching.catchingUp()) {
+            <span class="chat-page__branch-note">· catching up on the earlier conversation…</span>
+          }
+          @if (branching.parent(); as parent) {
+            @if (!parent.deleted) {
+              <button type="button" class="chat-page__branch-link" (click)="branching.openParent()">
+                View the original{{ parent.message_id ? ' at this point' : '' }}
+              </button>
+            }
+          }
+        </div>
+      }
       @if (threadSummary(); as summary) {
         <button type="button" class="chat-page__summary-bar" (click)="openSummaryModal()">
           <span class="chat-page__summary-label">Summary</span>
@@ -178,6 +199,10 @@
             (toggleBookmark)="toggleBookmarkFromList($event)"
             (openToolCallDetail)="openToolCall($event)"
             (retryUserMessage)="retryUserMessageFromList($event)"
+            [branchesByMessage]="branching.branchesByMessage()"
+            [branchingEnabled]="branching.enabled()"
+            (branch)="branching.branchFrom($event)"
+            (openBranch)="branching.openBranch($event)"
             (loadOlder)="session.loadOlderMessages()"
           />
           <app-chat-send-outlet />

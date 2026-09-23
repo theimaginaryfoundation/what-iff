@@ -112,6 +112,23 @@ func isRehydrationInFlight(state string) bool {
 // outlives the HTTP response. Callers should only invoke this for imported threads that have not yet
 // been rehydrated (source set, empty checkpoint summary).
 func (a *Agent) EnqueueThreadRehydration(ctx context.Context, userID, chatID uuid.UUID) {
+	a.enqueueRehydration(ctx, userID, chatID, rehydrationOptions{seedMemories: true})
+}
+
+// EnqueueBranchRehydration summarizes the copied prefix of a "What if…" branch whose parent's
+// checkpoint summary could not be reused (it covers turns after the branch point). Unlike imports it
+// does not seed long-term memories: the parent thread already extracted memories from those turns.
+func (a *Agent) EnqueueBranchRehydration(ctx context.Context, userID, chatID uuid.UUID) {
+	a.enqueueRehydration(ctx, userID, chatID, rehydrationOptions{seedMemories: false})
+}
+
+// rehydrationOptions varies the shared rehydration pipeline between imports and branches.
+type rehydrationOptions struct {
+	// seedMemories extracts long-term memories from the transcript after the summary lands.
+	seedMemories bool
+}
+
+func (a *Agent) enqueueRehydration(ctx context.Context, userID, chatID uuid.UUID, opts rehydrationOptions) {
 	detachedCtx, ok := middleware.CopyUserToIDContext(ctx, context.Background())
 	if !ok {
 		a.logger.Error("thread rehydration: missing user in context", zap.String("chat_id", chatID.String()))
@@ -134,12 +151,12 @@ func (a *Agent) EnqueueThreadRehydration(ctx context.Context, userID, chatID uui
 		return
 	}
 
-	go a.runThreadRehydration(detachedCtx, userID, chatID, job.ID)
+	go a.runThreadRehydration(detachedCtx, userID, chatID, job.ID, opts)
 }
 
 // runThreadRehydration executes the summarization and persists the checkpoint + window pointer.
 // On any failure it marks the chat rehydration_state=failed so the inference gate stops waiting.
-func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID uuid.UUID) {
+func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID uuid.UUID, opts rehydrationOptions) {
 	defer func() {
 		if v := recover(); v != nil {
 			a.logger.Error("thread rehydration: panic",
@@ -173,7 +190,9 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 		}
 		// Seed long-term memories from the (short) thread too — even a few turns can carry durable
 		// facts. Runs after the gate is released; best-effort so it never fails the job.
-		a.extractAndStoreImportedMemories(ctx, userID, chatID, msgs)
+		if opts.seedMemories {
+			a.extractAndStoreImportedMemories(ctx, userID, chatID, msgs)
+		}
 		if _, err := a.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusComplete, ""); err != nil {
 			a.logger.Warn("thread rehydration: failed to complete short-thread job", zap.String("job_id", jobID.String()), zap.Error(err))
 		}
@@ -218,7 +237,9 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 
 	// Seed long-term memories from the full transcript. The state is already ready (gate released),
 	// so this extra LLM work delays only job completion, not the user's next turn. Best-effort.
-	a.extractAndStoreImportedMemories(ctx, userID, chatID, msgs)
+	if opts.seedMemories {
+		a.extractAndStoreImportedMemories(ctx, userID, chatID, msgs)
+	}
 
 	if _, err := a.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusComplete, ""); err != nil {
 		a.logger.Warn("thread rehydration: failed to complete job", zap.String("job_id", jobID.String()), zap.Error(err))

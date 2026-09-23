@@ -3806,6 +3806,106 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /chat/{id}/fork:
+    post:
+      summary: Branch a chat ("What if…")
+      description: >-
+        Creates a new thread that shares this thread's history up to `message_id` and then diverges.
+        Copies thread settings (model, personality, mood, tools, tags, MCP servers) and message text and
+        generation metadata; does not copy attachments, tool calls, context snapshots, bookmarks, or
+        thread-scoped memories. If the parent's latest checkpoint summary covers turns after the branch
+        point, the branch is created with `rehydration_state: pending` and its copied prefix is
+        re-summarized in the background (without re-seeding memories); inference on the branch waits
+        for that summary like a restored imported thread. The parent is not modified.
+      tags: [Chat Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Parent chat ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForkChatRequest'
+      responses:
+        '201':
+          description: Branch created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForkChatResponse'
+        '400':
+          description: Invalid chat ID, message ID, or name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Chat not found, or the message is not in this chat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Failed to create the branch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chat/{id}/lineage:
+    get:
+      summary: Get a chat's branch lineage
+      description: >-
+        Returns where this thread was branched from (`parent`, null for original threads; `deleted`
+        when the parent no longer exists) and the branches taken directly off it (newest first), so the
+        UI can show a "branched from" banner and per-message branch markers.
+      tags: [Chat Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Chat ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Lineage for the chat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatLineage'
+        '400':
+          description: Invalid chat ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Chat not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /chat/{id}/export:
     get:
       summary: Export chat
@@ -6150,6 +6250,16 @@ components:
         archived:
           type: boolean
           description: When true, the thread is in the archive and omitted from default list responses
+        forked_from_chat_id:
+          type: string
+          format: uuid
+          description: >-
+            Set on "What if…" branches: the thread this chat was branched from. The parent may since
+            have been deleted (see `GET /chat/{id}/lineage`).
+        forked_from_message_id:
+          type: string
+          format: uuid
+          description: Set on branches — the message in the parent thread where this branch diverged.
         created_at:
           type: string
           format: date-time
@@ -6166,6 +6276,89 @@ components:
         archived: false
         created_at: "2024-01-01T00:00:00Z"
         updated_at: "2024-01-01T00:00:00Z"
+
+    ForkChatRequest:
+      type: object
+      properties:
+        message_id:
+          type: string
+          format: uuid
+          description: Branch point — a message in the parent thread.
+        include_message:
+          type: boolean
+          default: true
+          description: >-
+            Keep the branch-point message in the branch (continue after it). False ends the branch just
+            before it, for re-asking a user turn differently.
+        name:
+          type: string
+          maxLength: 200
+          description: 'Optional branch name; defaults to "What if: <parent name>".'
+      required:
+        - message_id
+
+    ForkChatResponse:
+      type: object
+      properties:
+        chat:
+          $ref: '#/components/schemas/Chat'
+        copied_messages:
+          type: integer
+          description: How many parent messages the branch starts with.
+      required:
+        - chat
+        - copied_messages
+
+    ChatBranchSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        forked_from_message_id:
+          type: string
+          format: uuid
+        last_message_time:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - created_at
+
+    ChatLineage:
+      type: object
+      properties:
+        parent:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: string
+              format: uuid
+            message_id:
+              type: string
+              format: uuid
+            name:
+              type: string
+              description: Empty when the parent was deleted.
+            deleted:
+              type: boolean
+          required:
+            - id
+            - deleted
+        branches:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatBranchSummary'
+      required:
+        - parent
+        - branches
 
     ChatContext:
       type: object
