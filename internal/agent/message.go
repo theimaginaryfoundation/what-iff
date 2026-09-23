@@ -497,29 +497,55 @@ var chatJobCancelPollInterval = 2 * time.Second
 
 // watchChatJobCancel cancels a running chat job when its status turns cancelled in the database,
 // which is how a Stop handled by another API instance reaches this worker (see CancelJob). It
-// returns when runCtx ends. Read errors are ignored; the next tick retries. Without a datastore
-// there is nothing to watch (CancelJob is then in-process only), so it returns immediately.
+// returns when runCtx ends, or when the job row is gone (nothing left to watch; the worker is left
+// to finish on its own). Other read errors are tolerated — the next tick retries — but logged on
+// the first failure and then every chatJobCancelErrLogEvery consecutive ones, so a datastore
+// problem is visible without flooding the log. Without a datastore there is nothing to watch
+// (CancelJob is then in-process only), so it returns immediately.
 func (a *Agent) watchChatJobCancel(runCtx context.Context, userID, jobID uuid.UUID, cancel context.CancelFunc) {
 	if a.ds == nil {
 		return
 	}
 	ticker := time.NewTicker(chatJobCancelPollInterval)
 	defer ticker.Stop()
+	consecutiveErrs := 0
 	for {
 		select {
 		case <-runCtx.Done():
 			return
 		case <-ticker.C:
 			status, err := a.ds.JobStatus(runCtx, userID, jobID)
-			if err == nil && status == models.JobStatusCancelled {
+			switch {
+			case errors.Is(err, datastore.ErrJobNotFound):
+				a.logger.Warn("chat job row vanished while running; no longer watching for cancel",
+					zap.String("job_id", jobID.String()))
+				return
+			case err != nil:
+				if runCtx.Err() != nil {
+					return
+				}
+				if consecutiveErrs%chatJobCancelErrLogEvery == 0 {
+					a.logger.Warn("failed to read chat job status while watching for cancel",
+						zap.String("job_id", jobID.String()),
+						zap.Int("consecutive_failures", consecutiveErrs+1),
+						zap.Error(err))
+				}
+				consecutiveErrs++
+			case status == models.JobStatusCancelled:
 				a.logger.Info("chat job cancelled from another instance; stopping",
 					zap.String("job_id", jobID.String()))
 				cancel()
 				return
+			default:
+				consecutiveErrs = 0
 			}
 		}
 	}
 }
+
+// chatJobCancelErrLogEvery throttles watchChatJobCancel's read-error log: the first failure and
+// then one per this many consecutive failures (~1/minute at the 2s poll interval).
+const chatJobCancelErrLogEvery = 30
 
 // ChunkPipeline returns the file chunk pipeline for asynchronous file processing.
 func (a *Agent) ChunkPipeline() *filechunker.FileChunkPipeline { return a.chunkPipeline }
