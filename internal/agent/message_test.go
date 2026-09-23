@@ -166,6 +166,15 @@ func TestAssertGenerationProducedOutput(t *testing.T) {
 		require.Contains(t, err.Error(), "cut off")
 	})
 
+	// Chat Completions providers (Xiaomi MiMo) report it as finish_reason "length".
+	t.Run("chat completions length truncation uses the truncation message", func(t *testing.T) {
+		err := a.assertGenerationProducedOutput("xiaomi", chatCtx,
+			&provider.GenerateResponse{ID: "msg_1d", StopReason: "length", OutputTokens: 16384}, nil)
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cut off")
+	})
+
 	// A non-truncation empty turn (extraction dropped the text, or nothing came back) keeps
 	// the diagnostic dump: the two fields that separate those causes are the whole value.
 	t.Run("non-truncation empty turn keeps the diagnostic message", func(t *testing.T) {

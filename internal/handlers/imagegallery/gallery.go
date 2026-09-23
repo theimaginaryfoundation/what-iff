@@ -29,7 +29,11 @@ func (h *Handler) ListImages(w http.ResponseWriter, r *http.Request) {
 	limit := handlerutils.ParseIntParam(r.URL.Query().Get("limit"), 20)
 
 	imageType := models.ImageMIMEPrefix
-	filters := models.FileAttachmentFilters{FileType: &imageType}
+	// Reference copies (one per chat reuse of a gallery image) are excluded in SQL
+	// so each stored image is listed once via its original row. Listing the copy
+	// instead made an image's Generated/Imported class flip after reuse, and
+	// per-page dedupe below cannot see duplicates split across pages.
+	filters := models.FileAttachmentFilters{FileType: &imageType, ExcludeReferenceCopies: true}
 
 	// Optional filename search. Trimmed to avoid whitespace-only filters silently
 	// returning the full library. Used both by the gallery view's search box and by
