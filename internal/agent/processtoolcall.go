@@ -70,6 +70,14 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 		tools.GenerateImageToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
 			return a.generateImageTool(ctx, chatCtx.chat, input)
 		},
+		tools.WebSearchFunctionToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.webSearchTool(ctx, input)
+			return out, nil, err
+		},
+		tools.FetchPageToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.fetchPageTool(ctx, input)
+			return out, nil, err
+		},
 		tools.RecallToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
 			out, memories, attachments, err := a.recallTool.Recall(ctx, chatCtx.chat, input)
 			if err == nil && len(memories) > 0 {

@@ -1,0 +1,117 @@
+package websearch
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"strings"
+)
+
+const parallelBaseURL = "https://api.parallel.ai/v1"
+
+// ParallelBackend calls the Parallel Search and Extract APIs.
+type ParallelBackend struct {
+	apiKey  string
+	mode    string
+	baseURL string
+	client  *http.Client
+}
+
+// NewParallel builds a Parallel backend. mode is "turbo", "fast" or "advanced" (default "fast").
+func NewParallel(apiKey, mode string, client *http.Client) *ParallelBackend {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		mode = "fast"
+	}
+	return &ParallelBackend{apiKey: apiKey, mode: mode, baseURL: parallelBaseURL, client: client}
+}
+
+func (p *ParallelBackend) Name() string { return "parallel" }
+
+type parallelSearchRequest struct {
+	Objective     string   `json:"objective,omitempty"`
+	SearchQueries []string `json:"search_queries"`
+	Mode          string   `json:"mode,omitempty"`
+}
+
+type parallelResult struct {
+	URL         string   `json:"url"`
+	Title       string   `json:"title"`
+	PublishDate *string  `json:"publish_date"`
+	Excerpts    []string `json:"excerpts"`
+	FullContent *string  `json:"full_content"`
+}
+
+type parallelSearchResponse struct {
+	Results []parallelResult `json:"results"`
+}
+
+func (p *ParallelBackend) Search(ctx context.Context, q Query) ([]Result, error) {
+	query := strings.TrimSpace(q.Query)
+	if query == "" {
+		return nil, fmt.Errorf("parallel: empty query")
+	}
+	var resp parallelSearchResponse
+	req := parallelSearchRequest{Objective: strings.TrimSpace(q.Objective), SearchQueries: []string{query}, Mode: p.mode}
+	if err := postJSON(ctx, p.client, p.baseURL+"/search", map[string]string{"x-api-key": p.apiKey}, req, &resp); err != nil {
+		return nil, fmt.Errorf("parallel search: %w", err)
+	}
+	limit := normalizeMaxResults(q.MaxResults)
+	out := make([]Result, 0, min(limit, len(resp.Results)))
+	for _, r := range resp.Results {
+		if len(out) == limit {
+			break
+		}
+		snippet, _ := truncateRunes(strings.Join(r.Excerpts, " … "), snippetMaxRunes)
+		out = append(out, Result{Title: strings.TrimSpace(r.Title), URL: r.URL, Snippet: snippet, PublishedAt: deref(r.PublishDate)})
+	}
+	return out, nil
+}
+
+type parallelExtractRequest struct {
+	URLs        []string `json:"urls"`
+	Objective   string   `json:"objective,omitempty"`
+	Excerpts    bool     `json:"excerpts"`
+	FullContent bool     `json:"full_content"`
+}
+
+type parallelExtractResponse struct {
+	Results []parallelResult `json:"results"`
+	Errors  []struct {
+		URL     string `json:"url"`
+		Message string `json:"message"`
+	} `json:"errors"`
+}
+
+func (p *ParallelBackend) Extract(ctx context.Context, url, objective string) (Page, error) {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return Page{}, fmt.Errorf("parallel: empty url")
+	}
+	objective = strings.TrimSpace(objective)
+	req := parallelExtractRequest{URLs: []string{url}, Objective: objective, Excerpts: objective != "", FullContent: objective == ""}
+	var resp parallelExtractResponse
+	if err := postJSON(ctx, p.client, p.baseURL+"/extract", map[string]string{"x-api-key": p.apiKey}, req, &resp); err != nil {
+		return Page{}, fmt.Errorf("parallel extract: %w", err)
+	}
+	if len(resp.Results) == 0 {
+		if len(resp.Errors) > 0 && resp.Errors[0].Message != "" {
+			return Page{}, fmt.Errorf("parallel extract: %s", resp.Errors[0].Message)
+		}
+		return Page{}, fmt.Errorf("parallel extract: no content for %s", url)
+	}
+	r := resp.Results[0]
+	text := deref(r.FullContent)
+	if strings.TrimSpace(text) == "" {
+		text = strings.Join(r.Excerpts, "\n\n")
+	}
+	content, truncated := truncateRunes(text, pageMaxRunes)
+	return Page{URL: r.URL, Title: strings.TrimSpace(r.Title), Content: content, PublishedAt: deref(r.PublishDate), Truncated: truncated}, nil
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return strings.TrimSpace(*s)
+}

@@ -17,6 +17,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/filechunker"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
@@ -135,6 +136,8 @@ type Agent struct {
 	// is chosen at construction and swapped via server wiring, so no push detail
 	// reaches this package.
 	pushNotifier pushnotify.Notifier
+	// webSearch backs the first-party web search tools; nil when not configured (ADR 0x021).
+	webSearch *websearch.Service
 	// pushEnabled is true when a real push implementation was wired (a non-nil
 	// PushNotifier). It lets the completion hook skip spawning a detached
 	// goroutine when push is off (the open-source default).
@@ -192,6 +195,9 @@ type AgentConfig struct {
 	// nil, NewAgent falls back to pushnotify.NoopNotifier (sends nothing) — the
 	// open-source default.
 	PushNotifier pushnotify.Notifier
+	// WebSearch backs the first-party web_search / fetch_page tools (ADR 0x021). Nil leaves them
+	// off and vendor-native web search in place. NewAgent ignores it under non-vendor backends.
+	WebSearch *websearch.Service
 	// LifecycleContext is cancelled on app shutdown and used for detached work.
 	// Nil defaults to context.Background().
 	LifecycleContext context.Context
@@ -273,6 +279,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		fileStore:                    fileStore,
 		meter:                        cfg.Meter,
 		pushNotifier:                 cfg.PushNotifier,
+		webSearch:                    vendorOnlyWebSearch(cfg),
 		pushEnabled:                  cfg.PushNotifier != nil,
 		runningJobCancels:            make(map[uuid.UUID]runningJobCancel),
 		lifecycleCtx:                 cfg.LifecycleContext,
@@ -1219,7 +1226,8 @@ func (a *Agent) openAIResponseParamsForChat(ctx context.Context, chatCtx *chatCo
 	if policy.toolsEnabled {
 		parallel = true
 		chatTools := getChatTools(ToolConfig{
-			DisabledTools: policy.disabledTools,
+			DisabledTools:   policy.disabledTools,
+			NativeWebSearch: policy.nativeWebSearch,
 		})
 		agentTools := getAgentToolsList(policy.disabledTools, policy.showMoodTools)
 		mcpTools := a.getChatMCPTools(ctx, userID, chatMessage.ChatID, policy.ritualIDs, chatCtx.model)
@@ -1227,7 +1235,7 @@ func (a *Agent) openAIResponseParamsForChat(ctx context.Context, chatCtx *chatCo
 	}
 	a.recordToolDefinitionEstimate(modelCtx, toolParams)
 	var include []responses.ResponseIncludable
-	if policy.toolsEnabled && !policy.disabledTools[tools.ToolNameWebSearch] {
+	if policy.nativeWebSearch {
 		include = []responses.ResponseIncludable{
 			responses.ResponseIncludableWebSearchCallResults,
 			responses.ResponseIncludableWebSearchCallActionSources,
@@ -1312,7 +1320,7 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 
 	claudeFunctionTools := claudeFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
 	a.recordToolDefinitionEstimate(modelContext, claudeFunctionTools)
-	webSearchEnabled := policy.toolsEnabled && nativeAnthropic && !policy.disabledTools[tools.ToolNameWebSearch]
+	webSearchEnabled := nativeAnthropic && policy.nativeWebSearch
 	adapter := provider.NewClaudeAdapter(claudeProvider, claudeParams, claudeFunctionTools, webSearchEnabled, mcpConfig, policy.disabledTools)
 	if zai {
 		adapter.SetTruncationFallback(func(params *anthropic.MessageNewParams) {

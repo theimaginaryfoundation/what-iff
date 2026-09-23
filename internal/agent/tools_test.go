@@ -13,19 +13,17 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestGetChatToolsAddsWebSearch(t *testing.T) {
-	tools := getChatTools(ToolConfig{})
+func TestGetChatToolsAddsNativeWebSearchWhenPolicyAllows(t *testing.T) {
+	tools := getChatTools(ToolConfig{NativeWebSearch: true})
 
 	require.Len(t, tools, 1)
 	assert.NotNil(t, tools[0].OfWebSearch)
 }
 
-func TestGetChatToolsRespectsWebSearchToggle(t *testing.T) {
-	tools := getChatTools(ToolConfig{
-		DisabledTools: map[string]bool{"web_search": true},
-	})
-
-	require.Empty(t, tools)
+func TestGetChatToolsOmitsNativeWebSearchOtherwise(t *testing.T) {
+	// The web_search toggle and first-party web search both reach getChatTools as
+	// NativeWebSearch=false (see applyWebSearchPolicy).
+	require.Empty(t, getChatTools(ToolConfig{}))
 }
 
 func TestGetAvailableToolsUsesHumanDescriptions(t *testing.T) {

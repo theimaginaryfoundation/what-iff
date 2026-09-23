@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/embedding"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
 	agentjobscheduler "github.com/theimaginaryfoundation/what-iff/internal/agentjobs/scheduler"
 	"github.com/theimaginaryfoundation/what-iff/internal/buildinfo"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
@@ -186,6 +188,21 @@ func (s *Server) setupRoutes() {
 		QwenBaseURL:        s.config.QwenBaseURL,
 		XiaomiKey:          s.config.XiaomiKey,
 		XiaomiBaseURL:      s.config.XiaomiBaseURL,
+	}
+	if s.config.LLMBackend == "vendor" {
+		webSearch, err := websearch.New(websearch.Config{
+			Provider:       s.config.WebSearchProvider,
+			ParallelAPIKey: s.config.ParallelAPIKey,
+			ParallelMode:   s.config.ParallelSearchMode,
+			BraveAPIKey:    s.config.BraveSearchAPIKey,
+		})
+		switch {
+		case err == nil:
+			agentCfg.WebSearch = webSearch
+			s.logger.Info("first-party web search enabled", zap.String("backend", webSearch.Backend.Name()))
+		case !errors.Is(err, websearch.ErrNotConfigured):
+			s.logger.Fatal("invalid web search configuration", zap.Error(err))
+		}
 	}
 	// The concrete meter is provided by metering.New, which the private metering
 	// implementation registers via a blank import in cmd/api-server; it reads its

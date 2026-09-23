@@ -36,6 +36,7 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
 | `buildModelContextForChatMessage` | Shared path for chat turns so user-segment handling stays consistent. |
 | `openAIResponseParamsForChat` | Tools + personality file enrichment + `BuildOpenAIResponseParams`. |
 | `HandleAgentLoop` / `ExecuteToolUseWithRecovery` | Multi-round tool execution with panic recovery (`agentloop.go`). |
+| `webSearchTool` / `fetchPageTool` / `applyWebSearchPolicy` | First-party web search (ADR 0x021, `web_search_tool.go`, `tools.go`): when a `websearch.Service` is configured every model gets `web_search` (and `fetch_page` with an extractor) and vendor-native web search is left out of the request; otherwise vendor search stays as before. The user's `web_search` toggle governs both. |
 | `buildTurnToolPolicy` / `getChatTools` / `dispatchToolUse` | Shared tool policy, provider-specific tool assembly, and handler routing (`tools.go`, `processtoolcall.go`). |
 
 Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool implementations), `embedding/`, `filechunker/`.

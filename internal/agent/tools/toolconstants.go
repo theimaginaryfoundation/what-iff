@@ -242,3 +242,51 @@ var RunSubagentToolSpec = FunctionToolSpec{
 	},
 	Required: []string{"message"},
 }
+
+// ToolNameFetchPage is the first-party page-reading tool that pairs with web_search (ADR 0x021).
+const ToolNameFetchPage = "fetch_page"
+
+// WebSearchFunctionToolSpec is the first-party web search tool (ADR 0x021). It reuses the
+// web_search name so the user's web search toggle and saved tool-call history stay the same
+// whichever backend runs; the agent never offers it alongside a vendor-native web_search.
+var WebSearchFunctionToolSpec = FunctionToolSpec{
+	Name: ToolNameWebSearch,
+	Description: "Search the web for current or factual information you don't already know. " +
+		"Returns a short list of results with title, URL, snippet and published date. " +
+		"Use fetch_page on a result's URL when a snippet isn't enough. Cite the URLs you rely on.",
+	Properties: map[string]interface{}{
+		"query": map[string]interface{}{
+			"type":        "string",
+			"description": "A concise search query, as you would type it into a search engine.",
+		},
+		"objective": map[string]interface{}{
+			"type":        "string",
+			"description": "Optional: one sentence on what you are trying to find out, used to rank and excerpt results.",
+		},
+		"max_results": map[string]interface{}{
+			"type":        "integer",
+			"description": "Number of results to return (1-10). Defaults to 5.",
+			"minimum":     1,
+			"maximum":     10,
+		},
+	},
+	Required: []string{"query"},
+}
+
+// FetchPageToolSpec reads one web page through the search provider's extract API.
+var FetchPageToolSpec = FunctionToolSpec{
+	Name: ToolNameFetchPage,
+	Description: "Read the text of one web page, usually a URL returned by web_search. " +
+		"Give an objective to get only the relevant excerpts instead of the whole page.",
+	Properties: map[string]interface{}{
+		"url": map[string]interface{}{
+			"type":        "string",
+			"description": "The full http(s) URL to read.",
+		},
+		"objective": map[string]interface{}{
+			"type":        "string",
+			"description": "Optional: what you want from the page; returns focused excerpts instead of the full text.",
+		},
+	},
+	Required: []string{"url"},
+}
