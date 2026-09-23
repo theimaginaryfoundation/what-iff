@@ -65,6 +65,8 @@ func (h *Handler) GenerateExpressionCandidates(w http.ResponseWriter, r *http.Re
 			handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Personality not found", nil)
 		case errors.Is(err, agent.ErrExpressionReferenceImageNotFound):
 			handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Reference image not found", nil)
+		case errors.Is(err, agent.ErrExpressionCandidateKeyCount):
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, fmt.Sprintf("expressions must contain exactly %d keys", expressionCandidateCount), nil)
 		case errors.Is(err, agent.ErrExpressionImagesDisabled):
 			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Image generation is disabled for this personality (image style is none)", nil)
 		default:

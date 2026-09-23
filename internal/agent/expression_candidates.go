@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
@@ -22,6 +23,9 @@ const ExpressionCandidatesMode = "candidates"
 // ErrExpressionReferenceImageNotFound is returned when the requested reference image is missing,
 // owned by another user, or not an image.
 var ErrExpressionReferenceImageNotFound = errors.New("reference image not found")
+
+// ErrExpressionCandidateKeyCount is returned when a candidate run is not given exactly nine keys.
+var ErrExpressionCandidateKeyCount = errors.New("expression candidates need exactly 9 keys")
 
 // ErrExpressionImagesDisabled is returned when the personality's image style is "none".
 var ErrExpressionImagesDisabled = errors.New("image generation is disabled for this personality (image style is none)")
@@ -62,7 +66,7 @@ func (a *Agent) EnqueueExpressionCandidatesJob(ctx context.Context, userID, pers
 		return nil, fmt.Errorf("expression candidates job: agent not configured")
 	}
 	if len(keys) != 9 {
-		return nil, fmt.Errorf("expression candidates job: expected 9 keys, got %d", len(keys))
+		return nil, fmt.Errorf("%w: got %d", ErrExpressionCandidateKeyCount, len(keys))
 	}
 
 	person, err := a.ds.GetPersonality(ctx, userID, personalityID)
@@ -73,8 +77,13 @@ func (a *Agent) EnqueueExpressionCandidatesJob(ctx context.Context, userID, pers
 		return nil, ErrExpressionImagesDisabled
 	}
 	if referenceImageID != nil {
+		// Only a genuine miss (absent or another user's) maps to not-found; a datastore failure
+		// is surfaced as-is so it reads as a server error rather than a bad request.
 		att, err := a.ds.GetFileAttachment(ctx, userID, *referenceImageID)
-		if err != nil || att == nil || !strings.HasPrefix(strings.ToLower(att.FileType), "image/") {
+		if err != nil && !errors.Is(err, datastore.ErrFileAttachmentNotFound) {
+			return nil, fmt.Errorf("load reference image: %w", err)
+		}
+		if att == nil || !strings.HasPrefix(strings.ToLower(att.FileType), "image/") {
 			return nil, ErrExpressionReferenceImageNotFound
 		}
 	}
@@ -114,27 +123,34 @@ func (a *Agent) EnqueueExpressionCandidatesJob(ctx context.Context, userID, pers
 
 	jobID := newJob.ID
 	go a.runPersonalityMediaJob(detachedCtx, newJob, func(runCtx context.Context) (uuid.UUID, error) {
-		candidates, err := a.GenerateExpressionCandidates(runCtx, userID, personalityID, keys, referenceImageID)
-		if err != nil {
-			return uuid.Nil, err
-		}
-		done, err := json.Marshal(ExpressionCandidatesProgress{
-			Mode:             ExpressionCandidatesMode,
-			Expressions:      keys,
-			ReferenceImageID: referenceImageID,
-			Candidates:       candidates,
-		})
-		if err == nil {
-			err = a.ds.UpdateJobProgress(runCtx, userID, jobID, string(done))
-		}
-		if err != nil {
-			a.deleteExpressionCandidates(runCtx, userID, candidates)
-			return uuid.Nil, fmt.Errorf("record expression candidates: %w", err)
-		}
-		return personalityID, nil
+		return a.runExpressionCandidatesJob(runCtx, userID, jobID, personalityID, keys, referenceImageID)
 	})
 
 	return newJob, nil
+}
+
+// runExpressionCandidatesJob is the background body of a candidate run: generate, then record the
+// candidates on the job's progress. If recording fails the uploads are deleted, since nothing
+// else would ever point at them.
+func (a *Agent) runExpressionCandidatesJob(ctx context.Context, userID, jobID, personalityID uuid.UUID, keys []string, referenceImageID *uuid.UUID) (uuid.UUID, error) {
+	candidates, err := a.GenerateExpressionCandidates(ctx, userID, personalityID, keys, referenceImageID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	done, err := json.Marshal(ExpressionCandidatesProgress{
+		Mode:             ExpressionCandidatesMode,
+		Expressions:      keys,
+		ReferenceImageID: referenceImageID,
+		Candidates:       candidates,
+	})
+	if err == nil {
+		err = a.ds.UpdateJobProgress(ctx, userID, jobID, string(done))
+	}
+	if err != nil {
+		a.deleteExpressionCandidates(ctx, userID, candidates)
+		return uuid.Nil, fmt.Errorf("record expression candidates: %w", err)
+	}
+	return personalityID, nil
 }
 
 // GenerateExpressionCandidates generates a 3×3 grid for nine row-major keys and uploads each cell
