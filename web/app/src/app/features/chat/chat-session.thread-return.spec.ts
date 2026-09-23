@@ -12,6 +12,7 @@ import { DraftMessageService } from '../../core/services/draft-message.service';
 import { JobService } from '../../core/services/job.service';
 import { MessageService } from '../../core/services/message.service';
 import { ChatSendGate } from './services/chat-send-gate';
+import { CHAT_JOB_POLL_INTERVAL_MS } from './chat.constants';
 import { Chat } from '../../core/models/chat.model';
 import { ChatMessage } from '../../core/models/message.model';
 import { environment } from '../../../environments/environment';
@@ -160,7 +161,7 @@ describe('ChatSessionService — returning to a thread with a running turn', () 
         http.expectNone(r => r.url === `${api}/chat/chat-B/chat-message`);
 
         // Reply lands; post-inference phases (expression, summarization) keep job-1 pending.
-        await vi.advanceTimersByTimeAsync(2000);
+        await vi.advanceTimersByTimeAsync(CHAT_JOB_POLL_INTERVAL_MS);
         http.expectOne(`${api}/job/job-1`).flush({
             id: 'job-1', status: 'inference_complete', job_type: 'chat_message', reference: 'user-1', result_id: 'asst-1',
         });
@@ -193,7 +194,7 @@ describe('ChatSessionService — returning to a thread with a running turn', () 
         expect(service.pendingAssistantDraftText()).toBe('Hel');
 
         // job-1 finishing its post-inference phases must not wipe job-2's in-progress draft.
-        await vi.advanceTimersByTimeAsync(2000);
+        await vi.advanceTimersByTimeAsync(CHAT_JOB_POLL_INTERVAL_MS);
         http.expectOne(`${api}/job/job-1`).flush({
             id: 'job-1', status: 'complete', job_type: 'chat_message', reference: 'user-1', result_id: 'asst-1',
         });
@@ -203,6 +204,42 @@ describe('ChatSessionService — returning to a thread with a running turn', () 
         });
         expect(service.pendingAssistantDraftText()).toBe('Hello');
         expect(service.isGenerating()).toBe(true);
+    });
+
+    it('surfaces the running turn\'s tool timeline from job progress, and drops it on switch', async () => {
+        service.setActive('chat-B');
+        flushList('chat-B', []);
+        noActiveJob('chat-B');
+
+        const send = service.sendMessage('look things up');
+        http.expectOne(`${api}/chat/chat-B/chat-message`).flush({ id: 'user-1', job_id: 'job-1', type: 'chat_message' });
+        await send;
+        await vi.advanceTimersByTimeAsync(0);
+        const progress = (calls: object[]) => JSON.stringify({ tool_calls: calls });
+        http.expectOne(`${api}/job/job-1`).flush({
+            id: 'job-1', status: 'processing', job_type: 'chat_message', reference: 'user-1',
+            progress: progress([{ id: 'c1', name: 'recall_memories', status: 'running', round: 0, started_at: 't0' }]),
+        });
+        expect(service.liveToolCalls().map(c => [c.name, c.status])).toEqual([['recall_memories', 'running']]);
+
+        // Only the progress changed: the poller must still deliver it.
+        await vi.advanceTimersByTimeAsync(CHAT_JOB_POLL_INTERVAL_MS);
+        http.expectOne(`${api}/job/job-1`).flush({
+            id: 'job-1', status: 'processing', job_type: 'chat_message', reference: 'user-1',
+            progress: progress([
+                { id: 'c1', name: 'recall_memories', status: 'complete', output: '[]', round: 0, started_at: 't0', finished_at: 't1' },
+                { id: 'c2', name: 'web_search', status: 'running', round: 1, started_at: 't2' },
+            ]),
+        });
+        expect(service.liveToolCalls().map(c => [c.name, c.status])).toEqual([
+            ['recall_memories', 'complete'],
+            ['web_search', 'running'],
+        ]);
+
+        service.setActive('chat-A');
+        flushList('chat-A', []);
+        noActiveJob('chat-A');
+        expect(service.liveToolCalls()).toEqual([]);
     });
 
     it('does not resume when nothing is running for the thread', () => {

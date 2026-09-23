@@ -28,6 +28,7 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
 | `buildModelContextForChatMessage` | Shared path for chat turns so user-segment handling stays consistent. |
 | `openAIResponseParamsForChat` | Tools + personality file enrichment + `BuildOpenAIResponseParams`. |
 | `HandleAgentLoop` / `ExecuteToolUseWithRecovery` | Multi-round tool execution with panic recovery (`agentloop.go`). |
+| `jobToolProgress` | Live tool timeline for an in-flight chat turn: records each call's start/finish into `Job.progress` (`models.ChatTurnProgress`, truncated previews), flushing buffered draft text and marking a paragraph boundary first (`tool_progress.go`). Nil-safe; best-effort writes. |
 | `buildTurnToolPolicy` / `getChatTools` / `dispatchToolUse` | Shared tool policy, provider-specific tool assembly, and handler routing (`tools.go`, `processtoolcall.go`). |
 
 Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool implementations), `embedding/`, `filechunker/`.

@@ -6,9 +6,9 @@ import { ChatStreamingService } from '../../core/services/chat-streaming.service
 import { JobService } from '../../core/services/job.service';
 import { MessageService } from '../../core/services/message.service';
 import { ChatMessage } from '../../core/models/message.model';
-import { Job } from '../../core/models/job.model';
+import { ChatTurnProgress, ChatTurnToolCall, Job } from '../../core/models/job.model';
 import { apiErrorMessage } from '../../core/utils/api-error.helpers';
-import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from './chat.constants';
+import { CHAT_JOB_POLL_INTERVAL_MS, CHAT_PENDING_ASSISTANT_MESSAGE_ID } from './chat.constants';
 import { ChatSendGate } from './services/chat-send-gate';
 
 export interface AssistantTurnDeps {
@@ -42,6 +42,7 @@ export class AssistantTurn {
   private readonly _activeJobPhase = signal<Job['status'] | null>(null);
   private readonly _streamingMessageId = signal<string | null>(null);
   private readonly _pendingAssistantDraftText = signal('');
+  private readonly _liveToolCalls = signal<readonly ChatTurnToolCall[]>([]);
 
   private expectingAssistantResponse = false;
   private expectedAssistantAfterUserMessageId: string | null = null;
@@ -64,6 +65,8 @@ export class AssistantTurn {
   readonly streamingMessageId: Signal<string | null> = this._streamingMessageId.asReadonly();
   readonly isStreaming = computed(() => this._streamingMessageId() !== null);
   readonly pendingAssistantDraftText = this._pendingAssistantDraftText.asReadonly();
+  /** The active job's tool calls so far (live timeline from Job.progress); empty when idle. */
+  readonly liveToolCalls = this._liveToolCalls.asReadonly();
   /** True while a chat_message job is in flight (after send) but not yet finished. */
   readonly jobPending = computed(() => this._activeChatJobId() !== null);
   /**
@@ -109,6 +112,7 @@ export class AssistantTurn {
     this._activeJobPhase.set(null);
     this._cancelRequestedJobId.set(null);
     this._streamingMessageId.set(null);
+    this._liveToolCalls.set([]);
   }
 
   dispose(): void {
@@ -181,6 +185,7 @@ export class AssistantTurn {
     this.expectingAssistantResponse = true;
     this._activeChatJobId.set(jobId);
     this._activeJobPhase.set(null);
+    this._liveToolCalls.set([]);
     if (this._cancelRequestedJobId() !== jobId) {
       this._pendingAssistantDraftText.set('');
       streamingService.clearMessageState(CHAT_PENDING_ASSISTANT_MESSAGE_ID);
@@ -190,7 +195,7 @@ export class AssistantTurn {
     // slot, streaming id and expectation flags are shared across threads.
     this.jobSubscriptions.add(
       jobService
-        .pollJob(jobId, chatId)
+        .pollJob(jobId, chatId, CHAT_JOB_POLL_INTERVAL_MS)
         .pipe(
           finalize(() => {
             this.jobRenderedDeltaIndex.delete(jobId);
@@ -313,6 +318,8 @@ export class AssistantTurn {
     // composer unlocked, and its late snapshots must not overwrite the new job's phase.
     if (this._activeChatJobId() === job.id) {
       this._activeJobPhase.set(job.status);
+      const toolCalls = parseChatTurnToolCalls(job.progress);
+      if (toolCalls) this._liveToolCalls.set(toolCalls);
     }
     const cancelPendingForJob = this._cancelRequestedJobId() === job.id;
     if (cancelPendingForJob && job.status === 'cancelled') {
@@ -391,6 +398,17 @@ export class AssistantTurn {
 
   private isActiveThread(threadId: string): boolean {
     return this.deps.activeThreadId() === threadId;
+  }
+}
+
+/** The tool timeline from a chat_message job's progress payload; undefined when absent or unreadable. */
+export function parseChatTurnToolCalls(progress: string | undefined): ChatTurnToolCall[] | undefined {
+  if (!progress) return undefined;
+  try {
+    const parsed = JSON.parse(progress) as Partial<ChatTurnProgress>;
+    return Array.isArray(parsed.tool_calls) ? parsed.tool_calls : undefined;
+  } catch {
+    return undefined;
   }
 }
 

@@ -1,7 +1,6 @@
+import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 
-import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
-
-import { ToolCall } from '../../../../core/models/toolcall.model';
+import { ToolCall, ToolCallView } from '../../../../core/models/toolcall.model';
 import { ToolCallComponent } from '../tool-call/tool-call.component';
 
 @Component({
@@ -9,28 +8,28 @@ import { ToolCallComponent } from '../tool-call/tool-call.component';
   standalone: true,
   imports: [ToolCallComponent],
   template: `
-    <section class="tool-call-group" aria-label="Tool calls">
+    <section class="tool-call-group" [attr.aria-label]="live() ? 'Tool calls in progress' : 'Tool calls'">
       @if (hasMultipleCalls()) {
         <button
           type="button"
           class="tool-call-group__toggle"
-          [attr.aria-expanded]="expanded()"
+          [attr.aria-expanded]="showItems()"
           [attr.aria-controls]="panelId"
           (click)="toggle()"
         >
-          <span class="tool-call-group__title">{{ toolCalls().length }} tool {{ toolCalls().length === 1 ? 'call' : 'calls' }}</span>
-          <span class="tool-call-group__chevron" [class.tool-call-group__chevron--open]="expanded()" aria-hidden="true">›</span>
+          <span class="tool-call-group__title">{{ title() }}</span>
+          <span class="tool-call-group__chevron" [class.tool-call-group__chevron--open]="showItems()" aria-hidden="true">›</span>
         </button>
-        @if (expanded()) {
+        @if (showItems()) {
           <div class="tool-call-group__items" [id]="panelId">
             @for (toolCall of toolCalls(); track toolCall.id) {
-              <app-tool-call [toolCall]="toolCall" [grouped]="true" (openDetail)="openDetail.emit($event)" />
+              <app-tool-call [toolCall]="toolCall" [status]="toolCall.status ?? null" [grouped]="true" (openDetail)="openDetail.emit($event)" />
             }
           </div>
         }
       } @else {
         @for (toolCall of toolCalls(); track toolCall.id) {
-          <app-tool-call [toolCall]="toolCall" (openDetail)="openDetail.emit($event)" />
+          <app-tool-call [toolCall]="toolCall" [status]="toolCall.status ?? null" (openDetail)="openDetail.emit($event)" />
         }
       }
     </section>
@@ -102,16 +101,26 @@ import { ToolCallComponent } from '../tool-call/tool-call.component';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ToolCallGroupComponent {
-  readonly toolCalls = input.required<readonly ToolCall[]>();
+  readonly toolCalls = input.required<readonly ToolCallView[]>();
+  /** The in-flight turn's timeline: shown open (unless collapsed) so progress is visible. */
+  readonly live = input(false);
   readonly openDetail = output<ToolCall>();
-  readonly expanded = signal(false);
+  /** User override of the default open state (live groups default open, saved ones closed). */
+  private readonly expandedOverride = signal<boolean | null>(null);
+  readonly showItems = computed(() => this.expandedOverride() ?? this.live());
   readonly panelId = `tool-call-group-${Math.random().toString(36).slice(2)}`;
+  readonly title = computed(() => {
+    const count = this.toolCalls().length;
+    const noun = `${count} tool ${count === 1 ? 'call' : 'calls'}`;
+    const running = this.toolCalls().some(call => call.status === 'running');
+    return this.live() && running ? `working · ${noun}` : noun;
+  });
 
   hasMultipleCalls(): boolean {
     return this.toolCalls().length > 1;
   }
 
   toggle(): void {
-    this.expanded.set(!this.expanded());
+    this.expandedOverride.set(!this.showItems());
   }
 }

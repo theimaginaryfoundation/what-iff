@@ -1,5 +1,5 @@
 import { ChatMessage } from '../../../core/models/message.model';
-import { appendPendingAssistantGroup, groupMessages, lastUserTurnWithGenerationError, needsPendingAssistantPlaceholder, pendingAssistantPlaceholderMessage, } from './message-grouping.helpers';
+import { appendLiveToolCallGroup, appendPendingAssistantGroup, groupMessages, lastUserTurnWithGenerationError, needsPendingAssistantPlaceholder, pendingAssistantPlaceholderMessage, } from './message-grouping.helpers';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../chat.constants';
 
 describe('groupMessages', () => {
@@ -157,6 +157,38 @@ describe('appendPendingAssistantGroup', () => {
         if (extended[0].kind === 'message-group') {
             expect(extended[0].messages).toEqual([pending]);
         }
+    });
+});
+
+describe('appendLiveToolCallGroup', () => {
+    const pending = pendingAssistantPlaceholderMessage({
+        chatId: 'chat-1', draftText: '', generationPersonality: 'Kai', thinkingImageUrl: null,
+    });
+
+    it('adds nothing while the turn has made no tool calls', () => {
+        expect(appendLiveToolCallGroup([], pending, [])).toEqual([]);
+    });
+
+    it('maps the timeline to a live tool-call group, splitting output by status', () => {
+        const groups = appendLiveToolCallGroup([], pending, [
+            { id: 'c1', name: 'recall_memories', input: '{"query":"fox"}', status: 'complete', output: '[1]', round: 0, started_at: 't0', finished_at: 't1' },
+            { id: 'c2', name: 'fetch_url', status: 'error', output: 'timeout', round: 1, started_at: 't2', finished_at: 't3' },
+            { id: 'c3', name: 'web_search', input: '{}', status: 'running', round: 1, started_at: 't4' },
+        ]);
+
+        expect(groups.length).toBe(1);
+        const group = groups[0];
+        expect(group.kind).toBe('tool-call-group');
+        if (group.kind !== 'tool-call-group') return;
+        expect(group.live).toBe(true);
+        expect(group.message).toBe(pending);
+        expect(group.toolCalls.map(c => [c.tool_name, c.status, c.tool_output, c.tool_error])).toEqual([
+            ['recall_memories', 'complete', '[1]', ''],
+            ['fetch_url', 'error', '', 'timeout'],
+            ['web_search', 'running', '', ''],
+        ]);
+        expect(new Set(group.toolCalls.map(c => c.id)).size).toBe(3);
+        expect(group.toolCalls[2].updated_at).toBe('t4');
     });
 });
 

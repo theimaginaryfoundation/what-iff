@@ -651,3 +651,41 @@ func TestRecordCancelledChatUsage_NilArgsAreNoOp(t *testing.T) {
 		a.recordCancelledChatUsage(context.Background(), &models.Job{}, &models.ChatMessage{}, nil, nil, metering.Decision{}, errCoverageTestSentinel, nil)
 	})
 }
+
+func TestParagraphBreakBefore(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name, prior, next, want string
+	}{
+		{"plain sentences", "Let me check.", "Here is what I found.", "\n\n"},
+		{"prior ends with newline", "Checking:\n", "Done.", "\n"},
+		{"next starts with newline", "Checking.", "\nDone.", "\n"},
+		{"already a paragraph apart", "Checking.\n\n", "Done.", ""},
+		{"both sides have one", "Checking.\n", "\nDone.", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, paragraphBreakBefore(tc.prior, tc.next))
+		})
+	}
+}
+
+func TestJobDraftDeltaBuffer_MarkRoundBoundary_AppliesToNextDeltaOnly(t *testing.T) {
+	t.Parallel()
+
+	ds, _, cleanup := newTestDatastore(t)
+	defer cleanup()
+	job := &models.Job{ID: uuid.New(), UserID: uuid.New()}
+	b := newJobDraftDeltaBuffer(context.Background(), ds, zap.NewNop(), job, 1<<20, time.Hour)
+
+	b.MarkRoundBoundary() // no text yet: nothing to separate
+	b.HandleDelta("Let me check.")
+	b.MarkRoundBoundary()
+	b.MarkRoundBoundary() // several tools in one round still add one break
+	b.HandleDelta("Found it")
+	b.HandleDelta(".")
+
+	require.Equal(t, "Let me check.\n\nFound it.", b.allText)
+	require.Equal(t, b.allText, b.pending, "the break is part of the streamed deltas")
+}

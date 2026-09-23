@@ -696,6 +696,9 @@ type chatContext struct {
 	expressionsEnabled bool
 	// webSearchCount is set after the provider turn for native web search metering.
 	webSearchCount int
+	// toolProgress records the live tool timeline into the chat job's Progress. Nil when the
+	// turn has no job to report to; its methods are nil-safe.
+	toolProgress *jobToolProgress
 }
 
 // handleUserMessage handles the agent processing flow for a user message
@@ -930,6 +933,10 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 	draftBuffer := newJobDraftDeltaBuffer(a.lifecycleCtx, a.ds, a.logger, chatJob, jobDraftDeltaFlushMinChars, jobDraftDeltaFlushMaxWait)
 	adapter.SetTextDeltaHandler(draftBuffer.HandleDelta)
 	defer draftBuffer.Flush()
+	chatCtx.toolProgress = a.newChatToolProgress(chatJob, func() {
+		draftBuffer.Flush()
+		draftBuffer.MarkRoundBoundary()
+	})
 
 	result, toolCalls, generatedAttachments, err := a.handleAgentLoop(ctx, chatCtx, adapter)
 	if err != nil {
@@ -1247,6 +1254,10 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	draftBuffer := newJobDraftDeltaBuffer(a.lifecycleCtx, a.ds, a.logger, chatJob, jobDraftDeltaFlushMinChars, jobDraftDeltaFlushMaxWait)
 	adapter.SetTextDeltaHandler(draftBuffer.HandleDelta)
 	defer draftBuffer.Flush()
+	chatCtx.toolProgress = a.newChatToolProgress(chatJob, func() {
+		draftBuffer.Flush()
+		draftBuffer.MarkRoundBoundary()
+	})
 
 	result, toolCalls, generatedAttachments, err := a.handleAgentLoop(ctx, chatCtx, adapter)
 	if err != nil {
@@ -1568,6 +1579,9 @@ type jobDraftDeltaBuffer struct {
 	pending   string
 	allText   string
 	lastFlush time.Time
+	// breakBeforeNext is set at a tool-round boundary so the next round's text starts a new
+	// paragraph instead of running on from the previous round's ("…anything.Tool report").
+	breakBeforeNext bool
 }
 
 func newJobDraftDeltaBuffer(
@@ -1609,6 +1623,10 @@ func (b *jobDraftDeltaBuffer) HandleDelta(delta string) {
 	var flushChunk string
 	now := time.Now()
 	b.mu.Lock()
+	if b.breakBeforeNext {
+		b.breakBeforeNext = false
+		delta = paragraphBreakBefore(b.allText, delta) + delta
+	}
 	b.pending += delta
 	b.allText += delta
 	shouldFlush := len(b.pending) >= b.minChunkChars || now.Sub(b.lastFlush) >= b.maxWait
@@ -1636,6 +1654,29 @@ func (b *jobDraftDeltaBuffer) Flush() {
 	if flushChunk != "" {
 		b.persist(flushChunk)
 	}
+}
+
+// MarkRoundBoundary records that a tool round ran; the next text delta is prefixed with a
+// paragraph break when earlier text exists. The break goes through HandleDelta like any other
+// text, so persisted deltas and the final message still match exactly.
+func (b *jobDraftDeltaBuffer) MarkRoundBoundary() {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	b.breakBeforeNext = b.allText != ""
+	b.mu.Unlock()
+}
+
+// paragraphBreakBefore is the separator needed between prior text and next so they read as
+// separate paragraphs, reusing any newlines either side already has.
+func paragraphBreakBefore(prior, next string) string {
+	trailing := len(prior) - len(strings.TrimRight(prior, "\n"))
+	leading := len(next) - len(strings.TrimLeft(next, "\n"))
+	if missing := 2 - trailing - leading; missing > 0 {
+		return strings.Repeat("\n", missing)
+	}
+	return ""
 }
 
 func (b *jobDraftDeltaBuffer) persist(chunk string) {
