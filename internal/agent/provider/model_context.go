@@ -251,8 +251,8 @@ func (m *ModelContext) StripUserMessageImages() {
 }
 
 // PrepareForTextOnlyChatCompletions strips multimodal payloads for OpenAI-compatible Chat
-// Completions providers without vision (DeepSeek, MiMo; non-vision Qwen/Mistral ids).
-// Gemini uses a separate call path; vision-capable Qwen/Mistral models skip this helper.
+// Completions providers without vision (DeepSeek; pre-2.6 MiMo and non-vision Qwen/Mistral ids).
+// Gemini uses a separate call path; vision-capable Qwen/Mistral/MiMo models skip this helper.
 //
 // Invariants after preparation:
 //   - SegmentKindExpressionPortrait segments are removed entirely.
