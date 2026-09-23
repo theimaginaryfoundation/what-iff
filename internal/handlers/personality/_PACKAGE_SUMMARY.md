@@ -17,10 +17,12 @@ HTTP API for **personalities** — CRUD, defaults, file attachments, and persona
 ## Non-obvious decisions
 
 - Personality files participate in **file search** and **vector store** tool wiring — coordinate with `internal/agent/tools_test.go` when changing attachment behavior.
+- **Usage stats on single-personality responses:** `ListPersonalities` fills `stats` (thread count / last used) in the datastore, but `GetPersonality`/`UpdatePersonality` return zeroed `stats` (they sit on hot agent paths). `GET`/`PUT /personality/{id}` therefore call `attachUsageStats` (`Store.GetPersonalityUsageStats`) so the stand-alone page matches the list card (#129). A stats error is logged and the personality is still returned.
 
 ## Testing
 
 - `generate_test.go`, `create_default_test.go` — generation and defaults.
+- `usage_stats_test.go` — `stats` present on GET/PUT single-personality responses.
 
 ## Related documentation
 
