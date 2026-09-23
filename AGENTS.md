@@ -40,6 +40,13 @@
 - Keep handlers thin; business logic in services/datastore. Avoid editing files under `ent/` manually.
 - API changes must update `openapi.yaml` and related docs.
 
+### Structure & reuse
+Large files and near-duplicate code are a recurring review finding here. They build up one reasonable-looking addition at a time. Check for them as part of the change, not afterwards:
+- **Search before writing.** Before adding a helper, request wrapper, mapper or status check, grep for an existing one (`internal/...`, `web/app/src/app/core/{services,utils}`, `features/*/helpers`). Reuse or extend it rather than writing a second copy. If you're about to write the second copy of something, extract it and use it in both places.
+- **Watch the file you're growing.** When a change adds a new *responsibility* to a file that is already large (several hundred lines, or a service juggling many independent pieces of state), split along a real seam instead of appending. A seam is a group of state and methods that mostly touch each other, and that the rest of the file touches only through a few calls. Give the extracted piece a small, documented interface. Example: `features/chat/assistant-turn.ts` holds the in-flight-reply state that used to live inside `ChatSessionService`.
+- **Keep the public surface stable when splitting.** Callers and tests should not have to change beyond internal references. Prefer a plain class or pure functions owned by the existing service over a new DI provider, unless the new piece really is shared.
+- **Scope it.** Refactor what the change touches, and keep it behaviour-preserving: tests green before and after, ideally its own commit. Don't start unrelated refactors mid-task. Mention them in the PR or file an issue instead (see the `gh-issue` skill).
+
 ## Testing Guidelines
 - Backend: Go `testing` with table-driven tests when appropriate. Files end with `_test.go`; test funcs `TestXxx`. Run `go test ./...` or `make test`.
 - Frontend: `cd web/app && npm test`. Runs on Vitest via the `@angular/build:unit-test` builder (jsdom); Karma and Jasmine are gone.
