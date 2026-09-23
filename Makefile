@@ -50,7 +50,7 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: pre-commit
-pre-commit: fmt vet tidy test build check-no-local-models check-compose-defaults check-public-hygiene ## Run all pre-commit checks (matches CI/CD)
+pre-commit: fmt vet tidy test build check-no-local-models check-compose-defaults check-public-hygiene check-package-summaries ## Run all pre-commit checks (matches CI/CD)
 	@echo "✅ All pre-commit checks passed!"
 
 .PHONY: fmt
@@ -405,6 +405,14 @@ check-compose-defaults: ## Fail if docker-compose.yml or its Go config re-ships 
 .PHONY: check-public-hygiene
 check-public-hygiene: ## Fail if secrets, AI attribution, or absolute home paths appear in tracked files
 	@./scripts/check-public-hygiene.sh
+
+.PHONY: check-package-summaries
+check-package-summaries: ## Fail if a _PACKAGE_SUMMARY.md has long multi-sentence lines (one sentence per line)
+	@python3 scripts/reflow-package-summaries.py --check
+
+.PHONY: reflow-package-summaries
+reflow-package-summaries: ## Rewrite _PACKAGE_SUMMARY.md files to one sentence per line (rendering unchanged)
+	@python3 scripts/reflow-package-summaries.py
 
 .PHONY: check-skill-symlinks
 check-skill-symlinks: ## Verify .claude/skills/ symlinks match .agents/skills/ and CLAUDE.md/GEMINI.md exist
