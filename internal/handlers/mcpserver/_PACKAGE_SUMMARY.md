@@ -16,7 +16,8 @@ HTTP API for **MCP server catalog** — list/register MCP servers available to t
 ## Non-obvious decisions
 
 - Chat-level MCP association is under **`handlers/chat`**; this package is the global MCP server resource API.
-- **`PUT/PATCH /mcp-servers/{id}`** accepts optional **`ritual_ids`**: omitted leaves ritual↔MCP edges unchanged; a JSON array (including `[]`) replaces the full set. Invalid or foreign ritual IDs return **400**.
+- **`PUT/PATCH /mcp-servers/{id}`** accepts optional **`ritual_ids`**: omitted leaves ritual↔MCP edges unchanged; a JSON array (including `[]`) replaces the full set.
+  Invalid or foreign ritual IDs return **400**.
 
 ## Testing
 

@@ -15,7 +15,8 @@
 
 ## Non-obvious decisions
 
-- **vs `internal/datastore`:** This package defines **contracts**; `datastore` implements them with Ent. Prefer adding methods on `Datastore` and satisfying interfaces here when splitting test doubles.
+- **vs `internal/datastore`:** This package defines **contracts**; `datastore` implements them with Ent.
+  Prefer adding methods on `Datastore` and satisfying interfaces here when splitting test doubles.
 
 ## Testing
 

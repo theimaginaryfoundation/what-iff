@@ -42,7 +42,10 @@
 
  This is a **habit**, not a one-time cleanup: small doc edits alongside code prevent drift and keep agent/human review grounded in accurate structure. Agentic PR review can enforce consistency over time; authors should still proactively check both places before requesting review.
 
- **Testing docs:** Refactors that only touch tests (rename/move/split `*_test.go` files) should still update that package’s **`Testing`** section in `_PACKAGE_SUMMARY.md` when those notes name specific files—so the summary does not silently point at old paths.
+ **Formatting:** Package summaries use **one sentence per line** (long bullets continue on indented lines), so two PRs touching the same bullet only conflict when they edit the same sentence.
+Run `make reflow-package-summaries` to fix a file mechanically; CI enforces it with `make check-package-summaries`.
+
+**Testing docs:** Refactors that only touch tests (rename/move/split `*_test.go` files) should still update that package’s **`Testing`** section in `_PACKAGE_SUMMARY.md` when those notes name specific files—so the summary does not silently point at old paths.
 
  ## Go workflow (before push)
 
