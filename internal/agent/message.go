@@ -439,12 +439,17 @@ func (a *Agent) CancelJob(ctx context.Context, userID, jobID uuid.UUID) error {
 	if !slices.Contains(ids, jobID) {
 		ids = append(ids, jobID)
 	}
+	// Best effort: one job failing to cancel (a DB hiccup) must not leave the rest of the
+	// thread running, so every job is attempted and the failures are returned together.
+	var errs []error
 	for _, id := range ids {
 		if err := a.cancelChatJob(ctx, userID, id); err != nil {
-			return err
+			a.logger.Warn("failed to cancel chat job during thread stop",
+				zap.String("job_id", id.String()), zap.Error(err))
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // cancelChatJob cancels one chat job: directly when its worker is in this process, otherwise by
@@ -492,8 +497,12 @@ var chatJobCancelPollInterval = 2 * time.Second
 
 // watchChatJobCancel cancels a running chat job when its status turns cancelled in the database,
 // which is how a Stop handled by another API instance reaches this worker (see CancelJob). It
-// returns when runCtx ends. Read errors are ignored; the next tick retries.
+// returns when runCtx ends. Read errors are ignored; the next tick retries. Without a datastore
+// there is nothing to watch (CancelJob is then in-process only), so it returns immediately.
 func (a *Agent) watchChatJobCancel(runCtx context.Context, userID, jobID uuid.UUID, cancel context.CancelFunc) {
+	if a.ds == nil {
+		return
+	}
 	ticker := time.NewTicker(chatJobCancelPollInterval)
 	defer ticker.Stop()
 	for {
