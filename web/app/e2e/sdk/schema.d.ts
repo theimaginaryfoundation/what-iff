@@ -6383,6 +6383,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat/{chatId}/active-job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Active job for a chat
+         * @description Returns the newest non-terminal chat_message job for any user turn in this chat, if any, with the user message it answers. Lets a client returning to a thread resume a running turn without first deciding which user message is unanswered.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Active job present */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ActiveChatMessageJob"];
+                    };
+                };
+                /** @description No active job */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid chat ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/webhooks/chat/{chatId}/messages": {
         parameters: {
             query?: never;
@@ -8524,6 +8590,11 @@ export interface components {
             job_id?: string;
             /** @enum {string} */
             status?: "pending" | "processing" | "inference_complete" | "expression_complete" | "compaction_complete" | "complete" | "cancelled" | "failed";
+            /**
+             * Format: uuid
+             * @description The user turn this job answers. Set by GET /chat/{chatId}/active-job.
+             */
+            message_id?: string;
         };
         WebhookToken: {
             /** Format: uuid */

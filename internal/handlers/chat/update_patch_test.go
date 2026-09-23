@@ -138,6 +138,9 @@ func (f *fakeStore) ListChatMessageBookmarks(ctx context.Context, userID, chatID
 func (f *fakeStore) FindLatestActiveChatMessageJob(ctx context.Context, userID, userMessageID uuid.UUID) (*models.Job, error) {
 	return nil, errors.New("not implemented")
 }
+func (f *fakeStore) FindLatestActiveChatJob(ctx context.Context, userID, chatID uuid.UUID) (*models.Job, error) {
+	return nil, errors.New("not implemented")
+}
 func (f *fakeStore) ImportChats(ctx context.Context, userID uuid.UUID, convs []models.ImportConversation, onProgress func(imported, skipped int)) (*models.ImportResult, error) {
 	return nil, errors.New("not implemented")
 }

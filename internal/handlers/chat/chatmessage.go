@@ -183,6 +183,36 @@ func (h *Handler) GetActiveChatMessageJob(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// GetActiveChatJob GET /chat/{chatId}/active-job — the newest non-terminal chat_message job for
+// any user turn in this chat. Lets a client that returns to a thread pick a running turn back up
+// without guessing which user message is still unanswered. 204 when nothing is in flight.
+func (h *Handler) GetActiveChatJob(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		handlerutils.RespondWithError(w, h.logger, http.StatusUnauthorized, handlerutils.CodeNotSet, "Unauthorized", nil)
+		return
+	}
+	chatID, err := uuid.Parse(mux.Vars(r)["chatId"])
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid chat ID", err)
+		return
+	}
+	j, err := h.ds.FindLatestActiveChatJob(r.Context(), userID, chatID)
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to look up job", err)
+		return
+	}
+	if j == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	resp := models.ActiveChatMessageJobResponse{JobID: j.ID, Status: j.Status}
+	if messageID, err := uuid.Parse(j.Reference); err == nil {
+		resp.MessageID = &messageID
+	}
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, resp)
+}
+
 // GetChatMessage handler function for GET /chat-message/{id}
 func (h *Handler) GetChatMessage(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserIDFromContext(r.Context())
