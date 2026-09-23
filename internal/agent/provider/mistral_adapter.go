@@ -85,7 +85,7 @@ func (a *MistralAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse
 	if len(toolUses) == 0 {
 		return a.toGenerateResponse(resp), nil, nil
 	}
-	a.params.Messages = append(a.params.Messages, resp.Choices[0].Message.ToParam())
+	a.params.Messages = append(a.params.Messages, chatCompletionAssistantReplay(resp.Choices[0].Message, ""))
 	return nil, toolUses, nil
 }
 
