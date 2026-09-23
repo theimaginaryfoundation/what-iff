@@ -1982,6 +1982,68 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /personality/{id}/expressions/generate-candidates:
+    post:
+      summary: Generate candidate expression portraits for custom keys
+      description: >-
+        Primary integration: the personality expressions "Generate" modal. Enqueues a background
+        `expression_grid` job that renders nine portraits — one 3×3 image for nine caller-chosen
+        expression keys in row-major order — and uploads each panel as a gallery image pinned to
+        the personality **without assigning any expression slot**. When `reference_image_id` is set,
+        the image grounds both the likeness pass and the image model (style/character reference);
+        if the reference call is rejected the run falls back to prompt-only generation. Poll
+        `GET /jobs/{id}`; on `complete`, the job's `progress` is a JSON-encoded
+        `ExpressionCandidatesProgress` whose `candidates` list maps each key to its image. Assign
+        keepers with `PUT /personality/{id}/expressions/{expression_key}` (`image_id`) and delete
+        rejects via `DELETE /image-gallery/{id}`. Shares the single per-user personality media-job
+        slot. Not quota-metered (~$0.01 per run).
+      tags: [Personality Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Personality ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateExpressionCandidatesRequest'
+      responses:
+        '202':
+          description: Candidate generation job enqueued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalityMediaJobResponse'
+        '400':
+          description: Invalid personality ID, keys (not nine unique URL-safe keys), or reference ID; or the personality's image style is none
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Personality or reference image not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: A personality media job is already active
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalityMediaJobConflict'
+
   /personality/{id}/expressions/{expression_key}:
     put:
       summary: Upsert personality expression
@@ -4055,18 +4117,27 @@ paths:
             format: uuid
         - name: page
           in: query
-          description: Page number (default 1)
+          description: Page number (default 1). Ignored when `cursor` is supplied.
           schema:
             type: integer
             minimum: 1
             default: 1
+        - name: cursor
+          in: query
+          description: >-
+            Opaque keyset token (a `next_cursor` from a prior response) for fetching the batch of
+            messages strictly older than it, newest-first. Decouples batch size from page-offset
+            math, so scroll-back and jump-to-bookmark can request large batches without gaps. When
+            present, `page` is ignored.
+          schema:
+            type: string
         - name: limit
           in: query
           description: Number of items per page (default 10)
           schema:
             type: integer
             minimum: 1
-            maximum: 100
+            maximum: 500
             default: 10
         - name: origin
           in: query
@@ -4363,6 +4434,43 @@ paths:
                 $ref: '#/components/schemas/Error'
         '404':
           description: Message not found or not in this chat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chat/{chatId}/active-job:
+    get:
+      summary: Active job for a chat
+      description: >-
+        Returns the newest non-terminal chat_message job for any user turn in this chat, if
+        any, with the user message it answers. Lets a client returning to a thread resume a
+        running turn without first deciding which user message is unanswered.
+      tags: [Chat Messages]
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Active job present
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActiveChatMessageJob'
+        '204':
+          description: No active job
+        '400':
+          description: Invalid chat ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
           content:
             application/json:
               schema:
@@ -6492,6 +6600,10 @@ components:
         status:
           type: string
           enum: [pending, processing, inference_complete, expression_complete, compaction_complete, complete, cancelled, failed]
+        message_id:
+          type: string
+          format: uuid
+          description: The user turn this job answers. Set by GET /chat/{chatId}/active-job.
 
     WebhookToken:
       type: object
@@ -6954,6 +7066,68 @@ components:
         - answers
         - image_style
 
+    GenerateExpressionCandidatesRequest:
+      type: object
+      properties:
+        expressions:
+          type: array
+          minItems: 9
+          maxItems: 9
+          uniqueItems: true
+          description: Nine URL-safe expression keys in row-major 3×3 grid order.
+          items:
+            type: string
+            pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+        reference_image_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Optional owned gallery image used as a style/character reference.
+      required:
+        - expressions
+      example:
+        expressions: [happy, content, sad, angry, surprised, confused, tired, in-love, thinking]
+        reference_image_id: "123e4567-e89b-12d3-a456-426614174000"
+
+    ExpressionCandidate:
+      type: object
+      properties:
+        expression_key:
+          type: string
+          description: Expression key this panel was generated for.
+        image_id:
+          type: string
+          format: uuid
+          description: Gallery image (pinned to the personality) holding the unassigned portrait.
+      required:
+        - expression_key
+        - image_id
+
+    ExpressionCandidatesProgress:
+      type: object
+      description: >-
+        Decoded shape of `Job.progress` for candidate runs (`POST
+        /personality/{id}/expressions/generate-candidates`). Written at enqueue without
+        `candidates`; rewritten with `candidates` before the job reaches `complete`.
+      properties:
+        mode:
+          type: string
+          enum: [candidates]
+        expressions:
+          type: array
+          items:
+            type: string
+        reference_image_id:
+          type: string
+          format: uuid
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExpressionCandidate'
+      required:
+        - mode
+        - expressions
+
     PersonalityMediaJobResponse:
       type: object
       properties:
@@ -6989,6 +7163,12 @@ components:
         flow_id:
           type: string
           nullable: true
+        expression_mode:
+          type: string
+          enum: [default, candidates]
+          description: >-
+            For `expression_grid` jobs only: `default` assigns the default 3×3 grid; `candidates` is an
+            unassigned candidate run owned by the expressions Generate modal.
         error:
           type: string
       required:
@@ -7743,6 +7923,12 @@ components:
           type: integer
         page:
           type: integer
+        next_cursor:
+          type: string
+          description: >-
+            Opaque keyset token for continuing a cursor-paginated view past the last row in this
+            response (absent when there is nothing more). Only the descending chat-message view
+            sets it.
       example:
         results: []
         total_count: 25

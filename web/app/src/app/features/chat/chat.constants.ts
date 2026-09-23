@@ -6,6 +6,13 @@ export const SCROLL_LOAD_OLDER_THRESHOLD_PX = 120;
 /** Must match the limit used for initial chat load and message list refreshes. */
 export const MESSAGE_LIST_PAGE_SIZE = 50;
 
+/**
+ * Larger batch used when walking older messages to reach a jump target (e.g. a bookmark far back
+ * in a long thread). Keyset pagination lets us request a big batch without offset math, so a
+ * far-back target resolves in a few roundtrips instead of dozens of 50-message pages.
+ */
+export const MESSAGE_JUMP_PAGE_SIZE = 200;
+
 // Textarea configuration
 export const TEXTAREA_MAX_ROWS = 10;
 export const TEXTAREA_LINE_HEIGHT_PX = 24;

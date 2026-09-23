@@ -918,7 +918,9 @@ func (d *Datastore) FindLatestActiveChatMessageJob(ctx context.Context, userID, 
 		).
 		Order(job.ByCreatedAt(sql.OrderDesc())).
 		WithOwner().
-		Only(ctx)
+		// First, not Only: a stale non-terminal job left behind (e.g. by a restart) must not
+		// turn the lookup into a NotSingular error and hide the newest job.
+		First(ctx)
 	if ent.IsNotFound(err) {
 		return nil, nil
 	}
@@ -926,6 +928,62 @@ func (d *Datastore) FindLatestActiveChatMessageJob(ctx context.Context, userID, 
 		return nil, err
 	}
 	return toJobModel(j), nil
+}
+
+// activeChatJobScanLimit bounds how many of a user's in-flight chat_message jobs
+// FindLatestActiveChatJob inspects; a user rarely has more than a handful at once.
+const activeChatJobScanLimit = 50
+
+// FindLatestActiveChatJob returns the newest non-terminal chat_message job whose user turn
+// belongs to chatID, if any. Unlike FindLatestActiveChatMessageJob it needs no message id, so a
+// client returning to a thread can find a running turn without first deciding which user
+// message is "unanswered". The job's Reference is the user message id.
+func (d *Datastore) FindLatestActiveChatJob(ctx context.Context, userID, chatID uuid.UUID) (*models.Job, error) {
+	jobs, err := d.dbClient.Job.Query().
+		Where(
+			job.HasOwnerWith(user.ID(userID)),
+			job.JobTypeEQ("chat_message"),
+			job.StatusNotIn(job.StatusComplete, job.StatusCancelled, job.StatusFailed),
+		).
+		Order(job.ByCreatedAt(sql.OrderDesc())).
+		Limit(activeChatJobScanLimit).
+		WithOwner().
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(jobs) == 0 {
+		return nil, nil
+	}
+
+	refs := make([]uuid.UUID, 0, len(jobs))
+	for _, j := range jobs {
+		if id, err := uuid.Parse(j.Reference); err == nil {
+			refs = append(refs, id)
+		}
+	}
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	inChat, err := d.dbClient.ChatMessage.Query().
+		Where(
+			entchatmessage.IDIn(refs...),
+			entchatmessage.HasChatWith(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))),
+		).
+		IDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	inChatSet := make(map[string]struct{}, len(inChat))
+	for _, id := range inChat {
+		inChatSet[id.String()] = struct{}{}
+	}
+	for _, j := range jobs {
+		if _, ok := inChatSet[j.Reference]; ok {
+			return toJobModel(j), nil
+		}
+	}
+	return nil, nil
 }
 
 // FindActivePersonalityGenerationJob returns the newest non-terminal personality_generation

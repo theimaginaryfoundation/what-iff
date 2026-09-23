@@ -27,6 +27,13 @@ export class PersonalityDetailPage {
     this.expressionKeySubmit = this.expressionKeyDialog.getByRole('button', { name: 'Add', exact: true });
     this.expressionKeyCancel = this.expressionKeyDialog.getByRole('button', { name: 'Cancel', exact: true });
     this.expressionKeyError = this.expressionKeyDialog.getByRole('alert');
+    this.generateExpressionsButton = this.expressions.getByRole('button', { name: 'Generate', exact: true });
+    this.generateDialog = this.page.getByRole('dialog', { name: 'Generate expressions' });
+    this.generateNames = this.generateDialog.getByRole('list', { name: 'Expressions to generate' }).getByRole('textbox');
+    this.generateSubmit = this.generateDialog.getByRole('button', { name: /^(Generate|Generating…)$/ });
+    this.generateCancel = this.generateDialog.getByRole('button', { name: 'Cancel', exact: true });
+    this.generateGalleryToggle = this.generateDialog.getByRole('button', { name: /^(Choose from gallery|Hide gallery)$/ });
+    this.generateError = this.generateDialog.getByRole('alert');
   }
 
   /**
@@ -153,6 +160,34 @@ export class PersonalityDetailPage {
   async submitExpressionKey(key: string): Promise<void> {
     await this.expressionKeyInput.fill(key);
     await this.expressionKeySubmit.click();
+  }
+
+  /** The expressions panel's "Generate" button (opens `generateDialog`). */
+  readonly generateExpressionsButton: Locator;
+
+  /** The "Generate expressions" modal: nine names, optional reference, keep/discard review. */
+  readonly generateDialog: Locator;
+
+  /** The nine expression-name inputs in the modal, row-major. */
+  readonly generateNames: Locator;
+
+  readonly generateSubmit: Locator;
+
+  readonly generateCancel: Locator;
+
+  /** "Choose from gallery" / "Hide gallery" — toggles the reference-image picker. */
+  readonly generateGalleryToggle: Locator;
+
+  /** The modal's error banner (failed enqueue or failed job). */
+  readonly generateError: Locator;
+
+  /** One cell of the modal's 3×3 grid (0-based, row-major): portrait, keep/discard, name, hint. */
+  generateCell(index: number): Locator {
+    return this.generateDialog.getByRole('list', { name: 'Expressions to generate' }).getByRole('listitem').nth(index);
+  }
+
+  async openGenerate(): Promise<void> {
+    await this.generateExpressionsButton.click();
   }
 
   /** A slot tile in the expressions grid, by its expression key. */

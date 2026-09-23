@@ -53,4 +53,6 @@ export interface JobFilters {
 export interface ActiveChatMessageJob {
   job_id: string;
   status: JobStatus;
+  /** The user turn the job answers (set by the thread-level lookup). */
+  message_id?: string;
 }

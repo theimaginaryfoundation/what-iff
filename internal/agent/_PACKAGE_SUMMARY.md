@@ -81,6 +81,10 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   Exposed via personality HTTP + expressions UI; create/accept flows do not auto-call.
 - **Always-on reasoning models & truncated turns:** On the zai path `generateAssistantForMessageClaude` applies `provider.ApplyZAIReasoningEffort` (`high`) and installs a `SetTruncationFallback` that logs and drops to `low`; `XiaomiAdapter` handles its own thinking-off retry.
   If a turn still ends with no text, `assertGenerationProducedOutput` maps `max_tokens` / `max_output_tokens` / `length` (`isTruncationStopReason`) to the clearer "cut off at the length limit" error.
+- **Custom expression candidates:** `EnqueueExpressionCandidatesJob` / `GenerateExpressionCandidates` (`expression_candidates.go`) — same pipeline (`generateExpressionGridCells`) for nine caller-chosen row-major keys (the canvas prompt is built from the keys), but cells are only uploaded as personality-pinned gallery images, **never assigned**; the completed `expression_grid` job's `Progress` (`ExpressionCandidatesProgress`, `mode: "candidates"`) lists `{expression_key, image_id}` and the client assigns keepers via the regular upsert.
+  An optional reference image grounds the likeness pass **and** is sent to the image model via `OpenAIProvider.EditImagePNGBase64WithQuality` (images edit endpoint, no mask); a rejected edit falls back to prompt-only generation.
+  Failed runs delete already-uploaded candidates.
+  Shares the per-user media-job slot.
 - **Expression portrait picker:** **`PickGenerationExpression`** forks the inference **`ModelContext`**, appends the assistant reply and task **user** turn, and uses **strict JSON schema** output (`expression_key` + `reasoning`) with **`GenerateSchema`**, **`Text.Format`**, and **`ProcessResponseOutput`**.
   On failure or unknown key, **no** portrait is selected (no default first slot).
   **`generation_expression_reasoning`** is persisted when set; continuity echoes it.
@@ -112,7 +116,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 - `context_breakdown_test.go` — `buildContextBreakdown` totals/budget/model stamping and nil-input guards for the Context X-ray.
 - `message_context_builder_test.go` — builder ordering; `mergeAdditionalContextItems` dedupe.
 - `expression_generation_test.go` — expression picker JSON / markdown-fence parsing helpers.
-- `expression_grid_generation_test.go` — 3×3 PNG grid splice (`SlicePNGGrid3x3`).
+- `expression_grid_generation_test.go` — 3×3 PNG grid splice (`SlicePNGGrid3x3`), key-driven canvas prompt.
 - `message_context_builder_expression_test.go` — prior-turn expression snapshot selection for continuity text.
 - `conversation_summary_test.go`, `scratchpad_test.go`, `memory_test.go`, `postprocessing_policy_test.go` — maintenance prompts and checkpoints.
 - `thread_rehydration_test.go` — imported-thread split at n-5 turns, assistant counting, char-budget chunking, and transcript rendering.

@@ -31,6 +31,10 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
   The accumulator also drops Google's non-standard `extra_content.google.thought_signature`, which Google **requires** echoed back on the assistant tool-call turn (else a 400 "Function call is missing a thought_signature").
   `GeminiProvider.CallStreaming` recovers it per tool-call index from the raw deltas (via `streamChatCompletionCapturing`'s `onToolCallDelta` hook) and the adapter re-attaches it in `geminiAssistantToolCallMessage`.
   Non-streaming responses keep it in their own raw JSON, so the raw path preserves it there.
+  **Tool-call placeholder echo (#142):** Gemini rejects an assistant tool-call turn with empty content, so `geminiAssistantToolCallMessage` fills it with the internal `geminiToolCallContentPlaceholder` (`"[tool call]"`).
+  That placeholder lives only in the in-turn outbound `params.Messages` (never persisted), but the model sees it as its own prior output and can imitate it, streaming it back as response text — which `runGeneration` would concatenate into the draft stream and saved message.
+  Whenever an outbound **assistant** turn carries the placeholder (`geminiMessagesCarryToolCallPlaceholder`), the adapter wraps the text-delta handler in `geminiToolCallEchoFilter` and strips the final `Text` via `stripGeminiToolCallEcho`; both remove only **leading** echoes of the placeholder.
+  User-authored text never arms the filter and is never rewritten.
 - **User-attached images (chat):** `ModelContextSegment.UserImages` + `AppendUserMessage`.
   OpenAI Responses gets `input_image` with the OpenAI **`file_id`** from upload.
   **Claude** uses **`UserMessageImage.RawBytes`** when set (see **`loadImageBytesForClaude`**); otherwise **`renderClaudeContext`** falls back to **text-only** for that turn.

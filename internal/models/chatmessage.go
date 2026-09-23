@@ -137,6 +137,9 @@ type ChatMessageResponse struct {
 type ActiveChatMessageJobResponse struct {
 	JobID  uuid.UUID `json:"job_id"`
 	Status JobStatus `json:"status"`
+	// MessageID is the user turn the job answers; set by the thread-level lookup
+	// (GET /chat/{chatId}/active-job), where the caller does not already know it.
+	MessageID *uuid.UUID `json:"message_id,omitempty"`
 }
 
 // ChatMessageExport is the user-facing export of a chat message

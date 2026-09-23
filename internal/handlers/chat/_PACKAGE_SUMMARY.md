@@ -24,6 +24,9 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
   Client-side zip extraction merges ChatGPT shards matching `conversations.json` / `conversations-NNN.json` (thread-complete chunks) before upload.
 - **Lazy rehydration trigger (`PatchChat`):** When an imported thread (`source` set, no checkpoint yet) is unarchived, the handler calls `agent.EnqueueThreadRehydration` to summarize it **and seed long-term memories** in the background (see `internal/agent`).
   The frontend's post-import picker reuses this path: selecting threads simply PATCHes `archived=false` on each, so no dedicated "prepare" endpoint exists.
+- **Resuming a running turn:** `GET /chat/{chatId}/active-job` (`GetActiveChatJob`) returns the newest non-terminal `chat_message` job for any user turn in the chat, plus the `message_id` it answers (204 when idle).
+  The web client calls it whenever it (re)enters a thread, since job polls are scoped to the active thread and this is how a turn that kept running while the user was elsewhere gets its typing placeholder back.
+  The older per-message `.../chat-message/{messageId}/active-job` remains for callers that already know the turn.
 - **`MessageAgent` interface:** Decouples `CreateChatMessage` from concrete `*agent.Agent` for tests.
 - **`WelcomeMessageAgent` interface:** Decouples welcome-message async prompt enqueueing from concrete `*agent.Agent`.
 - **`HandlerConfig`:** Billing requirement and free-tier message limit passed from server config.

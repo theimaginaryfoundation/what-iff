@@ -437,6 +437,45 @@ h1 {
   position: relative;
 }
 
+// Floating status while jumping to a bookmark — sits over the top of the message list so it's
+// visible wherever the reader currently is, then clears on arrival or reports a failure.
+.chat-page__jump-toast {
+  align-items: center;
+  background: var(--color-surface-raised, var(--color-surface-base));
+  border: 1px solid var(--color-border-base);
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  color: var(--color-text-primary);
+  display: inline-flex;
+  font-size: 0.8rem;
+  font-weight: 600;
+  gap: 0.5rem;
+  left: 50%;
+  padding: 0.4rem 0.85rem;
+  position: absolute;
+  top: 0.75rem;
+  transform: translateX(-50%);
+  z-index: 25;
+}
+
+.chat-page__jump-spinner {
+  animation: chat-page-jump-spin 0.7s linear infinite;
+  border: 2px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  border-radius: 50%;
+  border-top-color: var(--color-accent);
+  display: inline-block;
+  height: 0.85rem;
+  width: 0.85rem;
+}
+
+@keyframes chat-page-jump-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-page__jump-spinner { animation-duration: 1.6s; }
+}
+
 .chat-page__context-rail {
   display: flex;
   flex-direction: column;

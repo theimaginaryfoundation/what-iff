@@ -23,7 +23,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     `toFileAttachmentModel` derives **`Source`** (`generated`/`imported`, empty when the chat-message edge was not loaded): linked message origin decides (Assistant ⇒ generated, User ⇒ imported); unlinked rows are generated only for the pipelines' fixed names (`expression-*.png`, `personality-portrait.png`).
     **`FileAttachmentFilters.ExcludeReferenceCopies`** (image gallery) drops `CreateFileAttachmentReference` clones in SQL — keeps the earliest row per `(owner, s3_key)`, backed by an `(s3_key, owner)` index — so counts/pagination and classification follow the original row.
   - Personalities & rituals: `personality.go`, `personality_gen_flow.go`, `ritual.go`, `system_ritual_binding.go`.
-  - Jobs: `job.go` (CRUD + **`UpdateJobProgress`** — a single scoped UPDATE for the opaque `progress` JSON, safe to call frequently from long-running jobs), `agentjob.go`, `scheduler_lock.go` (distributed scheduler lock).
+  - Jobs: `job.go` (CRUD + **`UpdateJobProgress`** — a single scoped UPDATE for the opaque `progress` JSON, safe to call frequently from long-running jobs; **`FindLatestActiveChatJob`** finds a chat's running turn by matching recent non-terminal `chat_message` job references against that chat's messages, and **`FindLatestActiveChatMessageJob`** uses `First` so a stranded duplicate job never makes the lookup fail), `agentjob.go`, `scheduler_lock.go` (distributed scheduler lock).
   - Usage: `usagestats.go`.
     Quota-bucket types live in `internal/models` (`billing.go`, `quotabucket.go`); the quota-enforcement logic itself (free-tier limits, trial grants, subscription reconciliation) is in a private extension, not this tree.
   - Users & access: `user.go`, `userpreferences.go`, `role.go`, `admin.go`.
@@ -49,8 +49,11 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 ## Non-obvious decisions
 
 - **Chat message context items:** `createContextItemsBulk` returns errors to callers; failed inserts **roll back** the surrounding transaction and increment `telemetry.ChatMessageContextItemsPersistFailures` when metrics are configured.
-- **Message pagination:** `ListChatMessages` remains newest-first and offset-paginated for the chat UI.
-  `ListChatMessagesAfter` is the forward-only retrieval path for agent thread walks; it orders by `(sent_at, id)` and accepts that same keyset cursor to avoid unstable ties and offset drift.
+- **Message pagination:** `ListChatMessages` is newest-first and offset-paginated for the chat UI's initial page.
+  `ListChatMessagesBefore` is the newest-first keyset path for scroll-back and jump-to-bookmark: it filters `(sent_at, id) <` the cursor so the UI can request large batches (e.g. a far-back bookmark jump) without the offset math that couples page number to page size, and its response's `NextCursor` continues the walk.
+  Because it is user-facing via the `limit` query param, it clamps the batch size to `[1, maxMessagePageSize]` (500, matching the OpenAPI max) rather than erroring on an oversized request.
+  `ListChatMessagesAfter` is the forward-only retrieval path for agent thread walks; it orders by `(sent_at, id)` ascending and accepts that same keyset cursor to avoid unstable ties and offset drift.
+  The opaque cursor token is minted/parsed by `models.EncodeMessageCursor`/`DecodeMessageCursor` (URL-safe base64 of `sent_at|id`), so the datastore and the HTTP handler share one contract.
 - **Context X-ray column:** `chat_message.context_breakdown` is a typed **`jsonb`** column (`field.JSON` over `*models.ContextBreakdown`); ent handles (un)marshalling, so `toChatMessageModel` just surfaces it (guarding empty snapshots) and `SetChatMessageContextBreakdown` sets the pointer (assistant rows only; best-effort).
   It is a scalar column rather than a `ChatMessageContextItem` row on purpose — context items are re-fed into the model context, and this snapshot must not be.
   It's a value object (write-once, read-with-parent, never queried by field), so no child table; `jsonb` (not text) keeps DB-side JSON queries open and the embedded `version` guards shape evolution.

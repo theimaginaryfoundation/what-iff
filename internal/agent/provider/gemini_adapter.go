@@ -92,7 +92,7 @@ func (a *GeminiAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse,
 	toolUses := normalizeGeminiToolUses(extractChatCompletionToolUses(resp))
 	if len(toolUses) == 0 {
 		a.lastRequested = nil
-		return a.provider.ToGenerateResponse(resp), nil, nil
+		return a.toGenerateResponse(resp), nil, nil
 	}
 
 	a.lastRequested = toolUses
@@ -160,7 +160,20 @@ func (a *GeminiAdapter) ForceFinalResponse(ctx context.Context) (*GenerateRespon
 		)
 		return nil, WrapProviderCallError(models.SafetyViolationProviderGoogle, "Gemini final-response call failed", err)
 	}
-	return a.provider.ToGenerateResponse(resp), nil
+	return a.toGenerateResponse(resp), nil
+}
+
+// toGenerateResponse converts a final response, stripping a leading echo of the
+// internal tool-call placeholder when the outbound messages showed it to the model
+// as assistant output (see geminiToolCallContentPlaceholder). The streamed path is
+// filtered in call; this covers non-streamed turns and a streamed turn whose
+// deltas were entirely echo (runGeneration then falls back to this Text).
+func (a *GeminiAdapter) toGenerateResponse(resp *openai.ChatCompletion) *GenerateResponse {
+	out := a.provider.ToGenerateResponse(resp)
+	if geminiMessagesCarryToolCallPlaceholder(a.params.Messages) {
+		out.Text = stripGeminiToolCallEcho(out.Text)
+	}
+	return out
 }
 
 // call streams when a text-delta handler is set, else issues a non-streaming request.
@@ -169,7 +182,18 @@ func (a *GeminiAdapter) ForceFinalResponse(ctx context.Context) (*GenerateRespon
 // in its own raw JSON, so lastThoughtSignatures is cleared there.
 func (a *GeminiAdapter) call(ctx context.Context) (*openai.ChatCompletion, error) {
 	if a.textDeltaHandler != nil {
-		resp, thoughtSignatures, err := a.provider.CallStreaming(ctx, a.params, a.textDeltaHandler)
+		onDelta := a.textDeltaHandler
+		var echo *geminiToolCallEchoFilter
+		if geminiMessagesCarryToolCallPlaceholder(a.params.Messages) {
+			// The model has seen the internal placeholder as its own prior output
+			// and may imitate it; keep any echo out of the user-visible stream.
+			echo = newGeminiToolCallEchoFilter(onDelta)
+			onDelta = echo.HandleDelta
+		}
+		resp, thoughtSignatures, err := a.provider.CallStreaming(ctx, a.params, onDelta)
+		if echo != nil {
+			echo.Flush()
+		}
 		if err != nil {
 			// Do not retain signatures from a failed call.
 			a.lastThoughtSignatures = nil

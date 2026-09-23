@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -113,4 +114,65 @@ func TestGetActiveChatMessageJob_NoJob204(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusNoContent, w.Code)
+}
+
+type activeChatJobStoreStub struct {
+	fakeStore
+	job     *models.Job
+	err     error
+	gotChat uuid.UUID
+	gotUser uuid.UUID
+}
+
+func (s *activeChatJobStoreStub) FindLatestActiveChatJob(_ context.Context, userID, chatID uuid.UUID) (*models.Job, error) {
+	s.gotUser, s.gotChat = userID, chatID
+	return s.job, s.err
+}
+
+func serveActiveChatJob(t *testing.T, store *activeChatJobStoreStub, chatID string, userID uuid.UUID) *httptest.ResponseRecorder {
+	t.Helper()
+	h := &Handler{ds: store, logger: zap.NewNop()}
+	router := mux.NewRouter()
+	h.RegisterRoutes(router)
+	req := httptest.NewRequest(http.MethodGet, "/chat/"+chatID+"/active-job", nil)
+	req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, userID))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestGetActiveChatJob(t *testing.T) {
+	t.Parallel()
+
+	t.Run("running turn returns job and its user message", func(t *testing.T) {
+		t.Parallel()
+		userID, chatID, jobID, msgID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+		store := &activeChatJobStoreStub{job: &models.Job{ID: jobID, Status: models.JobStatusProcessing, Reference: msgID.String()}}
+
+		rec := serveActiveChatJob(t, store, chatID.String(), userID)
+
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Equal(t, chatID, store.gotChat)
+		require.Equal(t, userID, store.gotUser)
+		require.JSONEq(t, `{"job_id":"`+jobID.String()+`","status":"processing","message_id":"`+msgID.String()+`"}`, rec.Body.String())
+	})
+
+	t.Run("nothing in flight is 204", func(t *testing.T) {
+		t.Parallel()
+		rec := serveActiveChatJob(t, &activeChatJobStoreStub{}, uuid.New().String(), uuid.New())
+		require.Equal(t, http.StatusNoContent, rec.Code)
+		require.Empty(t, rec.Body.String())
+	})
+
+	t.Run("invalid chat id is 400", func(t *testing.T) {
+		t.Parallel()
+		rec := serveActiveChatJob(t, &activeChatJobStoreStub{}, "not-a-uuid", uuid.New())
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("store failure is 500", func(t *testing.T) {
+		t.Parallel()
+		rec := serveActiveChatJob(t, &activeChatJobStoreStub{err: errors.New("db down")}, uuid.New().String(), uuid.New())
+		require.Equal(t, http.StatusInternalServerError, rec.Code)
+	})
 }

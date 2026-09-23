@@ -20,6 +20,14 @@ import (
 
 type fakePersonalityAgent struct {
 	enqueuePersonalityGenerationJobFn func(ctx context.Context, userID, flowID uuid.UUID) (*models.Job, error)
+	enqueueExpressionCandidatesJobFn  func(ctx context.Context, userID, personalityID uuid.UUID, keys []string, referenceImageID *uuid.UUID) (*models.Job, error)
+}
+
+func (f *fakePersonalityAgent) EnqueueExpressionCandidatesJob(ctx context.Context, userID, personalityID uuid.UUID, keys []string, referenceImageID *uuid.UUID) (*models.Job, error) {
+	if f.enqueueExpressionCandidatesJobFn != nil {
+		return f.enqueueExpressionCandidatesJobFn(ctx, userID, personalityID, keys, referenceImageID)
+	}
+	return nil, errors.New("not implemented")
 }
 
 func (f *fakePersonalityAgent) EnqueueExpressionGridJob(ctx context.Context, userID, personalityID uuid.UUID) (*models.Job, error) {
