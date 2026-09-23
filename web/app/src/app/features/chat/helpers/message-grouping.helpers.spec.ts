@@ -150,6 +150,16 @@ describe('appendPendingAssistantGroup', () => {
         });
         expect(pending.id).toBe(CHAT_PENDING_ASSISTANT_MESSAGE_ID);
         expect(pending.message).toBe('Hello');
+        expect(pending.model_reasoning).toBeUndefined();
+
+        const thinking = pendingAssistantPlaceholderMessage({
+            chatId: 'chat-1',
+            draftText: '',
+            draftReasoning: 'Weighing options',
+            generationPersonality: 'Kai',
+            thinkingImageUrl: null,
+        });
+        expect(thinking.model_reasoning).toBe('Weighing options');
 
         const extended = appendPendingAssistantGroup([], pending);
         expect(extended.length).toBe(1);

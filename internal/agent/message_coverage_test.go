@@ -689,3 +689,57 @@ func TestJobDraftDeltaBuffer_MarkRoundBoundary_AppliesToNextDeltaOnly(t *testing
 	require.Equal(t, "Let me check.\n\nFound it.", b.allText)
 	require.Equal(t, b.allText, b.pending, "the break is part of the streamed deltas")
 }
+
+func TestJobDraftReasoningBuffer_FlushesToDraftReasoning(t *testing.T) {
+	t.Parallel()
+
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	mock.ExpectExec("UPDATE .*jobs.*draft_reasoning.*").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	job := &models.Job{ID: uuid.New(), UserID: uuid.New()}
+	b := newJobDraftReasoningBuffer(context.Background(), ds, zap.NewNop(), job, 3, time.Hour)
+	b.HandleDelta("hmm!")
+	require.Empty(t, b.pending)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestJobDraftReasoningBuffer_ResetDropsPendingAndClearsColumn(t *testing.T) {
+	t.Parallel()
+
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	mock.ExpectExec("UPDATE .*jobs.*draft_reasoning.*").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	job := &models.Job{ID: uuid.New(), UserID: uuid.New()}
+	b := newJobDraftReasoningBuffer(context.Background(), ds, zap.NewNop(), job, 999, time.Hour)
+	b.HandleDelta("abandoned attempt") // below threshold: buffered, not persisted
+	b.ResetReasoning()
+	require.Empty(t, b.pending)
+	require.Empty(t, b.allText)
+	b.Flush() // nothing left to write
+	require.NoError(t, mock.ExpectationsWereMet())
+
+	var nilBuf *jobDraftDeltaBuffer
+	require.NotPanics(t, func() { nilBuf.ResetReasoning() })
+	require.NotPanics(t, func() { (&jobDraftDeltaBuffer{}).ResetReasoning() })
+}
+
+func TestWatchChatJobCancel_NoDatastoreReturnsImmediately(t *testing.T) {
+	t.Parallel()
+	a := newCancelTestAgent()
+	done := make(chan struct{})
+	go func() {
+		a.watchChatJobCancel(context.Background(), uuid.New(), uuid.New(), func() {})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("watchChatJobCancel must return at once when there is no datastore")
+	}
+}

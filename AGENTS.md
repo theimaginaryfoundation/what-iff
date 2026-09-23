@@ -83,6 +83,10 @@ deliberately does not duplicate:
 - **`internal/<package>/_PACKAGE_SUMMARY.md`** — per-package docs: role,
   responsibilities, key entry points, dependencies, non-obvious decisions, and
   testing notes. List them all with `find internal -name _PACKAGE_SUMMARY.md`.
+  Write them **one sentence per line**: a long bullet continues on indented
+  lines, one sentence each, rather than growing into a single huge line that
+  every concurrent PR conflicts on. `make reflow-package-summaries` fixes a file
+  mechanically (rendering is unchanged); CI runs `make check-package-summaries`.
 - **`ARCHITECTURE.md`** — the long-form reference behind the summary.
 
 **Anti-drift expectation:** any change under `internal/...` that affects

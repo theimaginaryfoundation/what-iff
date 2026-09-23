@@ -28,17 +28,18 @@ func toJobModel(e *ent.Job) *models.Job {
 	}
 
 	return &models.Job{
-		ID:          e.ID,
-		UserID:      e.Edges.Owner.ID,
-		JobType:     e.JobType,
-		Reference:   e.Reference,
-		Status:      models.JobStatus(e.Status),
-		Error:       e.Error,
-		ResultID:    resultID,
-		DraftDeltas: append([]string(nil), e.DraftDeltas...),
-		Progress:    e.Progress,
-		CreatedAt:   e.CreatedAt,
-		UpdatedAt:   e.UpdatedAt,
+		ID:             e.ID,
+		UserID:         e.Edges.Owner.ID,
+		JobType:        e.JobType,
+		Reference:      e.Reference,
+		Status:         models.JobStatus(e.Status),
+		Error:          e.Error,
+		ResultID:       resultID,
+		DraftDeltas:    append([]string(nil), e.DraftDeltas...),
+		DraftReasoning: append([]string(nil), e.DraftReasoning...),
+		Progress:       e.Progress,
+		CreatedAt:      e.CreatedAt,
+		UpdatedAt:      e.UpdatedAt,
 	}
 }
 
@@ -500,11 +501,42 @@ func (d *Datastore) AppendJobDraftDeltas(ctx context.Context, userID, id uuid.UU
 	return nil
 }
 
-// ClearJobDraftDeltas removes any in-progress draft chunks from a job.
+// AppendJobDraftReasoning appends incremental reasoning chunks to a job's draft_reasoning.
+// Same single-row, owner-scoped shape as AppendJobDraftDeltas.
+func (d *Datastore) AppendJobDraftReasoning(ctx context.Context, userID, id uuid.UUID, chunks []string) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	if _, err := d.dbClient.Job.Update().
+		Where(job.ID(id), job.HasOwnerWith(user.ID(userID))).
+		AppendDraftReasoning(chunks).
+		Save(ctx); err != nil {
+		d.logger.Error(i18n.T1("update.failed", "Entity", "job draft_reasoning"), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// ResetJobDraftReasoning empties a job's draft_reasoning without touching its text
+// draft. Used when a truncated call is discarded and retried, so the abandoned
+// attempt's reasoning stops showing.
+func (d *Datastore) ResetJobDraftReasoning(ctx context.Context, userID, id uuid.UUID) error {
+	if _, err := d.dbClient.Job.Update().
+		Where(job.ID(id), job.HasOwnerWith(user.ID(userID))).
+		ClearDraftReasoning().
+		Save(ctx); err != nil {
+		d.logger.Error(i18n.T1("update.failed", "Entity", "job draft_reasoning"), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// ClearJobDraftDeltas removes any in-progress draft chunks — text and reasoning — from a job.
 func (d *Datastore) ClearJobDraftDeltas(ctx context.Context, userID, id uuid.UUID) error {
 	_, err := d.dbClient.Job.Update().
 		Where(job.ID(id), job.HasOwnerWith(user.ID(userID))).
 		ClearDraftDeltas().
+		ClearDraftReasoning().
 		Save(ctx)
 	if err != nil {
 		d.logger.Error(i18n.T1("update.failed", "Entity", "job draft_deltas"), zap.Error(err))
@@ -594,8 +626,9 @@ func (d *Datastore) finalizeChatJobWithPartial(
 
 	// Phase 2: consume current draft deltas into a partial assistant message (if any).
 	partialText := strings.Join(entJob.DraftDeltas, "")
+	partialReasoning := strings.Join(entJob.DraftReasoning, "")
 	resultID, err := d.consumeDraftDeltasToMessageTx(
-		ctx, tx, chatID, partialText, generationModel, generationPersonality, generationMoodID,
+		ctx, tx, chatID, partialText, partialReasoning, generationModel, generationPersonality, generationMoodID,
 	)
 	if err != nil {
 		d.rollbackTx(tx)
@@ -649,8 +682,8 @@ func (d *Datastore) loadOwnedJobTx(ctx context.Context, tx *ent.Tx, userID, jobI
 }
 
 func (d *Datastore) finalizeTerminalPartialIdempotentTx(ctx context.Context, tx *ent.Tx, entJob *ent.Job) (*uuid.UUID, error) {
-	if len(entJob.DraftDeltas) > 0 {
-		if _, err := tx.Job.UpdateOneID(entJob.ID).SetDraftDeltas([]string{}).Save(ctx); err != nil {
+	if len(entJob.DraftDeltas) > 0 || len(entJob.DraftReasoning) > 0 {
+		if _, err := tx.Job.UpdateOneID(entJob.ID).SetDraftDeltas([]string{}).ClearDraftReasoning().Save(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -665,7 +698,7 @@ func (d *Datastore) consumeDraftDeltasToMessageTx(
 	ctx context.Context,
 	tx *ent.Tx,
 	chatID uuid.UUID,
-	partialText, generationModel, generationPersonality string,
+	partialText, partialReasoning, generationModel, generationPersonality string,
 	generationMoodID *uuid.UUID,
 ) (*uuid.UUID, error) {
 	if strings.TrimSpace(partialText) == "" {
@@ -684,6 +717,10 @@ func (d *Datastore) consumeDraftDeltasToMessageTx(
 	}
 	if generationMoodID != nil && *generationMoodID != uuid.Nil {
 		createMsg.SetGenerationMoodID(*generationMoodID)
+	}
+	// Keep the reasoning that led up to the partial reply (e.g. the user hit Stop).
+	if r := strings.TrimSpace(partialReasoning); r != "" {
+		createMsg.SetModelReasoning(r)
 	}
 	entMsg, err := createMsg.Save(ctx)
 	if err != nil {
@@ -707,7 +744,8 @@ func (d *Datastore) updateJobToTerminalTx(
 	jobUpdate := tx.Job.Update().
 		Where(job.ID(jobID), job.HasOwnerWith(user.ID(userID))).
 		SetStatus(terminalStatus).
-		SetDraftDeltas([]string{})
+		SetDraftDeltas([]string{}).
+		ClearDraftReasoning()
 	switch terminalStatus {
 	case job.StatusFailed:
 		jobUpdate.SetError(failureMessage)
@@ -939,6 +977,31 @@ const activeChatJobScanLimit = 50
 // client returning to a thread can find a running turn without first deciding which user
 // message is "unanswered". The job's Reference is the user message id.
 func (d *Datastore) FindLatestActiveChatJob(ctx context.Context, userID, chatID uuid.UUID) (*models.Job, error) {
+	jobs, err := d.activeChatJobsForChat(ctx, userID, chatID)
+	if err != nil || len(jobs) == 0 {
+		return nil, err
+	}
+	return toJobModel(jobs[0]), nil
+}
+
+// ListActiveChatJobIDsForChat returns the ids of every non-terminal chat_message job whose user
+// turn belongs to chatID, newest first. Stop uses it to clear a whole thread, including jobs left
+// non-terminal by a worker that died (a restart) or that run on another API instance.
+func (d *Datastore) ListActiveChatJobIDsForChat(ctx context.Context, userID, chatID uuid.UUID) ([]uuid.UUID, error) {
+	jobs, err := d.activeChatJobsForChat(ctx, userID, chatID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]uuid.UUID, 0, len(jobs))
+	for _, j := range jobs {
+		ids = append(ids, j.ID)
+	}
+	return ids, nil
+}
+
+// activeChatJobsForChat returns the user's non-terminal chat_message jobs whose user turn is in
+// chatID, newest first. The job's Reference is the user message id.
+func (d *Datastore) activeChatJobsForChat(ctx context.Context, userID, chatID uuid.UUID) ([]*ent.Job, error) {
 	jobs, err := d.dbClient.Job.Query().
 		Where(
 			job.HasOwnerWith(user.ID(userID)),
@@ -978,12 +1041,80 @@ func (d *Datastore) FindLatestActiveChatJob(ctx context.Context, userID, chatID 
 	for _, id := range inChat {
 		inChatSet[id.String()] = struct{}{}
 	}
+	out := make([]*ent.Job, 0, len(inChat))
 	for _, j := range jobs {
 		if _, ok := inChatSet[j.Reference]; ok {
-			return toJobModel(j), nil
+			out = append(out, j)
 		}
 	}
-	return nil, nil
+	return out, nil
+}
+
+// ChatIDForChatJob resolves the chat a chat_message job belongs to, via its Reference (the user
+// message id). Returns ErrJobNotFound when the job is not the user's or is not a chat job.
+func (d *Datastore) ChatIDForChatJob(ctx context.Context, userID, jobID uuid.UUID) (uuid.UUID, error) {
+	j, err := d.dbClient.Job.Query().
+		Where(job.ID(jobID), job.HasOwnerWith(user.ID(userID)), job.JobTypeEQ("chat_message")).
+		Only(ctx)
+	if ent.IsNotFound(err) {
+		return uuid.Nil, ErrJobNotFound
+	}
+	if err != nil {
+		return uuid.Nil, err
+	}
+	msgID, err := uuid.Parse(j.Reference)
+	if err != nil {
+		return uuid.Nil, ErrJobNotFound
+	}
+	chatID, err := d.dbClient.ChatMessage.Query().
+		Where(entchatmessage.ID(msgID), entchatmessage.HasChatWith(entchat.HasOwnerWith(user.ID(userID)))).
+		QueryChat().
+		OnlyID(ctx)
+	if ent.IsNotFound(err) {
+		return uuid.Nil, ErrJobNotFound
+	}
+	return chatID, err
+}
+
+// MarkChatJobCancelled moves a non-terminal chat_message job straight to cancelled and clears its
+// drafts, for a job with no worker in this process to cancel it: either its worker died (a
+// restart left it orphaned) or it runs on another API instance, whose worker sees the status via
+// JobStatus and stops. Streamed draft text is dropped rather than saved as a partial reply — the
+// live worker (when there is one) saves its own partial as it winds down. Reports whether the job
+// was changed; an already-terminal job is left alone.
+func (d *Datastore) MarkChatJobCancelled(ctx context.Context, userID, jobID uuid.UUID) (bool, error) {
+	n, err := d.dbClient.Job.Update().
+		Where(
+			job.ID(jobID),
+			job.HasOwnerWith(user.ID(userID)),
+			job.JobTypeEQ("chat_message"),
+			job.StatusNotIn(job.StatusComplete, job.StatusCancelled, job.StatusFailed),
+		).
+		SetStatus(job.StatusCancelled).
+		SetDraftDeltas([]string{}).
+		SetDraftReasoning([]string{}).
+		Save(ctx)
+	if err != nil {
+		d.logger.Error(i18n.T1("update.failed", "Entity", "job status"), zap.Error(err))
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// JobStatus returns just a job's status: a cheap single-column read for a running worker that
+// polls for a cancel requested on another API instance.
+func (d *Datastore) JobStatus(ctx context.Context, userID, jobID uuid.UUID) (models.JobStatus, error) {
+	st, err := d.dbClient.Job.Query().
+		Where(job.ID(jobID), job.HasOwnerWith(user.ID(userID))).
+		Select(job.FieldStatus).
+		String(ctx)
+	if ent.IsNotFound(err) {
+		return "", ErrJobNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	return models.JobStatus(st), nil
 }
 
 // FindActivePersonalityGenerationJob returns the newest non-terminal personality_generation

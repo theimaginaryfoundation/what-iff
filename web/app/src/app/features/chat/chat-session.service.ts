@@ -86,6 +86,7 @@ export class ChatSessionService implements OnDestroy {
   readonly pendingAssistantDraftText = this.turn.pendingAssistantDraftText;
   /** Tool calls the in-flight turn has made so far, for the live timeline above the pending reply. */
   readonly liveToolCalls = this.turn.liveToolCalls;
+  readonly pendingAssistantDraftReasoning = this.turn.pendingAssistantDraftReasoning;
   readonly draft: WritableSignal<string> = signal('');
   readonly model: Signal<Model | null> = this._model.asReadonly();
   readonly personalityId = computed(() => this._thread()?.personality_id ?? null);

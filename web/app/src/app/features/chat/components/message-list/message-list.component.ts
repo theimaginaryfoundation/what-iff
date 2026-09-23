@@ -536,7 +536,7 @@ export class MessageListComponent {
   }
 }
 
-/** Digest when tail message id/length or group count changes (covers send, reply, streaming). */
+/** Digest when tail message id/length, live reasoning length, or group count changes (covers send, reply, streaming). */
 function digestForTailScroll(
   groups: readonly GroupedItem[],
   displayResolver: (message: ChatMessage) => string,
@@ -546,7 +546,9 @@ function digestForTailScroll(
   const tail = lastMessageInGroups(groups);
   if (!tail) return '';
   const displayLength = (displayResolver(tail) ?? '').length;
-  return `${groups.length}:${tail.id}:${displayLength}`;
+  // Streamed reasoning grows the pending bubble before any reply text exists.
+  const reasoningLength = tail.model_reasoning?.length ?? 0;
+  return `${groups.length}:${tail.id}:${displayLength}:${reasoningLength}`;
 }
 
 function lastMessageInGroups(groups: readonly GroupedItem[]): ChatMessage | null {

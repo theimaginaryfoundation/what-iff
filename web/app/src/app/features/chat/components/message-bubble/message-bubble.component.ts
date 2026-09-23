@@ -1,16 +1,16 @@
 
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, afterRenderEffect, computed, input, output, viewChild } from '@angular/core';
 
 import { ChatMessage } from '../../../../core/models/message.model';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../../chat.constants';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
-import { StarIconComponent } from '../../../../shared/ui/icons/icons';
+import { BrainIconComponent, ChevRightIconComponent, StarIconComponent } from '../../../../shared/ui/icons/icons';
 import { MessageContentComponent } from '../message-content/message-content.component';
 
 @Component({
   selector: 'app-message-bubble',
   standalone: true,
-  imports: [MessageContentComponent, TooltipDirective, StarIconComponent],
+  imports: [MessageContentComponent, TooltipDirective, StarIconComponent, BrainIconComponent, ChevRightIconComponent],
   template: `
     <article
       class="bubble"
@@ -19,6 +19,23 @@ import { MessageContentComponent } from '../message-content/message-content.comp
       [class.bubble--bookmarked]="message().bookmarked && !isPendingPlaceholder()"
       [attr.aria-label]="ariaLabel()"
     >
+      @if (reasoning(); as reasoningText) {
+        <!-- Live while the model is still thinking (open, auto-following); settles to a
+             collapsed "Thought process" once reply text starts or the saved message lands.
+             [open] only flips on that transition, so a manual toggle otherwise sticks. -->
+        <details
+          class="bubble__reasoning"
+          [class.bubble__reasoning--live]="reasoningLive()"
+          [open]="reasoningLive()"
+        >
+          <summary class="bubble__reasoning-summary">
+            <ui-chev-right-icon class="bubble__reasoning-chevron" [size]="12" />
+            <ui-brain-icon [size]="12" />
+            <span>{{ reasoningLive() ? 'Thinking…' : 'Thought process' }}</span>
+          </summary>
+          <div #reasoningBox class="bubble__reasoning-text" [attr.aria-live]="reasoningLive() ? 'polite' : null">{{ reasoningText }}</div>
+        </details>
+      }
       <div class="bubble__body">
         @if (showPendingDots()) {
           <span class="bubble__pending-dots" aria-hidden="true">
@@ -134,6 +151,76 @@ import { MessageContentComponent } from '../message-content/message-content.comp
 
     .bubble--user .bubble__body :where(code, pre) {
       background: color-mix(in srgb, currentColor 14%, transparent);
+    }
+
+    /* Collapsed-by-default model reasoning, sitting above the reply like a quiet aside. */
+    .bubble__reasoning {
+      margin-bottom: 0.25rem;
+      max-width: 100%;
+      min-width: 0;
+    }
+
+    .bubble__reasoning-summary {
+      align-items: center;
+      border-radius: 999px;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      display: inline-flex;
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.6875rem;
+      gap: 0.3rem;
+      list-style: none;
+      padding: 0.125rem 0.375rem 0.125rem 0.25rem;
+      transition: background 150ms ease, color 150ms ease;
+      user-select: none;
+    }
+
+    .bubble__reasoning-summary::-webkit-details-marker { display: none; }
+
+    .bubble__reasoning-summary:hover,
+    .bubble__reasoning-summary:focus-visible {
+      background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+      color: var(--color-text-secondary);
+    }
+
+    .bubble__reasoning-chevron {
+      display: inline-flex;
+      transition: transform 150ms ease;
+    }
+
+    .bubble__reasoning[open] .bubble__reasoning-chevron {
+      transform: rotate(90deg);
+    }
+
+    .bubble__reasoning-text {
+      border-left: 2px solid color-mix(in srgb, var(--color-accent) 30%, var(--color-border-base));
+      color: var(--color-text-secondary);
+      font-size: 0.75rem;
+      line-height: 1.55;
+      margin: 0.25rem 0 0.375rem 0.5rem;
+      max-height: 20rem;
+      overflow-wrap: anywhere;
+      overflow-y: auto;
+      padding: 0.125rem 0 0.125rem 0.625rem;
+      white-space: pre-wrap;
+    }
+
+    .bubble__reasoning--live .bubble__reasoning-summary span {
+      animation: bubble-reasoning-pulse 1.6s ease-in-out infinite;
+    }
+
+    .bubble__reasoning--live .bubble__reasoning-text {
+      max-height: 12rem;
+    }
+
+    @keyframes bubble-reasoning-pulse {
+      0%, 100% { opacity: 0.55; }
+      50% { opacity: 1; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .bubble__reasoning-chevron { transition: none; }
+      .bubble__reasoning--live .bubble__reasoning-summary span { animation: none; }
     }
 
     .bubble__skills {
@@ -334,6 +421,34 @@ export class MessageBubbleComponent {
     const m = this.message();
     return m.origin === 'Assistant' && (m.context_breakdown?.segments?.length ?? 0) > 0;
   });
+
+  /** Model-reported reasoning for assistant replies; null hides the disclosure. */
+  readonly reasoning = computed((): string | null => {
+    const m = this.message();
+    if (m.origin !== 'Assistant') {
+      return null;
+    }
+    return m.model_reasoning?.trim() || null;
+  });
+
+  /** Reasoning is still streaming: pending placeholder with no reply text yet. */
+  readonly reasoningLive = computed(
+    () => this.isPendingPlaceholder() && !!this.reasoning() && !this.displayContent().trim(),
+  );
+
+  private readonly reasoningBox = viewChild<ElementRef<HTMLElement>>('reasoningBox');
+
+  constructor() {
+    // While live, keep the newest reasoning in view inside its scroll box. Runs after
+    // render so scrollHeight already includes the chunk that just arrived.
+    afterRenderEffect(() => {
+      this.reasoning();
+      const box = this.reasoningBox()?.nativeElement;
+      if (box && this.reasoningLive()) {
+        box.scrollTop = box.scrollHeight;
+      }
+    });
+  }
 
   readonly isPendingPlaceholder = computed(() => this.message().id === CHAT_PENDING_ASSISTANT_MESSAGE_ID);
   readonly showPendingDots = computed(

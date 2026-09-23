@@ -54,6 +54,10 @@ func (ChatMessage) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			Comment("Short classifier rationale for the chosen generation_expression portrait (assistant messages)"),
+		field.Text("model_reasoning").
+			Optional().
+			Nillable().
+			Comment("Provider-reported reasoning/thinking text for an assistant turn (e.g. GLM thinking blocks, MiMo reasoning_content), concatenated across the turn's tool rounds. Display-only: never replayed into model context."),
 		field.Text("last_error_message").
 			Optional().
 			Nillable().

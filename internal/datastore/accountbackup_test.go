@@ -87,6 +87,7 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			generation_model text,
 			generation_personality text,
 			generation_expression_reasoning text,
+			model_reasoning text,
 			last_error_message text,
 			checkpoint_completed_at datetime,
 			context_breakdown json,
