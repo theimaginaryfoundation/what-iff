@@ -35,6 +35,13 @@ describe('ChatSessionService', () => {
     let sendGate: ChatSendGateMock;
     let messages$: BehaviorSubject<ChatMessage[]>;
 
+    /** An assistant row arriving now is not treated as the reply to a pending turn. */
+    function expectLateAssistantNotStreamed(): void {
+        streamingService.startStreaming.mockClear();
+        messages$.next([message('late-assistant', 'Assistant')]);
+        expect(streamingService.startStreaming).not.toHaveBeenCalled();
+    }
+
     const chat: Chat = {
         id: 'chat-1',
         user_id: 'user-1',
@@ -168,10 +175,10 @@ describe('ChatSessionService', () => {
         expect(sendGate.refresh).toHaveBeenCalled();
     });
 
-    it('clears expectingAssistantResponse when job polling finalizes without assistant message', async () => {
+    it('stops expecting a reply when job polling finalizes without assistant message', async () => {
         service.setActive('chat-1');
         await service.sendMessage('hello');
-        expect(service['expectingAssistantResponse']).toBe(false);
+        expectLateAssistantNotStreamed();
     });
 
     it('sends a message and starts job polling', async () => {
@@ -288,7 +295,8 @@ describe('ChatSessionService', () => {
 
     it('cancels active streaming', () => {
         service.setActive('chat-1');
-        service['expectingAssistantResponse'] = true;
+        jobService.pollJob.mockReturnValue(new Subject<any>() as any);
+        service.startAssistantJobPolling('job-1', 'chat-1');
         messages$.next([message('assistant-1', 'Assistant')]);
 
         service.cancelStreaming();
@@ -351,8 +359,15 @@ describe('ChatSessionService', () => {
     });
 
     it('falls back to stopping local streaming when no active job id exists', () => {
+        // The reply is still animating in after its job's bookkeeping was already cleared.
+        const job$ = new Subject<any>();
+        jobService.pollJob.mockReturnValue(job$ as any);
         service.setActive('chat-1');
-        service['_streamingMessageId'].set('assistant-1');
+        service.startAssistantJobPolling('job-1', 'chat-1');
+        messages$.next([message('assistant-1', 'Assistant')]);
+        job$.complete();
+        expect(service.assistantJobPending()).toBe(false);
+        streamingService.stopStreaming.mockClear();
 
         service.cancelGeneration();
 
@@ -424,7 +439,7 @@ describe('ChatSessionService', () => {
         await service.sendMessage('hello');
         jobService.getActiveChatJob.mockClear();
 
-        service['resumePendingJobIfNeeded']('chat-1');
+        service.syncActiveThread(true);
 
         expect(jobService.getActiveChatJob).not.toHaveBeenCalled();
     });
@@ -589,8 +604,8 @@ describe('ChatSessionService', () => {
         const result = await service.sendMessage('hello');
         expect(isChatSendSucceeded(result)).toBe(true);
         expect(service.error()).toBe('poll failed');
-        expect(service['expectingAssistantResponse']).toBe(false);
         expect(service.assistantJobPending()).toBe(false);
+        expectLateAssistantNotStreamed();
     });
 
     describe('thread switch while a job is in flight (#144)', () => {
@@ -660,7 +675,6 @@ describe('ChatSessionService', () => {
             expect(service.assistantJobPending()).toBe(true);
             expect(service.pendingAssistantDraftText()).toBe('Maggie reply');
             expect(service.streamingMessageId()).toBe(CHAT_PENDING_ASSISTANT_MESSAGE_ID);
-            expect(service['expectedAssistantAfterUserMessageId']).toBe('user-B');
             expect(service.error()).toBeNull();
         });
 
@@ -688,9 +702,8 @@ describe('ChatSessionService', () => {
             expect(isChatSendSucceeded(await pending)).toBe(true);
 
             expect(jobService.pollJob).not.toHaveBeenCalled();
-            expect(service['expectedAssistantAfterUserMessageId']).toBeNull();
-            expect(service['expectingAssistantResponse']).toBe(false);
             expect(service.assistantJobPending()).toBe(false);
+            expectLateAssistantNotStreamed();
         });
 
         it('does not restore a failed send\'s text into the newly active thread\'s composer', async () => {
