@@ -24,6 +24,11 @@ type agentTestHooks struct {
 	ImageRitualCreateChatMessage    func(ctx context.Context, userID uuid.UUID, chatMessage models.ChatMessage) (*models.ChatMessage, error)
 	ImageRitualCreateFileAttachment func(ctx context.Context, userID uuid.UUID, fileAttachment models.FileAttachment) (*models.FileAttachment, error)
 	ImageRitualPersistImage         func(ctx context.Context, userID uuid.UUID, attachment *models.FileAttachment, imageBase64 string) error
+
+	// Expression hooks exercise the real Phase 1 orchestration without making a
+	// provider network call or requiring expression persistence through Ent/S3.
+	ExpressionImageProviderOverride provider.ExpressionImageProvider
+	ExpressionPersistCellOverride   func(ctx context.Context, userID, personalityID uuid.UUID, expressionKey string, pngBytes []byte, receipt expressionGenerationReceipt) error
 }
 
 func (h agentTestHooks) anySet() bool {
@@ -34,7 +39,9 @@ func (h agentTestHooks) anySet() bool {
 		h.ImageRitualGenerateImagePNG != nil ||
 		h.ImageRitualCreateChatMessage != nil ||
 		h.ImageRitualCreateFileAttachment != nil ||
-		h.ImageRitualPersistImage != nil
+		h.ImageRitualPersistImage != nil ||
+		h.ExpressionImageProviderOverride != nil ||
+		h.ExpressionPersistCellOverride != nil
 }
 
 // assertNoTestHooksInProduction panics if any test hook is set outside of `go test`.
