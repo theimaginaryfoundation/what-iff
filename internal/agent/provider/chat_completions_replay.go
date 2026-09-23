@@ -9,12 +9,14 @@ import (
 // chatCompletionAssistantReplay converts an assistant tool-call response into the
 // request message that is appended to the conversation for the next tool round.
 //
-// It exists because the SDK's Message.ToParam() is unsafe for streamed turns: tool
-// calls assembled by ChatCompletionAccumulator carry no raw JSON, ToParam() installs
-// that empty string as the marshal override, and the next request fails with
-// "unexpected end of JSON input". Each tool call is rebuilt from its decoded fields
-// instead. (Gemini has its own variant, geminiAssistantToolCallMessage, which also
-// re-attaches Google's thought signature.)
+// Each tool call is rebuilt from its decoded fields rather than the SDK's
+// Message.ToParam(), whose raw-JSON marshal override is empty for tool calls the
+// stream accumulator assembled — the failure behind the Gemini "unexpected end of
+// JSON input" fix. (Gemini has its own variant, geminiAssistantToolCallMessage,
+// which also re-attaches Google's thought signature.)
+//
+// A tool-call turn with no text is sent with an explicit empty content string
+// rather than no content field (see below).
 //
 // A non-empty reasoningContent is echoed back as the non-standard reasoning_content
 // field. MiMo requires it on every assistant tool-call message while thinking is
@@ -22,6 +24,14 @@ import (
 // the reasoning the adapter captured for that call.
 func chatCompletionAssistantReplay(msg openai.ChatCompletionMessage, reasoningContent string) openai.ChatCompletionMessageParamUnion {
 	p := msg.ToAssistantMessageParam()
+	if len(msg.ToolCalls) > 0 && assistantContentEmpty(p.Content) {
+		// A tool-call turn usually has no text, and ToAssistantMessageParam then omits
+		// content altogether. Send an explicit "" instead — the shape MiMo's own
+		// multi-turn tool examples send back. Unlike Gemini (which rejects "" and gets
+		// geminiToolCallContentPlaceholder), nothing is shown to the model that it
+		// could echo as reply text.
+		p.Content = openai.ChatCompletionAssistantMessageParamContentUnion{OfString: openai.String("")}
+	}
 	if len(msg.ToolCalls) > 0 {
 		p.ToolCalls = make([]openai.ChatCompletionMessageToolCallUnionParam, 0, len(msg.ToolCalls))
 		for _, tc := range msg.ToolCalls {
