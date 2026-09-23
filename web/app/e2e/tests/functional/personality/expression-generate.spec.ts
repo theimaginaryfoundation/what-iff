@@ -40,13 +40,16 @@ test('blocks generating while a name is empty or duplicated', async ({ personali
   await expect(names.nth(0)).toHaveAttribute('aria-invalid', 'true');
   await expect(personalityDetailPage.generateSubmit).toBeDisabled();
 
-  // Names are normalized to keys, so "SAD" collides with cell 3's "sad".
+  // Names are normalized to keys, so "SAD" collides with cell 3's "sad". The later
+  // occurrence of a key is the one marked as the duplicate.
   await names.nth(0).fill('SAD');
-  await expect(personalityDetailPage.generateCell(0).getByText('Duplicate name')).toBeVisible();
+  await expect(personalityDetailPage.generateCell(2).getByText('Duplicate name')).toBeVisible();
+  await expect(names.nth(2)).toHaveAttribute('aria-invalid', 'true');
+  await expect(names.nth(0)).toHaveAttribute('aria-invalid', 'false');
   await expect(personalityDetailPage.generateSubmit).toBeDisabled();
 
   await names.nth(0).fill('Mischievous');
-  await expect(names.nth(0)).toHaveAttribute('aria-invalid', 'false');
+  await expect(names.nth(2)).toHaveAttribute('aria-invalid', 'false');
   await expect(personalityDetailPage.generateSubmit).toBeEnabled();
 });
 

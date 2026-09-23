@@ -85,6 +85,9 @@ test.describe('personalities screens', () => {
       await personalityDetailPage.generateNames.nth(4).fill('');
       await expect(personalityDetailPage.generateCell(4).getByText('Name required')).toBeVisible();
       await personalityDetailPage.generateNames.nth(4).blur();
+      // Filling the cell scrolls the modal body on shorter viewports; pin the baseline to the
+      // top of the body so it does not depend on where that scroll landed.
+      await personalityDetailPage.generateDialog.getByRole('region', { name: 'Reference image' }).evaluate(el => el.scrollIntoView({ block: 'start' }));
 
       await expect(personalityDetailPage.generateDialog).toHaveScreenshot('generate-expressions-modal.png', {
         animations: 'disabled',
