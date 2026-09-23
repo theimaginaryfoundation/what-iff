@@ -81,6 +81,11 @@ describe('tool-call format helpers', () => {
       expect(summarizeToolOutput('{"status":"saved","id":"m-1"}')).toBe('saved');
     });
 
+    it('says nothing for a truncated JSON preview instead of echoing a fragment', () => {
+      expect(summarizeToolOutput('{"results":[{"id":"a","text":"long…')).toBe('');
+      expect(summarizeToolOutput('[{"id":1},{"id":…')).toBe('');
+    });
+
     it('uses the first non-empty line of a text result', () => {
       expect(summarizeToolOutput('\nRetrieved memories: foxes\nmore')).toBe('Retrieved memories: foxes');
     });

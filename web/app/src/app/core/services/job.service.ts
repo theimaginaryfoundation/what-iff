@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpErrorResponse, HttpResponse } from '@angular/common/http';
-import { Observable, BehaviorSubject, EMPTY, throwError, timer, switchMap, takeWhile, finalize, distinctUntilChanged } from 'rxjs';
+import { Observable, BehaviorSubject, EMPTY, throwError, timer, exhaustMap, takeWhile, finalize, distinctUntilChanged } from 'rxjs';
 import { catchError, tap, map } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { Job, JobFilters, JobStatus, ActiveChatMessageJob } from '../models/job.model';
@@ -103,7 +103,10 @@ export class JobService {
 
     return timer(0, pollingInterval)
       .pipe(
-        switchMap(() =>
+        // exhaustMap, not switchMap: a tick that fires while the previous GET is still in flight
+        // is skipped. switchMap cancelled that request, so when every response took longer than
+        // the interval (slow link, large job row) no snapshot ever arrived.
+        exhaustMap(() =>
           this.getJob(jobId).pipe(
             catchError(error => {
               // A failed poll request says nothing authoritative about the server-side job.

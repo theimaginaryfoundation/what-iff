@@ -129,6 +129,8 @@ export class AssistantTurn {
     this.expectingAssistantResponse = true;
     this._cancelRequestedJobId.set(null);
     this._activeChatJobId.set(AssistantTurn.PENDING_SEND_JOB_ID);
+    // The placeholder shows from here; it must not carry the previous turn's tool rows.
+    this._liveToolCalls.set([]);
   }
 
   sendFailed(): void {
@@ -152,6 +154,7 @@ export class AssistantTurn {
   }
 
   beginRetry(userMessageId: string): void {
+    this._liveToolCalls.set([]);
     this.expectingAssistantResponse = true;
     this.expectedAssistantAfterUserMessageId = userMessageId;
   }
@@ -214,6 +217,7 @@ export class AssistantTurn {
             sendGate.refresh();
             if (!this.isActiveThread(chatId)) return;
             if (this._activeChatJobId() === jobId) {
+              this._liveToolCalls.set([]);
               this._activeChatJobId.set(null);
               this._activeJobPhase.set(null);
             }

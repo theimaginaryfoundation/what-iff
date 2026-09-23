@@ -60,6 +60,9 @@ export function summarizeToolInput(raw: string | null | undefined): string {
 /** A short result label, e.g. `3 results`, `2 memories`, or the first line of a text result. */
 export function summarizeToolOutput(raw: string | null | undefined): string {
   const parsed = parseToolPayload(raw);
+  // A live preview of long JSON is cut off (ending "…") and no longer parses; say nothing rather
+  // than echoing a fragment like `{"results":[{"id":…`. The saved row has the full output.
+  if (parsed === undefined && isTruncatedJson(raw)) return '';
   if (parsed === undefined) return clip(raw?.split('\n').find(line => line.trim()));
   if (Array.isArray(parsed)) return countLabel(parsed.length, 'result');
   if (isRecord(parsed)) {
@@ -95,6 +98,11 @@ export function friendlyToolName(name: string): string {
     .filter(Boolean)
     .map(part => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
+}
+
+function isTruncatedJson(raw: string | null | undefined): boolean {
+  const text = raw?.trim() ?? '';
+  return /^[[{]/.test(text) && text.endsWith('…');
 }
 
 function countLabel(count: number, noun: string): string {

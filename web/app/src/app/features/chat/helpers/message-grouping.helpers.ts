@@ -201,16 +201,18 @@ export function appendLiveToolCallGroup(
   const item: ToolCallGroupItem = {
     kind: 'tool-call-group',
     message: pendingMessage,
-    toolCalls: liveCalls.map(call => liveToolCallView(call, pendingMessage.id)),
+    toolCalls: liveCalls.map((call, index) => liveToolCallView(call, index, pendingMessage.id)),
     live: true,
   };
   return [...groups, item];
 }
 
-function liveToolCallView(call: ChatTurnToolCall, messageId: string): ToolCallView {
+function liveToolCallView(call: ChatTurnToolCall, index: number, messageId: string): ToolCallView {
   const output = call.output ?? '';
   return {
-    id: `live-${call.round}-${call.id}`,
+    // Position keeps the id unique even if a provider repeats or omits tool-call ids; entries are
+    // only ever appended, so a call keeps its position (and its DOM row) as it updates.
+    id: `live-${index}-${call.id}`,
     chat_message_id: messageId,
     tool_name: call.name,
     tool_input: call.input ?? '',

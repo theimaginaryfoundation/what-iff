@@ -198,6 +198,14 @@ describe('appendLiveToolCallGroup', () => {
             ['web_search', 'running', '', ''],
         ]);
         expect(new Set(group.toolCalls.map(c => c.id)).size).toBe(3);
+
+        const dupes = appendLiveToolCallGroup([], pending, [
+            { id: '', name: 'a', status: 'complete', round: 0, started_at: 't0' },
+            { id: '', name: 'b', status: 'running', round: 0, started_at: 't1' },
+        ])[0];
+        if (dupes.kind === 'tool-call-group') {
+            expect(new Set(dupes.toolCalls.map(c => c.id)).size).toBe(2);
+        }
         expect(group.toolCalls[2].updated_at).toBe('t4');
     });
 });
