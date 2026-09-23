@@ -90,10 +90,13 @@ func readQueries(path string) ([]string, error) {
 			out = append(out, line)
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("%s has no queries", path)
 	}
-	return out, scanner.Err()
+	return out, nil
 }
 
 func names(backends []websearch.Backend) string {
