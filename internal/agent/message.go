@@ -430,11 +430,13 @@ func (a *Agent) CancelJob(ctx context.Context, userID, jobID uuid.UUID) error {
 		return a.cancelRunningJob(userID, jobID)
 	}
 	if err != nil {
-		return err
+		// The thread-wide lookup failed (a DB hiccup); still stop what this process is running,
+		// as Stop did before it reached across the thread.
+		return errors.Join(err, a.cancelRunningJob(userID, jobID))
 	}
 	ids, err := a.ds.ListActiveChatJobIDsForChat(ctx, userID, chatID)
 	if err != nil {
-		return err
+		return errors.Join(err, a.cancelRunningJob(userID, jobID))
 	}
 	if !slices.Contains(ids, jobID) {
 		ids = append(ids, jobID)
