@@ -124,6 +124,44 @@ func TestGenerateExpressionCandidates_ValidationErrors(t *testing.T) {
 	}
 }
 
+func TestGenerateExpressionCandidates_MalformedBody(t *testing.T) {
+	t.Parallel()
+	req := httptest.NewRequest(http.MethodPost, "/personality/"+uuid.New().String()+"/expressions/generate-candidates", strings.NewReader("{not json"))
+	req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, uuid.New()))
+	rec := serveCandidates(&fakePersonalityAgent{}, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "Invalid request body")
+}
+
+func TestGenerateExpressionCandidates_AgentNotConfigured(t *testing.T) {
+	t.Parallel()
+	h := NewHandler(&fakeStore{}, zap.NewNop(), nil)
+	// NewHandler stores a typed-nil *agent.Agent; clear the interface to hit the guard.
+	h.personalityAgent = nil
+	router := mux.NewRouter()
+	h.RegisterRoutes(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, candidatesRequest(t, uuid.New(), map[string]any{"expressions": candidateTestKeys}))
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	require.Contains(t, rec.Body.String(), "Agent not configured")
+}
+
+func TestGenerateExpressionCandidates_EmptyReferenceMeansNone(t *testing.T) {
+	t.Parallel()
+	var gotRef *uuid.UUID
+	called := false
+	fake := &fakePersonalityAgent{
+		enqueueExpressionCandidatesJobFn: func(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ []string, ref *uuid.UUID) (*models.Job, error) {
+			called, gotRef = true, ref
+			return &models.Job{ID: uuid.New()}, nil
+		},
+	}
+	rec := serveCandidates(fake, candidatesRequest(t, uuid.New(), map[string]any{"expressions": candidateTestKeys, "reference_image_id": ""}))
+	require.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
+	require.True(t, called)
+	require.Nil(t, gotRef)
+}
+
 func TestGenerateExpressionCandidates_EnqueueErrorMapping(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -134,6 +172,7 @@ func TestGenerateExpressionCandidates_EnqueueErrorMapping(t *testing.T) {
 		{"personality missing", datastore.ErrPersonalityNotFound, http.StatusNotFound},
 		{"reference missing", agent.ErrExpressionReferenceImageNotFound, http.StatusNotFound},
 		{"images disabled", agent.ErrExpressionImagesDisabled, http.StatusBadRequest},
+		{"key count", fmt.Errorf("%w: got 8", agent.ErrExpressionCandidateKeyCount), http.StatusBadRequest},
 		{"active job", &agent.ErrPersonalityMediaJobActive{Job: &models.Job{ID: uuid.New(), JobType: agent.JobTypeExpressionGrid, Reference: uuid.New().String()}}, http.StatusConflict},
 		{"other", fmt.Errorf("boom"), http.StatusInternalServerError},
 	}
