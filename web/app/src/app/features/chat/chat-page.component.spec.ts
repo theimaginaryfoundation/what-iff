@@ -92,7 +92,8 @@ describe('ChatPageComponent', () => {
         };
         const jobService = {
             pollJob: vi.fn().mockName("JobService.pollJob"),
-            isJobBeingPolled: vi.fn().mockName("JobService.isJobBeingPolled")
+            isJobBeingPolled: vi.fn().mockName("JobService.isJobBeingPolled"),
+            getActiveChatJob: vi.fn().mockName("JobService.getActiveChatJob")
         };
         const modelService = {
             getModels: vi.fn().mockName("ModelService.getModels"),
@@ -142,6 +143,7 @@ describe('ChatPageComponent', () => {
         imageGallery.referenceImage.mockReturnValue(of(fileAttachment({ id: 'gallery-ref-1', name: 'fox.png' })));
         jobService.pollJob.mockReturnValue(of(null as any));
         jobService.isJobBeingPolled.mockReturnValue(false);
+        jobService.getActiveChatJob.mockReturnValue(of(null));
         modelService.getModels.mockReturnValue(of([]));
         streamingService.getDisplayMessage.mockImplementation(message => message.message);
         streamingService.getDisplayRevision.mockReturnValue(0);
