@@ -225,10 +225,17 @@ func extractChatCompletionToolUses(resp *openai.ChatCompletion) []ToolUse {
 		if tc.Type != "" && tc.Type != "function" {
 			continue
 		}
+		// Some Chat Completions providers send "" (not "{}") for a call with no
+		// arguments; every tool decodes Input as a JSON object, and "" fails that
+		// with "unexpected end of JSON input".
+		args := tc.Function.Arguments
+		if strings.TrimSpace(args) == "" {
+			args = "{}"
+		}
 		uses = append(uses, ToolUse{
 			ID:    tc.ID,
 			Name:  tc.Function.Name,
-			Input: []byte(tc.Function.Arguments),
+			Input: []byte(args),
 		})
 	}
 	return uses

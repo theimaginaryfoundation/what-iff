@@ -37,6 +37,10 @@ type XiaomiAdapter struct {
 
 	// reasoning collects reasoning_content from every call this turn.
 	reasoning reasoningLog
+	// lastReasoning is the most recent call's reasoning_content, echoed back on the
+	// assistant tool-call message it belongs to (MiMo 400s without it; see
+	// chatCompletionAssistantReplay).
+	lastReasoning string
 	// liveReasoning streams reasoning_content deltas as they arrive (see SetReasoningStream).
 	liveReasoning reasoningRelay
 	// thinkingDisabled records that a truncated call already triggered the
@@ -121,7 +125,7 @@ func (a *XiaomiAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse,
 	if len(toolUses) == 0 {
 		return a.toGenerateResponse(resp), nil, nil
 	}
-	a.params.Messages = append(a.params.Messages, resp.Choices[0].Message.ToParam())
+	a.params.Messages = append(a.params.Messages, chatCompletionAssistantReplay(resp.Choices[0].Message, a.lastReasoning))
 	return nil, toolUses, nil
 }
 
@@ -157,6 +161,7 @@ func (a *XiaomiAdapter) call(ctx context.Context) (*openai.ChatCompletion, error
 		return nil, err
 	}
 	a.reasoning.add(reasoning)
+	a.lastReasoning = reasoning
 	return resp, nil
 }
 
