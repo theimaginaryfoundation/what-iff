@@ -14,7 +14,7 @@ import { MessageService } from '../../core/services/message.service';
 import { Chat } from '../../core/models/chat.model';
 import { ChatMessage } from '../../core/models/message.model';
 import { ChatSendGate } from './services/chat-send-gate';
-import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from './chat.constants';
+import { CHAT_PENDING_ASSISTANT_MESSAGE_ID, MESSAGE_JUMP_PAGE_SIZE } from './chat.constants';
 
 describe('ChatSessionService', () => {
     type ChatServiceMock = Pick<MockedObject<ChatService>, 'createChat' | 'getChat' | 'patchChat' | 'setLastChatId' | 'markChatRead'>;
@@ -520,6 +520,43 @@ describe('ChatSessionService', () => {
         expect(service.thread()).toEqual(secondChat);
         expect(service.error()).toBeNull();
         expect(service.loading()).toBe(true);
+    });
+
+    it('walks the keyset cursor with the jump batch until the bookmark target loads', async () => {
+        const target = message('target', 'User');
+        // Initial load: no messages yet, but a total and a continuation cursor mean there is
+        // history to walk back through.
+        messageService.listMessages.mockReturnValueOnce(
+            of({ results: [], page: 1, total_count: 100, next_cursor: 'cursor-1' }),
+        );
+        // Older batch: the target now appears in the shared message stream.
+        messageService.listMessages.mockImplementationOnce(() => {
+            messages$.next([target]);
+            return of({ results: [target], page: 1, total_count: 100, next_cursor: 'cursor-2' });
+        });
+
+        service.setActive('chat-1');
+        const found = await service.loadOlderMessagesUntil('target');
+
+        expect(found).toBe(true);
+        // The older fetch used the larger jump batch and the cursor from the initial response —
+        // not a page number.
+        expect(messageService.listMessages).toHaveBeenLastCalledWith('chat-1', 1, MESSAGE_JUMP_PAGE_SIZE, undefined, 'cursor-1');
+    });
+
+    it('stops walking and reports not-found when the cursor runs out before the target', async () => {
+        messageService.listMessages.mockReturnValueOnce(
+            of({ results: [], page: 1, total_count: 100, next_cursor: 'cursor-1' }),
+        );
+        // Older batch returns no continuation cursor: the oldest message is loaded, target absent.
+        messageService.listMessages.mockReturnValueOnce(
+            of({ results: [], page: 1, total_count: 100, next_cursor: '' }),
+        );
+
+        service.setActive('chat-1');
+        const found = await service.loadOlderMessagesUntil('missing');
+
+        expect(found).toBe(false);
     });
 
     it('restores draft and error state when send fails', async () => {

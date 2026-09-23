@@ -219,6 +219,11 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     return map;
   });
   readonly exportFeedback = signal<string | null>(null);
+  /** Transient status while locating/loading a bookmark target (shown as a floating toast). */
+  readonly bookmarkJumpStatus = signal<string | null>(null);
+  /** True while a jump is still loading/scrolling (drives the toast spinner). */
+  readonly bookmarkJumpPending = signal(false);
+  private clearBookmarkJumpStatusTimer: ReturnType<typeof setTimeout> | null = null;
   readonly editingThreadName = signal(false);
   readonly threadNameDraft = signal('');
   readonly threadSummary = signal('');
@@ -496,6 +501,10 @@ export class ChatPageComponent implements OnInit, OnDestroy {
       clearTimeout(this.clearCopyFeedbackTimer);
       this.clearCopyFeedbackTimer = null;
     }
+    if (this.clearBookmarkJumpStatusTimer) {
+      clearTimeout(this.clearBookmarkJumpStatusTimer);
+      this.clearBookmarkJumpStatusTimer = null;
+    }
     this.contextPanel.setDesktopVisible(false);
     this.document.removeEventListener('visibilitychange', this.onReturnToApp);
     const view = this.document.defaultView;
@@ -705,10 +714,69 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     );
   }
 
-  // Jump to a bookmark from the navigator: load older pages until it's present, then scroll.
+  // Jump to a bookmark from the navigator: load older batches until it's present, then scroll to
+  // it. The floating toast communicates progress and only clears once the target is actually
+  // scrolled into view (not merely loaded) — a far-back jump prepends hundreds of bubbles, so the
+  // scroll has to wait for them to render. Failures are reported so the click never looks dead.
   async jumpToBookmark(bookmark: MessageBookmark): Promise<void> {
-    await this.session.loadOlderMessagesUntil(bookmark.id);
-    this.messageList()?.scrollToMessage(bookmark.id);
+    if (this.clearBookmarkJumpStatusTimer) {
+      clearTimeout(this.clearBookmarkJumpStatusTimer);
+      this.clearBookmarkJumpStatusTimer = null;
+    }
+    this.bookmarkJumpPending.set(true);
+    this.bookmarkJumpStatus.set('Jumping to bookmark…');
+    // Stop following the tail for the whole jump (load + scroll), not just the scroll: the older
+    // batches prepend while the reader sits at the bottom, and without this they'd snap the view
+    // back down before we reach the target.
+    const list = this.messageList();
+    list?.beginJump();
+    try {
+      const found = await this.session.loadOlderMessagesUntil(bookmark.id);
+      if (!found) {
+        this.failBookmarkJump();
+        return;
+      }
+      const scrolled = (await list?.scrollToMessage(bookmark.id)) ?? false;
+      if (!scrolled) {
+        this.failBookmarkJump();
+        return;
+      }
+      this.bookmarkJumpPending.set(false);
+      this.bookmarkJumpStatus.set(null);
+    } catch {
+      this.failBookmarkJump();
+    } finally {
+      list?.endJump();
+    }
+  }
+
+  private failBookmarkJump(): void {
+    this.bookmarkJumpPending.set(false);
+    this.bookmarkJumpStatus.set('Could not locate that bookmark.');
+    if (this.clearBookmarkJumpStatusTimer) {
+      clearTimeout(this.clearBookmarkJumpStatusTimer);
+    }
+    this.clearBookmarkJumpStatusTimer = setTimeout(() => {
+      this.bookmarkJumpStatus.set(null);
+      this.clearBookmarkJumpStatusTimer = null;
+    }, 4000);
+  }
+
+  // Commit the bookmark removals the user queued in the navigator. The navigator defers the actual
+  // unbookmark until its menu closes (star toggles unfilled but the row stays), so a mis-click is
+  // freely undoable while the menu is open — only what's still un-starred on close is saved here.
+  commitBookmarkRemovals(ids: string[]): void {
+    const chatId = this.session.thread()?.id;
+    if (!chatId || ids.length === 0) return;
+    let remaining = ids.length;
+    const done = () => {
+      if (--remaining === 0) this.refreshBookmarks(chatId);
+    };
+    for (const id of ids) {
+      this.subscriptions.add(
+        this.messageService.setBookmark(chatId, id, false).subscribe({ next: done, error: done }),
+      );
+    }
   }
 
   exportActiveChat(): void {

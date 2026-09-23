@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -21,6 +22,7 @@ type Store interface {
 
 	// Related resources used by chat endpoints.
 	ListChatMessages(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
+	ListChatMessagesBefore(ctx context.Context, userID, chatID uuid.UUID, beforeSentAt time.Time, beforeID uuid.UUID, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
 	GetChatMessage(ctx context.Context, userID, messageID uuid.UUID) (*models.ChatMessage, error)
 	MarkChatMessagesRead(ctx context.Context, userID, chatID uuid.UUID) (int, error)
 	SetChatMessageBookmarked(ctx context.Context, userID, messageID uuid.UUID, bookmarked bool) (*models.ChatMessage, error)

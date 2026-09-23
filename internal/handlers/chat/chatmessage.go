@@ -335,7 +335,20 @@ func (h *Handler) GetChatMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	messagePage, err := h.ds.ListChatMessages(r.Context(), userID, chatID, page, pageSize, filters)
+	// A cursor requests keyset ("before") pagination — the batch strictly older than the token,
+	// decoupled from page/limit offset math. Used by scroll-back and jump-to-bookmark so large
+	// batches stay correct. When absent, fall back to page-number offset pagination.
+	var messagePage *models.PaginatedResponse
+	if cursor := queryParams.Get("cursor"); cursor != "" {
+		beforeSentAt, beforeID, decodeErr := models.DecodeMessageCursor(cursor)
+		if decodeErr != nil {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid cursor", decodeErr)
+			return
+		}
+		messagePage, err = h.ds.ListChatMessagesBefore(r.Context(), userID, chatID, beforeSentAt, beforeID, pageSize, filters)
+	} else {
+		messagePage, err = h.ds.ListChatMessages(r.Context(), userID, chatID, page, pageSize, filters)
+	}
 	if err != nil {
 		h.logger.Error("failed to list chat messages", zap.String("user_id", userID.String()), zap.Error(err))
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "failed to list chat messages", err)
