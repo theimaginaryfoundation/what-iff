@@ -421,7 +421,11 @@ func (d *Datastore) GetPersonalityUsageStats(ctx context.Context, userID, person
 	if err != nil {
 		return models.PersonalityUsageStats{}, err
 	}
-	return statsByPersonalityID[personalityID], nil
+	// A personality with no (unarchived) chats has no usage: zero stats, not an error.
+	if stats, ok := statsByPersonalityID[personalityID]; ok {
+		return stats, nil
+	}
+	return models.PersonalityUsageStats{}, nil
 }
 
 func (d *Datastore) personalityUsageStats(ctx context.Context, chats *ent.ChatClient, userID uuid.UUID, personalityIDs []uuid.UUID) (map[uuid.UUID]models.PersonalityUsageStats, error) {
