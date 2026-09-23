@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -405,11 +406,80 @@ func (a *Agent) unregisterRunningJobCancel(jobID uuid.UUID) {
 	a.runningJobCancelsMu.Unlock()
 }
 
-// CancelJob cancels an in-flight job owned by userID. Missing entries are treated as no-op.
-func (a *Agent) CancelJob(_ context.Context, userID, jobID uuid.UUID) error {
+// CancelJob stops an in-flight job owned by userID.
+//
+// For a chat_message job this is the thread's Stop button, so it stops every non-terminal chat
+// job in the same thread, not just jobID: a thread should never be left showing a reply in
+// progress after Stop. Each job running in this process is cancelled directly (its worker saves
+// any partial reply as it winds down). Any other job is marked cancelled in the database — the
+// API runs more than one instance, so the job may be running on another one (whose worker polls
+// its status via watchChatJobCancel and stops), or its worker may have died in a restart and left
+// it orphaned, which nothing else would ever finish.
+//
+// Other job types (scheduled agent jobs, media jobs) keep the in-process-only behaviour: a
+// missing entry is a no-op.
+func (a *Agent) CancelJob(ctx context.Context, userID, jobID uuid.UUID) error {
 	if userID == uuid.Nil || jobID == uuid.Nil {
 		return datastore.ErrUnauthorized
 	}
+	if a.ds == nil {
+		return a.cancelRunningJob(userID, jobID)
+	}
+	chatID, err := a.ds.ChatIDForChatJob(ctx, userID, jobID)
+	if errors.Is(err, datastore.ErrJobNotFound) {
+		return a.cancelRunningJob(userID, jobID)
+	}
+	if err != nil {
+		// The thread-wide lookup failed (a DB hiccup); still stop what this process is running,
+		// as Stop did before it reached across the thread.
+		return errors.Join(err, a.cancelRunningJob(userID, jobID))
+	}
+	ids, err := a.ds.ListActiveChatJobIDsForChat(ctx, userID, chatID)
+	if err != nil {
+		return errors.Join(err, a.cancelRunningJob(userID, jobID))
+	}
+	if !slices.Contains(ids, jobID) {
+		ids = append(ids, jobID)
+	}
+	// Best effort: one job failing to cancel (a DB hiccup) must not leave the rest of the
+	// thread running, so every job is attempted and the failures are returned together.
+	var errs []error
+	for _, id := range ids {
+		if err := a.cancelChatJob(ctx, userID, id); err != nil {
+			a.logger.Warn("failed to cancel chat job during thread stop",
+				zap.String("job_id", id.String()), zap.Error(err))
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// cancelChatJob cancels one chat job: directly when its worker is in this process, otherwise by
+// marking it cancelled in the database.
+func (a *Agent) cancelChatJob(ctx context.Context, userID, jobID uuid.UUID) error {
+	if a.hasRunningJob(jobID) {
+		return a.cancelRunningJob(userID, jobID)
+	}
+	changed, err := a.ds.MarkChatJobCancelled(ctx, userID, jobID)
+	if err != nil {
+		return err
+	}
+	if changed {
+		a.logger.Info("chat job cancelled with no local worker (orphaned, or running on another instance)",
+			zap.String("job_id", jobID.String()))
+	}
+	return nil
+}
+
+func (a *Agent) hasRunningJob(jobID uuid.UUID) bool {
+	a.runningJobCancelsMu.Lock()
+	defer a.runningJobCancelsMu.Unlock()
+	_, ok := a.runningJobCancels[jobID]
+	return ok
+}
+
+// cancelRunningJob cancels a job whose worker runs in this process. A missing entry is a no-op.
+func (a *Agent) cancelRunningJob(userID, jobID uuid.UUID) error {
 	a.runningJobCancelsMu.Lock()
 	entry, ok := a.runningJobCancels[jobID]
 	a.runningJobCancelsMu.Unlock()
@@ -422,6 +492,62 @@ func (a *Agent) CancelJob(_ context.Context, userID, jobID uuid.UUID) error {
 	entry.cancel()
 	return nil
 }
+
+// chatJobCancelPollInterval is how often a running chat job checks the database for a cancel
+// requested on another API instance. It bounds how long Stop can take to reach such a job.
+var chatJobCancelPollInterval = 2 * time.Second
+
+// watchChatJobCancel cancels a running chat job when its status turns cancelled in the database,
+// which is how a Stop handled by another API instance reaches this worker (see CancelJob). It
+// returns when runCtx ends, or when the job row is gone (nothing left to watch; the worker is left
+// to finish on its own). Other read errors are tolerated — the next tick retries — but logged on
+// the first failure and then every chatJobCancelErrLogEvery consecutive ones, so a datastore
+// problem is visible without flooding the log. Without a datastore there is nothing to watch
+// (CancelJob is then in-process only), so it returns immediately.
+func (a *Agent) watchChatJobCancel(runCtx context.Context, userID, jobID uuid.UUID, cancel context.CancelFunc) {
+	if a.ds == nil {
+		return
+	}
+	ticker := time.NewTicker(chatJobCancelPollInterval)
+	defer ticker.Stop()
+	consecutiveErrs := 0
+	for {
+		select {
+		case <-runCtx.Done():
+			return
+		case <-ticker.C:
+			status, err := a.ds.JobStatus(runCtx, userID, jobID)
+			switch {
+			case errors.Is(err, datastore.ErrJobNotFound):
+				a.logger.Warn("chat job row vanished while running; no longer watching for cancel",
+					zap.String("job_id", jobID.String()))
+				return
+			case err != nil:
+				if runCtx.Err() != nil {
+					return
+				}
+				if consecutiveErrs%chatJobCancelErrLogEvery == 0 {
+					a.logger.Warn("failed to read chat job status while watching for cancel",
+						zap.String("job_id", jobID.String()),
+						zap.Int("consecutive_failures", consecutiveErrs+1),
+						zap.Error(err))
+				}
+				consecutiveErrs++
+			case status == models.JobStatusCancelled:
+				a.logger.Info("chat job cancelled from another instance; stopping",
+					zap.String("job_id", jobID.String()))
+				cancel()
+				return
+			default:
+				consecutiveErrs = 0
+			}
+		}
+	}
+}
+
+// chatJobCancelErrLogEvery throttles watchChatJobCancel's read-error log: the first failure and
+// then one per this many consecutive failures (~1/minute at the 2s poll interval).
+const chatJobCancelErrLogEvery = 30
 
 // ChunkPipeline returns the file chunk pipeline for asynchronous file processing.
 func (a *Agent) ChunkPipeline() *filechunker.FileChunkPipeline { return a.chunkPipeline }
@@ -542,6 +668,7 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 	// Start the background processing with a cancellable runtime context.
 	runCtx, cancel := context.WithCancel(ctx)
 	a.registerRunningJobCancel(newJob.ID, userID, cancel)
+	go a.watchChatJobCancel(runCtx, userID, newJob.ID, cancel)
 	go func() {
 		defer cancel()
 		defer a.unregisterRunningJobCancel(newJob.ID)

@@ -70,6 +70,9 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Streamed chat failures:** `FinalizeCancelledChatJobWithPartial` and `FinalizeFailedChatJobWithPartial` atomically consume `draft_deltas` into an assistant message when text was streamed before termination, set the terminal job status/result, and clear the draft buffer.
   Any `draft_reasoning` streamed alongside is carried onto that partial message's `model_reasoning`.
   A failed (rather than cancelled) chat job retains its error for the user-turn failure banner.
+- **Stopping a thread:** `ListActiveChatJobIDsForChat` (shares `activeChatJobsForChat` with `FindLatestActiveChatJob`), `ChatIDForChatJob`, `MarkChatJobCancelled`, and `JobStatus` back the agent's thread-wide Stop.
+  `MarkChatJobCancelled` only moves a non-terminal chat job to cancelled (clearing both drafts); a terminal job is left alone.
+  `FailInterruptedJobs` also runs for `chat_message` at startup (30m staleness bound), so a turn orphaned by a restart is failed instead of resumed forever.
 - **`SetAgentJobOverrides`:** `personality_id` must belong to the job owner; `model_id` must exist in the global model catalog.
   Partial updates use `models.SetAgentJobOverridesPatch` so omitted JSON fields are not overwritten.
   Invalid IDs return `ErrInvalidRequestBody`.

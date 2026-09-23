@@ -690,3 +690,18 @@ func TestJobDraftReasoningBuffer_ResetDropsPendingAndClearsColumn(t *testing.T) 
 	require.NotPanics(t, func() { nilBuf.ResetReasoning() })
 	require.NotPanics(t, func() { (&jobDraftDeltaBuffer{}).ResetReasoning() })
 }
+
+func TestWatchChatJobCancel_NoDatastoreReturnsImmediately(t *testing.T) {
+	t.Parallel()
+	a := newCancelTestAgent()
+	done := make(chan struct{})
+	go func() {
+		a.watchChatJobCancel(context.Background(), uuid.New(), uuid.New(), func() {})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("watchChatJobCancel must return at once when there is no datastore")
+	}
+}
