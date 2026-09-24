@@ -145,7 +145,18 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
       @if (attachments().length) {
         <div class="composer__attachments" aria-label="Pending attachments">
           @for (attachment of attachments(); track pendingAttachmentKey(attachment)) {
-            <span class="composer__attachment" [class.composer__attachment--error]="attachment.uploadError">
+            @let notSeen = selectedModelLacksVision() && isPendingImageAttachment(attachment);
+            <span
+              class="composer__attachment"
+              [class.composer__attachment--error]="attachment.uploadError"
+              [class.composer__attachment--no-vision]="notSeen"
+              [uiTooltip]="notSeen ? noVisionTooltip : ''"
+              [disabledOnTouch]="false"
+              [attr.tabindex]="notSeen ? 0 : null"
+            >
+              @if (notSeen) {
+                <ui-eye-off-icon class="composer__attachment-no-vision-icon" [size]="12" aria-hidden="true" />
+              }
               <span class="composer__attachment-name">{{ attachment.attachment?.name ?? attachment.file?.name }}</span>
               @if (attachment.isUploading) {
                 <small>uploading</small>
@@ -160,18 +171,6 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                 (click)="removeAttachment(pendingAttachmentKey(attachment))"
               >×</button>
             </span>
-          }
-          @if (showNoVisionWarning()) {
-            <button
-              type="button"
-              class="composer__no-vision"
-              [uiTooltip]="noVisionTooltip"
-              [disabledOnTouch]="false"
-              [attr.aria-label]="'Images not supported. ' + noVisionTooltip"
-            >
-              <ui-eye-off-icon [size]="12" />
-              Images not supported
-            </button>
           }
         </div>
       }
@@ -703,23 +702,23 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
       font-size: 0.625rem;
     }
 
-    .composer__no-vision {
-      align-items: center;
+    /* An image the selected model can't see: still attached (and saved), just not sent. */
+    .composer__attachment--no-vision {
       background: color-mix(in srgb, var(--color-warning) 14%, transparent);
-      border: 1px solid color-mix(in srgb, var(--color-warning) 55%, transparent);
-      border-radius: 999px;
+      border-color: color-mix(in srgb, var(--color-warning) 55%, transparent);
       color: var(--color-text-primary);
       cursor: help;
-      display: inline-flex;
-      font-size: 0.6875rem;
-      font-weight: 600;
-      gap: 0.3rem;
-      padding: 0.25rem 0.5rem;
     }
 
-    .composer__no-vision ui-eye-off-icon {
+    .composer__attachment--no-vision:focus-visible {
+      outline: 2px solid var(--color-warning);
+      outline-offset: 2px;
+    }
+
+    .composer__attachment-no-vision-icon {
       color: var(--color-warning);
       display: inline-flex;
+      flex-shrink: 0;
     }
 
     .composer__attachment--error {
@@ -1332,10 +1331,11 @@ export class ChatComposerComponent {
   readonly warningLimitLabel = TEXT_LIMIT_WARNING_THRESHOLD.toLocaleString();
   readonly hasUploadingAttachments = computed(() => this.attachments().some(attachment => attachment.isUploading));
   readonly noVisionTooltip = "This model can't see images. They'll still be saved to your gallery and chat history, where later agents can find them — they just won't be sent to this model.";
-  readonly showNoVisionWarning = computed(() => {
-    const model = this.models().find(m => m.id === this.selectedModelId());
-    return model?.vision_support === false && this.attachments().some(isPendingImageAttachment);
-  });
+  /** True when the selected model is known to be text-only; its image chips then show the no-vision style. */
+  readonly selectedModelLacksVision = computed(
+    () => this.models().find(m => m.id === this.selectedModelId())?.vision_support === false,
+  );
+  readonly isPendingImageAttachment = isPendingImageAttachment;
   readonly composerDisabled = computed(() => this.disabled() || this.threadArchived());
   readonly characterCount = computed(() => this.draft().length);
   readonly characterCountLabel = computed(() => this.characterCount().toLocaleString());
