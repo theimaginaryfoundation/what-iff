@@ -38,6 +38,9 @@ type braveResponse struct {
 	} `json:"web"`
 }
 
+// braveFreshness maps Recency to Brave's freshness codes (past day/week/month/year).
+var braveFreshness = map[Recency]string{RecencyDay: "pd", RecencyWeek: "pw", RecencyMonth: "pm", RecencyYear: "py"}
+
 func (b *BraveBackend) Search(ctx context.Context, q Query) ([]Result, error) {
 	query := strings.TrimSpace(q.Query)
 	if query == "" {
@@ -48,6 +51,9 @@ func (b *BraveBackend) Search(ctx context.Context, q Query) ([]Result, error) {
 	params.Set("q", query)
 	params.Set("count", strconv.Itoa(limit))
 	params.Set("extra_snippets", "true")
+	if f := braveFreshness[q.Recency]; f != "" {
+		params.Set("freshness", f)
+	}
 	var resp braveResponse
 	if err := getJSON(ctx, b.client, b.baseURL+"/web/search?"+params.Encode(), map[string]string{"X-Subscription-Token": b.apiKey}, &resp); err != nil {
 		return nil, fmt.Errorf("brave search: %w", err)

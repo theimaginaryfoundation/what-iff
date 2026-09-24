@@ -34,6 +34,43 @@ type Query struct {
 	// that support it (Parallel) use it to rank and excerpt, others ignore it.
 	Objective  string
 	MaxResults int
+	// Recency, when set, limits results to content published within that window.
+	Recency Recency
+}
+
+// Recency is a relative publication window for a search ("this week's news").
+type Recency string
+
+const (
+	RecencyDay   Recency = "day"
+	RecencyWeek  Recency = "week"
+	RecencyMonth Recency = "month"
+	RecencyYear  Recency = "year"
+)
+
+// ParseRecency accepts "", day, week, month or year (case-insensitive).
+func ParseRecency(s string) (Recency, error) {
+	r := Recency(strings.ToLower(strings.TrimSpace(s)))
+	switch r {
+	case "", RecencyDay, RecencyWeek, RecencyMonth, RecencyYear:
+		return r, nil
+	}
+	return "", fmt.Errorf("recency must be one of day, week, month or year, got %q", s)
+}
+
+// since returns the start of the window ending at now.
+func (r Recency) since(now time.Time) time.Time {
+	switch r {
+	case RecencyDay:
+		return now.AddDate(0, 0, -1)
+	case RecencyWeek:
+		return now.AddDate(0, 0, -7)
+	case RecencyMonth:
+		return now.AddDate(0, -1, 0)
+	case RecencyYear:
+		return now.AddDate(-1, 0, 0)
+	}
+	return time.Time{}
 }
 
 // Result is one search hit, already trimmed for model consumption.

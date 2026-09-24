@@ -269,6 +269,12 @@ var WebSearchFunctionToolSpec = FunctionToolSpec{
 			"minimum":     1,
 			"maximum":     10,
 		},
+		"recency": map[string]interface{}{
+			"type": "string",
+			"enum": []string{"day", "week", "month", "year"},
+			"description": "Optional: only return pages published within the last day, week, month or year. " +
+				"Set it for news, scores, prices, releases and anything else asked about as recent.",
+		},
 	},
 	Required: []string{"query"},
 }

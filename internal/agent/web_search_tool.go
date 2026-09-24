@@ -26,6 +26,7 @@ type webSearchToolInput struct {
 	Query      string `json:"query"`
 	Objective  string `json:"objective"`
 	MaxResults int    `json:"max_results"`
+	Recency    string `json:"recency"`
 }
 
 type webSearchToolOutput struct {
@@ -46,7 +47,11 @@ func (a *Agent) webSearchTool(ctx context.Context, input []byte) (string, error)
 	if in.Query == "" {
 		return "", errors.New("web_search needs a non-empty query")
 	}
-	results, err := a.webSearch.Backend.Search(ctx, websearch.Query{Query: in.Query, Objective: in.Objective, MaxResults: in.MaxResults})
+	recency, err := websearch.ParseRecency(in.Recency)
+	if err != nil {
+		return "", err
+	}
+	results, err := a.webSearch.Backend.Search(ctx, websearch.Query{Query: in.Query, Objective: in.Objective, MaxResults: in.MaxResults, Recency: recency})
 	if err != nil {
 		return "", fmt.Errorf("web search failed: %w", err)
 	}

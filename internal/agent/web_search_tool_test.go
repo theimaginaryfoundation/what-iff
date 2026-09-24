@@ -81,9 +81,9 @@ func TestWebSearchTool(t *testing.T) {
 	backend := &fakeSearchBackend{results: []websearch.Result{{Title: "Fox", URL: "https://a.example", Snippet: "s"}}}
 	a := &Agent{webSearch: &websearch.Service{Backend: backend}}
 
-	out, err := a.webSearchTool(context.Background(), []byte(`{"query":"  red fox ","objective":"facts","max_results":3}`))
+	out, err := a.webSearchTool(context.Background(), []byte(`{"query":"  red fox ","objective":"facts","max_results":3,"recency":"week"}`))
 	require.NoError(t, err)
-	assert.Equal(t, websearch.Query{Query: "red fox", Objective: "facts", MaxResults: 3}, backend.gotQuery)
+	assert.Equal(t, websearch.Query{Query: "red fox", Objective: "facts", MaxResults: 3, Recency: websearch.RecencyWeek}, backend.gotQuery)
 	var decoded webSearchToolOutput
 	require.NoError(t, json.Unmarshal([]byte(out), &decoded))
 	assert.Equal(t, "red fox", decoded.Query)
@@ -96,6 +96,9 @@ func TestWebSearchTool(t *testing.T) {
 
 	_, err = a.webSearchTool(context.Background(), []byte(`{"query":"  "}`))
 	assert.ErrorContains(t, err, "non-empty query")
+
+	_, err = a.webSearchTool(context.Background(), []byte(`{"query":"x","recency":"fortnight"}`))
+	assert.ErrorContains(t, err, "day, week, month or year", "a bad recency tells the model the allowed values")
 
 	backend.err = errors.New("HTTP 500")
 	_, err = a.webSearchTool(context.Background(), []byte(`{"query":"x"}`))

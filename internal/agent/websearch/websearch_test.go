@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,6 +38,32 @@ func TestParallelSearch(t *testing.T) {
 		{Title: "Red foxes", URL: "https://a.example", Snippet: "one … two", PublishedAt: "2026-01-02"},
 		{Title: "B", URL: "https://b.example"},
 	}, results)
+}
+
+func TestParallelSearch_RecencySetsAfterDate(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	}))
+	defer srv.Close()
+	p := NewParallel("pk", "", srv.Client())
+	p.baseURL = srv.URL
+	p.now = func() time.Time { return time.Date(2026, 9, 24, 15, 0, 0, 0, time.UTC) }
+
+	_, err := p.Search(context.Background(), Query{Query: "week 3 injuries", Recency: RecencyWeek})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"search_queries":["week 3 injuries"],"mode":"fast","advanced_settings":{"source_policy":{"after_date":"2026-09-17"}}}`, string(gotBody))
+}
+
+func TestParseRecency(t *testing.T) {
+	for in, want := range map[string]Recency{"": "", " Week ": RecencyWeek, "day": RecencyDay, "MONTH": RecencyMonth, "year": RecencyYear} {
+		got, err := ParseRecency(in)
+		require.NoError(t, err, in)
+		assert.Equal(t, want, got, in)
+	}
+	_, err := ParseRecency("fortnight")
+	assert.ErrorContains(t, err, "day, week, month or year")
 }
 
 // The v1 Extract API rejects unknown fields (422 extra_forbidden), so the body is pinned to
@@ -132,6 +159,7 @@ func TestBraveSearch(t *testing.T) {
 		assert.Equal(t, "red fox", r.URL.Query().Get("q"))
 		assert.Equal(t, "3", r.URL.Query().Get("count"))
 		assert.Equal(t, "true", r.URL.Query().Get("extra_snippets"))
+		assert.Equal(t, "pm", r.URL.Query().Get("freshness"))
 		_, _ = w.Write([]byte(`{"web":{"results":[
 			{"title":"The <strong>Red Fox</strong>","url":"https://a.example","description":"Foxes &amp; <strong>kits</strong>","page_age":"2026-03-04T00:00:00","extra_snippets":["more"]}]}}`))
 	}))
@@ -139,7 +167,7 @@ func TestBraveSearch(t *testing.T) {
 	b := NewBrave("bk", srv.Client())
 	b.baseURL = srv.URL
 
-	results, err := b.Search(context.Background(), Query{Query: "red fox", MaxResults: 3})
+	results, err := b.Search(context.Background(), Query{Query: "red fox", MaxResults: 3, Recency: RecencyMonth})
 	require.NoError(t, err)
 	assert.Equal(t, []Result{{Title: "The Red Fox", URL: "https://a.example", Snippet: "Foxes & kits … more", PublishedAt: "2026-03-04T00:00:00"}}, results)
 }

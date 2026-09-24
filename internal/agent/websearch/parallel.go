@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const parallelBaseURL = "https://api.parallel.ai/v1"
@@ -15,6 +16,7 @@ type ParallelBackend struct {
 	mode    string
 	baseURL string
 	client  *http.Client
+	now     func() time.Time
 }
 
 // NewParallel builds a Parallel backend. mode is "turbo", "fast" or "advanced" (default "fast").
@@ -23,15 +25,25 @@ func NewParallel(apiKey, mode string, client *http.Client) *ParallelBackend {
 	if mode == "" {
 		mode = "fast"
 	}
-	return &ParallelBackend{apiKey: apiKey, mode: mode, baseURL: parallelBaseURL, client: client}
+	return &ParallelBackend{apiKey: apiKey, mode: mode, baseURL: parallelBaseURL, client: client, now: time.Now}
 }
 
 func (p *ParallelBackend) Name() string { return "parallel" }
 
 type parallelSearchRequest struct {
-	Objective     string   `json:"objective,omitempty"`
-	SearchQueries []string `json:"search_queries"`
-	Mode          string   `json:"mode,omitempty"`
+	Objective        string                  `json:"objective,omitempty"`
+	SearchQueries    []string                `json:"search_queries"`
+	Mode             string                  `json:"mode,omitempty"`
+	AdvancedSettings *parallelSearchAdvanced `json:"advanced_settings,omitempty"`
+}
+
+type parallelSearchAdvanced struct {
+	SourcePolicy parallelSourcePolicy `json:"source_policy"`
+}
+
+type parallelSourcePolicy struct {
+	// AfterDate (YYYY-MM-DD) limits results to content published on or after it.
+	AfterDate string `json:"after_date"`
 }
 
 type parallelResult struct {
@@ -53,6 +65,9 @@ func (p *ParallelBackend) Search(ctx context.Context, q Query) ([]Result, error)
 	}
 	var resp parallelSearchResponse
 	req := parallelSearchRequest{Objective: strings.TrimSpace(q.Objective), SearchQueries: []string{query}, Mode: p.mode}
+	if q.Recency != "" {
+		req.AdvancedSettings = &parallelSearchAdvanced{SourcePolicy: parallelSourcePolicy{AfterDate: q.Recency.since(p.now()).Format(time.DateOnly)}}
+	}
 	if err := postJSON(ctx, p.client, p.baseURL+"/search", map[string]string{"x-api-key": p.apiKey}, req, &resp); err != nil {
 		return nil, fmt.Errorf("parallel search: %w", err)
 	}
