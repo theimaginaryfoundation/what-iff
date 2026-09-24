@@ -68,18 +68,25 @@ func (p *ParallelBackend) Search(ctx context.Context, q Query) ([]Result, error)
 	return out, nil
 }
 
+// parallelExtractRequest is the v1 Extract body. Excerpts always come back; full page
+// text is opt-in under advanced_settings.
 type parallelExtractRequest struct {
-	URLs        []string `json:"urls"`
-	Objective   string   `json:"objective,omitempty"`
-	Excerpts    bool     `json:"excerpts"`
-	FullContent bool     `json:"full_content"`
+	URLs             []string                 `json:"urls"`
+	Objective        string                   `json:"objective,omitempty"`
+	AdvancedSettings *parallelExtractAdvanced `json:"advanced_settings,omitempty"`
+}
+
+type parallelExtractAdvanced struct {
+	FullContent bool `json:"full_content"`
 }
 
 type parallelExtractResponse struct {
 	Results []parallelResult `json:"results"`
 	Errors  []struct {
-		URL     string `json:"url"`
-		Message string `json:"message"`
+		URL            string `json:"url"`
+		ErrorType      string `json:"error_type"`
+		HTTPStatusCode *int   `json:"http_status_code"`
+		Content        string `json:"content"`
 	} `json:"errors"`
 }
 
@@ -89,14 +96,26 @@ func (p *ParallelBackend) Extract(ctx context.Context, url, objective string) (P
 		return Page{}, fmt.Errorf("parallel: empty url")
 	}
 	objective = strings.TrimSpace(objective)
-	req := parallelExtractRequest{URLs: []string{url}, Objective: objective, Excerpts: objective != "", FullContent: objective == ""}
+	// With an objective the excerpts are already focused on it; without one, ask for the
+	// whole page so the model has something to read.
+	req := parallelExtractRequest{URLs: []string{url}, Objective: objective}
+	if objective == "" {
+		req.AdvancedSettings = &parallelExtractAdvanced{FullContent: true}
+	}
 	var resp parallelExtractResponse
 	if err := postJSON(ctx, p.client, p.baseURL+"/extract", map[string]string{"x-api-key": p.apiKey}, req, &resp); err != nil {
 		return Page{}, fmt.Errorf("parallel extract: %w", err)
 	}
 	if len(resp.Results) == 0 {
-		if len(resp.Errors) > 0 && resp.Errors[0].Message != "" {
-			return Page{}, fmt.Errorf("parallel extract: %s", resp.Errors[0].Message)
+		if len(resp.Errors) > 0 {
+			e := resp.Errors[0]
+			reason := strings.TrimSpace(e.ErrorType)
+			if e.HTTPStatusCode != nil {
+				reason = fmt.Sprintf("%s (HTTP %d)", reason, *e.HTTPStatusCode)
+			}
+			if reason != "" {
+				return Page{}, fmt.Errorf("parallel extract: could not read %s: %s", url, reason)
+			}
 		}
 		return Page{}, fmt.Errorf("parallel extract: no content for %s", url)
 	}
