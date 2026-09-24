@@ -48,6 +48,7 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			description text NOT NULL,
 			provider text NOT NULL DEFAULT 'openai',
 			tool_support bool NOT NULL DEFAULT false,
+			vision_support bool NULL,
 			base_credits_per_slab integer NOT NULL DEFAULT 1,
 			subscription_tier text NOT NULL DEFAULT 'high',
 			deleted bool NOT NULL DEFAULT false,

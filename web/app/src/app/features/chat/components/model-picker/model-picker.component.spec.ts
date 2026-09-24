@@ -40,7 +40,7 @@ describe('ModelPickerComponent', () => {
     let favorites: FakeModelFavoritesService;
     const models: Model[] = [
         { id: 'm3', name: 'claude-sonnet-4-6', display_name: 'Claude Sonnet 4.6', description: 'Claude', provider: 'anthropic', tool_support: true, subscription_tier: 'high' },
-        { id: 'm2', name: 'gpt-5.1', display_name: 'GPT-5.1', description: 'Two', provider: 'openai', tool_support: false, subscription_tier: 'high' },
+        { id: 'm2', name: 'gpt-5.1', display_name: 'GPT-5.1', description: 'Two', provider: 'openai', tool_support: false, vision_support: false, subscription_tier: 'high' },
         { id: 'm1', name: 'gpt-4o-mini', display_name: 'GPT-4o Mini', description: 'One', provider: 'openai', tool_support: true, subscription_tier: 'low' },
     ];
 
@@ -110,6 +110,17 @@ describe('ModelPickerComponent', () => {
         const vendors = [...fixture.nativeElement.querySelectorAll('.model-picker__vendor')].map((node: Element) => node.textContent ?? '');
         expect(vendors.some(text => text.includes('Gemini'))).toBe(true);
         expect(vendors.some(text => text.includes('GPT'))).toBe(true);
+    });
+
+    it('marks only models without vision support with the no-vision icon', () => {
+        fixture.nativeElement.querySelector('.model-picker__trigger').click();
+        fixture.detectChanges();
+
+        const rows = [...fixture.nativeElement.querySelectorAll('.model-picker__option')] as HTMLElement[];
+        const flagged = rows.filter(row => row.querySelector('.model-picker__no-vision'));
+        expect(flagged.length).toBe(1);
+        expect(flagged[0].textContent).toContain('GPT-5.1');
+        expect(flagged[0].querySelector('.model-picker__no-vision')?.getAttribute('aria-label')).toBe("Can't see images");
     });
 
     it('does not open when disabled', () => {

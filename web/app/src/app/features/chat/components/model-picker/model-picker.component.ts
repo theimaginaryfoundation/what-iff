@@ -155,6 +155,16 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
           (click)="choose(model)"
         >
           <span class="model-picker__option-name">{{ model.display_name }}</span>
+          @if (model.vision_support === false) {
+            <span class="model-picker__no-vision" role="img" aria-label="Can't see images" title="Can't see images">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c7 0 10 8 10 8a13.2 13.2 0 0 1-1.67 2.68"/>
+                <path d="M6.61 6.61A13.5 13.5 0 0 0 2 12s3 8 10 8a9.7 9.7 0 0 0 5.39-1.61"/>
+                <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/>
+                <line x1="2" y1="2" x2="22" y2="22"/>
+              </svg>
+            </span>
+          }
           @if (tierLabel(model); as tier) {
             <span class="model-picker__tier">{{ tier }}</span>
           }
@@ -381,6 +391,13 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    .model-picker__no-vision {
+      color: var(--color-text-muted);
+      display: inline-flex;
+      flex-shrink: 0;
+      margin-left: auto;
     }
 
     .model-picker__tier {

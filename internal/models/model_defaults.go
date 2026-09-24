@@ -1,10 +1,6 @@
 package models
 
-import (
-	"regexp"
-	"strconv"
-	"strings"
-)
+import "strings"
 
 const (
 	// DefaultModelName specifies which model from AvailableModels to use as the default
@@ -50,118 +46,135 @@ type ModelConfig struct {
 	DisplayName string
 	Description string
 	ToolSupport bool
-	Provider    ModelProvider
+	// VisionSupport marks models that accept image input; images are stripped
+	// from the context for models without it.
+	VisionSupport bool
+	Provider      ModelProvider
 }
 
 // AvailableModels is the complete list of models that will be seeded into the database.
 // The default model is determined by the DefaultModelName constant above.
 var AvailableModels = []ModelConfig{
 	{
-		Name:        "gpt-5.1",
-		DisplayName: "GPT-5.1",
-		Description: "GPT-5.1 is our flagship model for coding and agentic tasks with configurable reasoning and non-reasoning effort.",
-		ToolSupport: true,
-		Provider:    ModelProviderOpenAI,
+		Name:          "gpt-5.1",
+		DisplayName:   "GPT-5.1",
+		Description:   "GPT-5.1 is our flagship model for coding and agentic tasks with configurable reasoning and non-reasoning effort.",
+		ToolSupport:   true,
+		VisionSupport: true,
+		Provider:      ModelProviderOpenAI,
 	},
 	{
-		Name:        "gpt-5.4",
-		DisplayName: "GPT-5.4",
-		Description: "Best intelligence at scale for agentic, coding, and professional workflows.",
-		ToolSupport: true,
-		Provider:    ModelProviderOpenAI,
+		Name:          "gpt-5.4",
+		DisplayName:   "GPT-5.4",
+		Description:   "Best intelligence at scale for agentic, coding, and professional workflows.",
+		ToolSupport:   true,
+		VisionSupport: true,
+		Provider:      ModelProviderOpenAI,
 	},
 	{
-		Name:        "gpt-4o",
-		DisplayName: "GPT-4o",
-		Description: "OpenAI's flagship multimodal model with vision capabilities. Matches GPT-4 Turbo performance in text/coding with superior non-English and vision tasks.",
-		ToolSupport: true,
-		Provider:    ModelProviderOpenAI,
+		Name:          "gpt-4o",
+		DisplayName:   "GPT-4o",
+		Description:   "OpenAI's flagship multimodal model with vision capabilities. Matches GPT-4 Turbo performance in text/coding with superior non-English and vision tasks.",
+		ToolSupport:   true,
+		VisionSupport: true,
+		Provider:      ModelProviderOpenAI,
 	},
 	{
-		Name:        "gpt-5",
-		DisplayName: "GPT-5",
-		Description: "OpenAI's latest flagship model combining reasoning and conversational capabilities. 272K token input, 128K token output.",
-		ToolSupport: true,
-		Provider:    ModelProviderOpenAI,
+		Name:          "gpt-5",
+		DisplayName:   "GPT-5",
+		Description:   "OpenAI's latest flagship model combining reasoning and conversational capabilities. 272K token input, 128K token output.",
+		ToolSupport:   true,
+		VisionSupport: true,
+		Provider:      ModelProviderOpenAI,
 	},
 	{
-		Name:        "gpt-5-mini",
-		DisplayName: "GPT-5 Mini",
-		Description: "Faster, more affordable GPT-5 variant with same capabilities. Optimized for cost-sensitive applications.",
-		ToolSupport: true,
-		Provider:    ModelProviderOpenAI,
+		Name:          "gpt-5-mini",
+		DisplayName:   "GPT-5 Mini",
+		Description:   "Faster, more affordable GPT-5 variant with same capabilities. Optimized for cost-sensitive applications.",
+		ToolSupport:   true,
+		VisionSupport: true,
+		Provider:      ModelProviderOpenAI,
 	},
 	{
-		Name:        "gpt-4.1-mini",
-		DisplayName: "GPT-4.1 Mini",
-		Description: "OpenAI GPT-4.1 Mini general-purpose chat model.",
-		ToolSupport: true,
-		Provider:    ModelProviderOpenAI,
+		Name:          "gpt-4.1-mini",
+		DisplayName:   "GPT-4.1 Mini",
+		Description:   "OpenAI GPT-4.1 Mini general-purpose chat model.",
+		ToolSupport:   true,
+		VisionSupport: true,
+		Provider:      ModelProviderOpenAI,
 	},
 	{
-		Name:        "gpt-4o-mini",
-		DisplayName: "GPT-4o Mini",
-		Description: "Smaller, faster, and more affordable version of GPT-4o. Excellent for high-volume tasks requiring good performance.",
-		ToolSupport: true,
-		Provider:    ModelProviderOpenAI,
+		Name:          "gpt-4o-mini",
+		DisplayName:   "GPT-4o Mini",
+		Description:   "Smaller, faster, and more affordable version of GPT-4o. Excellent for high-volume tasks requiring good performance.",
+		ToolSupport:   true,
+		VisionSupport: true,
+		Provider:      ModelProviderOpenAI,
 	},
 	{
-		Name:        "gpt-5.1-nano",
-		DisplayName: "GPT-5.1 Nano",
-		Description: "Ultra-fast, lightweight GPT-5.1 variant for high-throughput applications. Best price-performance ratio.",
-		ToolSupport: true,
-		Provider:    ModelProviderOpenAI,
+		Name:          "gpt-5.1-nano",
+		DisplayName:   "GPT-5.1 Nano",
+		Description:   "Ultra-fast, lightweight GPT-5.1 variant for high-throughput applications. Best price-performance ratio.",
+		ToolSupport:   true,
+		VisionSupport: true,
+		Provider:      ModelProviderOpenAI,
 	},
 
 	// Anthropic Claude models
 	/*
-		Commenting out Opus 4.6 as it is more expensive than our existing models so it needs better rate limiting before GA
-		{
-			Name:        "claude-opus-4-6",
-			DisplayName: "Claude Opus 4.6",
-			Description: "Anthropic's most intelligent model. Exceptional at complex analysis, coding, and nuanced reasoning with a 200K token context window.",
-			ToolSupport: true,
-			Provider:    ModelProviderAnthropic,
-		},
+				Commenting out Opus 4.6 as it is more expensive than our existing models so it needs better rate limiting before GA
+				{
+					Name:        "claude-opus-4-6",
+					DisplayName: "Claude Opus 4.6",
+					Description: "Anthropic's most intelligent model. Exceptional at complex analysis, coding, and nuanced reasoning with a 200K token context window.",
+					ToolSupport: true,
+		VisionSupport: true,
+					Provider:    ModelProviderAnthropic,
+				},
 	*/
 	{
-		Name:        "claude-sonnet-4-6",
-		DisplayName: "Claude Sonnet 4.6",
-		Description: "Anthropic's best balance of speed and intelligence with extended thinking capabilities. Ideal for most tasks.",
-		ToolSupport: true,
-		Provider:    ModelProviderAnthropic,
+		Name:          "claude-sonnet-4-6",
+		DisplayName:   "Claude Sonnet 4.6",
+		Description:   "Anthropic's best balance of speed and intelligence with extended thinking capabilities. Ideal for most tasks.",
+		ToolSupport:   true,
+		VisionSupport: true,
+		Provider:      ModelProviderAnthropic,
 	},
 	{
-		Name:        "claude-haiku-4-5",
-		DisplayName: "Claude 4.5 Haiku",
-		Description: "Anthropic's fastest and most compact Claude model. Best for high-volume, latency-sensitive tasks.",
-		ToolSupport: true,
-		Provider:    ModelProviderAnthropic,
+		Name:          "claude-haiku-4-5",
+		DisplayName:   "Claude 4.5 Haiku",
+		Description:   "Anthropic's fastest and most compact Claude model. Best for high-volume, latency-sensitive tasks.",
+		ToolSupport:   true,
+		VisionSupport: true,
+		Provider:      ModelProviderAnthropic,
 	},
 
 	// z.ai GLM models (routed through z.ai's Anthropic-compatible Messages API).
 	{
-		Name:        "glm-5.2",
-		DisplayName: "GLM-5.2",
-		Description: "z.ai's flagship GLM model. A strong, low-cost general-purpose model routed through z.ai's Anthropic-compatible API.",
-		ToolSupport: true,
-		Provider:    ModelProviderZAI,
+		Name:          "glm-5.2",
+		DisplayName:   "GLM-5.2",
+		Description:   "z.ai's flagship GLM model. A strong, low-cost general-purpose model routed through z.ai's Anthropic-compatible API.",
+		ToolSupport:   true,
+		VisionSupport: true,
+		Provider:      ModelProviderZAI,
 	},
 
 	// Google Gemini models (routed through Google's OpenAI-compatible Chat Completions API).
 	{
-		Name:        "gemini-3.5-flash",
-		DisplayName: "Gemini 3.5 Flash",
-		Description: "Google's fast, low-cost Gemini model. Optimized for high-volume, latency-sensitive conversational tasks.",
-		ToolSupport: true,
-		Provider:    ModelProviderGoogle,
+		Name:          "gemini-3.5-flash",
+		DisplayName:   "Gemini 3.5 Flash",
+		Description:   "Google's fast, low-cost Gemini model. Optimized for high-volume, latency-sensitive conversational tasks.",
+		ToolSupport:   true,
+		VisionSupport: true,
+		Provider:      ModelProviderGoogle,
 	},
 	{
-		Name:        "gemini-3.5",
-		DisplayName: "Gemini 3.5",
-		Description: "Google's flagship Gemini model balancing intelligence and cost for general-purpose conversation.",
-		ToolSupport: true,
-		Provider:    ModelProviderGoogle,
+		Name:          "gemini-3.5",
+		DisplayName:   "Gemini 3.5",
+		Description:   "Google's flagship Gemini model balancing intelligence and cost for general-purpose conversation.",
+		ToolSupport:   true,
+		VisionSupport: true,
+		Provider:      ModelProviderGoogle,
 	},
 }
 
@@ -175,6 +188,17 @@ func GetDefaultModel() *ModelConfig {
 	// Fallback to first model if default not found
 	if len(AvailableModels) > 0 {
 		return &AvailableModels[0]
+	}
+	return nil
+}
+
+// CatalogModel returns the seed-catalog entry for name, or nil when the name
+// is not in AvailableModels.
+func CatalogModel(name string) *ModelConfig {
+	for i := range AvailableModels {
+		if AvailableModels[i].Name == name {
+			return &AvailableModels[i]
+		}
 	}
 	return nil
 }
@@ -284,94 +308,6 @@ func UsesOpenAIChatCompletionsAPI(provider, name string) bool {
 	default:
 		return false
 	}
-}
-
-// ChatCompletionsSupportsVision reports whether an OpenAI-compatible Chat Completions
-// model accepts multimodal image input. Gemini (google) always does; Qwen, Mistral and
-// Xiaomi MiMo are matched by model-id heuristics. DeepSeek is text-only today.
-//
-// TODO: replace heuristics with a per-model allows_images (or similar) DB flag when
-// admin model management grows a vision capability field.
-func ChatCompletionsSupportsVision(provider, name string) bool {
-	switch providerForModel(provider, name) {
-	case ModelProviderGoogle:
-		return true
-	case ModelProviderQwen:
-		return qwenModelSupportsVision(name)
-	case ModelProviderMistral:
-		return mistralModelSupportsVision(name)
-	case ModelProviderXiaomi:
-		return xiaomiModelSupportsVision(name)
-	default:
-		return false
-	}
-}
-
-// mimoVersionPattern captures the major/minor version from MiMo model ids such as
-// "mimo-v2.6", "mimo-v2.6-pro" or "MiMo-2.6". The trailing guard keeps parameter-size
-// ids like "mimo-7b-rl" from being read as version 7.
-var mimoVersionPattern = regexp.MustCompile(`mimo-v?(\d+)(?:\.(\d+))?(?:[^0-9a-z.]|$)`)
-
-// xiaomiModelSupportsVision matches MiMo ids that accept image input: the 2.6+ line
-// (issue #143) and explicit omni/VL variants. mimo-v2.5-pro and older ids stay
-// text-only so they keep the image-stripping fallback.
-func xiaomiModelSupportsVision(name string) bool {
-	n := strings.ToLower(strings.TrimSpace(name))
-	if n == "" {
-		return false
-	}
-	if strings.Contains(n, "omni") || strings.Contains(n, "-vl") {
-		return true
-	}
-	m := mimoVersionPattern.FindStringSubmatch(n)
-	if m == nil {
-		return false
-	}
-	major, _ := strconv.Atoi(m[1])
-	minor := 0
-	if m[2] != "" {
-		minor, _ = strconv.Atoi(m[2])
-	}
-	return major > 2 || (major == 2 && minor >= 6)
-}
-
-func qwenModelSupportsVision(name string) bool {
-	n := strings.ToLower(strings.TrimSpace(name))
-	if n == "" {
-		return false
-	}
-	// Qwen 3.7/3.6 multimodal line (e.g. qwen3.7-plus).
-	if strings.Contains(n, "qwen3.7") || strings.Contains(n, "qwen3.6") {
-		return true
-	}
-	// qwen3.5-plus/flash support vision per DashScope docs; plain qwen-plus does not.
-	if strings.HasPrefix(n, "qwen3.5-plus") || strings.HasPrefix(n, "qwen3.5-flash") {
-		return true
-	}
-	if strings.Contains(n, "qwen-vl") || strings.Contains(n, "qwen3-vl") || strings.Contains(n, "qwen2.5-vl") {
-		return true
-	}
-	return false
-}
-
-func mistralModelSupportsVision(name string) bool {
-	n := strings.ToLower(strings.TrimSpace(name))
-	if n == "" {
-		return false
-	}
-	// Medium/Large/Small 3.x+ and Ministral/Magistral lines are multimodal.
-	for _, marker := range []string{
-		"mistral-medium",
-		"mistral-large",
-		"mistral-small",
-		"ministral",
-		"magistral",
-	} {
-		if strings.Contains(n, marker) {
-			return true
-		}
-	}
-	return false
 }
 
 // IsExperimentalProvider reports whether a provider is gated behind the per-user

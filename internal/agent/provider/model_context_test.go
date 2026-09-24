@@ -61,7 +61,7 @@ func TestModelContext_StripUserMessageImages_DropsExpressionPortrait(t *testing.
 	require.Equal(t, SegmentKindDeveloperContext, ctx.Segments[0].Kind)
 }
 
-func TestModelContext_PrepareForTextOnlyChatCompletions(t *testing.T) {
+func TestModelContext_PrepareForTextOnly(t *testing.T) {
 	t.Parallel()
 
 	ctx := &ModelContext{}
@@ -69,10 +69,10 @@ func TestModelContext_PrepareForTextOnlyChatCompletions(t *testing.T) {
 	ctx.AppendUserMessage(RoleUser, "", []UserMessageImage{{RawBytes: []byte{0x89, 0x50}, MediaType: "image/png"}}, false)
 	ctx.AppendUserMessage(RoleUser, "hello with image", []UserMessageImage{{RawBytes: []byte{0x01}}}, false)
 
-	ctx.PrepareForTextOnlyChatCompletions()
+	ctx.PrepareForTextOnly()
 
 	require.Len(t, ctx.Segments, 2)
-	require.Equal(t, TextOnlyChatCompletionsImageFallback, ctx.Segments[0].Content)
+	require.Equal(t, TextOnlyImageFallback, ctx.Segments[0].Content)
 	require.Empty(t, ctx.Segments[0].UserImages)
 	require.Equal(t, "hello with image", ctx.Segments[1].Content)
 	require.Empty(t, ctx.Segments[1].UserImages)

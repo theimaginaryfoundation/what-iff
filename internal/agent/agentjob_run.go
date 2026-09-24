@@ -254,6 +254,7 @@ func (a *Agent) handleEphemeralPrompt(
 			chatCtx.model = model.Name
 			chatCtx.modelProvider = model.Provider
 			chatCtx.modelSubscriptionTier = model.SubscriptionTier
+			chatCtx.modelVisionSupport = model.VisionSupport
 		} else if err != nil && !errors.Is(err, datastore.ErrModelNotFound) {
 			return nil, fmt.Errorf("failed to resolve model override: %w", err)
 		}
