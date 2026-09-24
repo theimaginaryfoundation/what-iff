@@ -3,7 +3,6 @@ package websearch
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -138,38 +137,19 @@ func TestHTTPError_SummarizesParallelValidationErrors(t *testing.T) {
 	assert.Equal(t, "parallel extract: HTTP 422: Request validation error. body.excerpts: Extra inputs are not permitted body.full_content: Extra inputs are not permitted", err.Error())
 }
 
-func TestHTTPError_SummarizesBraveDetail(t *testing.T) {
+// Auth failures use a different shape: a top-level message.
+func TestHTTPError_SummarizesTopLevelMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"type":"ErrorResponse","error":{"id":"x","status":429,"code":"RATE_LIMITED","detail":"Request rate limit exceeded for plan."}}`))
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code":16,"message":"Invalid API key (C.1)"}`))
 	}))
 	defer srv.Close()
-	b := NewBrave("bk", srv.Client())
-	b.baseURL = srv.URL
+	p := NewParallel("bad", "", srv.Client())
+	p.baseURL = srv.URL
 
-	_, err := b.Search(context.Background(), Query{Query: "x"})
+	_, err := p.Search(context.Background(), Query{Query: "x"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "HTTP 429: Request rate limit exceeded for plan.")
-}
-
-func TestBraveSearch(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/web/search", r.URL.Path)
-		assert.Equal(t, "bk", r.Header.Get("X-Subscription-Token"))
-		assert.Equal(t, "red fox", r.URL.Query().Get("q"))
-		assert.Equal(t, "3", r.URL.Query().Get("count"))
-		assert.Equal(t, "true", r.URL.Query().Get("extra_snippets"))
-		assert.Equal(t, "pm", r.URL.Query().Get("freshness"))
-		_, _ = w.Write([]byte(`{"web":{"results":[
-			{"title":"The <strong>Red Fox</strong>","url":"https://a.example","description":"Foxes &amp; <strong>kits</strong>","page_age":"2026-03-04T00:00:00","extra_snippets":["more"]}]}}`))
-	}))
-	defer srv.Close()
-	b := NewBrave("bk", srv.Client())
-	b.baseURL = srv.URL
-
-	results, err := b.Search(context.Background(), Query{Query: "red fox", MaxResults: 3, Recency: RecencyMonth})
-	require.NoError(t, err)
-	assert.Equal(t, []Result{{Title: "The Red Fox", URL: "https://a.example", Snippet: "Foxes & kits … more", PublishedAt: "2026-03-04T00:00:00"}}, results)
+	assert.Equal(t, "parallel search: HTTP 401: Invalid API key (C.1)", err.Error())
 }
 
 func TestHTTPErrorsAreBoundedAndOmitKey(t *testing.T) {
@@ -178,10 +158,10 @@ func TestHTTPErrorsAreBoundedAndOmitKey(t *testing.T) {
 		_, _ = w.Write([]byte(strings.Repeat("bad key ", 200)))
 	}))
 	defer srv.Close()
-	b := NewBrave("secret-key", srv.Client())
-	b.baseURL = srv.URL
+	p := NewParallel("secret-key", "", srv.Client())
+	p.baseURL = srv.URL
 
-	_, err := b.Search(context.Background(), Query{Query: "x"})
+	_, err := p.Search(context.Background(), Query{Query: "x"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "HTTP 401")
 	assert.NotContains(t, err.Error(), "secret-key")
@@ -189,65 +169,23 @@ func TestHTTPErrorsAreBoundedAndOmitKey(t *testing.T) {
 	assert.True(t, strings.HasSuffix(err.Error(), "…"), "a cut message says so")
 }
 
-type stubBackend struct {
-	name    string
-	results []Result
-	err     error
-	calls   int
-}
-
-func (s *stubBackend) Name() string { return s.name }
-func (s *stubBackend) Search(context.Context, Query) ([]Result, error) {
-	s.calls++
-	return s.results, s.err
-}
-
-func TestFallbackBackend(t *testing.T) {
-	primary := &stubBackend{name: "p", err: errors.New("down")}
-	secondary := &stubBackend{name: "s", results: []Result{{URL: "https://s.example"}}}
-	f := &fallbackBackend{primary: primary, secondary: secondary}
-
-	got, err := f.Search(context.Background(), Query{Query: "x"})
-	require.NoError(t, err)
-	assert.Equal(t, secondary.results, got)
-
-	primary.err = nil
-	primary.results = []Result{{URL: "https://p.example"}}
-	got, err = f.Search(context.Background(), Query{Query: "x"})
-	require.NoError(t, err)
-	assert.Equal(t, primary.results, got)
-	assert.Equal(t, 1, secondary.calls, "secondary only used when primary fails")
-
-	primary.err, secondary.err = errors.New("down"), errors.New("also down")
-	_, err = f.Search(context.Background(), Query{Query: "x"})
-	assert.ErrorContains(t, err, "also down")
-}
-
-func TestNew_SelectsBackends(t *testing.T) {
-	_, err := New(Config{})
+func TestNew(t *testing.T) {
+	_, err := New(Config{ParallelAPIKey: "  "})
 	assert.ErrorIs(t, err, ErrNotConfigured)
 
-	_, err = New(Config{Provider: "bing", BraveAPIKey: "b"})
-	assert.ErrorContains(t, err, "unknown provider")
-
-	svc, err := New(Config{BraveAPIKey: "b"})
+	svc, err := New(Config{ParallelAPIKey: "p"})
 	require.NoError(t, err)
-	assert.Equal(t, "brave", svc.Backend.Name())
-	assert.Nil(t, svc.Extractor, "Brave has no extract API")
+	assert.Equal(t, "parallel", svc.Backend.Name())
+	assert.Same(t, svc.Backend, svc.Extractor, "Parallel serves both search and extract")
+	parallel, ok := svc.Backend.(*ParallelBackend)
+	require.True(t, ok)
+	require.NotNil(t, parallel.client)
+	assert.Equal(t, defaultTimeout, parallel.client.Timeout, "no client given means a bounded default, never http.DefaultClient")
 
-	svc, err = New(Config{ParallelAPIKey: "p", BraveAPIKey: "b"})
+	custom := &http.Client{Timeout: time.Second}
+	svc, err = New(Config{ParallelAPIKey: "p", HTTPClient: custom})
 	require.NoError(t, err)
-	assert.Equal(t, "parallel+brave", svc.Backend.Name())
-	assert.NotNil(t, svc.Extractor)
-
-	svc, err = New(Config{Provider: "brave", ParallelAPIKey: "p", BraveAPIKey: "b"})
-	require.NoError(t, err)
-	assert.Equal(t, "brave+parallel", svc.Backend.Name())
-	assert.NotNil(t, svc.Extractor, "extract still available through Parallel")
-
-	svc, err = New(Config{Provider: "brave", ParallelAPIKey: "p"})
-	require.NoError(t, err)
-	assert.Equal(t, "parallel", svc.Backend.Name(), "falls back to the keyed backend")
+	assert.Same(t, custom, svc.Backend.(*ParallelBackend).client)
 }
 
 func TestNormalizeMaxResultsAndTruncate(t *testing.T) {

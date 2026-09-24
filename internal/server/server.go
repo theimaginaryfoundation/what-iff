@@ -190,11 +190,11 @@ func (s *Server) setupRoutes() {
 		XiaomiBaseURL:      s.config.XiaomiBaseURL,
 	}
 	if s.config.LLMBackend == "vendor" {
+		// ErrNotConfigured (no PARALLEL_API_KEY) leaves vendor-native search in place; any
+		// other error is a misconfiguration and stops startup rather than silently degrading.
 		webSearch, err := websearch.New(websearch.Config{
-			Provider:       s.config.WebSearchProvider,
 			ParallelAPIKey: s.config.ParallelAPIKey,
 			ParallelMode:   s.config.ParallelSearchMode,
-			BraveAPIKey:    s.config.BraveSearchAPIKey,
 		})
 		switch {
 		case err == nil:

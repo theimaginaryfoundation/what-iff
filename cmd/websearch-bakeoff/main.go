@@ -1,9 +1,8 @@
-// Command websearch-bakeoff runs the same queries through every keyed web search backend and
-// writes the results side by side as Markdown, so the production default is chosen on What Iff
-// traffic rather than published benchmarks (ADR 0x021).
+// Command websearch-bakeoff runs a set of sample queries through the web search backend and
+// writes the results as Markdown, so result quality and latency can be reviewed on What Iff
+// style queries (ADR 0x021). Set PARALLEL_SEARCH_MODE to compare search modes.
 //
-//	PARALLEL_API_KEY=... BRAVE_SEARCH_API_KEY=... \
-//	  go run ./cmd/websearch-bakeoff -queries scripts/websearch-bakeoff-queries.txt > bakeoff.md
+//	PARALLEL_API_KEY=... go run ./cmd/websearch-bakeoff -queries scripts/websearch-bakeoff-queries.txt > bakeoff.md
 package main
 
 import (
@@ -30,7 +29,7 @@ func main() {
 	}
 	backends := keyedBackends()
 	if len(backends) == 0 {
-		fail(fmt.Errorf("set PARALLEL_API_KEY and/or BRAVE_SEARCH_API_KEY"))
+		fail(fmt.Errorf("set PARALLEL_API_KEY"))
 	}
 
 	fmt.Printf("# Web search bake-off\n\n%s · %d queries · backends: %s\n", time.Now().Format(time.RFC3339), len(queries), names(backends))
@@ -63,15 +62,12 @@ func main() {
 	}
 }
 
-// keyedBackends returns each configured backend on its own (no fallback), for comparison.
+// keyedBackends returns the configured backends.
 func keyedBackends() []websearch.Backend {
 	client := &http.Client{Timeout: 30 * time.Second}
 	var out []websearch.Backend
 	if key := strings.TrimSpace(os.Getenv("PARALLEL_API_KEY")); key != "" {
 		out = append(out, websearch.NewParallel(key, os.Getenv("PARALLEL_SEARCH_MODE"), client))
-	}
-	if key := strings.TrimSpace(os.Getenv("BRAVE_SEARCH_API_KEY")); key != "" {
-		out = append(out, websearch.NewBrave(key, client))
 	}
 	return out
 }

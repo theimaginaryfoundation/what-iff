@@ -65,11 +65,9 @@ type Config struct {
 	QwenBaseURL     string
 	XiaomiKey       string
 	XiaomiBaseURL   string
-	// First-party web search (ADR 0x021). Empty keys leave the tools off.
-	WebSearchProvider     string
+	// First-party web search (ADR 0x021). An empty key leaves the tools off.
 	ParallelAPIKey        string
 	ParallelSearchMode    string
-	BraveSearchAPIKey     string
 	TokenEncryptionSecret string
 	AllowedEmails         []string
 	RequireBilling        bool // Feature flag to enable/disable billing
@@ -172,10 +170,8 @@ func NewConfig() *Config {
 	qwenBaseURL := strings.TrimSpace(os.Getenv("QWEN_BASE_URL"))
 	xiaomiKey := os.Getenv("XIAOMI_API_KEY")
 	xiaomiBaseURL := strings.TrimSpace(os.Getenv("XIAOMI_BASE_URL"))
-	webSearchProvider := strings.TrimSpace(os.Getenv("WEB_SEARCH_PROVIDER"))
 	parallelAPIKey := strings.TrimSpace(os.Getenv("PARALLEL_API_KEY"))
 	parallelSearchMode := strings.TrimSpace(os.Getenv("PARALLEL_SEARCH_MODE"))
-	braveSearchAPIKey := strings.TrimSpace(os.Getenv("BRAVE_SEARCH_API_KEY"))
 	tokenEncryptionSecret := strings.TrimSpace(os.Getenv("TOKEN_ENCRYPTION_SECRET"))
 
 	// Local-development defaults only. Deployed environments must set
@@ -291,10 +287,8 @@ func NewConfig() *Config {
 		QwenBaseURL:                         qwenBaseURL,
 		XiaomiKey:                           xiaomiKey,
 		XiaomiBaseURL:                       xiaomiBaseURL,
-		WebSearchProvider:                   webSearchProvider,
 		ParallelAPIKey:                      parallelAPIKey,
 		ParallelSearchMode:                  parallelSearchMode,
-		BraveSearchAPIKey:                   braveSearchAPIKey,
 		TokenEncryptionSecret:               tokenEncryptionSecret,
 		AllowedEmails:                       allowedEmails,
 		RequireBilling:                      requireBilling,

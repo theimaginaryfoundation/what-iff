@@ -59,13 +59,18 @@ func do(client *http.Client, req *http.Request, headers map[string]string, out a
 	return nil
 }
 
-// providerErrorEnvelope covers the JSON error shapes of the supported providers: Parallel
-// puts a message plus field-level validation errors under error; Brave puts a detail
-// string there.
+// providerErrorEnvelope covers Parallel's two error shapes: a top-level message (auth
+// errors), or a message plus field-level validation errors under error.
 type providerErrorEnvelope struct {
-	Error struct {
+	Message string `json:"message"`
+	Error   struct {
 		Message string `json:"message"`
-		Detail  any    `json:"detail"`
+		Detail  struct {
+			Errors []struct {
+				Loc []any  `json:"loc"`
+				Msg string `json:"msg"`
+			} `json:"errors"`
+		} `json:"detail"`
 	} `json:"error"`
 }
 
@@ -77,45 +82,29 @@ func summarizeErrorBody(body []byte) string {
 	var env providerErrorEnvelope
 	if json.Unmarshal(body, &env) == nil {
 		parts := []string{}
-		if m := strings.TrimSpace(env.Error.Message); m != "" {
-			parts = append(parts, m)
-		}
-		switch d := env.Error.Detail.(type) {
-		case string:
-			if d = strings.TrimSpace(d); d != "" {
-				parts = append(parts, d)
+		for _, m := range []string{env.Message, env.Error.Message} {
+			if m = strings.TrimSpace(m); m != "" {
+				parts = append(parts, m)
 			}
-		case map[string]any:
-			parts = append(parts, fieldErrors(d["errors"])...)
+		}
+		for _, e := range env.Error.Detail.Errors {
+			if e.Msg == "" {
+				continue
+			}
+			loc := make([]string, 0, len(e.Loc))
+			for _, p := range e.Loc {
+				loc = append(loc, fmt.Sprint(p))
+			}
+			if len(loc) > 0 {
+				parts = append(parts, strings.Join(loc, ".")+": "+e.Msg)
+			} else {
+				parts = append(parts, e.Msg)
+			}
 		}
 		if len(parts) > 0 {
 			msg = strings.Join(parts, " ")
 		}
 	}
 	out, _ := truncateRunes(msg, maxErrorMessage)
-	return out
-}
-
-// fieldErrors formats pydantic-style validation errors ({loc: [...], msg}) as "loc: msg".
-func fieldErrors(raw any) []string {
-	list, _ := raw.([]any)
-	out := make([]string, 0, len(list))
-	for _, item := range list {
-		e, _ := item.(map[string]any)
-		msg, _ := e["msg"].(string)
-		if msg == "" {
-			continue
-		}
-		loc := []string{}
-		if parts, ok := e["loc"].([]any); ok {
-			for _, p := range parts {
-				loc = append(loc, fmt.Sprint(p))
-			}
-		}
-		if len(loc) > 0 {
-			msg = strings.Join(loc, ".") + ": " + msg
-		}
-		out = append(out, msg)
-	}
 	return out
 }

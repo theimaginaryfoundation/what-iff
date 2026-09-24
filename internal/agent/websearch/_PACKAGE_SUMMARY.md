@@ -2,15 +2,17 @@
 
 ## Role
 
-First-party web search and page extraction behind the agent's `web_search` and `fetch_page` tools (ADR 0x021).
-It replaces vendor-native web search so every model gets the same capability, and the provider is configuration rather than code.
+First-party web search and page extraction behind the agent's `web_search` and `fetch_page` tools (ADR 0x021), backed by Parallel.
+When it is configured, every model gets the same capability and vendor-native web search is switched off.
 
 ## Responsibilities
 
-- `Backend` (search) and `Extractor` (page text) interfaces, with Parallel (`parallel.go`, search and extract) and Brave (`brave.go`, search only) implementations.
-- `New(Config)` picks the primary backend (`WEB_SEARCH_PROVIDER`, default Parallel), wraps the other keyed backend as a fallback, and exposes Parallel as the extractor when keyed.
-  It returns `ErrNotConfigured` when no key is set, which callers treat as "tools off".
-- Trims results for model context: snippets capped at 600 runes, pages at 20k runes, result counts at 1–10 (default 5), and HTML highlighting stripped from Brave text.
+- `Backend` (search) and `Extractor` (page text) interfaces, implemented by Parallel (`parallel.go`, Search and Extract v1 APIs).
+  The interfaces are the seam for agent tests and any future provider.
+- `New(Config)` returns a `Service` whose backend and extractor are both Parallel.
+  It returns `ErrNotConfigured` when `PARALLEL_API_KEY` is unset, which callers treat as "tools off".
+- `Query.Recency` (day/week/month/year) limits results to recently published pages via Parallel's `source_policy.after_date`.
+- Trims results for model context: snippets capped at 600 runes, pages at 20k runes, result counts at 1–10 (default 5).
 
 ## Dependencies
 
@@ -21,14 +23,13 @@ It replaces vendor-native web search so every model gets the same capability, an
 ## Non-obvious decisions
 
 - `fetch_page` goes through the provider's extract API, so our servers never fetch model-chosen URLs themselves.
-- The fallback only runs when the primary errors, and not when the request context is already cancelled.
-- Provider error bodies are truncated to 300 bytes before they reach errors (and so tool output), and never include the API key.
-- Absent backends are kept as nil interfaces, not interfaces holding nil pointers, so selection and fallback checks stay correct.
+- Parallel's v1 APIs reject unknown request fields (422 `extra_forbidden`), so tests pin request bodies to the documented JSON rather than comparing structs.
+- Provider errors are summarised from Parallel's error envelope (message plus field errors), bounded to 300 runes and cut on a rune boundary, and never include the API key.
 
 ## Testing
 
-- `websearch_test.go` runs each backend against `httptest` servers: auth headers, request bodies, parsing, limits, truncation, extract errors, bounded HTTP errors, fallback and provider selection.
-- `cmd/websearch-bakeoff` compares keyed backends on real queries (`scripts/websearch-bakeoff-queries.txt`); it needs real keys and is not part of CI.
+- `websearch_test.go` runs the backend against `httptest` servers: auth header, exact request bodies (including recency and extract options), parsing, limits, truncation, extract errors and error summaries.
+- `cmd/websearch-bakeoff` runs sample queries (`scripts/websearch-bakeoff-queries.txt`) against the real API to review quality and latency; it needs a real key and is not part of CI.
 
 ## Related documentation
 

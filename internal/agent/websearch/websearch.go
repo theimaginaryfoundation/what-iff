@@ -1,6 +1,6 @@
 // Package websearch provides first-party web search and page extraction for agent tools
-// (ADR 0x021). Backends are interchangeable behind Backend; configuration picks one and an
-// optional fallback, so the provider is a deployment choice rather than code.
+// (ADR 0x021), backed by Parallel. Backend and Extractor are the seam for tests and for any
+// future provider.
 package websearch
 
 import (
@@ -24,7 +24,7 @@ const (
 	defaultTimeout = 20 * time.Second
 )
 
-// ErrNotConfigured is returned by New when no backend has a key.
+// ErrNotConfigured is returned by New when no API key is set.
 var ErrNotConfigured = errors.New("websearch: no backend configured")
 
 // Query is one search request.
@@ -102,97 +102,32 @@ type Extractor interface {
 	Extract(ctx context.Context, url, objective string) (Page, error)
 }
 
-// Config selects and configures backends. Empty keys disable a backend.
+// Config configures the Parallel backend. An empty key leaves web search off.
 type Config struct {
-	// Provider is "parallel", "brave", or "" (auto: Parallel when keyed, else Brave).
-	Provider       string
 	ParallelAPIKey string
 	// ParallelMode is the Parallel search mode ("turbo", "fast", "advanced"); default "fast".
 	ParallelMode string
-	BraveAPIKey  string
 	HTTPClient   *http.Client
 }
 
-// Service is the configured search backend (with fallback) plus an optional extractor.
+// Service is the configured search backend and page extractor.
 type Service struct {
 	Backend   Backend
 	Extractor Extractor
 }
 
-// New builds the Service from cfg. It returns ErrNotConfigured when no backend has a key.
-// When both backends are keyed, the non-selected one becomes the fallback.
+// New builds the Service from cfg. It returns ErrNotConfigured when there is no key.
 func New(cfg Config) (*Service, error) {
+	key := strings.TrimSpace(cfg.ParallelAPIKey)
+	if key == "" {
+		return nil, ErrNotConfigured
+	}
 	client := cfg.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: defaultTimeout}
 	}
-	var parallel *ParallelBackend
-	if key := strings.TrimSpace(cfg.ParallelAPIKey); key != "" {
-		parallel = NewParallel(key, cfg.ParallelMode, client)
-	}
-	var brave *BraveBackend
-	if key := strings.TrimSpace(cfg.BraveAPIKey); key != "" {
-		brave = NewBrave(key, client)
-	}
-
-	// Assign through interfaces only when non-nil, so an absent backend is a nil Backend rather
-	// than a non-nil interface holding a nil pointer.
-	var parallelBackend, braveBackend Backend
-	if parallel != nil {
-		parallelBackend = parallel
-	}
-	if brave != nil {
-		braveBackend = brave
-	}
-
-	var primary, secondary Backend
-	switch strings.ToLower(strings.TrimSpace(cfg.Provider)) {
-	case "", "parallel":
-		primary, secondary = parallelBackend, braveBackend
-	case "brave":
-		primary, secondary = braveBackend, parallelBackend
-	default:
-		return nil, fmt.Errorf("websearch: unknown provider %q (want parallel or brave)", cfg.Provider)
-	}
-	if primary == nil {
-		primary, secondary = secondary, nil
-	}
-	if primary == nil {
-		return nil, ErrNotConfigured
-	}
-
-	svc := &Service{Backend: primary}
-	if secondary != nil {
-		svc.Backend = &fallbackBackend{primary: primary, secondary: secondary}
-	}
-	if parallel != nil {
-		svc.Extractor = parallel
-	}
-	return svc, nil
-}
-
-// fallbackBackend tries primary, then secondary when primary errors.
-type fallbackBackend struct {
-	primary, secondary Backend
-}
-
-func (f *fallbackBackend) Name() string {
-	return f.primary.Name() + "+" + f.secondary.Name()
-}
-
-func (f *fallbackBackend) Search(ctx context.Context, q Query) ([]Result, error) {
-	results, err := f.primary.Search(ctx, q)
-	if err == nil {
-		return results, nil
-	}
-	if ctx.Err() != nil {
-		return nil, err
-	}
-	fallback, fbErr := f.secondary.Search(ctx, q)
-	if fbErr != nil {
-		return nil, fmt.Errorf("%s: %w; fallback %s: %v", f.primary.Name(), err, f.secondary.Name(), fbErr)
-	}
-	return fallback, nil
+	parallel := NewParallel(key, cfg.ParallelMode, client)
+	return &Service{Backend: parallel, Extractor: parallel}, nil
 }
 
 func normalizeMaxResults(n int) int {
