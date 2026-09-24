@@ -228,6 +228,32 @@ describe('ChatComposerComponent', () => {
         expect(spy).not.toHaveBeenCalled();
     });
 
+    describe('no-vision warning', () => {
+        const textOnly = { id: 'm-text', name: 'deepseek-chat', display_name: 'DeepSeek', description: '', tool_support: true, vision_support: false };
+        const vision = { id: 'm-vision', name: 'gpt-5.1', display_name: 'GPT-5.1', description: '', tool_support: true, vision_support: true };
+        const image = { file: new File(['x'], 'cat.png', { type: 'image/png' }), isUploading: false };
+        const text = { file: new File(['x'], 'notes.txt', { type: 'text/plain' }), isUploading: false };
+
+        const warning = (modelId: string, attachments: unknown[]): HTMLElement | null => {
+            fixture.componentRef.setInput('models', [textOnly, vision]);
+            fixture.componentRef.setInput('selectedModelId', modelId);
+            fixture.componentRef.setInput('attachments', attachments);
+            fixture.detectChanges();
+            return fixture.nativeElement.querySelector('.composer__no-vision');
+        };
+
+        it('shows for an image on a text-only model, with the explanatory tooltip', () => {
+            const el = warning('m-text', [image]);
+            expect(el?.textContent).toContain('Images not supported');
+            expect(el?.getAttribute('aria-label')).toContain("This model can't see images.");
+        });
+
+        it('stays hidden for vision models and non-image files', () => {
+            expect(warning('m-vision', [image])).toBeNull();
+            expect(warning('m-text', [text])).toBeNull();
+        });
+    });
+
     it('shows stop button while generating', () => {
         fixture.componentRef.setInput('isGenerating', true);
         fixture.detectChanges();

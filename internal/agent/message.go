@@ -823,8 +823,11 @@ type chatContext struct {
 	// ("low"/"medium"/"high"/"ultra"), passed to the meter which classifies it for
 	// free-chat gating. Empty means unknown; the meter treats that conservatively.
 	modelSubscriptionTier string
-	activeMood            *models.Mood
-	activeMoodRituals     []*models.Ritual
+	// modelVisionSupport is the model's vision_support flag; when false, images are
+	// stripped from the context before any provider sees it.
+	modelVisionSupport bool
+	activeMood         *models.Mood
+	activeMoodRituals  []*models.Ritual
 	// expressionsEnabled mirrors personality.ExpressionsEnabled; when false,
 	// expression picking is skipped for this turn.
 	expressionsEnabled bool
@@ -894,9 +897,11 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 		return nil, quotaErr
 	}
 	var imageBytes map[uuid.UUID][]byte
-	if models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model) ||
-		models.ChatCompletionsSupportsVision(chatCtx.modelProvider, chatCtx.model) ||
-		hasImageAttachmentsWithoutFileID(chatMessage.Attachments) {
+	// Anthropic and Chat Completions wire formats take inline image bytes; OpenAI
+	// Responses references uploaded file IDs and only needs bytes as a fallback.
+	if chatCtx.modelVisionSupport && (models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model) ||
+		models.UsesOpenAIChatCompletionsAPI(chatCtx.modelProvider, chatCtx.model) ||
+		hasImageAttachmentsWithoutFileID(chatMessage.Attachments)) {
 		imageBytes = a.loadImageBytesForClaude(ctx, chatJob.UserID, chatMessage)
 	}
 	modelContext, err := a.buildModelContextForChatMessage(ctx, chatJob.UserID, chatMessage, chatCtx, imageBytes)
@@ -1256,7 +1261,7 @@ func (a *Agent) openAIResponseParamsForChat(ctx context.Context, chatCtx *chatCo
 			responses.ResponseIncludableWebSearchCallActionSources,
 		}
 	}
-	return modelCtx.BuildOpenAIResponseParams(provider.OpenAIResponseParamsOptions{
+	return visionRenderContext(chatCtx, modelCtx).BuildOpenAIResponseParams(provider.OpenAIResponseParamsOptions{
 		Model:             chatCtx.model,
 		SafetyUserID:      userID.String(),
 		MaxOutputTokens:   provider.DefaultMaxContentLength,
@@ -1318,7 +1323,7 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 	// Build the full message list from DB history + context injections.
 	// User images use base64 blocks when `UserMessageImage.RawBytes` is populated
 	// (see `loadImageBytesForClaude`); otherwise the user turn falls back to text-only.
-	claudeParams := modelContext.BuildClaudeParams(chatCtx.model)
+	claudeParams := visionRenderContext(chatCtx, modelContext).BuildClaudeParams(chatCtx.model)
 
 	// GLM/z.ai models always think and ignore a thinking budget; left alone, reasoning
 	// can eat the whole output cap and the turn truncates before any answer. Bound it
@@ -1369,7 +1374,7 @@ func (a *Agent) generateAssistantForMessageGemini(ctx context.Context, userID uu
 		return nil, nil, fmt.Errorf("Gemini model %q requested but GEMINI_API_KEY is not configured", chatCtx.model)
 	}
 
-	geminiParams := modelContext.BuildGeminiParams(chatCtx.model)
+	geminiParams := visionRenderContext(chatCtx, modelContext).BuildGeminiParams(chatCtx.model)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
 	geminiFunctionTools := geminiFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
@@ -1407,7 +1412,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	}
 
 	renderCtx := modelContext.Clone()
-	renderCtx.PrepareForTextOnlyChatCompletions()
+	renderCtx.PrepareForTextOnly()
 	params := renderCtx.BuildOpenAIChatCompletionParams(a.localLLMModel)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
@@ -1458,9 +1463,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 
 // generateAssistantForMessageOpenAIChatCompletions drives a chat turn through an
 // OpenAI-compatible Chat Completions API (Mistral, DeepSeek, Qwen, Xiaomi MiMo).
-// Text-only models strip multimodal segments via PrepareForTextOnlyChatCompletions;
-// vision-capable models (Gemini on its own path; Qwen 3.7+/Mistral medium+/MiMo 2.6+
-// heuristics here) keep images. Gemini uses a separate path for tool-call compatibility.
+// Gemini uses a separate path for tool-call compatibility.
 func (a *Agent) generateAssistantForMessageOpenAIChatCompletions(ctx context.Context, userID uuid.UUID, chatJob *models.Job, chatMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext) (*models.ChatMessage, *provider.GenerateResponse, error) {
 	params := buildOpenAIChatCompletionsParams(chatCtx, modelContext)
 
@@ -1476,16 +1479,21 @@ func (a *Agent) generateAssistantForMessageOpenAIChatCompletions(ctx context.Con
 	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, generationOptions{provider: string(chatCtx.modelProvider)})
 }
 
-// buildOpenAIChatCompletionsParams renders the model context for an OpenAI-compatible
-// Chat Completions turn. Image payloads are kept only when the model accepts vision
-// input (models.ChatCompletionsSupportsVision); otherwise they are stripped so a
-// text-only model never receives image parts it would reject.
 func buildOpenAIChatCompletionsParams(chatCtx *chatContext, modelContext *provider.ModelContext) openai.ChatCompletionNewParams {
-	renderCtx := modelContext.Clone()
-	if !models.ChatCompletionsSupportsVision(chatCtx.modelProvider, chatCtx.model) {
-		renderCtx.PrepareForTextOnlyChatCompletions()
+	return visionRenderContext(chatCtx, modelContext).BuildOpenAIChatCompletionParams(chatCtx.model)
+}
+
+// visionRenderContext returns the context to render a provider request from: the
+// context itself for vision models, or a text-only clone so a model without
+// vision_support never receives image parts. The source is never mutated because
+// post-turn phases and the context breakdown still read it.
+func visionRenderContext(chatCtx *chatContext, modelContext *provider.ModelContext) *provider.ModelContext {
+	if chatCtx.modelVisionSupport {
+		return modelContext
 	}
-	return renderCtx.BuildOpenAIChatCompletionParams(chatCtx.model)
+	renderCtx := modelContext.Clone()
+	renderCtx.PrepareForTextOnly()
+	return renderCtx
 }
 
 func (a *Agent) openAIChatCompletionsAdapter(chatCtx *chatContext, params openai.ChatCompletionNewParams, functionTools []openai.ChatCompletionToolUnionParam, disabledTools map[string]bool) (provider.AgentAdapter, error) {
@@ -1987,8 +1995,8 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 	// Resolve model from the chat's model_id (authoritative). Do not trust model_name
 	// alone — it can be stale, and a missing edge used to fall through to defaultModel
 	// (gpt-5.1) even when the user selected a different provider.
-	model, modelProvider, modelSubscriptionTier := a.resolveModelForChat(ctx, parentChat)
-	if err := a.assertUserCanRunChatModel(ctx, userID, parentChat, modelProvider); err != nil {
+	resolved := a.resolveModelForChat(ctx, parentChat)
+	if err := a.assertUserCanRunChatModel(ctx, userID, parentChat, resolved.provider); err != nil {
 		return nil, err
 	}
 
@@ -2000,23 +2008,40 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 		memories:               memories,
 		liveMemories:           liveMemories,
 		memoryEnrichmentFailed: memoryEnrichmentFailed,
-		model:                  model,
-		modelProvider:          modelProvider,
-		modelSubscriptionTier:  modelSubscriptionTier,
+		model:                  resolved.name,
+		modelProvider:          resolved.provider,
+		modelSubscriptionTier:  resolved.subscriptionTier,
+		modelVisionSupport:     resolved.visionSupport,
 		expressionsEnabled:     expressionsEnabled,
 	}, nil
 }
 
-// resolveModelForChat loads the effective model name, provider, and tier
-// for a chat turn. model_id on the chat row is authoritative; model_name is a fallback
-// only when the ID lookup fails. The returned tier is the model's raw
-// SubscriptionTier string ("" when unknown); the meter classifies it for gating.
-func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat) (modelName, modelProvider, subscriptionTier string) {
-	modelName = defaultModel
-	modelProvider = string(models.ModelProviderOpenAI)
+// resolvedChatModel is the effective model for a chat turn.
+type resolvedChatModel struct {
+	name     string
+	provider string
+	// subscriptionTier is the model's raw SubscriptionTier string ("" when unknown);
+	// the meter classifies it for gating.
+	subscriptionTier string
+	visionSupport    bool
+}
+
+// resolveModelForChat loads the effective model for a chat turn. model_id on the
+// chat row is authoritative; model_name is a fallback only when the ID lookup fails.
+func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat) resolvedChatModel {
+	fallback := func(name string) resolvedChatModel {
+		// No DB row: default provider/tier. Do not infer provider from the name —
+		// stale or orphan names must not route to experimental providers without a
+		// catalog row. Vision comes from the seed catalog so the default model keeps images.
+		r := resolvedChatModel{name: name, provider: string(models.ModelProviderOpenAI)}
+		if cfg := models.CatalogModel(name); cfg != nil {
+			r.visionSupport = cfg.VisionSupport
+		}
+		return r
+	}
 
 	if parentChat == nil {
-		return modelName, modelProvider, subscriptionTier
+		return fallback(defaultModel)
 	}
 
 	var dbModel *models.Model
@@ -2045,16 +2070,16 @@ func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat
 		}
 	}
 	if dbModel != nil {
-		provider := string(models.ProviderForModel(dbModel.Provider, dbModel.Name))
-		return dbModel.Name, provider, dbModel.SubscriptionTier
+		return resolvedChatModel{
+			name:             dbModel.Name,
+			provider:         string(models.ProviderForModel(dbModel.Provider, dbModel.Name)),
+			subscriptionTier: dbModel.SubscriptionTier,
+			visionSupport:    dbModel.VisionSupport,
+		}
 	}
 
 	if name := strings.TrimSpace(parentChat.ModelName); name != "" {
-		// No DB row: keep the chat's model name but default provider/tier. Do not
-		// infer provider from the name here — stale or orphan names must not route
-		// to experimental providers without a catalog row.
-		modelName = name
-		return modelName, modelProvider, subscriptionTier
+		return fallback(name)
 	}
 
 	if parentChat.ModelID != uuid.Nil {
@@ -2064,7 +2089,7 @@ func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat
 			zap.String("default_model", defaultModel),
 		)
 	}
-	return modelName, modelProvider, subscriptionTier
+	return fallback(defaultModel)
 }
 
 func (a *Agent) assertUserCanRunChatModel(ctx context.Context, userID uuid.UUID, parentChat *models.Chat, modelProvider string) error {

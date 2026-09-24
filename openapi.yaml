@@ -5940,6 +5940,9 @@ components:
         tool_support:
           type: boolean
           description: Whether the model supports tool/function calling
+        vision_support:
+          type: boolean
+          description: Whether the model accepts image input. Images are stripped from the context sent to models without it.
         base_credits_per_slab:
           type: integer
           format: int64
@@ -5961,6 +5964,7 @@ components:
         - description
         - provider
         - tool_support
+        - vision_support
         - base_credits_per_slab
         - subscription_tier
         - deleted
@@ -5972,6 +5976,7 @@ components:
         description: "Advanced language model with enhanced reasoning capabilities"
         provider: "openai"
         tool_support: true
+        vision_support: true
         base_credits_per_slab: 5
         deleted: false
         is_default: true

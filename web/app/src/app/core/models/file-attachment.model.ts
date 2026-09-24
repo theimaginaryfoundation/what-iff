@@ -83,3 +83,15 @@ export interface FileAttachmentFilters {
   max_date?: string;
 }
 
+
+export function isImageAttachment(attachment: Pick<FileAttachment, 'file_type'>): boolean {
+  return attachment.file_type?.toLowerCase().startsWith('image/') ?? false;
+}
+
+/** True when a pending chip is an image, whether still a local File or already uploaded. */
+export function isPendingImageAttachment(item: PendingFileAttachment): boolean {
+  if (item.attachment) {
+    return isImageAttachment(item.attachment);
+  }
+  return item.file?.type.toLowerCase().startsWith('image/') ?? false;
+}

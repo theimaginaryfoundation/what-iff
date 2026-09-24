@@ -16,6 +16,7 @@ import {
   sortedProviders,
 } from '../../helpers/model-picker.helpers';
 import { ModelFavoritesService } from '../../services/model-favorites.service';
+import { EyeOffIconComponent } from '../../../../shared/ui/icons/icons';
 
 type VendorStep = 'vendor' | 'model';
 type TierStep = 'tier' | 'model';
@@ -26,7 +27,7 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
 @Component({
   selector: 'app-model-picker',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, EyeOffIconComponent],
   template: `
     <div class="model-picker">
       <button
@@ -38,7 +39,12 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
         [disabled]="disabled()"
         (click)="toggle()"
       >
-        <span>{{ selectedModel()?.display_name || 'Model' }}</span>
+        <span class="model-picker__trigger-name">{{ selectedModel()?.display_name || 'Model' }}</span>
+        @if (lacksVision(selectedModel())) {
+          <span class="model-picker__no-vision" role="img" [attr.aria-label]="noVisionLabel" [title]="noVisionLabel">
+            <ui-eye-off-icon [size]="12" />
+          </span>
+        }
       </button>
       @if (open()) {
         <div
@@ -155,6 +161,11 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
           (click)="choose(model)"
         >
           <span class="model-picker__option-name">{{ model.display_name }}</span>
+          @if (lacksVision(model)) {
+            <span class="model-picker__no-vision" role="img" [attr.aria-label]="noVisionLabel" [title]="noVisionLabel">
+              <ui-eye-off-icon [size]="14" />
+            </span>
+          }
           @if (tierLabel(model); as tier) {
             <span class="model-picker__tier">{{ tier }}</span>
           }
@@ -191,6 +202,7 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
       cursor: pointer;
       display: inline-flex;
       font-size: 0.6875rem;
+      gap: 0.25rem;
       height: 2.25rem;
       line-height: 1;
       max-width: 8rem;
@@ -198,7 +210,7 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
       white-space: nowrap;
     }
 
-    .model-picker__trigger span {
+    .model-picker__trigger-name {
       overflow: hidden;
       text-overflow: ellipsis;
     }
@@ -383,7 +395,14 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
       white-space: nowrap;
     }
 
+    .model-picker__no-vision {
+      color: var(--color-text-muted);
+      display: inline-flex;
+      flex-shrink: 0;
+    }
+
     .model-picker__tier {
+      margin-left: auto;
       color: var(--color-text-primary);
       flex-shrink: 0;
       font-size: 0.625rem;
@@ -482,6 +501,12 @@ export class ModelPickerComponent {
     } else if (mode === 'tier') {
       this.resetTierStep();
     }
+  }
+
+  readonly noVisionLabel = "Can't see images";
+
+  lacksVision(model: Model | undefined): boolean {
+    return model?.vision_support === false;
   }
 
   tierLabel(model: Model): string {

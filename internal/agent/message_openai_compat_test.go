@@ -95,9 +95,9 @@ func userImageParts(params openai.ChatCompletionNewParams) []openai.ChatCompleti
 	return out
 }
 
-// Regression for #143: MiMo 2.6 accepts image input, so the rendered Chat
-// Completions request must keep the user's image as an OpenAI-style image_url
-// part. Text-only models (older MiMo, DeepSeek) must still have images stripped.
+// Regression for #143: a vision model's rendered Chat Completions request keeps the
+// user's image as an OpenAI-style image_url part; a text-only model's is stripped.
+// The gate is the model row's vision_support flag, not the model id.
 func TestBuildOpenAIChatCompletionsParams_ImageGating(t *testing.T) {
 	t.Parallel()
 
@@ -116,17 +116,17 @@ func TestBuildOpenAIChatCompletionsParams_ImageGating(t *testing.T) {
 		wantImages bool
 	}{
 		{provider: "xiaomi", model: "mimo-v2.6", wantImages: true},
-		{provider: "xiaomi", model: "mimo-v2.6-pro", wantImages: true},
 		{provider: "xiaomi", model: "mimo-v2.5-pro", wantImages: false},
 		{provider: "deepseek", model: "deepseek-chat", wantImages: false},
-		{provider: "qwen", model: "qwen3.7-plus", wantImages: true},
+		// Flag wins over the id: a DeepSeek row marked vision-capable keeps images.
+		{provider: "deepseek", model: "deepseek-vl", wantImages: true},
 	}
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.provider+"/"+tt.model, func(t *testing.T) {
 			t.Parallel()
 			mc := newCtx()
-			params := buildOpenAIChatCompletionsParams(&chatContext{modelProvider: tt.provider, model: tt.model}, mc)
+			params := buildOpenAIChatCompletionsParams(&chatContext{modelProvider: tt.provider, model: tt.model, modelVisionSupport: tt.wantImages}, mc)
 
 			require.Equal(t, shared.ChatModel(tt.model), params.Model)
 			parts := userImageParts(params)
@@ -140,4 +140,20 @@ func TestBuildOpenAIChatCompletionsParams_ImageGating(t *testing.T) {
 			require.Len(t, mc.Segments[1].UserImages, 1)
 		})
 	}
+}
+
+func TestVisionRenderContext(t *testing.T) {
+	t.Parallel()
+	mc := &provider.ModelContext{}
+	mc.AppendUserMessage(provider.RoleUser, "", []provider.UserMessageImage{
+		{RawBytes: []byte{0x89}, MediaType: "image/png"},
+	}, false)
+
+	require.Same(t, mc, visionRenderContext(&chatContext{modelVisionSupport: true}, mc))
+
+	textOnly := visionRenderContext(&chatContext{modelVisionSupport: false}, mc)
+	require.NotSame(t, mc, textOnly)
+	require.Empty(t, textOnly.Segments[0].UserImages)
+	require.Equal(t, provider.TextOnlyImageFallback, textOnly.Segments[0].Content)
+	require.Len(t, mc.Segments[0].UserImages, 1, "source context is not mutated")
 }

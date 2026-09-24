@@ -8255,6 +8255,7 @@ export interface components {
          *       "description": "Advanced language model with enhanced reasoning capabilities",
          *       "provider": "openai",
          *       "tool_support": true,
+         *       "vision_support": true,
          *       "base_credits_per_slab": 5,
          *       "deleted": false,
          *       "is_default": true
@@ -8279,6 +8280,8 @@ export interface components {
             provider: "openai" | "anthropic" | "zai" | "google" | "mistral" | "deepseek" | "qwen" | "xiaomi";
             /** @description Whether the model supports tool/function calling */
             tool_support: boolean;
+            /** @description Whether the model accepts image input. Images are stripped from the context sent to models without it. */
+            vision_support: boolean;
             /**
              * Format: int64
              * @description Credits charged per 15k-token slab for chat/job turns using this model
