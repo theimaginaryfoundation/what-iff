@@ -89,6 +89,42 @@ describe('ContextPanelService', () => {
         expect(service.pendingThreadReferences()).toEqual([referenced]);
     });
 
+    it('toggles composer thread references and never references the active chat', () => {
+        service.setActiveChat(chat('active', 'Current chat'));
+        const other = chat('old-1', 'Old research');
+
+        service.toggleComposerThreadReference(other);
+        service.toggleComposerThreadReference(chat('active', 'Current chat'));
+        expect(service.composerThreadReferences()).toEqual([other]);
+
+        service.toggleComposerThreadReference(other);
+        expect(service.composerThreadReferences()).toEqual([]);
+    });
+
+    it('removes, clears and formats composer thread references', () => {
+        service.toggleComposerThreadReference(chat('a', 'Alpha'));
+        service.toggleComposerThreadReference(chat('b', 'Beta'));
+
+        expect(service.composerThreadReferencesText()).toBe(
+            '[Thread context: "Alpha"; thread_id="a"]\n[Thread context: "Beta"; thread_id="b"]\n',
+        );
+
+        service.removeComposerThreadReference('a');
+        expect(service.composerThreadReferences().map(thread => thread.id)).toEqual(['b']);
+
+        service.clearComposerThreadReferences();
+        expect(service.composerThreadReferencesText()).toBe('');
+    });
+
+    it('drops a composer reference when the user opens that thread', () => {
+        service.toggleComposerThreadReference(chat('a', 'Alpha'));
+        service.toggleComposerThreadReference(chat('b', 'Beta'));
+
+        service.setActiveChat(chat('a', 'Alpha'));
+
+        expect(service.composerThreadReferences().map(thread => thread.id)).toEqual(['b']);
+    });
+
     it('forwards desktop visibility to right panel service', () => {
         service.setDesktopVisible(true);
         expect(rightPanel.setVisible).toHaveBeenCalledWith(true);

@@ -1,16 +1,19 @@
 import { AsyncPipe, NgComponentOutlet } from '@angular/common';
-import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, output, signal } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { Subscription } from 'rxjs';
 
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { CommandPaletteService } from '../../core/services/command-palette.service';
 import { NavService } from '../../core/services/nav.service';
+import { Chat } from '../../core/models/chat.model';
 import { Personality } from '../../core/models/personality.model';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { ThreadListService } from '../../core/services/thread-list.service';
 import { pickSidebarRecentThreads } from '../../features/chat/helpers/thread-list.helpers';
+import { startThreadDrag } from '../../features/chat/helpers/thread-drag.helpers';
+import { ContextPanelService } from '../../features/chat/services/context-panel.service';
 import { GalleryViewService } from '../../core/services/gallery-view.service';
 import { MemoryViewService } from '../../core/services/memory-view.service';
 import { ModeViewService } from '../../core/services/mode-view.service';
@@ -37,6 +40,10 @@ import { appNavItems, configNavItems, NavItem } from './nav.helpers';
 const PORTRAIT_SOURCE_WIDTH = 200;
 const PORTRAIT_SOURCE_HEIGHT = 267;
 const SIDEBAR_THREAD_AVATAR_SIZE = 30;
+/** Hold time before a touch on a thread row starts multi-select. */
+const SIDEBAR_LONG_PRESS_MS = 500;
+/** Finger travel that turns a press into a scroll and cancels the long-press. */
+const SIDEBAR_LONG_PRESS_SLOP_PX = 10;
 
 /**
  * Concept-D dual-sidebar shell. Composes the header, the active nav list, the
@@ -81,9 +88,30 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
   private readonly personalityService = inject(PersonalityService);
   private readonly router = inject(Router);
   private readonly confirmationService = inject(ConfirmationService);
+  private readonly contextPanel = inject(ContextPanelService);
   private readonly subscriptions = new Subscription();
   /** Thread to return to when the Chat button closes the Thread Manager (set when it opens it). */
   private threadManagerReturnId: string | null = null;
+
+  /** Mobile multi-select: long-press a thread, tap others to attach them to the next message. */
+  readonly refSelectionMode = signal(false);
+  readonly composerRefs = this.contextPanel.composerThreadReferences;
+  readonly refSelectionLabel = computed(() => {
+    const count = this.composerRefs().length;
+    return count === 1 ? '1 thread added' : `${count} threads added`;
+  });
+  private refSelectionSnapshot: readonly Chat[] = [];
+  private longPressTimer: ReturnType<typeof setTimeout> | null = null;
+  private longPressOrigin: { x: number; y: number } | null = null;
+  private suppressNextClick = false;
+  private lastPointerType = 'mouse';
+
+  /** Closing the drawer while selecting keeps what was picked (same as Confirm). */
+  private readonly exitSelectionOnCollapse = effect(() => {
+    if (this.nav.collapsed() && this.refSelectionMode()) {
+      this.refSelectionMode.set(false);
+    }
+  });
 
   readonly mode = this.nav.mode;
   readonly collapsed = this.nav.collapsed;
@@ -444,6 +472,95 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
 
   isModeView(): boolean {
     return this.router.url.startsWith('/mode');
+  }
+
+  onThreadDragStart(event: DragEvent, threadId: string): void {
+    // The open thread can't be attached to its own composer; touch long-press must select,
+    // not start a native drag (drag-to-composer is desktop only).
+    if (threadId === this.threads.activeThreadId() || this.lastPointerType !== 'mouse') {
+      event.preventDefault();
+      return;
+    }
+    startThreadDrag(event, threadId);
+  }
+
+  onThreadPointerDown(event: PointerEvent, thread: Chat): void {
+    this.lastPointerType = event.pointerType || 'mouse';
+    this.cancelLongPress();
+    if (this.lastPointerType === 'mouse' || thread.id === this.threads.activeThreadId()) {
+      return;
+    }
+    this.longPressOrigin = { x: event.clientX, y: event.clientY };
+    this.longPressTimer = setTimeout(() => {
+      this.longPressTimer = null;
+      this.suppressNextClick = true;
+      this.activateRefSelection(thread);
+    }, SIDEBAR_LONG_PRESS_MS);
+  }
+
+  onThreadPointerMove(event: PointerEvent): void {
+    const origin = this.longPressOrigin;
+    if (!this.longPressTimer || !origin) return;
+    if (Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > SIDEBAR_LONG_PRESS_SLOP_PX) {
+      this.cancelLongPress();
+    }
+  }
+
+  cancelLongPress(): void {
+    if (this.longPressTimer) {
+      clearTimeout(this.longPressTimer);
+      this.longPressTimer = null;
+    }
+    this.longPressOrigin = null;
+  }
+
+  onThreadContextMenu(event: Event): void {
+    if (this.lastPointerType !== 'mouse') {
+      event.preventDefault();
+    }
+  }
+
+  onThreadClick(thread: Chat): void {
+    if (this.suppressNextClick) {
+      this.suppressNextClick = false;
+      return;
+    }
+    if (this.refSelectionMode()) {
+      this.contextPanel.toggleComposerThreadReference(thread);
+      return;
+    }
+    this.openThread(thread.id);
+  }
+
+  isRefSelected(threadId: string): boolean {
+    return this.composerRefs().some(thread => thread.id === threadId);
+  }
+
+  private activateRefSelection(thread: Chat): void {
+    if (!this.refSelectionMode()) {
+      this.refSelectionSnapshot = [...this.composerRefs()];
+      this.refSelectionMode.set(true);
+    }
+    if (!this.isRefSelected(thread.id)) {
+      this.contextPanel.toggleComposerThreadReference(thread);
+    }
+  }
+
+  /** Enters selection mode without a long-press (keyboard / mouse / screen-reader route). */
+  startRefSelection(): void {
+    if (this.refSelectionMode()) return;
+    this.refSelectionSnapshot = [...this.composerRefs()];
+    this.refSelectionMode.set(true);
+  }
+
+  cancelRefSelection(): void {
+    this.contextPanel.setComposerThreadReferences(this.refSelectionSnapshot);
+    this.refSelectionMode.set(false);
+  }
+
+  confirmRefSelection(): void {
+    this.refSelectionMode.set(false);
+    this.nav.setCollapsed(true);
   }
 
   openThread(threadId: string): void {

@@ -16,6 +16,7 @@ export class ContextPanelService {
   private readonly _mobileOpen = signal(false);
   private readonly _composerInsert = signal<string | null>(null);
   private readonly _pendingThreadReferences = signal<Chat[]>([]);
+  private readonly _composerThreadReferences = signal<Chat[]>([]);
   private readonly _toolCalls = signal<readonly ToolCall[]>([]);
   private readonly _latestBreakdown = signal<ContextBreakdown | null>(null);
   private readonly _latestBreakdownId = signal<string | null>(null);
@@ -29,6 +30,8 @@ export class ContextPanelService {
   readonly mobileOpen = this._mobileOpen.asReadonly();
   readonly composerInsert = this._composerInsert.asReadonly();
   readonly pendingThreadReferences = this._pendingThreadReferences.asReadonly();
+  /** Threads attached to the message being composed; rendered as chips above the composer. */
+  readonly composerThreadReferences = this._composerThreadReferences.asReadonly();
   readonly toolCalls = this._toolCalls.asReadonly();
   /** Most recent assistant turn's Context X-ray for the active chat, or null. */
   readonly latestBreakdown = this._latestBreakdown.asReadonly();
@@ -51,6 +54,11 @@ export class ContextPanelService {
   setActiveChat(chat: Chat | null): void {
     this._activeChat.set(chat);
 
+    // A thread can't reference itself; drop it if the user navigated into a referenced thread.
+    if (chat && this._composerThreadReferences().some(thread => thread.id === chat.id)) {
+      this.removeComposerThreadReference(chat.id);
+    }
+
     // Thread references can be queued from the thread manager while there is no
     // active composer. Once the user opens the conversation they want to send
     // from, turn those queued references into explicit next-turn context text.
@@ -68,6 +76,38 @@ export class ContextPanelService {
       }
       return [...current, thread];
     });
+  }
+
+  /** Adds the thread to the composer references, or removes it if already attached. */
+  toggleComposerThreadReference(thread: Chat): void {
+    if (thread.id === this.activeChatId()) {
+      return;
+    }
+    this._composerThreadReferences.update(current =>
+      current.some(item => item.id === thread.id)
+        ? current.filter(item => item.id !== thread.id)
+        : [...current, thread],
+    );
+  }
+
+  removeComposerThreadReference(threadId: string): void {
+    this._composerThreadReferences.update(current => current.filter(thread => thread.id !== threadId));
+  }
+
+  /** Replaces the composer references wholesale (e.g. restoring a selection snapshot). */
+  setComposerThreadReferences(threads: readonly Chat[]): void {
+    const activeId = this.activeChatId();
+    this._composerThreadReferences.set(threads.filter(thread => thread.id !== activeId));
+  }
+
+  clearComposerThreadReferences(): void {
+    this._composerThreadReferences.set([]);
+  }
+
+  /** Text block sent ahead of the user's message for the attached threads ('' when none). */
+  composerThreadReferencesText(): string {
+    const references = this._composerThreadReferences();
+    return references.length > 0 ? formatThreadReferences(references) : '';
   }
 
   removePendingThreadReference(threadId: string): void {
