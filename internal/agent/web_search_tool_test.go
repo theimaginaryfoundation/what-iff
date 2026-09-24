@@ -192,10 +192,14 @@ func TestWebSearchUsage(t *testing.T) {
 	require.True(t, ok)
 	assert.False(t, usage.WebSearchFirstParty, "vendor-native searches are flagged as such, so they keep their own price")
 
+	usage, ok = firstParty.webSearchUsage(userID, chatID, chatCtx, models.ActionTypeJobRun)
+	require.True(t, ok, "agent job runs bill their web searches too")
+	assert.Equal(t, 3, usage.WebSearchCount)
+
+	_, ok = firstParty.webSearchUsage(userID, chatID, chatCtx, models.ActionTypeImageGeneration)
+	assert.False(t, ok, "turn types not listed as billable are not billed")
 	_, ok = firstParty.webSearchUsage(userID, chatID, &chatContext{}, models.ActionTypeChatMessage)
 	assert.False(t, ok, "no web actions, nothing to bill")
-	_, ok = firstParty.webSearchUsage(userID, chatID, chatCtx, models.ActionTypeJobRun)
-	assert.False(t, ok, "only chat turns bill web search")
 	_, ok = firstParty.webSearchUsage(userID, chatID, nil, models.ActionTypeChatMessage)
 	assert.False(t, ok)
 }

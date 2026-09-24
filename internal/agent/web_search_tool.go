@@ -136,11 +136,21 @@ func (a *Agent) turnWebSearchCount(adapter provider.AgentAdapter, toolCalls []*m
 	return n
 }
 
-// webSearchUsage builds the turn's web search metering event, recorded alongside the chat
-// turn's own event. ok is false when there is nothing to bill: no web actions, or not a
-// chat turn. The meter prices it by count, and WebSearchFirstParty says which kind.
+// webSearchBillableTurns lists the turn types whose web searches are billed: user chat turns
+// and scheduled agent job runs. Both run the full agent loop with the web search tools.
+// Turns that skip usage recording altogether (the welcome message) never reach
+// webSearchUsage. A new turn type must be added here deliberately.
+var webSearchBillableTurns = map[string]bool{
+	models.ActionTypeChatMessage: true,
+	models.ActionTypeJobRun:      true,
+}
+
+// webSearchUsage builds the turn's web search metering event, recorded alongside the turn's
+// own event. ok is false when there is nothing to bill: no web actions, or a turn type not
+// in webSearchBillableTurns. The meter prices it by count, and WebSearchFirstParty says
+// which kind.
 func (a *Agent) webSearchUsage(userID, chatID uuid.UUID, chatCtx *chatContext, actionType string) (metering.Usage, bool) {
-	if actionType != models.ActionTypeChatMessage || chatCtx == nil || chatCtx.webSearchCount <= 0 {
+	if !webSearchBillableTurns[actionType] || chatCtx == nil || chatCtx.webSearchCount <= 0 {
 		return metering.Usage{}, false
 	}
 	return metering.Usage{
