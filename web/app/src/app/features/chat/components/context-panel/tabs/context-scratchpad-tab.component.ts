@@ -23,16 +23,19 @@ import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.
             at checkpoints as you chat, you can edit them here, and they carry into every thread with this personality.
           </ui-help-hint>
         </div>
+        <!-- Scratchpads are per-personality, shared by all of its chats: saving here goes through
+             PATCH /chat/{id}/context -> UpdatePersonalityScratchpad(chat.personality_id)
+             (internal/handlers/chat/chat.go). Keep this copy personality-wide, not per-thread. -->
         <textarea
           id="scratchpad-input"
           [value]="scratchpad.value()"
           [disabled]="!canSave()"
           (input)="scratchpad.updateDraft($any($event.target).value)"
           aria-describedby="scratchpad-help"
-          placeholder="Capture thread-specific notes"
+          placeholder="Notes this personality keeps across all of its chats"
         ></textarea>
         <p id="scratchpad-help" class="hint">
-          @if (canSave()) { Autosaves changes for this conversation. } @else { Attach a personality to enable scratchpad saving. }
+          @if (canSave()) { Autosaves. Shared by every chat with this personality. } @else { Attach a personality to enable scratchpad saving. }
         </p>
         <div class="actions">
           <ui-button size="sm" variant="secondary" (activate)="copyToComposer()">Copy to composer</ui-button>
