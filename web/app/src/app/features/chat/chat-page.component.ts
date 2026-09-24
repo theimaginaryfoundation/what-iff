@@ -30,6 +30,7 @@ import { personalityCoverUrl } from '../personality/helpers/cover-image.helpers'
 import { AuthImagePipe } from '../../core/pipes/auth-image.pipe';
 import { ToolCallDetailModalComponent } from './components/tool-call-detail-modal/tool-call-detail-modal.component';
 import {
+  appendLiveToolCallGroup,
   appendPendingAssistantGroup,
   groupMessages,
   lastUserTurnWithGenerationError,
@@ -124,6 +125,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
           ? null
           : this.thinkingExpressionThumbUrl(),
       });
+      grouped = appendLiveToolCallGroup(grouped, pending, this.session.liveToolCalls());
       grouped = appendPendingAssistantGroup(grouped, pending);
     }
     return grouped;

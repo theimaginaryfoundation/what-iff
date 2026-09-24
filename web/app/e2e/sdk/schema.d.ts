@@ -8344,7 +8344,11 @@ export interface components {
              * @description Optional JSON-encoded progress payload for long-running jobs. Opaque to clients except per
              *     job_type. For `chat_import` it is `{phase, source, total, imported, skipped}`; for
              *     `account_import` it is `{phase, message, counts, conversations, personalities, memories,
-             *     warnings, result}`, where `result` is present on terminal success.
+             *     warnings, result}`, where `result` is present on terminal success. For `chat_message` it is
+             *     the live tool-call timeline of the in-flight turn: `{tool_calls: [{id, name, input, status,
+             *     output, round, started_at, finished_at}]}`, where `status` is `running`, `complete` or
+             *     `error`, `input`/`output` are truncated previews, and `output`/`finished_at` are set once the
+             *     call finishes. It is display-only; the saved assistant message's `tool_calls` are authoritative.
              */
             progress?: string;
             /** Format: date-time */

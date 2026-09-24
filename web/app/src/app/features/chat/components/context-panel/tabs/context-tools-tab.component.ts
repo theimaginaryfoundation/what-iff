@@ -11,6 +11,7 @@ import { ToolMeta, ToolService } from '../../../../../core/services/tool.service
 import { ChatService } from '../../../../../core/services/chat.service';
 import { apiErrorMessage } from '../../../../../core/utils/api-error.helpers';
 import { ContextPanelService } from '../../../services/context-panel.service';
+import { friendlyToolName, summarizeToolInput } from '../../../helpers/tool-call-format.helpers';
 
 type ToolContextTab = 'available' | 'history';
 
@@ -359,28 +360,13 @@ export class ContextToolsTabComponent implements OnChanges {
     void this.router.navigate(['/integrations']);
   }
 
-  friendlyToolName(name: string): string {
-    return name
-      .split(/[_-]/)
-      .filter(Boolean)
-      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(' ');
-  }
+  readonly friendlyToolName = friendlyToolName;
 
   toolInputSummary(toolCall: ToolCall): string {
-    const input = toolCall.tool_input?.trim();
-    if (!input) return 'No input recorded.';
-    try {
-      const parsed = JSON.parse(input) as Record<string, unknown>;
-      const query = parsed['query'] ?? parsed['search'] ?? parsed['url'] ?? parsed['path'];
-      if (typeof query === 'string' && query.trim()) {
-        const label = toolCall.tool_name.toLowerCase().includes('search') ? 'Search' : 'Input';
-        return `${label}: "${query.trim()}"`;
-      }
-    } catch {
-      // Fall back to compact raw text below.
-    }
-    return input.length > 96 ? `${input.slice(0, 93)}...` : input;
+    const summary = summarizeToolInput(toolCall.tool_input);
+    if (!summary) return 'No input recorded.';
+    const label = toolCall.tool_name.toLowerCase().includes('search') ? 'Search' : 'Input';
+    return `${label}: ${summary}`;
   }
 
   private async loadForChat(): Promise<void> {

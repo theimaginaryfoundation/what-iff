@@ -58,7 +58,7 @@ interface AssistantVisual {
               />
             }
             @case ('tool-call-group') {
-              <app-tool-call-group [toolCalls]="item.toolCalls" (openDetail)="openToolCallDetail.emit($event)" />
+              <app-tool-call-group [toolCalls]="item.toolCalls" [live]="item.live ?? false" (openDetail)="openToolCallDetail.emit($event)" />
             }
             @case ('model-change-divider') {
               <div class="message-list__divider" role="separator" aria-label="Model changed">

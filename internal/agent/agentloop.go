@@ -37,7 +37,7 @@ func (a *Agent) handleAgentLoop(
 			return result, allToolCalls, allGeneratedAttachments, nil
 		}
 
-		toolResults, modelToolCalls, generatedAttachments := a.executeToolUses(ctx, chatCtx, toolUses)
+		toolResults, modelToolCalls, generatedAttachments := a.executeToolUses(ctx, chatCtx, round, toolUses)
 		allToolCalls = append(allToolCalls, modelToolCalls...)
 		allGeneratedAttachments = append(allGeneratedAttachments, generatedAttachments...)
 		adapter.AppendToolResults(toolResults)
@@ -73,11 +73,19 @@ func (a *Agent) appendPostToolLoopGeneratedAttachments(ctx context.Context, chat
 
 // executeToolUses executes all tool uses and returns provider-agnostic results
 // plus the model-level ToolCall records for DB persistence.
-func (a *Agent) executeToolUses(ctx context.Context, chatCtx *chatContext, uses []provider.ToolUse) ([]provider.ToolResult, []*models.ToolCall, []*models.FileAttachment) {
+func (a *Agent) executeToolUses(ctx context.Context, chatCtx *chatContext, round int, uses []provider.ToolUse) ([]provider.ToolResult, []*models.ToolCall, []*models.FileAttachment) {
+	// progress may be nil (no job to report to); jobToolProgress methods are nil-receiver safe,
+	// so the calls below need no guard.
+	var progress *jobToolProgress
+	if chatCtx != nil {
+		progress = chatCtx.toolProgress
+	}
 	results := make([]provider.ToolResult, len(uses))
 	generatedAttachments := make([][]*models.FileAttachment, len(uses))
 	for i, use := range uses {
+		progress.Started(round, use)
 		results[i], generatedAttachments[i] = a.executeToolUseWithRecovery(ctx, chatCtx, use)
+		progress.Finished(results[i])
 		a.notifyToolUseGeneratedAttachments(chatCtx, use, generatedAttachments[i])
 		results[i].Images = toolResultImagesFromAttachments(generatedAttachments[i])
 	}

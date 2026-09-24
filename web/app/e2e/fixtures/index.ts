@@ -294,7 +294,7 @@ interface Fixtures {
   /**
    * A logged-in user that already owns a personality. Needed by anything that
    * navigates the authenticated app: `personalitySetupGuard` bounces accounts
-   * with zero personalities to `/personality/getting-started`.
+   * with zero personalities to `/personality?setup=1` (the first-run welcome).
    */
   userWithPersonality: UserWithPersonality;
 }

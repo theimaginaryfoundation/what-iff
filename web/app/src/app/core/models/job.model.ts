@@ -37,6 +37,25 @@ export interface Job {
   updated_at: string;
 }
 
+/** Decoded shape of {@link Job.progress} for `chat_message` jobs: the live tool-call timeline. */
+export interface ChatTurnProgress {
+  tool_calls: ChatTurnToolCall[];
+}
+
+/** One tool call in {@link ChatTurnProgress}; input/output are truncated previews. */
+export interface ChatTurnToolCall {
+  /** Provider tool-call id, unique within the turn. */
+  id: string;
+  name: string;
+  input?: string;
+  status: 'running' | 'complete' | 'error';
+  /** Result (or error text) preview, set once the call finishes. */
+  output?: string;
+  round: number;
+  started_at: string;
+  finished_at?: string;
+}
+
 /** Decoded shape of {@link Job.progress} for `chat_import` jobs. */
 export interface ChatImportProgress {
   phase: 'uploading' | 'parsing' | 'importing' | 'complete' | 'failed' | string;

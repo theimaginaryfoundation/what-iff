@@ -1,14 +1,16 @@
 
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 
-import { ToolCall } from '../../../../core/models/toolcall.model';
+import { ToolCall, ToolCallStatus } from '../../../../core/models/toolcall.model';
+import { formatToolPayload, friendlyToolName, summarizeToolCall } from '../../helpers/tool-call-format.helpers';
+
 
 @Component({
   selector: 'app-tool-call',
   standalone: true,
   imports: [],
   template: `
-    <article class="tool-call" [class.tool-call--grouped]="grouped()">
+    <article class="tool-call" [class.tool-call--grouped]="grouped()" [class.tool-call--running]="isRunning()">
       <button
         type="button"
         class="tool-call__toggle"
@@ -17,22 +19,38 @@ import { ToolCall } from '../../../../core/models/toolcall.model';
         (click)="toggle()"
       >
         <span class="tool-call__head">
-          <span class="tool-call__status-dot" [class.tool-call__status-dot--error]="hasError()" aria-hidden="true"></span>
+          <span
+            class="tool-call__status-dot"
+            [class.tool-call__status-dot--error]="hasError()"
+            [class.tool-call__status-dot--running]="isRunning()"
+            aria-hidden="true"
+          ></span>
           <span class="tool-call__name">{{ displayName() }}</span>
           <span class="tool-call__summary">{{ summary() }}</span>
         </span>
         <span class="tool-call__side">
-          <span class="tool-call__status">{{ hasError() ? 'Failed' : 'Complete' }}</span>
+          <span class="tool-call__status" [attr.aria-live]="isRunning() ? 'polite' : null">{{ statusLabel() }}</span>
           <time class="tool-call__stamp" [attr.datetime]="toolCall().created_at">{{ shortTime(toolCall().created_at) }}</time>
           <span class="tool-call__chevron" [class.tool-call__chevron--open]="expanded()" aria-hidden="true">›</span>
         </span>
       </button>
       @if (expanded()) {
         <div class="tool-call__panel" [id]="panelId()">
-          <pre>{{ toolCall().tool_output || toolCall().tool_error || 'No output' }}</pre>
-          <button type="button" class="tool-call__details" (click)="openDetail.emit(toolCall())">
-            View details
-          </button>
+          @if (formattedInput()) {
+            <section class="tool-call__section">
+              <h4 class="tool-call__section-label">Input</h4>
+              <pre>{{ formattedInput() }}</pre>
+            </section>
+          }
+          <section class="tool-call__section">
+            <h4 class="tool-call__section-label">{{ hasError() ? 'Error' : 'Output' }}</h4>
+            <pre>{{ formattedResult() }}</pre>
+          </section>
+          @if (!isRunning()) {
+            <button type="button" class="tool-call__details" (click)="openDetail.emit(toolCall())">
+              View details
+            </button>
+          }
         </div>
       }
     </article>
@@ -103,6 +121,20 @@ import { ToolCall } from '../../../../core/models/toolcall.model';
       background: var(--color-danger, #ef4444);
     }
 
+    .tool-call__status-dot--running {
+      background: var(--color-accent);
+      animation: tool-call-pulse 1.2s ease-in-out infinite;
+    }
+
+    @keyframes tool-call-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.35; transform: scale(0.75); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .tool-call__status-dot--running { animation: none; }
+    }
+
     .tool-call__name {
       color: var(--color-text-primary);
       font-size: 0.6875rem;
@@ -141,7 +173,28 @@ import { ToolCall } from '../../../../core/models/toolcall.model';
       padding: 0.625rem 0.75rem 0.75rem;
     }
 
+    .tool-call__section {
+      display: grid;
+      gap: 0.25rem;
+      min-width: 0;
+    }
+
+    .tool-call__section-label {
+      color: var(--color-text-muted);
+      font-size: 0.625rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      margin: 0;
+      text-transform: uppercase;
+    }
+
     pre {
+      background: color-mix(in srgb, var(--color-surface-base) 70%, transparent);
+      border-radius: 0.375rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      max-height: 16rem;
+      overflow-y: auto;
+      padding: 0.5rem 0.625rem;
       color: var(--color-text-secondary);
       font-size: 0.75rem;
       margin: 0;
@@ -164,12 +217,25 @@ import { ToolCall } from '../../../../core/models/toolcall.model';
 export class ToolCallComponent {
   readonly toolCall = input.required<ToolCall>();
   readonly grouped = input(false);
+  /** Set for live (in-flight) calls; saved calls derive complete/error from tool_error. */
+  readonly status = input<ToolCallStatus | null>(null);
   readonly openDetail = output<ToolCall>();
   readonly expanded = signal(false);
-  readonly hasError = computed(() => Boolean(this.toolCall().tool_error?.trim()));
+  readonly resolvedStatus = computed<ToolCallStatus>(
+    () => this.status() ?? (this.toolCall().tool_error?.trim() ? 'error' : 'complete'),
+  );
+  readonly isRunning = computed(() => this.resolvedStatus() === 'running');
+  readonly hasError = computed(() => this.resolvedStatus() === 'error');
+  readonly statusLabel = computed(() => STATUS_LABELS[this.resolvedStatus()]);
   readonly panelId = computed(() => `tool-call-${this.toolCall().id}`);
-  readonly displayName = computed(() => this.toolCall().tool_name.trim().toLowerCase());
-  readonly summary = computed(() => summarizeToolCall(this.toolCall()));
+  readonly displayName = computed(() => friendlyToolName(this.toolCall().tool_name.trim()).toLowerCase());
+  readonly summary = computed(() => summarizeToolCall(this.toolCall(), this.resolvedStatus()));
+  readonly formattedInput = computed(() => formatToolPayload(this.toolCall().tool_input));
+  readonly formattedResult = computed(() => {
+    if (this.isRunning()) return 'Waiting for result…';
+    const call = this.toolCall();
+    return formatToolPayload(this.hasError() ? call.tool_error : call.tool_output) || 'No output';
+  });
 
   toggle(): void {
     this.expanded.set(!this.expanded());
@@ -180,15 +246,8 @@ export class ToolCallComponent {
   }
 }
 
-function summarizeToolCall(toolCall: ToolCall): string {
-  const output = toolCall.tool_output?.trim();
-  if (output) return output.replace(/\s+/g, ' ').slice(0, 120);
-
-  const error = toolCall.tool_error?.trim();
-  if (error) return error.replace(/\s+/g, ' ').slice(0, 120);
-
-  const input = toolCall.tool_input?.trim();
-  if (input) return input.replace(/\s+/g, ' ').slice(0, 120);
-
-  return 'No summary';
-}
+const STATUS_LABELS: Record<ToolCallStatus, string> = {
+  running: 'Running…',
+  complete: 'Complete',
+  error: 'Failed',
+};

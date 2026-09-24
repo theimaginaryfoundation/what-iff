@@ -10,32 +10,39 @@ import { ButtonComponent } from '../../../../../shared/ui/button/button.componen
 import { ModalComponent } from '../../../../../shared/ui/modal/modal.component';
 
 type MemoryContextTab = 'thread' | 'global';
+import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.component';
 
 @Component({
   selector: 'app-context-memories-tab',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, ModalComponent],
+  imports: [CommonModule, ButtonComponent, ModalComponent, HelpHintComponent],
   template: `
     <section class="tab-body">
-      <div class="context-tabs" role="tablist" aria-label="Memory scope">
-        <button
-          type="button"
-          role="tab"
-          [attr.aria-selected]="activeMemoryTab() === 'thread'"
-          [class.context-tabs__button--active]="activeMemoryTab() === 'thread'"
-          (click)="activeMemoryTab.set('thread')"
-        >
-          This Thread
-        </button>
-        <button
-          type="button"
-          role="tab"
-          [attr.aria-selected]="activeMemoryTab() === 'global'"
-          [class.context-tabs__button--active]="activeMemoryTab() === 'global'"
-          (click)="activeMemoryTab.set('global')"
-        >
-          Global
-        </button>
+      <div class="memory-scope-row">
+        <div class="context-tabs" role="tablist" aria-label="Memory scope">
+          <button
+            type="button"
+            role="tab"
+            [attr.aria-selected]="activeMemoryTab() === 'thread'"
+            [class.context-tabs__button--active]="activeMemoryTab() === 'thread'"
+            (click)="activeMemoryTab.set('thread')"
+          >
+            This Thread
+          </button>
+          <button
+            type="button"
+            role="tab"
+            [attr.aria-selected]="activeMemoryTab() === 'global'"
+            [class.context-tabs__button--active]="activeMemoryTab() === 'global'"
+            (click)="activeMemoryTab.set('global')"
+          >
+            Global
+          </button>
+        </div>
+        <ui-help-hint label="What are memories?" heading="Memories" guide="continuity" align="end">
+          Things this personality has saved to remember. <strong>This Thread</strong> memories apply to this conversation;
+          <strong>Global</strong> ones carry into future conversations. You can edit or remove any of them.
+        </ui-help-hint>
       </div>
 
       <div class="memory-content">
@@ -102,6 +109,16 @@ type MemoryContextTab = 'thread' | 'global';
       display: flex;
       flex: 1;
       min-height: 0;
+    }
+
+    .memory-scope-row {
+      align-items: center;
+      display: flex;
+      gap: 0.25rem;
+    }
+
+    .memory-scope-row .context-tabs {
+      flex: 1;
     }
 
     .context-tabs {
