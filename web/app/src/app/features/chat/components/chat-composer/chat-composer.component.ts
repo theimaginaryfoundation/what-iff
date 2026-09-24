@@ -165,9 +165,9 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
             <button
               type="button"
               class="composer__no-vision"
-              uiTooltip="This model cannot see images"
+              [uiTooltip]="noVisionTooltip"
               [disabledOnTouch]="false"
-              aria-label="Images not supported: this model cannot see images"
+              [attr.aria-label]="'Images not supported. ' + noVisionTooltip"
             >
               <ui-eye-off-icon [size]="12" />
               Images not supported
@@ -1331,6 +1331,7 @@ export class ChatComposerComponent {
   readonly hardLimitLabel = TEXT_LIMIT_HARD_MAX.toLocaleString();
   readonly warningLimitLabel = TEXT_LIMIT_WARNING_THRESHOLD.toLocaleString();
   readonly hasUploadingAttachments = computed(() => this.attachments().some(attachment => attachment.isUploading));
+  readonly noVisionTooltip = "This model can't see images. They'll still be saved to your gallery and chat history, where later agents can find them — they just won't be sent to this model.";
   readonly showNoVisionWarning = computed(() => {
     const model = this.models().find(m => m.id === this.selectedModelId());
     return model?.vision_support === false && this.attachments().some(isPendingImageAttachment);

@@ -73,7 +73,8 @@ html:has(.app-layout) body {
   padding: 0.35rem 0.5rem;
   pointer-events: none;
   position: fixed;
-  white-space: nowrap;
+  white-space: normal;
+  width: max-content;
   z-index: 1200;
 }
 

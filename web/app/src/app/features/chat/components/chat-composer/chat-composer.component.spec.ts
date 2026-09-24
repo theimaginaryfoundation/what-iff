@@ -245,7 +245,7 @@ describe('ChatComposerComponent', () => {
         it('shows for an image on a text-only model, with the explanatory tooltip', () => {
             const el = warning('m-text', [image]);
             expect(el?.textContent).toContain('Images not supported');
-            expect(el?.getAttribute('uitooltip') ?? el?.getAttribute('uiTooltip')).toBe('This model cannot see images');
+            expect(el?.getAttribute('aria-label')).toContain("This model can't see images.");
         });
 
         it('stays hidden for vision models and non-image files', () => {
