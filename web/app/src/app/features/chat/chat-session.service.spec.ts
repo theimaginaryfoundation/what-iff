@@ -14,7 +14,7 @@ import { MessageService } from '../../core/services/message.service';
 import { Chat } from '../../core/models/chat.model';
 import { ChatMessage } from '../../core/models/message.model';
 import { ChatSendGate } from './services/chat-send-gate';
-import { CHAT_PENDING_ASSISTANT_MESSAGE_ID, MESSAGE_JUMP_PAGE_SIZE } from './chat.constants';
+import { CHAT_JOB_POLL_INTERVAL_MS, CHAT_PENDING_ASSISTANT_MESSAGE_ID, MESSAGE_JUMP_PAGE_SIZE } from './chat.constants';
 
 describe('ChatSessionService', () => {
     type ChatServiceMock = Pick<MockedObject<ChatService>, 'createChat' | 'getChat' | 'patchChat' | 'setLastChatId' | 'markChatRead'>;
@@ -190,7 +190,7 @@ describe('ChatSessionService', () => {
             message: 'hello',
             origin: 'User',
         }));
-        expect(jobService.pollJob).toHaveBeenCalledWith('job-1', 'chat-1');
+        expect(jobService.pollJob).toHaveBeenCalledWith('job-1', 'chat-1', CHAT_JOB_POLL_INTERVAL_MS);
     });
 
     it('streams the next assistant message after a send', async () => {
@@ -442,7 +442,7 @@ describe('ChatSessionService', () => {
 
         service.setActive('chat-1');
 
-        expect(jobService.pollJob).toHaveBeenCalledWith('job-1', 'chat-1');
+        expect(jobService.pollJob).toHaveBeenCalledWith('job-1', 'chat-1', CHAT_JOB_POLL_INTERVAL_MS);
         expect(service.assistantJobPending()).toBe(true);
         expect(messageService.getMessage).not.toHaveBeenCalled();
     });
@@ -462,7 +462,7 @@ describe('ChatSessionService', () => {
 
         expect(messageService.getMessage).toHaveBeenCalledWith('user-new');
         expect(messageService.addMessageToList).toHaveBeenCalledWith(newTurn);
-        expect(jobService.pollJob).toHaveBeenCalledWith('job-2', 'chat-1');
+        expect(jobService.pollJob).toHaveBeenCalledWith('job-2', 'chat-1', CHAT_JOB_POLL_INTERVAL_MS);
     });
 
     it("does not look up the thread's job again while this tab is already polling one", async () => {
@@ -841,7 +841,7 @@ describe('ChatSessionService', () => {
 
             service.setActive('chat-1');
 
-            expect(jobService.pollJob).toHaveBeenCalledWith('job-A', 'chat-1');
+            expect(jobService.pollJob).toHaveBeenCalledWith('job-A', 'chat-1', CHAT_JOB_POLL_INTERVAL_MS);
             expect(service.assistantJobPending()).toBe(true);
             jobA$.next(jobSnapshot('job-A', { draft_deltas: ['Riven reply'] }));
             expect(service.pendingAssistantDraftText()).toBe('Riven reply');

@@ -1,7 +1,7 @@
 import type { MockedObject } from "vitest";
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
-import { Subject, of, throwError } from 'rxjs';
+import { Subject, map, of, throwError, timer } from 'rxjs';
 import { provideHttpClient, withXhr } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 
@@ -124,6 +124,32 @@ describe('JobService', () => {
             vi.useRealTimers();
         }
     });
+    it('pollJob still delivers snapshots when each response is slower than the poll interval', async () => {
+        vi.useFakeTimers();
+        try {
+            let requests = 0;
+            // Every GET takes 25ms against a 10ms interval (a slow link or a large job row).
+            vi.spyOn(service, 'getJob').mockImplementation(() => {
+                requests += 1;
+                return timer(25).pipe(map(() => ({
+                    id: 'job-1', user_id: 'user-1', status: 'processing', job_type: 'chat_message',
+                    reference: 'message-1', created_at: '', updated_at: '',
+                } as Job)));
+            });
+
+            const emissions: Job[] = [];
+            const sub = service.pollJob('job-1', 'chat-1', 10).subscribe(value => emissions.push(value));
+            await vi.advanceTimersByTimeAsync(100);
+            sub.unsubscribe();
+
+            expect(emissions.length).toBeGreaterThan(0);
+            // Ticks during an in-flight request are skipped rather than stacking or cancelling it.
+            expect(requests).toBeLessThanOrEqual(4);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('pollJob does not let a late inference_complete row overwrite the completed one', async () => {
         // Regression: a job emits several phases that each carry a result_id, and
         // each dispatches its own getMessage(). Those are independent requests, so
