@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/embedding"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
 	agentjobscheduler "github.com/theimaginaryfoundation/what-iff/internal/agentjobs/scheduler"
 	"github.com/theimaginaryfoundation/what-iff/internal/buildinfo"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
@@ -187,6 +189,21 @@ func (s *Server) setupRoutes() {
 		XiaomiKey:          s.config.XiaomiKey,
 		XiaomiBaseURL:      s.config.XiaomiBaseURL,
 	}
+	if s.config.LLMBackend == "vendor" {
+		// ErrNotConfigured (no PARALLEL_API_KEY) leaves vendor-native search in place; any
+		// other error is a misconfiguration and stops startup rather than silently degrading.
+		webSearch, err := websearch.New(websearch.Config{
+			ParallelAPIKey: s.config.ParallelAPIKey,
+			ParallelMode:   s.config.ParallelSearchMode,
+		})
+		switch {
+		case err == nil:
+			agentCfg.WebSearch = webSearch
+			s.logger.Info("first-party web search enabled", zap.String("backend", webSearch.Backend.Name()))
+		case !errors.Is(err, websearch.ErrNotConfigured):
+			s.logger.Fatal("invalid web search configuration", zap.Error(err))
+		}
+	}
 	// The concrete meter is provided by metering.New, which the private metering
 	// implementation registers via a blank import in cmd/api-server; it reads its
 	// own configuration from the environment. When that package is absent (e.g.
@@ -280,7 +297,7 @@ func (s *Server) setupRoutes() {
 	moodHandler := moodhandler.NewHandler(dataStore, s.logger, agent.FileStore())
 	roleHandler := role.NewHandler(dataStore, s.logger)
 	webhookHandler := webhook.NewHandler(dataStore, agent, s.logger)
-	toolsHandler := toolshandler.NewHandler(s.logger)
+	toolsHandler := toolshandler.NewHandler(s.logger, agent.FirstPartyWebSearch())
 	searchHandler := search.NewHandler(dataStore, s.logger)
 	// Setup API routes
 	apiRouter := s.router.PathPrefix("/api").Subrouter()

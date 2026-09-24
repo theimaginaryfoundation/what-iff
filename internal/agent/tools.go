@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3/responses"
 	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -16,13 +17,23 @@ const ImageGenerationToolName = "image_generation"
 type ToolConfig struct {
 	// DisabledTools is the effective set of tool names to exclude. nil/empty = use all defaults.
 	DisabledTools map[string]bool
+	// NativeWebSearch adds the provider's built-in web search tool (off when first-party web
+	// search is configured, ADR 0x021).
+	NativeWebSearch bool
 }
 
 type turnToolPolicy struct {
-	toolsEnabled  bool
+	toolsEnabled bool
+	// disabledTools filters the function tools offered to the model. It is not consulted for
+	// vendor-native web search; use nativeWebSearch for that.
 	disabledTools map[string]bool
 	showMoodTools bool
 	ritualIDs     []uuid.UUID
+	// Exactly one of these is true when the user wants web search this turn: first-party
+	// web_search/fetch_page when a backend is configured (ADR 0x021), otherwise the vendor's
+	// native tool where the provider has one.
+	firstPartyWebSearch bool
+	nativeWebSearch     bool
 }
 
 // ToolMeta describes an available agent tool for use in the tools API.
@@ -43,12 +54,13 @@ func humanFacingToolDescription(def agenttools.FunctionToolDefinition) string {
 }
 
 // GetAvailableTools returns human-facing metadata for tools the user can toggle via disabled_tools.
+// firstPartyWebSearch selects the web_search copy (see Agent.FirstPartyWebSearch).
 // Provider/agent prompt descriptions remain on FunctionToolSpec and are intentionally not modified.
-func GetAvailableTools(ctx context.Context) []ToolMeta {
+func GetAvailableTools(ctx context.Context, firstPartyWebSearch bool) []ToolMeta {
 	_ = ctx
 	definitions := agenttools.FunctionToolCatalog()
 	out := make([]ToolMeta, 0, len(definitions)+1)
-	out = append(out, ToolMeta{Name: agenttools.ToolNameWebSearch, Description: agenttools.AvailableToolDescriptionWebSearch})
+	out = append(out, ToolMeta{Name: agenttools.ToolNameWebSearch, Description: agenttools.WebSearchToggleDescription(firstPartyWebSearch)})
 	for _, def := range definitions {
 		if !def.UserToggleable {
 			continue
@@ -91,8 +103,24 @@ func (a *Agent) buildTurnToolPolicy(ctx context.Context, chatCtx *chatContext, u
 			}
 		}
 	}
+	applyWebSearchPolicy(&policy, a.webSearch)
 
 	return policy
+}
+
+// applyWebSearchPolicy decides between first-party and vendor-native web search for a turn.
+// The user's web_search toggle governs both; fetch_page follows it and also needs a backend
+// with an extract API.
+func applyWebSearchPolicy(policy *turnToolPolicy, svc *websearch.Service) {
+	wantSearch := policy.toolsEnabled && !policy.disabledTools[agenttools.ToolNameWebSearch]
+	policy.firstPartyWebSearch = wantSearch && svc != nil
+	policy.nativeWebSearch = wantSearch && svc == nil
+	if !policy.firstPartyWebSearch {
+		policy.disabledTools[agenttools.ToolNameWebSearch] = true
+	}
+	if !policy.firstPartyWebSearch || svc.Extractor == nil {
+		policy.disabledTools[agenttools.ToolNameFetchPage] = true
+	}
 }
 
 func getChatTools(config ToolConfig) []responses.ToolUnionParam {
@@ -102,7 +130,7 @@ func getChatTools(config ToolConfig) []responses.ToolUnionParam {
 	// otherwise support tool calling do not support image_generation as a native tool, and we
 	// implement image generation via an explicit Images API call in a dedicated agent branch.
 	tools := []responses.ToolUnionParam{}
-	if !config.DisabledTools[agenttools.ToolNameWebSearch] {
+	if config.NativeWebSearch {
 		tools = append(tools, responses.ToolUnionParam{OfWebSearch: &responses.WebSearchToolParam{
 			Type: responses.WebSearchToolTypeWebSearch,
 		}})

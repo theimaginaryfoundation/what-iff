@@ -27,11 +27,6 @@ func claudeToolName(t anthropic.ToolUnionParam) string {
 	return ""
 }
 
-// claudeWebSearchTool adds Anthropic's native web search capability.
-var claudeWebSearchTool = anthropic.ToolUnionParam{
-	OfWebSearchTool20250305: &anthropic.WebSearchTool20250305Param{},
-}
-
 // ClaudeFunctionTool builds an Anthropic function tool param from a provider-neutral
 // function spec. Tool selection stays in the agent layer; this only handles SDK shape.
 func ClaudeFunctionTool(name, description string, properties map[string]interface{}, required []string, strict bool) anthropic.ToolUnionParam {
@@ -350,32 +345,6 @@ func (a *ClaudeAdapter) WebSearchCompletedCount() int {
 	return a.webSearchCompleted
 }
 
-func countWebSearchToolResultsInMessage(msg *anthropic.Message) int {
-	if msg == nil {
-		return 0
-	}
-	n := 0
-	for _, block := range msg.Content {
-		if _, ok := block.AsAny().(anthropic.WebSearchToolResultBlock); ok {
-			n++
-		}
-	}
-	return n
-}
-
-func countWebSearchToolResultsInBetaMessage(msg *anthropic.BetaMessage) int {
-	if msg == nil {
-		return 0
-	}
-	n := 0
-	for _, block := range msg.Content {
-		if _, ok := block.AsAny().(anthropic.BetaWebSearchToolResultBlock); ok {
-			n++
-		}
-	}
-	return n
-}
-
 // extractClaudeToolUses returns all tool-use blocks from a Message normalised
 // to the provider-agnostic ToolUse type.
 func extractClaudeToolUses(msg *anthropic.Message) []ToolUse {
@@ -518,22 +487,6 @@ func appendClaudeAssistantLoopTurn(params *anthropic.MessageNewParams, msg *anth
 	}
 }
 
-func claudeWebSearchToolResultReplayable(ws anthropic.WebSearchToolResultBlock) bool {
-	if len(claudeWebSearchResultsFromContent(ws.Content)) > 0 {
-		return true
-	}
-	err := ws.Content.AsResponseWebSearchToolResultError()
-	return err.ErrorCode != ""
-}
-
-func claudeBetaWebSearchToolResultReplayable(ws anthropic.BetaWebSearchToolResultBlock) bool {
-	if len(ws.Content.AsBetaWebSearchResultBlockArray()) > 0 {
-		return true
-	}
-	err := ws.Content.AsResponseWebSearchToolResultError()
-	return err.ErrorCode != ""
-}
-
 func appendClaudeToolResultImages(params *anthropic.MessageNewParams, results []ToolResult) {
 	if params == nil {
 		return
@@ -583,24 +536,6 @@ func claudeBetaImageBlocksFromUserImages(images []UserMessageImage, leadingText 
 		blocks = append(blocks, anthropic.NewBetaTextBlock(t))
 	}
 	return append(blocks, imageBlocks...)
-}
-
-func appendClaudeInLoopWebSearchContextText(params *anthropic.MessageNewParams, text string) {
-	if params == nil || strings.TrimSpace(text) == "" {
-		return
-	}
-	params.Messages = append(params.Messages, anthropic.NewUserMessage(
-		anthropic.NewTextBlock(text),
-	))
-}
-
-func appendClaudeBetaInLoopWebSearchContextText(params *anthropic.BetaMessageNewParams, text string) {
-	if params == nil || strings.TrimSpace(text) == "" {
-		return
-	}
-	params.Messages = append(params.Messages, anthropic.NewBetaUserMessage(
-		anthropic.NewBetaTextBlock(text),
-	))
 }
 
 // BuildClaudeBetaMCPParams converts standard MessageNewParams + an MCP config into

@@ -5,11 +5,23 @@ const (
 	ToolNameWebSearch = "web_search"
 )
 
-// Short descriptions for the /api/tools listing. Full FunctionToolSpec descriptions
-// are often long; the chat UI shows this for the web_search logical tool.
+// Short descriptions of the web_search toggle for the /api/tools listing and the first-chat
+// greeting. Full FunctionToolSpec descriptions are written for the model, not the user. The
+// copy depends on which web search is running (ADR 0x021): first-party search can also read
+// pages, while vendor-native search depends on the chat's model.
 const (
-	AvailableToolDescriptionWebSearch = "Search the web for current information."
+	WebSearchDescriptionFirstParty = "Look up current information (news, scores, prices, releases) and read web pages you share or it finds."
+	WebSearchDescriptionNative     = "Look up current information on the web. Works with models whose provider has built-in search."
 )
+
+// WebSearchToggleDescription returns the user-facing web_search description for the active
+// web search: first-party (PARALLEL_API_KEY set) or vendor-native.
+func WebSearchToggleDescription(firstParty bool) string {
+	if firstParty {
+		return WebSearchDescriptionFirstParty
+	}
+	return WebSearchDescriptionNative
+}
 
 // FunctionToolSpec captures provider-agnostic function tool metadata.
 // Both OpenAI and Claude tool registration should use these shared specs
@@ -241,4 +253,77 @@ var RunSubagentToolSpec = FunctionToolSpec{
 		},
 	},
 	Required: []string{"message"},
+}
+
+// ToolNameFetchPage is the first-party page-reading tool that pairs with web_search (ADR 0x021).
+const ToolNameFetchPage = "fetch_page"
+
+// WebSearchFunctionToolSpec is the first-party web search tool (ADR 0x021). It reuses the
+// web_search name so the user's web search toggle and saved tool-call history stay the same
+// whichever backend runs; the agent never offers it alongside a vendor-native web_search.
+var WebSearchFunctionToolSpec = FunctionToolSpec{
+	Name: ToolNameWebSearch,
+	Description: "Search the web for current or factual information you don't already know. " +
+		"Returns a short list of results with title, URL, snippet and published date (often missing). " +
+		"Prefer the snippets; use fetch_page only on the one or two URLs your answer depends on. " +
+		"Cite the URLs you rely on.",
+	Properties: map[string]interface{}{
+		"query": map[string]interface{}{
+			"type":        "string",
+			"description": "A concise search query, as you would type it into a search engine.",
+		},
+		"objective": map[string]interface{}{
+			"type":        "string",
+			"description": "Optional: one sentence on what you are trying to find out, used to rank and excerpt results.",
+		},
+		"max_results": map[string]interface{}{
+			"type":        "integer",
+			"description": "Number of results to return (1-10). Defaults to 5.",
+			"minimum":     1,
+			"maximum":     10,
+		},
+		"recency": map[string]interface{}{
+			"type": "string",
+			"enum": []string{"day", "week", "month", "year"},
+			"description": "Optional: drop pages published before the last day, week, month or year. " +
+				"Use it for news, scores, prices, releases and anything else asked about as recent. " +
+				"Pages with no published date are not filtered out, so check the published field before treating a result as recent.",
+		},
+		"published_after": map[string]interface{}{
+			"type": "string",
+			"description": "Optional: like recency but with an exact cutoff date, YYYY-MM-DD. " +
+				"If both are given, the later cutoff applies. Undated pages can still appear.",
+		},
+		"include_domains": map[string]interface{}{
+			"type":        "array",
+			"items":       map[string]interface{}{"type": "string"},
+			"description": "Optional: only return results from these domains, e.g. [\"espn.com\"] (at most 10). This is a strict filter.",
+		},
+		"exclude_domains": map[string]interface{}{
+			"type":        "array",
+			"items":       map[string]interface{}{"type": "string"},
+			"description": "Optional: never return results from these domains (at most 10).",
+		},
+	},
+	Required: []string{"query"},
+}
+
+// FetchPageToolSpec reads one web page through the search provider's extract API.
+var FetchPageToolSpec = FunctionToolSpec{
+	Name: ToolNameFetchPage,
+	Description: "Read the text of one web page, usually a URL returned by web_search. " +
+		"Give an objective to get only the relevant excerpts instead of the whole page. " +
+		"It can fail on JavaScript-heavy sites, some PDFs, or blocked and rate-limited hosts; the error says why. " +
+		"On failure, tell the user what went wrong rather than retrying the same URL.",
+	Properties: map[string]interface{}{
+		"url": map[string]interface{}{
+			"type":        "string",
+			"description": "The full http(s) URL to read.",
+		},
+		"objective": map[string]interface{}{
+			"type":        "string",
+			"description": "Optional: what you want from the page; returns focused excerpts instead of the full text.",
+		},
+	},
+	Required: []string{"url"},
 }

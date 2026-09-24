@@ -11,6 +11,11 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
+// Vendor-native web search (ADR 0x021): recovers Anthropic's built-in web search calls
+// from raw responses so they are persisted like any other tool call. This is the fallback
+// when first-party web search is not configured; runGeneration only wires it up when
+// Agent.FirstPartyWebSearch is false.
+
 // webSearchToolCallsFromClaudeMessages extracts native web search result blocks from
 // Anthropic message payloads observed during a turn.
 func webSearchToolCallsFromClaudeMessages(msgs ...*anthropic.Message) []*models.ToolCall {

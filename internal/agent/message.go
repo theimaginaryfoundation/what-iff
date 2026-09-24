@@ -17,6 +17,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/filechunker"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
@@ -135,6 +136,8 @@ type Agent struct {
 	// is chosen at construction and swapped via server wiring, so no push detail
 	// reaches this package.
 	pushNotifier pushnotify.Notifier
+	// webSearch backs the first-party web search tools; nil when not configured (ADR 0x021).
+	webSearch *websearch.Service
 	// pushEnabled is true when a real push implementation was wired (a non-nil
 	// PushNotifier). It lets the completion hook skip spawning a detached
 	// goroutine when push is off (the open-source default).
@@ -192,6 +195,9 @@ type AgentConfig struct {
 	// nil, NewAgent falls back to pushnotify.NoopNotifier (sends nothing) — the
 	// open-source default.
 	PushNotifier pushnotify.Notifier
+	// WebSearch backs the first-party web_search / fetch_page tools (ADR 0x021). Nil leaves them
+	// off and vendor-native web search in place. NewAgent ignores it under non-vendor backends.
+	WebSearch *websearch.Service
 	// LifecycleContext is cancelled on app shutdown and used for detached work.
 	// Nil defaults to context.Background().
 	LifecycleContext context.Context
@@ -273,6 +279,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		fileStore:                    fileStore,
 		meter:                        cfg.Meter,
 		pushNotifier:                 cfg.PushNotifier,
+		webSearch:                    vendorOnlyWebSearch(cfg),
 		pushEnabled:                  cfg.PushNotifier != nil,
 		runningJobCancels:            make(map[uuid.UUID]runningJobCancel),
 		lifecycleCtx:                 cfg.LifecycleContext,
@@ -821,7 +828,7 @@ type chatContext struct {
 	// expressionsEnabled mirrors personality.ExpressionsEnabled; when false,
 	// expression picking is skipped for this turn.
 	expressionsEnabled bool
-	// webSearchCount is set after the provider turn for native web search metering.
+	// webSearchCount is the turn's billable web searches (see turnWebSearchCount).
 	webSearchCount int
 	// toolProgress records the live tool timeline into the chat job's Progress. Nil when the
 	// turn has no job to report to; its methods are nil-safe.
@@ -1040,8 +1047,8 @@ func (a *Agent) dispatchAssistantGeneration(ctx context.Context, userID uuid.UUI
 
 // generationOptions parameterizes runGeneration over the small ways the five
 // generateAssistantForMessage* paths differ: the label used in error/save
-// messages, an optional provider-specific tool-call merge (native web search
-// results), and an optional post-save step (OpenAI's attachment persistence).
+// messages, an optional provider-specific tool-call merge (vendor-native web search
+// results; unset when first-party web search is configured), and an optional post-save step (OpenAI's attachment persistence).
 type generationOptions struct {
 	provider       string
 	mergeToolCalls func(toolCalls []*models.ToolCall) []*models.ToolCall
@@ -1100,7 +1107,7 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 	if streamed := strings.TrimSpace(draftBuffer.allText); streamed != "" {
 		result.Text = streamed
 	}
-	chatCtx.webSearchCount = adapter.WebSearchCompletedCount()
+	chatCtx.webSearchCount = a.turnWebSearchCount(adapter, toolCalls)
 
 	if opts.mergeToolCalls != nil {
 		toolCalls = opts.mergeToolCalls(toolCalls)
@@ -1234,7 +1241,8 @@ func (a *Agent) openAIResponseParamsForChat(ctx context.Context, chatCtx *chatCo
 	if policy.toolsEnabled {
 		parallel = true
 		chatTools := getChatTools(ToolConfig{
-			DisabledTools: policy.disabledTools,
+			DisabledTools:   policy.disabledTools,
+			NativeWebSearch: policy.nativeWebSearch,
 		})
 		agentTools := getAgentToolsList(policy.disabledTools, policy.showMoodTools)
 		mcpTools := a.getChatMCPTools(ctx, userID, chatMessage.ChatID, policy.ritualIDs, chatCtx.model)
@@ -1242,7 +1250,7 @@ func (a *Agent) openAIResponseParamsForChat(ctx context.Context, chatCtx *chatCo
 	}
 	a.recordToolDefinitionEstimate(modelCtx, toolParams)
 	var include []responses.ResponseIncludable
-	if policy.toolsEnabled && !policy.disabledTools[tools.ToolNameWebSearch] {
+	if policy.nativeWebSearch {
 		include = []responses.ResponseIncludable{
 			responses.ResponseIncludableWebSearchCallResults,
 			responses.ResponseIncludableWebSearchCallActionSources,
@@ -1263,11 +1271,8 @@ func (a *Agent) generateAssistantForMessageOpenAI(ctx context.Context, userID uu
 	params := a.openAIResponseParamsForChat(ctx, chatCtx, userID, chatMessage, modelContext)
 	adapter := provider.NewOpenAIAdapter(a.OpenAIProvider, params)
 
-	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, generationOptions{
+	opts := generationOptions{
 		provider: "OpenAI",
-		mergeToolCalls: func(toolCalls []*models.ToolCall) []*models.ToolCall {
-			return mergeWebSearchToolCalls(toolCalls, webSearchToolCallsFromOpenAIResponses(adapter.AllRawResponses()...))
-		},
 		// Persist any image/code-interpreter attachments (OpenAI-specific). The
 		// unified loop returns a provider-agnostic GenerateResponse, so we
 		// retrieve the raw response from the adapter to pass provider-specific
@@ -1277,7 +1282,13 @@ func (a *Agent) generateAssistantForMessageOpenAI(ctx context.Context, userID uu
 				a.OpenAIProvider.SaveMessageAttachments(ctx, userID, agentMessage.ID, rawResp)
 			}
 		},
-	})
+	}
+	if !a.FirstPartyWebSearch() {
+		opts.mergeToolCalls = func(toolCalls []*models.ToolCall) []*models.ToolCall {
+			return mergeWebSearchToolCalls(toolCalls, webSearchToolCallsFromOpenAIResponses(adapter.AllRawResponses()...))
+		}
+	}
+	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, opts)
 }
 
 // claudeProviderForModel selects the Anthropic-Messages-API provider for the model
@@ -1327,7 +1338,7 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 
 	claudeFunctionTools := claudeFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
 	a.recordToolDefinitionEstimate(modelContext, claudeFunctionTools)
-	webSearchEnabled := policy.toolsEnabled && nativeAnthropic && !policy.disabledTools[tools.ToolNameWebSearch]
+	webSearchEnabled := nativeAnthropic && policy.nativeWebSearch
 	adapter := provider.NewClaudeAdapter(claudeProvider, claudeParams, claudeFunctionTools, webSearchEnabled, mcpConfig, policy.disabledTools)
 	if zai {
 		adapter.SetTruncationFallback(func(params *anthropic.MessageNewParams) {
@@ -1340,13 +1351,14 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 		})
 	}
 
-	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, generationOptions{
-		provider: "Claude",
-		mergeToolCalls: func(toolCalls []*models.ToolCall) []*models.ToolCall {
+	opts := generationOptions{provider: "Claude"}
+	if !a.FirstPartyWebSearch() {
+		opts.mergeToolCalls = func(toolCalls []*models.ToolCall) []*models.ToolCall {
 			toolCalls = mergeWebSearchToolCalls(toolCalls, webSearchToolCallsFromClaudeMessages(adapter.AllRawMessages()...))
 			return mergeWebSearchToolCalls(toolCalls, webSearchToolCallsFromClaudeBetaMessages(adapter.AllRawBetaMessages()...))
-		},
-	})
+		}
+	}
+	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, opts)
 }
 
 // generateAssistantForMessageGemini drives a chat turn through Google's
@@ -1424,7 +1436,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	if streamed := strings.TrimSpace(draftBuffer.allText); streamed != "" {
 		result.Text = streamed
 	}
-	chatCtx.webSearchCount = adapter.WebSearchCompletedCount()
+	chatCtx.webSearchCount = a.turnWebSearchCount(adapter, toolCalls)
 
 	toolCalls = append(toolCalls, memoryToolCallsForChatContext(chatCtx)...)
 	a.recordToolCalls(ctx, toolCalls)
@@ -2508,15 +2520,8 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 			MessageID:  messageID,
 		})
 
-		if actionType == models.ActionTypeChatMessage && chatCtx != nil && chatCtx.webSearchCount > 0 {
-			// The meter prices web search by count and skips a zero charge.
-			a.meter.Record(ctx, qd, metering.Usage{
-				UserID:         userID,
-				ActionType:     models.ActionTypeWebSearch,
-				Model:          chatCtx.model,
-				ChatID:         chatMessage.ChatID.String(),
-				WebSearchCount: chatCtx.webSearchCount,
-			})
+		if usage, ok := a.webSearchUsage(userID, chatMessage.ChatID, chatCtx, actionType); ok {
+			a.meter.Record(ctx, qd, usage)
 		}
 	}
 

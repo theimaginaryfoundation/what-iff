@@ -10,6 +10,11 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
+// Vendor-native web search (ADR 0x021): recovers OpenAI's built-in web search calls
+// from raw responses so they are persisted like any other tool call. This is the fallback
+// when first-party web search is not configured; runGeneration only wires it up when
+// Agent.FirstPartyWebSearch is false.
+
 type openAIWebSearchSource struct {
 	URL   string `json:"url"`
 	Title string `json:"title"`
