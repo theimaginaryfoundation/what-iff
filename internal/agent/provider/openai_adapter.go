@@ -174,23 +174,6 @@ func (a *OpenAIAdapter) AllRawResponses() []*responses.Response {
 	return out
 }
 
-func countCompletedWebSearchesOpenAI(resp *responses.Response) int {
-	if resp == nil {
-		return 0
-	}
-	n := 0
-	for _, out := range resp.Output {
-		if out.Type != "web_search_call" {
-			continue
-		}
-		ws := out.AsWebSearchCall()
-		if ws.Status == responses.ResponseFunctionWebSearchStatusCompleted {
-			n++
-		}
-	}
-	return n
-}
-
 // extractOpenAIToolUses pulls function-call output items from a Response and
 // normalises them to the provider-agnostic ToolUse type.
 func extractOpenAIToolUses(resp *responses.Response) []ToolUse {

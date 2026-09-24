@@ -5,11 +5,23 @@ const (
 	ToolNameWebSearch = "web_search"
 )
 
-// Short descriptions for the /api/tools listing. Full FunctionToolSpec descriptions
-// are often long; the chat UI shows this for the web_search logical tool.
+// Short descriptions of the web_search toggle for the /api/tools listing and the first-chat
+// greeting. Full FunctionToolSpec descriptions are written for the model, not the user. The
+// copy depends on which web search is running (ADR 0x021): first-party search can also read
+// pages, while vendor-native search depends on the chat's model.
 const (
-	AvailableToolDescriptionWebSearch = "Search the web for current information."
+	WebSearchDescriptionFirstParty = "Look up current information (news, scores, prices, releases) and read web pages you share or it finds."
+	WebSearchDescriptionNative     = "Look up current information on the web. Works with models whose provider has built-in search."
 )
+
+// WebSearchToggleDescription returns the user-facing web_search description for the active
+// web search: first-party (PARALLEL_API_KEY set) or vendor-native.
+func WebSearchToggleDescription(firstParty bool) string {
+	if firstParty {
+		return WebSearchDescriptionFirstParty
+	}
+	return WebSearchDescriptionNative
+}
 
 // FunctionToolSpec captures provider-agnostic function tool metadata.
 // Both OpenAI and Claude tool registration should use these shared specs

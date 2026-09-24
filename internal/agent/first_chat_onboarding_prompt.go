@@ -11,8 +11,8 @@ const FirstChatGreetingModelName = "claude-haiku-4-5"
 
 // BuildFirstChatGreetingPrompt creates the injected first-chat prompt used to
 // produce an in-character welcome message for new users.
-func BuildFirstChatGreetingPrompt() string {
-	toolLines := buildFirstChatToolLines()
+func BuildFirstChatGreetingPrompt(firstPartyWebSearch bool) string {
+	toolLines := buildFirstChatToolLines(firstPartyWebSearch)
 
 	return fmt.Sprintf(`You are writing the very first assistant message in a brand new chat.
 
@@ -34,13 +34,20 @@ Tools currently available to this assistant:
 Write only the final assistant message.`, checkpointMaxAssistantMessagesSinceStart, checkpointMaxAssistantMessagesSinceSummary, strings.Join(toolLines, "\n"))
 }
 
-func buildFirstChatToolLines() []string {
+// buildFirstChatToolLines lists the tools for the greeting. web_search is listed once, from
+// its toggle; the first-party web_search/fetch_page catalog entries are covered by that line
+// (and are not offered at all when firstPartyWebSearch is false).
+func buildFirstChatToolLines(firstPartyWebSearch bool) []string {
 	lines := []string{
-		fmt.Sprintf("- `%s`: %s", agenttools.ToolNameWebSearch, agenttools.AvailableToolDescriptionWebSearch),
+		fmt.Sprintf("- `%s`: %s", agenttools.ToolNameWebSearch, agenttools.WebSearchToggleDescription(firstPartyWebSearch)),
 	}
 
 	for _, def := range agenttools.FunctionToolCatalog() {
 		if !def.AgentDefault {
+			continue
+		}
+		switch def.Spec.Name {
+		case agenttools.ToolNameWebSearch, agenttools.ToolNameFetchPage:
 			continue
 		}
 		lines = append(lines, fmt.Sprintf("- `%s`: %s", def.Spec.Name, compactToolDescription(def.Spec.Description)))

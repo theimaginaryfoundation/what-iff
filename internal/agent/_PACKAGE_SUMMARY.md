@@ -36,7 +36,7 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
 | `buildModelContextForChatMessage` | Shared path for chat turns so user-segment handling stays consistent. |
 | `openAIResponseParamsForChat` | Tools + personality file enrichment + `BuildOpenAIResponseParams`. |
 | `HandleAgentLoop` / `ExecuteToolUseWithRecovery` | Multi-round tool execution with panic recovery (`agentloop.go`). |
-| `webSearchTool` / `fetchPageTool` / `applyWebSearchPolicy` | First-party web search (ADR 0x021, `web_search_tool.go`, `tools.go`): when a `websearch.Service` is configured every model gets `web_search` (and `fetch_page` with an extractor) and vendor-native web search is left out of the request; otherwise vendor search stays as before. The user's `web_search` toggle governs both. |
+| `webSearchTool` / `fetchPageTool` / `applyWebSearchPolicy` / `turnWebSearchCount` | Web search (ADR 0x021, `web_search_tool.go`, `tools.go`). With a `websearch.Service` (Parallel) configured, every model gets `web_search`/`fetch_page`, and nothing vendor-native runs: the native tool is not sent, the `native_web_search*.go` extraction is not wired into `runGeneration`, and metering counts successful `web_search` calls. Without one, vendor-native search is the fallback and metering uses the provider's count. The user's `web_search` toggle governs both, and its description (`WebSearchToggleDescription`) follows the mode. |
 | `buildTurnToolPolicy` / `getChatTools` / `dispatchToolUse` | Shared tool policy, provider-specific tool assembly, and handler routing (`tools.go`, `processtoolcall.go`). |
 
 Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool implementations), `embedding/`, `filechunker/`.

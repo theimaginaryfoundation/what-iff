@@ -297,7 +297,7 @@ func (s *Server) setupRoutes() {
 	moodHandler := moodhandler.NewHandler(dataStore, s.logger, agent.FileStore())
 	roleHandler := role.NewHandler(dataStore, s.logger)
 	webhookHandler := webhook.NewHandler(dataStore, agent, s.logger)
-	toolsHandler := toolshandler.NewHandler(s.logger)
+	toolsHandler := toolshandler.NewHandler(s.logger, agent.FirstPartyWebSearch())
 	searchHandler := search.NewHandler(dataStore, s.logger)
 	// Setup API routes
 	apiRouter := s.router.PathPrefix("/api").Subrouter()

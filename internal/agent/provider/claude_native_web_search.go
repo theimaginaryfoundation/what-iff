@@ -8,6 +8,17 @@ import (
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 )
 
+// Vendor-native web search for Anthropic (ADR 0x021): the fallback when first-party web
+// search is not configured. None of it runs when PARALLEL_API_KEY is set, because the native
+// web_search tool is then never sent (see applyWebSearchPolicy), so no server_tool_use or
+// web_search_tool_result blocks come back. Kept out of claude_adapter.go so the vendor path
+// stays in one place.
+
+// claudeWebSearchTool adds Anthropic's native web search capability.
+var claudeWebSearchTool = anthropic.ToolUnionParam{
+	OfWebSearchTool20250305: &anthropic.WebSearchTool20250305Param{},
+}
+
 // ClaudeInLoopWebSearchContextHeader prefixes replay-safe web search text injected
 // between agent-loop rounds when native web_search_tool_result blocks cannot be resubmitted.
 const ClaudeInLoopWebSearchContextHeader = "[Web search results from the preceding assistant turn]\n"
@@ -176,4 +187,64 @@ func FormatClaudeWebSearchResults(results []anthropic.WebSearchResultBlock) stri
 		return formatClaudeWebSearchEncryptedOnlyNotice(encryptedOnly)
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func countWebSearchToolResultsInMessage(msg *anthropic.Message) int {
+	if msg == nil {
+		return 0
+	}
+	n := 0
+	for _, block := range msg.Content {
+		if _, ok := block.AsAny().(anthropic.WebSearchToolResultBlock); ok {
+			n++
+		}
+	}
+	return n
+}
+
+func countWebSearchToolResultsInBetaMessage(msg *anthropic.BetaMessage) int {
+	if msg == nil {
+		return 0
+	}
+	n := 0
+	for _, block := range msg.Content {
+		if _, ok := block.AsAny().(anthropic.BetaWebSearchToolResultBlock); ok {
+			n++
+		}
+	}
+	return n
+}
+
+func claudeWebSearchToolResultReplayable(ws anthropic.WebSearchToolResultBlock) bool {
+	if len(claudeWebSearchResultsFromContent(ws.Content)) > 0 {
+		return true
+	}
+	err := ws.Content.AsResponseWebSearchToolResultError()
+	return err.ErrorCode != ""
+}
+
+func claudeBetaWebSearchToolResultReplayable(ws anthropic.BetaWebSearchToolResultBlock) bool {
+	if len(ws.Content.AsBetaWebSearchResultBlockArray()) > 0 {
+		return true
+	}
+	err := ws.Content.AsResponseWebSearchToolResultError()
+	return err.ErrorCode != ""
+}
+
+func appendClaudeInLoopWebSearchContextText(params *anthropic.MessageNewParams, text string) {
+	if params == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	params.Messages = append(params.Messages, anthropic.NewUserMessage(
+		anthropic.NewTextBlock(text),
+	))
+}
+
+func appendClaudeBetaInLoopWebSearchContextText(params *anthropic.BetaMessageNewParams, text string) {
+	if params == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	params.Messages = append(params.Messages, anthropic.NewBetaUserMessage(
+		anthropic.NewBetaTextBlock(text),
+	))
 }

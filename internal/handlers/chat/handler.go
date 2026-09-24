@@ -20,6 +20,8 @@ type MessageAgent interface {
 // WelcomeMessageAgent is the minimal async prompt surface used for welcome generation.
 type WelcomeMessageAgent interface {
 	HandleWelcomeMessagePromptAsync(ctx context.Context, chatID uuid.UUID, prompt string, modelOverrideID *uuid.UUID, personalityOverrideID *uuid.UUID) (*models.ChatMessageResponse, error)
+	// FirstPartyWebSearch selects how the greeting describes web search (ADR 0x021).
+	FirstPartyWebSearch() bool
 }
 
 // HandlerConfig configures chat handler behavior.

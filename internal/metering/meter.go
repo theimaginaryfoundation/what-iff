@@ -81,7 +81,8 @@ type Usage struct {
 	Metadata map[string]interface{}
 	// SubagentRun marks the usage as originating from a subagent job.
 	SubagentRun bool
-	// WebSearchCount is the number of native web searches performed this turn.
+	// WebSearchCount is the number of web searches performed this turn: successful
+	// first-party web_search calls, or the provider's native searches (ADR 0x021).
 	// Only meaningful when ActionType is models.ActionTypeWebSearch.
 	WebSearchCount int
 }

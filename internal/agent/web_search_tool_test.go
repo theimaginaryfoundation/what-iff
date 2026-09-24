@@ -8,8 +8,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
 type fakeSearchBackend struct {
@@ -125,4 +127,37 @@ func TestFetchPageTool(t *testing.T) {
 
 	_, err = (&Agent{webSearch: &websearch.Service{Backend: &fakeSearchBackend{}}}).fetchPageTool(context.Background(), []byte(`{"url":"https://a.example"}`))
 	assert.ErrorIs(t, err, errWebSearchUnavailable)
+}
+
+// countingAdapter reports a fixed number of vendor-native searches.
+type countingAdapter struct {
+	provider.AgentAdapter
+	native int
+}
+
+func (c countingAdapter) WebSearchCompletedCount() int { return c.native }
+
+func TestTurnWebSearchCount(t *testing.T) {
+	calls := []*models.ToolCall{
+		{ToolName: agenttools.ToolNameWebSearch, ToolOutput: "{}"},
+		{ToolName: agenttools.ToolNameWebSearch, ToolError: "web search failed: HTTP 500"},
+		{ToolName: agenttools.ToolNameFetchPage, ToolOutput: "{}"},
+		{ToolName: agenttools.ToolNameWebSearch, ToolOutput: "{}"},
+		nil,
+	}
+	adapter := countingAdapter{native: 7}
+
+	firstParty := &Agent{webSearch: &websearch.Service{Backend: &fakeSearchBackend{}}}
+	assert.Equal(t, 2, firstParty.turnWebSearchCount(adapter, calls),
+		"first-party bills successful web_search calls only; fetch_page and failures are free, and the adapter is not consulted")
+
+	native := &Agent{}
+	assert.Equal(t, 7, native.turnWebSearchCount(adapter, calls), "vendor-native bills what the provider reports")
+}
+
+func TestFirstPartyWebSearch(t *testing.T) {
+	assert.True(t, (&Agent{webSearch: &websearch.Service{}}).FirstPartyWebSearch())
+	assert.False(t, (&Agent{}).FirstPartyWebSearch())
+	var nilAgent *Agent
+	assert.False(t, nilAgent.FirstPartyWebSearch())
 }

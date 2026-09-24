@@ -54,12 +54,13 @@ func humanFacingToolDescription(def agenttools.FunctionToolDefinition) string {
 }
 
 // GetAvailableTools returns human-facing metadata for tools the user can toggle via disabled_tools.
+// firstPartyWebSearch selects the web_search copy (see Agent.FirstPartyWebSearch).
 // Provider/agent prompt descriptions remain on FunctionToolSpec and are intentionally not modified.
-func GetAvailableTools(ctx context.Context) []ToolMeta {
+func GetAvailableTools(ctx context.Context, firstPartyWebSearch bool) []ToolMeta {
 	_ = ctx
 	definitions := agenttools.FunctionToolCatalog()
 	out := make([]ToolMeta, 0, len(definitions)+1)
-	out = append(out, ToolMeta{Name: agenttools.ToolNameWebSearch, Description: agenttools.AvailableToolDescriptionWebSearch})
+	out = append(out, ToolMeta{Name: agenttools.ToolNameWebSearch, Description: agenttools.WebSearchToggleDescription(firstPartyWebSearch)})
 	for _, def := range definitions {
 		if !def.UserToggleable {
 			continue

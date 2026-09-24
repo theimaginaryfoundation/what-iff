@@ -108,6 +108,9 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
   Pinned by `TestOpenAIAdapter_ForceFinalResponse_ThreadsLatestResponseID`.
 - **Claude native web-search replay:** Intermediate text blocks are replayed without their provider-owned citations because Anthropic can return a citation with an empty `web_search_result_location.url`, then reject that same citation on the next request.
   The native `web_search_tool_result` block is still replayed unchanged, preserving its encrypted content and server-side search continuity.
+- **Vendor-native web search is the no-key fallback (ADR 0x021):** its helpers live in `claude_native_web_search.go` and `openai_native_web_search.go`, not in the adapters.
+  With first-party web search configured the agent never sends the native tool, so none of that code sees a block.
+  `AgentAdapter.WebSearchCompletedCount` stays on every adapter because metering reads it in native mode.
 - **MCP defer/search caveat:** OpenAI `defer_loading` + `tool_search` behavior is provider-specific and is not simulated for Claude when unavailable in Anthropic MCP mode.
 - **Cross-cutting model-context rules** live in the root [architecture summary](../../../docs/ARCHITECTURE_SUMMARY.md) — do not duplicate long prose here; link to it.
 - **Call path:** Before `CallWithRetry` / `ClaudeProvider.Call`, attach a path on `context` (`telemetry.WithCallPath`, or `Agent.withCallPath` from agent entry points).

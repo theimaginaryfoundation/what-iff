@@ -12,7 +12,7 @@ import (
 )
 
 func TestListToolsSerializesResolvedDisplayDescriptions(t *testing.T) {
-	handler := NewHandler(zap.NewNop())
+	handler := NewHandler(zap.NewNop(), true)
 	req := httptest.NewRequest(http.MethodGet, "/tools", nil)
 	recorder := httptest.NewRecorder()
 
@@ -21,7 +21,7 @@ func TestListToolsSerializesResolvedDisplayDescriptions(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	var got []agent.ToolMeta
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &got))
-	require.Equal(t, agent.GetAvailableTools(req.Context()), got)
+	require.Equal(t, agent.GetAvailableTools(req.Context(), true), got)
 
 	byName := make(map[string]string, len(got))
 	for _, tool := range got {

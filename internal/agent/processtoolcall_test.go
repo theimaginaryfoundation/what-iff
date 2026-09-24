@@ -58,7 +58,7 @@ func TestGetAgentToolsListMatchesSharedSpecsOrder(t *testing.T) {
 
 func TestGetAvailableToolsMatchesCatalogAndLogicalTools(t *testing.T) {
 	ctx := context.Background()
-	avail := GetAvailableTools(ctx)
+	avail := GetAvailableTools(ctx, true)
 	definitions := tools.FunctionToolCatalog()
 	userToggleable := make([]tools.FunctionToolDefinition, 0, len(definitions))
 	for _, def := range definitions {
@@ -69,7 +69,7 @@ func TestGetAvailableToolsMatchesCatalogAndLogicalTools(t *testing.T) {
 	require.Len(t, avail, len(userToggleable)+1, "web + user-toggleable function definitions")
 
 	require.Equal(t, tools.ToolNameWebSearch, avail[0].Name)
-	require.Equal(t, tools.AvailableToolDescriptionWebSearch, avail[0].Description)
+	require.Equal(t, tools.WebSearchDescriptionFirstParty, avail[0].Description)
 	for i, def := range userToggleable {
 		actual := avail[i+1]
 		require.Equal(t, def.Spec.Name, actual.Name)
