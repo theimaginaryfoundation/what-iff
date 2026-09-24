@@ -1,6 +1,8 @@
 import { test, expect } from '../../../fixtures';
 import type { Page } from '@playwright/test';
 import type { AppShell, PersonalitiesPage, PersonalityDetailPage } from '../../../poms';
+import type { Seed } from '../../../fixtures';
+import { uniqueId } from '../../../fixtures/unique';
 
 /**
  * The compaction log's personality prompt audit section (#65, collapsed by
@@ -12,16 +14,20 @@ import type { AppShell, PersonalitiesPage, PersonalityDetailPage } from '../../.
 
 /**
  * Creates a personality through the UI and edits its prompt once, which is
- * what produces an audit entry. Returns the fixed strings the assertions use.
+ * what produces an audit entry. Returns the fixed prompts the assertions use.
  *
- * Fixed names, not `seedName()`: the card is located by the personality name
- * and the diff panes are compared against the prompts verbatim.
+ * The card is located by the personality name, so the name carries a per-run
+ * suffix (deployed runs share one account, and a fixed name matched every
+ * earlier run's leftover card), and the personality is handed to `seed` so it
+ * is deleted afterwards. The prompts stay fixed: the diff panes compare them
+ * verbatim, and they are only ever matched inside this run's card.
  */
 async function editPromptOnce(
   page: Page,
   personalitiesPage: PersonalitiesPage,
   personalityDetailPage: PersonalityDetailPage,
   shell: AppShell,
+  seed: Seed,
   name: string,
 ): Promise<{ initialPrompt: string; updatedPrompt: string }> {
   const initialPrompt = 'You are a calm assistant. Keep answers concise.';
@@ -32,6 +38,11 @@ async function editPromptOnce(
   await shell.dismissAnnouncementIfPresent();
   await personalitiesPage.openCreateManually();
   await personalitiesPage.createManually(name, initialPrompt);
+  // createManually only clicks Create; the app then routes to the new personality.
+  await page.waitForURL(url => /^\/personality\/[^/]+$/.test(url.pathname));
+  const created = /^\/personality\/([^/]+)$/.exec(new URL(page.url()).pathname);
+  expect(created, 'creating the personality should land on its detail page').not.toBeNull();
+  seed.adoptPersonality(created![1]);
 
   await personalityDetailPage.editPrompt({ systemPrompt: updatedPrompt });
   // The audit entry is written by the same request that saves the prompt, so
@@ -54,13 +65,15 @@ test('records a prompt edit as an audit entry behind the collapsed toggle', asyn
   personalitiesPage,
   personalityDetailPage,
   shell,
+  seed,
 }) => {
-  const name = 'E2E Audit Persona';
+  const name = `E2E Audit Persona ${uniqueId()}`;
   const { initialPrompt, updatedPrompt } = await editPromptOnce(
     page,
     personalitiesPage,
     personalityDetailPage,
     shell,
+    seed,
     name,
   );
   await expect(page).toHaveURL(/\/personality\/[^/]+$/);
@@ -89,13 +102,15 @@ test('restoring a previous prompt appends a second, reversed entry', async ({
   personalitiesPage,
   personalityDetailPage,
   shell,
+  seed,
 }) => {
-  const name = 'E2E Restore Persona';
+  const name = `E2E Restore Persona ${uniqueId()}`;
   const { initialPrompt, updatedPrompt } = await editPromptOnce(
     page,
     personalitiesPage,
     personalityDetailPage,
     shell,
+    seed,
     name,
   );
 

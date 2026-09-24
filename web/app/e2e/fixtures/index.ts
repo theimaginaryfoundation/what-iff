@@ -112,6 +112,12 @@ export interface Seed {
   webhookToken(name?: string): Promise<{ token: WebhookToken; apiToken: string }>;
   /** Creates one personality. */
   personality(name?: string): Promise<SeededPersonality>;
+  /**
+   * Hands a personality the test created some other way (through the UI) to this
+   * fixture's teardown. Deployed runs share one account, so anything left behind
+   * piles up across nightly runs and breaks name-based locators.
+   */
+  adoptPersonality(id: string): void;
 }
 
 interface Tracked {
@@ -195,6 +201,10 @@ function makeSeed(client: ApiClient, tracked: Tracked): Seed {
       });
       track(tracked.personalities, personality.id);
       return { id: personality.id as string, name };
+    },
+
+    adoptPersonality(id: string) {
+      track(tracked.personalities, id);
     },
   };
 }

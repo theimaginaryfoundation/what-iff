@@ -340,6 +340,12 @@
 
 .memories-list__move-menu {
   width: min(22rem, 100%);
+  // One button per personality: with a long list the menu must scroll inside the
+  // viewport rather than grow past it (the overlay centres it, so the top entries —
+  // "Global / shared" first — would otherwise sit above the screen, unreachable).
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
