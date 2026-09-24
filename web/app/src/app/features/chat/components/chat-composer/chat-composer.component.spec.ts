@@ -234,23 +234,41 @@ describe('ChatComposerComponent', () => {
         const image = { file: new File(['x'], 'cat.png', { type: 'image/png' }), isUploading: false };
         const text = { file: new File(['x'], 'notes.txt', { type: 'text/plain' }), isUploading: false };
 
-        const warning = (modelId: string, attachments: unknown[]): HTMLElement | null => {
+        const chips = (modelId: string, attachments: unknown[]): HTMLElement[] => {
             fixture.componentRef.setInput('models', [textOnly, vision]);
             fixture.componentRef.setInput('selectedModelId', modelId);
             fixture.componentRef.setInput('attachments', attachments);
             fixture.detectChanges();
-            return fixture.nativeElement.querySelector('.composer__no-vision');
+            return Array.from(fixture.nativeElement.querySelectorAll('.composer__attachment'));
         };
+        const isNoVision = (chip: HTMLElement) => chip.classList.contains('composer__attachment--no-vision');
 
-        it('shows for an image on a text-only model, with the explanatory tooltip', () => {
-            const el = warning('m-text', [image]);
-            expect(el?.textContent).toContain('Images not supported');
-            expect(el?.getAttribute('aria-label')).toContain("This model can't see images.");
+        it('marks the image chip itself on a text-only model, with no separate warning chip', () => {
+            const [imageChip, textChip] = chips('m-text', [image, text]);
+
+            expect(isNoVision(imageChip)).toBe(true);
+            expect(imageChip.querySelector('ui-eye-off-icon')).toBeTruthy();
+            expect(imageChip.firstElementChild?.tagName.toLowerCase()).toBe('ui-eye-off-icon');
+            expect(imageChip.getAttribute('tabindex')).toBe('0');
+            expect(isNoVision(textChip)).toBe(false);
+            expect(textChip.querySelector('ui-eye-off-icon')).toBeNull();
+            expect(fixture.nativeElement.textContent).not.toContain('Images not supported');
         });
 
-        it('stays hidden for vision models and non-image files', () => {
-            expect(warning('m-vision', [image])).toBeNull();
-            expect(warning('m-text', [text])).toBeNull();
+        it('explains itself in a tooltip on hover or focus', () => {
+            const [imageChip] = chips('m-text', [image]);
+
+            imageChip.dispatchEvent(new Event('focus'));
+            const describedBy = imageChip.getAttribute('aria-describedby');
+            expect(describedBy).toBeTruthy();
+            expect(document.getElementById(describedBy!)?.textContent).toContain("This model can't see images.");
+        });
+
+        it('leaves chips plain for vision models', () => {
+            const [imageChip] = chips('m-vision', [image]);
+            expect(isNoVision(imageChip)).toBe(false);
+            expect(imageChip.hasAttribute('tabindex')).toBe(false);
+            expect(imageChip.querySelector('ui-eye-off-icon')).toBeNull();
         });
     });
 
