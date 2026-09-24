@@ -46,6 +46,35 @@ describe('TooltipDirective', () => {
         expect(button.getAttribute('aria-describedby')).toBe(tooltip.id);
     });
 
+    describe('viewport clamping', () => {
+        const showAt = (hostLeft: number, hostWidth: number, tooltipWidth: number): number => {
+            const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+            vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(
+                { left: hostLeft, right: hostLeft + hostWidth, width: hostWidth, top: 500, bottom: 520, height: 20, x: hostLeft, y: 500, toJSON: () => ({}) } as DOMRect,
+            );
+            vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(tooltipWidth);
+            button.dispatchEvent(new Event('focus'));
+            const tooltip = document.body.querySelector('[role="tooltip"]') as HTMLElement;
+            return parseFloat(tooltip.style.left);
+        };
+
+        beforeEach(() => vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(400));
+        afterEach(() => vi.restoreAllMocks());
+
+        it('centres on the host when there is room', () => {
+            expect(showAt(150, 100, 120)).toBe(200);
+        });
+
+        it('keeps a tooltip near the left edge fully on screen', () => {
+            // Host centre is at 30px; a 200px tooltip centred there would start at -70px.
+            expect(showAt(10, 40, 200)).toBe(8 + 100);
+        });
+
+        it('keeps a tooltip near the right edge fully on screen', () => {
+            expect(showAt(360, 30, 200)).toBe(400 - 8 - 100);
+        });
+    });
+
     it('closes on escape', () => {
         const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
 
