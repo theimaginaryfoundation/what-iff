@@ -89,9 +89,11 @@ export const routes: Routes = [
               .then(m => m.PersonalitiesPageComponent)
           },
           {
+            // The old standalone getting-started page was superseded by the first-run welcome on
+            // the personalities page; keep the URL working for any old links.
             path: 'getting-started',
-            loadComponent: () => import('./features/personality/personality-getting-started/personality-getting-started.component')
-              .then(m => m.PersonalityGettingStartedComponent)
+            redirectTo: '',
+            pathMatch: 'full'
           },
           {
             path: 'generate',

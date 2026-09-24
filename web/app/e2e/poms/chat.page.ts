@@ -38,7 +38,7 @@ export class ChatPage {
     this.contextCostOutlet = this.contextBreakdown.locator('app-context-cost-outlet');
     this.contextCostEstimate = this.contextBreakdown.locator('.gauge__cost');
     this.scratchpadTab = this.page.getByLabel('Thread scratchpad');
-    this.scratchpadInput = this.page.getByPlaceholder('Capture thread-specific notes');
+    this.scratchpadInput = this.page.getByPlaceholder('Notes this personality keeps across all of its chats');
     this.composerInput = this.page.locator('#chat-composer-input');
     this.plusMenuButton = this.page.getByRole('button', { name: 'Open chat options' });
     this.plusMenu = this.page.getByRole('menu');

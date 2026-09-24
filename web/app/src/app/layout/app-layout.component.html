@@ -69,6 +69,7 @@
             </svg>
             Previous
           </button>
+          @if (generateFlow.hasProgress()) {
           <button
             type="button"
             (click)="generateFlow.resetDraft()"
@@ -81,6 +82,7 @@
               Start Over
             }
           </button>
+          }
         </div>
 
         <div class="flex items-center gap-2">
@@ -106,9 +108,10 @@
                 type="button"
                 (click)="generateFlow.finishAndGenerate()"
                 [disabled]="generateFlow.isSaving()"
+                title="Skip the remaining questions and generate from what you've entered so far"
                 class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Skip to Generate
+                Generate now
                 <svg class="ml-2 -mr-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
                 </svg>

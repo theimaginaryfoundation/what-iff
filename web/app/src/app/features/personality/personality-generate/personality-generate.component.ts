@@ -240,6 +240,12 @@ export class PersonalityGenerateComponent implements OnInit {
     return this.currentStep() > 0;
   }
 
+  /** True once there is something to reset: past the first step or any answer typed. "Start Over"
+   * shows only then, so a brand-new user isn't offered to reset a form they haven't touched. */
+  hasProgress(): boolean {
+    return this.canGoBack() || Object.values(this.answers()).some(value => typeof value === 'string' && value.trim() !== '');
+  }
+
   isLastPage(): boolean {
     return this.currentStep() === this.totalSteps - 1;
   }
