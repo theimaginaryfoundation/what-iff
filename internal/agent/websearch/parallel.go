@@ -42,8 +42,11 @@ type parallelSearchAdvanced struct {
 }
 
 type parallelSourcePolicy struct {
-	// AfterDate (YYYY-MM-DD) limits results to content published on or after it.
-	AfterDate string `json:"after_date"`
+	// AfterDate (YYYY-MM-DD) limits results to content published on or after it. Pages with
+	// no known publish date are not excluded.
+	AfterDate      string   `json:"after_date,omitempty"`
+	IncludeDomains []string `json:"include_domains,omitempty"`
+	ExcludeDomains []string `json:"exclude_domains,omitempty"`
 }
 
 type parallelResult struct {
@@ -65,8 +68,16 @@ func (p *ParallelBackend) Search(ctx context.Context, q Query) ([]Result, error)
 	}
 	var resp parallelSearchResponse
 	req := parallelSearchRequest{Objective: strings.TrimSpace(q.Objective), SearchQueries: []string{query}, Mode: p.mode}
-	if q.Recency != "" {
-		req.AdvancedSettings = &parallelSearchAdvanced{SourcePolicy: parallelSourcePolicy{AfterDate: q.Recency.since(p.now()).Format(time.DateOnly)}}
+	policy := parallelSourcePolicy{IncludeDomains: q.IncludeDomains, ExcludeDomains: q.ExcludeDomains}
+	after := q.PublishedAfter
+	if since := q.Recency.since(p.now()); since.After(after) {
+		after = since
+	}
+	if !after.IsZero() {
+		policy.AfterDate = after.Format(time.DateOnly)
+	}
+	if policy.AfterDate != "" || len(policy.IncludeDomains) > 0 || len(policy.ExcludeDomains) > 0 {
+		req.AdvancedSettings = &parallelSearchAdvanced{SourcePolicy: policy}
 	}
 	if err := postJSON(ctx, p.client, p.baseURL+"/search", map[string]string{"x-api-key": p.apiKey}, req, &resp); err != nil {
 		return nil, fmt.Errorf("parallel search: %w", err)

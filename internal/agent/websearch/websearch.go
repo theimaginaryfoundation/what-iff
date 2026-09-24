@@ -34,8 +34,50 @@ type Query struct {
 	// that support it (Parallel) use it to rank and excerpt, others ignore it.
 	Objective  string
 	MaxResults int
-	// Recency, when set, limits results to content published within that window.
-	Recency Recency
+	// Recency and PublishedAfter limit results by publication date; with both, the later
+	// cutoff wins. Pages the provider has no date for can still come back.
+	Recency        Recency
+	PublishedAfter time.Time
+	// IncludeDomains restricts results to these domains; ExcludeDomains drops them. Both
+	// take bare domains (see NormalizeDomains).
+	IncludeDomains []string
+	ExcludeDomains []string
+}
+
+// MaxDomainFilters caps each domain list so a runaway tool call can't build a huge request.
+const MaxDomainFilters = 10
+
+// NormalizeDomains turns model-supplied domains ("https://www.ESPN.com/nfl") into bare,
+// lowercased hosts ("espn.com"), dropping duplicates. It rejects entries without a dot and
+// lists longer than MaxDomainFilters, so the model gets a clear error rather than a filter
+// that silently matches nothing.
+func NormalizeDomains(domains []string) ([]string, error) {
+	if len(domains) == 0 {
+		return nil, nil
+	}
+	if len(domains) > MaxDomainFilters {
+		return nil, fmt.Errorf("at most %d domains per filter, got %d", MaxDomainFilters, len(domains))
+	}
+	out := make([]string, 0, len(domains))
+	seen := make(map[string]bool, len(domains))
+	for _, raw := range domains {
+		d := strings.ToLower(strings.TrimSpace(raw))
+		if i := strings.Index(d, "://"); i >= 0 {
+			d = d[i+3:]
+		}
+		if i := strings.IndexAny(d, "/?#"); i >= 0 {
+			d = d[:i]
+		}
+		d = strings.TrimPrefix(d, "www.")
+		if !strings.Contains(d, ".") || strings.ContainsAny(d, " @:") {
+			return nil, fmt.Errorf("%q is not a domain (want something like espn.com)", raw)
+		}
+		if !seen[d] {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	return out, nil
 }
 
 // Recency is a relative publication window for a search ("this week's news").

@@ -11,7 +11,8 @@ When it is configured, every model gets the same capability and vendor-native we
   The interfaces are the seam for agent tests and any future provider.
 - `New(Config)` returns a `Service` whose backend and extractor are both Parallel.
   It returns `ErrNotConfigured` when `PARALLEL_API_KEY` is unset, which callers treat as "tools off".
-- `Query.Recency` (day/week/month/year) limits results to recently published pages via Parallel's `source_policy.after_date`.
+- `Query` filters map onto Parallel's `source_policy`: `Recency` (day/week/month/year) and `PublishedAfter` become `after_date` (the later cutoff wins), and `IncludeDomains`/`ExcludeDomains` pass through after `NormalizeDomains`.
+  The domain filters are strict, but `after_date` does not exclude pages with no known publish date (checked live), so tool descriptions tell the model to check the published field.
 - Trims results for model context: snippets capped at 600 runes, pages at 20k runes, result counts at 1–10 (default 5).
 
 ## Dependencies

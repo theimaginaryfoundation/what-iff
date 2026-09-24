@@ -264,8 +264,9 @@ const ToolNameFetchPage = "fetch_page"
 var WebSearchFunctionToolSpec = FunctionToolSpec{
 	Name: ToolNameWebSearch,
 	Description: "Search the web for current or factual information you don't already know. " +
-		"Returns a short list of results with title, URL, snippet and published date. " +
-		"Use fetch_page on a result's URL when a snippet isn't enough. Cite the URLs you rely on.",
+		"Returns a short list of results with title, URL, snippet and published date (often missing). " +
+		"Prefer the snippets; use fetch_page only on the one or two URLs your answer depends on. " +
+		"Cite the URLs you rely on.",
 	Properties: map[string]interface{}{
 		"query": map[string]interface{}{
 			"type":        "string",
@@ -284,8 +285,24 @@ var WebSearchFunctionToolSpec = FunctionToolSpec{
 		"recency": map[string]interface{}{
 			"type": "string",
 			"enum": []string{"day", "week", "month", "year"},
-			"description": "Optional: only return pages published within the last day, week, month or year. " +
-				"Set it for news, scores, prices, releases and anything else asked about as recent.",
+			"description": "Optional: drop pages published before the last day, week, month or year. " +
+				"Use it for news, scores, prices, releases and anything else asked about as recent. " +
+				"Pages with no published date are not filtered out, so check the published field before treating a result as recent.",
+		},
+		"published_after": map[string]interface{}{
+			"type": "string",
+			"description": "Optional: like recency but with an exact cutoff date, YYYY-MM-DD. " +
+				"If both are given, the later cutoff applies. Undated pages can still appear.",
+		},
+		"include_domains": map[string]interface{}{
+			"type":        "array",
+			"items":       map[string]interface{}{"type": "string"},
+			"description": "Optional: only return results from these domains, e.g. [\"espn.com\"] (at most 10). This is a strict filter.",
+		},
+		"exclude_domains": map[string]interface{}{
+			"type":        "array",
+			"items":       map[string]interface{}{"type": "string"},
+			"description": "Optional: never return results from these domains (at most 10).",
 		},
 	},
 	Required: []string{"query"},
@@ -295,7 +312,9 @@ var WebSearchFunctionToolSpec = FunctionToolSpec{
 var FetchPageToolSpec = FunctionToolSpec{
 	Name: ToolNameFetchPage,
 	Description: "Read the text of one web page, usually a URL returned by web_search. " +
-		"Give an objective to get only the relevant excerpts instead of the whole page.",
+		"Give an objective to get only the relevant excerpts instead of the whole page. " +
+		"It can fail on JavaScript-heavy sites, some PDFs, or blocked and rate-limited hosts; the error says why. " +
+		"On failure, tell the user what went wrong rather than retrying the same URL.",
 	Properties: map[string]interface{}{
 		"url": map[string]interface{}{
 			"type":        "string",

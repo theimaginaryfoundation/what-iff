@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
@@ -34,10 +35,13 @@ func (a *Agent) FirstPartyWebSearch() bool {
 }
 
 type webSearchToolInput struct {
-	Query      string `json:"query"`
-	Objective  string `json:"objective"`
-	MaxResults int    `json:"max_results"`
-	Recency    string `json:"recency"`
+	Query          string   `json:"query"`
+	Objective      string   `json:"objective"`
+	MaxResults     int      `json:"max_results"`
+	Recency        string   `json:"recency"`
+	PublishedAfter string   `json:"published_after"`
+	IncludeDomains []string `json:"include_domains"`
+	ExcludeDomains []string `json:"exclude_domains"`
 }
 
 type webSearchToolOutput struct {
@@ -62,7 +66,19 @@ func (a *Agent) webSearchTool(ctx context.Context, input []byte) (string, error)
 	if err != nil {
 		return "", err
 	}
-	results, err := a.webSearch.Backend.Search(ctx, websearch.Query{Query: in.Query, Objective: in.Objective, MaxResults: in.MaxResults, Recency: recency})
+	q := websearch.Query{Query: in.Query, Objective: in.Objective, MaxResults: in.MaxResults, Recency: recency}
+	if s := strings.TrimSpace(in.PublishedAfter); s != "" {
+		if q.PublishedAfter, err = time.Parse(time.DateOnly, s); err != nil {
+			return "", fmt.Errorf("published_after must be a date like 2026-09-01, got %q", in.PublishedAfter)
+		}
+	}
+	if q.IncludeDomains, err = websearch.NormalizeDomains(in.IncludeDomains); err != nil {
+		return "", fmt.Errorf("include_domains: %w", err)
+	}
+	if q.ExcludeDomains, err = websearch.NormalizeDomains(in.ExcludeDomains); err != nil {
+		return "", fmt.Errorf("exclude_domains: %w", err)
+	}
+	results, err := a.webSearch.Backend.Search(ctx, q)
 	if err != nil {
 		return "", fmt.Errorf("web search failed: %w", err)
 	}

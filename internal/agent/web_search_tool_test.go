@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -100,6 +101,17 @@ func TestWebSearchTool(t *testing.T) {
 
 	_, err = a.webSearchTool(context.Background(), []byte(`{"query":"  "}`))
 	assert.ErrorContains(t, err, "non-empty query")
+
+	_, err = a.webSearchTool(context.Background(), []byte(`{"query":"x","published_after":"2026-09-01","include_domains":["https://www.ESPN.com/nfl"],"exclude_domains":["reddit.com"]}`))
+	require.NoError(t, err)
+	assert.Equal(t, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), backend.gotQuery.PublishedAfter)
+	assert.Equal(t, []string{"espn.com"}, backend.gotQuery.IncludeDomains, "domains are normalised before reaching the provider")
+	assert.Equal(t, []string{"reddit.com"}, backend.gotQuery.ExcludeDomains)
+
+	_, err = a.webSearchTool(context.Background(), []byte(`{"query":"x","published_after":"last tuesday"}`))
+	assert.ErrorContains(t, err, "published_after must be a date like 2026-09-01")
+	_, err = a.webSearchTool(context.Background(), []byte(`{"query":"x","include_domains":["localhost"]}`))
+	assert.ErrorContains(t, err, "include_domains:")
 
 	_, err = a.webSearchTool(context.Background(), []byte(`{"query":"x","recency":"fortnight"}`))
 	assert.ErrorContains(t, err, "day, week, month or year", "a bad recency tells the model the allowed values")

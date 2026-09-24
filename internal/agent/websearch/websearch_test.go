@@ -55,6 +55,58 @@ func TestParallelSearch_RecencySetsAfterDate(t *testing.T) {
 	assert.JSONEq(t, `{"search_queries":["week 3 injuries"],"mode":"fast","advanced_settings":{"source_policy":{"after_date":"2026-09-17"}}}`, string(gotBody))
 }
 
+func TestParallelSearch_SourcePolicy(t *testing.T) {
+	now := time.Date(2026, 9, 24, 15, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name     string
+		q        Query
+		wantBody string
+	}{
+		{"no filters sends no advanced settings", Query{Query: "q"}, `{"search_queries":["q"],"mode":"fast"}`},
+		{"exact date", Query{Query: "q", PublishedAfter: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)},
+			`{"search_queries":["q"],"mode":"fast","advanced_settings":{"source_policy":{"after_date":"2026-09-01"}}}`},
+		{"later cutoff wins: recency", Query{Query: "q", Recency: RecencyWeek, PublishedAfter: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)},
+			`{"search_queries":["q"],"mode":"fast","advanced_settings":{"source_policy":{"after_date":"2026-09-17"}}}`},
+		{"later cutoff wins: exact date", Query{Query: "q", Recency: RecencyMonth, PublishedAfter: time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)},
+			`{"search_queries":["q"],"mode":"fast","advanced_settings":{"source_policy":{"after_date":"2026-09-20"}}}`},
+		{"domains only", Query{Query: "q", IncludeDomains: []string{"espn.com"}, ExcludeDomains: []string{"reddit.com"}},
+			`{"search_queries":["q"],"mode":"fast","advanced_settings":{"source_policy":{"include_domains":["espn.com"],"exclude_domains":["reddit.com"]}}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody []byte
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotBody, _ = io.ReadAll(r.Body)
+				_, _ = w.Write([]byte(`{"results":[]}`))
+			}))
+			defer srv.Close()
+			p := NewParallel("pk", "", srv.Client())
+			p.baseURL = srv.URL
+			p.now = func() time.Time { return now }
+
+			_, err := p.Search(context.Background(), tc.q)
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.wantBody, string(gotBody))
+		})
+	}
+}
+
+func TestNormalizeDomains(t *testing.T) {
+	got, err := NormalizeDomains([]string{" https://www.ESPN.com/nfl?x=1 ", "espn.com", "news.ycombinator.com"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"espn.com", "news.ycombinator.com"}, got)
+
+	got, err = NormalizeDomains(nil)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+
+	for _, bad := range []string{"localhost", "", "not a domain.com", "user@example.com"} {
+		_, err := NormalizeDomains([]string{bad})
+		assert.ErrorContains(t, err, "is not a domain", bad)
+	}
+	_, err = NormalizeDomains(make([]string, MaxDomainFilters+1))
+	assert.ErrorContains(t, err, "at most 10 domains")
+}
+
 func TestParseRecency(t *testing.T) {
 	for in, want := range map[string]Recency{"": "", " Week ": RecencyWeek, "day": RecencyDay, "MONTH": RecencyMonth, "year": RecencyYear} {
 		got, err := ParseRecency(in)
