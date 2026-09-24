@@ -81,10 +81,15 @@ type Usage struct {
 	Metadata map[string]interface{}
 	// SubagentRun marks the usage as originating from a subagent job.
 	SubagentRun bool
-	// WebSearchCount is the number of web searches performed this turn: successful
-	// first-party web_search calls, or the provider's native searches (ADR 0x021).
+	// WebSearchCount is the number of billable web actions this turn (ADR 0x021): the
+	// provider's native searches, or, when WebSearchFirstParty is set, successful
+	// first-party web_search and fetch_page calls.
 	// Only meaningful when ActionType is models.ActionTypeWebSearch.
 	WebSearchCount int
+	// WebSearchFirstParty marks WebSearchCount as first-party tool calls rather than
+	// vendor-native searches, which cost the operator very different amounts, so an
+	// implementation can price them separately.
+	WebSearchFirstParty bool
 }
 
 // New constructs the production Meter. It is nil in builds that do not link a

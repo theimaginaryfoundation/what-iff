@@ -2468,15 +2468,8 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 			MessageID:  messageID,
 		})
 
-		if actionType == models.ActionTypeChatMessage && chatCtx != nil && chatCtx.webSearchCount > 0 {
-			// The meter prices web search by count and skips a zero charge.
-			a.meter.Record(ctx, qd, metering.Usage{
-				UserID:         userID,
-				ActionType:     models.ActionTypeWebSearch,
-				Model:          chatCtx.model,
-				ChatID:         chatMessage.ChatID.String(),
-				WebSearchCount: chatCtx.webSearchCount,
-			})
+		if usage, ok := a.webSearchUsage(userID, chatMessage.ChatID, chatCtx, actionType); ok {
+			a.meter.Record(ctx, qd, usage)
 		}
 	}
 

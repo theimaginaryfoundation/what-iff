@@ -8,9 +8,11 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
+	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -96,20 +98,43 @@ func (a *Agent) fetchPageTool(ctx context.Context, input []byte) (string, error)
 	return marshalToolOutput(page)
 }
 
-// turnWebSearchCount returns the turn's billable web searches for metering. First-party
-// search bills each successful web_search call (fetch_page is not a search); vendor-native
-// search bills what the provider reports. Exactly one of the two can run in a turn.
+// turnWebSearchCount returns the turn's billable web actions for metering. First-party
+// search bills each successful web_search and fetch_page call alike (both are one provider
+// request at a similar price; failures are free); vendor-native search bills what the
+// provider reports. Exactly one of the two can run in a turn, and the meter is told which
+// (metering.Usage.WebSearchFirstParty).
 func (a *Agent) turnWebSearchCount(adapter provider.AgentAdapter, toolCalls []*models.ToolCall) int {
 	if !a.FirstPartyWebSearch() {
 		return adapter.WebSearchCompletedCount()
 	}
 	n := 0
 	for _, tc := range toolCalls {
-		if tc != nil && tc.ToolName == agenttools.ToolNameWebSearch && tc.ToolError == "" {
+		if tc == nil || tc.ToolError != "" {
+			continue
+		}
+		switch tc.ToolName {
+		case agenttools.ToolNameWebSearch, agenttools.ToolNameFetchPage:
 			n++
 		}
 	}
 	return n
+}
+
+// webSearchUsage builds the turn's web search metering event, recorded alongside the chat
+// turn's own event. ok is false when there is nothing to bill: no web actions, or not a
+// chat turn. The meter prices it by count, and WebSearchFirstParty says which kind.
+func (a *Agent) webSearchUsage(userID, chatID uuid.UUID, chatCtx *chatContext, actionType string) (metering.Usage, bool) {
+	if actionType != models.ActionTypeChatMessage || chatCtx == nil || chatCtx.webSearchCount <= 0 {
+		return metering.Usage{}, false
+	}
+	return metering.Usage{
+		UserID:              userID,
+		ActionType:          models.ActionTypeWebSearch,
+		Model:               chatCtx.model,
+		ChatID:              chatID.String(),
+		WebSearchCount:      chatCtx.webSearchCount,
+		WebSearchFirstParty: a.FirstPartyWebSearch(),
+	}, true
 }
 
 func marshalToolOutput(v any) (string, error) {

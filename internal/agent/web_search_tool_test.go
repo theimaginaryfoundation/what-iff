@@ -6,11 +6,13 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
+	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -148,8 +150,8 @@ func TestTurnWebSearchCount(t *testing.T) {
 	adapter := countingAdapter{native: 7}
 
 	firstParty := &Agent{webSearch: &websearch.Service{Backend: &fakeSearchBackend{}}}
-	assert.Equal(t, 2, firstParty.turnWebSearchCount(adapter, calls),
-		"first-party bills successful web_search calls only; fetch_page and failures are free, and the adapter is not consulted")
+	assert.Equal(t, 3, firstParty.turnWebSearchCount(adapter, calls),
+		"first-party bills successful web_search and fetch_page calls alike; failures are free, and the adapter is not consulted")
 
 	native := &Agent{}
 	assert.Equal(t, 7, native.turnWebSearchCount(adapter, calls), "vendor-native bills what the provider reports")
@@ -160,4 +162,28 @@ func TestFirstPartyWebSearch(t *testing.T) {
 	assert.False(t, (&Agent{}).FirstPartyWebSearch())
 	var nilAgent *Agent
 	assert.False(t, nilAgent.FirstPartyWebSearch())
+}
+
+func TestWebSearchUsage(t *testing.T) {
+	userID, chatID := uuid.New(), uuid.New()
+	chatCtx := &chatContext{model: "claude-sonnet-4-6", webSearchCount: 3}
+
+	firstParty := &Agent{webSearch: &websearch.Service{}}
+	usage, ok := firstParty.webSearchUsage(userID, chatID, chatCtx, models.ActionTypeChatMessage)
+	require.True(t, ok)
+	assert.Equal(t, metering.Usage{
+		UserID: userID, ActionType: models.ActionTypeWebSearch, Model: "claude-sonnet-4-6", ChatID: chatID.String(),
+		WebSearchCount: 3, WebSearchFirstParty: true,
+	}, usage)
+
+	usage, ok = (&Agent{}).webSearchUsage(userID, chatID, chatCtx, models.ActionTypeChatMessage)
+	require.True(t, ok)
+	assert.False(t, usage.WebSearchFirstParty, "vendor-native searches are flagged as such, so they keep their own price")
+
+	_, ok = firstParty.webSearchUsage(userID, chatID, &chatContext{}, models.ActionTypeChatMessage)
+	assert.False(t, ok, "no web actions, nothing to bill")
+	_, ok = firstParty.webSearchUsage(userID, chatID, chatCtx, models.ActionTypeJobRun)
+	assert.False(t, ok, "only chat turns bill web search")
+	_, ok = firstParty.webSearchUsage(userID, chatID, nil, models.ActionTypeChatMessage)
+	assert.False(t, ok)
 }
