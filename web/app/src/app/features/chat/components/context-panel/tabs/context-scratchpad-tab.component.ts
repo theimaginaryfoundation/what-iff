@@ -3,11 +3,12 @@ import { ChangeDetectionStrategy, Component, computed, effect, inject, input } f
 import { ContextPanelService } from '../../../services/context-panel.service';
 import { ScratchpadService } from '../../../services/scratchpad.service';
 import { ButtonComponent } from '../../../../../shared/ui/button/button.component';
+import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.component';
 
 @Component({
   selector: 'app-context-scratchpad-tab',
   standalone: true,
-  imports: [ButtonComponent],
+  imports: [ButtonComponent, HelpHintComponent],
   template: `
     <section class="tab-body" aria-label="Thread scratchpad">
       @if (!chatId()) {
@@ -15,7 +16,13 @@ import { ButtonComponent } from '../../../../../shared/ui/button/button.componen
       } @else if (scratchpad.loading()) {
         <p class="state">Loading scratchpad…</p>
       } @else {
-        <label for="scratchpad-input" class="label">{{ scratchpadHeading() }}</label>
+        <div class="label-row">
+          <label for="scratchpad-input" class="label">{{ scratchpadHeading() }}</label>
+          <ui-help-hint label="What is the scratchpad?" heading="Scratchpad" guide="continuity" align="end">
+            Working notes this personality keeps about you: goals, projects and what matters to you. It updates them
+            at checkpoints as you chat, you can edit them here, and they carry into every thread with this personality.
+          </ui-help-hint>
+        </div>
         <textarea
           id="scratchpad-input"
           [value]="scratchpad.value()"
@@ -51,6 +58,13 @@ import { ButtonComponent } from '../../../../../shared/ui/button/button.componen
     .tab-body {
       display: grid;
       gap: 0.6rem;
+    }
+
+    .label-row {
+      align-items: center;
+      display: flex;
+      justify-content: space-between;
+      gap: 0.5rem;
     }
 
     .label {

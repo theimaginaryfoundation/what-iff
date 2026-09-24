@@ -8,7 +8,7 @@ import { test, expect } from '../../../fixtures';
  * Every test names `userWithPersonality` without reading it: naming a fixture
  * is what runs it, and this one registers the account, seeds a personality and
  * lands on /chat. That last part is load-bearing — `personalitySetupGuard`
- * bounces personality-less accounts to /personality/getting-started, so an
+ * bounces personality-less accounts to /personality?setup=1 (the first-run welcome), so an
  * account with no personality never reaches /chat at all.
  */
 
