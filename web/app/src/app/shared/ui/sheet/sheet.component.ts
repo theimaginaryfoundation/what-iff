@@ -18,6 +18,11 @@ export class SheetComponent implements OnDestroy {
   readonly labelledBy = input<string | null>(null);
   readonly describedBy = input<string | null>(null);
   readonly dismissible = input(true);
+  /** Set false when the projected content renders its own title row and close control. */
+  readonly showHeader = input(true);
+  readonly showHandle = input(true);
+  /** Extra class(es) on the panel so a host can size it for its content. */
+  readonly panelClass = input('');
   readonly dismiss = output<void>();
 
   readonly dialog = viewChild<ElementRef<HTMLElement>>('dialog');

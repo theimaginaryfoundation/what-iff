@@ -5,7 +5,13 @@ import { ContextBreakdownTabComponent } from './tabs/context-breakdown-tab.compo
 import { ContextMemoriesTabComponent } from './tabs/context-memories-tab.component';
 import { ContextScratchpadTabComponent } from './tabs/context-scratchpad-tab.component';
 import { ContextToolsTabComponent } from './tabs/context-tools-tab.component';
-import { XIconComponent } from '../../../../shared/ui/icons/icons';
+import {
+  BrainIconComponent,
+  LayersIconComponent,
+  NoteIconComponent,
+  WrenchIconComponent,
+  XIconComponent,
+} from '../../../../shared/ui/icons/icons';
 
 @Component({
   selector: 'app-context-panel',
@@ -16,6 +22,10 @@ import { XIconComponent } from '../../../../shared/ui/icons/icons';
     ContextToolsTabComponent,
     ContextBreakdownTabComponent,
     XIconComponent,
+    NoteIconComponent,
+    BrainIconComponent,
+    WrenchIconComponent,
+    LayersIconComponent,
   ],
   template: `
     <section class="context-panel" aria-label="Conversation context">
@@ -36,33 +46,41 @@ import { XIconComponent } from '../../../../shared/ui/icons/icons';
           type="button"
           [class.context-panel__primary-tab--active]="context.activeTab() === 'scratchpad'"
           [attr.aria-current]="context.activeTab() === 'scratchpad' ? 'page' : null"
+          title="Scratchpad"
           (click)="context.setActiveTab('scratchpad')"
         >
-          Scratchpad
+          <ui-note-icon class="context-panel__primary-tab-icon" [size]="20" />
+          <span class="context-panel__primary-tab-label">Scratchpad</span>
         </button>
         <button
           type="button"
           [class.context-panel__primary-tab--active]="context.activeTab() === 'memories'"
           [attr.aria-current]="context.activeTab() === 'memories' ? 'page' : null"
+          title="Memories"
           (click)="context.setActiveTab('memories')"
         >
-          Memories
+          <ui-brain-icon class="context-panel__primary-tab-icon" [size]="20" />
+          <span class="context-panel__primary-tab-label">Memories</span>
         </button>
         <button
           type="button"
           [class.context-panel__primary-tab--active]="context.activeTab() === 'tools'"
           [attr.aria-current]="context.activeTab() === 'tools' ? 'page' : null"
+          title="Tools"
           (click)="context.setActiveTab('tools')"
         >
-          Tools
+          <ui-wrench-icon class="context-panel__primary-tab-icon" [size]="20" />
+          <span class="context-panel__primary-tab-label">Tools</span>
         </button>
         <button
           type="button"
           [class.context-panel__primary-tab--active]="context.activeTab() === 'context'"
           [attr.aria-current]="context.activeTab() === 'context' ? 'page' : null"
+          title="Context"
           (click)="context.setActiveTab('context')"
         >
-          Context
+          <ui-layers-icon class="context-panel__primary-tab-icon" [size]="20" />
+          <span class="context-panel__primary-tab-label">Context</span>
         </button>
       </nav>
 
@@ -147,31 +165,53 @@ import { XIconComponent } from '../../../../shared/ui/icons/icons';
     }
 
     @media (max-width: 1023px) {
+      /* Title, tab strip, then a body that takes the remaining height. */
+      .context-panel {
+        grid-template-rows: auto auto minmax(0, 1fr);
+      }
+
       .context-panel__header {
+        color: var(--color-text-primary);
+        font-size: 0.875rem;
         padding-block: 0.5rem;
         padding-inline: 0.75rem;
       }
 
       .context-panel__close {
-        display: none;
+        height: 2.75rem;
+        width: 2.75rem;
       }
 
       .context-panel__primary-tabs {
         border-bottom: 1px solid var(--color-border-base);
-        display: grid;
-        gap: 0.375rem;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        display: flex;
+        gap: 0.5rem;
+        justify-content: center;
         padding: 0.625rem 0.75rem;
       }
 
       .context-panel__primary-tabs button {
+        align-items: center;
         border: 1px solid var(--color-border-base);
-        border-radius: 0.5rem;
+        border-radius: 0.625rem;
         color: var(--color-text-secondary);
-        font-size: 0.75rem;
-        font-weight: 600;
-        min-height: 2.75rem;
-        padding: 0.375rem 0.5rem;
+        display: inline-flex;
+        flex: 0 0 auto;
+        height: 2.75rem;
+        justify-content: center;
+        padding: 0;
+        width: 2.75rem;
+      }
+
+      .context-panel__primary-tab-label {
+        border: 0;
+        clip: rect(0 0 0 0);
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        position: absolute;
+        white-space: nowrap;
+        width: 1px;
       }
 
       .context-panel__primary-tabs .context-panel__primary-tab--active {
