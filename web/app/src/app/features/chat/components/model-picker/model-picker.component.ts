@@ -16,6 +16,7 @@ import {
   sortedProviders,
 } from '../../helpers/model-picker.helpers';
 import { ModelFavoritesService } from '../../services/model-favorites.service';
+import { EyeOffIconComponent } from '../../../../shared/ui/icons/icons';
 
 type VendorStep = 'vendor' | 'model';
 type TierStep = 'tier' | 'model';
@@ -26,7 +27,7 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
 @Component({
   selector: 'app-model-picker',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, EyeOffIconComponent],
   template: `
     <div class="model-picker">
       <button
@@ -38,7 +39,12 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
         [disabled]="disabled()"
         (click)="toggle()"
       >
-        <span>{{ selectedModel()?.display_name || 'Model' }}</span>
+        <span class="model-picker__trigger-name">{{ selectedModel()?.display_name || 'Model' }}</span>
+        @if (lacksVision(selectedModel())) {
+          <span class="model-picker__no-vision" role="img" [attr.aria-label]="noVisionLabel" [title]="noVisionLabel">
+            <ui-eye-off-icon [size]="12" />
+          </span>
+        }
       </button>
       @if (open()) {
         <div
@@ -155,14 +161,9 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
           (click)="choose(model)"
         >
           <span class="model-picker__option-name">{{ model.display_name }}</span>
-          @if (model.vision_support === false) {
-            <span class="model-picker__no-vision" role="img" aria-label="Can't see images" title="Can't see images">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c7 0 10 8 10 8a13.2 13.2 0 0 1-1.67 2.68"/>
-                <path d="M6.61 6.61A13.5 13.5 0 0 0 2 12s3 8 10 8a9.7 9.7 0 0 0 5.39-1.61"/>
-                <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/>
-                <line x1="2" y1="2" x2="22" y2="22"/>
-              </svg>
+          @if (lacksVision(model)) {
+            <span class="model-picker__no-vision" role="img" [attr.aria-label]="noVisionLabel" [title]="noVisionLabel">
+              <ui-eye-off-icon [size]="14" />
             </span>
           }
           @if (tierLabel(model); as tier) {
@@ -201,6 +202,7 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
       cursor: pointer;
       display: inline-flex;
       font-size: 0.6875rem;
+      gap: 0.25rem;
       height: 2.25rem;
       line-height: 1;
       max-width: 8rem;
@@ -208,7 +210,7 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
       white-space: nowrap;
     }
 
-    .model-picker__trigger span {
+    .model-picker__trigger-name {
       overflow: hidden;
       text-overflow: ellipsis;
     }
@@ -397,10 +399,10 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
       color: var(--color-text-muted);
       display: inline-flex;
       flex-shrink: 0;
-      margin-left: auto;
     }
 
     .model-picker__tier {
+      margin-left: auto;
       color: var(--color-text-primary);
       flex-shrink: 0;
       font-size: 0.625rem;
@@ -499,6 +501,12 @@ export class ModelPickerComponent {
     } else if (mode === 'tier') {
       this.resetTierStep();
     }
+  }
+
+  readonly noVisionLabel = "Can't see images";
+
+  lacksVision(model: Model | undefined): boolean {
+    return model?.vision_support === false;
   }
 
   tierLabel(model: Model): string {

@@ -123,6 +123,15 @@ describe('ModelPickerComponent', () => {
         expect(flagged[0].querySelector('.model-picker__no-vision')?.getAttribute('aria-label')).toBe("Can't see images");
     });
 
+    it('shows the no-vision icon on the trigger only for a selected text-only model', () => {
+        const trigger = (): HTMLElement => fixture.nativeElement.querySelector('.model-picker__trigger');
+        expect(trigger().querySelector('.model-picker__no-vision')).toBeNull();
+
+        fixture.componentRef.setInput('selectedId', 'm2');
+        fixture.detectChanges();
+        expect(trigger().querySelector('.model-picker__no-vision')).toBeTruthy();
+    });
+
     it('does not open when disabled', () => {
         fixture.componentRef.setInput('disabled', true);
         fixture.detectChanges();

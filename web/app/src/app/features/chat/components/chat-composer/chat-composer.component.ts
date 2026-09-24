@@ -24,6 +24,7 @@ import { EmojiEvent } from '@ctrl/ngx-emoji-mart/ngx-emoji';
 import {
   FileAttachment,
   PendingFileAttachment,
+  isPendingImageAttachment,
   pendingAttachmentKey,
 } from '../../../../core/models/file-attachment.model';
 import { Model } from '../../../../core/models/model.model';
@@ -52,7 +53,8 @@ import {
 import { ModelPickerComponent } from '../model-picker/model-picker.component';
 import { EmojiAutocompleteMenuComponent } from '../emoji-autocomplete-menu/emoji-autocomplete-menu.component';
 import { SlashMenuComponent } from '../slash-menu/slash-menu.component';
-import { BoltIconComponent, FileIconComponent, ImageIconComponent, PlusIconComponent } from '../../../../shared/ui/icons/icons';
+import { BoltIconComponent, EyeOffIconComponent, FileIconComponent, ImageIconComponent, PlusIconComponent } from '../../../../shared/ui/icons/icons';
+import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 import { ModalComponent } from '../../../../shared/ui/modal/modal.component';
 import {
   TEXT_LIMIT_HARD_MAX,
@@ -88,8 +90,10 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
     BoltIconComponent,
     FileIconComponent,
     ImageIconComponent,
+    EyeOffIconComponent,
     PlusIconComponent,
     ModalComponent,
+    TooltipDirective,
   ],
   template: `
     <form class="composer" (submit)="onSubmit($event)" (drop)="onDrop($event)" (dragover)="onDragOver($event)" (dragleave)="isDragOver.set(false)">
@@ -156,6 +160,18 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                 (click)="removeAttachment(pendingAttachmentKey(attachment))"
               >×</button>
             </span>
+          }
+          @if (showNoVisionWarning()) {
+            <button
+              type="button"
+              class="composer__no-vision"
+              uiTooltip="This model cannot see images"
+              [disabledOnTouch]="false"
+              aria-label="Images not supported: this model cannot see images"
+            >
+              <ui-eye-off-icon [size]="12" />
+              Images not supported
+            </button>
           }
         </div>
       }
@@ -685,6 +701,25 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
     .composer__attachments small {
       color: var(--color-text-muted);
       font-size: 0.625rem;
+    }
+
+    .composer__no-vision {
+      align-items: center;
+      background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+      border: 1px solid color-mix(in srgb, var(--color-warning) 55%, transparent);
+      border-radius: 999px;
+      color: var(--color-text-primary);
+      cursor: help;
+      display: inline-flex;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      gap: 0.3rem;
+      padding: 0.25rem 0.5rem;
+    }
+
+    .composer__no-vision ui-eye-off-icon {
+      color: var(--color-warning);
+      display: inline-flex;
     }
 
     .composer__attachment--error {
@@ -1296,6 +1331,10 @@ export class ChatComposerComponent {
   readonly hardLimitLabel = TEXT_LIMIT_HARD_MAX.toLocaleString();
   readonly warningLimitLabel = TEXT_LIMIT_WARNING_THRESHOLD.toLocaleString();
   readonly hasUploadingAttachments = computed(() => this.attachments().some(attachment => attachment.isUploading));
+  readonly showNoVisionWarning = computed(() => {
+    const model = this.models().find(m => m.id === this.selectedModelId());
+    return model?.vision_support === false && this.attachments().some(isPendingImageAttachment);
+  });
   readonly composerDisabled = computed(() => this.disabled() || this.threadArchived());
   readonly characterCount = computed(() => this.draft().length);
   readonly characterCountLabel = computed(() => this.characterCount().toLocaleString());
