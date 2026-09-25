@@ -52,13 +52,13 @@ describe('nav.helpers', () => {
 
     describe('navTooltip', () => {
         it('explains the section when its label is visible', () => {
-            expect(navTooltip('Skills', 'Saved instructions you add to a message with /', true))
-                .toBe('Saved instructions you add to a message with /');
+            expect(navTooltip('Skills', "Saved instructions you add to a message with '/'", true))
+                .toBe("Saved instructions you add to a message with '/'");
         });
 
         it('leads with the label when the control is icon-only', () => {
-            expect(navTooltip('Skills', 'Saved instructions you add to a message with /', false))
-                .toBe('Skills: saved instructions you add to a message with /');
+            expect(navTooltip('Skills', "Saved instructions you add to a message with '/'", false))
+                .toBe("Skills: saved instructions you add to a message with '/'");
         });
 
         it('gives every nav item a hint that says more than its label', () => {

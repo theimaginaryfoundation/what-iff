@@ -58,7 +58,7 @@ type ToolContextTab = 'available' | 'history';
           <ul class="list">
             @for (tool of tools(); track tool.name) {
               <li>
-                <label class="tool-item">
+                <label class="tool-item" [uiTooltip]="tool.guide ?? ''" placement="left">
                   <input
                     type="checkbox"
                     [checked]="isToolEnabled(tool.name)"

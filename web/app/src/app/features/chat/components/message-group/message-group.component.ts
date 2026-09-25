@@ -30,7 +30,7 @@ interface AssistantVisual {
       @if (origin() === 'Assistant' && showAssistantAvatar()) {
         <div class="message-group__avatar-column">
           @if (expressionKeySnippet(); as exprKey) {
-            <div class="message-group__expression-key" [uiTooltip]="'Expression shown for this reply: ' + exprKey">{{ exprKey }}</div>
+            <div class="message-group__expression-key" [uiTooltip]="'Expression the personality chose for this reply: ' + exprKey">{{ exprKey }}</div>
           }
           <div class="message-group__avatar" aria-hidden="true">
             <span class="message-group__avatar-main">

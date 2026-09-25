@@ -77,8 +77,8 @@ import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
             <h2 class="inline-flex items-center gap-1 text-base font-semibold text-(--color-text-primary)">
               Expressions
               <ui-help-hint label="What are expressions?" heading="Expressions" guide="expressions">
-                Portraits shown next to this personality's replies. After each reply the app picks the one that fits
-                best, using the labels to decide when each applies.
+                Portraits shown next to this personality's replies. After each reply the personality picks the one that
+                fits, using the labels to know when each applies.
               </ui-help-hint>
             </h2>
           }

@@ -280,9 +280,9 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                             <span class="composer__skill-name">Auto</span>
                             <!-- Auto lets the model pick and switch the mode; choosing one below locks it. -->
                             @if (isAutoMood() && activeMode(); as current) {
-                              <span class="composer__skill-subtitle">Model picks the mode · now {{ current.name }}</span>
+                              <span class="composer__skill-subtitle">Your personality picks the mode · now {{ current.name }}</span>
                             } @else {
-                              <span class="composer__skill-subtitle">Model picks and switches the mode itself</span>
+                              <span class="composer__skill-subtitle">Your personality picks and switches the mode itself</span>
                             }
                           </span>
                         </button>
@@ -1277,8 +1277,8 @@ export class ChatComposerComponent {
     }
     const name = this.selectedPersonalityName()?.trim() || '';
     return name
-      ? `Message ${name}... (type / for commands)`
-      : 'Message... (type / for commands)';
+      ? `Message ${name}... (type '/' for commands)`
+      : "Message... (type '/' for commands)";
   });
   readonly personaButtonLabel = computed(() => this.selectedPersonalityName() || 'Pick personality');
   readonly personaButtonAriaLabel = computed(() => {

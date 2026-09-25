@@ -1,7 +1,7 @@
 <section class="rounded-2xl border border-border-base bg-surface-card p-4 text-sm">
   <h3 class="font-semibold text-text-primary">Available in thread</h3>
   @if (!chatId()) {
-    <p class="mt-2 text-xs text-text-secondary">Pick a thread to see whether this skill is in its / menu.</p>
+    <p class="mt-2 text-xs text-text-secondary">Pick a thread to see whether this skill is in its '/' menu.</p>
   } @else if (loading()) {
     <p class="mt-2 text-xs text-text-secondary" role="status">Checking available skills…</p>
   } @else if (error()) {

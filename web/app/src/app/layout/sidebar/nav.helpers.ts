@@ -53,7 +53,7 @@ const APP_NAV_ITEMS: ReadonlyArray<NavItem> = [
 const CONFIG_BASE_ITEMS: ReadonlyArray<NavItem> = [
   { id: 'memories', label: 'Memories', hint: 'What your personalities remember across threads', route: '/memories', icon: BrainIconComponent },
   { id: 'modes', label: 'Modes', hint: 'Sets of instructions, skills and a model a thread can switch into', route: '/mode', icon: SmileIconComponent },
-  { id: 'skills', label: 'Skills', hint: 'Saved instructions you add to a message with /', route: '/skills', icon: BoltIconComponent },
+  { id: 'skills', label: 'Skills', hint: "Saved instructions you add to a message with '/'", route: '/skills', icon: BoltIconComponent },
   { id: 'tools', label: 'Tools', hint: 'Connectors (MCP servers) and webhook tokens', route: '/integrations', icon: WrenchIconComponent },
   { id: 'jobs', label: 'Jobs', hint: 'Prompts your personalities run on a schedule', route: '/agent-jobs', icon: ClockIconComponent },
 ];

@@ -6,6 +6,8 @@ import { environment } from '@environments/environment';
 export interface ToolMeta {
   name: string;
   description: string;
+  /** What the tool can do and which options it takes; shown as its tooltip. */
+  guide?: string;
 }
 
 @Injectable({

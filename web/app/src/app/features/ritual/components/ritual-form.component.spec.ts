@@ -66,7 +66,7 @@ describe('RitualFormComponent', () => {
         const host = fixture.nativeElement as HTMLElement;
         const nameInput = host.querySelector('input[placeholder="e.g., Source Analysis"]') as HTMLInputElement;
         const hint = host.querySelector(`#${nameInput.getAttribute('aria-describedby')}`);
-        expect(hint?.textContent).toContain('typing / and this name');
+        expect(hint?.textContent).toContain("typing '/' and this name");
     });
 
     it('toggles save validity and create/edit labels', () => {
