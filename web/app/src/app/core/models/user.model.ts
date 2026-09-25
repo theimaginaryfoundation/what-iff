@@ -67,7 +67,6 @@ export interface UserPreferences {
   default_model_id: string;
   default_personality_id?: string;
   theme?: 'light' | 'dark' | 'system';
-  last_seen_announcement?: string;
   /**
    * Model IDs starred in the model picker. User-global, not per-personality.
    *

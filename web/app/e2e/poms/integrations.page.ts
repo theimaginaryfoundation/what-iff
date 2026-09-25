@@ -1,5 +1,4 @@
 import type { Locator, Page } from '@playwright/test';
-import { AppShell } from './app-shell.page';
 import { ConfirmationModal } from './confirmation.modal';
 
 /**
@@ -16,11 +15,9 @@ import { ConfirmationModal } from './confirmation.modal';
  * rather than assuming either.
  */
 export class IntegrationsPage {
-  private readonly shell: AppShell;
   readonly confirmation: ConfirmationModal;
 
   constructor(private readonly page: Page) {
-    this.shell = new AppShell(page);
     this.confirmation = new ConfirmationModal(page);
     this.unavailableNotice = this.page.getByRole('status').filter({ hasText: 'Integrations are unavailable for this account' });
     this.connectorsTab = this.page.getByRole('button', {
@@ -52,7 +49,6 @@ export class IntegrationsPage {
 
   async navigateTo(): Promise<void> {
     await this.page.goto('/integrations');
-    await this.shell.dismissAnnouncementIfPresent();
   }
 
   readonly heading: Locator;

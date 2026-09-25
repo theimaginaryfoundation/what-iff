@@ -11,7 +11,7 @@ test('create a personality and send/receive a chat message with it', async ({
   chatPage,
   personalitiesPage,
   personalityDetailPage,
-  shell,
+  
 }) => {
   const personalityName = `E2E Persona ${shortId()}`;
 
@@ -23,12 +23,10 @@ test('create a personality and send/receive a chat message with it', async ({
   // costs a real Cognito authentication, which is what the shared-session
   // setup exists to avoid.
   await test.step('dismiss the first-run announcement', async () => {
-    await shell.dismissAnnouncementIfPresent();
   });
 
   await test.step('create a personality manually', async () => {
     await personalitiesPage.navigateTo();
-    await shell.dismissAnnouncementIfPresent();
     await personalitiesPage.openCreateManually();
 
     await personalitiesPage.createManually(

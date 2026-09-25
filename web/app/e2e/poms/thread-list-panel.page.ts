@@ -1,5 +1,4 @@
 import type { Locator, Page, Response } from '@playwright/test';
-import { AppShell } from './app-shell.page';
 import { ConfirmationModal } from './confirmation.modal';
 import { MUTATION_ACK_TIMEOUT } from '../timeouts';
 
@@ -10,11 +9,9 @@ import { MUTATION_ACK_TIMEOUT } from '../timeouts';
  * `aria-label="Threads"` region except the modals, which portal to the body.
  */
 export class ThreadListPanel {
-  private readonly shell: AppShell;
   readonly confirmation: ConfirmationModal;
 
   constructor(private readonly page: Page) {
-    this.shell = new AppShell(page);
     this.confirmation = new ConfirmationModal(page);
     this.panel = this.page.getByRole('complementary', { name: 'Threads' });
     this.heading = this.page.getByRole('heading', { name: 'Thread Manager' });
@@ -41,7 +38,6 @@ export class ThreadListPanel {
    */
   async navigateTo(): Promise<void> {
     await this.page.goto('/chat');
-    await this.shell.dismissAnnouncementIfPresent();
   }
 
   /** The `<aside aria-label="Threads">` wrapper — a `complementary`, not a `region`. */

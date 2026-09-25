@@ -1,5 +1,4 @@
 import type { Locator, Page } from '@playwright/test';
-import { AppShell } from './app-shell.page';
 
 /**
  * A single memory (`/memories/<id>`) — memory-detail-page.component.html plus
@@ -10,10 +9,8 @@ import { AppShell } from './app-shell.page';
  * There is likewise no Copy button — the exploration pass expected both.
  */
 export class MemoryDetailPage {
-  private readonly shell: AppShell;
 
   constructor(private readonly page: Page) {
-    this.shell = new AppShell(page);
     this.backButton = this.page.getByRole('button', {
       name: 'Back to memories',
     });
@@ -24,7 +21,6 @@ export class MemoryDetailPage {
 
   async navigateTo(id: string): Promise<void> {
     await this.page.goto(`/memories/${id}`);
-    await this.shell.dismissAnnouncementIfPresent();
   }
 
   /** Back link. Sentence case in the template — "Back to memories". */

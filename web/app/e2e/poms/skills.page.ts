@@ -27,7 +27,6 @@ export class SkillsPage {
 
   async navigateTo(): Promise<void> {
     await this.page.goto('/skills');
-    await this.shell.dismissAnnouncementIfPresent();
   }
 
   readonly heading: Locator;

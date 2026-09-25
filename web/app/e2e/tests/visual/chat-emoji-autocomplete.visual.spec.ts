@@ -28,9 +28,7 @@ test(
     // the same fixed-name approach, as chat.visual.spec.ts.
     const personalityName = 'E2E Visual Emoji Persona';
 
-    await shell.dismissAnnouncementIfPresent();
     await personalitiesPage.navigateTo();
-    await shell.dismissAnnouncementIfPresent();
     await personalitiesPage.openCreateManually();
     await personalitiesPage.createManually(
       personalityName,

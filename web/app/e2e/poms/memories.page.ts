@@ -62,7 +62,6 @@ export class MemoriesPage {
   /** `query` is an optional leading-`?` query string, for deep-linking (e.g. `?status=inactive`). */
   async navigateTo(query = ''): Promise<void> {
     await this.page.goto(`/memories${query}`);
-    await this.shell.dismissAnnouncementIfPresent();
   }
 
   readonly heading: Locator;

@@ -405,7 +405,6 @@ export const test = base.extend<Fixtures & InternalFixtures & PomFixtures>({
     // personality exists, so tests that never navigate themselves (sidebar
     // nav, command palette) start from a usable app.
     await authenticatedPage.goto('/chat');
-    await new AppShell(authenticatedPage).dismissAnnouncementIfPresent();
 
     await use({ user: testUser, personality, page: authenticatedPage });
   },
