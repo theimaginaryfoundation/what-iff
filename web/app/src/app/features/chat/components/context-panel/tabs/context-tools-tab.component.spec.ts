@@ -82,11 +82,12 @@ describe('ContextToolsTabComponent', () => {
     });
 
     it('renders available tools with descriptions returned by the tools API', () => {
-        expect(fixture.nativeElement.textContent).toContain('Available Tools');
-        expect(fixture.nativeElement.textContent).toContain('Tool Call History');
+        expect(fixture.nativeElement.textContent).toContain('Available tools');
+        expect(fixture.nativeElement.textContent).toContain('Tool call history');
         const labels = fixture.nativeElement.querySelectorAll('.tool-item');
         expect(labels.length).toBe(2);
         expect(fixture.nativeElement.textContent).toContain('Search the web for current information.');
+        expect(fixture.nativeElement.textContent).toContain('Web Search');
         expect(fixture.nativeElement.textContent).toContain("Update this personality's working notes, which persist across conversations using the same personality.");
         expect(fixture.nativeElement.textContent).not.toContain('Austin vs Seattle cost of living 2026');
     });

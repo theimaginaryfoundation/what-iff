@@ -313,7 +313,7 @@ export class ThreadListPanel {
   /** Opens the Import & Export screen from the panel header action. */
   async openImport(): Promise<void> {
     const headerButton = this.panel.getByRole('button', {
-      name: 'Import Conversations',
+      name: 'Import threads',
     });
     await headerButton.click();
     await this.page.waitForURL(/\/data$/);

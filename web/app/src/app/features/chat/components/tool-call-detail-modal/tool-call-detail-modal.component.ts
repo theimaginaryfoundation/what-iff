@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, input, output, signal, ChangeDetectionStrategy } from '@angular/core';
 
 import { ToolCall } from '../../../../core/models/toolcall.model';
+import { friendlyToolName } from '../../helpers/tool-call-format.helpers';
 
 interface ParsedField {
   isJson: boolean;
@@ -25,6 +26,7 @@ export class ToolCallDetailModalComponent {
   readonly isInputExpanded = signal(true);
   readonly isOutputExpanded = signal(true);
   readonly isErrorExpanded = signal(true);
+  readonly friendlyToolName = friendlyToolName;
 
   toggleInputSection(): void {
     this.isInputExpanded.set(!this.isInputExpanded());
@@ -64,6 +66,10 @@ export class ToolCallDetailModalComponent {
 
   get parsedOutput(): ParsedField {
     return this.parseField(this.toolCall().tool_output);
+  }
+
+  hasError(): boolean {
+    return !!this.toolCall().tool_error?.trim();
   }
 
   get parsedError(): ParsedField {

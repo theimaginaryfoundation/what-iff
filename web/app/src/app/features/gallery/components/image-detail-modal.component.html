@@ -17,7 +17,15 @@
           <button type="button" class="image-detail-modal__rename-cancel" (click)="cancelRename()">Cancel</button>
         </div>
       } @else {
-        <h2 id="gallery-image-detail-title" class="image-detail-modal__title truncate">
+        <h2
+          #detailTitle
+          id="gallery-image-detail-title"
+          class="image-detail-modal__title truncate"
+          [uiTooltip]="displayTitle()"
+          truncatedOnly
+          [truncationTarget]="detailTitle"
+          placement="bottom"
+        >
           {{ displayTitle() }}
         </h2>
         <p class="image-detail-modal__subtitle truncate">{{ image()?.sourceLabel ?? '' }}</p>
@@ -29,7 +37,8 @@
         <button
           type="button"
           class="image-detail-modal__icon-btn"
-          title="Rename"
+          uiTooltip="Rename this image"
+          placement="bottom"
           aria-label="Rename image"
           [disabled]="!image()"
           (click)="startRename()"
@@ -39,7 +48,8 @@
         <button
           type="button"
           class="image-detail-modal__icon-btn"
-          title="Download"
+          uiTooltip="Download the full-size image"
+          placement="bottom"
           aria-label="Download image"
           [disabled]="!image()"
           (click)="download()"
@@ -85,7 +95,7 @@
               @if ((image()?.personalityNames?.length ?? 0) > 0) {
                 {{ image()?.personalityNames?.join(', ') }}
               } @else {
-                Unassigned
+                <span tabindex="0" uiTooltip="Not linked to any personality">Unassigned</span>
               }
             </dd>
           </div>
@@ -101,6 +111,7 @@
           type="button"
           class="image-detail-modal__chat-btn image-detail-modal__chat-btn--primary"
           [disabled]="!image()"
+          uiTooltip="Open a new thread with this image attached to your message"
           (click)="onStartNewChat()"
         >
           Start new thread
@@ -110,6 +121,7 @@
             type="button"
             class="image-detail-modal__chat-btn"
             [disabled]="!image()"
+            uiTooltip="Attach this image to your next message in a recent thread"
             (click)="openThreadPicker()"
           >
             Add to existing thread
@@ -151,6 +163,7 @@
         type="button"
         class="rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:opacity-90"
         [disabled]="!image()"
+        uiTooltip="Use this image as one of a personality's expressions"
         (click)="image() && assign.emit(image()!.id)"
       >
         Assign as expression

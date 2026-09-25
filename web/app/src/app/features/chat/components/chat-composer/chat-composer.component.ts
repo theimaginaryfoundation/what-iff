@@ -64,10 +64,10 @@ import {
 const SLASH_COMMANDS: readonly SlashCommand[] = [
   { id: 'attach', label: 'Attach file', description: 'Upload a file', keywords: ['file', 'upload'] },
   { id: 'emoji', label: 'Emoji', description: 'Insert an emoji', keywords: ['reaction'] },
-  { id: 'skill', label: 'Skill', description: 'Add a skill to send', keywords: ['ritual', 'rit', 'routine', 'skills'] },
+  { id: 'skill', label: 'Skill', description: 'Add saved instructions to this message', keywords: ['ritual', 'rit', 'routine', 'skills'] },
   { id: 'gallery', label: 'Gallery image', description: 'Attach an image from the gallery', keywords: ['photo', 'image'] },
-  { id: 'personality', label: 'Personality', description: 'Change chat personality', keywords: ['persona', 'character'] },
-  { id: 'mode', label: MODE_SINGULAR, description: `Set the generation ${MODE_SINGULAR.toLowerCase()}`, keywords: ['emotion', 'mood'] },
+  { id: 'personality', label: 'Personality', description: 'Change the thread’s personality', keywords: ['persona', 'character'] },
+  { id: 'mode', label: MODE_SINGULAR, description: 'Switch the thread’s mode: its instructions, skills and model', keywords: ['emotion', 'mood'] },
 ];
 const COMPOSER_DESKTOP_MAX_ROWS = 10;
 const COMPOSER_MOBILE_MAX_ROWS = 8;
@@ -129,12 +129,13 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
         <div class="composer__pending-skills" aria-label="Skills to send with this message">
           @for (r of pendingRituals(); track r.id) {
             <span class="composer__skill-chip">
-              {{ r.name }}
+              <span uiTooltip="Sent with your next message only">{{ r.name }}</span>
               <button
                 type="button"
                 class="composer__skill-chip-remove"
                 [disabled]="disabled()"
                 [attr.aria-label]="'Remove skill ' + r.name"
+                uiTooltip="Remove skill"
                 (click)="removePendingRitual(r.id)"
               >×</button>
             </span>
@@ -168,6 +169,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                 class="composer__attachment-remove"
                 [disabled]="disabled()"
                 [attr.aria-label]="'Remove attachment ' + (attachment.attachment?.name ?? attachment.file?.name)"
+                [uiTooltip]="notSeen ? '' : 'Remove attachment'"
                 (click)="removeAttachment(pendingAttachmentKey(attachment))"
               >×</button>
             </span>
@@ -186,7 +188,8 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
           <button
             type="button"
             class="composer__resizer"
-            aria-label="chat input resizer"
+            aria-label="Resize message box"
+            uiTooltip="Click to expand or shrink; drag to resize"
             [class.composer__resizer--active]="inputExpanded()"
             (mousedown)="onResizerMouseDown($event)"
             (touchstart)="onResizerTouchStart($event)"
@@ -226,6 +229,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                 class="composer__plus"
                 [disabled]="disabled()"
                 aria-label="Open chat options"
+                uiTooltip="Add emoji, skills, files or images; change mode or personality"
                 [attr.aria-expanded]="plusOpen()"
                 (click)="togglePlusMenu()"
               >
@@ -274,8 +278,11 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                         >
                           <span class="composer__skill-row-main">
                             <span class="composer__skill-name">Auto</span>
+                            <!-- Auto lets the model pick and switch the mode; choosing one below locks it. -->
                             @if (isAutoMood() && activeMode(); as current) {
-                              <span class="composer__skill-subtitle">Currently: {{ current.name }}</span>
+                              <span class="composer__skill-subtitle">Model picks the mode · now {{ current.name }}</span>
+                            } @else {
+                              <span class="composer__skill-subtitle">Model picks and switches the mode itself</span>
                             }
                           </span>
                         </button>
@@ -361,13 +368,18 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                     <ui-file-icon [size]="13" />
                     Attach file
                   </button>
-                  <button type="button" role="menuitem" (click)="personaButtonClicked.emit(); plusOpen.set(false); emojiOpen.set(false)">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    [attr.aria-label]="personaButtonAriaLabel()"
+                    (click)="personaButtonClicked.emit(); plusOpen.set(false); emojiOpen.set(false)"
+                  >
                     <span aria-hidden="true">{{ personaButtonLabel().charAt(0) }}</span>
                     {{ personaButtonLabel() }}
                   </button>
                   <button type="button" role="menuitem" (click)="openGalleryFromMenu()">
                     <ui-image-icon [size]="13" />
-                    Add from Gallery
+                    Add from gallery
                   </button>
                 </div>
               }
@@ -410,6 +422,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                 type="button"
                 class="composer__stop"
                 aria-label="Stop response"
+                uiTooltip="Stop generating this reply"
                 (click)="stop.emit()"
               >
                 <span class="composer__stop-icon" aria-hidden="true"></span>
@@ -419,6 +432,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                 type="submit"
                 class="composer__send"
                 aria-label="Send message"
+                [uiTooltip]="softKeyboard() ? '' : 'Send (Enter). Shift+Enter adds a new line'"
                 [disabled]="composerDisabled() || hasUploadingAttachments() || !draft().trim() || isOverLimit()"
               >
                 <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1263,8 +1277,8 @@ export class ChatComposerComponent {
     }
     const name = this.selectedPersonalityName()?.trim() || '';
     return name
-      ? `Message ${name}... (type / for skills)`
-      : 'Message... (type / for skills)';
+      ? `Message ${name}... (type / for commands)`
+      : 'Message... (type / for commands)';
   });
   readonly personaButtonLabel = computed(() => this.selectedPersonalityName() || 'Pick personality');
   readonly personaButtonAriaLabel = computed(() => {
@@ -1330,7 +1344,7 @@ export class ChatComposerComponent {
   readonly hardLimitLabel = TEXT_LIMIT_HARD_MAX.toLocaleString();
   readonly warningLimitLabel = TEXT_LIMIT_WARNING_THRESHOLD.toLocaleString();
   readonly hasUploadingAttachments = computed(() => this.attachments().some(attachment => attachment.isUploading));
-  readonly noVisionTooltip = "This model can't see images. They'll still be saved to your gallery and chat history, where later agents can find them — they just won't be sent to this model.";
+  readonly noVisionTooltip = "This model can't see images. It's saved to your gallery, not sent";
   /** True when the selected model is known to be text-only; its image chips then show the no-vision style. */
   readonly selectedModelLacksVision = computed(
     () => this.models().find(m => m.id === this.selectedModelId())?.vision_support === false,

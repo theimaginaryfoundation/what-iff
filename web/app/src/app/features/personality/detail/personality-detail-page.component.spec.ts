@@ -129,10 +129,18 @@ describe('PersonalityDetailPageComponent', () => {
         expect(nameInput.value).toBe('Vera Calder');
     });
 
+    it('explains each section with a help hint next to its heading', () => {
+        fixture.detectChanges();
+        const host = fixture.nativeElement as HTMLElement;
+        for (const label of ['What is the system prompt?', 'What is the scratchpad?', 'What are attachments?', 'What are expressions?']) {
+            expect(host.querySelector(`h2 ui-help-hint button[aria-label="${label}"]`), label).toBeTruthy();
+        }
+    });
+
     it('contracts the editor back to the personalities list', () => {
         fixture.detectChanges();
 
-        const contractButton = fixture.nativeElement.querySelector('[aria-label="Contract editor"]') as HTMLButtonElement;
+        const contractButton = fixture.nativeElement.querySelector('[aria-label="Compact editor"]') as HTMLButtonElement;
         contractButton.click();
 
         expect(router.navigate).toHaveBeenCalledWith(['/personality'], {

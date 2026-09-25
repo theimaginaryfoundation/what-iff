@@ -11,6 +11,7 @@ import { Personality } from '../../../core/models/personality.model';
 import { ImageGalleryService } from '../../../core/services/image-gallery.service';
 import { PersonaAccentScopeComponent } from '../picker/persona-accent-scope.component';
 import { PersonaCoverComponent } from '../picker/persona-cover.component';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 import { personalityCoverUrl } from '../helpers/cover-image.helpers';
 import { toPersonalityCardVm } from '../helpers/personality-vm.helpers';
 
@@ -24,7 +25,7 @@ export type PersonalityCardAction = 'open' | 'edit' | 'delete' | 'set-default';
 @Component({
   selector: 'app-personality-card',
   standalone: true,
-  imports: [PersonaAccentScopeComponent, PersonaCoverComponent],
+  imports: [PersonaAccentScopeComponent, PersonaCoverComponent, TooltipDirective],
   template: `
     <persona-accent-scope [personality]="personality()">
       <article
@@ -42,7 +43,8 @@ export type PersonalityCardAction = 'open' | 'edit' | 'delete' | 'set-default';
           <div class="absolute inset-x-0 top-3 flex items-center justify-between px-3">
             <span
               class="inline-flex items-center gap-1.5 rounded-[1.25rem] bg-black/45 px-2.5 py-1 text-xs font-medium text-white backdrop-blur-[8px]"
-              [title]="usageTitle()"
+              [uiTooltip]="usageTitle()"
+              placement="bottom"
             >
               <span
                 class="h-[0.4375rem] w-[0.4375rem] shrink-0 rounded-full"
@@ -56,14 +58,16 @@ export type PersonalityCardAction = 'open' | 'edit' | 'delete' | 'set-default';
               @if (vm().isDefault) {
                 <span
                   class="inline-flex items-center rounded-md bg-[var(--persona-accent)]/85 px-2 py-1 text-[0.625rem] font-semibold uppercase tracking-wide text-white"
-                  title="This personality is your default"
+                  uiTooltip="New threads start with this personality"
+                  placement="bottom"
                 >Default</span>
               }
               @if (!vm().isDefault) {
                 <button
                   type="button"
                   class="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-black/35 text-[0.75rem] text-white/85 opacity-0 backdrop-blur-[8px] transition group-hover:opacity-100 hover:bg-black/55 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-white/70"
-                  [title]="'Make ' + vm().name + ' default'"
+                  uiTooltip="Make default: new threads start with this personality"
+                  placement="bottom"
                   [attr.aria-label]="'Make ' + vm().name + ' default'"
                   (click)="onAction('set-default', $event)"
                 >
@@ -77,9 +81,12 @@ export type PersonalityCardAction = 'open' | 'edit' | 'delete' | 'set-default';
             class="absolute inset-x-0 bottom-0 h-[5.5rem] border-t-2 border-[var(--persona-accent)] bg-black/40 px-4 pb-3.5 pt-3 backdrop-blur-[10px]"
           >
             <h3
+              #cardTitle
               [id]="titleId"
               class="truncate text-[1.0625rem] font-bold leading-tight text-white"
-              [title]="vm().name"
+              [uiTooltip]="vm().name"
+              truncatedOnly
+              [truncationTarget]="cardTitle"
             >{{ vm().name }}</h3>
             <p class="mt-1 line-clamp-2 text-xs leading-[1.45] text-white/85">
               {{ vm().systemPromptPreview || 'No system prompt set.' }}
@@ -114,12 +121,13 @@ export class PersonalityCardComponent {
 
   readonly usageTitle = computed(() => {
     const stats = this.vm().stats;
-    if (!stats || !stats.last_used_at) {
-      return stats && stats.chat_count > 0
-        ? `${stats.chat_count} ${stats.chat_count === 1 ? 'thread' : 'threads'}`
-        : 'No threads yet';
-    }
-    return `${stats.chat_count} threads, last used ${stats.last_used_at}`;
+    const count = stats?.chat_count ?? 0;
+    if (count === 0) return 'Not used in any threads yet';
+    const threads = `Used in ${count} ${count === 1 ? 'thread' : 'threads'}`;
+    const lastUsed = stats?.last_used_at ? new Date(stats.last_used_at) : null;
+    return lastUsed && !Number.isNaN(lastUsed.getTime())
+      ? `${threads}, last on ${lastUsed.toLocaleDateString()}`
+      : threads;
   });
 
   onEdit(): void {

@@ -46,6 +46,8 @@ import { ThreadListPanelComponent } from './components/thread-list-panel/thread-
 import { ContextPanelService, ContextPanelTab } from './services/context-panel.service';
 import { ScratchpadService } from './services/scratchpad.service';
 import { ContextPanelToggleComponent } from './components/context-panel/context-panel-toggle.component';
+import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { BrainIconComponent, ChevDownIconComponent, EditIconComponent, FileIconComponent, LayersIconComponent, NoteIconComponent, WrenchIconComponent, XIconComponent } from '../../shared/ui/icons/icons';
 import { thumbnailCircleToCirclePreviewTransform } from '../../shared/ui/avatar/avatar-thumbnail.helpers';
 import { personalityAccent, personalityAccentSurface } from '../personality/helpers/personality-vm.helpers';
@@ -73,6 +75,8 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
     AuthImagePipe,
     ThreadListPanelComponent,
     ContextPanelToggleComponent,
+    HelpHintComponent,
+    TooltipDirective,
     BrainIconComponent,
     ChevDownIconComponent,
     EditIconComponent,

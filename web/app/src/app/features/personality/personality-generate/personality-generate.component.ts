@@ -10,6 +10,8 @@ import { PersonalityMediaJobService } from '../../../core/services/personality-m
 import { ImageGalleryService } from '../../../core/services/image-gallery.service';
 import { ConfirmationService } from '../../../core/services/confirmation.service';
 import { ChatService } from '../../../core/services/chat.service';
+import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 import {
   CUSTOM_IMAGE_STYLE_MAX_LEN,
   effectiveImageStyle,
@@ -81,7 +83,7 @@ export const WIZARD_PAGES: readonly WizardPage[] = [
 @Component({
   selector: 'app-personality-generate',
   standalone: true,
-  imports: [AsyncPipe, AuthImagePipe, FormsModule, NgClass],
+  imports: [AsyncPipe, AuthImagePipe, FormsModule, NgClass, HelpHintComponent, TooltipDirective],
   templateUrl: './personality-generate.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./personality-generate.component.scss'],
@@ -669,6 +671,21 @@ export class PersonalityGenerateComponent implements OnInit {
 
   isImageStyleSelected(value: string): boolean {
     return this.imageStyleSelection() === value;
+  }
+
+  /** Tooltip for the special style pills; presets are self-explanatory. */
+  imageStyleTooltip(style: (typeof IMAGE_STYLES)[number]): string {
+    const emphasis = 'emphasis' in style ? style.emphasis : undefined;
+    switch (emphasis) {
+      case 'auto':
+        return 'Let the app pick a style that suits this personality';
+      case 'none':
+        return 'Skip the portrait; no images are generated';
+      case 'other':
+        return 'Describe your own style';
+      default:
+        return '';
+    }
   }
 
   imageStylePillClass(style: (typeof IMAGE_STYLES)[number]): string {

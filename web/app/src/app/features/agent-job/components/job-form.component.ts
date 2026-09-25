@@ -6,11 +6,13 @@ import { AgentJob, AgentJobScheduleParseRequest, AgentJobSchedulePreview, Update
 import { Chat } from '../../../core/models/chat.model';
 import { Model } from '../../../core/models/model.model';
 import { Personality } from '../../../core/models/personality.model';
+import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 
 @Component({
   selector: 'app-job-form',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, HelpHintComponent, TooltipDirective],
   templateUrl: './job-form.component.html',
   styleUrl: './job-form.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

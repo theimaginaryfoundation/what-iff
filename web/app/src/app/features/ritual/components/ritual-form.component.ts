@@ -6,6 +6,8 @@ import { Ritual } from '../../../core/models/ritual.model';
 import { HotkeyInputComponent } from '../../../core/components/hotkey-input/hotkey-input.component';
 import { RitualSelectOption } from './ritual-filter-bar.component';
 
+let nextFormId = 0;
+
 export interface RitualFormSave {
   name: string;
   description: string;
@@ -33,6 +35,8 @@ export class RitualFormComponent {
 
   readonly cancel = output<void>();
   readonly save = output<RitualFormSave>();
+
+  private readonly formId = `ritual-form-${++nextFormId}`;
 
   readonly name = signal('');
   readonly description = signal('');
@@ -82,5 +86,10 @@ export class RitualFormComponent {
       hotkeys: this.hotkeys().trim() || undefined,
       personality_id: this.personalityId().trim() || null,
     });
+  }
+
+  /** Unique id for a field's hint so aria-describedby stays valid if two forms render at once. */
+  hintId(field: string): string {
+    return `${this.formId}-${field}-hint`;
   }
 }

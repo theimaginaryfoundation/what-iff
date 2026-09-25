@@ -54,7 +54,7 @@ export class PersonalityDetailPage {
   }
 
   async useInNewChat(): Promise<void> {
-    await this.page.getByRole('button', { name: 'Use in new chat' }).click();
+    await this.page.getByRole('button', { name: 'Use in new thread' }).click();
   }
 
   /** Renames the personality via the header field and persists it. */

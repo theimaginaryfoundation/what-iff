@@ -29,7 +29,12 @@ export function filterMoodsBySelectedPersonalities(moods: Mood[], selectedPerson
 
 export function moodSkillsChipText(mood: Mood): string {
   const count = mood.ritual_ids?.length ?? 0;
-  return count === 0 ? 'All skills on' : `${count} skills configured`;
+  if (count === 0) return 'No skills attached';
+  return `${count} ${count === 1 ? 'skill' : 'skills'} attached`;
+}
+
+export function mcpServerCountLabel(count: number): string {
+  return `${count} MCP ${count === 1 ? 'server' : 'servers'}`;
 }
 
 export function moodJobsChipText(): string {

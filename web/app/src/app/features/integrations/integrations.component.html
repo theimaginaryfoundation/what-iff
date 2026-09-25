@@ -1,9 +1,15 @@
 <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
     <div class="mb-6 text-center lg:text-left">
-      <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">Integrations</h1>
+      <h1 class="inline-flex items-center gap-1 text-2xl font-semibold text-gray-900 dark:text-white">
+        Tools
+        <ui-help-hint label="What are tools?" heading="Tools">
+          Connectors link outside services (MCP servers) that personalities can use in threads and skills. Webhook
+          tokens let another app post messages into your threads.
+        </ui-help-hint>
+      </h1>
       <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
-        Configure connectors and webhook tokens available to your agent.
+        Configure connectors and webhook tokens available to your personalities.
       </p>
     </div>
 
@@ -12,6 +18,8 @@
         <nav class="-mb-px flex gap-6">
           <button
             (click)="setActiveTab('connectors')"
+            uiTooltip="Outside services (MCP servers) personalities can use"
+            placement="bottom"
             class="border-b-2 px-1 py-3 text-sm font-medium"
           [ngClass]="activeTab() === 'connectors'
             ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
@@ -20,6 +28,8 @@
           </button>
           <button
             (click)="setActiveTab('webhooks')"
+            uiTooltip="API tokens that let other apps post into your threads"
+            placement="bottom"
             class="border-b-2 px-1 py-3 text-sm font-medium"
           [ngClass]="activeTab() === 'webhooks'
             ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'

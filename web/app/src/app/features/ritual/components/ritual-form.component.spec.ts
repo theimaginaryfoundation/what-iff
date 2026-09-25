@@ -55,10 +55,18 @@ describe('RitualFormComponent', () => {
         expect(component.name()).toBe('Source analysis');
         expect(options.length).toBe(3);
         expect(Array.from(options).map(option => option.text)).toEqual([
-            'Global (any persona)',
+            'Global (every personality)',
             'Ada',
             'Grace',
         ]);
+    });
+
+    it('links the name field to a hint explaining the / command', () => {
+        fixture.detectChanges();
+        const host = fixture.nativeElement as HTMLElement;
+        const nameInput = host.querySelector('input[placeholder="e.g., Source Analysis"]') as HTMLInputElement;
+        const hint = host.querySelector(`#${nameInput.getAttribute('aria-describedby')}`);
+        expect(hint?.textContent).toContain('typing / and this name');
     });
 
     it('toggles save validity and create/edit labels', () => {

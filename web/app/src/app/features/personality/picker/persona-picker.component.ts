@@ -23,6 +23,7 @@ import { shortName } from '../helpers/short-name.helpers';
 import { usageBadge } from '../helpers/personality-vm.helpers';
 import { PersonaCoverComponent } from './persona-cover.component';
 import { PersonaAccentScopeComponent } from './persona-accent-scope.component';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 
 interface PersonaPickerRow {
   id: string;
@@ -41,7 +42,7 @@ interface PersonaPickerRow {
 @Component({
   selector: 'persona-picker',
   standalone: true,
-  imports: [AsyncPipe, AuthImagePipe, AvatarComponent, PersonaCoverComponent, PersonaAccentScopeComponent],
+  imports: [AsyncPipe, AuthImagePipe, AvatarComponent, PersonaCoverComponent, PersonaAccentScopeComponent, TooltipDirective],
   template: `
     <div class="persona-picker flex flex-col gap-3 p-4" role="dialog" aria-modal="true" [attr.aria-label]="ariaLabel()">
       <label class="flex flex-col gap-1">
@@ -141,6 +142,10 @@ interface PersonaPickerRow {
               [class.persona-picker__row--active]="i === highlightedIndex()"
               (mousemove)="setHighlight(i)"
               (click)="emitSelect(row)"
+              [uiTooltip]="row.name"
+              truncatedOnly
+              [truncationTarget]="rowName"
+              placement="right"
             >
               <persona-accent-scope [personality]="row.source">
                 <persona-cover
@@ -151,7 +156,7 @@ interface PersonaPickerRow {
                 />
               </persona-accent-scope>
               <div class="flex min-w-0 flex-1 flex-col">
-                <span class="truncate text-sm font-medium text-(--color-text-primary)">{{ row.name }}</span>
+                <span #rowName class="truncate text-sm font-medium text-(--color-text-primary)">{{ row.name }}</span>
                 <span class="truncate text-xs text-(--color-text-secondary)">{{ row.shortName }} · {{ row.usage }}</span>
               </div>
             </li>

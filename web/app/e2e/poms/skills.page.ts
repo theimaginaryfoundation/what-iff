@@ -50,20 +50,21 @@ export class SkillsPage {
   readonly emptyMessage: Locator;
 
   /**
-   * Row actions are icon buttons whose only accessible name is a `title`
-   * attribute ("Edit" / "Delete"), so they resolve as buttons by that name.
+   * Row actions are icon buttons labelled "Edit <name>" (or "View <name>" for
+   * built-in skills) and "Delete <name>"; anchored so a skill name containing
+   * "edit" or "delete" can't match the other button.
    */
   async openEditor(name: string): Promise<void> {
-    await this.card(name).getByRole('button', { name: 'Edit' }).click();
+    await this.card(name).getByRole('button', { name: /^(Edit|View) / }).click();
   }
 
   async requestDelete(name: string): Promise<void> {
-    await this.card(name).getByRole('button', { name: 'Delete' }).click();
+    await this.card(name).getByRole('button', { name: /^Delete / }).click();
   }
 
   /** The Delete button is disabled for built-in system skills. */
   deleteButton(name: string): Locator {
-    return this.card(name).getByRole('button', { name: 'Delete' });
+    return this.card(name).getByRole('button', { name: /^Delete / });
   }
 
   async delete(name: string): Promise<void> {

@@ -245,7 +245,7 @@ test('moves a memory to Global from the card menu', async ({ memoriesPage, seed,
   await memoriesPage.navigateTo();
 
   const content = memory.content as string;
-  await memoriesPage.moveFromMenu(content, 'Global / shared');
+  await memoriesPage.moveFromMenu(content, 'Global (every personality)');
   await expect(memoriesPage.card(content)).toBeVisible();
   await expect(memoriesPage.card(content)).toContainText('Global');
 });
@@ -321,7 +321,7 @@ test('treats checkpoint summaries as read-only in the Summaries tab', async ({ m
 
   await memoriesPage.showSummaries();
   await expect(memoriesPage.summariesStatusTab).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByText('conversation checkpoint summaries (read-only here)')).toBeVisible();
+  await expect(page.getByText('thread checkpoint summaries (read-only here)')).toBeVisible();
 
   const card = memoriesPage.card(content);
   await expect(card).toBeVisible();
@@ -334,7 +334,7 @@ test('treats checkpoint summaries as read-only in the Summaries tab', async ({ m
 
   await memoriesPage.openFocus(content);
   await expect(
-    page.getByText("Summaries are managed with the conversation checkpoint — they can't be archived or deleted here."),
+    page.getByText("Summaries are managed with the thread checkpoint — they can't be archived or deleted here."),
   ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);

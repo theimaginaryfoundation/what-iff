@@ -1,5 +1,5 @@
 import { DOCUMENT } from '@angular/common';
-import { Directive, ElementRef, HostListener, OnDestroy, Renderer2, computed, inject, input } from '@angular/core';
+import { Directive, booleanAttribute, ElementRef, HostListener, OnDestroy, Renderer2, computed, inject, input } from '@angular/core';
 
 export type TooltipPlacement = 'top' | 'bottom' | 'left' | 'right';
 
@@ -16,6 +16,12 @@ export class TooltipDirective implements OnDestroy {
   readonly uiTooltip = input<string>('');
   readonly placement = input<TooltipPlacement>('top');
   readonly disabledOnTouch = input(true);
+  /**
+   * Only show when text is cut off (ellipsis or line clamp), e.g. a long thread name. Checks
+   * `truncationTarget` if given (the text span inside a row), else the host itself.
+   */
+  readonly truncatedOnly = input(false, { transform: booleanAttribute });
+  readonly truncationTarget = input<HTMLElement | null>(null);
 
   private readonly elementRef = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly renderer = inject(Renderer2);
@@ -42,7 +48,7 @@ export class TooltipDirective implements OnDestroy {
   @HostListener('mouseenter')
   @HostListener('focus')
   show(): void {
-    if (!this.uiTooltip() || this.isDisabledForTouch()) {
+    if (!this.uiTooltip() || this.isDisabledForTouch() || (this.truncatedOnly() && !this.isTruncated())) {
       return;
     }
 
@@ -77,6 +83,11 @@ export class TooltipDirective implements OnDestroy {
   @HostListener('keydown.escape')
   onEscape(): void {
     this.hide();
+  }
+
+  private isTruncated(): boolean {
+    const el = this.truncationTarget() ?? this.elementRef.nativeElement;
+    return el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight;
   }
 
   private ensureTooltipElement(): HTMLElement {

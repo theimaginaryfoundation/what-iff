@@ -3,12 +3,13 @@ import { CommonModule } from '@angular/common';
 import { AuthImagePipe } from '../../../core/pipes/auth-image.pipe';
 import { EditIconComponent, TrashIconComponent } from '../../../shared/ui/icons/icons';
 import { ModeAssociationPickerComponent } from './mode-association-picker.component';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 import { ModeCardVm, ModePersonalityVm } from '../helpers/mode-vm.helpers';
 
 @Component({
   selector: 'app-mode-card',
   standalone: true,
-  imports: [CommonModule, AuthImagePipe, EditIconComponent, TrashIconComponent, ModeAssociationPickerComponent],
+  imports: [CommonModule, AuthImagePipe, EditIconComponent, TrashIconComponent, ModeAssociationPickerComponent, TooltipDirective],
   templateUrl: './mode-card.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./mode-card.component.scss'],

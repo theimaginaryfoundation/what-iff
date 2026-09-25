@@ -16,11 +16,11 @@ describe('isHttpErrorResponse', () => {
 
 describe('defaultComposerPlaceholder', () => {
     it('includes the personality name when provided', () => {
-        expect(defaultComposerPlaceholder('Ada')).toBe('Message Ada... (type / for skills)');
+        expect(defaultComposerPlaceholder('Ada')).toBe('Message Ada... (type / for commands)');
     });
 
     it('falls back to a generic placeholder when the name is blank', () => {
-        expect(defaultComposerPlaceholder('   ')).toBe('Message... (type / for skills)');
-        expect(defaultComposerPlaceholder(null)).toBe('Message... (type / for skills)');
+        expect(defaultComposerPlaceholder('   ')).toBe('Message... (type / for commands)');
+        expect(defaultComposerPlaceholder(null)).toBe('Message... (type / for commands)');
     });
 });

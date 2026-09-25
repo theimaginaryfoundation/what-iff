@@ -5,7 +5,13 @@
       <!-- Header -->
       <div class="mb-6 flex items-center justify-between">
         <div>
-          <h1 class="text-3xl font-bold text-gray-900 dark:text-white">Generate Personality</h1>
+          <h1 class="inline-flex items-center gap-1 text-3xl font-bold text-gray-900 dark:text-white">
+            Generate personality
+            <ui-help-hint label="How does generating a personality work?" heading="Generate personality" guide="gettingStarted">
+              Answer a few questions and the app drafts a name, bio, system prompt and portrait. Review the draft, then
+              accept it to create the personality.
+            </ui-help-hint>
+          </h1>
           <p class="mt-2 text-gray-600 dark:text-gray-400">Answer a few questions and we'll build a custom personality for you.</p>
         </div>
         <button (click)="closeOrBack()"
@@ -64,6 +70,9 @@
           @for (page of pages; track $index) {
             <button (click)="jumpToStep($index)"
                     [disabled]="isReviewScreen()"
+                    [attr.aria-label]="'Step ' + ($index + 1) + ': ' + page.title"
+                    [uiTooltip]="'Jump to step ' + ($index + 1)"
+                    placement="bottom"
                     class="flex flex-col items-center group"
                     [class.cursor-pointer]="!isReviewScreen()"
                     [class.cursor-default]="isReviewScreen()">
@@ -139,14 +148,16 @@
                     <span class="text-xs text-gray-400 dark:text-gray-500">{{ (selectedNameIndex() % generatedNames().length) + 1 }}/{{ generatedNames().length }}</span>
                     <button (click)="prevName()"
                             class="p-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                            title="Previous generated name">
+                            aria-label="Previous generated name"
+                            uiTooltip="Previous generated name">
                       <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
                       </svg>
                     </button>
                     <button (click)="nextName()"
                             class="p-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                            title="Next generated name">
+                            aria-label="Next generated name"
+                            uiTooltip="Next generated name">
                       <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
                       </svg>
@@ -154,7 +165,8 @@
                   }
                   <button (click)="toggleManualNameMode()"
                           class="p-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                          [title]="isManualNameMode() ? 'Use generated names' : 'Edit name manually'">
+                          [attr.aria-label]="isManualNameMode() ? 'Use generated names' : 'Edit name manually'"
+                          [uiTooltip]="isManualNameMode() ? 'Use generated names' : 'Edit name manually'">
                     <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
                     </svg>
@@ -190,16 +202,18 @@
             <div class="flex items-center gap-2">
               <button (click)="goBackToEdit()"
                       [disabled]="isGenerating() || isAccepting() || isResetting()"
+                      uiTooltip="Change your answers; the current draft stays until they change"
                       class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed">
-                Edit Answers
+                Edit answers
               </button>
               <button (click)="resetDraft()"
                       [disabled]="isGenerating() || isAccepting() || isResetting()"
+                      uiTooltip="Discard this draft and start again from step 1"
                       class="inline-flex items-center px-4 py-2 border border-amber-300 dark:border-amber-700 shadow-sm text-sm font-medium rounded-md text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 disabled:opacity-50 disabled:cursor-not-allowed">
                 @if (isResetting()) {
                   Resetting...
                 } @else {
-                  Start Over
+                  Start over
                 }
               </button>
             </div>
@@ -207,6 +221,7 @@
             <div class="flex items-center gap-3">
               <button (click)="regenerate()"
                       [disabled]="isGenerating() || isAccepting()"
+                      uiTooltip="Draft a new version from the same answers"
                       class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed">
                 @if (isGenerating()) {
                   <svg class="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -221,6 +236,7 @@
 
               <button (click)="accept()"
                       [disabled]="isGenerating() || isAccepting()"
+                      uiTooltip="Create the personality with the selected name"
                       class="inline-flex items-center px-5 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed">
                 @if (isAccepting()) {
                   <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -229,7 +245,7 @@
                   </svg>
                   Creating...
                 } @else {
-                  Accept & Create
+                  Accept &amp; create
                 }
               </button>
             </div>
@@ -295,17 +311,18 @@
           <!-- Page 1 extras: Image Style + Reference Image -->
           @if (currentStep() === 0) {
             <div class="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700 space-y-6">
-              <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Image Options</p>
+              <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Image options</p>
 
               <!-- Image style picker -->
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Image Style
+                  Image style
                 </label>
                 <div class="flex flex-wrap gap-2">
                   @for (style of imageStyles; track style.value) {
                     <button type="button"
                             (click)="selectImageStyle(style.value)"
+                            [uiTooltip]="imageStyleTooltip(style)"
                             [ngClass]="imageStylePillClass(style)"
                             class="px-3 py-1.5 text-xs font-medium border rounded-full transition-colors">
                       {{ style.label }}
@@ -393,11 +410,12 @@
                 @if (hasProgress()) {
                 <button (click)="resetDraft()"
                         [disabled]="isSaving() || isResetting()"
+                        uiTooltip="Discard this draft and start again from step 1"
                         class="inline-flex items-center px-4 py-2 border border-amber-300 dark:border-amber-700 shadow-sm text-sm font-medium rounded-md text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 disabled:opacity-50 disabled:cursor-not-allowed">
                   @if (isResetting()) {
                     Resetting...
                   } @else {
-                    Start Over
+                    Start over
                   }
                 </button>
                 }

@@ -15,6 +15,7 @@ import { AccountArchiveService, ArchiveContents } from './account-archive.servic
 import { ChatImportModalComponent } from '../chat/components/chat-import-modal/chat-import-modal.component';
 import { XIconComponent } from '../../shared/ui/icons/icons';
 import { ExportDeliveryService } from '../../extensions/export-delivery.service';
+import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 
 type ExportPhase = 'idle' | 'queued' | 'building' | 'uploading' | 'complete' | 'failed';
 type ImportPhase = 'idle' | 'inspecting' | 'review' | 'queued' | 'uploading' | 'validating' | 'importing' | 'complete' | 'failed';
@@ -30,7 +31,7 @@ const TERMINAL_JOB_STATES = ['complete', 'failed', 'cancelled'];
 @Component({
   selector: 'app-data-portability-page',
   standalone: true,
-  imports: [ChatImportModalComponent, XIconComponent],
+  imports: [ChatImportModalComponent, XIconComponent, TooltipDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './data-portability-page.component.html',
 })

@@ -9,6 +9,6 @@ export function isHttpErrorResponse(error: unknown): error is HttpErrorResponse 
 export function defaultComposerPlaceholder(defaultName: string | null): string {
   const name = defaultName?.trim() || '';
   return name
-    ? `Message ${name}... (type / for skills)`
-    : 'Message... (type / for skills)';
+    ? `Message ${name}... (type / for commands)`
+    : 'Message... (type / for commands)';
 }

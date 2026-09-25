@@ -79,7 +79,7 @@ describe('ContextMemoriesTabComponent', () => {
 
     it('renders memory scope tabs and defaults to thread memories', () => {
         expect(memoryService.getMemories).toHaveBeenCalled();
-        expect(fixture.nativeElement.textContent).toContain('This Thread');
+        expect(fixture.nativeElement.textContent).toContain('This thread');
         expect(fixture.nativeElement.textContent).toContain('Global');
         expect(fixture.nativeElement.textContent).toContain('thread memory');
         expect(fixture.nativeElement.textContent).not.toContain('global memory');
@@ -99,7 +99,7 @@ describe('ContextMemoriesTabComponent', () => {
         const actions = fixture.nativeElement.querySelector('.memory-actions') as HTMLElement;
 
         expect(actions).toBeTruthy();
-        expect(actions.textContent).toContain('Add Memory');
+        expect(actions.textContent).toContain('Add memory');
         expect(actions.textContent).toContain('Manage all memories');
     });
 

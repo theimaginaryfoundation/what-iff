@@ -1,18 +1,35 @@
 <section class="gallery-page mx-auto flex w-full max-w-none flex-col gap-3 p-4 md:p-6" aria-label="Image gallery">
   <header class="gallery-page__header">
     <div class="gallery-page__title-spacer" aria-hidden="true"></div>
-    <h1 class="gallery-page__title">{{ pageTitle() }}</h1>
+    <h1 class="gallery-page__title inline-flex items-center gap-1">
+      {{ pageTitle() }}
+      @if (mode() === 'gallery') {
+        <ui-help-hint label="What is the gallery?" heading="Gallery" guide="expressions">
+          Every image made by the image tool in your threads, plus images you import. Any of them can become a
+          personality's portrait or one of its expressions.
+        </ui-help-hint>
+      } @else {
+        <ui-help-hint label="What are expressions?" heading="Expressions" guide="expressions">
+          Portraits shown next to a personality's replies. After each reply the app picks the one that fits best,
+          using the labels to decide when each applies.
+        </ui-help-hint>
+      }
+    </h1>
     <div class="gallery-page__mode-switch" role="group" aria-label="Gallery mode">
       <button
         type="button"
         [attr.aria-pressed]="mode() === 'gallery'"
         [class.gallery-page__mode-button--active]="mode() === 'gallery'"
+        uiTooltip="Browse, search and import images"
+        placement="bottom"
         (click)="setMode('gallery')"
       >Gallery</button>
       <button
         type="button"
         [attr.aria-pressed]="mode() === 'expressions'"
         [class.gallery-page__mode-button--active]="mode() === 'expressions'"
+        uiTooltip="Set each personality's expression portraits"
+        placement="bottom"
         (click)="setMode('expressions')"
       >Expression Manager</button>
     </div>
@@ -45,12 +62,14 @@
           type="button"
           [attr.aria-pressed]="view.filters().source === 'generated'"
           [class.gallery-page__segmented-button--active]="view.filters().source === 'generated'"
+          uiTooltip="Made by the image tool in your threads"
           (click)="setSourceFilter('generated')"
         >Generated {{ sourceCounts().generated }}</button>
         <button
           type="button"
           [attr.aria-pressed]="view.filters().source === 'uploaded'"
           [class.gallery-page__segmented-button--active]="view.filters().source === 'uploaded'"
+          uiTooltip="Images you uploaded"
           (click)="setSourceFilter('uploaded')"
         >Imported {{ sourceCounts().imported }}</button>
       </div>
@@ -58,14 +77,14 @@
       <div class="gallery-page__segmented" role="group" aria-label="Sort images">
         <button
           type="button"
-          title="Newest first — click to flip"
+          [uiTooltip]="sortTooltip('created')"
           [attr.aria-pressed]="sort() === 'created'"
           [class.gallery-page__segmented-button--active]="sort() === 'created'"
           (click)="setSort('created')"
         >Created {{ sort() === 'created' ? (sortDescending() ? '▼' : '▲') : '' }}</button>
         <button
           type="button"
-          title="Sort by last used"
+          [uiTooltip]="sortTooltip('last_used')"
           [attr.aria-pressed]="sort() === 'last_used'"
           [class.gallery-page__segmented-button--active]="sort() === 'last_used'"
           (click)="setSort('last_used')"

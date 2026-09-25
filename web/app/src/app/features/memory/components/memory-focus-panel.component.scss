@@ -101,32 +101,6 @@
   gap: 0.35rem;
 }
 
-.focus-panel__info {
-  width: 0.95rem;
-  height: 0.95rem;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--color-text-muted) 55%, transparent);
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 0.625rem;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: 0;
-  text-transform: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: help;
-  padding: 0;
-}
-
-.focus-panel__info:hover,
-.focus-panel__info:focus-visible {
-  color: var(--color-accent);
-  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
-  outline: none;
-}
-
 .focus-panel__muted {
   margin: 0;
   font-size: 0.8125rem;

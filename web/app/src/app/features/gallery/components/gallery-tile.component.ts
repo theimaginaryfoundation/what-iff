@@ -2,12 +2,13 @@ import { AsyncPipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 
 import { AuthImagePipe } from '../../../core/pipes/auth-image.pipe';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 import { GalleryTileVm } from '../helpers/gallery-vm.helpers';
 
 @Component({
   selector: 'app-gallery-tile',
   standalone: true,
-  imports: [AsyncPipe, AuthImagePipe],
+  imports: [AsyncPipe, AuthImagePipe, TooltipDirective],
   templateUrl: './gallery-tile.component.html',
   styleUrl: './gallery-tile.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

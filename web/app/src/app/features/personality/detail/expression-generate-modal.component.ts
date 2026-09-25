@@ -29,6 +29,7 @@ import { PersonalityService } from '../../../core/services/personality.service';
 import { PersonalityMediaJobService } from '../../../core/services/personality-media-job.service';
 import { ModalComponent } from '../../../shared/ui/modal/modal.component';
 import { SpinnerComponent } from '../../../shared/ui/spinner/spinner.component';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 import { CheckIconComponent, UploadIconComponent, XIconComponent } from '../../../shared/ui/icons';
 import {
   DEFAULT_EXPRESSION_SUGGESTIONS,
@@ -79,6 +80,7 @@ function defaultCells(): GenerateCell[] {
     CheckIconComponent,
     UploadIconComponent,
     XIconComponent,
+    TooltipDirective,
   ],
   template: `
     <ui-modal [open]="open()" [labelledBy]="labelId" size="lg" (dismiss)="dismiss.emit()">
@@ -220,6 +222,7 @@ function defaultCells(): GenerateCell[] {
                       [class.text-white/80]="!cell.keep"
                       [attr.aria-label]="'Keep ' + cell.name"
                       [attr.aria-pressed]="cell.keep"
+                      uiTooltip="Keep: saved as this expression's image"
                       [disabled]="saving()"
                       (click)="setKeep(i, true)"
                     ><ui-check-icon [size]="14" /></button>
@@ -234,13 +237,18 @@ function defaultCells(): GenerateCell[] {
                       [class.text-white/80]="cell.keep"
                       [attr.aria-label]="'Discard ' + cell.name"
                       [attr.aria-pressed]="!cell.keep"
+                      uiTooltip="Discard: deleted on save, or replaced when you regenerate"
                       [disabled]="saving()"
                       (click)="setKeep(i, false)"
                     ><ui-x-icon [size]="14" /></button>
                   </div>
                 }
                 @if (replacesExisting(i)) {
-                  <span class="absolute left-1 top-1 rounded bg-black/55 px-1 text-[0.5625rem] font-medium text-white" title="Saving replaces this expression's current image">replaces</span>
+                  <span
+                    class="absolute left-1 top-1 rounded bg-black/55 px-1 text-[0.5625rem] font-medium text-white"
+                    tabindex="0"
+                    uiTooltip="Saving replaces this expression's current image"
+                  >replaces</span>
                 }
               </div>
               <input
@@ -284,6 +292,7 @@ function defaultCells(): GenerateCell[] {
             [class.bg-(--color-accent)]="!hasCandidates()"
             [class.text-white]="!hasCandidates()"
             [disabled]="busy() || !canGenerate()"
+            [uiTooltip]="hasCandidates() ? 'New portraits for discarded and empty panels; kept ones stay' : ''"
             (click)="generate()"
           >
             @if (generating()) {
@@ -299,6 +308,7 @@ function defaultCells(): GenerateCell[] {
               type="button"
               class="rounded-lg bg-(--color-accent) px-3 py-1.5 text-sm font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
               [disabled]="busy() || keptCount() === 0"
+              uiTooltip="Save kept portraits as expressions; discarded ones are deleted"
               (click)="save()"
             >{{ saving() ? 'Saving…' : 'Save ' + keptCount() }}</button>
           }

@@ -1,15 +1,18 @@
 import { ChangeDetectionStrategy, Component, output } from '@angular/core';
 import { AdjustmentsHorizontalIconComponent } from '../../../../shared/ui/icons/icons';
+import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 
 @Component({
   selector: 'app-context-panel-toggle',
   standalone: true,
-  imports: [AdjustmentsHorizontalIconComponent],
+  imports: [AdjustmentsHorizontalIconComponent, TooltipDirective],
   template: `
     <button
       type="button"
       class="context-toggle"
-      aria-label="Open conversation context panel"
+      aria-label="Open thread context panel"
+      uiTooltip="Scratchpad, memories, tools and context for this thread"
+      placement="bottom"
       (click)="open.emit()"
     >
       <ui-adjustments-horizontal-icon [size]="14" />

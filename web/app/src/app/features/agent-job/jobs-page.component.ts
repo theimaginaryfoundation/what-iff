@@ -7,11 +7,12 @@ import { JobViewService, JobViewFilters } from '../../core/services/job-view.ser
 import { toJobCardVm } from './helpers/job-vm.helpers';
 import { JobFilterBarComponent } from './components/job-filter-bar.component';
 import { JobCardComponent } from './components/job-card.component';
+import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 
 @Component({
   selector: 'app-jobs-page',
   standalone: true,
-  imports: [JobFilterBarComponent, JobCardComponent],
+  imports: [JobFilterBarComponent, JobCardComponent, HelpHintComponent],
   templateUrl: './jobs-page.component.html',
   styleUrl: './jobs-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

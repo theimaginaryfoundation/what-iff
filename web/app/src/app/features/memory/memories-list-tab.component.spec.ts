@@ -310,7 +310,7 @@ afterEach(() => {
 });
 
 describe('MemoriesListTabComponent bootstrap / ngOnInit', () => {
-  it('populates personalities and the Persona select on load success', async () => {
+  it('populates personalities and the Personality select on load success', async () => {
     const { fixture, component } = await createComponent({ personalities: [PERSONALITY_A, PERSONALITY_B] });
 
     expect(component.personalityNames()).toEqual({
@@ -320,7 +320,7 @@ describe('MemoriesListTabComponent bootstrap / ngOnInit', () => {
     const host = fixture.nativeElement as HTMLElement;
     const select = host.querySelectorAll('.memories-list__filters select')[0] as HTMLSelectElement;
     const options = Array.from(select.querySelectorAll('option'));
-    expect(options.map(o => o.textContent?.trim())).toEqual(['All personas', 'Global / shared', PERSONALITY_A.name, PERSONALITY_B.name]);
+    expect(options.map(o => o.textContent?.trim())).toEqual(['Any personality', 'Global (every personality)', PERSONALITY_A.name, PERSONALITY_B.name]);
   });
 
   it('falls back to an empty personality list on load error', async () => {
@@ -330,7 +330,7 @@ describe('MemoriesListTabComponent bootstrap / ngOnInit', () => {
     const host = fixture.nativeElement as HTMLElement;
     const select = host.querySelectorAll('.memories-list__filters select')[0] as HTMLSelectElement;
     const options = Array.from(select.querySelectorAll('option'));
-    expect(options.map(o => o.textContent?.trim())).toEqual(['All personas', 'Global / shared']);
+    expect(options.map(o => o.textContent?.trim())).toEqual(['Any personality', 'Global (every personality)']);
   });
 
   it('applies a second route queryParams emission, overwriting the search box and clearing a stale date error', async () => {
@@ -384,7 +384,7 @@ describe('MemoriesListTabComponent filters wiring', () => {
     expect(view.setFilters).toHaveBeenCalledWith({ personalityId: PERSONALITY_A.id });
   });
 
-  it('selects all associations when "All personas" is chosen', async () => {
+  it('selects all associations when "Any personality" is chosen', async () => {
     const { fixture, view } = await createComponent({ personalities: [PERSONALITY_A] });
     const host = fixture.nativeElement as HTMLElement;
     const select = host.querySelectorAll('.memories-list__filters select')[0] as HTMLSelectElement;
@@ -397,7 +397,7 @@ describe('MemoriesListTabComponent filters wiring', () => {
     expect(view.setSelectedPersonalityIds).not.toHaveBeenCalled();
   });
 
-  it('selects global associations when "Global / shared" is chosen', async () => {
+  it('selects global associations when "Global (every personality)" is chosen', async () => {
     const { fixture, view } = await createComponent({ personalities: [PERSONALITY_A] });
     const host = fixture.nativeElement as HTMLElement;
     const select = host.querySelectorAll('.memories-list__filters select')[0] as HTMLSelectElement;
@@ -526,7 +526,7 @@ describe('MemoriesListTabComponent filters wiring', () => {
     const { fixture } = await createComponent({ view });
     const host = fixture.nativeElement as HTMLElement;
 
-    (host.querySelector('[aria-label="Refresh"]') as HTMLButtonElement).click();
+    (host.querySelector('[aria-label="Refresh memories"]') as HTMLButtonElement).click();
 
     expect(view.load).toHaveBeenCalledWith(3);
   });
@@ -620,7 +620,7 @@ describe('MemoriesListTabComponent status tabs and Summaries read-only enforceme
     fixture.detectChanges();
 
     const host = fixture.nativeElement as HTMLElement;
-    expect(host.querySelector('.focus-panel__footnote')?.textContent).toContain('Summaries are managed with the conversation checkpoint');
+    expect(host.querySelector('.focus-panel__footnote')?.textContent).toContain('Summaries are managed with the thread checkpoint');
     expect(host.querySelector('.focus-panel__actions')).toBeNull();
   });
 
@@ -641,7 +641,7 @@ describe('MemoriesListTabComponent status tabs and Summaries read-only enforceme
     const view = makeViewService({ filters: { status: 'summaries' } });
     const { fixture } = await createComponent({ view });
     expect((fixture.nativeElement as HTMLElement).querySelector('.memories-list__hint')?.textContent).toContain(
-      'conversation checkpoint summaries (read-only here)',
+      'thread checkpoint summaries (read-only here)',
     );
   });
 

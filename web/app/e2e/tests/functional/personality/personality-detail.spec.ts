@@ -2,7 +2,7 @@ import { test, expect } from '../../../fixtures';
 
 /**
  * Personality detail page smoke coverage for the PersonalityDetailPage POM —
- * everything past "Use in new chat" (personality-chat.spec.ts), which is the
+ * everything past "Use in new thread" (personality-chat.spec.ts), which is the
  * only path the detail page previously had a test against.
  */
 

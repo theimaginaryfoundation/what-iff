@@ -360,7 +360,7 @@ describe('MemoryCardComponent', () => {
     expect(fixture.nativeElement.querySelector('.memory-card__pin-select')).toBeNull();
   });
 
-  it('renders one pin option per personality plus "All personalities", pre-set to the current pin', async () => {
+  it('renders one pin option per personality plus "Global (every personality)", pre-set to the current pin', async () => {
     fixture.componentRef.setInput('memory', makeVm({ level: 'global', pinnedPersonalityId: 'p-2' }));
     fixture.componentRef.setInput('personalities', [
       { id: 'p-1', label: 'Nova' },
@@ -376,7 +376,7 @@ describe('MemoryCardComponent', () => {
     const select = fixture.nativeElement.querySelector('.memory-card__pin-select') as HTMLSelectElement;
     expect(select).toBeTruthy();
     const optionLabels = Array.from(select.options).map(o => o.textContent?.trim());
-    expect(optionLabels).toEqual(['All personalities', 'Nova', 'Echo']);
+    expect(optionLabels).toEqual(['Global (every personality)', 'Nova', 'Echo']);
     expect(select.options[select.selectedIndex].textContent?.trim()).toBe('Echo');
   });
 
@@ -443,7 +443,7 @@ describe('MemoryCardComponent', () => {
     expect(fixture.nativeElement.querySelector('.memory-card__footer')?.textContent).toContain('60% · Medium confidence');
   });
 
-  it('shows the verified-count badge with its title when set, and hides it when null', () => {
+  it('shows the verified-count badge with an accessible label when set, and hides it when null', () => {
     expect(fixture.nativeElement.querySelector('.memory-card__verified')).toBeNull();
 
     fixture.componentRef.setInput('memory', makeVm({ verifiedCount: 3 }));
@@ -451,7 +451,8 @@ describe('MemoryCardComponent', () => {
 
     const badge = fixture.nativeElement.querySelector('.memory-card__verified') as HTMLElement;
     expect(badge.textContent?.trim()).toBe('3×');
-    expect(badge.getAttribute('title')).toBe('Verified duplicate count');
+    expect(badge.getAttribute('title')).toBeNull();
+    expect(badge.getAttribute('aria-label')).toBe('Verified 3 times');
   });
 
   it('shows the star badge in the top row when starred', () => {

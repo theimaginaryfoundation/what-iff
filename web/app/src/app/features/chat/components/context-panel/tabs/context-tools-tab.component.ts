@@ -12,13 +12,15 @@ import { ChatService } from '../../../../../core/services/chat.service';
 import { apiErrorMessage } from '../../../../../core/utils/api-error.helpers';
 import { ContextPanelService } from '../../../services/context-panel.service';
 import { friendlyToolName, summarizeToolInput } from '../../../helpers/tool-call-format.helpers';
+import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../../../../shared/ui/tooltip/tooltip.directive';
 
 type ToolContextTab = 'available' | 'history';
 
 @Component({
   selector: 'app-context-tools-tab',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, HelpHintComponent, TooltipDirective],
   template: `
     <section class="tab-body">
       <div class="context-tabs" role="tablist" aria-label="Tools view">
@@ -29,7 +31,7 @@ type ToolContextTab = 'available' | 'history';
           [class.context-tabs__button--active]="activeToolTab() === 'available'"
           (click)="activeToolTab.set('available')"
         >
-          Available Tools
+          Available tools
         </button>
         <button
           type="button"
@@ -38,7 +40,7 @@ type ToolContextTab = 'available' | 'history';
           [class.context-tabs__button--active]="activeToolTab() === 'history'"
           (click)="activeToolTab.set('history')"
         >
-          Tool Call History
+          Tool call history
         </button>
       </div>
 
@@ -46,6 +48,13 @@ type ToolContextTab = 'available' | 'history';
         @if (toolsLoading()) {
           <p class="state">Loading tools…</p>
         } @else {
+          <div class="label-row">
+            <span class="label">Tools for this thread</span>
+            <ui-help-hint label="What are tools?" heading="Tools" align="end">
+              Actions the personality can take while replying, such as searching the web or saving a memory.
+              Unticking a tool turns it off for this thread only.
+            </ui-help-hint>
+          </div>
           <ul class="list">
             @for (tool of tools(); track tool.name) {
               <li>
@@ -55,7 +64,7 @@ type ToolContextTab = 'available' | 'history';
                     [checked]="isToolEnabled(tool.name)"
                     (change)="toggleTool(tool.name, $any($event.target).checked)"
                   />
-                  <span>{{ tool.name }}</span>
+                  <span>{{ friendlyToolName(tool.name) }}</span>
                   <small>{{ tool.description }}</small>
                 </label>
               </li>
@@ -79,7 +88,16 @@ type ToolContextTab = 'available' | 'history';
       }
 
       <details class="mcp-section">
-        <summary>MCP Servers</summary>
+        <summary>
+          MCP servers
+          <!-- preventDefault keeps a click on the hint from also toggling the details. -->
+          <span class="summary-hint" (click)="$event.preventDefault()">
+            <ui-help-hint label="What are MCP servers?" heading="MCP servers" align="end">
+              External services that give the personality extra tools. Attach one to use its tools in this thread; set
+              servers up under Manage integrations.
+            </ui-help-hint>
+          </span>
+        </summary>
       @if (mcpLoading()) {
         <p class="state">Loading MCP servers…</p>
       } @else {
@@ -90,7 +108,7 @@ type ToolContextTab = 'available' | 'history';
               @for (server of connected(); track server.id) {
                 <li>
                   {{ server.name }}
-                  <button type="button" (click)="detach(server)">Detach</button>
+                  <button type="button" uiTooltip="Stop using this server's tools in this thread" (click)="detach(server)">Detach</button>
                 </li>
               }
             </ul>
@@ -101,7 +119,7 @@ type ToolContextTab = 'available' | 'history';
               @for (server of available(); track server.id) {
                 <li>
                   {{ server.name }}
-                  <button type="button" (click)="attach(server)">Attach</button>
+                  <button type="button" uiTooltip="Use this server's tools in this thread" (click)="attach(server)">Attach</button>
                 </li>
               }
             </ul>
@@ -219,6 +237,25 @@ type ToolContextTab = 'available' | 'history';
       color: var(--color-text-secondary);
       font-size: 0.75rem;
       overflow-wrap: anywhere;
+    }
+
+    .label-row {
+      align-items: center;
+      display: flex;
+      gap: 0.5rem;
+      justify-content: space-between;
+    }
+
+    .label {
+      color: var(--color-text-muted);
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .summary-hint {
+      display: inline-flex;
+      vertical-align: middle;
     }
 
     .mcp-section {

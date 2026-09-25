@@ -3,7 +3,7 @@
     <div class="memories-list__summary">
       <span>{{ countLabel() }}</span>
       @if (isSummariesView()) {
-        <span class="memories-list__hint">· conversation checkpoint summaries (read-only here)</span>
+        <span class="memories-list__hint">· thread checkpoint summaries (read-only here)</span>
       } @else {
         <span class="memories-list__hint">· retrieval isn't perfect — review and correct anything off</span>
       }
@@ -15,20 +15,21 @@
         <input
           type="search"
           placeholder="Search memories…"
+          aria-label="Search memories"
           [ngModel]="searchDraft()"
           (ngModelChange)="searchDraft.set($event)"
           (keydown.enter)="onSearchSubmit()"
         />
       </label>
-      <button type="button" class="memories-list__icon-btn" aria-label="Refresh" (click)="refresh()">↻</button>
+      <button type="button" class="memories-list__icon-btn" aria-label="Refresh memories" uiTooltip="Reload the list" (click)="refresh()">↻</button>
     </div>
 
     <div class="memories-list__filters" aria-label="Memory filters">
       <label class="memories-list__filter-field">
-        <span>Persona</span>
+        <span>Personality</span>
         <select [value]="filters().personalityId" (change)="onPersonalityFilterChange($any($event.target).value)">
-          <option value="">All personas</option>
-          <option [value]="globalPersonalityFilter">Global / shared</option>
+          <option value="">Any personality</option>
+          <option [value]="globalPersonalityFilter">{{ globalScopeLabel }}</option>
           @for (personality of personalities(); track personality.id) {
             <option [value]="personality.id">{{ personality.label }}</option>
           }
@@ -49,6 +50,7 @@
             type="button"
             class="memories-list__date-btn"
             aria-label="Open start date calendar"
+            uiTooltip="Pick a start date"
             (click)="openDatePicker(minDateInput)"
           >
             <ui-calendar-icon [size]="14" />
@@ -66,7 +68,7 @@
             (click)="openDatePicker(maxDateInput)"
             (change)="onMaxDateChange($any($event.target).value)"
           />
-          <button type="button" class="memories-list__date-btn" aria-label="Open end date calendar" (click)="openDatePicker(maxDateInput)">
+          <button type="button" class="memories-list__date-btn" aria-label="Open end date calendar" uiTooltip="Pick an end date" (click)="openDatePicker(maxDateInput)">
             <ui-calendar-icon [size]="14" />
           </button>
         </div>
@@ -82,7 +84,9 @@
           <ui-chev-down-icon [size]="12" />
         </div>
       </label>
-      <button type="button" class="memories-list__clear" (click)="onClearFilters()">Clear</button>
+      <button type="button" class="memories-list__clear" uiTooltip="Reset search, personality, dates and sort" (click)="onClearFilters()">
+        Clear
+      </button>
       @if (dateRangeError(); as dateError) {
         <p class="memories-list__date-error" role="alert">{{ dateError }}</p>
       }
@@ -94,6 +98,7 @@
         role="tab"
         [class.memories-list__status--active]="statusFilter() === 'active' && filters().scope === 'user'"
         [attr.aria-selected]="statusFilter() === 'active' && filters().scope === 'user'"
+        uiTooltip="Active global and personality memories, used across threads"
         (click)="setScopeFilter('user')"
       >
         User
@@ -103,6 +108,7 @@
         role="tab"
         [class.memories-list__status--active]="isThreadView()"
         [attr.aria-selected]="isThreadView()"
+        uiTooltip="Active memories used only in the thread they came from"
         (click)="setScopeFilter('chat')"
       >
         Thread
@@ -113,6 +119,7 @@
         class="memories-list__status--summaries"
         [class.memories-list__status--active]="statusFilter() === 'summaries'"
         [attr.aria-selected]="statusFilter() === 'summaries'"
+        uiTooltip="Thread summaries written at each checkpoint"
         (click)="setStatusFilter('summaries')"
       >
         Summaries
@@ -122,6 +129,7 @@
         role="tab"
         [class.memories-list__status--active]="statusFilter() === 'inactive'"
         [attr.aria-selected]="statusFilter() === 'inactive'"
+        uiTooltip="Archived memories are never used in replies"
         (click)="setStatusFilter('inactive')"
       >
         Archived
@@ -149,12 +157,32 @@
         </label>
         <span class="memories-list__bulk-count">{{ selectedCount() }} selected</span>
         @if (!isThreadView()) {
-          <button type="button" (click)="onMoveSelected()" [disabled]="mutating()">Move</button>
+          <button
+            type="button"
+            uiTooltip="Change which personality can use the selected memories"
+            (click)="onMoveSelected()"
+            [disabled]="mutating()"
+          >
+            Move
+          </button>
         }
-        <button type="button" (click)="onArchiveSelected()" [disabled]="mutating()">
+        <button
+          type="button"
+          [uiTooltip]="isArchivedView() ? 'Make the selected memories usable again' : 'Stop using the selected memories in replies'"
+          (click)="onArchiveSelected()"
+          [disabled]="mutating()"
+        >
           {{ isArchivedView() ? "Unarchive" : "Archive" }}
         </button>
-        <button type="button" class="memories-list__bulk-danger" (click)="onDeleteSelected()" [disabled]="deleting()">Delete</button>
+        <button
+          type="button"
+          class="memories-list__bulk-danger"
+          uiTooltip="Permanently delete the selected memories"
+          (click)="onDeleteSelected()"
+          [disabled]="deleting()"
+        >
+          Delete
+        </button>
       </div>
     }
 
@@ -229,7 +257,7 @@
   <div class="memories-list__move-overlay" (click)="closeMoveMenu()">
     <div class="memories-list__move-menu" role="dialog" aria-label="Move memories" (click)="$event.stopPropagation()">
       <h2>Move to</h2>
-      <button type="button" (click)="moveToPersonality(null)">Global / shared</button>
+      <button type="button" (click)="moveToPersonality(null)">{{ globalScopeLabel }}</button>
       @for (personality of personalities(); track personality.id) {
         <button type="button" (click)="moveToPersonality(personality.id)">{{ personality.label }}</button>
       }

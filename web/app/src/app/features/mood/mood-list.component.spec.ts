@@ -131,6 +131,13 @@ describe('MoodListComponent', () => {
         }).compileComponents();
     });
 
+    it('renders a help hint next to the page title', () => {
+        const fixture = TestBed.createComponent(MoodListComponent);
+        fixture.detectChanges();
+        const trigger = (fixture.nativeElement as HTMLElement).querySelector('h1 ui-help-hint button');
+        expect(trigger?.getAttribute('aria-label')).toBe('What is a mode?');
+    });
+
     it('filters visible mode cards by selected personalities', () => {
         const fixture = TestBed.createComponent(MoodListComponent);
         fixture.detectChanges();

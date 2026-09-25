@@ -6,11 +6,12 @@ import { Subscription } from 'rxjs';
 import { ModeEditModalComponent } from './components/mode-edit-modal.component';
 import { ModeGridComponent } from './components/mode-grid.component';
 import { MoodListFacade } from './services/mood-list.facade';
+import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 
 @Component({
   selector: 'app-mood-list',
   standalone: true,
-  imports: [ModeGridComponent, ModeEditModalComponent],
+  imports: [ModeGridComponent, ModeEditModalComponent, HelpHintComponent],
   providers: [MoodListFacade],
   templateUrl: './mood-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
