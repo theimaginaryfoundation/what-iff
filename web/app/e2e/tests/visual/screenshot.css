@@ -1,0 +1,13 @@
+/*
+ * Applied only while a visual baseline is captured (toHaveScreenshot stylePath in
+ * playwright.config.mock-llm.visual.ts). Hover tooltips depend on where the pointer
+ * happened to stop, so a baseline would pin incidental tooltip copy; hide them.
+ *
+ * .ui-tooltip is created only by TooltipDirective (src/app/shared/ui/tooltip), which
+ * shows it on hover/focus and never for essential content, so hiding it can't mask a
+ * regression in content the screen is meant to show. Help-hint popovers use their own
+ * classes and stay visible.
+ */
+.ui-tooltip {
+  visibility: hidden !important;
+}
