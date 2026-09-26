@@ -18,7 +18,7 @@ const (
 // Only first-party search takes recency and site options and can read pages.
 const (
 	WebSearchGuideFirstParty = "Ask for recent results only (past day, week, month or year), or limit it to certain sites. It can also read a page you paste in, or one it finds."
-	WebSearchGuideNative     = "Uses the model provider's own web search, so it's only available on models whose provider has one. Ask it to look something up or check the latest news."
+	WebSearchGuideNative     = "Uses the model provider's own web search, so it's only available on models whose provider has one. Ask to look something up or check the latest news."
 )
 
 // WebSearchToggleGuide returns the user guide for the active web search.
