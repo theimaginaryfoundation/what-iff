@@ -89,6 +89,9 @@ export class AppShell {
 
   /** Open/expand the sidebar. Safe to call repeatedly. */
   async prepareSidebar(): Promise<void> {
+    // The probes below don't wait, so first wait for the shell itself: the sidebar, plus the
+    // mobile menu button on narrow viewports, render together once the layout is up.
+    await this.page.locator('aside.app-sidebar').waitFor({ state: 'attached' });
     await this.openMobileSidebarIfPresent();
     await this.expandSidebarIfCollapsed();
   }
