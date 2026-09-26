@@ -23,11 +23,9 @@ test.describe('memory manager screens', () => {
   test(
     'empty state',
     { tag: ['@visual', '@mock-only'] },
-    async ({ userWithPersonality, memoriesPage, shell }) => {
+    async ({ userWithPersonality, memoriesPage }) => {
       const page = userWithPersonality.page;
-      await shell.dismissAnnouncementIfPresent();
       await memoriesPage.navigateTo();
-      await shell.dismissAnnouncementIfPresent();
 
       await expect(memoriesPage.heading).toBeVisible();
       await expect(memoriesPage.emptyMessage).toBeVisible();
@@ -45,7 +43,7 @@ test.describe('memory manager screens', () => {
   test(
     'populated list with fixed seeded content',
     { tag: ['@visual', '@mock-only'] },
-    async ({ userWithPersonality, memoriesPage, seed, shell }) => {
+    async ({ userWithPersonality, memoriesPage, seed }) => {
       const page = userWithPersonality.page;
       // Fixed copy so the baseline does not churn on every run.
       await seed.memories(1, {
@@ -59,9 +57,7 @@ test.describe('memory manager screens', () => {
         starred: false,
       });
 
-      await shell.dismissAnnouncementIfPresent();
       await memoriesPage.navigateTo();
-      await shell.dismissAnnouncementIfPresent();
 
       await expect(memoriesPage.card('prefers concise answers under 150 words')).toBeVisible();
       await expect(memoriesPage.card('birthday is March 3')).toBeVisible();
@@ -77,11 +73,9 @@ test.describe('memory manager screens', () => {
   test(
     'merge history tab chrome',
     { tag: ['@visual', '@mock-only'] },
-    async ({ userWithPersonality, memoriesPage, shell }) => {
+    async ({ userWithPersonality, memoriesPage }) => {
       const page = userWithPersonality.page;
-      await shell.dismissAnnouncementIfPresent();
       await memoriesPage.navigateTo();
-      await shell.dismissAnnouncementIfPresent();
       await memoriesPage.mergeHistoryTab.click();
 
       await expect(memoriesPage.mergeHistoryTab).toHaveAttribute('aria-selected', 'true');

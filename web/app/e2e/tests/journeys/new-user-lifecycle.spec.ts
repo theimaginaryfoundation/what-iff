@@ -18,7 +18,7 @@ import { AUTH_REDIRECT_TIMEOUT, LLM_REPLY_TIMEOUT } from '../../timeouts';
 test(
   'new user: register → create personality → chat → fill in profile',
   { tag: ['@journey', '@needs-cognito-admin'] },
-  async ({ chatPage, page, personalitiesPage, personalityDetailPage, profileSettingsModal, registerPage, shell }) => {
+  async ({ chatPage, page, personalitiesPage, personalityDetailPage, profileSettingsModal, registerPage }) => {
     const unique = uniqueId();
     const password = 'E2ePlaywright123!';
     const personalityName = `E2E Journey Persona ${unique}`;
@@ -39,12 +39,10 @@ test(
     });
 
     await test.step('dismiss the first-run announcement', async () => {
-      await shell.dismissAnnouncementIfPresent();
     });
 
     await test.step('create a personality manually', async () => {
       await personalitiesPage.navigateTo();
-      await shell.dismissAnnouncementIfPresent();
       await personalitiesPage.openCreateManually();
       await personalitiesPage.createManually(
         personalityName,

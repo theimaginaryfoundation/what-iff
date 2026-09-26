@@ -65,7 +65,6 @@ export class ProfileSettingsModal {
 
   /** Dismisses the announcement modal first — it intercepts the click. */
   async open(): Promise<void> {
-    await this.shell.dismissAnnouncementIfPresent();
     await this.shell.openMobileSidebarIfPresent();
     await this.shell.openProfileButton().click();
   }

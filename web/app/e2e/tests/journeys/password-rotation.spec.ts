@@ -22,18 +22,16 @@ import { AUTH_REDIRECT_TIMEOUT } from '../../timeouts';
 test(
   'returning user: change password → log out → log back in with data intact',
   { tag: ['@journey', '@mutates-account'] },
-  async ({ page, personalitiesPage, personalityDetailPage, profileSettingsModal, shell, testUser }) => {
+  async ({ page, personalitiesPage, personalityDetailPage, profileSettingsModal, testUser }) => {
     const newPassword = 'E2eRotated789!';
     const personalityName = `E2E Rotation Persona ${shortId()}`;
 
     await test.step('log in with the original password', async () => {
       await signInAs(page, testUser);
-      await shell.dismissAnnouncementIfPresent();
     });
 
     await test.step('create a personality to own before the rotation', async () => {
       await personalitiesPage.navigateTo();
-      await shell.dismissAnnouncementIfPresent();
       await personalitiesPage.openCreateManually();
       await personalitiesPage.createManually(
         personalityName,
@@ -62,12 +60,10 @@ test(
 
     await test.step('log back in with the new password', async () => {
       await signInAs(page, { email: testUser.email, password: newPassword });
-      await shell.dismissAnnouncementIfPresent();
     });
 
     await test.step('the personality created before the rotation is still listed', async () => {
       await personalitiesPage.navigateTo();
-      await shell.dismissAnnouncementIfPresent();
       await expect(personalitiesPage.card(personalityName)).toBeVisible();
     });
   },

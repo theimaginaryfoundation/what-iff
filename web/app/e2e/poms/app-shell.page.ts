@@ -1,5 +1,4 @@
-import { errors, type Locator, type Page } from '@playwright/test';
-import { OPTIONAL_UI_PROBE_TIMEOUT } from '../timeouts';
+import { type Locator, type Page } from '@playwright/test';
 
 /**
  * Sidebar nav destinations, keyed the way tests talk about them. The sidebar
@@ -40,122 +39,10 @@ export const quickActions = [
 
 export type QuickAction = (typeof quickActions)[number];
 
-/**
- * The in-flight or settled announcement probe for a page. A `WeakMap` so a
- * closed page's entry disappears with it, and per-page rather than
- * per-`AppShell` because callers construct a new `AppShell(page)` each time.
- *
- * Every account in this suite is brand new, and `AnnouncementService` always
- * shows the modal to an account that has never seen it — so on the accounts
- * this suite creates, the modal is not "possibly absent", it is "definitely
- * coming, on its own async schedule" (an Angular effect behind a preferences
- * fetch). A boolean "did we see it within one probe" cache would be wrong: a
- * probe that misses by a few hundred milliseconds under load doesn't mean the
- * modal was never coming, and caching that as "settled" leaves it open to
- * intercept every later click for the rest of the test — the exact failure
- * mode a plain per-page boolean produced under contended CI/mobile runs.
- *
- * Memoizing the *promise* instead fixes both directions at once: the first
- * caller starts the one real probe (bounded, retried, exactly as before);
- * every other call site — `clickThroughTo()`, `prepareSidebar()`, `quickAction()`'s
- * chain of both — awaits that same probe instead of starting its own, so
- * there is one full-budget attempt per page rather than N independent
- * shorter gambles, and nothing returns before that attempt is actually done.
- */
-const announcementProbe = new WeakMap<Page, Promise<void>>();
-
-/**
- * Pages with a `'load'` listener already wired to clear their cached probe.
- * Several POMs (`ThreadListPanel.navigateTo()`, `PersonalitiesPage.navigateTo()`, and
- * others) call `page.goto(...)` directly rather than the in-app router, which
- * is a hard navigation: the whole Angular app — and with it the announcement
- * effect — reboots. `Page` outlives that; it is the tab, not the document, so
- * a probe result cached against the old document would wrongly stand in for
- * the new one. `'load'` fires only on a real navigation, never on the
- * Angular router's client-side route changes, so this clears exactly when it
- * needs to and no more often.
- */
-const navigationResetWired = new WeakSet<Page>();
-
-function ensureProbeResetsOnNavigation(page: Page): void {
-  if (navigationResetWired.has(page)) {
-    return;
-  }
-  navigationResetWired.add(page);
-  page.on('load', () => announcementProbe.delete(page));
-}
-
-/** Chrome that wraps every authenticated page (sidebar, announcement modal). */
+/** Chrome that wraps every authenticated page (the sidebar and its controls). */
 export class AppShell {
   constructor(private readonly page: Page) {
     this.recentThreadsSection = this.page.locator('.app-sidebar__recent');
-  }
-
-  /**
-   * New accounts see a one-time "what's new" announcement modal that
-   * intercepts clicks until dismissed; it can appear async after navigation.
-   * Call this after landing on an authenticated page and before interacting
-   * with anything in the main content area.
-   */
-  async dismissAnnouncementIfPresent(): Promise<void> {
-    // Wired here rather than in the constructor: this is the only method that
-    // reads or writes the probe, so first use is the earliest point the
-    // listener can matter, and a POM constructor that attaches a page listener
-    // would do it for every test that merely names the fixture.
-    ensureProbeResetsOnNavigation(this.page);
-    // See `announcementProbe` above: the first call for this page starts the
-    // real probe below and every other call — concurrent or later — awaits
-    // that same run rather than starting its own.
-    const inFlight = announcementProbe.get(this.page);
-    if (inFlight) {
-      return inFlight;
-    }
-    const probe = this.probeAndDismissAnnouncement();
-    announcementProbe.set(this.page, probe);
-    return probe;
-  }
-
-  /**
-   * The two timeouts below mean different things, which is the reason for the
-   * two separate try blocks: a *visibility* timeout means no modal is there,
-   * which is the common case and returns quietly; a *click* timeout means the
-   * modal is there but won't accept input, which is a real failure and throws
-   * once the retries are used up.
-   */
-  private async probeAndDismissAnnouncement(): Promise<void> {
-    const gotIt = this.page.getByRole('button', { name: 'Got it' });
-    // Bounded, and retried: more than one announcement can be queued, and a
-    // click landing during the previous one's fade-out is swallowed by the
-    // outgoing backdrop. Every wait has a timeout so a modal that refuses to
-    // close fails the assertion that follows rather than hanging the test.
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        await gotIt.waitFor({
-          state: 'visible',
-          timeout: OPTIONAL_UI_PROBE_TIMEOUT,
-        });
-      } catch (err) {
-        if (err instanceof errors.TimeoutError) {
-          return; // Not shown (any more) — nothing to dismiss.
-        }
-        throw err; // Broken selector/detached locator — a real failure, surface it.
-      }
-      try {
-        // No per-call timeout override here: click() is an auto-waiting
-        // action, and the waitFor() above already established visibility, so
-        // Playwright's default action timeout is enough.
-        await gotIt.click();
-      } catch (err) {
-        // A visibility timeout above means "nothing to dismiss"; a timeout
-        // here means the modal IS there but won't accept the click — that's
-        // a real interaction failure, not an absence, so let it propagate.
-        if (err instanceof errors.TimeoutError && attempt < 2) {
-          continue; // Retry — the previous modal's fade-out may still be swallowing clicks.
-        }
-        throw err;
-      }
-      await gotIt.waitFor({ state: 'hidden', timeout: OPTIONAL_UI_PROBE_TIMEOUT }).catch(() => undefined);
-    }
   }
 
   /** Sidebar button that opens the Profile & Settings modal. */
@@ -200,9 +87,11 @@ export class AppShell {
     }
   }
 
-  /** Dismiss announcement + open/expand the sidebar. Safe to call repeatedly. */
+  /** Open/expand the sidebar. Safe to call repeatedly. */
   async prepareSidebar(): Promise<void> {
-    await this.dismissAnnouncementIfPresent();
+    // The probes below don't wait, so first wait for the shell itself: the sidebar, plus the
+    // mobile menu button on narrow viewports, render together once the layout is up.
+    await this.page.locator('aside.app-sidebar').waitFor({ state: 'attached' });
     await this.openMobileSidebarIfPresent();
     await this.expandSidebarIfCollapsed();
   }
@@ -221,7 +110,6 @@ export class AppShell {
    */
   async navigateTo(section: NavSection): Promise<void> {
     await this.page.goto(navSections[section].route);
-    await this.dismissAnnouncementIfPresent();
   }
 
   /**
@@ -241,28 +129,25 @@ export class AppShell {
     const target = navSections[section];
     await this.prepareSidebar();
 
-    // Switch modes by probing for the *switcher*, not for the target tab: the
-    // switcher into a mode only exists while in the other one, so this can't
-    // misfire the way a "is the tab there yet?" probe can while the sidebar is
-    // still rendering.
-    const switcher =
+    // The switcher into a mode only exists while in the other one. Wait until
+    // the sidebar shows either the target tab or that switcher, then switch
+    // only if the tab isn't there. A bare isVisible() probe here doesn't wait,
+    // so it misfires while the sidebar is still rendering.
+    const switcher = (
       target.mode === 'config'
         ? this.page.getByRole('button', {
             name: /Switch to configuration mode|^Configuration$/,
           })
         : this.page.getByRole('button', {
             name: /Switch to app mode|^Exit config$/,
-          });
-    if (
-      await switcher
-        .first()
-        .isVisible()
-        .catch(() => false)
-    ) {
-      await switcher.first().click();
+          })
+    ).first();
+    const tab = this.navTab(section);
+    await tab.or(switcher).first().waitFor({ state: 'visible' });
+    if (!(await tab.isVisible())) {
+      await switcher.click();
     }
 
-    const tab = this.navTab(section);
     await tab.waitFor({ state: 'visible' });
     await tab.click();
     await this.page.waitForURL(new RegExp(`${target.route}(/|\\?|$)`));

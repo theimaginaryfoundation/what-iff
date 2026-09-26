@@ -26,7 +26,6 @@ export class ModeEditModalPage {
 
   async navigateTo(): Promise<void> {
     await this.page.goto('/mode');
-    await this.shell.dismissAnnouncementIfPresent();
   }
 
   /** Opens the modal in create mode via the sidebar's "Create mode" quick action. */

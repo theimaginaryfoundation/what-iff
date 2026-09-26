@@ -1,4 +1,5 @@
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { ASSERTION_TIMEOUT } from '../timeouts';
 
 /** The personality list page (`/personalities`). */
 export class PersonalitiesPage {
@@ -40,7 +41,16 @@ export class PersonalitiesPage {
   }
 
   async openCreateManually(): Promise<void> {
-    await this.page.getByRole('button', { name: 'Create Manually' }).first().click();
+    // Up to three buttons match: the sidebar's (off-canvas on mobile), the page header's (hidden
+    // once a fresh account's first-run welcome shows) and the welcome's own. Which is visible
+    // changes as the list loads, so retry and re-resolve until a visible one takes the click.
+    await expect(async () => {
+      await this.page
+        .getByRole('button', { name: 'Create Manually' })
+        .filter({ visible: true })
+        .first()
+        .click({ timeout: 2_000 });
+    }).toPass({ timeout: ASSERTION_TIMEOUT });
   }
 
   /**

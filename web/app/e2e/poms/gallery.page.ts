@@ -1,5 +1,4 @@
 import type { Locator, Page } from '@playwright/test';
-import { AppShell } from './app-shell.page';
 
 /** The page's two top-level modes, by their switch buttons' labels. */
 export type GalleryMode = 'Gallery' | 'Expression Manager';
@@ -21,10 +20,8 @@ export type GallerySort = 'Created' | 'Last used';
  * TEST_PLAN.md). Nothing here drives the import modal for that reason.
  */
 export class GalleryPage {
-  private readonly shell: AppShell;
 
   constructor(private readonly page: Page) {
-    this.shell = new AppShell(page);
     // The page region, named independently of the <h1>: that heading is the
     // active mode's name and changes as the user switches, so it cannot also
     // be the handle used to find the page.
@@ -44,7 +41,6 @@ export class GalleryPage {
 
   async navigateTo(): Promise<void> {
     await this.page.goto('/gallery');
-    await this.shell.dismissAnnouncementIfPresent();
   }
 
   readonly root: Locator;

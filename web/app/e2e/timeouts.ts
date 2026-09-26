@@ -79,9 +79,9 @@ export const LLM_REPLY_TIMEOUT = 40_000;
 export const ASSERTION_TIMEOUT = 10_000;
 
 /**
- * Probing for optional, possibly-absent UI (e.g. a one-time announcement
- * modal) — short because the expected outcome is often "not shown", and a
- * long timeout here would just slow down the common case.
+ * Probing for optional, possibly-absent UI (e.g. a chat control that only
+ * some states render) — short because the expected outcome is often "not
+ * shown", and a long timeout here would just slow down the common case.
  */
 export const OPTIONAL_UI_PROBE_TIMEOUT = 5_000;
 

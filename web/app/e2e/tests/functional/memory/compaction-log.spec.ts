@@ -33,9 +33,7 @@ async function editPromptOnce(
   const initialPrompt = 'You are a calm assistant. Keep answers concise.';
   const updatedPrompt = 'You are a precise assistant. Explain your reasoning in short bullet points.';
 
-  await shell.dismissAnnouncementIfPresent();
   await personalitiesPage.navigateTo();
-  await shell.dismissAnnouncementIfPresent();
   await personalitiesPage.openCreateManually();
   await personalitiesPage.createManually(name, initialPrompt);
   // createManually only clicks Create; the app then routes to the new personality.
@@ -79,7 +77,6 @@ test('records a prompt edit as an audit entry behind the collapsed toggle', asyn
   await expect(page).toHaveURL(/\/personality\/[^/]+$/);
 
   await compactionLogPage.navigateTo();
-  await shell.dismissAnnouncementIfPresent();
   await expect(compactionLogPage.heading).toBeVisible();
 
   // Collapsed by default: the entry exists but is not rendered until asked for.
@@ -115,7 +112,6 @@ test('restoring a previous prompt appends a second, reversed entry', async ({
   );
 
   await compactionLogPage.navigateTo();
-  await shell.dismissAnnouncementIfPresent();
   await compactionLogPage.expandPromptChanges();
   await expect(compactionLogPage.promptChangeCard(name)).toHaveCount(1);
 

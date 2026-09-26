@@ -32,7 +32,7 @@ func (UserPreference) Fields() []ent.Field {
 		field.String("last_seen_announcement").
 			Optional().
 			Default("").
-			Comment("ID of the most recently seen announcement banner; empty means none seen"),
+			Comment("Deprecated unused column; the announcement modal it tracked was removed. Kept until a follow-up migration drops it."),
 		field.Bool("experimental_memory_dedupe_chain").
 			Default(false).
 			Comment("Deprecated unused column; memory merge/dedupe is always on. Kept until a follow-up migration drops it."),
