@@ -31,6 +31,7 @@ func TestResponsesNewStreaming_IncompleteIsNotAnError(t *testing.T) {
 		context.Background(),
 		responses.ResponseNewParams{Model: "test"},
 		func(d string) { deltas = append(deltas, d) },
+		nil,
 	)
 	require.NoError(t, err)
 	require.True(t, deltaEmitted)
@@ -56,6 +57,7 @@ func TestResponsesNewStreaming_FailedEventReturnsDescriptiveError(t *testing.T) 
 	resp, _, err := newTestOpenAIProvider(srv.URL).responsesNewStreaming(
 		context.Background(),
 		responses.ResponseNewParams{Model: "test"},
+		nil,
 		nil,
 	)
 	require.Error(t, err)
@@ -86,6 +88,7 @@ func TestResponsesNewStreaming_FailedAfterDeltasKeepsDeltaEmitted(t *testing.T) 
 		context.Background(),
 		responses.ResponseNewParams{Model: "test"},
 		func(d string) { deltas = append(deltas, d) },
+		nil,
 	)
 	require.Error(t, err)
 	require.Nil(t, resp)
@@ -104,6 +107,7 @@ func TestResponsesNewStreaming_ErrorEventReturnsDescriptiveError(t *testing.T) {
 	resp, _, err := newTestOpenAIProvider(srv.URL).responsesNewStreaming(
 		context.Background(),
 		responses.ResponseNewParams{Model: "test"},
+		nil,
 		nil,
 	)
 	require.Error(t, err)
@@ -127,6 +131,7 @@ func TestResponsesNewStreaming_NoTerminalEventIsTruncationError(t *testing.T) {
 		context.Background(),
 		responses.ResponseNewParams{Model: "test"},
 		nil,
+		nil,
 	)
 	require.Error(t, err)
 	require.Nil(t, resp)
@@ -147,6 +152,7 @@ func TestResponsesNewStreaming_CompletedStillWorks(t *testing.T) {
 	resp, deltaEmitted, err := newTestOpenAIProvider(srv.URL).responsesNewStreaming(
 		context.Background(),
 		responses.ResponseNewParams{Model: "test"},
+		nil,
 		nil,
 	)
 	require.NoError(t, err)

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
+
 	"go.uber.org/zap"
 )
 
@@ -26,6 +28,8 @@ type pgSchedulerLeaderLock struct {
 	conn   *sql.Conn
 	key    int64
 	logger *zap.Logger
+	// metrics times the lock's statements; nil in tests.
+	metrics *telemetry.Metrics
 
 	mu       sync.Mutex
 	released bool
@@ -47,7 +51,10 @@ func (d *Datastore) TryAcquireSchedulerLeaderLock(ctx context.Context, lockKey i
 	}
 
 	var acquired bool
-	if err := conn.QueryRowContext(lockCtx, "SELECT pg_try_advisory_lock($1)", lockKey).Scan(&acquired); err != nil {
+	done := timeRawSQL(lockCtx, d.metrics, dbCollectionSchedulerLk, dbOpAdvisoryLock)
+	err = conn.QueryRowContext(lockCtx, "SELECT pg_try_advisory_lock($1)", lockKey).Scan(&acquired)
+	done(err)
+	if err != nil {
 		_ = conn.Close()
 		return nil, false, fmt.Errorf("scheduler lock: try advisory lock: %w", err)
 	}
@@ -59,9 +66,10 @@ func (d *Datastore) TryAcquireSchedulerLeaderLock(ctx context.Context, lockKey i
 
 	d.logger.Info("scheduler leader lock acquired", zap.Int64("lock_key", lockKey))
 	return &pgSchedulerLeaderLock{
-		conn:   conn,
-		key:    lockKey,
-		logger: d.logger,
+		conn:    conn,
+		key:     lockKey,
+		logger:  d.logger,
+		metrics: d.metrics,
 	}, true, nil
 }
 
@@ -82,7 +90,10 @@ func (l *pgSchedulerLeaderLock) IsHealthy(ctx context.Context) (bool, error) {
 	defer cancel()
 
 	var one int
-	if err := conn.QueryRowContext(checkCtx, "SELECT 1").Scan(&one); err != nil {
+	done := timeRawSQL(checkCtx, l.metrics, dbCollectionSchedulerLk, dbOpAdvisoryLockCheck)
+	err := conn.QueryRowContext(checkCtx, "SELECT 1").Scan(&one)
+	done(err)
+	if err != nil {
 		// Health-check failure means this lock session should not be reused.
 		// Close the pinned connection so we do not keep a broken session around.
 		if closeErr := l.markReleasedAndCloseConn(); closeErr != nil {
@@ -111,7 +122,9 @@ func (l *pgSchedulerLeaderLock) Release(ctx context.Context) error {
 	defer cancel()
 
 	var unlocked bool
+	done := timeRawSQL(releaseCtx, l.metrics, dbCollectionSchedulerLk, dbOpAdvisoryUnlock)
 	err := conn.QueryRowContext(releaseCtx, "SELECT pg_advisory_unlock($1)", l.key).Scan(&unlocked)
+	done(err)
 	closeErr := conn.Close()
 
 	if err != nil {

@@ -18,11 +18,12 @@ const (
 	CallPathGeneratePersonality CallPath = "generate_personality"
 	CallPathExpressionGrid      CallPath = "expression_grid"
 	CallPathPersonalityPortrait CallPath = "personality_portrait"
-	CallPathGateRisk            CallPath = "gate_risk"
-	CallPathGateContradiction   CallPath = "gate_contradiction"
-	CallPathGateInput           CallPath = "gate_input"
-	CallPathScheduleParse       CallPath = "schedule_parse"
-	CallPathSubagent            CallPath = "subagent"
+	// CallPathModeSelect is the per-turn mood/mode auto-selection side call.
+	CallPathModeSelect CallPath = "mode_select"
+	// CallPathExpressionPick is the per-turn expression portrait picker side call.
+	CallPathExpressionPick CallPath = "expression_pick"
+	CallPathScheduleParse  CallPath = "schedule_parse"
+	CallPathSubagent       CallPath = "subagent"
 )
 
 type ctxKeyCallPath struct{}

@@ -10,6 +10,7 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -133,7 +134,7 @@ Assistant reply to evaluate:
 		}
 	}
 
-	resp, err := a.OpenAIProvider.CallWithRetry(ctx, params)
+	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathExpressionPick), params)
 	if err != nil {
 		a.logger.Warn("expression picker model call failed", zap.Error(err))
 		return nil, "", nil

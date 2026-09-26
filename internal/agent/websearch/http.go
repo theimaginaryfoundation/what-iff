@@ -51,13 +51,23 @@ func do(client *http.Client, req *http.Request, headers map[string]string, out a
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, summarizeErrorBody(body))
+		return &statusError{code: resp.StatusCode, summary: summarizeErrorBody(body)}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		return fmt.Errorf("decode response: %w", err)
 	}
 	return nil
 }
+
+// statusError is a non-2xx provider response. HTTPStatusCode lets telemetry.ClassifyError
+// label it (rate_limited, auth, server_error...) instead of "other".
+type statusError struct {
+	code    int
+	summary string
+}
+
+func (e *statusError) Error() string       { return fmt.Sprintf("HTTP %d: %s", e.code, e.summary) }
+func (e *statusError) HTTPStatusCode() int { return e.code }
 
 // providerErrorEnvelope covers Parallel's two error shapes: a top-level message (auth
 // errors), or a message plus field-level validation errors under error.

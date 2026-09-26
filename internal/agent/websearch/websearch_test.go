@@ -232,7 +232,7 @@ func TestNew(t *testing.T) {
 	parallel, ok := svc.Backend.(*ParallelBackend)
 	require.True(t, ok)
 	require.NotNil(t, parallel.client)
-	assert.Equal(t, defaultTimeout, parallel.client.Timeout, "no client given means a bounded default, never http.DefaultClient")
+	assert.Equal(t, DefaultTimeout, parallel.client.Timeout, "no client given means a bounded default, never http.DefaultClient")
 
 	custom := &http.Client{Timeout: time.Second}
 	svc, err = New(Config{ParallelAPIKey: "p", HTTPClient: custom})

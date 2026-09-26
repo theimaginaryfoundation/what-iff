@@ -28,7 +28,6 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/google/uuid"
@@ -73,13 +72,6 @@ const (
 	// Allow a short detached write window when the generation context is cancelled
 	// but we still need to persist terminal job state.
 	jobTerminalPersistTimeout = 5 * time.Second
-	// metrics
-	generateResponseJobDurationKey = "generate_response_job_duration"
-	generateResponseDurationKey    = "generate_response_duration"
-	postProcessMessageDurationKey  = "post_process_message_duration"
-	postProcessMessageCountKey     = "post_process_message_count"
-	toolCallCountKey               = "tool_call_count"
-	totalToolCallsHistogramKey     = "total_tool_calls"
 
 	safetyViolationAssistantMessage = "⚠️ This message has triggered a safety/ethics violation and cannot be processed"
 )
@@ -359,7 +351,8 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		// LLMBackend=local, cfg.HTTPClient is the deny-network transport (every
 		// other consumer stays egress-denied), but the local adapter itself
 		// must reach the local server over a real client.
-		a.LocalProvider = provider.NewLocalProvider(cfg.LocalLLMBaseURL, tel, nil)
+		a.LocalProvider = provider.NewLocalProvider(cfg.LocalLLMBaseURL, tel,
+			telemetry.InstrumentHTTPClient(nil, telemetry.WithDependencyHost(cfg.LocalLLMBaseURL, telemetry.DependencyLocalLLM)))
 	}
 
 	if a.mockLLM {
@@ -576,16 +569,6 @@ func (a *Agent) DeleteProviderFileAttachment(ctx context.Context, fileID string)
 	return a.OpenAIProvider.DeleteFileAttachment(ctx, fileID)
 }
 
-// RecordFileUpload emits a counter for a file-attachment upload attempt.
-// status should be "success" or "failure".
-func (a *Agent) RecordFileUpload(ctx context.Context, fileType, status string) {
-	a.recordCounter(ctx, telemetry.FileAttachmentUploadTotal, 1,
-		metric.WithAttributes(
-			attribute.String("file_type", fileType),
-			attribute.String("status", status),
-		))
-}
-
 // messageContextBuilder returns a context builder wired to this agent's datastore,
 // telemetry, and test-only history override (when set).
 func (a *Agent) messageContextBuilder() (*messageContextBuilder, error) {
@@ -685,7 +668,10 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 		// not crash every other in-flight chat. Registered after cancel/unregister so it
 		// runs first (LIFO) and UpdateJobStatus still sees a live runCtx.
 		defer a.recoverAsyncMessageJob(runCtx, userID, newJob.ID, chatMessage.ID)
-		_, err := a.handleUserMessage(runCtx, newJob, chatMessage)
+		err := a.runTrackedJob(runCtx, newJob, func() error {
+			_, err := a.handleUserMessage(runCtx, newJob, chatMessage)
+			return err
+		})
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				a.logger.Info("async agent message processing cancelled",
@@ -788,7 +774,11 @@ func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid
 	go func(runCtx context.Context, job *models.Job, chat *models.ChatMessage) {
 		defer cancel()
 		defer a.unregisterRunningJobCancel(job.ID)
-		if _, err := a.handleUserMessage(runCtx, job, chat); err != nil {
+		err := a.runTrackedJob(runCtx, job, func() error {
+			_, err := a.handleUserMessage(runCtx, job, chat)
+			return err
+		})
+		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				a.logger.Info("async agent message retry cancelled",
 					zap.String("job_id", job.ID.String()),
@@ -841,7 +831,12 @@ type chatContext struct {
 // handleUserMessage handles the agent processing flow for a user message
 func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chatMessage *models.ChatMessage) (*models.ChatMessage, error) {
 	assertNoTestHooksInProduction(a)
-	ctx = a.withCallPath(ctx, telemetry.CallPathUserChat)
+	// The sync webhook path runs agent_job_run jobs through here too; label those as jobs.
+	callPath := telemetry.CallPathUserChat
+	if chatJob != nil && chatJob.JobType == JobTypeAgentJobRun {
+		callPath = telemetry.CallPathAgentJob
+	}
+	ctx = a.withCallPath(ctx, callPath)
 
 	// Update job status to processing
 	if err := a.updateJobStatus(ctx, chatJob, models.JobStatusProcessing); err != nil {
@@ -876,9 +871,11 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 	// Resolve active mood and load mood-driven rituals before determining action type
 	// (a mood may inject image-generation rituals). Mode skills are injected into the
 	// mode context segment, not the user message.
+	doneMood := a.timeTurnStage(ctx, turnStageMood)
 	chatCtx.activeMood = a.resolveActiveMood(ctx, chatJob.UserID, chatCtx, chatMessage.Message, chatMessage.ID)
 	moodRituals := a.loadMoodRituals(ctx, chatJob.UserID, chatCtx.activeMood)
 	chatCtx.activeMoodRituals = moodRituals
+	doneMood()
 
 	// Determine action type: image generation rituals override the base chat type.
 	turnActionType := models.ActionTypeChatMessage
@@ -893,9 +890,11 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 	if !qd.Allowed {
 		quotaErr := fmt.Errorf("%w for user %s", ErrQuotaExceeded, chatJob.UserID)
 		a.logger.Warn("quota check failed, rejecting message", zap.String("user_id", chatJob.UserID.String()))
+		a.recordQuotaRejection(ctx)
 		a.setJobStatusFailed(ctx, chatJob, quotaErr)
 		return nil, quotaErr
 	}
+	doneBuildContext := a.timeTurnStage(ctx, turnStageBuildContext)
 	var imageBytes map[uuid.UUID][]byte
 	// Anthropic and Chat Completions wire formats take inline image bytes; OpenAI
 	// Responses references uploaded file IDs and only needs bytes as a fallback.
@@ -905,6 +904,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 		imageBytes = a.loadImageBytesForClaude(ctx, chatJob.UserID, chatMessage)
 	}
 	modelContext, err := a.buildModelContextForChatMessage(ctx, chatJob.UserID, chatMessage, chatCtx, imageBytes)
+	doneBuildContext()
 	if err != nil {
 		a.logger.Error("failed to build model context", zap.Error(err))
 		a.setJobStatusFailed(ctx, chatJob, err)
@@ -982,8 +982,6 @@ func (a *Agent) runUserChatPostInferencePhases(
 		return
 	}
 
-	a.recordTime(ctx, generateResponseJobDurationKey, time.Since(chatJob.CreatedAt))
-
 	if err := a.applyExpressionPhase(ctx, chatJob.UserID, chatJob, chatCtx, modelContext, chatMessage.Message, agentMessage); err != nil {
 		a.logger.Error("expression phase failed", zap.Error(err))
 	}
@@ -1005,7 +1003,7 @@ func (a *Agent) runUserChatPostInferencePhases(
 func (a *Agent) generateAssistantForMessage(ctx context.Context, userID uuid.UUID, chatJob *models.Job, chatMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext) (*models.ChatMessage, *provider.GenerateResponse, error) {
 	start := time.Now()
 	defer func() {
-		a.recordTime(ctx, generateResponseDurationKey, time.Since(start))
+		a.recordTurnStage(ctx, turnStageInference, time.Since(start))
 	}()
 
 	a.recordModelContextSegmentEstimates(ctx, modelContext)
@@ -1524,36 +1522,48 @@ func (a *Agent) openAIChatCompletionsAdapter(chatCtx *chatContext, params openai
 }
 
 func (a *Agent) recordToolCalls(ctx context.Context, toolCalls []*models.ToolCall) {
-	a.recordCountHistogram(ctx, totalToolCallsHistogramKey, int64(len(toolCalls)))
-	for _, toolCall := range toolCalls {
-		attrs := metric.WithAttributes(attribute.String("type", toolCall.ToolName), attribute.Bool("error", toolCall.ToolError != ""))
-		a.recordCounter(ctx, toolCallCountKey, 1, attrs)
-	}
+	a.metrics().Record(ctx, telemetry.ToolCallsPerTurn, float64(len(toolCalls)), a.callPathAttr(ctx))
 }
 
-func (a *Agent) recordTime(ctx context.Context, name string, duration time.Duration, attributes ...metric.RecordOption) {
-	if a.telemetry == nil || a.telemetry.Metrics == nil {
-		return
+// metrics returns the agent's metrics recorder. It may be nil (no telemetry, or a Telemetry
+// without Metrics); every *telemetry.Metrics method is a no-op on a nil receiver, so callers
+// don't check.
+func (a *Agent) metrics() *telemetry.Metrics {
+	if a.telemetry == nil {
+		return nil
 	}
-	a.telemetry.Metrics.RecordTime(ctx, name, duration, attributes...)
+	return a.telemetry.Metrics
 }
 
-func (a *Agent) recordCounter(ctx context.Context, name string, count int64, attributes ...metric.AddOption) {
-	if a.telemetry == nil || a.telemetry.Metrics == nil {
-		return
-	}
-	a.telemetry.Metrics.RecordCounter(ctx, name, count, attributes...)
+func (a *Agent) callPathAttr(ctx context.Context) attribute.KeyValue {
+	return telemetry.AttrCallPath.String(string(telemetry.CallPathFromContext(ctx)))
 }
 
-func (a *Agent) recordCountHistogram(ctx context.Context, name string, count int64, attributes ...metric.RecordOption) {
-	if a.telemetry == nil || a.telemetry.Metrics == nil {
-		return
-	}
-	a.telemetry.Metrics.RecordCountHistogram(ctx, name, count, attributes...)
+// Chat turn stages for telemetry.ChatTurnStageDuration: a fixed set, in turn order. Stages
+// can nest: prepare_context includes memory_enrichment, and post_process includes chat_name
+// and the checkpoint_* stages.
+const (
+	turnStageRehydrationWait      = "rehydration_wait"
+	turnStagePrepareContext       = "prepare_context"
+	turnStageMemoryEnrichment     = "memory_enrichment"
+	turnStageMood                 = "mood"
+	turnStageBuildContext         = "build_context"
+	turnStageInference            = "inference"
+	turnStageExpression           = "expression"
+	turnStagePostProcess          = "post_process"
+	turnStageChatName             = "chat_name"
+	turnStageCheckpointScratchpad = "checkpoint_scratchpad"
+	turnStageCheckpointMemory     = "checkpoint_memory"
+	turnStageCheckpointSummary    = "checkpoint_summary"
+	turnStageCheckpointPersist    = "checkpoint_persist"
+)
+
+func (a *Agent) recordTurnStage(ctx context.Context, stage string, d time.Duration) {
+	a.metrics().RecordDuration(ctx, telemetry.ChatTurnStageDuration, d, telemetry.AttrStage.String(stage), a.callPathAttr(ctx))
 }
 
 func (a *Agent) recordModelContextSegmentEstimates(ctx context.Context, modelContext *provider.ModelContext) {
-	if a.telemetry == nil || a.telemetry.Metrics == nil || modelContext == nil {
+	if a.metrics() == nil || modelContext == nil {
 		return
 	}
 	counter := a.tokenCounter
@@ -1564,13 +1574,12 @@ func (a *Agent) recordModelContextSegmentEstimates(ctx context.Context, modelCon
 	if len(estimates) == 0 {
 		return
 	}
-	m := make(map[string]int64, len(estimates))
-	for k, v := range estimates {
-		if v > 0 {
-			m[string(k)] = int64(v)
+	callPath := a.callPathAttr(ctx)
+	for segment, n := range estimates {
+		if n > 0 {
+			a.metrics().Record(ctx, telemetry.GenAIContextTokens, float64(n), telemetry.AttrSegment.String(string(segment)), callPath)
 		}
 	}
-	a.telemetry.Metrics.RecordSegmentTokenEstimates(ctx, m, telemetry.CallPathFromContext(ctx))
 }
 
 // recordToolDefinitionEstimate records the cl100k estimate for schemas passed out-of-band
@@ -1984,6 +1993,7 @@ func memoryToolCallsForChatContext(chatCtx *chatContext) []*models.ToolCall {
 
 // prepareChatContext prepares the chat context including chat, memories, and model selection
 func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage) (*chatContext, error) {
+	defer a.timeTurnStage(ctx, turnStagePrepareContext)()
 	// Get parent chat
 	parentChat, err := a.ds.GetChat(ctx, userID, chatMessage.ChatID)
 	if err != nil {
@@ -2132,6 +2142,7 @@ func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, 
 // getMemoriesBestEffort attempts memory enrichment and degrades gracefully on any failure.
 // When it fails, it logs the error and returns an empty memory list along with a failure flag.
 func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string) ([]string, []*models.Memory, bool) {
+	defer a.timeTurnStage(ctx, turnStageMemoryEnrichment)()
 	memories, liveMemories, err := a.getMemoriesForEnrichment(ctx, userID, chatID, personalityID, userMessage)
 	if err != nil {
 		// Note: the underlying memory retrieval path logs errors at the failure site(s).
@@ -2482,11 +2493,13 @@ func (a *Agent) resolvePersonalityName(ctx context.Context, userID, personalityI
 func (a *Agent) finalizeChat(ctx context.Context, userID uuid.UUID, chatMessage, agentMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext, qd metering.Decision) {
 	start := time.Now()
 	defer func() {
-		a.recordTime(ctx, postProcessMessageDurationKey, time.Since(start))
+		a.recordTurnStage(ctx, turnStagePostProcess, time.Since(start))
 	}()
 	// Generate chat name if it's still the default
 	if chatCtx.chat.Name == defaultChatName {
+		doneChatName := a.timeTurnStage(ctx, turnStageChatName)
 		chatName, err := a.generateChatName(ctx, chatMessage.Message)
+		doneChatName()
 		if err != nil {
 			a.logger.Error("failed to generate chat name", zap.Error(err))
 		} else {
@@ -2589,11 +2602,9 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	if !decision.ShouldCheckpoint {
 		return
 	}
-	attrs := metric.WithAttributes(
-		telemetry.InputTokenAttr(),
-	)
-	a.recordCountHistogram(ctx, telemetry.Tokens, int64(estimatedContextTokens), attrs)
-	a.recordCountHistogram(ctx, postProcessMessageCountKey, int64(chatCtx.chat.CheckpointUserMessageCount))
+	a.metrics().Add(ctx, telemetry.ChatCheckpoints, 1, telemetry.AttrReason.String(decision.Trigger))
+	a.metrics().Record(ctx, telemetry.ChatCheckpointContextTokens, float64(estimatedContextTokens))
+	a.metrics().Record(ctx, telemetry.ChatCheckpointMessages, float64(chatCtx.chat.CheckpointUserMessageCount))
 	a.logger.Debug("checkpointing chat",
 		zap.String("chat_id", chatMessage.ChatID.String()),
 		zap.String("reason", decision.Reason),
@@ -2630,7 +2641,9 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 	var newScratchpadResponseID *string
 	hasScratchpad := false
 	if chatCtx.chat.PersonalityID != uuid.Nil {
+		doneScratchpad := a.timeTurnStage(ctx, turnStageCheckpointScratchpad)
 		newScratchpad, err := a.updateScratchpad(ctx, userID, agentMessage.ResponseID, chatCtx)
+		doneScratchpad()
 		if err != nil {
 			a.logger.Error("failed to update scratchpad during checkpoint", zap.Error(err))
 		} else {
@@ -2649,21 +2662,27 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 	// failed, intentionally defer both extraction and roll-forward dedupe to the next checkpoint:
 	// compaction requires that delta, and a later checkpoint safely retries it.
 	if hasScratchpad {
+		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
 		a.extractMemoriesWithScratchpadDelta(ctx, userID, chatMessage.ChatID, newScratchpadResponseID, inferenceModelContext, chatCtx, compactionEventID)
+		doneMemory()
 	}
 
 	// 3) Conversation summarization
+	doneSummary := a.timeTurnStage(ctx, turnStageCheckpointSummary)
 	summary, err := a.summarizeConversationForCheckpoint(ctx, userID, chatCtx, checkpointSummarySource{
 		PreviousResponseID: agentMessage.ResponseID,
 	})
+	doneSummary()
 	if err != nil {
 		a.logger.Error("failed to summarize conversation for checkpoint", zap.Error(err))
 		return
 	}
 
+	donePersist := a.timeTurnStage(ctx, turnStageCheckpointPersist)
 	if a.persistCheckpointSummary(ctx, userID, chatMessage.ChatID, summary, assistantMessageCount, "OpenAI", agentMessage.ID) {
 		a.finishCompactionEvent(ctx, userID, compactionEventID, summary)
 	}
+	donePersist()
 }
 
 // runCheckpointClaude performs the scratchpad → memory → summary checkpoint sequence for
@@ -2695,7 +2714,9 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	var scratchpadCtx *provider.ModelContext
 	if chatCtx.chat.PersonalityID != uuid.Nil {
 		scratchpadCtx = archivalCtx.Clone()
+		doneScratchpad := a.timeTurnStage(ctx, turnStageCheckpointScratchpad)
 		newScratchpad, err := a.updateScratchpadClaude(ctx, userID, chatCtx, scratchpadCtx)
+		doneScratchpad()
 		if err != nil {
 			a.logger.Error("failed to update scratchpad during Claude checkpoint", zap.Error(err))
 		} else {
@@ -2713,25 +2734,31 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	// defer both extraction and roll-forward dedupe to the next checkpoint: compaction requires
 	// that delta, and a later checkpoint safely retries it.
 	if hasScratchpad {
+		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
 		if err := a.extractMemoriesWithScratchpadDeltaClaude(ctx, userID, chatMessage.ChatID, scratchpadCtx, modelContext, chatCtx, compactionEventID); err != nil {
 			a.logger.Error("failed to extract memories during Claude checkpoint", zap.Error(err))
 		}
+		doneMemory()
 	}
 
 	// 3) Conversation summarization — uses pristine inference modelContext plus the
 	// assistant reply (explicit OpenAI input items; same prompt as the threaded path).
+	doneSummary := a.timeTurnStage(ctx, turnStageCheckpointSummary)
 	summary, err := a.summarizeConversationForCheckpoint(ctx, userID, chatCtx, checkpointSummarySource{
 		ModelContext:   modelContext,
 		AssistantReply: agentMessage.Message,
 	})
+	doneSummary()
 	if err != nil {
 		a.logger.Error("failed to summarize conversation for Claude checkpoint", zap.Error(err))
 		return
 	}
 
+	donePersist := a.timeTurnStage(ctx, turnStageCheckpointPersist)
 	if a.persistCheckpointSummary(ctx, userID, chatMessage.ChatID, summary, assistantMessageCount, "Claude", agentMessage.ID) {
 		a.finishCompactionEvent(ctx, userID, compactionEventID, summary)
 	}
+	donePersist()
 }
 
 // persistCheckpointSummary writes the live checkpoint state. It returns false only when that

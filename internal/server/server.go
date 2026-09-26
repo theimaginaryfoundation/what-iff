@@ -19,6 +19,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
 	agentjobscheduler "github.com/theimaginaryfoundation/what-iff/internal/agentjobs/scheduler"
 	"github.com/theimaginaryfoundation/what-iff/internal/buildinfo"
+	"github.com/theimaginaryfoundation/what-iff/internal/database"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/email"
 	"github.com/theimaginaryfoundation/what-iff/internal/featuregate"
@@ -53,8 +54,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/zap"
 )
@@ -115,6 +114,13 @@ func (s *Server) setupMiddleware() {
 }
 
 func (s *Server) setupRoutes() {
+	// Dependency metrics: ent query/mutation durations (registered before the client is shared)
+	// and connection pool gauges.
+	datastore.InstrumentEntClient(s.db, s.telemetry.Metrics)
+	if _, err := database.RegisterPoolMetrics(s.telemetry.Metrics, s.sqlDB); err != nil {
+		s.logger.Warn("failed to register database pool metrics", zap.Error(err))
+	}
+
 	// Create data providers
 	dataStore, err := datastore.NewDatastore(s.db, s.sqlDB, s.logger, s.config.TokenEncryptionSecret, s.telemetry.Metrics)
 	if err != nil {
@@ -149,10 +155,17 @@ func (s *Server) setupRoutes() {
 		s.logger.Info("startup: marked interrupted chat jobs failed", zap.Int("count", n))
 	}
 
+	// Job backlog gauges (unfinished jobs by type/status and the oldest one's age), sampled at
+	// each metrics export after the reconcile above so orphans don't show as backlog.
+	if _, gerr := dataStore.RegisterJobBacklogGauges(s.telemetry.Metrics); gerr != nil {
+		s.logger.Warn("startup: failed to register job backlog gauges", zap.Error(gerr))
+	}
+
 	fileStore, err := storage.NewFileStore(context.Background(), s.config.S3FileBucket, s.config.AWSRegion, s.logger)
 	if err != nil {
 		s.logger.Fatal("failed to initialize S3 file store", zap.Error(err))
 	}
+	fileStore = storage.Instrument(fileStore)
 
 	// Under a non-vendor LLM_BACKEND every provider SDK client (agent +
 	// memory/admin handlers) is built on the deny-network transport: "no
@@ -161,10 +174,14 @@ func (s *Server) setupRoutes() {
 	// explicitly-set local/test ENV. Local mode still needs its own real
 	// egress to reach the local server — that client is constructed
 	// separately in agent.NewAgent, not via this shared deny transport.
+	//
+	// Either way the shared client records one http.client.request.duration sample per attempt
+	// (see telemetry.HTTPTransport), labelled by vendor from the request host.
 	var providerHTTPClient *http.Client
 	if s.config.LLMBackend != "vendor" {
 		providerHTTPClient = provider.DenyNetworkHTTPClient()
 	}
+	providerHTTPClient = telemetry.InstrumentHTTPClient(providerHTTPClient, s.dependencyHosts()...)
 
 	agentCfg := agent.AgentConfig{
 		LifecycleContext: s.lifecycleCtx,
@@ -195,6 +212,7 @@ func (s *Server) setupRoutes() {
 		webSearch, err := websearch.New(websearch.Config{
 			ParallelAPIKey: s.config.ParallelAPIKey,
 			ParallelMode:   s.config.ParallelSearchMode,
+			HTTPClient:     telemetry.InstrumentHTTPClient(&http.Client{Timeout: websearch.DefaultTimeout}),
 		})
 		switch {
 		case err == nil:
@@ -280,7 +298,8 @@ func (s *Server) setupRoutes() {
 	var exportSender email.Sender = email.NoopSender{Logger: s.logger}
 	if email.New != nil {
 		if snd := email.New(s.logger); snd != nil {
-			exportSender = snd
+			// The linked transport is SES in the hosted deployment.
+			exportSender = email.Instrument(snd, telemetry.DependencySES)
 		}
 	}
 	accountExportHandler := accountexport.NewHandler(dataStore, s.logger, fileStore, exportSender, s.config.OpenAIKey)
@@ -389,6 +408,20 @@ func (s *Server) setupRoutes() {
 	// be registered through the handler's RegisterRoutes method, which applies
 	// RequireRole("admin", "super_admin") middleware.
 	roleHandler.RegisterRoutes(apiV1Router)
+}
+
+// dependencyHosts labels the configured provider base URL overrides, so an LLM provider
+// pointed at a non-default host is still attributed to it on http.client.request.duration.
+// Unset overrides are skipped by WithDependencyHost; default hosts are built in.
+func (s *Server) dependencyHosts() []telemetry.HTTPTransportOption {
+	return []telemetry.HTTPTransportOption{
+		telemetry.WithDependencyHost(s.config.ZAIBaseURL, telemetry.DependencyZAI),
+		telemetry.WithDependencyHost(s.config.GeminiBaseURL, telemetry.DependencyGemini),
+		telemetry.WithDependencyHost(s.config.MistralBaseURL, telemetry.DependencyMistral),
+		telemetry.WithDependencyHost(s.config.DeepSeekBaseURL, telemetry.DependencyDeepSeek),
+		telemetry.WithDependencyHost(s.config.QwenBaseURL, telemetry.DependencyQwen),
+		telemetry.WithDependencyHost(s.config.XiaomiBaseURL, telemetry.DependencyXiaomi),
+	}
 }
 
 // pluginEmbedder builds the embedding function handed to plugins through
@@ -554,33 +587,14 @@ func normalizeMetricRoutePattern(s string) string {
 	return s
 }
 
-// httpStatusClass maps a numeric status to a coarse bucket (reduces metric cardinality vs per-code labels).
-func httpStatusClass(code int) string {
-	switch {
-	case code >= 100 && code < 200:
-		return "1xx"
-	case code >= 200 && code < 300:
-		return "2xx"
-	case code >= 300 && code < 400:
-		return "3xx"
-	case code >= 400 && code < 500:
-		return "4xx"
-	case code >= 500 && code < 600:
-		return "5xx"
-	default:
-		return "other"
-	}
-}
-
 // recordHTTP records request latency with method, mux route template, and status class (1xx–5xx).
 func (s *Server) recordHTTP(ctx context.Context, method, route string, status int, duration time.Duration) {
 	if s.telemetry == nil || s.telemetry.Metrics == nil {
 		return
 	}
-	attrs := metric.WithAttributes(
-		attribute.String("http.method", method),
-		attribute.String("http.route", route),
-		attribute.String("http.status_class", httpStatusClass(status)),
+	s.telemetry.Metrics.RecordDuration(ctx, telemetry.HTTPServerDuration, duration,
+		telemetry.AttrHTTPMethod.String(method),
+		telemetry.AttrHTTPRoute.String(route),
+		telemetry.AttrHTTPStatusClass.String(telemetry.HTTPStatusClass(status)),
 	)
-	s.telemetry.Metrics.RecordTime(ctx, "http_server_request_duration", duration, attrs)
 }

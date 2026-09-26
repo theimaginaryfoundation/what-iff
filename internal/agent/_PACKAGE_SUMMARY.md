@@ -45,7 +45,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 ## Dependencies
 
 - **Inbound:** `internal/handlers/chat` (and other handlers that invoke the agent), `internal/agentjobs/scheduler`.
-- **Outbound:** `internal/datastore`, `internal/models`, `internal/metering`, `internal/agent/provider`, `internal/storage`, `internal/telemetry`, OpenAI and Anthropic SDKs; not `internal/gate` on the live chat path today (gate is separate — see `internal/gate`).
+- **Outbound:** `internal/datastore`, `internal/models`, `internal/metering`, `internal/agent/provider`, `internal/storage`, `internal/telemetry`, OpenAI and Anthropic SDKs.
 
 ## Non-obvious decisions
 
@@ -107,6 +107,13 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 - **Compaction throttle:** `decideCheckpoint` (`postprocessing_policy.go`) gates the **token-based** triggers behind `MinTurnsBetweenCheckpoints` (`checkpointMinTurnsBetweenCheckpoints` = 5) so a burst of tool-heavy turns (agent job runs with large web-search/tool results) cannot force compaction every turn.
   The scheduled turn-count trigger (`MinAssistantMessagesSinceCheckpoint`) is exempt.
 - **Inference `call_path`:** New top-level flows that call the model should use **`Agent.withCallPath(ctx, path)`** (or ensure nested calls set `telemetry.WithCallPath`) so provider token metrics are labeled; see architecture doc.
+  Per-turn side calls label themselves so they don't inherit the turn's path: mood auto-selection uses `mode_select` and the expression picker uses `expression_pick`.
+- **Job and turn metrics** (`job_telemetry.go`): every async job worker (chat send/retry, the sync webhook path, `agent_job_run`, the three personality media jobs, thread rehydration) records `whatiff.job.queue.wait` and runs under `telemetry.TrackJob`.
+  Outcomes come from the worker's result: `quota` for `ErrQuotaExceeded`, `cancelled`/`timeout` for context errors, `panic` when the worker panics (the tracker's defer runs after the worker's own recover), else `success`/`failed`.
+  Chat turns record `whatiff.chat.turn.stage.duration` for a fixed stage set (`rehydration_wait`, `prepare_context` including `memory_enrichment`, `mood`, `build_context`, `inference`, `expression`, `post_process` including `chat_name` and `checkpoint_scratchpad`/`memory`/`summary`/`persist`), labeled by the turn's `call_path` (`user_chat` or `agent_job`).
+  `rehydration_wait` and `expression` are recorded only when the turn actually waits or runs the picker, so skipped turns don't add zero samples.
+  Quota-gate rejections count `whatiff.quota.rejections` by `call_path`.
+  Each tool call is timed on `whatiff.agent.tool.duration`; `toolMetricName` keeps the `tool` label bounded (catalog function tools by name, `mcp__*` as `mcp`, anything else, including made-up names, as `other`).
 - **Delegated subagent path:** `run_subagent` uses a minimal context builder (`base+personality system prompt`, optional scratchpad, provided message only), explicitly excludes history/checkpoint/memory segments, and calls providers directly to avoid post-turn side effects.
 - **Metering boundary:** The agent gates each billable turn through
   `metering.Meter.Check` and returns its opaque `Decision` to `Record` after
@@ -120,6 +127,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 - `agent_hooks.go` — `agentTestHooks` groups test-only seams (memory/history overrides, image ritual fakes).
   `assertNoTestHooksInProduction` runs under `NewAgent`, `handleUserMessage`, and `HandleAgentJobPrompt` when not inside `go test`.
 - `agentloop_test.go` — tool loop and adapter append behavior.
+- `job_telemetry_test.go` — job outcome mapping (success, quota, cancelled, timeout, failed, panic), media job tracking, bounded tool labels, quota rejections and turn stage labels.
 - `context_rebuild_test.go` — model switch / async job input shapes; persisted additional context from history.
 - `context_breakdown_test.go` — `buildContextBreakdown` totals/budget/model stamping and nil-input guards for the Context X-ray.
 - `message_context_builder_test.go` — builder ordering; `mergeAdditionalContextItems` dedupe.
