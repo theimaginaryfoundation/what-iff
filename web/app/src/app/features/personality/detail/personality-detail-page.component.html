@@ -31,11 +31,19 @@
             />
           </label>
           <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-(--color-text-secondary)">
-            <span class="rounded-full bg-[var(--persona-accent-surface)] px-2 py-0.5 font-medium text-(--color-text-primary)">
+            <span
+              class="rounded-full bg-[var(--persona-accent-surface)] px-2 py-0.5 font-medium text-(--color-text-primary)"
+              tabindex="0"
+              uiTooltip="Threads that use this personality"
+            >
               {{ personality.stats.chat_count }} thread{{ personality.stats.chat_count === 1 ? '' : 's' }}
             </span>
             @if (isDefault()) {
-              <span class="rounded-full border border-[var(--persona-accent)] px-2 py-0.5 font-semibold uppercase tracking-wide text-(--color-text-primary)">
+              <span
+                class="rounded-full border border-[var(--persona-accent)] px-2 py-0.5 font-semibold uppercase tracking-wide text-(--color-text-primary)"
+                tabindex="0"
+                uiTooltip="New threads start with this personality"
+              >
                 Default
               </span>
             }
@@ -45,19 +53,21 @@
           <button
             type="button"
             class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-(--color-border-default) bg-(--color-surface-elevated) text-(--color-text-secondary) shadow-sm hover:bg-(--color-surface-input) hover:text-(--color-text-primary) focus:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)"
-            aria-label="Contract editor"
-            title="Contract editor"
+            aria-label="Compact editor"
+            uiTooltip="Switch back to the compact editor"
             (click)="goBack()"
           ><ui-contract-icon [size]="18" /></button>
           <button
             type="button"
             class="rounded-lg bg-(--color-accent) px-3 py-2 text-sm font-semibold text-white hover:brightness-95"
+            uiTooltip="Start a new thread with this personality"
             (click)="onUseInNewChat()"
-          >Use in new chat</button>
+          >Use in new thread</button>
           @if (!isDefault()) {
             <button
               type="button"
               class="rounded-lg border border-(--color-border-default) px-3 py-2 text-sm font-medium text-(--color-text-primary) hover:bg-(--color-surface-elevated)"
+              uiTooltip="New threads will start with this personality"
               (click)="onMakeDefault()"
             >Make default</button>
           }
@@ -75,9 +85,16 @@
       />
 
       <section class="flex flex-col gap-3 rounded-2xl border border-(--color-border-default) bg-(--color-surface-card) p-4">
-        <h2 class="text-base font-semibold text-(--color-text-primary)">Scratchpad</h2>
+        <h2 class="inline-flex items-center gap-1 text-base font-semibold text-(--color-text-primary)">
+          Scratchpad
+          <ui-help-hint label="What is the scratchpad?" heading="Scratchpad" guide="continuity">
+            Working notes this personality keeps about you: goals, projects and what matters to you. It updates them at
+            checkpoints as you chat, and they carry into every thread with this personality.
+          </ui-help-hint>
+        </h2>
         <textarea
           rows="8"
+          aria-label="Scratchpad"
           class="w-full resize-y rounded-lg border border-(--color-border-default) bg-(--color-surface-input) px-3 py-2 text-sm leading-relaxed text-(--color-text-primary) outline-none focus:border-(--color-accent) focus:ring-2 focus:ring-(--color-accent)"
           [value]="editorDraft()?.scratchpad ?? ''"
           (input)="setDraftField('scratchpad', $any($event.target).value)"

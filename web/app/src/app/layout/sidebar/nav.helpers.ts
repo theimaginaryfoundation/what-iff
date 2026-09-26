@@ -25,22 +25,37 @@ export type NavMode = 'app' | 'config';
 export interface NavItem {
   readonly id: string;
   readonly label: string;
+  /** What the section is for; shown as the nav tooltip in every sidebar state. */
+  readonly hint: string;
   readonly route: string;
   readonly icon: Type<unknown>;
 }
 
+/** What the mode switch leads to, shared by the expanded and collapsed sidebar. */
+export const CONFIG_MODE_HINT = 'Memories, modes, skills, tools and jobs';
+export const APP_MODE_HINT = 'Back to chat, personalities and gallery';
+
+/**
+ * Tooltip for a nav control. When the label is on screen the hint says what it's for; when the
+ * control is icon-only the tooltip is its only name, so it leads with the label.
+ */
+export function navTooltip(label: string, hint: string, labelVisible: boolean): string {
+  if (labelVisible) return hint;
+  return `${label}: ${hint.charAt(0).toLowerCase()}${hint.slice(1)}`;
+}
+
 const APP_NAV_ITEMS: ReadonlyArray<NavItem> = [
-  { id: 'chat', label: 'Chat', route: '/chat', icon: ChatIconComponent },
-  { id: 'personalities', label: 'Personalities', route: '/personality', icon: UsersIconComponent },
-  { id: 'gallery', label: 'Gallery', route: '/gallery', icon: ImageIconComponent },
+  { id: 'chat', label: 'Chat', hint: 'Your threads. Click again to open or close the Thread Manager', route: '/chat', icon: ChatIconComponent },
+  { id: 'personalities', label: 'Personalities', hint: 'The characters you talk to: prompt, portraits and notes', route: '/personality', icon: UsersIconComponent },
+  { id: 'gallery', label: 'Gallery', hint: "Images you've generated or imported, and expressions", route: '/gallery', icon: ImageIconComponent },
 ];
 
 const CONFIG_BASE_ITEMS: ReadonlyArray<NavItem> = [
-  { id: 'memories', label: 'Memories', route: '/memories', icon: BrainIconComponent },
-  { id: 'modes', label: 'Modes', route: '/mode', icon: SmileIconComponent },
-  { id: 'skills', label: 'Skills', route: '/skills', icon: BoltIconComponent },
-  { id: 'tools', label: 'Tools', route: '/integrations', icon: WrenchIconComponent },
-  { id: 'jobs', label: 'Jobs', route: '/agent-jobs', icon: ClockIconComponent },
+  { id: 'memories', label: 'Memories', hint: 'What your personalities remember across threads', route: '/memories', icon: BrainIconComponent },
+  { id: 'modes', label: 'Modes', hint: 'Sets of instructions, skills and a model a thread can switch into', route: '/mode', icon: SmileIconComponent },
+  { id: 'skills', label: 'Skills', hint: "Saved instructions you add to a message with '/'", route: '/skills', icon: BoltIconComponent },
+  { id: 'tools', label: 'Tools', hint: 'Connectors (MCP servers) and webhook tokens', route: '/integrations', icon: WrenchIconComponent },
+  { id: 'jobs', label: 'Jobs', hint: 'Prompts your personalities run on a schedule', route: '/agent-jobs', icon: ClockIconComponent },
 ];
 
 /**

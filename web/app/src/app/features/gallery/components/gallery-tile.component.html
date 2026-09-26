@@ -3,6 +3,7 @@
     type="button"
     class="tile__delete"
     [attr.aria-label]="'Delete image ' + tile().name"
+    uiTooltip="Delete this image"
     (click)="$event.stopPropagation(); delete.emit(tile().id)">
     ×
   </button>
@@ -12,6 +13,10 @@
       type="button"
       class="tile__button"
       [attr.aria-label]="'Open image ' + tile().name + (tile().personalityName ? ' for ' + tile().personalityName : '')"
+      [uiTooltip]="tile().name"
+      truncatedOnly
+      [truncationTarget]="overlayTitle"
+      placement="bottom"
       (click)="open.emit(tile().id)">
       <img [src]="src" [alt]="tile().name" class="tile__image" loading="lazy" />
     </button>
@@ -25,6 +30,6 @@
   }
 
   <div class="tile__overlay">
-    <p class="tile__overlay-title">{{ tile().name }}</p>
+    <p #overlayTitle class="tile__overlay-title">{{ tile().name }}</p>
   </div>
 </article>

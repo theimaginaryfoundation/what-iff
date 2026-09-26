@@ -25,6 +25,7 @@ import {
   filterAssociationOptions,
   filterMoodsBySelectedPersonalities,
   initialsForName,
+  mcpServerCountLabel,
   moodSkillsChipText,
 } from '../helpers/mode-vm.helpers';
 
@@ -121,7 +122,7 @@ export class MoodListFacade {
       description: mood.description || 'No description provided yet.',
       toolsSilencedLabel: mood.recommended_model ? `Model: ${this.modelDisplayName(mood.recommended_model)}` : 'Model: Auto',
       skillsLabel: moodSkillsChipText(mood),
-      jobsLabel: `${this.mcpCountForMood(mood)} MCPs`,
+      jobsLabel: mcpServerCountLabel(this.mcpCountForMood(mood)),
       personalities: this.personalityCardsForMood(mood),
     })),
   );

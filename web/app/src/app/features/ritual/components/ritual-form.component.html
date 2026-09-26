@@ -5,60 +5,81 @@
     </p>
   }
 
-  <label class="ritual-form__label">
-    Name
-    <input
-      class="ritual-form__input"
-      placeholder="e.g., Source Analysis"
-      [disabled]="isSystem()"
-      [ngModel]="name()"
-      (ngModelChange)="name.set($event)" />
-  </label>
+  <div>
+    <label class="ritual-form__label">
+      Name
+      <input
+        class="ritual-form__input"
+        placeholder="e.g., Source Analysis"
+        [attr.aria-describedby]="hintId('name')"
+        [disabled]="isSystem()"
+        [ngModel]="name()"
+        (ngModelChange)="name.set($event)" />
+    </label>
+    <p class="ritual-form__hint" [id]="hintId('name')">Call the skill by typing '/' and this name in the chat box.</p>
+  </div>
 
-  <label class="ritual-form__label">
-    Description
-    <input
-      class="ritual-form__input"
-      placeholder="Brief description of what this skill does"
-      [disabled]="isSystem()"
-      [ngModel]="description()"
-      (ngModelChange)="description.set($event)" />
-  </label>
+  <div>
+    <label class="ritual-form__label">
+      Description
+      <input
+        class="ritual-form__input"
+        placeholder="Brief description of what this skill does"
+        [attr.aria-describedby]="hintId('description')"
+        [disabled]="isSystem()"
+        [ngModel]="description()"
+        (ngModelChange)="description.set($event)" />
+    </label>
+    <p class="ritual-form__hint" [id]="hintId('description')">A short summary to help you pick the right skill.</p>
+  </div>
 
-  <label class="ritual-form__label">
-    Content (Prompt)
-    <textarea
-      rows="6"
-      class="ritual-form__textarea"
-      placeholder="The prompt text that will be inserted into chat when this skill is called..."
-      [disabled]="isSystem()"
-      [ngModel]="content()"
-      (ngModelChange)="content.set($event)"></textarea>
-  </label>
+  <div>
+    <label class="ritual-form__label">
+      Content (prompt)
+      <textarea
+        rows="6"
+        class="ritual-form__textarea"
+        placeholder="The prompt text that will be inserted into chat when this skill is called..."
+        [attr.aria-describedby]="hintId('content')"
+        [disabled]="isSystem()"
+        [ngModel]="content()"
+        (ngModelChange)="content.set($event)"></textarea>
+    </label>
+    <p class="ritual-form__hint" [id]="hintId('content')">Added to your message when you call the skill.</p>
+  </div>
 
-  <label class="ritual-form__label">
-    Associated Personality (optional)
-    <select
-      class="ritual-form__input"
-      [disabled]="isSystem()"
-      [ngModel]="personalityId()"
-      (ngModelChange)="personalityId.set($event)">
-      <option value="">Global (any persona)</option>
-      @for (personality of personalities(); track personality.id) {
-        <option [value]="personality.id">{{ personality.label }}</option>
-      }
-    </select>
-  </label>
+  <div>
+    <label class="ritual-form__label">
+      Associated personality (optional)
+      <select
+        class="ritual-form__input"
+        [attr.aria-describedby]="hintId('personality')"
+        [disabled]="isSystem()"
+        [ngModel]="personalityId()"
+        (ngModelChange)="personalityId.set($event)">
+        <option value="">Global (every personality)</option>
+        @for (personality of personalities(); track personality.id) {
+          <option [value]="personality.id">{{ personality.label }}</option>
+        }
+      </select>
+    </label>
+    <p class="ritual-form__hint" [id]="hintId('personality')">
+      Global skills work in every thread; a personality skill only works in that personality's threads.
+    </p>
+  </div>
 
-  <label class="ritual-form__label">
-    Hotkey (optional)
-    <app-hotkey-input
-      [placeholder]="'e.g., Ctrl+Shift+1'"
-      [disabled]="isSystem()"
-      [showHelp]="false"
-      [ngModel]="hotkeys()"
-      (ngModelChange)="hotkeys.set($event)" />
-  </label>
+  <div>
+    <label class="ritual-form__label">
+      Hotkey (optional)
+      <app-hotkey-input
+        [placeholder]="'e.g., Ctrl+Shift+1'"
+        [disabled]="isSystem()"
+        [showHelp]="false"
+        [ngModel]="hotkeys()"
+        (ngModelChange)="hotkeys.set($event)" />
+    </label>
+    <p class="ritual-form__hint">On the chat page, adds this skill to your next message. Key sequences work too.</p>
+  </div>
 
   <footer class="ritual-form__footer">
     <button

@@ -4,11 +4,13 @@ import { Router } from '@angular/router';
 import { AccessGate } from '../../core/services/access-gate';
 import { IntegrationsConnectorsTabComponent } from './integrations-connectors-tab.component';
 import { IntegrationsWebhooksTabComponent } from './integrations-webhooks-tab.component';
+import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 
 @Component({
   selector: 'app-integrations',
   standalone: true,
-  imports: [CommonModule, IntegrationsConnectorsTabComponent, IntegrationsWebhooksTabComponent],
+  imports: [CommonModule, IntegrationsConnectorsTabComponent, IntegrationsWebhooksTabComponent, HelpHintComponent, TooltipDirective],
   templateUrl: './integrations.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./integrations.component.scss']

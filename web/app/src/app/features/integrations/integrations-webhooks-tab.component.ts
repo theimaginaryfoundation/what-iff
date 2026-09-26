@@ -1,6 +1,8 @@
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { WebhookTokenService } from '../../core/services/webhook-token.service';
 import { WebhookToken } from '../../core/models/webhook-token.model';
@@ -8,7 +10,7 @@ import { WebhookToken } from '../../core/models/webhook-token.model';
 @Component({
   selector: 'app-integrations-webhooks-tab',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, HelpHintComponent, TooltipDirective],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './integrations-webhooks-tab.component.html'
 })

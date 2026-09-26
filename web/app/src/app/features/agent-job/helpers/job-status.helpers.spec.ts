@@ -1,4 +1,4 @@
-import { isTerminalStatus, statusLabel, statusTone } from './job-status.helpers';
+import { isTerminalStatus, statusDescription, statusLabel, statusTone } from './job-status.helpers';
 
 describe('job-status.helpers', () => {
     it('maps statuses to labels and tones', () => {
@@ -17,5 +17,12 @@ describe('job-status.helpers', () => {
         expect(isTerminalStatus('failed')).toBe(true);
         expect(isTerminalStatus('active')).toBe(false);
         expect(isTerminalStatus('paused')).toBe(false);
+    });
+
+    it('describes what each status means for scheduling', () => {
+        expect(statusDescription('active')).toBe('Runs on its schedule');
+        expect(statusDescription('paused')).toContain('skipped until you resume');
+        expect(statusDescription('complete')).toContain('one-off');
+        expect(statusDescription('failed')).toContain('error');
     });
 });

@@ -8,6 +8,7 @@ import { Personality } from '../../../../core/models/personality.model';
 import { ThreadListService } from '../../../../core/services/thread-list.service';
 import { ConfirmationService } from '../../../../core/services/confirmation.service';
 import { ModalComponent } from '../../../../shared/ui/modal/modal.component';
+import { HelpHintComponent } from '../../../../shared/ui/help-hint/help-hint.component';
 import { ThreadRowComponent } from './thread-row.component';
 
 const MAX_THREAD_TAGS = 10;
@@ -18,13 +19,19 @@ type ThreadListTab = 'active' | 'archived';
 @Component({
   selector: 'app-thread-list-panel',
   standalone: true,
-  imports: [ModalComponent, ThreadRowComponent, TooltipDirective],
+  imports: [HelpHintComponent, ModalComponent, ThreadRowComponent, TooltipDirective],
   template: `
     <aside class="panel" aria-label="Threads">
       <header class="panel__header">
         <div class="panel__title-row">
           <div class="panel__title-spacer"></div>
-          <h2>Thread Manager</h2>
+          <h2 class="panel__title">
+            Thread Manager
+            <ui-help-hint label="What is the Thread Manager?" heading="Thread Manager">
+              Search, filter, star, tag, archive and delete your threads. Archived threads are read-only until you
+              restore them.
+            </ui-help-hint>
+          </h2>
           <div class="panel__title-actions">
             <button type="button" class="panel__back-btn" (click)="goBack()" aria-label="Go back">
               <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -35,8 +42,8 @@ type ThreadListTab = 'active' | 'archived';
             <button
               type="button"
               class="panel__import-btn"
-              aria-label="Import Conversations"
-              uiTooltip="Import Conversations"
+              aria-label="Import threads"
+              uiTooltip="Import threads from ChatGPT, Claude or a WhatIff export"
               placement="left"
               (click)="navigateToData()"
             >
@@ -66,6 +73,8 @@ type ThreadListTab = 'active' | 'archived';
               [attr.aria-selected]="threadListTab() === 'archived'"
               [class.panel__tab--active]="threadListTab() === 'archived'"
               (click)="onThreadListTab('archived')"
+              uiTooltip="Read-only threads you've archived; restore one to chat in it again"
+              placement="bottom"
             >
               Archived
             </button>
@@ -170,10 +179,16 @@ type ThreadListTab = 'active' | 'archived';
                       [indeterminate]="selectAllState() === 'some'"
                       (change)="onSelectAllChange()"
                       aria-label="Select all threads"
+                      uiTooltip="Select all threads for bulk actions"
                     />
                   </th>
                   <th scope="col">
-                    <button type="button" (click)="threads.pinnedOnly.set(!threads.pinnedOnly())">
+                    <button
+                      type="button"
+                      [attr.aria-pressed]="threads.pinnedOnly()"
+                      [uiTooltip]="threads.pinnedOnly() ? 'Show all threads' : 'Show starred threads only'"
+                      (click)="threads.pinnedOnly.set(!threads.pinnedOnly())"
+                    >
                       STARRED? <span aria-hidden="true">⬍</span>
                     </button>
                   </th>
@@ -193,17 +208,17 @@ type ThreadListTab = 'active' | 'archived';
                     </label>
                   </th>
                   <th scope="col">
-                    <button type="button" (click)="threads.sort.set('alphabetical')">
+                    <button type="button" uiTooltip="Sort by title, A to Z" (click)="threads.sort.set('alphabetical')">
                       TITLE <span aria-hidden="true">⬍</span>
                     </button>
                   </th>
                   <th scope="col">
-                    <button type="button" (click)="threads.sort.set('newest')">
+                    <button type="button" uiTooltip="Sort by creation date, newest first" (click)="threads.sort.set('newest')">
                       CREATED <span aria-hidden="true">⬍</span>
                     </button>
                   </th>
                   <th scope="col">
-                    <button type="button" (click)="threads.sort.set('recent')">
+                    <button type="button" uiTooltip="Sort by last activity, most recent first" (click)="threads.sort.set('recent')">
                       UPDATED <span aria-hidden="true">▼</span>
                     </button>
                   </th>
@@ -339,6 +354,13 @@ type ThreadListTab = 'active' | 'archived';
 
     .panel__title-row h2 {
       text-align: center;
+    }
+
+    .panel__title {
+      align-items: center;
+      display: inline-flex;
+      gap: 0.25rem;
+      justify-content: center;
     }
 
     .panel__title-actions {

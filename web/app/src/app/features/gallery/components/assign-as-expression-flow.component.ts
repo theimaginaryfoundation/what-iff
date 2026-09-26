@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ExpressionAssignmentService } from '../../../core/services/expression-assignment.service';
 import { PersonalityService } from '../../../core/services/personality.service';
 import { ModalComponent } from '../../../shared/ui/modal/modal.component';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 
 export interface ExpressionTargetPersonalityOption {
   id: string;
@@ -13,7 +14,7 @@ export interface ExpressionTargetPersonalityOption {
 @Component({
   selector: 'app-assign-as-expression-flow',
   standalone: true,
-  imports: [FormsModule, ModalComponent],
+  imports: [FormsModule, ModalComponent, TooltipDirective],
   templateUrl: './assign-as-expression-flow.component.html',
   styleUrl: './assign-as-expression-flow.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -37,6 +37,8 @@ import { ModalComponent } from '../../../shared/ui/modal/modal.component';
 import { AuthImagePipe } from '../../../core/pipes/auth-image.pipe';
 import { AsyncPipe } from '@angular/common';
 import { ExpressionGenerateModalComponent } from './expression-generate-modal.component';
+import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 
 /**
  * Renders persisted expression slots only (no client-side default placeholders).
@@ -50,7 +52,16 @@ import { ExpressionGenerateModalComponent } from './expression-generate-modal.co
 @Component({
   selector: 'app-personality-expressions-manager',
   standalone: true,
-  imports: [AsyncPipe, AuthImagePipe, NgClass, FormsModule, ModalComponent, ExpressionGenerateModalComponent],
+  imports: [
+    AsyncPipe,
+    AuthImagePipe,
+    NgClass,
+    FormsModule,
+    ModalComponent,
+    ExpressionGenerateModalComponent,
+    HelpHintComponent,
+    TooltipDirective,
+  ],
   template: `
     <section
       class="expressions-manager flex flex-col gap-3 rounded-xl border bg-(--color-surface-card) p-4"
@@ -63,7 +74,13 @@ import { ExpressionGenerateModalComponent } from './expression-generate-modal.co
           @if (personalityName()?.trim()) {
             <h2 class="truncate text-[0.9375rem] font-bold" [style.color]="accent()">{{ personalityName() }}</h2>
           } @else {
-            <h2 class="text-base font-semibold text-(--color-text-primary)">Expressions</h2>
+            <h2 class="inline-flex items-center gap-1 text-base font-semibold text-(--color-text-primary)">
+              Expressions
+              <ui-help-hint label="What are expressions?" heading="Expressions" guide="expressions">
+                Portraits shown next to this personality's replies. After each reply the personality picks the one that
+                fits, using the labels to know when each applies.
+              </ui-help-hint>
+            </h2>
           }
           <p class="text-xs text-(--color-text-secondary)">
             {{ slots().length }} slot{{ slots().length === 1 ? '' : 's' }} ·
@@ -75,7 +92,7 @@ import { ExpressionGenerateModalComponent } from './expression-generate-modal.co
             type="button"
             class="inline-flex items-center rounded-lg border border-border-base bg-(--color-surface-base) px-3 py-1.5 text-sm font-semibold text-(--color-text-primary) disabled:opacity-50"
             [disabled]="defaultGridRunning()"
-            title="Name nine expressions, add an optional reference image, and pick which portraits to keep"
+            uiTooltip="Generate a set of portraits and choose which ones to keep"
             (click)="openGenerate()"
           >{{ generateButtonLabel() }}</button>
           <button
@@ -83,6 +100,7 @@ import { ExpressionGenerateModalComponent } from './expression-generate-modal.co
             class="inline-flex items-center rounded-lg px-3 py-1.5 text-sm font-semibold"
             style="background: color-mix(in srgb, var(--expressions-accent) 16%, transparent); color: var(--expressions-accent);"
             [disabled]="gridGenerating()"
+            uiTooltip="Add your own expression key, then give it an image"
             (click)="onCreateCustomKey()"
           >+ Add expression</button>
 
@@ -96,7 +114,7 @@ import { ExpressionGenerateModalComponent } from './expression-generate-modal.co
             [class.bg-(--color-surface-input)]="!expressionsEnabled()"
             [attr.aria-checked]="expressionsEnabled()"
             [attr.aria-label]="'Expression images in chat'"
-            [title]="expressionsEnabled() ? 'Hide expression images in chat' : 'Show expression images in chat'"
+            [uiTooltip]="expressionsEnabled() ? 'Stop showing portraits next to replies' : 'Show portraits next to replies again'"
             [disabled]="expressionsToggleUpdating()"
             (click)="onToggleExpressionsEnabled()"
           >
@@ -139,8 +157,11 @@ import { ExpressionGenerateModalComponent } from './expression-generate-modal.co
               [attr.aria-label]="slotAriaLabel(slot)"
             >
               <div
+                #slotKey
                 class="w-full border-b border-border-base bg-(--color-surface-input) px-2 py-1 text-center text-[0.8125rem] font-medium text-(--color-text-primary) truncate"
-                [title]="slot.expressionKey"
+                [uiTooltip]="slot.expressionKey"
+                truncatedOnly
+                [truncationTarget]="slotKey"
               >{{ slot.expressionKey }}</div>
               <div class="relative aspect-square bg-(--color-surface-elevated)">
                 @if (slotImageUrl(slot); as imageUrl) {
@@ -160,12 +181,14 @@ import { ExpressionGenerateModalComponent } from './expression-generate-modal.co
                   <button
                     type="button"
                     class="rounded-md border border-border-base bg-(--color-surface-base) px-2 py-1 text-[0.6875rem] font-semibold tracking-wide text-(--color-text-primary)"
+                    uiTooltip="Pick a different image for this expression"
                     (click)="onAssign(slot)"
                   >REPLACE</button>
                   @if (slot.imageId) {
                     <button
                       type="button"
                       class="rounded-md border border-white/25 bg-black/25 px-2 py-1 text-[0.625rem] text-white"
+                      uiTooltip="Remove the image but keep the expression"
                       (click)="onClear(slot)"
                     >CLEAR</button>
                   }
@@ -175,6 +198,8 @@ import { ExpressionGenerateModalComponent } from './expression-generate-modal.co
                 type="text"
                 class="w-full rounded-none border-x-0 border-b-0 border-t border-border-base bg-(--color-surface-input) px-2 py-1.5 text-[0.6875rem] text-(--color-text-primary) outline-none focus:border-(--color-accent) focus:ring-1 focus:ring-(--color-accent)"
                 [placeholder]="'Label / when to use (optional)'"
+                [attr.aria-label]="'When to use ' + slot.expressionKey"
+                uiTooltip="Tells the app when to pick this expression"
                 [ngModel]="slot.label ?? ''"
                 (ngModelChange)="onLabelChange(slot, $event)"
                 (blur)="onLabelCommit(slot)"
@@ -184,6 +209,7 @@ import { ExpressionGenerateModalComponent } from './expression-generate-modal.co
                   type="button"
                   class="absolute right-1 top-1 rounded bg-black/45 px-1 text-[0.625rem] text-white opacity-0 transition-opacity group-hover:opacity-100"
                   [attr.aria-label]="'Remove ' + slot.expressionKey"
+                  uiTooltip="Delete this expression"
                   (click)="onRemove(slot)"
                 >✕</button>
               }
@@ -278,7 +304,7 @@ import { ExpressionGenerateModalComponent } from './expression-generate-modal.co
             <button
               type="button"
               class="inline-flex items-center gap-2 rounded-md border border-border-base bg-transparent px-2.5 py-1.5 text-xs font-medium text-(--color-text-secondary)"
-              title="Only show images pinned to this personality or from threads that include them"
+              uiTooltip="Only images pinned to this personality or from its threads"
               (click)="toggleGalleryPersonalityOnly()"
             >
               <span class="relative inline-flex h-3.5 w-6 shrink-0 rounded-full border border-border-base"

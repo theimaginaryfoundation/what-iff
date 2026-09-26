@@ -56,6 +56,13 @@ describe('JobsPageComponent', () => {
         expect(fixture.componentInstance).toBeTruthy();
     });
 
+    it('shows a help hint next to the Jobs title', () => {
+        fixture.detectChanges();
+        const h1 = (fixture.nativeElement as HTMLElement).querySelector('h1');
+        expect(h1?.textContent).toContain('Jobs');
+        expect(h1?.querySelector('ui-help-hint button[aria-label="What is a job?"]')).toBeTruthy();
+    });
+
     it('renders loading, error, and empty branches', () => {
         view.loading.set(true);
         fixture.detectChanges();

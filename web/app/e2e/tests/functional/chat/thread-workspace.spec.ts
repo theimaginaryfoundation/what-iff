@@ -150,11 +150,11 @@ test('creates, edits and deletes a thread memory from the context panel', async 
   await chatPage.openContextPanel();
   await chatPage.selectContextTab('Memories');
 
-  const memoryTab = chatPage.contextPanel.getByRole('tab', { name: 'This Thread' });
+  const memoryTab = chatPage.contextPanel.getByRole('tab', { name: 'This thread' });
   await expect(memoryTab).toHaveAttribute('aria-selected', 'true');
   await expect(chatPage.contextPanel).toContainText('No memories yet.');
 
-  await chatPage.contextPanel.getByRole('button', { name: 'Add Memory' }).click();
+  await chatPage.contextPanel.getByRole('button', { name: 'Add memory' }).click();
   const editorDialog = page.getByRole('dialog', { name: 'Create memory' });
   await expect(editorDialog).toBeVisible();
 
@@ -199,7 +199,7 @@ test('enables and disables a tool for the conversation', async ({ chatPage, seed
   await chatPage.openContextPanel();
   await chatPage.selectContextTab('Tools');
 
-  const webSearchToggle = chatPage.contextPanel.getByRole('checkbox', { name: /^web_search/ });
+  const webSearchToggle = chatPage.contextPanel.getByRole('checkbox', { name: /^Web Search/ });
   await expect(webSearchToggle).toBeChecked();
 
   await webSearchToggle.uncheck();

@@ -36,6 +36,12 @@
   color: var(--color-text-primary);
 }
 
+.memories-shell__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .memories-shell__copy p {
   margin: 0;
   color: var(--color-text-secondary);

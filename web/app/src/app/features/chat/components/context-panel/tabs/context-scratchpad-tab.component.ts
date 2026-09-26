@@ -32,10 +32,10 @@ import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.
           [disabled]="!canSave()"
           (input)="scratchpad.updateDraft($any($event.target).value)"
           aria-describedby="scratchpad-help"
-          placeholder="Notes this personality keeps across all of its chats"
+          placeholder="Notes this personality keeps across all of its threads"
         ></textarea>
         <p id="scratchpad-help" class="hint">
-          @if (canSave()) { Autosaves. Shared by every chat with this personality. } @else { Attach a personality to enable scratchpad saving. }
+          @if (canSave()) { Autosaves. Shared by every thread with this personality. } @else { Attach a personality to enable scratchpad saving. }
         </p>
         <div class="actions">
           <ui-button size="sm" variant="secondary" (activate)="copyToComposer()">Copy to composer</ui-button>

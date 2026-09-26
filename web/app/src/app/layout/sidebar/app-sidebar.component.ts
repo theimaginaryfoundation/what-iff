@@ -32,7 +32,7 @@ import { personalityAccent, personalityAccentSurface } from '../../features/pers
 import { AvatarComponent } from '../../shared/ui/avatar/avatar.component';
 import { PersonaAccentScopeComponent } from '../../features/personality/picker/persona-accent-scope.component';
 import { AppSidebarHeaderComponent } from './app-sidebar-header.component';
-import { appNavItems, configNavItems, NavItem } from './nav.helpers';
+import { APP_MODE_HINT, CONFIG_MODE_HINT, appNavItems, configNavItems, NavItem, navTooltip } from './nav.helpers';
 
 const PORTRAIT_SOURCE_WIDTH = 200;
 const PORTRAIT_SOURCE_HEIGHT = 267;
@@ -85,6 +85,9 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
   /** Thread to return to when the Chat button closes the Thread Manager (set when it opens it). */
   private threadManagerReturnId: string | null = null;
 
+  readonly navTooltip = navTooltip;
+  readonly configModeHint = CONFIG_MODE_HINT;
+  readonly appModeHint = APP_MODE_HINT;
   readonly mode = this.nav.mode;
   readonly collapsed = this.nav.collapsed;
   readonly personalityQuery = signal('');

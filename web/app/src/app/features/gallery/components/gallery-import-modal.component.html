@@ -48,7 +48,7 @@
           (click)="setScope('global')"
         >
           <span class="gallery-import__scope-title">Global</span>
-          <span class="gallery-import__scope-subtitle">Available everywhere</span>
+          <span class="gallery-import__scope-subtitle">Used with every personality</span>
         </button>
         <button
           type="button"
@@ -56,8 +56,8 @@
           [class.gallery-import__scope-card--active]="scope() === 'personality'"
           (click)="setScope('personality')"
         >
-          <span class="gallery-import__scope-title">Pin to character</span>
-          <span class="gallery-import__scope-subtitle">Tied to one persona</span>
+          <span class="gallery-import__scope-title">Pin to personality</span>
+          <span class="gallery-import__scope-subtitle">Tied to one personality</span>
         </button>
       </div>
       @if (scope() === 'personality') {

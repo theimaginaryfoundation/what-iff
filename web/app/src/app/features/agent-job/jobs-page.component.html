@@ -1,7 +1,13 @@
 <section class="jobs-page mx-auto flex w-full max-w-7xl flex-col gap-4 p-4 md:p-6">
   <header class="flex flex-wrap items-center justify-between gap-2">
     <div>
-      <h1 class="text-2xl font-semibold text-text-primary">Jobs</h1>
+      <h1 class="inline-flex items-center gap-1 text-2xl font-semibold text-text-primary">
+        Jobs
+        <ui-help-hint label="What is a job?" heading="Jobs" guide="advanced">
+          A job sends a prompt to a personality on a schedule you describe in plain language, once or on repeat.
+          Each run posts into its thread, so you can read the results there.
+        </ui-help-hint>
+      </h1>
       <p class="text-sm text-text-secondary">{{ totalCount() }} total jobs</p>
     </div>
     <button

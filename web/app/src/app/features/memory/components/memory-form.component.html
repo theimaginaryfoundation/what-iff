@@ -1,17 +1,21 @@
 <form class="grid gap-4" (ngSubmit)="onSubmit()">
-  <label class="text-xs text-text-secondary">
-    Memory level
-    <select
-      class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
-      [ngModel]="level()"
-      name="memory-level"
-      (ngModelChange)="onLevelChange($event)">
-      <option value="global">Global</option>
-      <option value="personality">Personality</option>
-      <option value="thread">Thread</option>
-      <option value="summary">Summary</option>
-    </select>
-  </label>
+  <div>
+    <label class="block text-xs text-text-secondary">
+      Memory level
+      <select
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        [ngModel]="level()"
+        name="memory-level"
+        aria-describedby="memory-level-hint"
+        (ngModelChange)="onLevelChange($event)">
+        <option value="global">Global</option>
+        <option value="personality">Personality</option>
+        <option value="thread">Thread</option>
+        <option value="summary">Summary</option>
+      </select>
+    </label>
+    <p id="memory-level-hint" class="mt-1 text-[11px] text-text-muted">{{ levelHint() }}</p>
+  </div>
 
   @if (showPinControl()) {
     <div class="memory-form__pin rounded-xl border border-border-base bg-surface-elevated p-3">
@@ -23,14 +27,15 @@
           name="memory-pin-personality"
           [disabled]="pinUpdating()"
           (ngModelChange)="onPinnedPersonalityChange($event)">
-          <option [ngValue]="null">None (accessible by all personalities)</option>
+          <option [ngValue]="null">{{ globalScopeLabel }}</option>
           @for (personality of personalities(); track personality.id) {
             <option [ngValue]="personality.id">{{ personality.label }}</option>
           }
         </select>
       </label>
       <p class="mt-2 text-[11px] text-text-muted">
-        When pinned, this memory is only used by the selected personality. When unpinned, all personalities can access it.
+        When pinned, this memory is only used in threads with that personality. Global memories are used with every
+        personality.
       </p>
     </div>
   }

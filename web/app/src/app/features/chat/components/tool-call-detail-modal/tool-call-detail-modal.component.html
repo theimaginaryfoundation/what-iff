@@ -12,7 +12,7 @@
     >
       <header class="flex items-start justify-between border-b border-border-base p-6">
         <div>
-          <h3 class="text-xl font-semibold text-text-primary">Tool Call Details</h3>
+          <h3 class="text-xl font-semibold text-text-primary">Tool call details</h3>
           <p class="mt-1 text-sm text-text-muted">{{ formatDateTime(toolCall().created_at) }}</p>
         </div>
         <button
@@ -26,13 +26,14 @@
 
       <div class="flex-1 space-y-4 overflow-y-auto p-6">
         <section class="border-b border-border-base pb-4">
-          <h4 class="mb-1 text-sm font-medium text-text-muted">Tool Name</h4>
-          <p class="font-mono text-lg font-semibold text-text-primary">{{ toolCall().tool_name }}</p>
+          <h4 class="mb-1 text-sm font-medium text-text-muted">Tool</h4>
+          <p class="text-lg font-semibold text-text-primary">{{ friendlyToolName(toolCall().tool_name) }}</p>
+          <p class="mt-0.5 font-mono text-xs text-text-muted">{{ toolCall().tool_name }}</p>
         </section>
 
         <section class="overflow-hidden rounded-lg border border-border-base">
           <button type="button" class="section-toggle" (click)="toggleInputSection()">
-            <span>Input Arguments</span>
+            <span>Input</span>
             <span aria-hidden="true">{{ isInputExpanded() ? '−' : '+' }}</span>
           </button>
           @if (isInputExpanded()) {
@@ -50,6 +51,7 @@
           }
         </section>
 
+        @if (hasError()) {
         <section class="overflow-hidden rounded-lg border border-border-base">
           <button type="button" class="section-toggle" (click)="toggleErrorSection()">
             <span>Error</span>
@@ -59,6 +61,7 @@
             <pre class="section-body">{{ parsedError.isJson ? (parsedError.jsonPairs | json) : parsedError.value }}</pre>
           }
         </section>
+        }
       </div>
     </div>
   </div>

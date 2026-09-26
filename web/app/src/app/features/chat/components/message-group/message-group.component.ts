@@ -4,6 +4,7 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
 import { ChatMessage } from '../../../../core/models/message.model';
 import { AuthImagePipe } from '../../../../core/pipes/auth-image.pipe';
 import { MessageBubbleComponent } from '../message-bubble/message-bubble.component';
+import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 
 interface AssistantVisual {
   avatarUrl: string | null;
@@ -15,7 +16,7 @@ interface AssistantVisual {
 @Component({
   selector: 'app-message-group',
   standalone: true,
-  imports: [CommonModule, AuthImagePipe, MessageBubbleComponent],
+  imports: [CommonModule, AuthImagePipe, MessageBubbleComponent, TooltipDirective],
   template: `
     <section
       class="message-group"
@@ -29,7 +30,7 @@ interface AssistantVisual {
       @if (origin() === 'Assistant' && showAssistantAvatar()) {
         <div class="message-group__avatar-column">
           @if (expressionKeySnippet(); as exprKey) {
-            <div class="message-group__expression-key" [attr.title]="exprKey">{{ exprKey }}</div>
+            <div class="message-group__expression-key" [uiTooltip]="'Expression the personality chose for this reply: ' + exprKey">{{ exprKey }}</div>
           }
           <div class="message-group__avatar" aria-hidden="true">
             <span class="message-group__avatar-main">
@@ -111,7 +112,10 @@ interface AssistantVisual {
         @if (assistantCheckpointLine(); as ck) {
           <div class="message-group__checkpoint" role="status" [attr.aria-label]="ck">
             <span class="message-group__checkpoint-line" aria-hidden="true"></span>
-            <span class="message-group__checkpoint-pill">{{ ck }}</span>
+            <span
+              class="message-group__checkpoint-pill"
+              uiTooltip="Checkpoint: notes about you refreshed, older turns folded into the summary"
+            >{{ ck }}</span>
             <span class="message-group__checkpoint-line" aria-hidden="true"></span>
           </div>
         }

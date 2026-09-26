@@ -1,7 +1,7 @@
 @if (state().open) {
   <div class="mode-modal-backdrop" (click)="dismissRequested.emit()">
     <div class="mode-modal" (click)="$event.stopPropagation()">
-      <button type="button" class="mode-modal__close-btn" aria-label="Close modal" (click)="close.emit()">
+      <button type="button" class="mode-modal__close-btn" aria-label="Close" uiTooltip="Close without saving" (click)="close.emit()">
         <ui-x-icon [size]="16" />
       </button>
       @if (state().loading) {
@@ -14,18 +14,28 @@
         <section class="mode-modal__intro">
           <div class="mode-modal__kicker">{{ state().mode === 'create' ? 'CREATE MODE' : 'EDIT MODE' }}</div>
           <div class="mode-modal__name-row">
-            <input class="mode-modal__name-input" type="text" placeholder="Mode name" [ngModel]="state().name" (ngModelChange)="nameChange.emit($event)" />
+            <input class="mode-modal__name-input" type="text" placeholder="Mode name" aria-label="Mode name" [ngModel]="state().name" (ngModelChange)="nameChange.emit($event)" />
           </div>
         </section>
 
         <section class="mode-modal__section">
-          <label>DESCRIPTION</label>
-          <textarea rows="2" placeholder="How should this mode feel? e.g. Concise, direct, no filler." [ngModel]="state().description" (ngModelChange)="descriptionChange.emit($event)"></textarea>
+          <label for="mode-description">DESCRIPTION</label>
+          <textarea
+            id="mode-description"
+            rows="2"
+            placeholder="e.g. Quick questions that need short, direct answers."
+            aria-describedby="mode-description-help"
+            [ngModel]="state().description"
+            (ngModelChange)="descriptionChange.emit($event)"></textarea>
+          <p id="mode-description-help" class="mode-modal__helper-text">
+            Shared with the personality along with the mode name, and helps it decide when to switch to this mode.
+          </p>
         </section>
 
         <section class="mode-modal__section">
-          <label>PROMPT SNIPPET</label>
+          <label for="mode-prompt-snippet">PROMPT SNIPPET</label>
           <textarea
+            id="mode-prompt-snippet"
             rows="4"
             placeholder="Text injected into the system prompt when this mode is active."
             [ngModel]="state().promptSnippet"
@@ -43,7 +53,7 @@
             }
           </select>
           <p class="mode-modal__helper-text">
-            If set, chat will switch to this model when the mode becomes active (tools can still override).
+            If set, the thread switches to this model when the mode becomes active (tools can still override).
           </p>
         </section>
 
@@ -52,6 +62,9 @@
             <h3>ATTACHED SKILLS</h3>
             <span class="mode-modal__section-count">{{ attachedSkillsCountLabel() }}</span>
           </div>
+          <p class="mode-modal__helper-text">
+            While this mode is active, attached skills' content is added to replies and their MCP servers are turned on.
+          </p>
           <app-mode-search-picker
             [placeholder]="'Search a skill to attach...'"
             [query]="skillQuery()"
@@ -67,7 +80,11 @@
               <span>No skills attached</span>
             } @else {
               @for (skill of state().attachedSkills; track skill.id) {
-                <span><span class="mode-modal__chip-label">{{ skill.label }}</span> <button type="button" (click)="removeAttachedSkill.emit(skill.id)">×</button></span>
+                <span><span class="mode-modal__chip-label">{{ skill.label }}</span> <button
+                    type="button"
+                    [attr.aria-label]="'Detach ' + skill.label"
+                    uiTooltip="Detach from this mode"
+                    (click)="removeAttachedSkill.emit(skill.id)">×</button></span>
               }
             }
           </div>

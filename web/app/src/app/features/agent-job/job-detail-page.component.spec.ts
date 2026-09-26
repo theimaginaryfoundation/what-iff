@@ -138,8 +138,8 @@ describe('JobDetailPageComponent', () => {
         const host = fixture.nativeElement as HTMLElement;
 
         expect(host.textContent).toContain('Morning summary');
-        expect(host.textContent).toContain('Status: active');
-        expect(host.textContent).toContain('Open chat');
+        expect(host.textContent).toContain('Status: Active');
+        expect(host.textContent).toContain('Open thread');
         expect(host.textContent).toContain('Run now');
         expect(host.textContent).toContain('Pause');
         expect(host.textContent).toContain('No attached skills.');
@@ -170,7 +170,7 @@ describe('JobDetailPageComponent', () => {
         expect(host.textContent).toContain('Daily brief');
         expect(host.textContent).toContain('+ Weekly review');
         expect(host.textContent).not.toContain('No attached skills.');
-        expect(host.textContent).not.toContain('Open chat');
+        expect(host.textContent).not.toContain('Open thread');
         expect(host.textContent).not.toContain('Run now');
         expect(host.textContent).not.toContain('Pause');
         expect(host.textContent).not.toContain('Resume');

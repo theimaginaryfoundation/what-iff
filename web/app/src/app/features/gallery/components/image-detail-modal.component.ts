@@ -21,6 +21,7 @@ import { ConfirmationService } from '../../../core/services/confirmation.service
 import { AuthImagePipe } from '../../../core/pipes/auth-image.pipe';
 import { DownloadIconComponent, EditIconComponent } from '../../../shared/ui/icons/icons';
 import { ModalComponent } from '../../../shared/ui/modal/modal.component';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 import {
   galleryDisplayBaseName,
   galleryFilenameFromBaseName,
@@ -30,7 +31,7 @@ import { GalleryTileVm } from '../helpers/gallery-vm.helpers';
 @Component({
   selector: 'app-image-detail-modal',
   standalone: true,
-  imports: [AsyncPipe, DatePipe, AuthImagePipe, ModalComponent, EditIconComponent, DownloadIconComponent],
+  imports: [AsyncPipe, DatePipe, AuthImagePipe, ModalComponent, EditIconComponent, DownloadIconComponent, TooltipDirective],
   templateUrl: './image-detail-modal.component.html',
   styleUrl: './image-detail-modal.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

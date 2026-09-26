@@ -18,8 +18,8 @@ class NoopComponent {
 
 describe('AppNavListComponent', () => {
     const items: ReadonlyArray<NavItem> = [
-        { id: 'chat', label: 'Chat', route: '/chat', icon: ChatIconComponent },
-        { id: 'people', label: 'Personalities', route: '/personality', icon: UsersIconComponent },
+        { id: 'chat', label: 'Chat', hint: 'Threads', route: '/chat', icon: ChatIconComponent },
+        { id: 'people', label: 'Personalities', hint: 'Characters', route: '/personality', icon: UsersIconComponent },
     ];
 
     beforeEach(async () => {

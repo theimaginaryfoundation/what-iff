@@ -10,6 +10,12 @@
   color: var(--color-text-primary);
 }
 
+.mode-page__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .mode-page__header p {
   margin: 0;
   font-size: 13px;

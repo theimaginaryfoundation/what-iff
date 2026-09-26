@@ -47,6 +47,8 @@
                   <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ token.name }}</h3>
                   <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                     <span class="inline-flex items-center rounded-full px-2 py-0.5 font-medium"
+                  tabindex="0"
+                  [uiTooltip]="token.status === 'active' ? 'Can be used to post messages into your threads' : 'Revoked; calls with this token are rejected'"
                   [ngClass]="token.status === 'active'
                     ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
                     : 'bg-gray-100 text-gray-700 dark:bg-gray-900/40 dark:text-gray-300'">
@@ -62,6 +64,7 @@
                   <button
                     (click)="revokeWebhookToken(token)"
                     [disabled]="token.status !== 'active'"
+                    uiTooltip="Stop this token working; apps using it will be rejected"
                     class="px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
                     Revoke
                   </button>
@@ -75,7 +78,13 @@
   </div>
 
   <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 h-fit">
-    <h2 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Create Webhook API Token</h2>
+    <h2 class="inline-flex items-center gap-1 text-sm font-semibold text-gray-900 dark:text-white mb-3">
+      Create webhook API token
+      <ui-help-hint label="What is a webhook token?" heading="Webhook tokens" align="end">
+        A webhook token lets another app post a message into one of your threads with <span class="font-mono">POST /chat/&#123;chatId&#125;/messages</span>.
+        The token is shown once, and revoked tokens stop working.
+      </ui-help-hint>
+    </h2>
     <p class="text-xs text-gray-600 dark:text-gray-400 mb-4">
       Use this token with <span class="font-mono">Authorization: Bearer &lt;token&gt;</span> when calling webhook endpoints.
     </p>

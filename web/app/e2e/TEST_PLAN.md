@@ -43,7 +43,7 @@ what it covers and why it's a separate suite.
 ### 1. Chat thread lifecycle
 
 Route: `/chat/:id`. Discovered controls (from a live chat header):
-`Rename chat` (button, "Click to rename"), `Change personality (currently
+`Rename thread` (button), `Change personality (currently
 <name>)`, `Export thread`, `Close thread`. Thread Manager (`/chat`, when no
 thread is open, or via `All threads`) has `Active`/`Archived` tabs and a
 search box.
@@ -72,7 +72,7 @@ search box.
 ### 2. Personality detail page
 
 Route: `/personality/:id`. Discovered controls: `Edit` (opens the system
-prompt editor, region `System prompt editor`), `Delete`, `Use in new chat`
+prompt editor, region `System prompt editor`), `Delete`, `Use in new thread`
 (button, top of page — this is the code path `personality-chat.spec.ts`
 already exercises via `onUseInNewChat()`; the persona-picker's "new-thread"
 selection in `chat-page.component.ts` is a **separate, untested** code

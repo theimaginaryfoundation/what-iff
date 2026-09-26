@@ -4,19 +4,22 @@
       <h3>{{ card().title }}</h3>
       <p>{{ card().description }}</p>
       <div class="mode-card__chips">
-        <span>{{ card().toolsSilencedLabel }}</span>
-        <span>{{ card().skillsLabel }}</span>
-        <span>{{ card().jobsLabel }}</span>
+        <span
+          [uiTooltip]="card().mood.recommended_model ? 'The thread switches to this model while the mode is active' : 'No default model; the thread keeps its current model'"
+          >{{ card().toolsSilencedLabel }}</span
+        >
+        <span uiTooltip="Skills whose content is added to replies while this mode is active">{{ card().skillsLabel }}</span>
+        <span uiTooltip="MCP servers turned on by this mode's attached skills">{{ card().jobsLabel }}</span>
       </div>
     </div>
     <div class="mode-card__actions">
-      <button type="button" title="Edit mode basics" aria-label="Edit mode basics" (click)="edit.emit(card().mood.id)">
+      <button type="button" uiTooltip="Edit mode" aria-label="Edit mode" (click)="edit.emit(card().mood.id)">
         <ui-edit-icon [size]="12" />
       </button>
       <button
         type="button"
         class="mode-card__action--danger"
-        title="Delete"
+        uiTooltip="Delete mode"
         aria-label="Delete mode"
         (click)="delete.emit({ moodId: card().mood.id, event: $event })">
         <ui-trash-icon [size]="12" />
@@ -32,6 +35,7 @@
               type="button"
               class="mode-card__carousel-remove"
               [attr.aria-label]="'Remove ' + personality.name + ' from mode'"
+              uiTooltip="Stop this personality using the mode"
               (click)="removeAssociation.emit({ moodId: card().mood.id, personalityId: personality.id, event: $event })">
               ×
             </button>
@@ -56,6 +60,7 @@
         <button
           type="button"
           class="mode-card__carousel-add-card"
+          uiTooltip="Only attached personalities can use this mode"
           (click)="openAssociationPicker.emit({ moodId: card().mood.id, event: $event })">
           <span class="mode-card__carousel-add-avatar">+</span>
           <span class="mode-card__carousel-add-label">Add personality</span>
