@@ -1,0 +1,65 @@
+:host {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.ui-help-hint {
+  display: inline-flex;
+  position: relative;
+}
+
+.ui-help-hint__trigger {
+  align-items: center;
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  justify-content: center;
+  // Comfortable touch target around a 16px glyph.
+  min-height: 1.75rem;
+  min-width: 1.75rem;
+  transition: color 150ms ease, background-color 150ms ease;
+
+  &:hover,
+  &[aria-expanded='true'] {
+    background: var(--color-surface-elevated);
+    color: var(--color-accent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+}
+
+.ui-help-hint__panel {
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-border-default);
+  border-radius: 0.75rem;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.18);
+  color: var(--color-text-secondary);
+  display: grid;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  gap: 0.375rem;
+  letter-spacing: normal;
+  line-height: 1.45;
+  padding: 0.75rem 0.875rem;
+  // Coordinates come from HelpHintComponent.computePosition (viewport-clamped).
+  position: fixed;
+  text-align: left;
+  text-transform: none;
+  z-index: 60;
+}
+
+.ui-help-hint__heading {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.ui-help-hint__link {
+  color: var(--color-accent);
+  font-weight: 600;
+  justify-self: start;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

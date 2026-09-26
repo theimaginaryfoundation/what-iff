@@ -1,4 +1,4 @@
-import { Injectable, OnDestroy, Signal, WritableSignal, computed, effect, inject, signal } from '@angular/core';
+import { Injectable, OnDestroy, Signal, WritableSignal, computed, effect, inject, signal, untracked } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { firstValueFrom, Subscription, finalize } from 'rxjs';
 import { take } from 'rxjs/operators';
@@ -12,26 +12,24 @@ import { MessageService } from '../../core/services/message.service';
 import { Chat } from '../../core/models/chat.model';
 import { FileAttachment, PendingFileAttachment } from '../../core/models/file-attachment.model';
 import { ChatMessage } from '../../core/models/message.model';
-import { Job } from '../../core/models/job.model';
 import { Model } from '../../core/models/model.model';
 import { Ritual } from '../../core/models/ritual.model';
 import { apiErrorMessage } from '../../core/utils/api-error.helpers';
 import {
   AUTOSAVE_DEBOUNCE_MS,
-  CHAT_PENDING_ASSISTANT_MESSAGE_ID,
   CODE_BLOCK_CHUNK_SIZE,
+  MESSAGE_JUMP_PAGE_SIZE,
   MESSAGE_LIST_PAGE_SIZE,
   STREAMING_INTERVAL_MS,
   STREAMING_SCROLL_CHECK_INTERVAL,
 } from './chat.constants';
 import { isHttpErrorResponse } from './helpers/chat-send.helpers';
-import { lastUserTurnWithGenerationError } from './helpers/message-grouping.helpers';
 import { ChatSendMessageResult } from './chat-send-result';
 import { ChatSendGate } from './services/chat-send-gate';
+import { AssistantTurn } from './assistant-turn';
 
 @Injectable()
 export class ChatSessionService implements OnDestroy {
-  private static readonly PENDING_SEND_JOB_ID = 'pending-send';
   private readonly chatService = inject(ChatService);
   private readonly threadList = inject(ThreadListService);
   private readonly messageService = inject(MessageService);
@@ -42,54 +40,62 @@ export class ChatSessionService implements OnDestroy {
 
   private readonly _thread = signal<Chat | null>(null);
   private readonly _model = signal<Model | null>(null);
-  private readonly _streamingMessageId = signal<string | null>(null);
   private readonly _loading = signal(false);
   private readonly _error = signal<string | null>(null);
-  private readonly _pendingAssistantDraftText = signal('');
 
   private activeThreadId: string | null = null;
-  private messagesPage = 1;
   private messagesTotalCount = 0;
+  /**
+   * Keyset token for the batch of messages immediately older than the oldest loaded one. Set from
+   * each response's `next_cursor`; null when the oldest message in the thread is loaded. Older
+   * loads (scroll-back and jump-to-bookmark) walk this cursor instead of doing page-offset math,
+   * so the batch size can vary freely without gaps.
+   */
+  private olderCursor: string | null = null;
   /** Baseline for detecting checkpoints that land *after* the initial thread load. */
   private lastCheckpointAt = '';
   private checkpointBaselineInitialized = false;
-  private expectingAssistantResponse = false;
-  private expectedAssistantAfterUserMessageId: string | null = null;
-  private readonly jobRenderedDeltaIndex = new Map<string, number>();
   private autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly subscriptions = new Subscription();
+  /**
+   * The active thread's in-flight reply: job polling, pending draft, streaming, cancel and
+   * resume-on-entry. New behaviour in those areas belongs in AssistantTurn, not here; this
+   * service only decides when a turn starts and resets it on thread switches.
+   */
+  private readonly turn = new AssistantTurn({
+    jobService: this.jobService,
+    messageService: this.messageService,
+    streamingService: this.streamingService,
+    sendGate: this.sendGate,
+    activeThreadId: () => this.activeThreadId,
+    reportError: message => this._error.set(message),
+  });
+  /**
+   * A tab-return sync that arrived while this tab's reply was still landing. Replayed once that
+   * settles; otherwise a turn sent from another tab in the meantime would stay invisible until
+   * the next focus event. Cleared on every thread switch.
+   */
+  private deferredSync: { threadId: string; nearBottom: boolean } | null = null;
 
   readonly thread: Signal<Chat | null> = this._thread.asReadonly();
   readonly messages: Signal<ChatMessage[]> = toSignal(this.messageService.messages$, { initialValue: [] });
-  readonly streamingMessageId: Signal<string | null> = this._streamingMessageId.asReadonly();
-  readonly isStreaming = computed(() => this._streamingMessageId() !== null);
+  readonly streamingMessageId: Signal<string | null> = this.turn.streamingMessageId;
+  readonly isStreaming = this.turn.isStreaming;
   readonly loading = this._loading.asReadonly();
   readonly error = this._error.asReadonly();
-  readonly pendingAssistantDraftText = this._pendingAssistantDraftText.asReadonly();
+  readonly pendingAssistantDraftText = this.turn.pendingAssistantDraftText;
+  /** Tool calls the in-flight turn has made so far, for the live timeline above the pending reply. */
+  readonly liveToolCalls = this.turn.liveToolCalls;
+  readonly pendingAssistantDraftReasoning = this.turn.pendingAssistantDraftReasoning;
   readonly draft: WritableSignal<string> = signal('');
   readonly model: Signal<Model | null> = this._model.asReadonly();
   readonly personalityId = computed(() => this._thread()?.personality_id ?? null);
-  /** Set while an async chat job is being polled (typing placeholder; send is still allowed). */
-  private readonly _activeChatJobId = signal<string | null>(null);
-  /** Tracks explicit user-initiated cancel intent for an in-flight job id. */
-  private readonly _cancelRequestedJobId = signal<string | null>(null);
-  /** Latest observed status of the in-flight chat job (null until the first poll snapshot). */
-  private readonly _activeJobPhase = signal<Job['status'] | null>(null);
-  /**
-   * True only while *core inference* is still running. Once the job reaches
-   * inference_complete, the assistant reply is fully available and the post-inference
-   * phases (expression pick, conversation summarization) continue in the background —
-   * they must not keep the stop button up or the composer locked.
-   */
-  private readonly inferenceGenerating = computed(
-    () => this.assistantJobPending() && !isPostInferencePhase(this._activeJobPhase()),
-  );
   /** True while the assistant is generating (core inference pending and/or UI streaming). */
-  readonly isGenerating = computed(() => (this.inferenceGenerating() && !this.isCancellationPending()) || this.isStreaming());
+  readonly isGenerating = this.turn.isGenerating;
   /** Keep composer disabled while generation is in progress. */
   readonly composerBusy = computed(() => this.isGenerating());
   /** True while a chat_message job is in flight (after send) but not yet finished. */
-  readonly assistantJobPending = computed(() => this._activeChatJobId() !== null);
+  readonly assistantJobPending = this.turn.jobPending;
   readonly hasMoreOlderMessages = signal(false);
   readonly loadingOlderMessages = signal(false);
   private readonly _contextCheckpointToken = signal(0);
@@ -121,15 +127,6 @@ export class ChatSessionService implements OnDestroy {
       scrollCheckInterval: STREAMING_SCROLL_CHECK_INTERVAL,
       codeBlockChunkSize: CODE_BLOCK_CHUNK_SIZE,
     });
-    this.streamingService.setCompletionCallback(messageId => {
-      if (this._streamingMessageId() === messageId) {
-        this._streamingMessageId.set(null);
-      }
-    });
-
-    this.subscriptions.add(
-      this.messageService.messages$.subscribe(messages => this.maybeStreamLatestAssistant(messages)),
-    );
 
     this.subscriptions.add(
       this.messageService.messages$.subscribe(() => this.maybeBumpCheckpointToken()),
@@ -151,30 +148,28 @@ export class ChatSessionService implements OnDestroy {
         }
       }, AUTOSAVE_DEBOUNCE_MS);
     });
+
+    effect(() => {
+      if (this.turn.replyLanding()) return;
+      untracked(() => this.flushDeferredSync());
+    });
   }
 
   setActive(threadId: string): void {
     if (threadId === this.activeThreadId) return;
 
     const requestedThreadId = threadId;
+    this.turn.reset();
+    this.deferredSync = null;
     this.activeThreadId = threadId;
-    this.messagesPage = 1;
     this.messagesTotalCount = 0;
+    this.olderCursor = null;
     this.lastCheckpointAt = '';
     this.checkpointBaselineInitialized = false;
     this.hasMoreOlderMessages.set(false);
     this.loadingOlderMessages.set(false);
     this._loading.set(true);
     this._error.set(null);
-    this._pendingAssistantDraftText.set('');
-    this.streamingService.clearMessageState(CHAT_PENDING_ASSISTANT_MESSAGE_ID);
-    this.expectedAssistantAfterUserMessageId = null;
-    this.jobRenderedDeltaIndex.clear();
-    this._activeChatJobId.set(null);
-    this._activeJobPhase.set(null);
-    this._cancelRequestedJobId.set(null);
-    this.expectingAssistantResponse = false;
-    this._streamingMessageId.set(null);
     // Clear the optimistic per-thread model selection so the picker reflects the
     // newly-loaded thread's own model_id instead of carrying the previous thread's pick.
     this._model.set(null);
@@ -203,15 +198,15 @@ export class ChatSessionService implements OnDestroy {
       this.messageService.listMessages(threadId, 1, MESSAGE_LIST_PAGE_SIZE).subscribe({
         next: response => {
           if (!this.isActiveThread(requestedThreadId)) return;
-          this.messagesPage = 1;
           this.messagesTotalCount = response.total_count ?? response.results.length;
+          this.olderCursor = response.next_cursor ?? null;
           this.hasMoreOlderMessages.set(this.messages().length < this.messagesTotalCount);
           this._loading.set(false);
           // Adopt the loaded thread's newest checkpoint as the baseline so only
           // checkpoints that complete afterward trigger an in-place context refresh.
           this.lastCheckpointAt = this.latestCheckpointCompletedAt();
           this.checkpointBaselineInitialized = true;
-          this.resumePendingJobIfNeeded(threadId);
+          this.turn.resumeIfRunning(threadId);
           this.subscriptions.add(
             this.chatService.markChatRead(threadId).subscribe({
               next: () => {
@@ -235,28 +230,26 @@ export class ChatSessionService implements OnDestroy {
   }
 
   /**
-   * Re-pull the active thread's latest messages + metadata in place — no list
-   * clear, no loading flash. Used when the tab regains focus/visibility so
-   * messages produced in another tab (or by a background job) appear without a
-   * manual page refresh. The message-list replace flows through the checkpoint
-   * subscription, so a background turn's new summary/scratchpad refreshes too.
-   *
-   * No-op while this tab has its own in-flight job or streaming: the job poller
-   * already keeps it current, and we must not disturb that state.
-   */
-  /**
    * Refresh the active thread after a tab-return/focus without destroying the user's scrollback.
    * Thread metadata (name/summary) always refreshes. Messages are reconciled non-destructively:
    * messages already loaded are updated in place and anything new is appended — older loaded
    * pages and the scroll position are preserved. A full reload only happens when more than a
    * page arrived while away (a gap) AND the user is following at the bottom; a user reading
    * history is never yanked back to the present.
+   *
+   * While this tab is generating, the sync is deferred rather than dropped: the job poller owns
+   * the list until the reply lands, and the sync runs once it settles. Post-inference phases
+   * (expression, summarization) do not defer it — they can run for minutes, and the composer is
+   * already unlocked for them.
    */
   syncActiveThread(nearBottom: boolean): void {
     const threadId = this.activeThreadId;
-    if (!threadId || this.assistantJobPending() || this.isStreaming()) {
+    if (!threadId) return;
+    if (this.turn.replyLanding()) {
+      this.deferredSync = { threadId, nearBottom };
       return;
     }
+    this.deferredSync = null;
 
     this.subscriptions.add(
       this.chatService.getChat(threadId).subscribe({
@@ -282,7 +275,7 @@ export class ChatSessionService implements OnDestroy {
           }
           this.messagesTotalCount = result.total;
           this.hasMoreOlderMessages.set(this.messages().length < this.messagesTotalCount);
-          this.resumePendingJobIfNeeded(threadId);
+          this.turn.resumeIfRunning(threadId);
           this.markActiveThreadRead(threadId);
         },
         error: () => {
@@ -292,16 +285,23 @@ export class ChatSessionService implements OnDestroy {
     );
   }
 
+  private flushDeferredSync(): void {
+    const pending = this.deferredSync;
+    if (!pending) return;
+    this.deferredSync = null;
+    if (this.isActiveThread(pending.threadId)) this.syncActiveThread(pending.nearBottom);
+  }
+
   /** Destructive reload to the newest page (used only when a gap makes a merge unsafe). */
   private reloadFromLatest(threadId: string): void {
     this.subscriptions.add(
       this.messageService.listMessages(threadId, 1, MESSAGE_LIST_PAGE_SIZE).subscribe({
         next: response => {
           if (!this.isActiveThread(threadId)) return;
-          this.messagesPage = 1;
           this.messagesTotalCount = response.total_count ?? response.results.length;
+          this.olderCursor = response.next_cursor ?? null;
           this.hasMoreOlderMessages.set(this.messages().length < this.messagesTotalCount);
-          this.resumePendingJobIfNeeded(threadId);
+          this.turn.resumeIfRunning(threadId);
           this.markActiveThreadRead(threadId);
         },
         error: () => {
@@ -328,22 +328,21 @@ export class ChatSessionService implements OnDestroy {
 
   loadOlderMessages(): void {
     const threadId = this.activeThreadId;
-    if (!threadId || this.loadingOlderMessages() || !this.hasMoreOlderMessages()) {
+    if (!threadId || this.loadingOlderMessages() || !this.hasMoreOlderMessages() || !this.olderCursor) {
       return;
     }
-    const nextPage = this.messagesPage + 1;
     this.loadingOlderMessages.set(true);
     this.messageService
-      .listMessages(threadId, nextPage, MESSAGE_LIST_PAGE_SIZE)
+      .listMessages(threadId, 1, MESSAGE_LIST_PAGE_SIZE, undefined, this.olderCursor)
       .pipe(finalize(() => this.loadingOlderMessages.set(false)))
       .subscribe({
         next: response => {
           if (!this.isActiveThread(threadId)) {
             return;
           }
-          this.messagesPage = nextPage;
+          this.olderCursor = response.next_cursor ?? null;
           this.messagesTotalCount = response.total_count ?? this.messagesTotalCount;
-          this.hasMoreOlderMessages.set(this.messages().length < this.messagesTotalCount);
+          this.hasMoreOlderMessages.set(!!this.olderCursor && this.messages().length < this.messagesTotalCount);
         },
         error: () => {
           if (!this.isActiveThread(threadId)) {
@@ -354,31 +353,34 @@ export class ChatSessionService implements OnDestroy {
   }
 
   /**
-   * Load successive older pages until `messageId` is present in the list, or there are no more
-   * pages / a page cap is hit. Resolves to whether the message is now loaded. Powers jumping to
-   * a bookmark that lives on an older, not-yet-loaded page.
+   * Load successive older batches until `messageId` is present in the list, or there is nothing
+   * older left / a batch cap is hit. Resolves to whether the message is now loaded. Powers jumping
+   * to a bookmark that lives on an older, not-yet-loaded batch.
+   *
+   * Uses the larger jump batch and keyset cursor so a far-back target resolves in a handful of
+   * roundtrips instead of dozens of small pages. The cap is on *batches*, not messages, so with a
+   * 200-message batch it still reaches thousands of messages back.
    */
-  loadOlderMessagesUntil(messageId: string, maxPages = 60): Promise<boolean> {
+  loadOlderMessagesUntil(messageId: string, maxBatches = 40): Promise<boolean> {
     const threadId = this.activeThreadId;
     const isLoaded = () => this.messages().some(m => m.id === messageId);
     if (!threadId || isLoaded()) {
       return Promise.resolve(isLoaded());
     }
     return new Promise<boolean>(resolve => {
-      let remaining = maxPages;
+      let remaining = maxBatches;
       const step = (): void => {
         if (isLoaded()) {
           resolve(true);
           return;
         }
-        if (!this.hasMoreOlderMessages() || remaining-- <= 0) {
+        if (!this.hasMoreOlderMessages() || !this.olderCursor || remaining-- <= 0) {
           resolve(isLoaded());
           return;
         }
-        const nextPage = this.messagesPage + 1;
         this.loadingOlderMessages.set(true);
         this.messageService
-          .listMessages(threadId, nextPage, MESSAGE_LIST_PAGE_SIZE)
+          .listMessages(threadId, 1, MESSAGE_JUMP_PAGE_SIZE, undefined, this.olderCursor)
           .pipe(finalize(() => this.loadingOlderMessages.set(false)))
           .subscribe({
             next: response => {
@@ -386,9 +388,9 @@ export class ChatSessionService implements OnDestroy {
                 resolve(false);
                 return;
               }
-              this.messagesPage = nextPage;
+              this.olderCursor = response.next_cursor ?? null;
               this.messagesTotalCount = response.total_count ?? this.messagesTotalCount;
-              this.hasMoreOlderMessages.set(this.messages().length < this.messagesTotalCount);
+              this.hasMoreOlderMessages.set(!!this.olderCursor && this.messages().length < this.messagesTotalCount);
               step();
             },
             error: () => resolve(isLoaded()),
@@ -399,21 +401,15 @@ export class ChatSessionService implements OnDestroy {
   }
 
   clearActive(): void {
+    this.turn.reset();
+    this.deferredSync = null;
     this.activeThreadId = null;
-    this.messagesPage = 1;
     this.messagesTotalCount = 0;
+    this.olderCursor = null;
     this.hasMoreOlderMessages.set(false);
     this.loadingOlderMessages.set(false);
     this._thread.set(null);
     this._model.set(null);
-    this._streamingMessageId.set(null);
-    this._activeChatJobId.set(null);
-    this._activeJobPhase.set(null);
-    this._cancelRequestedJobId.set(null);
-    this._pendingAssistantDraftText.set('');
-    this.streamingService.clearMessageState(CHAT_PENDING_ASSISTANT_MESSAGE_ID);
-    this.expectedAssistantAfterUserMessageId = null;
-    this.jobRenderedDeltaIndex.clear();
     this.messageService.setCurrentChatId(null);
     this.messageService.clearMessages();
     this.draft.set('');
@@ -436,13 +432,13 @@ export class ChatSessionService implements OnDestroy {
   ): Promise<ChatSendMessageResult> {
     const chat = this._thread();
     const message = text.trim();
-    if (!chat || !message || this.isGenerating()) {
+    // `_thread` still holds the previous thread until the new one's getChat resolves; never
+    // let a send in that window post to the thread the user just navigated away from.
+    if (!chat || !this.isActiveThread(chat.id) || !message || this.isGenerating()) {
       return { status: 'skipped' };
     }
 
-    this.expectingAssistantResponse = true;
-    this._cancelRequestedJobId.set(null);
-    this._activeChatJobId.set(ChatSessionService.PENDING_SEND_JOB_ID);
+    this.turn.beginSend();
     this.draft.set('');
     this.draftService.clearDraft(chat.id);
 
@@ -457,125 +453,59 @@ export class ChatSessionService implements OnDestroy {
         rituals: ritualPayload,
       }));
     } catch (error) {
-      this.expectingAssistantResponse = false;
-      this._activeChatJobId.set(null);
-      this.expectedAssistantAfterUserMessageId = null;
-      this.draft.set(message);
-      this._error.set(apiErrorMessage(error, 'Failed to send message'));
       this.draftService.saveDraft(chat.id, message);
       if (!isHttpErrorResponse(error)) {
         console.warn('[chat.sendMessage] send failed with non-HTTP error', error);
       }
+      if (!this.isActiveThread(chat.id)) {
+        // The user switched threads while the POST was in flight; the unsent text is kept as
+        // that thread's saved draft and must not surface in the now-active thread's composer.
+        return { status: 'failed', error };
+      }
+      this.turn.sendFailed();
+      this.draft.set(message);
+      this._error.set(apiErrorMessage(error, 'Failed to send message'));
       return { status: 'failed', error };
     }
 
-    this._error.set(null);
-    this.expectedAssistantAfterUserMessageId = response.id;
-    if (response.job_id) {
-      this.startAssistantJobPolling(response.job_id, chat.id);
-      if (this._cancelRequestedJobId() === ChatSessionService.PENDING_SEND_JOB_ID) {
-        this.requestCancelForJob(response.job_id);
-      }
-    } else {
-      this._activeChatJobId.set(null);
-      this._cancelRequestedJobId.set(null);
+    if (!this.isActiveThread(chat.id)) {
+      // Switched threads mid-POST: the turn belongs to the previous thread, whose job is picked
+      // up by the turn's resume-on-entry when the user returns. Leave the active thread alone.
+      return { status: 'sent' };
     }
+    this._error.set(null);
+    this.turn.sendAccepted(chat.id, response.id, response.job_id);
     return { status: 'sent' };
   }
 
   async retryUserMessage(message: ChatMessage): Promise<void> {
     const chat = this._thread();
-    if (!chat || message.origin !== 'User' || this.isGenerating()) return;
+    if (!chat || !this.isActiveThread(chat.id) || message.origin !== 'User' || this.isGenerating()) return;
 
-    this.expectingAssistantResponse = true;
+    this.turn.beginRetry(message.id);
     this._error.set(null);
-    this.expectedAssistantAfterUserMessageId = message.id;
     try {
       const response = await firstValueFrom(this.messageService.retryUserMessage(chat.id, message.id));
       if (response.job_id) {
-        this.startAssistantJobPolling(response.job_id, chat.id);
+        this.turn.startPolling(response.job_id, chat.id);
       }
     } catch (error) {
-      this.expectingAssistantResponse = false;
+      if (!this.isActiveThread(chat.id)) return;
+      this.turn.retryFailed();
       this._error.set(apiErrorMessage(error, 'Retry failed'));
     }
   }
 
   startAssistantJobPolling(jobId: string, chatId: string): void {
-    if (!jobId || !this.isActiveThread(chatId) || this.jobService.isJobBeingPolled(jobId)) {
-      return;
-    }
-    this.expectingAssistantResponse = true;
-    this._activeChatJobId.set(jobId);
-    this._activeJobPhase.set(null);
-    if (this._cancelRequestedJobId() !== jobId) {
-      this._pendingAssistantDraftText.set('');
-      this.streamingService.clearMessageState(CHAT_PENDING_ASSISTANT_MESSAGE_ID);
-    }
-    this.jobRenderedDeltaIndex.set(jobId, 0);
-    this.subscriptions.add(
-      this.jobService
-        .pollJob(jobId, chatId)
-        .pipe(
-          finalize(() => {
-            this.finishPendingDraftStream(this._cancelRequestedJobId() !== jobId);
-            this.jobRenderedDeltaIndex.delete(jobId);
-          }),
-          finalize(() => {
-            if (this._activeChatJobId() === jobId) {
-              this._activeChatJobId.set(null);
-              this._activeJobPhase.set(null);
-            }
-            if (this._cancelRequestedJobId() === jobId) {
-              this._cancelRequestedJobId.set(null);
-            }
-            this.expectingAssistantResponse = false;
-            this.expectedAssistantAfterUserMessageId = null;
-            this.sendGate.refresh();
-          }),
-        )
-        .subscribe({
-          next: job => this.handleJobProgressSnapshot(job),
-          error: err => {
-            this._error.set(apiErrorMessage(err, 'Failed to process message'));
-          },
-        }),
-    );
+    this.turn.startPolling(jobId, chatId);
   }
 
   cancelStreaming(): void {
-    this.cancelStreamingWithOptions({ clearPendingDraft: true });
+    this.turn.cancelStreaming();
   }
 
   cancelGeneration(): void {
-    const activeJobId = this._activeChatJobId();
-    if (!activeJobId) {
-      // Rare but possible during UI transitions: streaming may still be active
-      // after job bookkeeping has already been cleared.
-      this.cancelStreaming();
-      return;
-    }
-    this._cancelRequestedJobId.set(activeJobId);
-    if (activeJobId !== ChatSessionService.PENDING_SEND_JOB_ID) {
-      this.requestCancelForJob(activeJobId);
-    }
-    // Stop local typing animation immediately, but preserve visible partial draft
-    // until terminal cancel reconciliation arrives from polling.
-    this.cancelStreamingWithOptions({ clearPendingDraft: false });
-  }
-
-  private cancelStreamingWithOptions(opts: { clearPendingDraft: boolean }): void {
-    const messageId = this._streamingMessageId();
-    if (messageId) {
-      const fullText = messageId === CHAT_PENDING_ASSISTANT_MESSAGE_ID ? this._pendingAssistantDraftText() : undefined;
-      this.streamingService.stopStreaming(messageId, fullText, false);
-      this._streamingMessageId.set(null);
-    }
-    if (opts.clearPendingDraft && messageId === CHAT_PENDING_ASSISTANT_MESSAGE_ID) {
-      this._pendingAssistantDraftText.set('');
-    }
-    this.expectingAssistantResponse = false;
-    this.expectedAssistantAfterUserMessageId = null;
+    this.turn.cancelGeneration();
   }
 
   setModel(model: Model): void {
@@ -621,11 +551,17 @@ export class ChatSessionService implements OnDestroy {
 
   setPersonality(id: string | null): void {
     const chat = this._thread();
-    if (!chat) return;
+    if (!chat || !this.isActiveThread(chat.id)) return;
     this.subscriptions.add(
       this.chatService.patchChat(chat.id, { personality_id: id ?? undefined }).subscribe({
-        next: updated => this._thread.set(updated),
-        error: err => this._error.set(apiErrorMessage(err, 'Failed to update personality')),
+        next: updated => {
+          if (!this.isActiveThread(chat.id)) return;
+          this._thread.set(updated);
+        },
+        error: err => {
+          if (!this.isActiveThread(chat.id)) return;
+          this._error.set(apiErrorMessage(err, 'Failed to update personality'));
+        },
       }),
     );
   }
@@ -633,7 +569,7 @@ export class ChatSessionService implements OnDestroy {
   /** Pins a generation mode on the thread, or clears to Auto when moodId is null. */
   setActiveMood(moodId: string | null): void {
     const chat = this._thread();
-    if (!chat) return;
+    if (!chat || !this.isActiveThread(chat.id)) return;
     const patch =
       moodId === null
         ? { clear_active_mood: true }
@@ -641,10 +577,14 @@ export class ChatSessionService implements OnDestroy {
     this.subscriptions.add(
       this.chatService.patchChat(chat.id, patch).subscribe({
         next: updated => {
+          if (!this.isActiveThread(chat.id)) return;
           this._error.set(null);
           this._thread.set(updated);
         },
-        error: err => this._error.set(apiErrorMessage(err, 'Failed to update mode')),
+        error: err => {
+          if (!this.isActiveThread(chat.id)) return;
+          this._error.set(apiErrorMessage(err, 'Failed to update mode'));
+        },
       }),
     );
   }
@@ -652,10 +592,13 @@ export class ChatSessionService implements OnDestroy {
   setThreadName(name: string): void {
     const chat = this._thread();
     const trimmedName = name.trim();
-    if (!chat || !trimmedName || trimmedName === chat.name) return;
+    if (!chat || !this.isActiveThread(chat.id) || !trimmedName || trimmedName === chat.name) return;
     this.subscriptions.add(
       this.chatService.patchChat(chat.id, { name: trimmedName }).subscribe({
-        next: updated => this._thread.set(updated),
+        next: updated => {
+          if (!this.isActiveThread(chat.id)) return;
+          this._thread.set(updated);
+        },
       }),
     );
   }
@@ -672,23 +615,9 @@ export class ChatSessionService implements OnDestroy {
     if (this.autosaveTimer) {
       clearTimeout(this.autosaveTimer);
     }
+    this.turn.dispose();
     this.subscriptions.unsubscribe();
     this.streamingService.destroy();
-  }
-
-  private maybeStreamLatestAssistant(messages: readonly ChatMessage[]): void {
-    const latest = messages[messages.length - 1];
-    if (!latest || latest.origin !== 'Assistant' || !latest.message) return;
-    if (this._pendingAssistantDraftText()) {
-      this.finishPendingDraftStream();
-      return;
-    }
-    if (!this.expectingAssistantResponse) return;
-    if (!this.isAssistantForExpectedUserTurn(messages, latest.id)) return;
-    this.expectingAssistantResponse = false;
-    this.expectedAssistantAfterUserMessageId = null;
-    this._streamingMessageId.set(latest.id);
-    this.streamingService.startStreaming(latest);
   }
 
   /**
@@ -707,149 +636,6 @@ export class ChatSessionService implements OnDestroy {
   private isActiveThread(threadId: string): boolean {
     return this.activeThreadId === threadId;
   }
-
-  private resumePendingJobIfNeeded(threadId: string): void {
-    if (!this.isActiveThread(threadId)) return;
-    // Snapshot from the same stream the UI uses (avoids relying on getMessages(),
-    // which may be absent on UX-V2's slimmer MessageService after merges).
-    this.subscriptions.add(
-      this.messageService.messages$.pipe(take(1)).subscribe(messages => {
-        if (!this.isActiveThread(threadId)) return;
-        const lastUser = this.latestUserTurn(messages);
-        if (!lastUser) return;
-        if (this.hasAssistantReplyForUserTurn(messages, lastUser)) return;
-        if (lastUserTurnWithGenerationError(messages) !== null) {
-          return;
-        }
-
-        this.subscriptions.add(
-          this.jobService.getActiveChatMessageJob(threadId, lastUser.id).subscribe({
-            next: active => {
-              if (!this.isActiveThread(threadId) || !active?.job_id) return;
-              if (isTerminalJobStatus(active.status)) return;
-              this.startAssistantJobPolling(active.job_id, threadId);
-            },
-          }),
-        );
-      }),
-    );
-  }
-
-  private handleJobProgressSnapshot(job: Job): void {
-    if (!job) return;
-    // Only the active job drives the generating/phase state. A prior job may still
-    // be polling its post-inference phases (expression/summarization) after the
-    // composer unlocked, and its late snapshots must not overwrite the new job's phase.
-    if (this._activeChatJobId() === job.id) {
-      this._activeJobPhase.set(job.status);
-    }
-    const cancelPendingForJob = this._cancelRequestedJobId() === job.id;
-    if (cancelPendingForJob && job.status === 'cancelled') {
-      this._cancelRequestedJobId.set(null);
-    }
-    const draftDeltas = job.draft_deltas ?? [];
-    if (draftDeltas.length === 0) return;
-    const jobId = job.id;
-    const renderedIdx = this.jobRenderedDeltaIndex.get(jobId) ?? 0;
-    if (renderedIdx >= draftDeltas.length) return;
-    if (cancelPendingForJob) {
-      // Cancellation requested: advance cursor but do not keep animating more draft chunks.
-      this.jobRenderedDeltaIndex.set(jobId, draftDeltas.length);
-      return;
-    }
-    const newChunks = draftDeltas.slice(renderedIdx);
-    this.jobRenderedDeltaIndex.set(jobId, draftDeltas.length);
-    const nextDraftText = `${this._pendingAssistantDraftText()}${newChunks.join('')}`;
-    this._pendingAssistantDraftText.set(nextDraftText);
-    this.expectingAssistantResponse = false;
-    this._streamingMessageId.set(CHAT_PENDING_ASSISTANT_MESSAGE_ID);
-    this.streamingService.appendServerChunks(CHAT_PENDING_ASSISTANT_MESSAGE_ID, newChunks);
-  }
-
-  private finishPendingDraftStream(clearPendingDraft: boolean = true): void {
-    const pendingText = this._pendingAssistantDraftText();
-    if (pendingText) {
-      this.streamingService.completeStreaming(CHAT_PENDING_ASSISTANT_MESSAGE_ID, pendingText, true);
-    } else {
-      this.streamingService.stopStreaming(CHAT_PENDING_ASSISTANT_MESSAGE_ID);
-    }
-    if (this._streamingMessageId() === CHAT_PENDING_ASSISTANT_MESSAGE_ID) {
-      this._streamingMessageId.set(null);
-    }
-    if (clearPendingDraft) {
-      this._pendingAssistantDraftText.set('');
-      this.streamingService.clearMessageState(CHAT_PENDING_ASSISTANT_MESSAGE_ID);
-    }
-  }
-
-  private requestCancelForJob(jobId: string): void {
-    this.subscriptions.add(
-      this.jobService.cancelJob(jobId).subscribe({
-        error: err => {
-          if (this._cancelRequestedJobId() === jobId) {
-            this._cancelRequestedJobId.set(null);
-          }
-          this._error.set(apiErrorMessage(err, 'Failed to stop response'));
-        },
-      }),
-    );
-  }
-
-  private isCancellationPending(): boolean {
-    const activeJobId = this._activeChatJobId();
-    const cancelJobId = this._cancelRequestedJobId();
-    return !!activeJobId && !!cancelJobId && activeJobId === cancelJobId;
-  }
-
-  private isAssistantForExpectedUserTurn(messages: readonly ChatMessage[], assistantMessageId: string): boolean {
-    const expectedUserId = this.expectedAssistantAfterUserMessageId;
-    if (!expectedUserId) {
-      return true;
-    }
-    const userIdx = messages.findIndex(message => message.id === expectedUserId);
-    if (userIdx < 0) {
-      return false;
-    }
-    const assistantIdx = messages.findIndex(message => message.id === assistantMessageId);
-    return assistantIdx > userIdx;
-  }
-
-  private hasAssistantReplyForUserTurn(messages: readonly ChatMessage[], userMessage: ChatMessage): boolean {
-    if (userMessage.origin !== 'User') return false;
-    if (userMessage.response_id && messages.some(message => message.origin === 'Assistant' && message.id === userMessage.response_id)) {
-      return true;
-    }
-    if (messages.some(message => message.origin === 'Assistant' && message.response_id === userMessage.id)) {
-      return true;
-    }
-    const userSentAtMs = Date.parse(userMessage.sent_at);
-    if (Number.isNaN(userSentAtMs)) {
-      return false;
-    }
-    return messages.some(message => {
-      if (message.origin !== 'Assistant') return false;
-      const assistantSentAtMs = Date.parse(message.sent_at);
-      return !Number.isNaN(assistantSentAtMs) && assistantSentAtMs >= userSentAtMs;
-    });
-  }
-
-  private latestUserTurn(messages: readonly ChatMessage[]): ChatMessage | null {
-    let best: ChatMessage | null = null;
-    let bestSentAtMs = Number.NEGATIVE_INFINITY;
-    for (const message of messages) {
-      if (message.origin !== 'User') continue;
-      const sentAtMs = Date.parse(message.sent_at);
-      if (Number.isNaN(sentAtMs)) {
-        if (!best) best = message;
-        continue;
-      }
-      if (sentAtMs >= bestSentAtMs) {
-        best = message;
-        bestSentAtMs = sentAtMs;
-      }
-    }
-    return best;
-  }
 }
 
 function toUploadedAttachments(attachments: readonly PendingFileAttachment[]): FileAttachment[] | undefined {
@@ -857,24 +643,4 @@ function toUploadedAttachments(attachments: readonly PendingFileAttachment[]): F
     .map(item => item.attachment)
     .filter((attachment): attachment is FileAttachment => attachment !== undefined);
   return uploaded.length ? uploaded : undefined;
-}
-
-function isTerminalJobStatus(status: Job['status']): boolean {
-  return status === 'complete' || status === 'cancelled' || status === 'failed';
-}
-
-/**
- * Reports whether the job has progressed past core inference. At and beyond
- * inference_complete the assistant text is finalized; remaining phases (expression
- * classification, conversation summarization) are background post-processing.
- */
-function isPostInferencePhase(status: Job['status'] | null): boolean {
-  return (
-    status === 'inference_complete' ||
-    status === 'expression_complete' ||
-    status === 'compaction_complete' ||
-    status === 'complete' ||
-    status === 'cancelled' ||
-    status === 'failed'
-  );
 }

@@ -62,6 +62,8 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	memoryRouter.HandleFunc("", h.ListMemories).Methods("GET")
 	memoryRouter.HandleFunc("", h.CreateMemory).Methods("POST")
 	memoryRouter.HandleFunc("/batch", h.CreateMemoriesBatch).Methods("POST")
+	memoryRouter.HandleFunc("/batch/delete", h.DeleteMemoriesBatch).Methods("POST")
+	memoryRouter.HandleFunc("/batch/patch", h.PatchMemoriesBatch).Methods("POST")
 	memoryRouter.HandleFunc("/export", h.ExportMemories).Methods("GET")
 	memoryRouter.HandleFunc("/import", h.ImportMemories).Methods("POST")
 	memoryRouter.HandleFunc("/merge-events", h.ListMemoryMergeEvents).Methods("GET")
@@ -80,4 +82,11 @@ func (h *Handler) createEmbedding(ctx context.Context, input string) ([]float32,
 		return nil, errMemoryImportUnavailable
 	}
 	return embedding.CreateEmbedding(ctx, h.oaiClient, input)
+}
+
+func (h *Handler) createEmbeddings(ctx context.Context, inputs []string) ([][]float32, error) {
+	if h.oaiClient == nil {
+		return nil, errMemoryImportUnavailable
+	}
+	return embedding.CreateEmbeddings(ctx, h.oaiClient, inputs)
 }

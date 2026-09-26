@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,10 +16,13 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/embedding"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
 	agentjobscheduler "github.com/theimaginaryfoundation/what-iff/internal/agentjobs/scheduler"
 	"github.com/theimaginaryfoundation/what-iff/internal/buildinfo"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/email"
 	"github.com/theimaginaryfoundation/what-iff/internal/featuregate"
+	"github.com/theimaginaryfoundation/what-iff/internal/handlers/accountexport"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/agentjob"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/chat"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/fileattachment"
@@ -40,6 +44,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/webhook"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
 	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
@@ -116,6 +121,34 @@ func (s *Server) setupRoutes() {
 		s.logger.Fatal("failed to configure token encryption", zap.Error(err))
 	}
 
+	// Reconcile account import/export jobs orphaned by a previous restart. They run in detached
+	// in-process workers, so any left non-terminal can never finish; mark them failed instead of
+	// leaving them "processing" forever (a client that resumes progress would otherwise poll them
+	// indefinitely). The 1h staleness bound is well past the 30m import timeout, so a live import on
+	// another instance (whose progress writes keep updated_at fresh) is never clobbered.
+	if n, rerr := dataStore.FailInterruptedJobs(context.Background(),
+		[]string{models.JobTypeAccountImport, models.JobTypeAccountExport},
+		time.Now().Add(-time.Hour),
+		"Interrupted by a server restart"); rerr != nil {
+		s.logger.Warn("startup: failed to reconcile interrupted import/export jobs", zap.Error(rerr))
+	} else if n > 0 {
+		s.logger.Info("startup: marked interrupted import/export jobs failed", zap.Int("count", n))
+	}
+
+	// Same for chat turns. A chat_message job whose worker died with the previous process stays
+	// non-terminal forever, and a client returning to its thread resumes it — a permanently stuck
+	// "thinking" reply. No chat turn runs anywhere near 30 minutes, so the bound leaves turns in
+	// flight on another instance alone. They are marked failed (not cancelled) so the thread shows
+	// the turn's failure banner instead of silently dropping it.
+	if n, rerr := dataStore.FailInterruptedJobs(context.Background(),
+		[]string{agent.JobTypeChatMessage},
+		time.Now().Add(-30*time.Minute),
+		"Interrupted by a server restart"); rerr != nil {
+		s.logger.Warn("startup: failed to reconcile interrupted chat jobs", zap.Error(rerr))
+	} else if n > 0 {
+		s.logger.Info("startup: marked interrupted chat jobs failed", zap.Int("count", n))
+	}
+
 	fileStore, err := storage.NewFileStore(context.Background(), s.config.S3FileBucket, s.config.AWSRegion, s.logger)
 	if err != nil {
 		s.logger.Fatal("failed to initialize S3 file store", zap.Error(err))
@@ -155,6 +188,21 @@ func (s *Server) setupRoutes() {
 		QwenBaseURL:        s.config.QwenBaseURL,
 		XiaomiKey:          s.config.XiaomiKey,
 		XiaomiBaseURL:      s.config.XiaomiBaseURL,
+	}
+	if s.config.LLMBackend == "vendor" {
+		// ErrNotConfigured (no PARALLEL_API_KEY) leaves vendor-native search in place; any
+		// other error is a misconfiguration and stops startup rather than silently degrading.
+		webSearch, err := websearch.New(websearch.Config{
+			ParallelAPIKey: s.config.ParallelAPIKey,
+			ParallelMode:   s.config.ParallelSearchMode,
+		})
+		switch {
+		case err == nil:
+			agentCfg.WebSearch = webSearch
+			s.logger.Info("first-party web search enabled", zap.String("backend", webSearch.Backend.Name()))
+		case !errors.Is(err, websearch.ErrNotConfigured):
+			s.logger.Fatal("invalid web search configuration", zap.Error(err))
+		}
 	}
 	// The concrete meter is provided by metering.New, which the private metering
 	// implementation registers via a blank import in cmd/api-server; it reads its
@@ -222,6 +270,20 @@ func (s *Server) setupRoutes() {
 	userHandler := user.NewHandler(dataStore, s.logger, s.config.AllowedEmails, s.config.Environment)
 	jobHandler := job.NewHandlerWithCanceller(dataStore, agent, s.logger)
 	memoryHandler := memory.NewHandler(dataStore, s.logger, s.config.OpenAIKey, providerHTTPClient)
+
+	// Account export: async export runs in-process here in the main app; the bundle lands in the
+	// file store and its download link is delivered ONLY out-of-band (a deliberate control — app
+	// access alone cannot exfiltrate the account). The concrete email transport is provided by
+	// email.New, which a private implementation registers via a blank import in cmd/api-server and
+	// which reads its own configuration from the environment. When that package is absent (e.g. the
+	// open-source build), email.New is nil and we fall back to email.NoopSender, which logs the link.
+	var exportSender email.Sender = email.NoopSender{Logger: s.logger}
+	if email.New != nil {
+		if snd := email.New(s.logger); snd != nil {
+			exportSender = snd
+		}
+	}
+	accountExportHandler := accountexport.NewHandler(dataStore, s.logger, fileStore, exportSender, s.config.OpenAIKey)
 	mcpServerHandler := mcpserver.NewHandler(dataStore, s.logger)
 	modelHandler := model.NewHandler(dataStore, s.logger)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)
@@ -235,7 +297,7 @@ func (s *Server) setupRoutes() {
 	moodHandler := moodhandler.NewHandler(dataStore, s.logger, agent.FileStore())
 	roleHandler := role.NewHandler(dataStore, s.logger)
 	webhookHandler := webhook.NewHandler(dataStore, agent, s.logger)
-	toolsHandler := toolshandler.NewHandler(s.logger)
+	toolsHandler := toolshandler.NewHandler(s.logger, agent.FirstPartyWebSearch())
 	searchHandler := search.NewHandler(dataStore, s.logger)
 	// Setup API routes
 	apiRouter := s.router.PathPrefix("/api").Subrouter()
@@ -282,6 +344,7 @@ func (s *Server) setupRoutes() {
 	chatHandler.RegisterRoutes(authRouter)
 	agentJobHandler.RegisterRoutes(authRouter)
 	memoryHandler.RegisterRoutes(authRouter)
+	accountExportHandler.RegisterRoutes(authRouter)
 	mcpServerHandler.RegisterRoutes(authRouter)
 	modelRouter := apiRouter.PathPrefix("/model").Subrouter()
 	modelRouter.Use(middleware.OptionalAuthMiddleware(s.db, dataStore, s.logger))

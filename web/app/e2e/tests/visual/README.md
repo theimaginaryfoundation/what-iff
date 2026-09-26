@@ -14,6 +14,8 @@ only, nothing downstream of an assistant reply:
 | `personalities.visual.spec.ts`    | empty personalities list (fresh user), personality detail page |
 | `chat.visual.spec.ts`             | chat composer before any message is sent                       |
 | `profile-settings.visual.spec.ts` | Profile & Settings modal, profile tab                          |
+| `memories.visual.spec.ts`         | Memory Manager empty list, populated list, merge-history tab   |
+| `compaction-log.visual.spec.ts`   | Compaction log prompt-history geometry (contract, not pixels)  |
 
 These specs run under `e2e/playwright.config.mock-llm.visual.ts` (`npm run e2e:mock-llm:visual`),
 which extends the mock config and sets reduced motion on each project, so no
@@ -22,3 +24,16 @@ username/avatar button). Baselines are generated and checked inside the official
 Docker image so macOS font rendering never fights CI — see "Visual
 regression" → "Updating snapshots" in `e2e/README.md` for the exact
 commands and the Docker networking recipe that makes it work on macOS.
+
+## Seeing what a change did
+
+A baseline update committed on a branch makes the visual suite pass, which
+means an *intentional* design change leaves no trace in any test report. To
+see the before and after, build the design review report — it reads the
+baselines out of git rather than running anything:
+
+```bash
+npm run design:review
+```
+
+See `e2e/design-review/README.md`, or the `design-review` skill.

@@ -134,7 +134,7 @@ func (d *Datastore) AdminImportAccountBackup(ctx context.Context, targetUserID u
 	}
 
 	var memories models.MemoryImportResult
-	memories, err = d.importMemories(ctx, targetUserID, zr, createEmbedding, false)
+	memories, err = d.importMemories(ctx, targetUserID, zr, createEmbedding, nil, false)
 	result.Memories = memories
 	if err != nil {
 		return result, err

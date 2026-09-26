@@ -20,6 +20,8 @@ import (
 type fakeStore struct {
 	listPersonalitiesFn                  func(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.PersonalityFilters) (*models.PaginatedResponse, error)
 	createPersonalityFn                  func(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
+	getPersonalityFn                     func(ctx context.Context, userID, id uuid.UUID) (*models.Personality, error)
+	getPersonalityUsageStatsFn           func(ctx context.Context, userID, personalityID uuid.UUID) (models.PersonalityUsageStats, error)
 	updatePersonalityFn                  func(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
 	listExpressionsFn                    func(ctx context.Context, userID, personalityID uuid.UUID) ([]models.PersonalityExpression, error)
 	upsertExpressionFn                   func(ctx context.Context, userID, personalityID uuid.UUID, key string, req models.UpdatePersonalityExpressionRequest) (*models.PersonalityExpression, error)
@@ -43,7 +45,16 @@ func (f *fakeStore) ListPersonalities(ctx context.Context, userID uuid.UUID, pag
 	return f.listPersonalitiesFn(ctx, userID, pageNum, pageSize, filters)
 }
 func (f *fakeStore) GetPersonality(ctx context.Context, userID, id uuid.UUID) (*models.Personality, error) {
+	if f.getPersonalityFn != nil {
+		return f.getPersonalityFn(ctx, userID, id)
+	}
 	return nil, errors.New("not implemented")
+}
+func (f *fakeStore) GetPersonalityUsageStats(ctx context.Context, userID, personalityID uuid.UUID) (models.PersonalityUsageStats, error) {
+	if f.getPersonalityUsageStatsFn != nil {
+		return f.getPersonalityUsageStatsFn(ctx, userID, personalityID)
+	}
+	return models.PersonalityUsageStats{}, nil
 }
 func (f *fakeStore) UpdatePersonality(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error) {
 	if f.updatePersonalityFn != nil {

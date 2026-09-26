@@ -70,5 +70,8 @@ func (FileAttachment) Indexes() []ent.Index {
 		index.Edges("owner"),
 		// Speed up personality attachment lookups.
 		index.Edges("personality"),
+		// Backs the gallery's reference-copy exclusion, a correlated
+		// (owner, s3_key) lookup per listed row.
+		index.Fields("s3_key").Edges("owner"),
 	}
 }

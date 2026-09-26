@@ -67,4 +67,33 @@ describe('LoginComponent', () => {
         fixture.componentInstance.navigateToRegister();
         expect(router.navigate).toHaveBeenCalledWith(['/auth/register']);
     });
+
+    it('toggles password visibility without changing the entered value', () => {
+        const fixture = TestBed.createComponent(LoginComponent);
+        const component = fixture.componentInstance;
+        component.loginForm.setValue({ username: 'gori', password: 'password1', remember: false });
+        fixture.detectChanges();
+
+        const passwordInput = fixture.nativeElement.querySelector('#password') as HTMLInputElement;
+        expect(passwordInput.type).toBe('password');
+        expect(component.passwordVisible()).toBe(false);
+
+        component.togglePasswordVisibility();
+        fixture.detectChanges();
+
+        expect(component.passwordVisible()).toBe(true);
+        expect(passwordInput.type).toBe('text');
+        expect(component.loginForm.value.password).toBe('password1');
+
+        const toggle = fixture.nativeElement.querySelector(
+            'button[aria-label="Hide password"]',
+        ) as HTMLButtonElement;
+        expect(toggle.getAttribute('aria-pressed')).toBe('true');
+
+        component.togglePasswordVisibility();
+        fixture.detectChanges();
+
+        expect(passwordInput.type).toBe('password');
+        expect(component.loginForm.value.password).toBe('password1');
+    });
 });

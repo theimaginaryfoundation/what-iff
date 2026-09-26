@@ -6,11 +6,24 @@ export const SCROLL_LOAD_OLDER_THRESHOLD_PX = 120;
 /** Must match the limit used for initial chat load and message list refreshes. */
 export const MESSAGE_LIST_PAGE_SIZE = 50;
 
+/**
+ * Larger batch used when walking older messages to reach a jump target (e.g. a bookmark far back
+ * in a long thread). Keyset pagination lets us request a big batch without offset math, so a
+ * far-back target resolves in a few roundtrips instead of dozens of 50-message pages.
+ */
+export const MESSAGE_JUMP_PAGE_SIZE = 200;
+
 // Textarea configuration
 export const TEXTAREA_MAX_ROWS = 10;
 export const TEXTAREA_LINE_HEIGHT_PX = 24;
 
 // Streaming animation constants
+/**
+ * How often an in-flight chat turn's job is polled. Tighter than the JobService default so the
+ * live tool timeline can show a call as running before it finishes, and draft text arrives in
+ * smaller steps. One small GET per second, for the active thread's turn only.
+ */
+export const CHAT_JOB_POLL_INTERVAL_MS = 1000;
 export const STREAMING_INTERVAL_MS = 25;
 export const STREAMING_SCROLL_CHECK_INTERVAL = 10;
 export const CODE_BLOCK_CHUNK_SIZE = 30;

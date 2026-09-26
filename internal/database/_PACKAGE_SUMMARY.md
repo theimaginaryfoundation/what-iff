@@ -6,7 +6,8 @@
 
 ## Responsibilities
 
-- Connection string assembly from environment (`DB_HOST`, `DB_PASSWORD`, etc.). `DB_PASSWORD` always comes from the process environment — in deployed environments ECS injects it from Secrets Manager via the task definition's `secrets` block (the old in-process `DB_SECRET_ARN` fetch path was removed).
+- Connection string assembly from environment (`DB_HOST`, `DB_PASSWORD`, etc.).
+  `DB_PASSWORD` always comes from the process environment — in deployed environments ECS injects it from Secrets Manager via the task definition's `secrets` block (the old in-process `DB_SECRET_ARN` fetch path was removed).
 - **`NewClient`:** Returns `*ent.Client` and `*sql.DB` for health checks (see `db.go`).
 - Driver imports: PostgreSQL (and MySQL driver may be present for tooling compatibility — verify `db.go`).
 
@@ -22,8 +23,13 @@
 ## Non-obvious decisions
 
 - **Secrets Manager:** JSON secret shape for password retrieval is documented inline in `getDBPassword`.
-- **`DB_SSL_MODE` defaults to `require`** for the `postgres` branch of `NewClient` (`db.go`) — fail closed, since an unset value must not silently mean no TLS. `docker-compose.yml` and `.env.example` both set `DB_SSL_MODE=disable` explicitly, because this repo's local Postgres has no TLS listener; that's a documented local opt-out, not the default.
-- **Admin provisioning (ADR 0x018):** `CreateOrPromoteAdmin` (`seed.go`) is the single create/promote/password-reset helper with an explicit `AdminProvisionResult`, called only by `cmd/create-superuser` (interactive, TTY-required, local-DB-only). The former `SUPERADMIN_*` boot path (`ensureSuperAdmin`) was **removed** after a security review flagged it — no environment variable can mint an admin in a running deployment. CI test users use the public register endpoint.
+- **`DB_SSL_MODE` defaults to `require`** for the `postgres` branch of `NewClient` (`db.go`) — fail closed, since an unset value must not silently mean no TLS.
+  `docker-compose.yml` and `.env.example` both set `DB_SSL_MODE=disable` explicitly, because this repo's local Postgres has no TLS listener; that's a documented local opt-out, not the default.
+- **Admin provisioning (ADR 0x018):** `CreateOrPromoteAdmin` (`seed.go`) is the single create/promote/password-reset helper with an explicit `AdminProvisionResult`, called only by `cmd/create-superuser` (interactive, TTY-required, local-DB-only).
+  The former `SUPERADMIN_*` boot path (`ensureSuperAdmin`) was **removed** after a security review flagged it — no environment variable can mint an admin in a running deployment.
+  CI test users use the public register endpoint.
+- **`vision_support` backfill:** `backfillModelVisionSupport` (run from `EnsureSeedData`) sets the flag on model rows that predate the column (NULL), using the provider/model-id heuristics that gated image input before it was a per-model field.
+  Rows that already have a value are never touched, so admin edits stick; the heuristics exist only for this backfill and can go once every deployment has run it.
 
 ## Testing
 

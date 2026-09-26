@@ -12,6 +12,10 @@ const EXEMPT_PATH_PREFIXES = [
   '/subscription',
   '/billing',
   '/usage',
+  // Import/restore must be available before a user has a personality (fresh users
+  // may want to restore an export or import history first). /experimental → /data.
+  '/data',
+  '/experimental',
 ];
 
 function isExemptPath(url: string | undefined | null): boolean {

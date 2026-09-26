@@ -656,8 +656,8 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
 
   /** Navigate to the Thread Manager and open the import modal (handled by chat-page via ?import). */
   navigateToImport(): void {
-    localStorage.removeItem('lastChatId');
-    void this.router.navigate(['/chat'], { queryParams: { import: Date.now() } });
+    // The import flow now lives on the Import & Export screen (was a chat-page popup).
+    void this.router.navigate(['/data']);
   }
 
   private syncThreadListPersonalityFilter(): void {

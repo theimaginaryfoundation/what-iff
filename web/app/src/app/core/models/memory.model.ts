@@ -28,6 +28,7 @@ export type MemorySort = 'created_desc' | 'created_asc' | 'updated_desc';
 export interface MemoryFilters {
   chat_id?: string;
   level?: 'global' | 'personality' | 'thread' | 'summary';
+  scope?: 'User' | 'Chat';
   type?: 'Context';
   starred?: boolean;
   pinned_personality_id?: string;
@@ -57,11 +58,33 @@ export interface CreateMemoryInput {
 }
 
 export interface BatchCreateMemoryInput {
-  memories: CreateMemoryInput[];
+  items: CreateMemoryInput[];
+  all_or_none?: boolean;
 }
 
 export interface BatchCreateMemoryResponse {
-  memories: Memory[];
+  results: Memory[];
+  created_count: number;
+}
+
+export interface BatchDeleteMemoryInput {
+  ids: string[];
+  all_or_none?: boolean;
+}
+
+export interface BatchDeleteMemoryResponse {
+  deleted_count: number;
+}
+
+export interface BatchPatchMemoryInput {
+  ids: string[];
+  patch: MemoryPatch;
+  all_or_none?: boolean;
+}
+
+export interface BatchPatchMemoryResponse {
+  results: Memory[];
+  updated_count: number;
 }
 
 export interface MemoryPatch {
@@ -78,6 +101,13 @@ export interface MemoryImportResult {
   imported_count: number;
   duplicate_count: number;
   invalid_record_count: number;
+  invalid_reasons?: {
+    malformed_json: number;
+    missing_id: number;
+    empty_content: number;
+    missing_created_at: number;
+    missing_chat_id: number;
+  };
   skipped_missing_chat_count: number;
   skipped_missing_personality_count: number;
 }

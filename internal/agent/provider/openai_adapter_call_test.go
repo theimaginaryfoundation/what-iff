@@ -106,6 +106,62 @@ func TestOpenAIAdapter_ForceFinalResponse(t *testing.T) {
 	require.Len(t, a.AllRawResponses(), 1)
 }
 
+// TestOpenAIAdapter_ForceFinalResponse_ThreadsLatestResponseID pins the fix for
+// the "No tool output found for function call" 400. When a tool request lands on
+// the next-to-last loop and again on the last loop, ForceFinalResponse sends the
+// last round's function_call_output items. Those outputs must be paired against
+// the last round's response id via previous_response_id — not the stale id left
+// on the params from the prior Call (which lags one round behind). A regression
+// would send round-9 outputs against round-8's response and OpenAI would 400.
+func TestOpenAIAdapter_ForceFinalResponse_ThreadsLatestResponseID(t *testing.T) {
+	var prevIDs []string
+	responsesBody := []string{
+		responseToolCallJSON("resp_round8", "call_8", "do_thing", `{}`),
+		responseToolCallJSON("resp_round9", "call_9", "do_thing", `{}`),
+		responseTextJSON("resp_final", "done"),
+	}
+	call := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			PreviousResponseID string `json:"previous_response_id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		prevIDs = append(prevIDs, body.PreviousResponseID)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(responsesBody[call]))
+		call++
+	}))
+	defer srv.Close()
+
+	a := NewOpenAIAdapter(newTestOpenAIProvider(srv.URL), responses.ResponseNewParams{
+		Model: "test",
+		Tools: []responses.ToolUnionParam{{OfFunction: &responses.FunctionToolParam{Name: "do_thing"}}},
+	})
+
+	// Round 8: tool request.
+	_, toolUses, err := a.Call(context.Background())
+	require.NoError(t, err)
+	require.Len(t, toolUses, 1)
+	a.AppendToolResults([]ToolResult{{ID: toolUses[0].ID, Output: "r8"}})
+
+	// Round 9 (last allowed): tool request again.
+	_, toolUses, err = a.Call(context.Background())
+	require.NoError(t, err)
+	require.Len(t, toolUses, 1)
+	a.AppendToolResults([]ToolResult{{ID: toolUses[0].ID, Output: "r9"}})
+
+	// Forced final call.
+	resp, err := a.ForceFinalResponse(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "done", resp.Text)
+
+	require.Len(t, prevIDs, 3)
+	require.Equal(t, "", prevIDs[0], "first call has no previous response")
+	require.Equal(t, "resp_round8", prevIDs[1], "round 9 threads off round 8")
+	require.Equal(t, "resp_round9", prevIDs[2],
+		"forced final call must thread off round 9 (whose outputs it sends), not the stale round-8 id")
+}
+
 func TestOpenAIAdapter_ForceFinalResponse_APIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

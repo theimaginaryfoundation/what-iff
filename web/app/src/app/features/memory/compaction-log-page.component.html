@@ -1,4 +1,8 @@
-<section class="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 md:p-6">
+<section
+  class="mx-auto flex w-full max-w-5xl flex-col gap-4"
+  [class.p-4]="!embedded()"
+  [class.md:p-6]="!embedded()">
+  @if (!embedded()) {
   <header class="compaction-log-header">
     <a routerLink="/memories" class="compaction-log-header__back">← Back to memories</a>
     <h1>Compaction log</h1>
@@ -7,6 +11,14 @@
       scratchpad, memory, and prompt changes here and restore a known-good state when needed.
     </p>
   </header>
+  } @else {
+    <div class="compaction-log-embedded-header">
+      <h2>Compaction log</h2>
+      <p>
+        Every conversation checkpoint and personality prompt change, captured like a diff. Restore a known-good state when needed.
+      </p>
+    </div>
+  }
 
   @if (notice()) {
     <p class="compaction-log-notice" role="status">{{ notice() }}</p>

@@ -36,4 +36,16 @@ runs:
         SECTION: ${{ inputs.section }}
         ORDER: ${{ inputs.order }}
         BODY_FILE: ${{ inputs.body-file }}
-      run: python3 "${{ github.action_path }}/merge_comment.py"
+      # $GITHUB_WORKSPACE, not ${{ github.action_path }}. This action is used by
+      # jobs that run inside a container (e2e-local-llm.yml), where the two do
+      # not agree: the workspace is mounted under /__w, but
+      # `github.action_path` still reports the runner's *host* checkout path,
+      # so the script is simply not there and the step dies with "can't open
+      # file". The nightly never caught it because this step only runs on
+      # pull_request, and the opt-in local-LLM job only runs on a PR carrying
+      # the `run-local-model` label.
+      #
+      # This action is repo-local, so the checkout that any caller must already
+      # have done puts it at a known place under the workspace, which resolves
+      # correctly both in a container and on a bare runner.
+      run: python3 "$GITHUB_WORKSPACE/.github/actions/e2e-status-comment/merge_comment.py"

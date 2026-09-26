@@ -2,6 +2,7 @@ package embedding
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -168,4 +169,32 @@ func TestCreateEmbedding(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCreateEmbeddingsBatchesInputsAndPreservesResponseOrder(t *testing.T) {
+	client := newTestClient(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		var request struct {
+			Input []string `json:"input"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		require.Equal(t, []string{"first", "second"}, request.Input)
+
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{
+			"object": "list",
+			"data": [
+				{"object": "embedding", "index": 1, "embedding": [2, 2]},
+				{"object": "embedding", "index": 0, "embedding": [1, 1]}
+			],
+			"model": "text-embedding-3-small",
+			"usage": {"prompt_tokens": 2, "total_tokens": 2}
+		}`))
+		require.NoError(t, err)
+	})
+
+	embeddings, err := CreateEmbeddings(context.Background(), client, []string{"first", "second"})
+
+	require.NoError(t, err)
+	require.Equal(t, [][]float32{{1, 1}, {2, 2}}, embeddings)
 }

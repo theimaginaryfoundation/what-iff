@@ -183,6 +183,36 @@ func (h *Handler) GetActiveChatMessageJob(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// GetActiveChatJob GET /chat/{chatId}/active-job — the newest non-terminal chat_message job for
+// any user turn in this chat. Lets a client that returns to a thread pick a running turn back up
+// without guessing which user message is still unanswered. 204 when nothing is in flight.
+func (h *Handler) GetActiveChatJob(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		handlerutils.RespondWithError(w, h.logger, http.StatusUnauthorized, handlerutils.CodeNotSet, "Unauthorized", nil)
+		return
+	}
+	chatID, err := uuid.Parse(mux.Vars(r)["chatId"])
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid chat ID", err)
+		return
+	}
+	j, err := h.ds.FindLatestActiveChatJob(r.Context(), userID, chatID)
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to look up job", err)
+		return
+	}
+	if j == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	resp := models.ActiveChatMessageJobResponse{JobID: j.ID, Status: j.Status}
+	if messageID, err := uuid.Parse(j.Reference); err == nil {
+		resp.MessageID = &messageID
+	}
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, resp)
+}
+
 // GetChatMessage handler function for GET /chat-message/{id}
 func (h *Handler) GetChatMessage(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserIDFromContext(r.Context())
@@ -335,7 +365,20 @@ func (h *Handler) GetChatMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	messagePage, err := h.ds.ListChatMessages(r.Context(), userID, chatID, page, pageSize, filters)
+	// A cursor requests keyset ("before") pagination — the batch strictly older than the token,
+	// decoupled from page/limit offset math. Used by scroll-back and jump-to-bookmark so large
+	// batches stay correct. When absent, fall back to page-number offset pagination.
+	var messagePage *models.PaginatedResponse
+	if cursor := queryParams.Get("cursor"); cursor != "" {
+		beforeSentAt, beforeID, decodeErr := models.DecodeMessageCursor(cursor)
+		if decodeErr != nil {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid cursor", decodeErr)
+			return
+		}
+		messagePage, err = h.ds.ListChatMessagesBefore(r.Context(), userID, chatID, beforeSentAt, beforeID, pageSize, filters)
+	} else {
+		messagePage, err = h.ds.ListChatMessages(r.Context(), userID, chatID, page, pageSize, filters)
+	}
 	if err != nil {
 		h.logger.Error("failed to list chat messages", zap.String("user_id", userID.String()), zap.Error(err))
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "failed to list chat messages", err)

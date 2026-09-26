@@ -20,6 +20,8 @@ type MessageAgent interface {
 // WelcomeMessageAgent is the minimal async prompt surface used for welcome generation.
 type WelcomeMessageAgent interface {
 	HandleWelcomeMessagePromptAsync(ctx context.Context, chatID uuid.UUID, prompt string, modelOverrideID *uuid.UUID, personalityOverrideID *uuid.UUID) (*models.ChatMessageResponse, error)
+	// FirstPartyWebSearch selects how the greeting describes web search (ADR 0x021).
+	FirstPartyWebSearch() bool
 }
 
 // HandlerConfig configures chat handler behavior.
@@ -61,6 +63,7 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	chatRouter.HandleFunc("/{chatId}/chat-message/{messageId}/active-job", h.GetActiveChatMessageJob).Methods("GET")
 	chatRouter.HandleFunc("/{chatId}/chat-message/{messageId}/bookmark", h.SetChatMessageBookmark).Methods("PATCH")
 	chatRouter.HandleFunc("/{chatId}/bookmarks", h.GetChatMessageBookmarks).Methods("GET")
+	chatRouter.HandleFunc("/{chatId}/active-job", h.GetActiveChatJob).Methods("GET")
 	chatRouter.HandleFunc("/{chatId}/chat-message", h.GetChatMessages).Methods("GET")
 	chatRouter.HandleFunc("/{chatId}/chat-message", h.CreateChatMessage).Methods("POST")
 	chatRouter.HandleFunc("/{chatId}/welcome-message", h.CreateWelcomeMessage).Methods("POST")

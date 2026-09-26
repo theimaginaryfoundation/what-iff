@@ -1,6 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
+import { Router } from '@angular/router';
 import { of } from 'rxjs';
 
 import { ProfileSettingsModalComponent } from './profile-settings-modal.component';
@@ -20,6 +21,7 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
   let personalityService: {
     listPersonalities: ReturnType<typeof vi.fn>;
   };
+  let router: { navigate: ReturnType<typeof vi.fn> };
 
   async function openAndWaitForProfile(fixture: ReturnType<typeof TestBed.createComponent<ProfileSettingsModalComponent>>): Promise<void> {
     const component = fixture.componentInstance;
@@ -71,6 +73,7 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
         page: 1,
       })),
     };
+    router = { navigate: vi.fn().mockName('Router.navigate') };
 
     await TestBed.configureTestingModule({
       imports: [ProfileSettingsModalComponent],
@@ -82,6 +85,7 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
         { provide: UserPreferencesService, useValue: preferencesService },
         { provide: ModelService, useValue: modelService },
         { provide: PersonalityService, useValue: personalityService },
+        { provide: Router, useValue: router },
         { provide: ExternalAuthProvider, useClass: NoopExternalAuthProvider },
       ],
     }).compileComponents();
@@ -189,5 +193,18 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     const component = fixture.componentInstance;
     await openAndWaitForProfile(fixture);
     expect(component.currentUser()?.email).toBe('testuser@example.com');
+  });
+
+  it('places Export Data at the end of the settings form and opens Import & Export', async () => {
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    await openAndWaitForProfile(fixture);
+
+    const row = fixture.nativeElement.querySelector('.profile-settings__data-action') as HTMLElement;
+    expect(row.textContent).toContain('Export Data');
+    const button = row.querySelector('button') as HTMLButtonElement;
+    expect(button.textContent).toContain('Export');
+
+    button.click();
+    expect(router.navigate).toHaveBeenCalledWith(['/data']);
   });
 });

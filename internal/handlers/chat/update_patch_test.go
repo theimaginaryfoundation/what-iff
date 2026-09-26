@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -51,6 +52,9 @@ func (f *fakeStore) DeleteChat(ctx context.Context, userID, id uuid.UUID) error 
 	return errors.New("not implemented")
 }
 func (f *fakeStore) ListChatMessages(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (f *fakeStore) ListChatMessagesBefore(ctx context.Context, userID, chatID uuid.UUID, beforeSentAt time.Time, beforeID uuid.UUID, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error) {
 	return nil, errors.New("not implemented")
 }
 func (f *fakeStore) GetChatMessage(ctx context.Context, userID, messageID uuid.UUID) (*models.ChatMessage, error) {
@@ -138,8 +142,13 @@ func (f *fakeStore) ListChatMessageBookmarks(ctx context.Context, userID, chatID
 func (f *fakeStore) FindLatestActiveChatMessageJob(ctx context.Context, userID, userMessageID uuid.UUID) (*models.Job, error) {
 	return nil, errors.New("not implemented")
 }
+func (f *fakeStore) FindLatestActiveChatJob(ctx context.Context, userID, chatID uuid.UUID) (*models.Job, error) {
+	return nil, errors.New("not implemented")
+}
 func (f *fakeStore) ImportChats(ctx context.Context, userID uuid.UUID, convs []models.ImportConversation, onProgress func(imported, skipped int)) (*models.ImportResult, error) {
 	return nil, errors.New("not implemented")
+}
+func (f *fakeStore) AuditChatImport(ctx context.Context, userID uuid.UUID, message string, metadata map[string]any) {
 }
 func (f *fakeStore) CreateJob(ctx context.Context, userID uuid.UUID, jobModel models.Job) (*models.Job, error) {
 	jobModel.ID = uuid.New()

@@ -71,4 +71,27 @@ test.describe('login', () => {
     await expect(loginPage.errorAlert).toContainText(/invalid|incorrect|not found/i);
     await expect(page).toHaveURL(/\/auth\/login/);
   });
+
+  test('password visibility toggle reveals and remasks without changing the value', async ({
+    loginPage,
+  }) => {
+    await loginPage.navigateTo();
+    await loginPage.passwordInput.fill('SecretPass1!');
+
+    await expect(loginPage.passwordInput).toHaveAttribute('type', 'password');
+    await expect(loginPage.showPasswordButton).toBeVisible();
+
+    await loginPage.showPassword();
+
+    await expect(loginPage.passwordInput).toHaveAttribute('type', 'text');
+    await expect(loginPage.passwordInput).toHaveValue('SecretPass1!');
+    await expect(loginPage.hidePasswordButton).toBeVisible();
+    await expect(loginPage.hidePasswordButton).toHaveAttribute('aria-pressed', 'true');
+
+    await loginPage.hidePassword();
+
+    await expect(loginPage.passwordInput).toHaveAttribute('type', 'password');
+    await expect(loginPage.passwordInput).toHaveValue('SecretPass1!');
+    await expect(loginPage.showPasswordButton).toBeVisible();
+  });
 });

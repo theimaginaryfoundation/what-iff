@@ -39,14 +39,18 @@ describe('ToolCallComponent', () => {
 
         expect(host.querySelector('.tool-call__panel')).toBeNull();
         expect(toggle.getAttribute('aria-expanded')).toBe('false');
-        expect(host.textContent).toContain('web_search');
+        expect(host.querySelector('.tool-call__name')?.textContent).toBe('web search');
+        expect(host.querySelector('.tool-call__summary')?.textContent).toBe('"Angular" · Found the result');
         expect(host.textContent).toContain('Complete');
 
         toggle.click();
         fixture.detectChanges();
 
         expect(host.querySelector('.tool-call__panel')).not.toBeNull();
-        expect(host.querySelector('pre')?.textContent).toContain('Found the result');
+        expect(sections(host)).toEqual([
+            ['Input', '{\n  "query": "Angular"\n}'],
+            ['Output', 'Found the result'],
+        ]);
         expect(toggle.getAttribute('aria-expanded')).toBe('true');
     });
 
@@ -62,7 +66,37 @@ describe('ToolCallComponent', () => {
 
         expect(host.querySelector('.tool-call__status-dot--error')).not.toBeNull();
         expect(host.textContent).toContain('Failed');
-        expect(host.querySelector('pre')?.textContent).toContain('Network unavailable');
+        expect(sections(host).at(-1)).toEqual(['Error', 'Network unavailable']);
+    });
+
+    it('pretty-prints JSON output', () => {
+        fixture.componentRef.setInput('toolCall', { ...toolCall, tool_output: '{"memories":[{"id":"m1"}]}' });
+        fixture.componentInstance.expanded.set(true);
+        fixture.detectChanges();
+        const host = fixture.nativeElement as HTMLElement;
+
+        expect(host.querySelector('.tool-call__summary')?.textContent).toBe('"Angular" · 1 memory');
+        expect(sections(host).at(-1)).toEqual(['Output', '{\n  "memories": [\n    {\n      "id": "m1"\n    }\n  ]\n}']);
+    });
+
+    it('renders a live call as running until it settles', () => {
+        fixture.componentRef.setInput('toolCall', { ...toolCall, tool_output: '' });
+        fixture.componentRef.setInput('status', 'running');
+        fixture.componentInstance.expanded.set(true);
+        fixture.detectChanges();
+        const host = fixture.nativeElement as HTMLElement;
+
+        expect(host.querySelector('.tool-call__status-dot--running')).not.toBeNull();
+        expect(host.querySelector('.tool-call__status')?.textContent).toBe('Running…');
+        expect(host.querySelector('.tool-call__summary')?.textContent).toBe('"Angular"');
+        expect(sections(host).at(-1)).toEqual(['Output', 'Waiting for result…']);
+        expect(host.querySelector('.tool-call__details')).toBeNull();
+
+        fixture.componentRef.setInput('toolCall', toolCall);
+        fixture.componentRef.setInput('status', 'complete');
+        fixture.detectChanges();
+        expect(host.querySelector('.tool-call__status-dot--running')).toBeNull();
+        expect(host.querySelector('.tool-call__status')?.textContent).toBe('Complete');
     });
 
     it('emits the tool call from the expanded detail action', () => {
@@ -75,3 +109,11 @@ describe('ToolCallComponent', () => {
         expect(emitted).toEqual(toolCall);
     });
 });
+
+/** [label, body] for each Input/Output/Error section of the expanded panel. */
+function sections(host: HTMLElement): string[][] {
+    return Array.from(host.querySelectorAll('.tool-call__section')).map(section => [
+        section.querySelector('.tool-call__section-label')?.textContent?.trim() ?? '',
+        section.querySelector('pre')?.textContent ?? '',
+    ]);
+}

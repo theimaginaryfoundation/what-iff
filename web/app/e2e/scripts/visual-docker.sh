@@ -138,7 +138,25 @@ else
     docker compose -f "${repo_root}/docker-compose.yml" up -d --build api
   echo "Waiting for backend readiness on :8080 (up to ~180s)…"
   if ! wait_for_http "${backend_health}" 90; then
-    echo "❌ Backend did not become ready on :8080 within ~180s — see 'docker compose logs api'." >&2
+    echo "❌ Backend did not become ready on :8080 within ~180s." >&2
+    echo >&2
+    # By far the most common cause on a fresh checkout, and the one that is
+    # least obvious from the outside: docker-compose.yml deliberately supplies
+    # no fallback for the three secrets the server validates at boot, so
+    # without a .env the container exits immediately and this loop just waits
+    # out its full timeout against a port nothing is listening on.
+    if [ ! -f "${repo_root}/.env" ]; then
+      echo "  No .env in ${repo_root}. docker-compose.yml supplies no default for" >&2
+      echo "  JWT_SECRET, JWT_REFRESH_SECRET or TOKEN_ENCRYPTION_SECRET (a shipped" >&2
+      echo "  default would be public), and the server refuses to boot without them." >&2
+      echo >&2
+      echo "  Create one:" >&2
+      echo "    cp .env.example .env" >&2
+      echo "    # then set the three secrets to values of at least 32 characters," >&2
+      echo "    # e.g. openssl rand -hex 32" >&2
+      echo >&2
+    fi
+    echo "  Full logs: docker compose logs api" >&2
     exit 1
   fi
   echo "✅ Backend ready on :8080 (mock mode; left running — stop later with 'docker compose stop api db')."

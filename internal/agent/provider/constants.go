@@ -12,9 +12,31 @@ const (
 	shortMessageThreshold = 100
 )
 
-// TextOnlyChatCompletionsImageFallback replaces image-only user turns when rendering for
-// Chat Completions providers that reject vision input (MiMo, DeepSeek; non-vision Qwen/Mistral ids).
-const TextOnlyChatCompletionsImageFallback = "[The user attached one or more images. This model does not support vision — ask them to describe the image or switch to a vision-capable model if visual analysis is required.]"
+// Always-on reasoning models (z.ai GLM, Xiaomi MiMo).
+//
+// These models reason before answering and the reasoning is billed against the same
+// output cap as the answer. Neither honors a reasoning token budget: z.ai GLM ignores
+// thinking.budget_tokens (and rejects disabling thinking), MiMo ignores both
+// budget_tokens and reasoning_effort (verified live 2026-09-22). So:
+//
+//   - Both get ReasoningMaxOutputTokens instead of DefaultMaxContentLength, leaving
+//     room for reasoning on top of the usual answer budget.
+//   - GLM's only working lever is output_config.effort. Left unset z.ai behaves like
+//     "max"; "high" cut reasoning roughly 5x in testing, so it is the default
+//     (ZAIReasoningEffort). z.ai accepts only low/high/max — "medium" is rejected.
+//     If a call still truncates before any reply text, the turn retries it once at
+//     ZAIFallbackReasoningEffort.
+//   - MiMo can switch thinking off (thinking.type=disabled), so on a truncated call
+//     it retries once with thinking disabled.
+const (
+	ReasoningMaxOutputTokens   = 2 * DefaultMaxContentLength
+	ZAIReasoningEffort         = "high"
+	ZAIFallbackReasoningEffort = "low"
+)
+
+// TextOnlyImageFallback replaces image-only user turns when rendering for
+// models without vision support.
+const TextOnlyImageFallback = "[The user attached one or more images. This model does not support vision — ask them to describe the image or switch to a vision-capable model if visual analysis is required.]"
 
 // ExpressionPortraitContinuityPointerNote is appended to developer continuity text when a
 // portrait thumbnail was sent in the immediately preceding user message.

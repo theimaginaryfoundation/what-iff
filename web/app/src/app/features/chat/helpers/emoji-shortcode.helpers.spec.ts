@@ -42,6 +42,12 @@ describe('emoji shortcode helpers', () => {
     it('triggers after opening punctuation', () => {
       expect(activeEmojiShortcodeQuery('(:fox', 5)).toEqual({ query: 'fox', start: 1, end: 5 });
     });
+
+    it('triggers when the colon is immediately after an emoji', () => {
+      // Surrogate-pair emoji must count as a valid boundary, same as whitespace.
+      expect(activeEmojiShortcodeQuery('🦊:fo', 5)).toEqual({ query: 'fo', start: 2, end: 5 });
+      expect(activeEmojiShortcodeQuery('hi 🦊:fox', 9)).toEqual({ query: 'fox', start: 5, end: 9 });
+    });
   });
 
   describe('searchEmojiShortcodes', () => {

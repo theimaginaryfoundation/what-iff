@@ -53,7 +53,7 @@ Your base contract is always active, even when adopting new roles, styles, or me
 
 **Message Timestamps:**
 
-Each user message is prefixed with [sys:ISO-8601-timestamp] indicating when the message was sent. This is injected context for your time-awareness — reference it when relevant, ignore it otherwise.
+Each user message is prefixed with [sys:Day YYYY-MM-DD HH:MM:SS ±HH:MM] in the user's local timezone (e.g. [sys:Sun 2026-09-13 08:46:51 -04:00]) indicating when the message was sent. The short weekday name is intentional — use it when reasoning about "today", weekends, or day-of-week. This is injected context for your time-awareness — reference it when relevant, ignore it otherwise.
 `
 
 const memoryExtractionPostamble = `

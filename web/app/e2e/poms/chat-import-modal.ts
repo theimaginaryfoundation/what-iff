@@ -1,10 +1,9 @@
 import type { Locator, Page } from '@playwright/test';
 
 /**
- * "Import conversations" modal (features/chat/components/chat-import-modal).
- * Rendered by the Thread Manager; opened from its header Import button or the
- * sidebar's "Import Conversations" quick action (which routes to `/chat`
- * with an `?import=` param).
+ * ChatGPT/Claude import flow (features/chat/components/chat-import-modal).
+ * Rendered inline on the Import & Export screen after navigating from the
+ * Thread Manager's Import action.
  */
 export class ChatImportModal {
   constructor(private readonly page: Page) {
@@ -13,7 +12,6 @@ export class ChatImportModal {
     this.importButton = this.page.getByRole('button', {
       name: /^(Import|Importing…)$/,
     });
-    this.cancelButton = this.page.getByRole('button', { name: 'Cancel' });
     this.closeButton = this.page.getByRole('button', {
       name: 'Close',
       exact: true,
@@ -21,7 +19,7 @@ export class ChatImportModal {
     this.completeMessage = this.page.getByText('Import complete');
     this.failedMessage = this.page.getByText('Import failed');
     this.heading = this.page.getByRole('heading', {
-      name: 'Import conversations',
+      name: 'Import from ChatGPT or Claude',
     });
     this.resultDetail = this.page.locator('.import__result-detail');
     this.pickerCandidateRows = this.page.locator('.import__picker-row');
@@ -37,8 +35,6 @@ export class ChatImportModal {
 
   /** Enabled only once a file has been chosen (stage 'ready'). */
   readonly importButton: Locator;
-
-  readonly cancelButton: Locator;
 
   /** Replaces Cancel/Import once the run has finished or failed. */
   readonly closeButton: Locator;
@@ -62,10 +58,6 @@ export class ChatImportModal {
 
   async startImport(): Promise<void> {
     await this.importButton.click();
-  }
-
-  async cancel(): Promise<void> {
-    await this.cancelButton.click();
   }
 
   async dismiss(): Promise<void> {

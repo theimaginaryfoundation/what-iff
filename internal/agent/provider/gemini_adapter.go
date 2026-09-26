@@ -31,6 +31,13 @@ type GeminiAdapter struct {
 	callSeq          int
 	lastRequested    []ToolUse
 	textDeltaHandler func(delta string)
+	// thought signatures recovered from the most recent streamed response, keyed
+	// by tool-call index; re-attached to the assistant tool-call replay turn
+	// because Gemini rejects a follow-up request that omits them. Empty/nil for
+	// non-streaming calls, where the response's own raw JSON already carries them.
+	// No locking: the adapter is owned by one agent-loop goroutine for the turn
+	// (see the type doc), so this field is written and read by that goroutine only.
+	lastThoughtSignatures map[int64]string
 }
 
 // NewGeminiAdapter constructs a GeminiAdapter from pre-built params. functionTools
@@ -85,7 +92,7 @@ func (a *GeminiAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse,
 	toolUses := normalizeGeminiToolUses(extractChatCompletionToolUses(resp))
 	if len(toolUses) == 0 {
 		a.lastRequested = nil
-		return a.provider.ToGenerateResponse(resp), nil, nil
+		return a.toGenerateResponse(resp), nil, nil
 	}
 
 	a.lastRequested = toolUses
@@ -107,7 +114,7 @@ func (a *GeminiAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse,
 	)
 
 	// Persist a Gemini-compat assistant turn so AppendToolResults can match tool_call_id.
-	a.params.Messages = append(a.params.Messages, geminiAssistantToolCallMessage(resp.Choices[0].Message))
+	a.params.Messages = append(a.params.Messages, geminiAssistantToolCallMessage(resp.Choices[0].Message, a.lastThoughtSignatures))
 	return nil, toolUses, nil
 }
 
@@ -153,14 +160,49 @@ func (a *GeminiAdapter) ForceFinalResponse(ctx context.Context) (*GenerateRespon
 		)
 		return nil, WrapProviderCallError(models.SafetyViolationProviderGoogle, "Gemini final-response call failed", err)
 	}
-	return a.provider.ToGenerateResponse(resp), nil
+	return a.toGenerateResponse(resp), nil
+}
+
+// toGenerateResponse converts a final response, stripping a leading echo of the
+// internal tool-call placeholder when the outbound messages showed it to the model
+// as assistant output (see geminiToolCallContentPlaceholder). The streamed path is
+// filtered in call; this covers non-streamed turns and a streamed turn whose
+// deltas were entirely echo (runGeneration then falls back to this Text).
+func (a *GeminiAdapter) toGenerateResponse(resp *openai.ChatCompletion) *GenerateResponse {
+	out := a.provider.ToGenerateResponse(resp)
+	if geminiMessagesCarryToolCallPlaceholder(a.params.Messages) {
+		out.Text = stripGeminiToolCallEcho(out.Text)
+	}
+	return out
 }
 
 // call streams when a text-delta handler is set, else issues a non-streaming request.
+// The streaming path also captures per-tool-call thought signatures (dropped by the
+// accumulator) for the tool-call replay turn; the non-streaming response carries them
+// in its own raw JSON, so lastThoughtSignatures is cleared there.
 func (a *GeminiAdapter) call(ctx context.Context) (*openai.ChatCompletion, error) {
 	if a.textDeltaHandler != nil {
-		return a.provider.CallStreaming(ctx, a.params, a.textDeltaHandler)
+		onDelta := a.textDeltaHandler
+		var echo *geminiToolCallEchoFilter
+		if geminiMessagesCarryToolCallPlaceholder(a.params.Messages) {
+			// The model has seen the internal placeholder as its own prior output
+			// and may imitate it; keep any echo out of the user-visible stream.
+			echo = newGeminiToolCallEchoFilter(onDelta)
+			onDelta = echo.HandleDelta
+		}
+		resp, thoughtSignatures, err := a.provider.CallStreaming(ctx, a.params, onDelta)
+		if echo != nil {
+			echo.Flush()
+		}
+		if err != nil {
+			// Do not retain signatures from a failed call.
+			a.lastThoughtSignatures = nil
+			return nil, err
+		}
+		a.lastThoughtSignatures = thoughtSignatures
+		return resp, nil
 	}
+	a.lastThoughtSignatures = nil
 	return a.provider.Call(ctx, a.params)
 }
 
@@ -183,10 +225,17 @@ func extractChatCompletionToolUses(resp *openai.ChatCompletion) []ToolUse {
 		if tc.Type != "" && tc.Type != "function" {
 			continue
 		}
+		// Some Chat Completions providers send "" (not "{}") for a call with no
+		// arguments; every tool decodes Input as a JSON object, and "" fails that
+		// with "unexpected end of JSON input".
+		args := tc.Function.Arguments
+		if strings.TrimSpace(args) == "" {
+			args = "{}"
+		}
 		uses = append(uses, ToolUse{
 			ID:    tc.ID,
 			Name:  tc.Function.Name,
-			Input: []byte(tc.Function.Arguments),
+			Input: []byte(args),
 		})
 	}
 	return uses

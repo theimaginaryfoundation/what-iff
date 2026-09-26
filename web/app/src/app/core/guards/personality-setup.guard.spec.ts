@@ -44,6 +44,12 @@ describe('personalitySetupGuard', () => {
         expect(personalityService.listPersonalities).not.toHaveBeenCalled();
     });
 
+    it('allows the experimental account restoration route without checking the API', async () => {
+        const value = await runGuard('/experimental');
+        expect(value).toBe(true);
+        expect(personalityService.listPersonalities).not.toHaveBeenCalled();
+    });
+
     it('redirects to personalities when the user has none', async () => {
         personalityService.listPersonalities.mockReturnValue(of({ results: [], total_count: 0, page: 1 }));
 

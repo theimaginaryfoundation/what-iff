@@ -163,6 +163,43 @@ func TestCreateChatMessage_HappyPathNoContextItems(t *testing.T) {
 	require.Empty(t, created.AdditionalContext)
 }
 
+func TestCreateChatMessage_ModelReasoningRoundTrips(t *testing.T) {
+	ds, cleanup := newChatMessageTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createCMTestUser(t, ds)
+	modelID := createCMTestModel(t, ds)
+	chatID := createCMTestChat(t, ds, userID, modelID)
+
+	reasoning := "  first I considered X\n\nthen Y  "
+	created, err := ds.CreateChatMessage(ctx, userID, models.ChatMessage{
+		ChatID:         chatID,
+		Message:        "assistant reply",
+		Origin:         models.MessageOriginAssistant,
+		ModelReasoning: &reasoning,
+	})
+	require.NoError(t, err)
+
+	got, err := ds.GetChatMessage(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.ModelReasoning)
+	require.Equal(t, "first I considered X\n\nthen Y", *got.ModelReasoning)
+
+	// Blank reasoning is not stored.
+	blank := "   "
+	created, err = ds.CreateChatMessage(ctx, userID, models.ChatMessage{
+		ChatID:         chatID,
+		Message:        "no thoughts",
+		Origin:         models.MessageOriginAssistant,
+		ModelReasoning: &blank,
+	})
+	require.NoError(t, err)
+	got, err = ds.GetChatMessage(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Nil(t, got.ModelReasoning)
+}
+
 func TestCreateChatMessage_ChatNotFound(t *testing.T) {
 	ds, cleanup := newChatMessageTestDatastore(t)
 	defer cleanup()
@@ -726,6 +763,81 @@ func TestListChatMessages_NewestFirstAndPagination(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, page2.Results, 1)
 	require.Equal(t, ids[0], page2.Results[0].(*models.ChatMessage).ID)
+}
+
+func TestListChatMessagesBefore_KeysetWalk(t *testing.T) {
+	ds, cleanup := newChatMessageTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createCMTestUser(t, ds)
+	modelID := createCMTestModel(t, ds)
+	chatID := createCMTestChat(t, ds, userID, modelID)
+	ids := createCMTestMessages(t, ds, userID, chatID, 5) // ids[0] oldest .. ids[4] newest
+
+	// Zero cursor: newest page, descending, with a continuation cursor.
+	page, err := ds.ListChatMessagesBefore(ctx, userID, chatID, time.Time{}, uuid.Nil, 2, models.ChatMessageFilters{})
+	require.NoError(t, err)
+	require.Equal(t, 5, page.TotalCount, "total_count reflects the whole thread, not the batch")
+	require.Len(t, page.Results, 2)
+	require.Equal(t, ids[4], page.Results[0].(*models.ChatMessage).ID)
+	require.Equal(t, ids[3], page.Results[1].(*models.ChatMessage).ID)
+	require.NotEmpty(t, page.NextCursor)
+
+	// Walk older via the cursor: batch size can differ from the first request without gaps.
+	beforeSentAt, beforeID, err := models.DecodeMessageCursor(page.NextCursor)
+	require.NoError(t, err)
+	page2, err := ds.ListChatMessagesBefore(ctx, userID, chatID, beforeSentAt, beforeID, 10, models.ChatMessageFilters{})
+	require.NoError(t, err)
+	require.Len(t, page2.Results, 3)
+	require.Equal(t, ids[2], page2.Results[0].(*models.ChatMessage).ID)
+	require.Equal(t, ids[1], page2.Results[1].(*models.ChatMessage).ID)
+	require.Equal(t, ids[0], page2.Results[2].(*models.ChatMessage).ID)
+
+	// Past the oldest message: empty batch and no continuation cursor.
+	beforeSentAt2, beforeID2, err := models.DecodeMessageCursor(page2.NextCursor)
+	require.NoError(t, err)
+	page3, err := ds.ListChatMessagesBefore(ctx, userID, chatID, beforeSentAt2, beforeID2, 10, models.ChatMessageFilters{})
+	require.NoError(t, err)
+	require.Empty(t, page3.Results)
+	require.Empty(t, page3.NextCursor)
+}
+
+func TestClampMessagePageSize(t *testing.T) {
+	cases := []struct {
+		name string
+		in   int
+		want int
+	}{
+		{"zero uses default", 0, defaultMessagePageSize},
+		{"negative uses default", -5, defaultMessagePageSize},
+		{"one is kept", 1, 1},
+		{"typical is kept", 200, 200},
+		{"at max is kept", maxMessagePageSize, maxMessagePageSize},
+		{"above max is clamped", maxMessagePageSize + 1, maxMessagePageSize},
+		{"huge is clamped", 1_000_000, maxMessagePageSize},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, clampMessagePageSize(tc.in))
+		})
+	}
+}
+
+func TestListChatMessagesBefore_CursorRequiresBothSentAtAndID(t *testing.T) {
+	ds, cleanup := newChatMessageTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createCMTestUser(t, ds)
+	modelID := createCMTestModel(t, ds)
+	chatID := createCMTestChat(t, ds, userID, modelID)
+
+	_, err := ds.ListChatMessagesBefore(ctx, userID, chatID, time.Now(), uuid.Nil, 10, models.ChatMessageFilters{})
+	require.Error(t, err)
+
+	_, err = ds.ListChatMessagesBefore(ctx, userID, chatID, time.Time{}, uuid.New(), 10, models.ChatMessageFilters{})
+	require.Error(t, err)
 }
 
 func TestListChatMessages_Filters(t *testing.T) {

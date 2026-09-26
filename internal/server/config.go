@@ -56,15 +56,18 @@ type Config struct {
 	// GeminiKey enables Google Gemini models (OpenAI-compatible Chat Completions); optional.
 	GeminiKey string
 	// GeminiBaseURL overrides Google's OpenAI-compatible base URL; optional.
-	GeminiBaseURL         string
-	MistralKey            string
-	MistralBaseURL        string
-	DeepSeekKey           string
-	DeepSeekBaseURL       string
-	QwenKey               string
-	QwenBaseURL           string
-	XiaomiKey             string
-	XiaomiBaseURL         string
+	GeminiBaseURL   string
+	MistralKey      string
+	MistralBaseURL  string
+	DeepSeekKey     string
+	DeepSeekBaseURL string
+	QwenKey         string
+	QwenBaseURL     string
+	XiaomiKey       string
+	XiaomiBaseURL   string
+	// First-party web search (ADR 0x021). An empty key leaves the tools off.
+	ParallelAPIKey        string
+	ParallelSearchMode    string
 	TokenEncryptionSecret string
 	AllowedEmails         []string
 	RequireBilling        bool // Feature flag to enable/disable billing
@@ -167,6 +170,8 @@ func NewConfig() *Config {
 	qwenBaseURL := strings.TrimSpace(os.Getenv("QWEN_BASE_URL"))
 	xiaomiKey := os.Getenv("XIAOMI_API_KEY")
 	xiaomiBaseURL := strings.TrimSpace(os.Getenv("XIAOMI_BASE_URL"))
+	parallelAPIKey := strings.TrimSpace(os.Getenv("PARALLEL_API_KEY"))
+	parallelSearchMode := strings.TrimSpace(os.Getenv("PARALLEL_SEARCH_MODE"))
 	tokenEncryptionSecret := strings.TrimSpace(os.Getenv("TOKEN_ENCRYPTION_SECRET"))
 
 	// Local-development defaults only. Deployed environments must set
@@ -282,6 +287,8 @@ func NewConfig() *Config {
 		QwenBaseURL:                         qwenBaseURL,
 		XiaomiKey:                           xiaomiKey,
 		XiaomiBaseURL:                       xiaomiBaseURL,
+		ParallelAPIKey:                      parallelAPIKey,
+		ParallelSearchMode:                  parallelSearchMode,
 		TokenEncryptionSecret:               tokenEncryptionSecret,
 		AllowedEmails:                       allowedEmails,
 		RequireBilling:                      requireBilling,

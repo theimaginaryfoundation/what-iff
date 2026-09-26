@@ -47,7 +47,7 @@ func TestGeminiAssistantToolCallMessage_PlaceholderContentAndStableID(t *testing
 		Role:      "assistant",
 		ToolCalls: []openai.ChatCompletionMessageToolCallUnion{tc},
 	}
-	param := geminiAssistantToolCallMessage(msg)
+	param := geminiAssistantToolCallMessage(msg, nil)
 	require.NotNil(t, param.OfAssistant)
 	require.Equal(t, geminiToolCallContentPlaceholder, param.OfAssistant.Content.OfString.Value)
 	require.Len(t, param.OfAssistant.ToolCalls, 1)
@@ -98,4 +98,133 @@ func TestGeminiAdapter_toolNameForResult(t *testing.T) {
 	}
 	require.Equal(t, "generate_image", a.toolNameForResult("generate_image", 0))
 	require.Equal(t, "generate_image", a.toolNameForResult("wrong", 0))
+}
+
+// TestGeminiToolCallToParam_StreamAccumulatedMarshals reproduces the malformed-request
+// bug from image-gen turns: Gemini streams, so tool calls come from
+// ChatCompletionAccumulator with an empty RawJSON. The SDK's ToParam() then set an
+// empty marshal override, which failed on the next request with "unexpected end of
+// JSON input". Rebuilding from fields must marshal cleanly.
+func TestGeminiToolCallToParam_StreamAccumulatedMarshals(t *testing.T) {
+	t.Parallel()
+	tc := openai.ChatCompletionMessageToolCallUnion{
+		ID:   "call_img",
+		Type: "function",
+		Function: openai.ChatCompletionMessageFunctionToolCallFunction{
+			Name:      "generate_image",
+			Arguments: "",
+		},
+	}
+	require.Empty(t, tc.RawJSON(), "accumulated tool calls have no raw JSON")
+
+	param := geminiToolCallToParam(tc, "")
+	out, err := param.MarshalJSON()
+	require.NoError(t, err)
+	require.Contains(t, string(out), `"name":"generate_image"`)
+	// Empty arguments default to an empty object so the compat layer accepts the turn.
+	require.Contains(t, string(out), `"arguments":"{}"`)
+	// A non-empty id is preserved verbatim.
+	require.Contains(t, string(out), `"id":"call_img"`)
+}
+
+// TestGeminiAssistantToolCallMessage_StreamAccumulatedMarshals is the end-to-end
+// repro: the whole assistant tool-call message (as replayed on the next round) must
+// marshal without the jsontext "unexpected end of JSON input" error.
+func TestGeminiAssistantToolCallMessage_StreamAccumulatedMarshals(t *testing.T) {
+	t.Parallel()
+	tc := openai.ChatCompletionMessageToolCallUnion{
+		ID:   "call_img",
+		Type: "function",
+		Function: openai.ChatCompletionMessageFunctionToolCallFunction{
+			Name:      "generate_image",
+			Arguments: `{"prompt":"a fox"}`,
+		},
+	}
+	require.Empty(t, tc.RawJSON())
+
+	msg := openai.ChatCompletionMessage{
+		Role:      "assistant",
+		ToolCalls: []openai.ChatCompletionMessageToolCallUnion{tc},
+	}
+	param := geminiAssistantToolCallMessage(msg, nil)
+	out, err := param.MarshalJSON()
+	require.NoError(t, err)
+	body := string(out)
+	require.Contains(t, body, `"name":"generate_image"`)
+	require.Contains(t, body, "a fox")
+	require.Contains(t, body, `"id":"call_img"`)
+}
+
+// TestGeminiToolCallToParam_CustomStreamAccumulatedMarshals covers the custom-tool
+// variant of the same accumulated path.
+func TestGeminiToolCallToParam_CustomStreamAccumulatedMarshals(t *testing.T) {
+	t.Parallel()
+	tc := openai.ChatCompletionMessageToolCallUnion{
+		ID:   "call_custom",
+		Type: "custom",
+		Custom: openai.ChatCompletionMessageCustomToolCallCustom{
+			Name:  "run_code",
+			Input: "print(1)",
+		},
+	}
+	require.Empty(t, tc.RawJSON())
+
+	param := geminiToolCallToParam(tc, "")
+	out, err := param.MarshalJSON()
+	require.NoError(t, err)
+	require.Contains(t, string(out), `"name":"run_code"`)
+	require.Contains(t, string(out), "print(1)")
+}
+
+// TestGeminiToolCallToParam_ReattachesThoughtSignature pins the fix for Google's
+// "Function call is missing a thought_signature" 400: the accumulator drops
+// extra_content during streaming, so the signature captured from the raw delta must
+// be re-attached to the reconstructed function-call param on replay.
+func TestGeminiToolCallToParam_ReattachesThoughtSignature(t *testing.T) {
+	t.Parallel()
+	tc := openai.ChatCompletionMessageToolCallUnion{
+		ID:   "call_img",
+		Type: "function",
+		Function: openai.ChatCompletionMessageFunctionToolCallFunction{
+			Name:      "generate_image",
+			Arguments: `{"prompt":"a fox"}`,
+		},
+	}
+	require.Empty(t, tc.RawJSON())
+
+	param := geminiToolCallToParam(tc, "sig-xyz")
+	out, err := param.MarshalJSON()
+	require.NoError(t, err)
+	body := string(out)
+	require.Contains(t, body, `"name":"generate_image"`)
+	require.Contains(t, body, "thought_signature")
+	require.Contains(t, body, "sig-xyz")
+	// Shape must match what Google emits: extra_content.google.thought_signature.
+	require.Contains(t, body, `"extra_content"`)
+	require.Contains(t, body, `"google"`)
+}
+
+// TestGeminiAssistantToolCallMessage_MapsSignatureByIndex verifies the per-index
+// signature map lands on the matching tool call.
+func TestGeminiAssistantToolCallMessage_MapsSignatureByIndex(t *testing.T) {
+	t.Parallel()
+	mk := func(name, args string) openai.ChatCompletionMessageToolCallUnion {
+		return openai.ChatCompletionMessageToolCallUnion{
+			Type:     "function",
+			Function: openai.ChatCompletionMessageFunctionToolCallFunction{Name: name, Arguments: args},
+		}
+	}
+	msg := openai.ChatCompletionMessage{
+		Role: "assistant",
+		ToolCalls: []openai.ChatCompletionMessageToolCallUnion{
+			mk("first_tool", `{"a":1}`),
+			mk("generate_image", `{"prompt":"fox"}`),
+		},
+	}
+	param := geminiAssistantToolCallMessage(msg, map[int64]string{1: "sig-second"})
+	require.Len(t, param.OfAssistant.ToolCalls, 2)
+
+	out, err := param.MarshalJSON()
+	require.NoError(t, err)
+	require.Contains(t, string(out), "sig-second")
 }

@@ -112,6 +112,12 @@ export interface Seed {
   webhookToken(name?: string): Promise<{ token: WebhookToken; apiToken: string }>;
   /** Creates one personality. */
   personality(name?: string): Promise<SeededPersonality>;
+  /**
+   * Hands a personality the test created some other way (through the UI) to this
+   * fixture's teardown. Deployed runs share one account, so anything left behind
+   * piles up across nightly runs and breaks name-based locators.
+   */
+  adoptPersonality(id: string): void;
 }
 
 interface Tracked {
@@ -146,13 +152,22 @@ function makeSeed(client: ApiClient, tracked: Tracked): Seed {
     },
 
     async memories(count, overrides = {}) {
-      const items: MemoryCreateRequest[] = Array.from({ length: count }, (_, i) => ({
-        content: `${seedName('memory')}-${i}`,
-        level: 'global',
-        type: 'Context',
-        starred: false,
-        ...overrides,
-      }));
+      const items: MemoryCreateRequest[] = Array.from({ length: count }, (_, i) => {
+        const item: MemoryCreateRequest = {
+          content: `${seedName('memory')}-${i}`,
+          level: 'global',
+          type: 'Context',
+          starred: false,
+          ...overrides,
+        };
+        // A shared `content` override would make every card match the same
+        // hasText locator (strict-mode violations on select/click). Keep the
+        // override as a readable prefix and uniquify when seeding a batch.
+        if (count > 1 && overrides.content != null) {
+          item.content = `${overrides.content}-${i}`;
+        }
+        return item;
+      });
       const result = await createMemoriesBatch(client, items);
       const created = result.results ?? [];
       for (const memory of created) {
@@ -186,6 +201,10 @@ function makeSeed(client: ApiClient, tracked: Tracked): Seed {
       });
       track(tracked.personalities, personality.id);
       return { id: personality.id as string, name };
+    },
+
+    adoptPersonality(id: string) {
+      track(tracked.personalities, id);
     },
   };
 }
@@ -285,7 +304,7 @@ interface Fixtures {
   /**
    * A logged-in user that already owns a personality. Needed by anything that
    * navigates the authenticated app: `personalitySetupGuard` bounces accounts
-   * with zero personalities to `/personality/getting-started`.
+   * with zero personalities to `/personality?setup=1` (the first-run welcome).
    */
   userWithPersonality: UserWithPersonality;
 }
@@ -403,6 +422,7 @@ export const test = base.extend<Fixtures & InternalFixtures & PomFixtures>({
 });
 
 export { expect };
+export type { Locator, Page } from '@playwright/test';
 // For tests that build their own context: the fixtures only reach pages the
 // `page`/`context` fixtures created, so a page from `browser.newContext()` has
 // to enrol itself. No-op unless `E2E_COVERAGE=1`.

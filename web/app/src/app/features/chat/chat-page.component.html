@@ -86,7 +86,7 @@
           </div>
         </div>
         <div class="chat-page__title-actions">
-          <app-thread-bookmarks [bookmarks]="bookmarks()" (jump)="jumpToBookmark($event)" />
+          <app-thread-bookmarks [bookmarks]="bookmarks()" (jump)="jumpToBookmark($event)" (commitRemovals)="commitBookmarkRemovals($event)" />
           <button type="button" class="chat-page__export" (click)="exportActiveChat()" aria-label="Export thread">
             <ui-file-icon [size]="12" />
             <span>Export</span>
@@ -160,6 +160,15 @@
             </button>
           </nav>
 
+          @if (bookmarkJumpStatus(); as status) {
+            <div class="chat-page__jump-toast" role="status" aria-live="polite">
+              @if (bookmarkJumpPending()) {
+                <span class="chat-page__jump-spinner" aria-hidden="true"></span>
+              }
+              <span>{{ status }}</span>
+            </div>
+          }
+
           <app-message-list
             [conversationId]="session.thread()?.id ?? null"
             [groups]="groups()"
@@ -223,7 +232,6 @@
         class="chat-page__thread-manager"
         [activeThreadId]="session.thread()?.id ?? null"
         [personalities]="personalities()"
-        [importTrigger]="importTrigger()"
         (selectThread)="openThread($event)"
         (newThread)="startConversation()"
       />

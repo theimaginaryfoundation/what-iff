@@ -21,6 +21,11 @@ var functionToolCatalog = []FunctionToolDefinition{
 	{Spec: RunSubagentToolSpec, HumanDescription: "Run a focused sub-agent with an optional personality, model, or skills and return its result.", AgentDefault: true, UserToggleable: true},
 	{Spec: GenerateImageToolSpec, HumanDescription: "Create an image from a written description.", AgentDefault: true, UserToggleable: true},
 	{Spec: CreateAgentJobToolSpec, HumanDescription: "Create a one-time or recurring task using natural-language timing. Run it in the current or a new thread, optionally with a different model or skills.", AgentDefault: true, UserToggleable: true},
+	// First-party web search (ADR 0x021). Not user-toggleable here: GetAvailableTools already lists
+	// web_search for the toggle, and fetch_page follows it. The per-turn policy hides both when no
+	// backend is configured.
+	{Spec: WebSearchFunctionToolSpec, AgentDefault: true},
+	{Spec: FetchPageToolSpec, AgentDefault: true},
 	{Spec: RecallToolSpec, HumanDescription: "Search or retrieve memories, files, summaries, and conversation history. Often use list first to find an item, then find_context to inspect or retrieve its contents.", AgentDefault: true, UserToggleable: true},
 }
 

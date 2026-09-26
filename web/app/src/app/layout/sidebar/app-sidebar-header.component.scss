@@ -22,8 +22,12 @@
   order: 1;
 }
 
-.app-sidebar-header--collapsed .app-sidebar-header__help-trigger {
+.app-sidebar-header--collapsed app-nav-actions-outlet {
   order: 2;
+}
+
+.app-sidebar-header--collapsed .app-sidebar-header__help-trigger {
+  order: 3;
 }
 
 .app-sidebar-header--collapsed .app-sidebar-header__brand,

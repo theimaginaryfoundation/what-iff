@@ -3140,6 +3140,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/personality/{id}/expressions/generate-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate candidate expression portraits for custom keys
+         * @description Primary integration: the personality expressions "Generate" modal. Enqueues a background `expression_grid` job that renders nine portraits — one 3×3 image for nine caller-chosen expression keys in row-major order — and uploads each panel as a gallery image pinned to the personality **without assigning any expression slot**. When `reference_image_id` is set, the image grounds both the likeness pass and the image model (style/character reference); if the reference call is rejected the run falls back to prompt-only generation. Poll `GET /jobs/{id}`; on `complete`, the job's `progress` is a JSON-encoded `ExpressionCandidatesProgress` whose `candidates` list maps each key to its image. Assign keepers with `PUT /personality/{id}/expressions/{expression_key}` (`image_id`) and delete rejects via `DELETE /image-gallery/{id}`. Shares the single per-user personality media-job slot. Not quota-metered (~$0.01 per run).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Personality ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["GenerateExpressionCandidatesRequest"];
+                };
+            };
+            responses: {
+                /** @description Candidate generation job enqueued */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PersonalityMediaJobResponse"];
+                    };
+                };
+                /** @description Invalid personality ID, keys (not nine unique URL-safe keys), or reference ID; or the personality's image style is none */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Personality or reference image not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A personality media job is already active */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PersonalityMediaJobConflict"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/personality/{id}/expressions/{expression_key}": {
         parameters: {
             query?: never;
@@ -3449,7 +3531,7 @@ export interface paths {
         };
         /**
          * List memories
-         * @description Returns a paginated list of memories for the current user, with optional filtering by chat, level, content, starred state, and date range
+         * @description Returns a paginated list of memories for the current user, with optional filtering by chat, scope, level, content, starred state, lifecycle status, and date range
          */
         get: {
             parameters: {
@@ -3462,6 +3544,8 @@ export interface paths {
                     chat_id?: string;
                     /** @description Filter by memory level */
                     level?: "global" | "personality" | "thread" | "summary";
+                    /** @description Filter by storage scope */
+                    scope?: "User" | "Chat";
                     /** @description Filter by memory type */
                     type?: "Context";
                     /** @description Filter by starred state */
@@ -3940,6 +4024,146 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/batch/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete memories in batch
+         * @description Permanently deletes multiple memories owned by the authenticated user. When all_or_none is false, missing ids are skipped and counted only for successful deletes; unexpected datastore errors abort the request. When all_or_none is true, the batch runs in one transaction and fails entirely if any id is missing.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemoryBatchDeleteRequest"];
+                };
+            };
+            responses: {
+                /** @description Batch delete processed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryBatchDeleteResponse"];
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description One or more memories not found (all_or_none) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/batch/patch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Patch memories in batch
+         * @description Applies the same patch to multiple memories (e.g. move / archive). Useful for bulk Move (level + pinned_personality_id) and Archive (status). When all_or_none is true, the first failure aborts remaining ids; each successful UpdateMemory is already committed (not one encompassing transaction). When all_or_none is false, missing ids are skipped; unexpected errors abort.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemoryBatchPatchRequest"];
+                };
+            };
+            responses: {
+                /** @description Batch patch processed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryBatchPatchResponse"];
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description One or more memories not found (all_or_none) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/{id}": {
         parameters: {
             query?: never;
@@ -3949,7 +4173,7 @@ export interface paths {
         };
         /**
          * Get memory by ID
-         * @description Returns a specific memory by its ID
+         * @description Returns an owned memory by ID, including inactive archived or merge-retired memories.
          */
         get: {
             parameters: {
@@ -4163,6 +4387,341 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/account/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enqueue a full-account export
+         * @description Enqueues an asynchronous full-account export for the authenticated user, built in-process. The
+         *     export is a **ZIP** containing conversations (in the round-trippable Claude `conversations.json`
+         *     shape), personalities (with scratchpads), memories (as a nested `memories.zip`), a
+         *     `files/manifest.json` inventory of the user's uploaded files, and a `manifest.json`.
+         *
+         *     Returns `202` with a Job; poll `GET /account/export/{id}` for the phase. **The download link is
+         *     delivered only by email — never in the API response.** This is a deliberate security control:
+         *     access to the app account alone cannot exfiltrate the full account, since the download also
+         *     requires access to the user's mailbox.
+         *
+         *     Rate limited to one export per user per 10 minutes.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Export enqueued */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Job"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description An export was requested too recently */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/account/export/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get account export status
+         * @description Returns the export Job. Its `progress` field is a JSON-encoded `AccountExportProgress`
+         *     (`phase` of queued/building/uploading/complete/failed, section `counts`, and a user-safe
+         *     `message`). It never contains the download link — that is emailed.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Export job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Job"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Export not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/account/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enqueue an account export ZIP import
+         * @description Restores conversations, memories, and personalities from an export ZIP (produced by
+         *     `/account/export`). Additive and id-stripped: conversations dedupe by import hash,
+         *     personalities dedupe by name, and everything is created fresh under the importing user, so an
+         *     export loads into any account without key collisions. Whatiff metadata in `conversations.json`
+         *     preserves checkpoint context and personality associations; source chat/personality references are
+         *     remapped before memories import. Summarized threads are immediately resumable, while threads
+         *     without a summary remain archived for lazy rehydration. The upload is staged to a temporary
+         *     file, then restored by a bounded in-process worker. Returns `202` with a Job; poll
+         *     `GET /account/import/{id}` until terminal status. Its JSON-encoded `progress` contains phase,
+         *     section counts, warnings, and the final result. Memory import requires the server to have an
+         *     OpenAI key (embeddings are regenerated); when unavailable, memories are skipped.
+         *
+         *     An optional `selection` field narrows what is restored (a partial import). When omitted, the
+         *     whole export is imported (backward-compatible).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /**
+                         * Format: binary
+                         * @description The export ZIP.
+                         */
+                        file: string;
+                        /**
+                         * @description Optional JSON object narrowing what is restored. Omit to import everything. Shape:
+                         *     `{"personality_ids":["<source-uuid>"],"conversation_ids":["<source-uuid>"],"include_memories":true}`.
+                         *     IDs are the source ids as they appear in the export (personality ids and conversation
+                         *     uuids), which the client reads from the ZIP to build its selection ledger. When present
+                         *     it is authoritative: only the listed personalities and conversations are restored (an
+                         *     empty list restores none), and memories are all-or-nothing via `include_memories`.
+                         */
+                        selection?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Import enqueued */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Job"];
+                    };
+                };
+                /** @description Missing or invalid ZIP */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Import file too large */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/account/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the user's recent import/export activity
+         * @description Returns the user's most recent account export/import and ChatGPT/Claude import events
+         *     (from the audit log), newest first — a lightweight activity log for the Import & Export screen.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Recent activity, newest first */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AccountActivityEntry"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/account/import/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get account import status and results
+         * @description Returns the account-import Job. Parse its JSON-encoded `progress` as `AccountImportProgress`;
+         *     terminal successful jobs include the per-section result and warnings.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Account import job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Job"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Import not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/import": {
         parameters: {
             query?: never;
@@ -4204,6 +4763,13 @@ export interface paths {
                             imported_count?: number;
                             duplicate_count?: number;
                             invalid_record_count?: number;
+                            invalid_reasons?: {
+                                malformed_json?: number;
+                                missing_id?: number;
+                                empty_content?: number;
+                                missing_created_at?: number;
+                                missing_chat_id?: number;
+                            };
                             skipped_missing_chat_count?: number;
                             skipped_missing_personality_count?: number;
                         };
@@ -5482,8 +6048,10 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    /** @description Page number (default 1) */
+                    /** @description Page number (default 1). Ignored when `cursor` is supplied. */
                     page?: number;
+                    /** @description Opaque keyset token (a `next_cursor` from a prior response) for fetching the batch of messages strictly older than it, newest-first. Decouples batch size from page-offset math, so scroll-back and jump-to-bookmark can request large batches without gaps. When present, `page` is ignored. */
+                    cursor?: string;
                     /** @description Number of items per page (default 10) */
                     limit?: number;
                     /** @description Filter by message origin */
@@ -5882,6 +6450,72 @@ export interface paths {
                 };
                 /** @description Message not found or not in this chat */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/{chatId}/active-job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Active job for a chat
+         * @description Returns the newest non-terminal chat_message job for any user turn in this chat, if any, with the user message it answers. Lets a client returning to a thread resume a running turn without first deciding which user message is unanswered.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Active job present */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ActiveChatMessageJob"];
+                    };
+                };
+                /** @description No active job */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid chat ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -7621,6 +8255,7 @@ export interface components {
          *       "description": "Advanced language model with enhanced reasoning capabilities",
          *       "provider": "openai",
          *       "tool_support": true,
+         *       "vision_support": true,
          *       "base_credits_per_slab": 5,
          *       "deleted": false,
          *       "is_default": true
@@ -7645,6 +8280,8 @@ export interface components {
             provider: "openai" | "anthropic" | "zai" | "google" | "mistral" | "deepseek" | "qwen" | "xiaomi";
             /** @description Whether the model supports tool/function calling */
             tool_support: boolean;
+            /** @description Whether the model accepts image input. Images are stripped from the context sent to models without it. */
+            vision_support: boolean;
             /**
              * Format: int64
              * @description Credits charged per 15k-token slab for chat/job turns using this model
@@ -7665,6 +8302,21 @@ export interface components {
          * @enum {string}
          */
         JobStatus: "pending" | "processing" | "inference_complete" | "expression_complete" | "compaction_complete" | "complete" | "failed";
+        /** @description One row of the user's import/export activity log (from the audit log). */
+        AccountActivityEntry: {
+            /** Format: date-time */
+            occurred_at?: string;
+            /** @description Audit category, e.g. account_export, account_import, or chat_import. */
+            category?: string;
+            /** @description e.g. exported, imported, import_failed, import. */
+            action?: string;
+            /** @description Human-readable summary. */
+            message?: string;
+            /** @description Structured safe-to-display counts and outcome fields for the activity row. */
+            metadata?: {
+                [key: string]: unknown;
+            };
+        };
         /**
          * @example {
          *       "id": "123e4567-e89b-12d3-a456-426614174000",
@@ -7689,9 +8341,17 @@ export interface components {
             result_id?: string;
             /** @description Incremental assistant text chunks emitted while inference is in progress. */
             draft_deltas?: string[];
+            /** @description Incremental model reasoning chunks emitted while inference is in progress (z.ai GLM, Xiaomi MiMo). Display-only. Unlike draft_deltas this can be reset (emptied and re-sent) when a truncated call is retried, so clients should render the whole array on each poll rather than appending by cursor. */
+            draft_reasoning?: string[];
             /**
              * @description Optional JSON-encoded progress payload for long-running jobs. Opaque to clients except per
-             *     job_type. For `chat_import` it is `{phase, source, total, imported, skipped}`.
+             *     job_type. For `chat_import` it is `{phase, source, total, imported, skipped}`; for
+             *     `account_import` it is `{phase, message, counts, conversations, personalities, memories,
+             *     warnings, result}`, where `result` is present on terminal success. For `chat_message` it is
+             *     the live tool-call timeline of the in-flight turn: `{tool_calls: [{id, name, input, status,
+             *     output, round, started_at, finished_at}]}`, where `status` is `running`, `complete` or
+             *     `error`, `input`/`output` are truncated previews, and `output`/`finished_at` are set once the
+             *     call finishes. It is display-only; the saved assistant message's `tool_calls` are authoritative.
              */
             progress?: string;
             /** Format: date-time */
@@ -7959,6 +8619,8 @@ export interface components {
             generation_expression_label?: string | null;
             /** @description Short classifier rationale for why this expression portrait was chosen */
             generation_expression_reasoning?: string | null;
+            /** @description Reasoning/thinking text the model reported for this assistant turn (e.g. z.ai GLM thinking blocks, Xiaomi MiMo reasoning_content), joined across the turn's tool rounds. Display-only; never replayed to the model. Omitted when the provider reported none. */
+            model_reasoning?: string | null;
             /** @description User-visible async generation failure for this user turn; cleared after a successful reply */
             last_error_message?: string | null;
             /**
@@ -8023,6 +8685,11 @@ export interface components {
             job_id?: string;
             /** @enum {string} */
             status?: "pending" | "processing" | "inference_complete" | "expression_complete" | "compaction_complete" | "complete" | "cancelled" | "failed";
+            /**
+             * Format: uuid
+             * @description The user turn this job answers. Set by GET /chat/{chatId}/active-job.
+             */
+            message_id?: string;
         };
         WebhookToken: {
             /** Format: uuid */
@@ -8116,6 +8783,11 @@ export interface components {
              * @description Timestamp when the file attachment was created
              */
             created_at: string;
+            /**
+             * @description Server-derived origin class used by the gallery's Generated/Imported filter. `generated` = attached to an assistant message or produced by a generation pipeline (expression grid, portrait); `imported` = uploaded by the user (gallery import, personality upload, user chat message). Omitted when the server could not determine it.
+             * @enum {string}
+             */
+            source?: "generated" | "imported";
         };
         FileAttachmentPersonality: {
             /** Format: uuid */
@@ -8289,6 +8961,49 @@ export interface components {
             /** Format: uuid */
             reference_image_id?: string;
         };
+        /**
+         * @example {
+         *       "expressions": [
+         *         "happy",
+         *         "content",
+         *         "sad",
+         *         "angry",
+         *         "surprised",
+         *         "confused",
+         *         "tired",
+         *         "in-love",
+         *         "thinking"
+         *       ],
+         *       "reference_image_id": "123e4567-e89b-12d3-a456-426614174000"
+         *     }
+         */
+        GenerateExpressionCandidatesRequest: {
+            /** @description Nine URL-safe expression keys in row-major 3×3 grid order. */
+            expressions: string[];
+            /**
+             * Format: uuid
+             * @description Optional owned gallery image used as a style/character reference.
+             */
+            reference_image_id?: string | null;
+        };
+        ExpressionCandidate: {
+            /** @description Expression key this panel was generated for. */
+            expression_key: string;
+            /**
+             * Format: uuid
+             * @description Gallery image (pinned to the personality) holding the unassigned portrait.
+             */
+            image_id: string;
+        };
+        /** @description Decoded shape of `Job.progress` for candidate runs (`POST /personality/{id}/expressions/generate-candidates`). Written at enqueue without `candidates`; rewritten with `candidates` before the job reaches `complete`. */
+        ExpressionCandidatesProgress: {
+            /** @enum {string} */
+            mode: "candidates";
+            expressions: string[];
+            /** Format: uuid */
+            reference_image_id?: string;
+            candidates?: components["schemas"]["ExpressionCandidate"][];
+        };
         PersonalityMediaJobResponse: {
             /** Format: uuid */
             job_id: string;
@@ -8305,6 +9020,11 @@ export interface components {
             personality_id?: string | null;
             personality_name?: string | null;
             flow_id?: string | null;
+            /**
+             * @description For `expression_grid` jobs only: `default` assigns the default 3×3 grid; `candidates` is an unassigned candidate run owned by the expressions Generate modal.
+             * @enum {string}
+             */
+            expression_mode?: "default" | "candidates";
             error?: string;
         };
         PersonalityMediaJobConflict: {
@@ -8393,8 +9113,11 @@ export interface components {
              * @enum {string}
              */
             status?: "active" | "inactive";
-            /** @enum {string} */
-            confidence?: "low" | "medium" | "high";
+            /**
+             * Format: float
+             * @description Stored confidence in [0,1]. Create/patch accept coarse buckets (low/medium/high) that map to anchors 0.3/0.6/0.9; other signals may refine the float over time.
+             */
+            confidence?: number;
             chain_metadata?: {
                 duplicate_count?: number;
                 verified_timestamps_first?: string[];
@@ -8430,6 +9153,30 @@ export interface components {
         MemoryBatchCreateResponse: {
             results: components["schemas"]["Memory"][];
             created_count: number;
+        };
+        MemoryBatchDeleteRequest: {
+            ids: string[];
+            /**
+             * @description When true, fail the whole delete if any id is missing (single transaction). When false, skip missing ids and return deleted_count for successes only; unexpected errors still fail the request.
+             * @default false
+             */
+            all_or_none: boolean;
+        };
+        MemoryBatchDeleteResponse: {
+            deleted_count: number;
+        };
+        MemoryBatchPatchRequest: {
+            ids: string[];
+            patch: components["schemas"]["MemoryPatchRequest"];
+            /**
+             * @description When true, stop on the first failure. Already-patched rows from earlier ids in the request are kept (per-id transactions). When false, skip missing ids; unexpected errors still fail the request.
+             * @default false
+             */
+            all_or_none: boolean;
+        };
+        MemoryBatchPatchResponse: {
+            results: components["schemas"]["Memory"][];
+            updated_count: number;
         };
         MemoryPatchRequest: {
             content?: string;
@@ -8703,6 +9450,8 @@ export interface components {
             results?: Record<string, never>[];
             total_count?: number;
             page?: number;
+            /** @description Opaque keyset token for continuing a cursor-paginated view past the last row in this response (absent when there is nothing more). Only the descending chat-message view sets it. */
+            next_cursor?: string;
         };
         /**
          * @example {

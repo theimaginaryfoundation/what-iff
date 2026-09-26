@@ -36,11 +36,21 @@ export function mediaJobBannerCopy(
   }
 
   const name = job.personality_name?.trim() || 'this personality';
-  if (
-    contextPersonalityId &&
-    job.personality_id &&
-    job.personality_id !== contextPersonalityId
-  ) {
+  const otherPersonality =
+    !!contextPersonalityId && !!job.personality_id && job.personality_id !== contextPersonalityId;
+
+  if (job.expression_mode === 'candidates') {
+    // On the personality's own page the Generate modal shows (and resumes) this run itself.
+    if (contextPersonalityId && !otherPersonality) {
+      return null;
+    }
+    return {
+      title: `Generating expressions for ${name}…`,
+      hint: otherPersonality ? `${hint} Only one image job can run at a time.` : hint,
+    };
+  }
+
+  if (otherPersonality) {
     return {
       title: `Generating expressions for ${name}`,
       hint: `${hint} Only one image job can run at a time.`,

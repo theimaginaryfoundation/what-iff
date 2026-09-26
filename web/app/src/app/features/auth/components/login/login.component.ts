@@ -4,6 +4,7 @@ import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angula
 import { Router, ActivatedRoute } from '@angular/router';
 import { AuthService } from '../../../../core/services/auth.service';
 import { UserLoginRequest } from '../../../../core/models/user.model';
+import { EyeIconComponent, EyeOffIconComponent } from '../../../../shared/ui/icons';
 
 /**
  * Local username/password sign-in against the built-in account store.
@@ -11,7 +12,7 @@ import { UserLoginRequest } from '../../../../core/models/user.model';
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [ReactiveFormsModule],
+  imports: [ReactiveFormsModule, EyeIconComponent, EyeOffIconComponent],
   templateUrl: './login.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./login.component.scss']
@@ -30,6 +31,12 @@ export class LoginComponent {
 
   isLoading = signal(false);
   errorMessage = signal<string | null>(null);
+  /** When true the password field renders as plain text; default stays masked. */
+  passwordVisible = signal(false);
+
+  togglePasswordVisibility(): void {
+    this.passwordVisible.update(visible => !visible);
+  }
 
   async onSubmit(): Promise<void> {
     if (!this.loginForm.valid) {

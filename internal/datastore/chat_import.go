@@ -10,6 +10,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
 	"github.com/theimaginaryfoundation/what-iff/ent/chatmessage"
+	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
 	entuser "github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -134,11 +135,17 @@ func (d *Datastore) persistImportedConversation(ctx context.Context, tx *ent.Tx,
 		}
 	}
 
-	// Dedup check: skip if this user already has a chat with the same import hash.
+	// Dedup check: skip if this user already has a chat that matches either the import hash (a
+	// prior import of the same source conversation) or, for account exports, the source chat's own
+	// id (a round-trip into the origin account, where the native chat has no import_hash to match).
+	dedup := []predicate.Chat{entchat.ImportHashEQ(conv.ImportHash)}
+	if conv.SourceID != nil {
+		dedup = append(dedup, entchat.ID(*conv.SourceID))
+	}
 	exists, err := tx.Chat.Query().
 		Where(
 			entchat.HasOwnerWith(entuser.ID(userID)),
-			entchat.ImportHashEQ(conv.ImportHash),
+			entchat.Or(dedup...),
 		).
 		Exist(ctx)
 	if err != nil {
@@ -175,16 +182,38 @@ func (d *Datastore) persistImportedConversation(ctx context.Context, tx *ent.Tx,
 		source = models.ChatSourceOpenAI
 	}
 
-	entChat, err := tx.Chat.Create().
+	create := tx.Chat.Create().
 		SetName(conv.Title).
 		SetOwnerID(userID).
-		SetArchived(true).
 		SetSource(source).
 		SetImportHash(conv.ImportHash).
-		SetIsAutoMood(true).
 		SetCreatedAt(conv.CreatedAt).
-		SetLastMessageTime(lastMsgTime).
-		Save(ctx)
+		SetLastMessageTime(lastMsgTime)
+	if conv.AccountExport {
+		create.SetArchived(!conv.RestoreReady).
+			SetIsAutoMood(conv.IsAutoMood).
+			SetIsFavorite(conv.IsFavorite)
+		if conv.RestoreReady {
+			create.SetRehydrationState(models.RehydrationStateReady)
+			create.SetCheckpointSummary(conv.CheckpointSummary)
+			create.SetCheckpointUserMessageCount(conv.CheckpointUserMessageCount)
+			if conv.LastCheckpointAt != nil {
+				create.SetLastCheckpointAt(*conv.LastCheckpointAt)
+			}
+		}
+		if conv.PersonalityID != nil {
+			create.SetPersonalityID(*conv.PersonalityID)
+		}
+		if conv.DisabledTools != nil {
+			create.SetDisabledTools(conv.DisabledTools)
+		}
+		if conv.Tags != nil {
+			create.SetTags(conv.Tags)
+		}
+	} else {
+		create.SetArchived(true).SetIsAutoMood(true)
+	}
+	entChat, err := create.Save(ctx)
 	if err != nil {
 		rollback()
 		// Only treat the specific import-hash uniqueness violation as a dedup race;

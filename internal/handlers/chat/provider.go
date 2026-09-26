@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -21,6 +22,7 @@ type Store interface {
 
 	// Related resources used by chat endpoints.
 	ListChatMessages(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
+	ListChatMessagesBefore(ctx context.Context, userID, chatID uuid.UUID, beforeSentAt time.Time, beforeID uuid.UUID, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
 	GetChatMessage(ctx context.Context, userID, messageID uuid.UUID) (*models.ChatMessage, error)
 	MarkChatMessagesRead(ctx context.Context, userID, chatID uuid.UUID) (int, error)
 	SetChatMessageBookmarked(ctx context.Context, userID, messageID uuid.UUID, bookmarked bool) (*models.ChatMessage, error)
@@ -37,6 +39,7 @@ type Store interface {
 	ListDefaultEnabledMCPServers(ctx context.Context, userID uuid.UUID) ([]*models.MCPServer, error)
 	ExportChat(ctx context.Context, userID, chatID uuid.UUID, w io.Writer) error
 	ImportChats(ctx context.Context, userID uuid.UUID, convs []models.ImportConversation, onProgress func(imported, skipped int)) (*models.ImportResult, error)
+	AuditChatImport(ctx context.Context, userID uuid.UUID, message string, metadata map[string]any)
 
 	// Background-job helpers for async conversation import.
 	CreateJob(ctx context.Context, userID uuid.UUID, jobModel models.Job) (*models.Job, error)
@@ -51,4 +54,5 @@ type Store interface {
 	GetUserByID(ctx context.Context, userID uuid.UUID) (*models.UserResponse, error)
 
 	FindLatestActiveChatMessageJob(ctx context.Context, userID, userMessageID uuid.UUID) (*models.Job, error)
+	FindLatestActiveChatJob(ctx context.Context, userID, chatID uuid.UUID) (*models.Job, error)
 }

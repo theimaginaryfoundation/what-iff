@@ -37,6 +37,28 @@ describe('image-source.helpers', () => {
         expect(sourceForImage(image)).toBe('reference');
     });
 
+    describe('server-provided source (#141)', () => {
+        it('treats a user chat upload as imported despite chat_message_id', () => {
+            const image = makeAttachment({ chat_message_id: 'msg-1', source: 'imported' });
+            expect(sourceForImage(image)).toBe('uploaded');
+        });
+
+        it('treats a global gallery import (no personality, no chat) as imported', () => {
+            const image = makeAttachment({ source: 'imported' });
+            expect(sourceForImage(image)).toBe('uploaded');
+        });
+
+        it('treats an unlinked generated portrait as generated', () => {
+            const image = makeAttachment({ name: 'personality-portrait.png', source: 'generated' });
+            expect(sourceForImage(image)).toBe('generated');
+        });
+
+        it('falls back to heuristics when source is absent', () => {
+            expect(sourceForImage(makeAttachment({ chat_message_id: 'msg-1' }))).toBe('generated');
+            expect(sourceForImage(makeAttachment({}))).toBe('unknown');
+        });
+    });
+
     it('formats source labels', () => {
         expect(formatSource('generated')).toBe('Generated');
         expect(formatSource('unknown')).toBe('Unknown');

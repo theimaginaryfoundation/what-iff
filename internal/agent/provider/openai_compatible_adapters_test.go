@@ -362,3 +362,48 @@ func TestDefaultBaseURLFallbacks(t *testing.T) {
 	require.NotNil(t, NewXiaomiProvider("k", "", nil, nil))
 	require.NotNil(t, NewLocalProvider("", nil, nil))
 }
+
+// Regression for #143: when the model context keeps a user image (vision-capable
+// MiMo), the Xiaomi adapter must put it on the wire as an OpenAI-style multimodal
+// content array — a text part plus an image_url part carrying a base64 data URI.
+func TestXiaomiAdapter_SendsUserImageAsImageURLPart(t *testing.T) {
+	srv, requestBody := sequencedJSONServer(t, []string{chatCompletionTextJSON("cmpl-img", "a cat")})
+	defer srv.Close()
+
+	mc := &ModelContext{}
+	mc.AppendUserMessage(RoleUser, "what is this?", []UserMessageImage{
+		{RawBytes: []byte{0x89, 0x50, 0x4e, 0x47}, MediaType: "image/png"},
+	}, false)
+	params := mc.BuildOpenAIChatCompletionParams("mimo-v2.6-pro")
+
+	a := NewXiaomiAdapter(NewXiaomiProvider("test-key", srv.URL, nil, nil), params, nil, nil)
+	resp, _, err := a.Call(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "a cat", resp.Text)
+
+	msgs := decodeRequestMessages(t, requestBody(0))
+	var userContent []interface{}
+	for _, m := range msgs {
+		if m["role"] == "user" {
+			if c, ok := m["content"].([]interface{}); ok {
+				userContent = c
+			}
+		}
+	}
+	require.NotEmpty(t, userContent, "user message must be a multimodal content array")
+
+	var sawText, sawImage bool
+	for _, raw := range userContent {
+		part := raw.(map[string]interface{})
+		switch part["type"] {
+		case "text":
+			sawText = sawText || part["text"] == "what is this?"
+		case "image_url":
+			img := part["image_url"].(map[string]interface{})
+			require.Equal(t, "data:image/png;base64,iVBORw==", img["url"])
+			sawImage = true
+		}
+	}
+	require.True(t, sawText, "text part missing")
+	require.True(t, sawImage, "image_url part missing")
+}

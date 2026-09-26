@@ -13,6 +13,7 @@ import (
 
 type PersonalityAgent interface {
 	EnqueueExpressionGridJob(ctx context.Context, userID, personalityID uuid.UUID) (*models.Job, error)
+	EnqueueExpressionCandidatesJob(ctx context.Context, userID, personalityID uuid.UUID, keys []string, referenceImageID *uuid.UUID) (*models.Job, error)
 	EnqueuePersonalityPortraitJob(ctx context.Context, userID, flowID uuid.UUID, systemPrompt, imageStyle string) (*models.Job, error)
 	EnqueuePersonalityGenerationJob(ctx context.Context, userID, flowID uuid.UUID) (*models.Job, error)
 }
@@ -59,6 +60,7 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	personalityRouter.HandleFunc("/{id}/file-attachment", h.CreateFileAttachment).Methods("POST")
 	personalityRouter.HandleFunc("/{id}/expressions", h.ListExpressions).Methods("GET")
 	personalityRouter.HandleFunc("/{id}/expressions/generate-default-grid", h.GenerateDefaultExpressionGrid).Methods("POST")
+	personalityRouter.HandleFunc("/{id}/expressions/generate-candidates", h.GenerateExpressionCandidates).Methods("POST")
 	personalityRouter.HandleFunc("/{id}/expressions/{expression_key}", h.UpsertExpression).Methods("PUT")
 	personalityRouter.HandleFunc("/{id}/expressions/{expression_key}", h.DeleteExpression).Methods("DELETE")
 	personalityRouter.HandleFunc("/{id}/prompt-changes", h.ListPersonalityPromptChanges).Methods("GET")

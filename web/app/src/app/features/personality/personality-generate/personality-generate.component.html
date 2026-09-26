@@ -266,7 +266,7 @@
               <button (click)="finishAndGenerate()"
                       [disabled]="isSaving()"
                       class="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
-                Skip to Generate
+                Generate now
                 <svg class="ml-2 -mr-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
                 </svg>
@@ -390,6 +390,7 @@
                   </svg>
                   Previous
                 </button>
+                @if (hasProgress()) {
                 <button (click)="resetDraft()"
                         [disabled]="isSaving() || isResetting()"
                         class="inline-flex items-center px-4 py-2 border border-amber-300 dark:border-amber-700 shadow-sm text-sm font-medium rounded-md text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 disabled:opacity-50 disabled:cursor-not-allowed">
@@ -399,6 +400,7 @@
                     Start Over
                   }
                 </button>
+                }
               </div>
 
               <div class="flex items-center gap-2">
@@ -420,7 +422,7 @@
                     <button (click)="finishAndGenerate()"
                             [disabled]="isSaving()"
                             class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed">
-                      Skip to Generate
+                      Generate now
                       <svg class="ml-2 -mr-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
                       </svg>

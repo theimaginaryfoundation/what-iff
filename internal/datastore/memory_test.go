@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -177,12 +178,22 @@ func TestValidateLevelInput(t *testing.T) {
 	require.NoError(t, validateLevelInput(global))
 
 	chatID := uuid.New()
+	globalWithSourceChat := models.CreateMemoryInput{Content: "x", Level: models.MemoryLevelGlobal, ChatID: &chatID}
+	require.NoError(t, validateLevelInput(globalWithSourceChat))
+
 	thread := models.CreateMemoryInput{Content: "x", Level: models.MemoryLevelThread, ChatID: &chatID}
 	require.NoError(t, validateLevelInput(thread))
 
 	pinned := uuid.New()
 	personality := models.CreateMemoryInput{Content: "x", Level: models.MemoryLevelPersonality, PinnedPersonalityID: &pinned}
 	require.NoError(t, validateLevelInput(personality))
+	personalityWithSourceChat := models.CreateMemoryInput{
+		Content:             "x",
+		Level:               models.MemoryLevelPersonality,
+		ChatID:              &chatID,
+		PinnedPersonalityID: &pinned,
+	}
+	require.NoError(t, validateLevelInput(personalityWithSourceChat))
 
 	invalidThread := models.CreateMemoryInput{Content: "x", Level: models.MemoryLevelThread}
 	require.Error(t, validateLevelInput(invalidThread))
@@ -603,9 +614,10 @@ func TestParseMemoryImportFile_UserRecords(t *testing.T) {
 	}
 	zf := buildZipFileForTest(t, "user.json", strings.Join(lines, "\n"))
 
-	candidates, invalidCount, err := parseMemoryImportFile(zf)
+	candidates, invalidCount, invalidReasons, err := parseMemoryImportFile(zf, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, invalidCount)
+	require.Equal(t, 1, invalidReasons.MissingID)
 	require.Len(t, candidates, 1)
 	require.Equal(t, memID, candidates[0].record.ID)
 	require.Equal(t, entmemory.ScopeUser, candidates[0].scope)
@@ -622,9 +634,10 @@ func TestParseMemoryImportFile_MalformedJSONCountsInvalidRecord(t *testing.T) {
 	}
 	zf := buildZipFileForTest(t, "user.json", strings.Join(lines, "\n"))
 
-	candidates, invalidCount, err := parseMemoryImportFile(zf)
+	candidates, invalidCount, invalidReasons, err := parseMemoryImportFile(zf, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, invalidCount)
+	require.Equal(t, 1, invalidReasons.MalformedJSON)
 	require.Len(t, candidates, 1)
 	require.Equal(t, memID, candidates[0].record.ID)
 }
@@ -637,9 +650,10 @@ func TestParseMemoryImportFile_ChatRequiresChatID(t *testing.T) {
 	}
 	zf := buildZipFileForTest(t, "chat.json", strings.Join(lines, "\n"))
 
-	candidates, invalidCount, err := parseMemoryImportFile(zf)
+	candidates, invalidCount, invalidReasons, err := parseMemoryImportFile(zf, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, invalidCount)
+	require.Equal(t, 1, invalidReasons.MissingChatID)
 	require.Empty(t, candidates)
 }
 
@@ -652,9 +666,10 @@ func TestParseMemoryImportFile_PersonalityScoped(t *testing.T) {
 	}
 	zf := buildZipFileForTest(t, "personality-"+personalityID.String()+".json", strings.Join(lines, "\n"))
 
-	candidates, invalidCount, err := parseMemoryImportFile(zf)
+	candidates, invalidCount, invalidReasons, err := parseMemoryImportFile(zf, nil)
 	require.NoError(t, err)
 	require.Zero(t, invalidCount)
+	require.Equal(t, models.MemoryImportInvalidReasons{}, invalidReasons)
 	require.Len(t, candidates, 1)
 	require.Equal(t, entmemory.ScopeUser, candidates[0].scope)
 	require.NotNil(t, candidates[0].pinnedPersonalityID)
@@ -699,6 +714,25 @@ func TestBuildImportEmbeddingsChunkReturnsFirstEmbeddingError(t *testing.T) {
 	require.Nil(t, prepared)
 	require.ErrorIs(t, err, embedErr)
 	require.ErrorContains(t, err, badID.String())
+}
+
+func TestBuildImportEmbeddingsBatchPreservesOrder(t *testing.T) {
+	chunk := []memoryImportCandidate{
+		{record: models.MemoryRecord{ID: uuid.New(), Content: "one"}},
+		{record: models.MemoryRecord{ID: uuid.New(), Content: "two"}},
+	}
+
+	prepared, err := buildImportEmbeddingsBatch(context.Background(), chunk, func(_ context.Context, inputs []string) ([][]float32, error) {
+		require.Equal(t, []string{"one", "two"}, inputs)
+		return [][]float32{{1}, {2}}, nil
+	})
+
+	require.NoError(t, err)
+	require.Len(t, prepared, len(chunk))
+	require.Equal(t, chunk[0], prepared[0].candidate)
+	require.Equal(t, []float32{1}, prepared[0].embedding)
+	require.Equal(t, chunk[1], prepared[1].candidate)
+	require.Equal(t, []float32{2}, prepared[1].embedding)
 }
 
 func TestImportMemoriesPersistsValidRecordsAndCountsSkips(t *testing.T) {
@@ -767,9 +801,13 @@ func TestImportMemoriesPersistsValidRecordsAndCountsSkips(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, models.MemoryImportResult{
-		ImportedCount:             3,
-		DuplicateCount:            1,
-		InvalidRecordCount:        2,
+		ImportedCount:      3,
+		DuplicateCount:     1,
+		InvalidRecordCount: 2,
+		InvalidReasons: models.MemoryImportInvalidReasons{
+			MalformedJSON: 1,
+			EmptyContent:  1,
+		},
 		SkippedMissingChat:        1,
 		SkippedMissingPersonality: 1,
 	}, result)
@@ -843,6 +881,62 @@ func TestImportMemoriesSkipsExistingIDsAndContinues(t *testing.T) {
 	require.True(t, exists)
 }
 
+func TestImportMemoriesWithBatchEmbeddingsUsesBoundedBatchesAndBulkPersistence(t *testing.T) {
+	ds, cleanup := newSQLiteDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := uuid.New()
+	_, err := ds.dbClient.User.Create().
+		SetID(userID).
+		SetUsername("memory-import-batch").
+		SetEmail("memory-import-batch@example.com").
+		SetPasswordHash("hash").
+		Save(ctx)
+	require.NoError(t, err)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	records := make([]string, memoryImportBatchSize+1)
+	for i := range records {
+		records[i] = memoryRecordJSON(t, models.MemoryRecord{
+			ID:        uuid.New(),
+			Content:   fmt.Sprintf("memory %d", i),
+			CreatedAt: now.Add(time.Duration(i) * time.Second),
+		})
+	}
+	zr := buildZipReaderForTest(t, map[string]string{
+		"user.json": strings.Join(records, "\n"),
+	})
+
+	batchCalls := 0
+	result, err := ds.ImportMemoriesWithBatchEmbeddings(ctx, userID, zr,
+		func(context.Context, string) ([]float32, error) {
+			t.Fatal("single embedding fallback should not be called when a batch generator is provided")
+			return nil, nil
+		},
+		func(_ context.Context, inputs []string) ([][]float32, error) {
+			batchCalls++
+			require.LessOrEqual(t, len(inputs), memoryImportBatchSize)
+			embeddings := make([][]float32, len(inputs))
+			for i := range inputs {
+				embeddings[i] = []float32{float32(i), 1, 2}
+			}
+			return embeddings, nil
+		},
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, 2, batchCalls)
+	require.Equal(t, len(records), result.ImportedCount)
+	require.Zero(t, result.DuplicateCount)
+	memoryCount, err := ds.dbClient.Memory.Query().Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, len(records), memoryCount)
+	embeddingCount, err := ds.dbClient.Embedding.Query().Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, len(records), embeddingCount)
+}
+
 func newSQLiteDatastore(t *testing.T) (*Datastore, func()) {
 	t.Helper()
 	return newTestDatastore(t, createMemoryImportTestSchema)
@@ -868,7 +962,11 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 			last_login datetime,
 			last_seen datetime,
 			terms_accepted_at datetime,
-			refresh_token_id text
+			refresh_token_id text,
+			-- Private-overlay user fields (user_ext.go): the composed private build
+			-- runs these tests against its own User schema, so its extra columns
+			-- must exist here too, like cognito_sub above.
+			release_notes_seen_at datetime
 		)`,
 		`CREATE TABLE chats (
 			id uuid PRIMARY KEY,
@@ -930,7 +1028,6 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 			embedding text NOT NULL,
 			embedding_memory uuid NOT NULL
 		)`,
-		`CREATE UNIQUE INDEX embeddings_embedding_memory_key ON embeddings (embedding_memory)`,
 	}
 	for _, stmt := range statements {
 		_, err := db.Exec(stmt)

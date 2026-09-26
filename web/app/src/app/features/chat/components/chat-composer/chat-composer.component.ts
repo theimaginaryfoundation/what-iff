@@ -24,6 +24,7 @@ import { EmojiEvent } from '@ctrl/ngx-emoji-mart/ngx-emoji';
 import {
   FileAttachment,
   PendingFileAttachment,
+  isPendingImageAttachment,
   pendingAttachmentKey,
 } from '../../../../core/models/file-attachment.model';
 import { Chat } from '../../../../core/models/chat.model';
@@ -59,7 +60,8 @@ import { ModelPickerComponent } from '../model-picker/model-picker.component';
 import { THREAD_DRAG_MIME, isThreadDrag } from '../../helpers/thread-drag.helpers';
 import { EmojiAutocompleteMenuComponent } from '../emoji-autocomplete-menu/emoji-autocomplete-menu.component';
 import { SlashMenuComponent } from '../slash-menu/slash-menu.component';
-import { BoltIconComponent, FileIconComponent, ImageIconComponent, PlusIconComponent } from '../../../../shared/ui/icons/icons';
+import { BoltIconComponent, EyeOffIconComponent, FileIconComponent, ImageIconComponent, PlusIconComponent } from '../../../../shared/ui/icons/icons';
+import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 import { ModalComponent } from '../../../../shared/ui/modal/modal.component';
 import {
   TEXT_LIMIT_HARD_MAX,
@@ -98,8 +100,10 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
     BoltIconComponent,
     FileIconComponent,
     ImageIconComponent,
+    EyeOffIconComponent,
     PlusIconComponent,
     ModalComponent,
+    TooltipDirective,
   ],
   template: `
     <form class="composer" (submit)="onSubmit($event)" (drop)="onDrop($event)" (dragover)="onDragOver($event)" (dragleave)="onDragLeave()" [class.composer--thread-drop]="isThreadDragOver()">
@@ -187,7 +191,18 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
       @if (attachments().length) {
         <div class="composer__attachments" aria-label="Pending attachments">
           @for (attachment of attachments(); track pendingAttachmentKey(attachment)) {
-            <span class="composer__attachment" [class.composer__attachment--error]="attachment.uploadError">
+            @let notSeen = selectedModelLacksVision() && isPendingImageAttachment(attachment);
+            <span
+              class="composer__attachment"
+              [class.composer__attachment--error]="attachment.uploadError"
+              [class.composer__attachment--no-vision]="notSeen"
+              [uiTooltip]="notSeen ? noVisionTooltip : ''"
+              [disabledOnTouch]="false"
+              [attr.tabindex]="notSeen ? 0 : null"
+            >
+              @if (notSeen) {
+                <ui-eye-off-icon class="composer__attachment-no-vision-icon" [size]="12" aria-hidden="true" />
+              }
               <span class="composer__attachment-name">{{ attachment.attachment?.name ?? attachment.file?.name }}</span>
               @if (attachment.isUploading) {
                 <small>uploading</small>
@@ -1096,6 +1111,25 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
       font-size: 0.625rem;
     }
 
+    /* An image the selected model can't see: still attached (and saved), just not sent. */
+    .composer__attachment--no-vision {
+      background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+      border-color: color-mix(in srgb, var(--color-warning) 55%, transparent);
+      color: var(--color-text-primary);
+      cursor: help;
+    }
+
+    .composer__attachment--no-vision:focus-visible {
+      outline: 2px solid var(--color-warning);
+      outline-offset: 2px;
+    }
+
+    .composer__attachment-no-vision-icon {
+      color: var(--color-warning);
+      display: inline-flex;
+      flex-shrink: 0;
+    }
+
     .composer__attachment--error {
       border-color: var(--color-danger);
     }
@@ -1759,6 +1793,12 @@ export class ChatComposerComponent {
   readonly hardLimitLabel = TEXT_LIMIT_HARD_MAX.toLocaleString();
   readonly warningLimitLabel = TEXT_LIMIT_WARNING_THRESHOLD.toLocaleString();
   readonly hasUploadingAttachments = computed(() => this.attachments().some(attachment => attachment.isUploading));
+  readonly noVisionTooltip = "This model can't see images. They'll still be saved to your gallery and chat history, where later agents can find them — they just won't be sent to this model.";
+  /** True when the selected model is known to be text-only; its image chips then show the no-vision style. */
+  readonly selectedModelLacksVision = computed(
+    () => this.models().find(m => m.id === this.selectedModelId())?.vision_support === false,
+  );
+  readonly isPendingImageAttachment = isPendingImageAttachment;
   readonly composerDisabled = computed(() => this.disabled() || this.threadArchived());
   readonly characterCount = computed(() => this.draft().length);
   readonly characterCountLabel = computed(() => this.characterCount().toLocaleString());

@@ -250,15 +250,14 @@ func (m *ModelContext) StripUserMessageImages() {
 	m.Segments = m.Segments[:write]
 }
 
-// PrepareForTextOnlyChatCompletions strips multimodal payloads for OpenAI-compatible Chat
-// Completions providers without vision (DeepSeek, MiMo; non-vision Qwen/Mistral ids).
-// Gemini uses a separate call path; vision-capable Qwen/Mistral models skip this helper.
+// PrepareForTextOnly strips multimodal payloads for models without vision support
+// (models.Model.VisionSupport false), on any provider path.
 //
 // Invariants after preparation:
 //   - SegmentKindExpressionPortrait segments are removed entirely.
 //   - Image payloads are cleared on all remaining segments.
-//   - Image-only SegmentKindUserMessage turns become TextOnlyChatCompletionsImageFallback.
-func (m *ModelContext) PrepareForTextOnlyChatCompletions() {
+//   - Image-only SegmentKindUserMessage turns become TextOnlyImageFallback.
+func (m *ModelContext) PrepareForTextOnly() {
 	if m == nil {
 		return
 	}
@@ -271,7 +270,7 @@ func (m *ModelContext) PrepareForTextOnlyChatCompletions() {
 		if len(seg.UserImages) > 0 {
 			seg.UserImages = nil
 			if seg.Kind == SegmentKindUserMessage && strings.TrimSpace(seg.Content) == "" {
-				seg.Content = TextOnlyChatCompletionsImageFallback
+				seg.Content = TextOnlyImageFallback
 			}
 		}
 		m.Segments[write] = seg

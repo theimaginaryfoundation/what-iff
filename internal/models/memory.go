@@ -148,6 +148,36 @@ type BatchCreateMemoryInput struct {
 	AllOrNone bool                `json:"all_or_none"`
 }
 
+// MaxMemoryBatchIDs bounds one bulk memory operation to prevent pathological
+// transaction/request fan-out. It matches the Memory Manager's 100-item page;
+// keep it in sync with MemoryBatch{Delete,Patch}Request.ids.maxItems in
+// openapi.yaml.
+const MaxMemoryBatchIDs = 100
+
+// BatchDeleteMemoryInput deletes multiple memories owned by the caller.
+type BatchDeleteMemoryInput struct {
+	IDs       []uuid.UUID `json:"ids"`
+	AllOrNone bool        `json:"all_or_none"`
+}
+
+// BatchDeleteMemoryResult reports how many memories were deleted.
+type BatchDeleteMemoryResult struct {
+	DeletedCount int `json:"deleted_count"`
+}
+
+// BatchPatchMemoryInput applies the same patch to multiple memories.
+type BatchPatchMemoryInput struct {
+	IDs       []uuid.UUID `json:"ids"`
+	Patch     MemoryPatch `json:"patch"`
+	AllOrNone bool        `json:"all_or_none"`
+}
+
+// BatchPatchMemoryResult reports the patched memories.
+type BatchPatchMemoryResult struct {
+	Results      []*Memory `json:"results"`
+	UpdatedCount int       `json:"updated_count"`
+}
+
 type MemoryPatch struct {
 	Content                *string           `json:"content,omitempty"`
 	Level                  *MemoryLevel      `json:"level,omitempty"`
@@ -181,9 +211,20 @@ type MemoryRecord struct {
 
 // MemoryImportResult reports import execution stats for a ZIP upload.
 type MemoryImportResult struct {
-	ImportedCount             int `json:"imported_count"`
-	DuplicateCount            int `json:"duplicate_count"`
-	InvalidRecordCount        int `json:"invalid_record_count"`
-	SkippedMissingChat        int `json:"skipped_missing_chat_count"`
-	SkippedMissingPersonality int `json:"skipped_missing_personality_count"`
+	ImportedCount             int                        `json:"imported_count"`
+	DuplicateCount            int                        `json:"duplicate_count"`
+	InvalidRecordCount        int                        `json:"invalid_record_count"`
+	InvalidReasons            MemoryImportInvalidReasons `json:"invalid_reasons"`
+	SkippedMissingChat        int                        `json:"skipped_missing_chat_count"`
+	SkippedMissingPersonality int                        `json:"skipped_missing_personality_count"`
+}
+
+// MemoryImportInvalidReasons classifies records counted by MemoryImportResult.InvalidRecordCount.
+// It deliberately omits memory content so import progress remains safe to display and audit.
+type MemoryImportInvalidReasons struct {
+	MalformedJSON    int `json:"malformed_json"`
+	MissingID        int `json:"missing_id"`
+	EmptyContent     int `json:"empty_content"`
+	MissingCreatedAt int `json:"missing_created_at"`
+	MissingChatID    int `json:"missing_chat_id"`
 }

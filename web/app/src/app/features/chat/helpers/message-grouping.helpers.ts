@@ -1,5 +1,6 @@
 import { ChatMessage } from '../../../core/models/message.model';
-import { ToolCall } from '../../../core/models/toolcall.model';
+import { ChatTurnToolCall } from '../../../core/models/job.model';
+import { ToolCall, ToolCallView } from '../../../core/models/toolcall.model';
 
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../chat.constants';
 
@@ -20,7 +21,9 @@ export interface MessageGroupItem {
 export interface ToolCallGroupItem {
   readonly kind: 'tool-call-group';
   readonly message: ChatMessage;
-  readonly toolCalls: readonly ToolCall[];
+  readonly toolCalls: readonly ToolCallView[];
+  /** The in-flight turn's timeline (shown expanded, rows carry a status) rather than saved calls. */
+  readonly live?: boolean;
 }
 
 export interface ModelChangeDividerItem {
@@ -133,6 +136,8 @@ const CHAT_PENDING_ASSISTANT_PLACEHOLDER_SENT_AT = '1970-01-01T00:00:00.000Z';
 export function pendingAssistantPlaceholderMessage(opts: {
   chatId: string;
   draftText: string;
+  /** Live model reasoning streamed so far (GLM, MiMo); empty when none. */
+  draftReasoning?: string;
   generationPersonality: string;
   thinkingImageUrl: string | null;
 }): ChatMessage {
@@ -140,6 +145,7 @@ export function pendingAssistantPlaceholderMessage(opts: {
     id: CHAT_PENDING_ASSISTANT_MESSAGE_ID,
     chat_id: opts.chatId,
     message: opts.draftText,
+    model_reasoning: opts.draftReasoning || undefined,
     origin: 'Assistant',
     sent_at: CHAT_PENDING_ASSISTANT_PLACEHOLDER_SENT_AT,
     generation_personality: opts.generationPersonality,
@@ -180,6 +186,42 @@ export function appendPendingAssistantGroup(groups: readonly GroupedItem[], pend
     messages: [pendingMessage],
   };
   return [...groups, item];
+}
+
+/**
+ * The in-flight turn's tool timeline as a tool-call group, placed where the saved calls will land
+ * once the reply is persisted (just before the reply), so the list doesn't jump on completion.
+ */
+export function appendLiveToolCallGroup(
+  groups: readonly GroupedItem[],
+  pendingMessage: ChatMessage,
+  liveCalls: readonly ChatTurnToolCall[],
+): GroupedItem[] {
+  if (liveCalls.length === 0) return [...groups];
+  const item: ToolCallGroupItem = {
+    kind: 'tool-call-group',
+    message: pendingMessage,
+    toolCalls: liveCalls.map((call, index) => liveToolCallView(call, index, pendingMessage.id)),
+    live: true,
+  };
+  return [...groups, item];
+}
+
+function liveToolCallView(call: ChatTurnToolCall, index: number, messageId: string): ToolCallView {
+  const output = call.output ?? '';
+  return {
+    // Position keeps the id unique even if a provider repeats or omits tool-call ids; entries are
+    // only ever appended, so a call keeps its position (and its DOM row) as it updates.
+    id: `live-${index}-${call.id}`,
+    chat_message_id: messageId,
+    tool_name: call.name,
+    tool_input: call.input ?? '',
+    tool_output: call.status === 'complete' ? output : '',
+    tool_error: call.status === 'error' ? output : '',
+    created_at: call.started_at,
+    updated_at: call.finished_at ?? call.started_at,
+    status: call.status,
+  };
 }
 
 /**
