@@ -274,15 +274,17 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                           [class.composer__skill-row--selected]="isAutoMood()"
                           [disabled]="disabled()"
                           [attr.aria-selected]="isAutoMood()"
+                          aria-label="Auto"
+                          aria-describedby="composer-auto-mode-desc"
                           (click)="pickAutoMode()"
                         >
                           <span class="composer__skill-row-main">
                             <span class="composer__skill-name">Auto</span>
                             <!-- Auto lets the model pick and switch the mode; choosing one below locks it. -->
                             @if (isAutoMood() && activeMode(); as current) {
-                              <span class="composer__skill-subtitle">Your personality picks the mode · now {{ current.name }}</span>
+                              <span id="composer-auto-mode-desc" class="composer__skill-subtitle">Your personality picks the mode · now {{ current.name }}</span>
                             } @else {
-                              <span class="composer__skill-subtitle">Your personality picks and switches the mode itself</span>
+                              <span id="composer-auto-mode-desc" class="composer__skill-subtitle">Your personality picks and switches the mode itself</span>
                             }
                           </span>
                         </button>

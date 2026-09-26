@@ -199,7 +199,7 @@ test('enables and disables a tool for the conversation', async ({ chatPage, seed
   await chatPage.openContextPanel();
   await chatPage.selectContextTab('Tools');
 
-  const webSearchToggle = chatPage.contextPanel.getByRole('checkbox', { name: /^web_search/ });
+  const webSearchToggle = chatPage.contextPanel.getByRole('checkbox', { name: /^Web Search/ });
   await expect(webSearchToggle).toBeChecked();
 
   await webSearchToggle.uncheck();
