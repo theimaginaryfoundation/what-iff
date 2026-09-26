@@ -8710,6 +8710,11 @@ export interface components {
         WebhookChatMessageRequest: {
             mode: components["schemas"]["WebhookMessageMode"];
             message: string;
+            /**
+             * Format: uuid
+             * @description Optional model ID used as a per-run override for background mode. Does not change the chat's saved model.
+             */
+            model_id?: string;
             response_id?: string;
             /** @description IANA timezone name from the caller. */
             client_timezone?: string;
