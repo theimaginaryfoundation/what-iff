@@ -126,28 +126,25 @@ export class AppShell {
     const target = navSections[section];
     await this.prepareSidebar();
 
-    // Switch modes by probing for the *switcher*, not for the target tab: the
-    // switcher into a mode only exists while in the other one, so this can't
-    // misfire the way a "is the tab there yet?" probe can while the sidebar is
-    // still rendering.
-    const switcher =
+    // The switcher into a mode only exists while in the other one. Wait until
+    // the sidebar shows either the target tab or that switcher, then switch
+    // only if the tab isn't there. A bare isVisible() probe here doesn't wait,
+    // so it misfires while the sidebar is still rendering.
+    const switcher = (
       target.mode === 'config'
         ? this.page.getByRole('button', {
             name: /Switch to configuration mode|^Configuration$/,
           })
         : this.page.getByRole('button', {
             name: /Switch to app mode|^Exit config$/,
-          });
-    if (
-      await switcher
-        .first()
-        .isVisible()
-        .catch(() => false)
-    ) {
-      await switcher.first().click();
+          })
+    ).first();
+    const tab = this.navTab(section);
+    await tab.or(switcher).first().waitFor({ state: 'visible' });
+    if (!(await tab.isVisible())) {
+      await switcher.click();
     }
 
-    const tab = this.navTab(section);
     await tab.waitFor({ state: 'visible' });
     await tab.click();
     await this.page.waitForURL(new RegExp(`${target.route}(/|\\?|$)`));

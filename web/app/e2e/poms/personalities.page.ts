@@ -40,7 +40,9 @@ export class PersonalitiesPage {
   }
 
   async openCreateManually(): Promise<void> {
-    await this.page.getByRole('button', { name: 'Create Manually' }).first().click();
+    // The page header and the sidebar both have this button; on mobile the sidebar's copy is
+    // off-canvas, so pick whichever is visible rather than the first in DOM order.
+    await this.page.getByRole('button', { name: 'Create Manually' }).filter({ visible: true }).first().click();
   }
 
   /**
