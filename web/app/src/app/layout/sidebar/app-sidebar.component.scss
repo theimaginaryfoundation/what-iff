@@ -467,10 +467,14 @@
   cursor: pointer;
 }
 
-.app-sidebar__pinned-thread {
-  -webkit-touch-callout: none;
-  -webkit-user-select: none;
-  user-select: none;
+/* Touch only: long-press selects threads, so suppress the text-selection/callout menu there.
+   Desktop keeps normal text selection. */
+@media (hover: none), (pointer: coarse) {
+  .app-sidebar__pinned-thread {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }
 
 .app-sidebar__pinned-thread--ref-selected {

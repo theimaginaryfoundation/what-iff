@@ -1,4 +1,4 @@
-import { AsyncPipe, NgComponentOutlet } from '@angular/common';
+import { AsyncPipe, DOCUMENT, NgComponentOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, output, signal } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { Subscription } from 'rxjs';
@@ -13,6 +13,7 @@ import { PersonalityService } from '../../core/services/personality.service';
 import { ThreadListService } from '../../core/services/thread-list.service';
 import { pickSidebarRecentThreads } from '../../features/chat/helpers/thread-list.helpers';
 import { startThreadDrag } from '../../features/chat/helpers/thread-drag.helpers';
+import { threadReferenceCountLabel } from '../../features/chat/helpers/thread-reference.helpers';
 import { ContextPanelService } from '../../features/chat/services/context-panel.service';
 import { GalleryViewService } from '../../core/services/gallery-view.service';
 import { MemoryViewService } from '../../core/services/memory-view.service';
@@ -44,6 +45,14 @@ const SIDEBAR_THREAD_AVATAR_SIZE = 30;
 const SIDEBAR_LONG_PRESS_MS = 500;
 /** Finger travel that turns a press into a scroll and cancels the long-press. */
 const SIDEBAR_LONG_PRESS_SLOP_PX = 10;
+/**
+ * After a long-press fires, the browser may or may not deliver a trailing click (it usually
+ * doesn't once the finger moved or a context menu was suppressed). Only swallow a click that
+ * arrives within this window so a stale flag can't eat the user's next real tap.
+ */
+const SIDEBAR_LONG_PRESS_CLICK_WINDOW_MS = 700;
+/** Matches AppLayoutComponent's mobile-nav breakpoint (desktop starts at 1024px). */
+const SIDEBAR_MOBILE_QUERY = '(max-width: 1023px)';
 
 /**
  * Concept-D dual-sidebar shell. Composes the header, the active nav list, the
@@ -89,6 +98,7 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
   private readonly router = inject(Router);
   private readonly confirmationService = inject(ConfirmationService);
   private readonly contextPanel = inject(ContextPanelService);
+  private readonly document = inject(DOCUMENT);
   private readonly subscriptions = new Subscription();
   /** Thread to return to when the Chat button closes the Thread Manager (set when it opens it). */
   private threadManagerReturnId: string | null = null;
@@ -96,14 +106,12 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
   /** Mobile multi-select: long-press a thread, tap others to attach them to the next message. */
   readonly refSelectionMode = signal(false);
   readonly composerRefs = this.contextPanel.composerThreadReferences;
-  readonly refSelectionLabel = computed(() => {
-    const count = this.composerRefs().length;
-    return count === 1 ? '1 thread added' : `${count} threads added`;
-  });
+  readonly refSelectionLabel = computed(() => threadReferenceCountLabel(this.composerRefs().length));
   private refSelectionSnapshot: readonly Chat[] = [];
   private longPressTimer: ReturnType<typeof setTimeout> | null = null;
   private longPressOrigin: { x: number; y: number } | null = null;
   private suppressNextClick = false;
+  private suppressClickTimer: ReturnType<typeof setTimeout> | null = null;
   private lastPointerType = 'mouse';
 
   /** Closing the drawer while selecting keeps what was picked (same as Confirm). */
@@ -407,6 +415,8 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.subscriptions.unsubscribe();
+    this.cancelLongPress();
+    this.clearSuppressedClick();
   }
 
   toggleMode(): void {
@@ -487,13 +497,15 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
   onThreadPointerDown(event: PointerEvent, thread: Chat): void {
     this.lastPointerType = event.pointerType || 'mouse';
     this.cancelLongPress();
+    // A new press starts fresh: whatever the previous long-press left behind no longer applies.
+    this.clearSuppressedClick();
     if (this.lastPointerType === 'mouse' || thread.id === this.threads.activeThreadId()) {
       return;
     }
     this.longPressOrigin = { x: event.clientX, y: event.clientY };
     this.longPressTimer = setTimeout(() => {
       this.longPressTimer = null;
-      this.suppressNextClick = true;
+      this.suppressTrailingClick();
       this.activateRefSelection(thread);
     }, SIDEBAR_LONG_PRESS_MS);
   }
@@ -514,6 +526,29 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
     this.longPressOrigin = null;
   }
 
+  /** pointercancel: the gesture became a scroll/system gesture, so no click will follow. */
+  onThreadPointerCancel(): void {
+    this.cancelLongPress();
+    this.clearSuppressedClick();
+  }
+
+  private suppressTrailingClick(): void {
+    this.clearSuppressedClick();
+    this.suppressNextClick = true;
+    this.suppressClickTimer = setTimeout(() => {
+      this.suppressNextClick = false;
+      this.suppressClickTimer = null;
+    }, SIDEBAR_LONG_PRESS_CLICK_WINDOW_MS);
+  }
+
+  private clearSuppressedClick(): void {
+    if (this.suppressClickTimer) {
+      clearTimeout(this.suppressClickTimer);
+      this.suppressClickTimer = null;
+    }
+    this.suppressNextClick = false;
+  }
+
   onThreadContextMenu(event: Event): void {
     if (this.lastPointerType !== 'mouse') {
       event.preventDefault();
@@ -522,7 +557,7 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
 
   onThreadClick(thread: Chat): void {
     if (this.suppressNextClick) {
-      this.suppressNextClick = false;
+      this.clearSuppressedClick();
       return;
     }
     if (this.refSelectionMode()) {
@@ -560,7 +595,15 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
 
   confirmRefSelection(): void {
     this.refSelectionMode.set(false);
-    this.nav.setCollapsed(true);
+    // On mobile the drawer covers the composer; close it so the chips are visible. Desktop keeps
+    // the sidebar where the user left it.
+    if (this.isMobileViewport()) {
+      this.nav.setCollapsed(true);
+    }
+  }
+
+  private isMobileViewport(): boolean {
+    return this.document.defaultView?.matchMedia?.(SIDEBAR_MOBILE_QUERY).matches ?? false;
   }
 
   openThread(threadId: string): void {

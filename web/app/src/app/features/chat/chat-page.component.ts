@@ -555,8 +555,9 @@ export class ChatPageComponent implements OnInit, OnDestroy {
       return;
     }
     const rituals = this.pendingRituals();
-    const outgoing = this.contextPanel.composerThreadReferencesText() + text;
-    const sendResult = await this.session.sendMessage(outgoing, attachments, rituals);
+    const sendResult = await this.session.sendMessage(text, attachments, rituals, {
+      contextPrefix: this.contextPanel.composerThreadReferencesText(),
+    });
     this.sendGate.refresh();
     if (isChatSendFailed(sendResult)) {
       this.sendGate.handleSendError(sendResult.error);

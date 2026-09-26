@@ -65,64 +65,94 @@ describe('ContextPanelService', () => {
         expect(service.consumeComposerInsert()).toBeNull();
     });
 
-    it('holds thread references while the manager is open and inserts them when a target chat opens', () => {
-        service.queueThreadReference(chat('old-1', 'Old research'));
-        service.queueThreadReference(chat('old-2', 'Prior decision'));
-
-        expect(service.pendingThreadReferences().map(thread => thread.id)).toEqual(['old-1', 'old-2']);
-        expect(service.consumeComposerInsert()).toBeNull();
-
-        service.setActiveChat(chat('target', 'Current chat'));
-
-        expect(service.pendingThreadReferences()).toEqual([]);
-        expect(service.consumeComposerInsert()).toBe(
-            '[Thread context: "Old research"; thread_id="old-1"]\n' +
-            '[Thread context: "Prior decision"; thread_id="old-2"]\n',
-        );
-    });
-
-    it('deduplicates a queued thread reference', () => {
-        const referenced = chat('old-1', 'Old research');
-        service.queueThreadReference(referenced);
-        service.queueThreadReference(referenced);
-
-        expect(service.pendingThreadReferences()).toEqual([referenced]);
-    });
+    const ID_A = '11111111-1111-4111-8111-111111111111';
+    const ID_B = '22222222-2222-4222-8222-222222222222';
+    const ID_ACTIVE = '33333333-3333-4333-8333-333333333333';
+    const ID_OTHER = '44444444-4444-4444-8444-444444444444';
+    const refIds = () => service.composerThreadReferences().map(thread => thread.id);
 
     it('toggles composer thread references and never references the active chat', () => {
-        service.setActiveChat(chat('active', 'Current chat'));
-        const other = chat('old-1', 'Old research');
+        service.setActiveChat(chat(ID_ACTIVE, 'Current chat'));
+        const other = chat(ID_A, 'Old research');
 
         service.toggleComposerThreadReference(other);
-        service.toggleComposerThreadReference(chat('active', 'Current chat'));
+        service.toggleComposerThreadReference(chat(ID_ACTIVE, 'Current chat'));
         expect(service.composerThreadReferences()).toEqual([other]);
+        expect(service.isComposerThreadReferenced(ID_A)).toBe(true);
 
         service.toggleComposerThreadReference(other);
         expect(service.composerThreadReferences()).toEqual([]);
     });
 
+    it('filters the active chat out of a wholesale replace', () => {
+        service.setActiveChat(chat(ID_ACTIVE, 'Current chat'));
+        service.setComposerThreadReferences([chat(ID_A, 'Alpha'), chat(ID_ACTIVE, 'Current chat')]);
+        expect(refIds()).toEqual([ID_A]);
+    });
+
     it('removes, clears and formats composer thread references', () => {
-        service.toggleComposerThreadReference(chat('a', 'Alpha'));
-        service.toggleComposerThreadReference(chat('b', 'Beta'));
+        service.toggleComposerThreadReference(chat(ID_A, 'Alpha'));
+        service.toggleComposerThreadReference(chat(ID_B, 'Beta'));
 
         expect(service.composerThreadReferencesText()).toBe(
-            '[Thread context: "Alpha"; thread_id="a"]\n[Thread context: "Beta"; thread_id="b"]\n',
+            `[Referenced thread "Alpha" — read it with find_context mode="conversation" target="${ID_A}"]\n` +
+            `[Referenced thread "Beta" — read it with find_context mode="conversation" target="${ID_B}"]\n`,
         );
 
-        service.removeComposerThreadReference('a');
-        expect(service.composerThreadReferences().map(thread => thread.id)).toEqual(['b']);
+        service.removeComposerThreadReference(ID_A);
+        expect(refIds()).toEqual([ID_B]);
 
         service.clearComposerThreadReferences();
         expect(service.composerThreadReferencesText()).toBe('');
     });
 
-    it('drops a composer reference when the user opens that thread', () => {
-        service.toggleComposerThreadReference(chat('a', 'Alpha'));
-        service.toggleComposerThreadReference(chat('b', 'Beta'));
+    describe('binding references to the chat they were attached for', () => {
+        it('carries unbound references (added with no chat open) into the next chat, minus that chat', () => {
+            service.setActiveChat(null);
+            service.toggleComposerThreadReference(chat(ID_A, 'Alpha'));
+            service.toggleComposerThreadReference(chat(ID_B, 'Beta'));
 
-        service.setActiveChat(chat('a', 'Alpha'));
+            service.setActiveChat(chat(ID_A, 'Alpha'));
 
-        expect(service.composerThreadReferences().map(thread => thread.id)).toEqual(['b']);
+            expect(refIds()).toEqual([ID_B]);
+        });
+
+        it('keeps references while the same chat stays active (e.g. the chat object is refreshed)', () => {
+            service.setActiveChat(chat(ID_ACTIVE, 'Current chat'));
+            service.toggleComposerThreadReference(chat(ID_A, 'Alpha'));
+
+            service.setActiveChat(chat(ID_ACTIVE, 'Renamed chat'));
+
+            expect(refIds()).toEqual([ID_A]);
+        });
+
+        it('clears references bound to a chat when another chat opens', () => {
+            service.setActiveChat(chat(ID_ACTIVE, 'Current chat'));
+            service.toggleComposerThreadReference(chat(ID_A, 'Alpha'));
+
+            service.setActiveChat(chat(ID_OTHER, 'Other chat'));
+
+            expect(refIds()).toEqual([]);
+        });
+
+        it('clears references bound to a chat when no chat is active', () => {
+            service.setActiveChat(chat(ID_ACTIVE, 'Current chat'));
+            service.toggleComposerThreadReference(chat(ID_A, 'Alpha'));
+
+            service.setActiveChat(null);
+
+            expect(refIds()).toEqual([]);
+        });
+
+        it('binds carried references to the chat they arrive in', () => {
+            service.toggleComposerThreadReference(chat(ID_A, 'Alpha'));
+            service.setActiveChat(chat(ID_ACTIVE, 'Current chat'));
+            expect(refIds()).toEqual([ID_A]);
+
+            service.setActiveChat(chat(ID_OTHER, 'Other chat'));
+
+            expect(refIds()).toEqual([]);
+        });
     });
 
     it('forwards desktop visibility to right panel service', () => {

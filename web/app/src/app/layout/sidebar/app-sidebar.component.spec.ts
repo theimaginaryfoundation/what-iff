@@ -538,18 +538,106 @@ describe('AppSidebarComponent', () => {
             expect(fixture.nativeElement.querySelector('.app-sidebar__select-btn')).toBeNull();
         });
 
-        it('Confirm keeps the selection and closes the drawer', () => {
+        function stubViewport(mobile: boolean): () => void {
+            const original = window.matchMedia;
+            Object.defineProperty(window, 'matchMedia', {
+                configurable: true,
+                writable: true,
+                value: (query: string) => ({ matches: mobile && query.includes('max-width'), media: query }),
+            });
+            return () => Object.defineProperty(window, 'matchMedia', { configurable: true, writable: true, value: original });
+        }
+
+        it('Confirm keeps the selection and closes the drawer on mobile', () => {
+            const restore = stubViewport(true);
+            try {
+                const { fixture, row, refs } = setup();
+                row('Cooking').dispatchEvent(pointer('pointerdown'));
+                vi.advanceTimersByTime(500);
+                fixture.detectChanges();
+
+                (fixture.nativeElement.querySelector('.app-sidebar__ref-bar-confirm') as HTMLButtonElement).click();
+                fixture.detectChanges();
+
+                expect(refs()).toEqual(['thread-2']);
+                expect(navSpy.setCollapsed).toHaveBeenCalledWith(true);
+                expect(fixture.nativeElement.querySelector('.app-sidebar__ref-bar')).toBeNull();
+            } finally {
+                restore();
+            }
+        });
+
+        it('Confirm leaves the sidebar open on desktop', () => {
+            const restore = stubViewport(false);
+            try {
+                const { fixture, refs } = setup();
+                (fixture.nativeElement.querySelector('.app-sidebar__select-btn') as HTMLButtonElement).click();
+                fixture.detectChanges();
+
+                (fixture.nativeElement.querySelector('.app-sidebar__ref-bar-confirm') as HTMLButtonElement).click();
+                fixture.detectChanges();
+
+                expect(refs()).toEqual([]);
+                expect(navSpy.setCollapsed).not.toHaveBeenCalled();
+                expect(fixture.nativeElement.querySelector('.app-sidebar__ref-bar')).toBeNull();
+            } finally {
+                restore();
+            }
+        });
+
+        it('marks rows with aria-pressed only while selecting (never the open thread)', () => {
+            const { fixture, row } = setup();
+            expect(row('Cooking').hasAttribute('aria-pressed')).toBe(false);
+
+            (fixture.nativeElement.querySelector('.app-sidebar__select-btn') as HTMLButtonElement).click();
+            fixture.detectChanges();
+            expect(row('Cooking').getAttribute('aria-pressed')).toBe('false');
+            expect(row('Active').hasAttribute('aria-pressed')).toBe(false);
+
+            row('Cooking').click();
+            fixture.detectChanges();
+            expect(row('Cooking').getAttribute('aria-pressed')).toBe('true');
+        });
+
+        it('does not let a long-press with no trailing click swallow a later tap', () => {
+            const { fixture, row, refs } = setup();
+            row('Cooking').dispatchEvent(pointer('pointerdown'));
+            vi.advanceTimersByTime(500);
+            fixture.detectChanges();
+            // The browser sent no click after the hold; the suppression window expires.
+            vi.advanceTimersByTime(1000);
+
+            row('Travel').click();
+            expect(refs()).toEqual(['thread-2', 'thread-3']);
+        });
+
+        it('resets click suppression on the next pointerdown and on pointercancel', () => {
             const { fixture, row, refs } = setup();
             row('Cooking').dispatchEvent(pointer('pointerdown'));
             vi.advanceTimersByTime(500);
             fixture.detectChanges();
 
-            (fixture.nativeElement.querySelector('.app-sidebar__ref-bar-confirm') as HTMLButtonElement).click();
-            fixture.detectChanges();
+            row('Travel').dispatchEvent(pointer('pointerdown'));
+            row('Travel').dispatchEvent(pointer('pointerup'));
+            row('Travel').click();
+            expect(refs()).toEqual(['thread-2', 'thread-3']);
 
+            // Long-press again, then the gesture is cancelled (became a scroll): no click follows.
+            row('Travel').dispatchEvent(pointer('pointerdown'));
+            vi.advanceTimersByTime(500);
+            row('Travel').dispatchEvent(pointer('pointercancel'));
+            row('Travel').click();
             expect(refs()).toEqual(['thread-2']);
-            expect(navSpy.setCollapsed).toHaveBeenCalledWith(true);
-            expect(fixture.nativeElement.querySelector('.app-sidebar__ref-bar')).toBeNull();
+        });
+
+        it('clears a pending long-press timer on destroy', () => {
+            const { fixture, row, refs } = setup();
+            row('Cooking').dispatchEvent(pointer('pointerdown'));
+
+            fixture.destroy();
+            vi.advanceTimersByTime(600);
+
+            expect(refs()).toEqual([]);
         });
     });
 });

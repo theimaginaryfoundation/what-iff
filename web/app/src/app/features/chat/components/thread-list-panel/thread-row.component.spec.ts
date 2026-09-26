@@ -4,6 +4,7 @@ import { provideHttpClient, withXhr } from '@angular/common/http';
 
 import { Chat } from '../../../../core/models/chat.model';
 import { Personality } from '../../../../core/models/personality.model';
+import { ContextPanelService } from '../../services/context-panel.service';
 import { ThreadRowComponent } from './thread-row.component';
 
 function makeChat(overrides: Partial<Chat> = {}): Chat {
@@ -174,5 +175,29 @@ describe('ThreadRowComponent', () => {
         expect(name.textContent?.trim()).toBe('Aurex');
         expect(avatarFallback.textContent?.trim()).toBe('A');
         expect(personalityContent.style.getPropertyValue('--thread-persona-accent').trim()).toBe('#123456');
+    });
+
+    it('toggles the thread as a composer context chip without opening it', () => {
+        const selected: string[] = [];
+        component.select.subscribe(id => selected.push(id));
+        const contextPanel = TestBed.inject(ContextPanelService);
+        const button = fixture.nativeElement.querySelector('.thread-row__context') as HTMLButtonElement;
+
+        expect(button.getAttribute('aria-label')).toBe('Attach thread Alpha to your next message');
+        expect(button.getAttribute('aria-pressed')).toBe('false');
+
+        button.click();
+        fixture.detectChanges();
+
+        expect(contextPanel.composerThreadReferences().map(t => t.id)).toEqual(['a']);
+        expect(button.getAttribute('aria-pressed')).toBe('true');
+        expect(button.classList).toContain('thread-row__context--on');
+        expect(selected).toEqual([]);
+
+        button.click();
+        fixture.detectChanges();
+
+        expect(contextPanel.composerThreadReferences()).toEqual([]);
+        expect(button.getAttribute('aria-pressed')).toBe('false');
     });
 });
