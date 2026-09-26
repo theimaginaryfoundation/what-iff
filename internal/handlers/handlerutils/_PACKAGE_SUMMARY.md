@@ -7,6 +7,10 @@
 ## Responsibilities
 
 - **`fileattachment.go`:** Utilities for reading uploads and binding to models (see tests for expected behavior).
+  It also owns the upload metrics for every upload path (chat, personality, image gallery), through `telemetry.Global()`.
+  `UploadFileAttachment` records the spooled size (`whatiff.file.size`, operation `upload`) and the image `normalize` stage time.
+  `whatiff.file.uploads` counts each upload once: failures in `UploadFileAttachment` or `UploadToS3`, success in `TriggerAsyncFileChunking`, which every path calls exactly once after the attachment is stored.
+  Callers must not count uploads themselves.
 - **`httpresponse.go`:** The response helpers every handler writes through — `RespondWithJSON`, `RespondWithHTML`, `RespondWithNoContent`, and `RespondWithError`.
   The last takes a code as its fourth argument: either a specific code from the models taxonomy, or `CodeNotSet` where none has been assigned yet, in which case the helper fills in the generic code for the status.
   A blank or whitespace-only code is treated as `CodeNotSet`.
@@ -43,6 +47,7 @@
 ## Testing
 
 - `fileattachment_test.go` — multipart and edge cases.
+- `fileattachment_metrics_test.go` — upload size/kind, the normalize stage, and that each upload is counted exactly once.
 - `httpresponse_test.go` — that raw errors never reach the body, and that every error response carries a code (including unmapped statuses).
 
 ## Related documentation

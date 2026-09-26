@@ -351,7 +351,8 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		// LLMBackend=local, cfg.HTTPClient is the deny-network transport (every
 		// other consumer stays egress-denied), but the local adapter itself
 		// must reach the local server over a real client.
-		a.LocalProvider = provider.NewLocalProvider(cfg.LocalLLMBaseURL, tel, nil)
+		a.LocalProvider = provider.NewLocalProvider(cfg.LocalLLMBaseURL, tel,
+			telemetry.InstrumentHTTPClient(nil, telemetry.WithDependencyHost(cfg.LocalLLMBaseURL, telemetry.DependencyLocalLLM)))
 	}
 
 	if a.mockLLM {
@@ -568,15 +569,6 @@ func (a *Agent) DeleteProviderFileAttachment(ctx context.Context, fileID string)
 	return a.OpenAIProvider.DeleteFileAttachment(ctx, fileID)
 }
 
-// RecordFileUpload counts a file-attachment upload attempt by file kind.
-// status should be "success" or "failure".
-func (a *Agent) RecordFileUpload(ctx context.Context, fileType, status string) {
-	a.metrics().Add(ctx, telemetry.FileUploads, 1,
-		telemetry.AttrKind.String(telemetry.FileKind(fileType)),
-		telemetry.AttrOutcome.String(status),
-	)
-}
-
 // messageContextBuilder returns a context builder wired to this agent's datastore,
 // telemetry, and test-only history override (when set).
 func (a *Agent) messageContextBuilder() (*messageContextBuilder, error) {
@@ -676,7 +668,10 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 		// not crash every other in-flight chat. Registered after cancel/unregister so it
 		// runs first (LIFO) and UpdateJobStatus still sees a live runCtx.
 		defer a.recoverAsyncMessageJob(runCtx, userID, newJob.ID, chatMessage.ID)
-		_, err := a.handleUserMessage(runCtx, newJob, chatMessage)
+		err := a.runTrackedJob(runCtx, newJob, func() error {
+			_, err := a.handleUserMessage(runCtx, newJob, chatMessage)
+			return err
+		})
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				a.logger.Info("async agent message processing cancelled",
@@ -779,7 +774,11 @@ func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid
 	go func(runCtx context.Context, job *models.Job, chat *models.ChatMessage) {
 		defer cancel()
 		defer a.unregisterRunningJobCancel(job.ID)
-		if _, err := a.handleUserMessage(runCtx, job, chat); err != nil {
+		err := a.runTrackedJob(runCtx, job, func() error {
+			_, err := a.handleUserMessage(runCtx, job, chat)
+			return err
+		})
+		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				a.logger.Info("async agent message retry cancelled",
 					zap.String("job_id", job.ID.String()),
@@ -832,7 +831,12 @@ type chatContext struct {
 // handleUserMessage handles the agent processing flow for a user message
 func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chatMessage *models.ChatMessage) (*models.ChatMessage, error) {
 	assertNoTestHooksInProduction(a)
-	ctx = a.withCallPath(ctx, telemetry.CallPathUserChat)
+	// The sync webhook path runs agent_job_run jobs through here too; label those as jobs.
+	callPath := telemetry.CallPathUserChat
+	if chatJob != nil && chatJob.JobType == JobTypeAgentJobRun {
+		callPath = telemetry.CallPathAgentJob
+	}
+	ctx = a.withCallPath(ctx, callPath)
 
 	// Update job status to processing
 	if err := a.updateJobStatus(ctx, chatJob, models.JobStatusProcessing); err != nil {
@@ -867,9 +871,11 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 	// Resolve active mood and load mood-driven rituals before determining action type
 	// (a mood may inject image-generation rituals). Mode skills are injected into the
 	// mode context segment, not the user message.
+	doneMood := a.timeTurnStage(ctx, turnStageMood)
 	chatCtx.activeMood = a.resolveActiveMood(ctx, chatJob.UserID, chatCtx, chatMessage.Message, chatMessage.ID)
 	moodRituals := a.loadMoodRituals(ctx, chatJob.UserID, chatCtx.activeMood)
 	chatCtx.activeMoodRituals = moodRituals
+	doneMood()
 
 	// Determine action type: image generation rituals override the base chat type.
 	turnActionType := models.ActionTypeChatMessage
@@ -884,9 +890,11 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 	if !qd.Allowed {
 		quotaErr := fmt.Errorf("%w for user %s", ErrQuotaExceeded, chatJob.UserID)
 		a.logger.Warn("quota check failed, rejecting message", zap.String("user_id", chatJob.UserID.String()))
+		a.recordQuotaRejection(ctx)
 		a.setJobStatusFailed(ctx, chatJob, quotaErr)
 		return nil, quotaErr
 	}
+	doneBuildContext := a.timeTurnStage(ctx, turnStageBuildContext)
 	var imageBytes map[uuid.UUID][]byte
 	// Anthropic and Chat Completions wire formats take inline image bytes; OpenAI
 	// Responses references uploaded file IDs and only needs bytes as a fallback.
@@ -896,6 +904,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 		imageBytes = a.loadImageBytesForClaude(ctx, chatJob.UserID, chatMessage)
 	}
 	modelContext, err := a.buildModelContextForChatMessage(ctx, chatJob.UserID, chatMessage, chatCtx, imageBytes)
+	doneBuildContext()
 	if err != nil {
 		a.logger.Error("failed to build model context", zap.Error(err))
 		a.setJobStatusFailed(ctx, chatJob, err)
@@ -1530,10 +1539,23 @@ func (a *Agent) callPathAttr(ctx context.Context) attribute.KeyValue {
 	return telemetry.AttrCallPath.String(string(telemetry.CallPathFromContext(ctx)))
 }
 
-// Chat turn stages for telemetry.ChatTurnStageDuration.
+// Chat turn stages for telemetry.ChatTurnStageDuration: a fixed set, in turn order. Stages
+// can nest: prepare_context includes memory_enrichment, and post_process includes chat_name
+// and the checkpoint_* stages.
 const (
-	turnStageInference   = "inference"
-	turnStagePostProcess = "post_process"
+	turnStageRehydrationWait      = "rehydration_wait"
+	turnStagePrepareContext       = "prepare_context"
+	turnStageMemoryEnrichment     = "memory_enrichment"
+	turnStageMood                 = "mood"
+	turnStageBuildContext         = "build_context"
+	turnStageInference            = "inference"
+	turnStageExpression           = "expression"
+	turnStagePostProcess          = "post_process"
+	turnStageChatName             = "chat_name"
+	turnStageCheckpointScratchpad = "checkpoint_scratchpad"
+	turnStageCheckpointMemory     = "checkpoint_memory"
+	turnStageCheckpointSummary    = "checkpoint_summary"
+	turnStageCheckpointPersist    = "checkpoint_persist"
 )
 
 func (a *Agent) recordTurnStage(ctx context.Context, stage string, d time.Duration) {
@@ -1971,6 +1993,7 @@ func memoryToolCallsForChatContext(chatCtx *chatContext) []*models.ToolCall {
 
 // prepareChatContext prepares the chat context including chat, memories, and model selection
 func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage) (*chatContext, error) {
+	defer a.timeTurnStage(ctx, turnStagePrepareContext)()
 	// Get parent chat
 	parentChat, err := a.ds.GetChat(ctx, userID, chatMessage.ChatID)
 	if err != nil {
@@ -2119,6 +2142,7 @@ func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, 
 // getMemoriesBestEffort attempts memory enrichment and degrades gracefully on any failure.
 // When it fails, it logs the error and returns an empty memory list along with a failure flag.
 func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string) ([]string, []*models.Memory, bool) {
+	defer a.timeTurnStage(ctx, turnStageMemoryEnrichment)()
 	memories, liveMemories, err := a.getMemoriesForEnrichment(ctx, userID, chatID, personalityID, userMessage)
 	if err != nil {
 		// Note: the underlying memory retrieval path logs errors at the failure site(s).
@@ -2473,7 +2497,9 @@ func (a *Agent) finalizeChat(ctx context.Context, userID uuid.UUID, chatMessage,
 	}()
 	// Generate chat name if it's still the default
 	if chatCtx.chat.Name == defaultChatName {
+		doneChatName := a.timeTurnStage(ctx, turnStageChatName)
 		chatName, err := a.generateChatName(ctx, chatMessage.Message)
+		doneChatName()
 		if err != nil {
 			a.logger.Error("failed to generate chat name", zap.Error(err))
 		} else {
@@ -2615,7 +2641,9 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 	var newScratchpadResponseID *string
 	hasScratchpad := false
 	if chatCtx.chat.PersonalityID != uuid.Nil {
+		doneScratchpad := a.timeTurnStage(ctx, turnStageCheckpointScratchpad)
 		newScratchpad, err := a.updateScratchpad(ctx, userID, agentMessage.ResponseID, chatCtx)
+		doneScratchpad()
 		if err != nil {
 			a.logger.Error("failed to update scratchpad during checkpoint", zap.Error(err))
 		} else {
@@ -2634,21 +2662,27 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 	// failed, intentionally defer both extraction and roll-forward dedupe to the next checkpoint:
 	// compaction requires that delta, and a later checkpoint safely retries it.
 	if hasScratchpad {
+		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
 		a.extractMemoriesWithScratchpadDelta(ctx, userID, chatMessage.ChatID, newScratchpadResponseID, inferenceModelContext, chatCtx, compactionEventID)
+		doneMemory()
 	}
 
 	// 3) Conversation summarization
+	doneSummary := a.timeTurnStage(ctx, turnStageCheckpointSummary)
 	summary, err := a.summarizeConversationForCheckpoint(ctx, userID, chatCtx, checkpointSummarySource{
 		PreviousResponseID: agentMessage.ResponseID,
 	})
+	doneSummary()
 	if err != nil {
 		a.logger.Error("failed to summarize conversation for checkpoint", zap.Error(err))
 		return
 	}
 
+	donePersist := a.timeTurnStage(ctx, turnStageCheckpointPersist)
 	if a.persistCheckpointSummary(ctx, userID, chatMessage.ChatID, summary, assistantMessageCount, "OpenAI", agentMessage.ID) {
 		a.finishCompactionEvent(ctx, userID, compactionEventID, summary)
 	}
+	donePersist()
 }
 
 // runCheckpointClaude performs the scratchpad → memory → summary checkpoint sequence for
@@ -2680,7 +2714,9 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	var scratchpadCtx *provider.ModelContext
 	if chatCtx.chat.PersonalityID != uuid.Nil {
 		scratchpadCtx = archivalCtx.Clone()
+		doneScratchpad := a.timeTurnStage(ctx, turnStageCheckpointScratchpad)
 		newScratchpad, err := a.updateScratchpadClaude(ctx, userID, chatCtx, scratchpadCtx)
+		doneScratchpad()
 		if err != nil {
 			a.logger.Error("failed to update scratchpad during Claude checkpoint", zap.Error(err))
 		} else {
@@ -2698,25 +2734,31 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	// defer both extraction and roll-forward dedupe to the next checkpoint: compaction requires
 	// that delta, and a later checkpoint safely retries it.
 	if hasScratchpad {
+		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
 		if err := a.extractMemoriesWithScratchpadDeltaClaude(ctx, userID, chatMessage.ChatID, scratchpadCtx, modelContext, chatCtx, compactionEventID); err != nil {
 			a.logger.Error("failed to extract memories during Claude checkpoint", zap.Error(err))
 		}
+		doneMemory()
 	}
 
 	// 3) Conversation summarization — uses pristine inference modelContext plus the
 	// assistant reply (explicit OpenAI input items; same prompt as the threaded path).
+	doneSummary := a.timeTurnStage(ctx, turnStageCheckpointSummary)
 	summary, err := a.summarizeConversationForCheckpoint(ctx, userID, chatCtx, checkpointSummarySource{
 		ModelContext:   modelContext,
 		AssistantReply: agentMessage.Message,
 	})
+	doneSummary()
 	if err != nil {
 		a.logger.Error("failed to summarize conversation for Claude checkpoint", zap.Error(err))
 		return
 	}
 
+	donePersist := a.timeTurnStage(ctx, turnStageCheckpointPersist)
 	if a.persistCheckpointSummary(ctx, userID, chatMessage.ChatID, summary, assistantMessageCount, "Claude", agentMessage.ID) {
 		a.finishCompactionEvent(ctx, userID, compactionEventID, summary)
 	}
+	donePersist()
 }
 
 // persistCheckpointSummary writes the live checkpoint state. It returns false only when that

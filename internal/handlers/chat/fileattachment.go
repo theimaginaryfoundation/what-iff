@@ -63,7 +63,6 @@ func (h *Handler) CreateFileAttachment(w http.ResponseWriter, r *http.Request) {
 				zap.String("file_attachment_id", createdAttachment.ID.String()))
 			_ = h.ds.DeleteFileAttachment(r.Context(), userID, createdAttachment.ID)
 			_ = os.Remove(tempFilePath)
-			h.agent.RecordFileUpload(r.Context(), fileAttachment.FileType, "failure")
 			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Error saving file — please retry", err)
 			return
 		}
@@ -84,7 +83,6 @@ func (h *Handler) CreateFileAttachment(w http.ResponseWriter, r *http.Request) {
 				zap.String("file_attachment_id", createdAttachment.ID.String()))
 			_ = h.ds.DeleteFileAttachment(r.Context(), userID, createdAttachment.ID)
 			_ = os.Remove(tempFilePath)
-			h.agent.RecordFileUpload(r.Context(), fileAttachment.FileType, "failure")
 			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Error saving file — please retry", err)
 			return
 		}
@@ -95,8 +93,8 @@ func (h *Handler) CreateFileAttachment(w http.ResponseWriter, r *http.Request) {
 				zap.Error(err))
 		}
 	}
-	h.agent.RecordFileUpload(r.Context(), fileAttachment.FileType, "success")
-
+	// Upload success/failure is counted in handlerutils (UploadFileAttachment, UploadToS3 and
+	// TriggerAsyncFileChunking), shared by every upload path, so it isn't recorded here.
 	handlerutils.TriggerAsyncFileChunking(
 		h.logger,
 		h.agent.ChunkPipeline(),

@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 
 	"entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
@@ -112,7 +114,32 @@ func (d *Datastore) CreateJob(ctx context.Context, userID uuid.UUID, jobModel mo
 		return nil, err
 	}
 
+	d.metrics.Add(ctx, telemetry.JobsEnqueued, 1, telemetry.AttrJobType.String(entJob.JobType))
 	return toJobModel(entJob), nil
+}
+
+// recordJobStatusChange records how old a job was when it moved to a new status
+// (telemetry.JobAgeAtStatus). Call it after the change commits, and only when the status
+// actually changed, so repeated writes of the same status don't count twice.
+func (d *Datastore) recordJobStatusChange(ctx context.Context, jobType string, createdAt time.Time, from, to job.Status) {
+	if from == to || createdAt.IsZero() {
+		return
+	}
+	d.metrics.RecordDuration(ctx, telemetry.JobAgeAtStatus, time.Since(createdAt),
+		telemetry.AttrJobType.String(jobType), telemetry.AttrStatus.String(string(to)))
+}
+
+// loadOwnedJobStatusTx returns the current status of a job owned by userID, or ErrJobNotFound.
+// It replaces a plain existence check so status writers can tell whether the status changed.
+func (d *Datastore) loadOwnedJobStatusTx(ctx context.Context, tx *ent.Tx, userID, id uuid.UUID) (job.Status, error) {
+	st, err := tx.Job.Query().
+		Where(job.ID(id), job.HasOwnerWith(user.ID(userID))).
+		Select(job.FieldStatus).
+		String(ctx)
+	if ent.IsNotFound(err) {
+		return "", ErrJobNotFound
+	}
+	return job.Status(st), err
 }
 
 // ListJobs returns a paginated list of jobs filtered by the provided criteria
@@ -277,30 +304,21 @@ func (d *Datastore) UpdateJob(ctx context.Context, userID uuid.UUID, jobModel mo
 		}
 	}()
 
-	// Check if job exists and belongs to the user
-	exists, err := tx.Job.Query().
-		Where(
-			job.ID(jobModel.ID),
-			job.HasOwnerWith(
-				user.ID(userID),
-			),
-		).
-		Exist(ctx)
-
+	// Check the job exists and belongs to the user, keeping its status to spot a change.
+	prevStatus, err := d.loadOwnedJobStatusTx(ctx, tx, userID, jobModel.ID)
+	if errors.Is(err, ErrJobNotFound) {
+		d.logger.Error(i18n.T2("job.not_found_or_unauthorized", "JobID", jobModel.ID.String(), "UserID", userID.String()))
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+		return nil, ErrJobNotFound
+	}
 	if err != nil {
 		d.logger.Error(i18n.T1("query.failed", "Entity", "job"), zap.Error(err))
 		if rerr := tx.Rollback(); rerr != nil {
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 		}
 		return nil, err
-	}
-
-	if !exists {
-		d.logger.Error(i18n.T2("job.not_found_or_unauthorized", "JobID", jobModel.ID.String(), "UserID", userID.String()))
-		if rerr := tx.Rollback(); rerr != nil {
-			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
-		}
-		return nil, ErrJobNotFound
 	}
 
 	// Update job
@@ -355,6 +373,7 @@ func (d *Datastore) UpdateJob(ctx context.Context, userID uuid.UUID, jobModel mo
 		return nil, err
 	}
 
+	d.recordJobStatusChange(ctx, entJob.JobType, entJob.CreatedAt, prevStatus, entJob.Status)
 	return toJobModel(entJob), nil
 }
 
@@ -375,30 +394,21 @@ func (d *Datastore) UpdateJobStatus(ctx context.Context, userID, id uuid.UUID, s
 		}
 	}()
 
-	// Check if job exists and belongs to the user
-	exists, err := tx.Job.Query().
-		Where(
-			job.ID(id),
-			job.HasOwnerWith(
-				user.ID(userID),
-			),
-		).
-		Exist(ctx)
-
+	// Check the job exists and belongs to the user, keeping its status to spot a change.
+	prevStatus, err := d.loadOwnedJobStatusTx(ctx, tx, userID, id)
+	if errors.Is(err, ErrJobNotFound) {
+		d.logger.Error(i18n.T2("job.not_found_or_unauthorized", "JobID", id.String(), "UserID", userID.String()))
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+		return nil, ErrJobNotFound
+	}
 	if err != nil {
 		d.logger.Error(i18n.T1("query.failed", "Entity", "job"), zap.Error(err))
 		if rerr := tx.Rollback(); rerr != nil {
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 		}
 		return nil, err
-	}
-
-	if !exists {
-		d.logger.Error(i18n.T2("job.not_found_or_unauthorized", "JobID", id.String(), "UserID", userID.String()))
-		if rerr := tx.Rollback(); rerr != nil {
-			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
-		}
-		return nil, ErrJobNotFound
 	}
 
 	// Update job status
@@ -440,6 +450,7 @@ func (d *Datastore) UpdateJobStatus(ctx context.Context, userID, id uuid.UUID, s
 		return nil, err
 	}
 
+	d.recordJobStatusChange(ctx, entJob.JobType, entJob.CreatedAt, prevStatus, entJob.Status)
 	return toJobModel(entJob), nil
 }
 
@@ -652,6 +663,7 @@ func (d *Datastore) finalizeChatJobWithPartial(
 		return nil, nil, err
 	}
 
+	d.recordJobStatusChange(ctx, entJob.JobType, entJob.CreatedAt, entJob.Status, terminalStatus)
 	return toJobModel(updatedJob), resultID, nil
 }
 
@@ -793,30 +805,21 @@ func (d *Datastore) SetJobResult(ctx context.Context, userID, id uuid.UUID, resu
 		}
 	}()
 
-	// Check if job exists and belongs to the user
-	exists, err := tx.Job.Query().
-		Where(
-			job.ID(id),
-			job.HasOwnerWith(
-				user.ID(userID),
-			),
-		).
-		Exist(ctx)
-
+	// Check the job exists and belongs to the user, keeping its status to spot a change.
+	prevStatus, err := d.loadOwnedJobStatusTx(ctx, tx, userID, id)
+	if errors.Is(err, ErrJobNotFound) {
+		d.logger.Error(i18n.T2("job.not_found_or_unauthorized", "JobID", id.String(), "UserID", userID.String()))
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+		return nil, ErrJobNotFound
+	}
 	if err != nil {
 		d.logger.Error(i18n.T1("query.failed", "Entity", "job"), zap.Error(err))
 		if rerr := tx.Rollback(); rerr != nil {
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 		}
 		return nil, err
-	}
-
-	if !exists {
-		d.logger.Error(i18n.T2("job.not_found_or_unauthorized", "JobID", id.String(), "UserID", userID.String()))
-		if rerr := tx.Rollback(); rerr != nil {
-			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
-		}
-		return nil, ErrJobNotFound
 	}
 
 	// Update job result and set status to complete
@@ -854,6 +857,7 @@ func (d *Datastore) SetJobResult(ctx context.Context, userID, id uuid.UUID, resu
 		return nil, err
 	}
 
+	d.recordJobStatusChange(ctx, entJob.JobType, entJob.CreatedAt, prevStatus, entJob.Status)
 	return toJobModel(entJob), nil
 }
 
@@ -1097,6 +1101,13 @@ func (d *Datastore) MarkChatJobCancelled(ctx context.Context, userID, jobID uuid
 	if err != nil {
 		d.logger.Error(i18n.T1("update.failed", "Entity", "job status"), zap.Error(err))
 		return false, err
+	}
+	if n > 0 && d.metrics != nil {
+		// The bulk update doesn't return the row; this rare path (a cancel with no local
+		// worker) can afford one extra read for the job's age.
+		if createdAt, qerr := d.dbClient.Job.Query().Where(job.ID(jobID)).Select(job.FieldCreatedAt).Only(ctx); qerr == nil {
+			d.recordJobStatusChange(ctx, "chat_message", createdAt.CreatedAt, "", job.StatusCancelled)
+		}
 	}
 	return n > 0, nil
 }

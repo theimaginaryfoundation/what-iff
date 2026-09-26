@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 )
 
 const parallelBaseURL = "https://api.parallel.ai/v1"
@@ -79,7 +81,10 @@ func (p *ParallelBackend) Search(ctx context.Context, q Query) ([]Result, error)
 	if policy.AfterDate != "" || len(policy.IncludeDomains) > 0 || len(policy.ExcludeDomains) > 0 {
 		req.AdvancedSettings = &parallelSearchAdvanced{SourcePolicy: policy}
 	}
-	if err := postJSON(ctx, p.client, p.baseURL+"/search", map[string]string{"x-api-key": p.apiKey}, req, &resp); err != nil {
+	done := telemetry.Global().TimeDependency(ctx, telemetry.DependencyParallel, "search")
+	err := postJSON(ctx, p.client, p.baseURL+"/search", map[string]string{"x-api-key": p.apiKey}, req, &resp)
+	done(err)
+	if err != nil {
 		return nil, fmt.Errorf("parallel search: %w", err)
 	}
 	limit := normalizeMaxResults(q.MaxResults)
@@ -129,7 +134,10 @@ func (p *ParallelBackend) Extract(ctx context.Context, url, objective string) (P
 		req.AdvancedSettings = &parallelExtractAdvanced{FullContent: true}
 	}
 	var resp parallelExtractResponse
-	if err := postJSON(ctx, p.client, p.baseURL+"/extract", map[string]string{"x-api-key": p.apiKey}, req, &resp); err != nil {
+	done := telemetry.Global().TimeDependency(ctx, telemetry.DependencyParallel, "extract")
+	err := postJSON(ctx, p.client, p.baseURL+"/extract", map[string]string{"x-api-key": p.apiKey}, req, &resp)
+	done(err)
+	if err != nil {
 		return Page{}, fmt.Errorf("parallel extract: %w", err)
 	}
 	if len(resp.Results) == 0 {

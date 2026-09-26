@@ -19,6 +19,8 @@ const (
 
 	AttrDBCollection = attribute.Key("db.collection.name")
 	AttrDBOperation  = attribute.Key("db.operation.name")
+	// AttrDBConnectionState is idle or used, on db.client.connection.count.
+	AttrDBConnectionState = attribute.Key("db.client.connection.state")
 
 	AttrGenAIProvider  = attribute.Key("gen_ai.provider.name")
 	AttrGenAIModel     = attribute.Key("gen_ai.request.model")

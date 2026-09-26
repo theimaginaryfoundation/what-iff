@@ -14,7 +14,6 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
-	"github.com/theimaginaryfoundation/what-iff/internal/telemetry/telemetrytest"
 	"go.uber.org/zap"
 )
 
@@ -136,13 +135,12 @@ func TestDeleteProviderFileAttachment_NoProviderConfigured(t *testing.T) {
 	require.ErrorContains(t, err, "openai provider is not configured")
 }
 
-// --- RecordFileUpload / recordTurnStage ---
+// --- agent metrics helpers ---
 
-func TestRecordFileUpload_NoopWithNilTelemetry(t *testing.T) {
+func TestRecordTurnStage_NoopWithNilTelemetry(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
 	require.NotPanics(t, func() {
-		a.RecordFileUpload(context.Background(), "image/png", "success")
 		a.recordTurnStage(context.Background(), turnStageInference, time.Second)
 	})
 }
@@ -155,24 +153,10 @@ func TestAgentMetrics_NoopWithNilMetrics(t *testing.T) {
 	require.Nil(t, a.metrics())
 	require.NotPanics(t, func() {
 		ctx := context.Background()
-		a.RecordFileUpload(ctx, "image/png", "success")
 		a.recordTurnStage(ctx, turnStagePostProcess, time.Second)
 		a.recordToolCalls(ctx, nil)
 		a.metrics().Add(ctx, telemetry.ChatCheckpoints, 1)
 	})
-}
-
-func TestRecordFileUpload_CountsByKindNotMIME(t *testing.T) {
-	t.Parallel()
-	tm := telemetrytest.New(t)
-	a := &Agent{telemetry: &telemetry.Telemetry{Logger: zap.NewNop(), Metrics: tm.Metrics}}
-
-	a.RecordFileUpload(context.Background(), "image/png", "success")
-	a.RecordFileUpload(context.Background(), "image/webp", "failure")
-
-	name := telemetry.FileUploads.Name
-	require.Equal(t, int64(2), tm.CounterValue(t, name, telemetry.AttrKind.String("image")))
-	require.Equal(t, int64(1), tm.CounterValue(t, name, telemetry.AttrOutcome.String("failure")))
 }
 
 // --- mergedRitualIDsForTools / mergeRitualSets ---

@@ -2,6 +2,7 @@ package chat
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -63,7 +65,11 @@ func (h *Handler) ExportChat(w http.ResponseWriter, r *http.Request) {
 	// Stream the export directly to the response writer
 	// If an error occurs during streaming, the ZIP will be finalized
 	// but may be incomplete. HTTP status codes indicate success/partial success.
-	if err := h.ds.ExportChat(r.Context(), userID, chatID, w); err != nil {
+	// The byte count feeds FileSize (chat_export); request latency is already on the HTTP metric.
+	cw := &countingWriter{w: w}
+	err = h.ds.ExportChat(r.Context(), userID, chatID, cw)
+	telemetry.Global().RecordFileSize(r.Context(), telemetry.FileOpChatExport, telemetry.FileKind("application/zip"), cw.n)
+	if err != nil {
 		// Log the error but don't try to write a response body
 		// Headers have already been sent at this point
 		h.logger.Error("failed to export chat",
@@ -80,6 +86,18 @@ func (h *Handler) ExportChat(w http.ResponseWriter, r *http.Request) {
 		zap.String("user_id", userID.String()),
 		zap.String("chat_id", chatID.String()),
 		zap.String("filename", filename))
+}
+
+// countingWriter counts the bytes written through it.
+type countingWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += int64(n)
+	return n, err
 }
 
 // sanitizeFilename removes or replaces characters that are unsafe for filenames

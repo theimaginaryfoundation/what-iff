@@ -25,6 +25,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 )
 
 var (
@@ -145,6 +146,7 @@ func (h *Handler) ImportAccount(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to stage import", err)
 		return
 	}
+	telemetry.Global().RecordFileSize(r.Context(), telemetry.FileOpAccountImport, telemetry.FileKind("application/zip"), written)
 
 	progress, _ := json.Marshal(models.AccountImportProgress{Phase: "queued", Message: "Import queued."})
 	job, err := h.ds.CreateJob(r.Context(), userID, models.Job{
@@ -165,24 +167,47 @@ func (h *Handler) ImportAccount(w http.ResponseWriter, r *http.Request) {
 
 // runAccountImport owns the staged archive after the response returns. It serializes expensive
 // restores per API process and always removes the temporary file.
+//
+// Metrics: the wait for an import slot is recorded on JobQueueWait, the run itself is tracked as an
+// account_import job, and each phase is timed on FileOperationDuration. Memory item counts come
+// from the datastore memory importer (operation memory_import), so they aren't repeated here.
 func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, selection *models.AccountImportSelection) {
 	defer func() {
 		if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
 			h.logger.Warn("account import: failed to remove temp file", zap.String("path", tmpPath), zap.Error(err))
 		}
 	}()
+	// finishJob is set once the job holds a slot. Its defer is registered before the recover below
+	// so it runs after it and sees a panic outcome; every early return is a failure.
+	metrics := telemetry.Global()
+	var finishJob func(outcome string)
+	outcome := telemetry.JobOutcomeFailed
+	defer func() {
+		if finishJob != nil {
+			finishJob(outcome)
+		}
+	}()
 	defer func() {
 		if v := recover(); v != nil {
+			outcome = telemetry.JobOutcomePanic
 			h.logger.Error("account import: panic in background job",
 				zap.String("job_id", jobID.String()), zap.Any("panic", v), zap.ByteString("stack", debug.Stack()))
 			h.failAccountImport(context.Background(), userID, jobID, "Import failed unexpectedly", nil)
 		}
 	}()
 
-	h.imports <- struct{}{}
-	defer func() { <-h.imports }()
+	release := h.acquireImportSlot(context.Background())
+	defer release()
 	ctx, cancel := context.WithTimeout(context.Background(), importJobTimeout)
 	defer cancel()
+	finishJob = metrics.TrackJob(ctx, models.JobTypeAccountImport)
+	doneValidate := metrics.TimeFileStage(ctx, telemetry.FileOpAccountImport, telemetry.FileStageValidate)
+	validated := false
+	defer func() {
+		if !validated {
+			doneValidate(errAccountImportInvalid)
+		}
+	}()
 	if _, err := h.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusProcessing, ""); err != nil {
 		h.logger.Warn("account import: failed to mark processing", zap.String("job_id", jobID.String()), zap.Error(err))
 	}
@@ -226,13 +251,17 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, sele
 		h.failAccountImport(ctx, userID, jobID, "Unsupported account export version", nil)
 		return
 	}
+	validated = true
+	doneValidate(nil)
 
 	result := models.AccountImportResult{}
 	h.writeAccountImportProgress(ctx, userID, jobID, models.AccountImportProgress{Phase: "importing", Message: "Importing personalities."})
 
 	// Personalities must precede conversations and memories: account exports carry source
 	// personality IDs in both places, while every imported account receives fresh destination IDs.
+	donePersonalities := metrics.TimeFileStage(ctx, telemetry.FileOpAccountImport, telemetry.FileStagePersonalities)
 	personalityCounts, personalityIDs := h.importPersonalities(ctx, userID, zr, selection)
+	donePersonalities(nil) // a personality that fails is logged and left out; the phase goes on
 	result.Personalities = personalityCounts
 	h.writeAccountImportProgress(ctx, userID, jobID, progressForAccountImport("importing", "Importing conversations.", result))
 
@@ -250,7 +279,10 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, sele
 				parsed = filterSelectedConversations(parsed, selection.ConversationIDs)
 			}
 			convs := toImportConversations(parsed, personalityIDs)
-			if res, ierr := h.ds.ImportChats(ctx, userID, convs, nil); ierr != nil {
+			doneConversations := metrics.TimeFileStage(ctx, telemetry.FileOpAccountImport, telemetry.FileStageConversations)
+			res, ierr := h.ds.ImportChats(ctx, userID, convs, nil)
+			doneConversations(ierr)
+			if ierr != nil {
 				h.logger.Error("account import: conversation import failed", zap.Error(ierr))
 				result.Warnings = append(result.Warnings, "Conversations could not be imported.")
 			} else if res != nil {
@@ -274,7 +306,10 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, sele
 						}
 					}
 					h.writeAccountImportProgress(ctx, userID, jobID, progressForAccountImport("importing", "Indexing thread summaries.", result))
-					if h.importConversationSummaryMemories(ctx, userID, parsed, chatIDs) {
+					doneSummaries := metrics.TimeFileStage(ctx, telemetry.FileOpAccountImport, telemetry.FileStageSummaries)
+					partial := h.importConversationSummaryMemories(ctx, userID, parsed, chatIDs)
+					doneSummaries(nil) // best effort: a partial result is a warning, not a failed phase
+					if partial {
 						result.Warnings = append(result.Warnings, "Some thread summaries could not be indexed for search.")
 					}
 				}
@@ -316,7 +351,9 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, sele
 					} else {
 						// The importer returns a partial result on error; keep it either way.
 						// Batch embeddings avoid one remote request per memory for large account restores.
+						doneMemories := metrics.TimeFileStage(ctx, telemetry.FileOpAccountImport, telemetry.FileStageMemories)
 						res, merr := h.ds.ImportMemoriesWithBatchEmbeddings(ctx, userID, mzr, h.createEmbedding, h.createEmbeddings)
+						doneMemories(merr)
 						if merr != nil {
 							h.logger.Error("account import: memory import failed", zap.Error(merr))
 							result.Warnings = append(result.Warnings, "Some memories could not be imported.")
@@ -330,7 +367,9 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, sele
 		}
 	}
 
+	recordAccountImportItems(ctx, metrics, result)
 	if err := ctx.Err(); err != nil {
+		outcome = telemetry.JobOutcomeFromError(err)
 		// The import context was cancelled before completion (a timeout, or something aborting the
 		// run — memory embedding is the usual long pole). Mark it failed on a fresh context so the
 		// job reaches a terminal state and shows on the activity log with what did land, instead of
@@ -346,6 +385,7 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, sele
 		zap.Int("conversations_imported", result.Conversations.Imported),
 		zap.Int("memories_imported", result.Memories.ImportedCount),
 		zap.Int("personalities_created", result.Personalities.Created))
+	outcome = telemetry.JobOutcomeSuccess
 	h.writeAccountImportProgress(ctx, userID, jobID, progressForAccountImport("complete", "Account import complete.", result))
 	if _, err := h.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusComplete, ""); err != nil {
 		h.logger.Warn("account import: failed to mark complete", zap.String("job_id", jobID.String()), zap.Error(err))
@@ -356,6 +396,31 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, sele
 		"personalities_created":  result.Personalities.Created,
 		"warnings":               len(result.Warnings),
 	})
+}
+
+// errAccountImportInvalid labels a failed validate phase on FileOperationDuration; the specific
+// reason is in the job's user-facing message.
+var errAccountImportInvalid = errors.New("account import archive rejected")
+
+// acquireImportSlot waits for one of the per-process import slots, recording the wait on
+// JobQueueWait (the only place in the API where background work queues), and returns the
+// function that frees the slot.
+func (h *Handler) acquireImportSlot(ctx context.Context) (release func()) {
+	start := time.Now()
+	h.imports <- struct{}{}
+	telemetry.Global().RecordDuration(ctx, telemetry.JobQueueWait, time.Since(start),
+		telemetry.AttrJobType.String(models.JobTypeAccountImport))
+	return func() { <-h.imports }
+}
+
+// recordAccountImportItems records the conversation and personality counts of one import run.
+func recordAccountImportItems(ctx context.Context, metrics *telemetry.Metrics, result models.AccountImportResult) {
+	op := telemetry.FileOpAccountImport
+	metrics.RecordFileItems(ctx, op, telemetry.FileItemConversation, telemetry.FileItemImported, result.Conversations.Imported)
+	metrics.RecordFileItems(ctx, op, telemetry.FileItemConversation, telemetry.FileItemSkipped, result.Conversations.Skipped)
+	metrics.RecordFileItems(ctx, op, telemetry.FileItemConversation, telemetry.FileItemFailed, len(result.Conversations.Errors))
+	metrics.RecordFileItems(ctx, op, telemetry.FileItemPersonality, telemetry.FileItemImported, result.Personalities.Created)
+	metrics.RecordFileItems(ctx, op, telemetry.FileItemPersonality, telemetry.FileItemSkipped, result.Personalities.Skipped)
 }
 
 func progressForAccountImport(phase, message string, result models.AccountImportResult) models.AccountImportProgress {

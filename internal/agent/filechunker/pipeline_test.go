@@ -2,9 +2,16 @@ package filechunker
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry/telemetrytest"
 	"go.uber.org/zap"
 )
 
@@ -214,4 +221,33 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// ProcessAndStore times its chunk and embed stages under the upload operation, and a failed
+// embedding marks the stage failed and counts the file's chunks as failed.
+func TestProcessAndStore_RecordsStageMetrics(t *testing.T) {
+	tm := telemetrytest.UseGlobal(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"bad input","type":"invalid_request_error"}}`))
+	}))
+	defer srv.Close()
+	client := openai.NewClient(option.WithBaseURL(srv.URL), option.WithAPIKey("test"), option.WithMaxRetries(0))
+	p := NewFileChunkPipeline(&client, nil, zap.NewNop())
+
+	err := p.ProcessAndStore(context.Background(), uuid.New(), []byte("some text worth chunking"), "notes.txt", "text/plain")
+	require.Error(t, err)
+
+	upload := telemetry.AttrOperation.String(telemetry.FileOpUpload)
+	require.Equal(t, uint64(1), tm.HistogramCount(t, telemetry.FileOperationDuration.Name,
+		upload, telemetry.AttrStage.String(telemetry.FileStageChunk)))
+	require.Equal(t, uint64(1), tm.HistogramCount(t, telemetry.FileOperationDuration.Name,
+		upload, telemetry.AttrStage.String(telemetry.FileStageEmbed)))
+	require.NotEmpty(t, tm.AttributeValues(t, telemetry.FileOperationDuration.Name, telemetry.AttrErrorType),
+		"the failed embed stage carries error.type")
+	require.Equal(t, uint64(1), tm.HistogramCount(t, telemetry.FileOperationItems.Name,
+		upload, telemetry.AttrKind.String(telemetry.FileItemChunk), telemetry.AttrOutcome.String(telemetry.FileItemFailed)))
+	require.Zero(t, tm.HistogramCount(t, telemetry.FileOperationDuration.Name,
+		upload, telemetry.AttrStage.String(telemetry.FileStageStore)), "store is not reached")
 }
