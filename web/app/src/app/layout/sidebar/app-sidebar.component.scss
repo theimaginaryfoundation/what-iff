@@ -467,6 +467,89 @@
   cursor: pointer;
 }
 
+.app-sidebar__pinned-thread {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.app-sidebar__pinned-thread--ref-selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.app-sidebar__ref-check {
+  margin-left: auto;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #fff;
+}
+
+.app-sidebar__ref-check--on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.app-sidebar__select-label--mobile {
+  display: none;
+}
+
+/* Matches the app's mobile-nav breakpoint (AppLayoutComponent: desktop starts at 1024px). */
+@media (max-width: 1023px) {
+  .app-sidebar__select-label--desktop {
+    display: none;
+  }
+
+  .app-sidebar__select-label--mobile {
+    display: inline;
+  }
+}
+
+.app-sidebar__ref-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary, var(--bg-base));
+  font-size: 12px;
+}
+
+.app-sidebar__ref-bar-label {
+  margin-right: auto;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.app-sidebar__ref-bar-cancel,
+.app-sidebar__ref-bar-confirm {
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.app-sidebar__ref-bar-cancel {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.app-sidebar__ref-bar-confirm {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+
 .app-sidebar__pinned-thread--active {
   color: var(--accent-light, var(--accent-mode));
   background: var(--thread-active-bg, var(--accent-bg));

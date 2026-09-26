@@ -537,4 +537,222 @@ describe('ChatComposerComponent', () => {
         expect(reviewRow?.classList.contains('composer__skill-row--selected')).toBe(true);
         expect(reviewRow?.getAttribute('aria-selected')).toBe('true');
     });
+    it('renders thread reference chips with overflow and emits remove/clear', () => {
+        const threads = ['A', 'B', 'C', 'D', 'E', 'F', 'G'].map(name => ({
+            id: `t-${name}`, user_id: 'u-1', name: `Thread ${name}`, created_at: '', updated_at: '',
+        }));
+        fixture.componentRef.setInput('threadReferences', threads);
+        fixture.detectChanges();
+        const root: HTMLElement = fixture.nativeElement;
+
+        expect(root.querySelector('.composer__thread-refs-label')?.textContent).toContain('7 threads added');
+        expect(root.querySelectorAll('.composer__thread-chip').length).toBe(7);
+        expect(root.querySelectorAll('.composer__thread-chip--hide-mobile').length).toBe(4);
+        expect(root.querySelectorAll('.composer__thread-chip--hide-desktop').length).toBe(2);
+        expect(root.querySelector('.composer__thread-more--mobile')?.textContent).toContain('+4');
+        expect(root.querySelector('.composer__thread-more--desktop')?.textContent).toContain('+2');
+
+        const removed = vi.fn().mockName('threadReferenceRemoved');
+        const cleared = vi.fn().mockName('threadReferencesCleared');
+        fixture.componentInstance.threadReferenceRemoved.subscribe(removed);
+        fixture.componentInstance.threadReferencesCleared.subscribe(cleared);
+        (root.querySelector('.composer__thread-chip .composer__skill-chip-remove') as HTMLButtonElement).click();
+        (root.querySelector('.composer__thread-refs-clear') as HTMLButtonElement).click();
+
+        expect(removed).toHaveBeenCalledWith('t-A');
+        expect(cleared).toHaveBeenCalled();
+    });
+
+    it('shows a singular label and no chips row when there are no thread references', () => {
+        fixture.componentRef.setInput('threadReferences', [
+            { id: 't-1', user_id: 'u-1', name: 'Only one', created_at: '', updated_at: '' },
+        ]);
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.composer__thread-refs-label')?.textContent).toContain('1 thread added');
+
+        fixture.componentRef.setInput('threadReferences', []);
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.composer__thread-refs')).toBeNull();
+    });
+    describe('thread picker', () => {
+        const options = [
+            { id: 'active', user_id: 'u', name: 'Active chat', created_at: '', updated_at: '' },
+            { id: 't-1', user_id: 'u', name: 'Travel Planning', is_favorite: true, created_at: '', updated_at: '' },
+            { id: 't-2', user_id: 'u', name: 'Cooking', created_at: '', updated_at: '' },
+            { id: 't-3', user_id: 'u', name: 'Old one', archived: true, created_at: '', updated_at: '' },
+        ];
+
+        beforeEach(() => {
+            fixture.componentRef.setInput('chatId', 'active');
+            fixture.componentRef.setInput('threadOptions', options);
+            fixture.detectChanges();
+        });
+
+        it('lists other active threads only and filters by search and starred', () => {
+            fixture.componentInstance.openThreadPicker();
+            fixture.detectChanges();
+            const root: HTMLElement = fixture.nativeElement;
+            const names = () => [...root.querySelectorAll('.composer__thread-popover .composer__thread-name')].map(n => n.textContent?.trim());
+
+            expect(names()).toEqual(['Travel Planning', 'Cooking']);
+
+            fixture.componentInstance.threadStarredOnly.set(true);
+            fixture.detectChanges();
+            expect(names()).toEqual(['Travel Planning']);
+
+            fixture.componentInstance.threadStarredOnly.set(false);
+            fixture.componentInstance.threadFilter.set('cook');
+            fixture.detectChanges();
+            expect(names()).toEqual(['Cooking']);
+        });
+
+        it('renders count header, personality avatar, age and a star for starred threads', () => {
+            fixture.componentRef.setInput('personalities', [
+                { id: 'p-1', name: 'Lola Tarsier', accent_color: '#10B981' },
+            ]);
+            fixture.componentRef.setInput('threadOptions', [
+                { id: 't-1', user_id: 'u', name: 'Travel Planning', is_favorite: true, personality_id: 'p-1',
+                  created_at: '', updated_at: '', last_message_time: new Date(Date.now() - 3 * 24 * 3_600_000).toISOString() },
+                { id: 't-2', user_id: 'u', name: 'Cooking', personality_name: 'Mooey', created_at: '', updated_at: '' },
+            ]);
+            fixture.componentInstance.openThreadPicker();
+            fixture.detectChanges();
+            const root: HTMLElement = fixture.nativeElement;
+            const rows = root.querySelectorAll('.composer__thread-popover .composer__thread-row');
+
+            expect(root.querySelector('.composer__thread-count')?.textContent).toContain('0 selected');
+            expect(rows[0].querySelector('.composer__thread-avatar')?.textContent?.trim()).toBe('LT');
+            expect(rows[0].querySelector('.composer__thread-age')?.textContent).toContain('3 days ago');
+            expect(rows[0].querySelector('.composer__thread-star')).not.toBeNull();
+            expect(rows[1].querySelector('.composer__thread-avatar')?.textContent?.trim()).toBe('MO');
+            expect(rows[1].querySelector('.composer__thread-star')).toBeNull();
+        });
+
+        it('sits directly under the composer body so it matches the composer width', () => {
+            fixture.componentInstance.openThreadPicker();
+            fixture.detectChanges();
+
+            const popover = fixture.nativeElement.querySelector('.composer__thread-popover') as HTMLElement;
+            expect(popover.parentElement?.classList.contains('composer__body')).toBe(true);
+        });
+
+        it('emits a toggle when a thread is picked and marks referenced rows', () => {
+            const toggled = vi.fn().mockName('threadReferenceToggled');
+            fixture.componentInstance.threadReferenceToggled.subscribe(toggled);
+            fixture.componentRef.setInput('threadReferences', [options[2]]);
+            fixture.componentInstance.openThreadPicker();
+            fixture.detectChanges();
+            const root: HTMLElement = fixture.nativeElement;
+            const rows = root.querySelectorAll<HTMLButtonElement>('.composer__thread-popover .composer__thread-row');
+
+            expect(rows[1].getAttribute('aria-selected')).toBe('true');
+            rows[0].click();
+
+            expect(toggled).toHaveBeenCalledWith(options[1]);
+        });
+
+        it('disables Done until a thread is selected and Cancel clears the references', () => {
+            const cleared = vi.fn().mockName('threadReferencesCleared');
+            fixture.componentInstance.threadReferencesCleared.subscribe(cleared);
+            fixture.componentInstance.openThreadPicker();
+            fixture.detectChanges();
+            const root: HTMLElement = fixture.nativeElement;
+            expect((root.querySelector('.composer__thread-done') as HTMLButtonElement).disabled).toBe(true);
+
+            fixture.componentRef.setInput('threadReferences', [options[1]]);
+            fixture.detectChanges();
+            expect((root.querySelector('.composer__thread-done') as HTMLButtonElement).disabled).toBe(false);
+
+            (root.querySelector('.composer__thread-cancel') as HTMLButtonElement).click();
+            fixture.detectChanges();
+
+            expect(cleared).toHaveBeenCalled();
+            expect(root.querySelector('.composer__thread-popover')).toBeNull();
+        });
+
+        it('opens from the /thread slash command', () => {
+            fixture.componentInstance.runCommand({ id: 'thread', label: 'Thread' });
+            fixture.detectChanges();
+
+            expect(fixture.nativeElement.querySelector('.composer__thread-popover')).not.toBeNull();
+        });
+    });
+    describe('thread drag and drop', () => {
+        const dragEvent = (type: string, types: string[], data: Record<string, string> = {}): DragEvent => {
+            const event = new Event(type, { bubbles: true, cancelable: true }) as DragEvent;
+            Object.defineProperty(event, 'dataTransfer', {
+                value: { types, getData: (key: string) => data[key] ?? '', files: [], dropEffect: 'none' },
+            });
+            return event;
+        };
+
+        beforeEach(() => {
+            fixture.componentRef.setInput('chatId', 'active');
+            fixture.componentRef.setInput('threadOptions', [
+                { id: 't-1', user_id: 'u', name: 'Travel Planning', created_at: '', updated_at: '' },
+                { id: 'active', user_id: 'u', name: 'Active chat', created_at: '', updated_at: '' },
+            ]);
+            fixture.detectChanges();
+        });
+
+        it('highlights the composer while a thread is dragged over it', () => {
+            const form: HTMLElement = fixture.nativeElement.querySelector('form.composer');
+            form.dispatchEvent(dragEvent('dragover', ['text/thread-id']));
+            fixture.detectChanges();
+
+            expect(form.classList.contains('composer--thread-drop')).toBe(true);
+            expect(fixture.nativeElement.textContent).toContain('Drop to add thread');
+            expect(fixture.componentInstance.isDragOver()).toBe(false);
+
+            form.dispatchEvent(dragEvent('dragleave', ['text/thread-id']));
+            fixture.detectChanges();
+            expect(form.classList.contains('composer--thread-drop')).toBe(false);
+        });
+
+        it('emits a toggle when a thread is dropped, ignoring the active thread and unknown ids', () => {
+            const toggled = vi.fn().mockName('threadReferenceToggled');
+            fixture.componentInstance.threadReferenceToggled.subscribe(toggled);
+            const form: HTMLElement = fixture.nativeElement.querySelector('form.composer');
+
+            form.dispatchEvent(dragEvent('drop', ['text/thread-id'], { 'text/thread-id': 't-1' }));
+            form.dispatchEvent(dragEvent('drop', ['text/thread-id'], { 'text/thread-id': 'active' }));
+            form.dispatchEvent(dragEvent('drop', ['text/thread-id'], { 'text/thread-id': 'missing' }));
+
+            expect(toggled).toHaveBeenCalledTimes(1);
+            expect(toggled.mock.calls[0][0].id).toBe('t-1');
+        });
+
+        it('does not remove an already-attached thread on drop and shows a timed notice', () => {
+            vi.useFakeTimers();
+            try {
+                const toggled = vi.fn().mockName('threadReferenceToggled');
+                fixture.componentInstance.threadReferenceToggled.subscribe(toggled);
+                fixture.componentRef.setInput('threadReferences', [
+                    { id: 't-1', user_id: 'u', name: 'Travel Planning', created_at: '', updated_at: '' },
+                ]);
+                fixture.detectChanges();
+                const form: HTMLElement = fixture.nativeElement.querySelector('form.composer');
+
+                form.dispatchEvent(dragEvent('drop', ['text/thread-id'], { 'text/thread-id': 't-1' }));
+                fixture.detectChanges();
+
+                expect(toggled).not.toHaveBeenCalled();
+                expect(fixture.nativeElement.querySelector('.composer__thread-notice')?.textContent).toContain('Thread already added.');
+
+                vi.advanceTimersByTime(2000);
+                fixture.detectChanges();
+                expect(fixture.nativeElement.querySelector('.composer__thread-notice')).toBeNull();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it('keeps the file drop path for non-thread drags', () => {
+            const form: HTMLElement = fixture.nativeElement.querySelector('form.composer');
+            form.dispatchEvent(dragEvent('dragover', ['Files']));
+
+            expect(fixture.componentInstance.isDragOver()).toBe(true);
+            expect(fixture.componentInstance.isThreadDragOver()).toBe(false);
+        });
+    });
 });

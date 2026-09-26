@@ -138,6 +138,19 @@
         >
           All ({{ sidebarFilteredThreads().length }})
         </button>
+        @if (!refSelectionMode() && threads.activeThreadId()) {
+          <button
+            type="button"
+            class="app-sidebar__pill app-sidebar__select-btn"
+            aria-label="Select threads to attach to your next message"
+            uiTooltip="Attach threads to your next message"
+            placement="right"
+            (click)="startRefSelection()"
+          >
+            <span class="app-sidebar__select-label--desktop">Select</span>
+            <span class="app-sidebar__select-label--mobile">Pick threads</span>
+          </button>
+        }
         <button
           type="button"
           class="app-sidebar__import-btn"
@@ -777,7 +790,16 @@
                 type="button"
                 class="app-sidebar__pinned-thread"
                 [class.app-sidebar__pinned-thread--active]="threads.activeThreadId() === thread.id"
-                (click)="openThread(thread.id)"
+                [class.app-sidebar__pinned-thread--ref-selected]="refSelectionMode() && isRefSelected(thread.id)"
+                [attr.draggable]="thread.id === threads.activeThreadId() ? 'false' : 'true'"
+                (dragstart)="onThreadDragStart($event, thread.id)"
+                (pointerdown)="onThreadPointerDown($event, thread)"
+                (pointermove)="onThreadPointerMove($event)"
+                (pointerup)="cancelLongPress()"
+                (pointercancel)="cancelLongPress()"
+                (pointerleave)="cancelLongPress()"
+                (contextmenu)="onThreadContextMenu($event)"
+                (click)="onThreadClick(thread)"
               >
                 <span
                   class="app-sidebar__thread-avatar"
@@ -806,6 +828,13 @@
                   }
                 </span>
                 <span class="app-sidebar__thread-name">{{ thread.name }}</span>
+                @if (refSelectionMode() && thread.id !== threads.activeThreadId()) {
+                  <span
+                    class="app-sidebar__ref-check"
+                    [class.app-sidebar__ref-check--on]="isRefSelected(thread.id)"
+                    aria-hidden="true"
+                  >{{ isRefSelected(thread.id) ? '✓' : '' }}</span>
+                }
                 @if (thread.unread_count && thread.unread_count > 0) {
                   <span class="app-sidebar__thread-badge" [attr.aria-label]="thread.unread_count + ' unread messages'">
                     {{ thread.unread_count }}
@@ -834,7 +863,16 @@
                 type="button"
                 class="app-sidebar__pinned-thread"
                 [class.app-sidebar__pinned-thread--active]="threads.activeThreadId() === thread.id"
-                (click)="openThread(thread.id)"
+                [class.app-sidebar__pinned-thread--ref-selected]="refSelectionMode() && isRefSelected(thread.id)"
+                [attr.draggable]="thread.id === threads.activeThreadId() ? 'false' : 'true'"
+                (dragstart)="onThreadDragStart($event, thread.id)"
+                (pointerdown)="onThreadPointerDown($event, thread)"
+                (pointermove)="onThreadPointerMove($event)"
+                (pointerup)="cancelLongPress()"
+                (pointercancel)="cancelLongPress()"
+                (pointerleave)="cancelLongPress()"
+                (contextmenu)="onThreadContextMenu($event)"
+                (click)="onThreadClick(thread)"
               >
                 <span
                   class="app-sidebar__thread-avatar"
@@ -863,6 +901,13 @@
                   }
                 </span>
                 <span class="app-sidebar__thread-name">{{ thread.name }}</span>
+                @if (refSelectionMode() && thread.id !== threads.activeThreadId()) {
+                  <span
+                    class="app-sidebar__ref-check"
+                    [class.app-sidebar__ref-check--on]="isRefSelected(thread.id)"
+                    aria-hidden="true"
+                  >{{ isRefSelected(thread.id) ? '✓' : '' }}</span>
+                }
                 @if (thread.unread_count && thread.unread_count > 0) {
                   <span class="app-sidebar__thread-badge" [attr.aria-label]="thread.unread_count + ' unread messages'">
                     {{ thread.unread_count }}
@@ -874,6 +919,14 @@
         </div>
       </section>
     </section>
+  }
+
+  @if (refSelectionMode()) {
+    <div class="app-sidebar__ref-bar" role="group" aria-label="Attach threads to your next message">
+      <span class="app-sidebar__ref-bar-label">{{ refSelectionLabel() }}</span>
+      <button type="button" class="app-sidebar__ref-bar-cancel" (click)="cancelRefSelection()">Cancel</button>
+      <button type="button" class="app-sidebar__ref-bar-confirm" (click)="confirmRefSelection()">Confirm</button>
+    </div>
   }
 
   @if (!collapsed()) {

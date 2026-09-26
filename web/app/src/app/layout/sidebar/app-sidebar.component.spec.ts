@@ -17,6 +17,7 @@ import { NavService } from '../../core/services/nav.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { RitualViewService } from '../../core/services/ritual-view.service';
 import { ThreadListService } from '../../core/services/thread-list.service';
+import { ContextPanelService } from '../../features/chat/services/context-panel.service';
 import { AppSidebarComponent } from './app-sidebar.component';
 
 describe('AppSidebarComponent', () => {
@@ -401,5 +402,154 @@ describe('AppSidebarComponent', () => {
         expect(ritualViewStub.setFilters).toHaveBeenCalledWith({ globalOnly: false, personalityIds: [], personalityId: '' });
         expect(ritualViewStub.setFilters).toHaveBeenCalledWith({ globalOnly: true, personalityIds: [], personalityId: '' });
         expect(router.navigate).toHaveBeenCalledWith(['/skills'], { queryParams: { create: '1' }, queryParamsHandling: 'merge' });
+    });
+    describe('thread drag source', () => {
+        it('makes every thread draggable except the open one', () => {
+            threadsStub.filteredThreads.set([
+                { id: 'thread-1', name: 'Active', is_favorite: true, personality_id: 'persona-1' },
+                { id: 'thread-2', name: 'Cooking', is_favorite: false, personality_id: 'persona-1' },
+            ]);
+            threadsStub.recentOpenedIds.set(['thread-2']);
+            const fixture = create();
+            const rows = [...fixture.nativeElement.querySelectorAll('.app-sidebar__pinned-thread')] as HTMLButtonElement[];
+            const byName = (name: string) => rows.find(r => r.textContent?.includes(name))!;
+
+            expect(byName('Active').getAttribute('draggable')).toBe('false');
+            expect(byName('Cooking').getAttribute('draggable')).toBe('true');
+        });
+
+        it('cancels a drag that starts on the open thread', () => {
+            const fixture = create();
+            const setData = vi.fn().mockName('setData');
+            const event = new Event('dragstart', { cancelable: true }) as DragEvent;
+            Object.defineProperty(event, 'dataTransfer', { value: { setData, effectAllowed: 'none' } });
+
+            fixture.componentInstance.onThreadDragStart(event, 'thread-1');
+
+            expect(event.defaultPrevented).toBe(true);
+            expect(setData).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('mobile long-press thread selection', () => {
+        const pointer = (type: string, init: PointerEventInit = {}) =>
+            new PointerEvent(type, { bubbles: true, pointerType: 'touch', clientX: 10, clientY: 10, ...init });
+
+        function setup() {
+            threadsStub.filteredThreads.set([
+                { id: 'thread-1', name: 'Active', is_favorite: true, personality_id: 'persona-1' },
+                { id: 'thread-2', name: 'Cooking', is_favorite: false, personality_id: 'persona-1' },
+                { id: 'thread-3', name: 'Travel', is_favorite: false, personality_id: 'persona-1' },
+            ]);
+            threadsStub.recentOpenedIds.set(['thread-2', 'thread-3']);
+            vi.useFakeTimers();
+            const fixture = create();
+            const rows = () => [...fixture.nativeElement.querySelectorAll('.app-sidebar__pinned-thread')] as HTMLButtonElement[];
+            const row = (name: string) => rows().find(r => r.textContent?.includes(name))!;
+            const refs = () => TestBed.inject(ContextPanelService).composerThreadReferences().map(t => t.id);
+            return { fixture, row, refs };
+        }
+
+        afterEach(() => vi.useRealTimers());
+
+        it('enters selection mode after a 500 ms touch hold and suppresses the opening click', () => {
+            const { fixture, row, refs } = setup();
+            const openSpy = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+
+            row('Cooking').dispatchEvent(pointer('pointerdown'));
+            vi.advanceTimersByTime(499);
+            expect(refs()).toEqual([]);
+            vi.advanceTimersByTime(1);
+            fixture.detectChanges();
+
+            expect(refs()).toEqual(['thread-2']);
+            expect(fixture.nativeElement.querySelector('.app-sidebar__ref-bar')).toBeTruthy();
+
+            row('Cooking').dispatchEvent(pointer('pointerup'));
+            row('Cooking').click();
+            expect(openSpy).not.toHaveBeenCalled();
+            expect(refs()).toEqual(['thread-2']);
+        });
+
+        it('does not start selection for mouse pointers, the active thread, or a moving finger', () => {
+            const { fixture, row, refs } = setup();
+
+            row('Cooking').dispatchEvent(pointer('pointerdown', { pointerType: 'mouse' }));
+            row('Active').dispatchEvent(pointer('pointerdown'));
+            vi.advanceTimersByTime(600);
+            expect(refs()).toEqual([]);
+
+            row('Travel').dispatchEvent(pointer('pointerdown'));
+            row('Travel').dispatchEvent(pointer('pointermove', { clientX: 40, clientY: 10 }));
+            vi.advanceTimersByTime(600);
+            fixture.detectChanges();
+
+            expect(refs()).toEqual([]);
+            expect(fixture.nativeElement.querySelector('.app-sidebar__ref-bar')).toBeNull();
+        });
+
+        it('toggles other threads by tap while selecting, then Cancel restores the snapshot', () => {
+            const { fixture, row, refs } = setup();
+            const openSpy = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+            row('Cooking').dispatchEvent(pointer('pointerdown'));
+            vi.advanceTimersByTime(500);
+            fixture.detectChanges();
+            row('Cooking').click(); // swallowed release click
+
+            row('Travel').click();
+            fixture.detectChanges();
+            expect(refs()).toEqual(['thread-2', 'thread-3']);
+            expect(openSpy).not.toHaveBeenCalled();
+
+            (fixture.nativeElement.querySelector('.app-sidebar__ref-bar-cancel') as HTMLButtonElement).click();
+            fixture.detectChanges();
+
+            expect(refs()).toEqual([]);
+            expect(fixture.nativeElement.querySelector('.app-sidebar__ref-bar')).toBeNull();
+        });
+
+        it('Select button enters selection mode without a long-press, and Cancel exits it', () => {
+            const { fixture, row, refs } = setup();
+            const select = fixture.nativeElement.querySelector('.app-sidebar__select-btn') as HTMLButtonElement;
+            expect(select).toBeTruthy();
+            expect(select.querySelector('.app-sidebar__select-label--desktop')?.textContent).toBe('Select');
+            expect(select.querySelector('.app-sidebar__select-label--mobile')?.textContent).toBe('Pick threads');
+
+            select.click();
+            fixture.detectChanges();
+            expect(fixture.nativeElement.querySelector('.app-sidebar__ref-bar')).toBeTruthy();
+            expect(fixture.nativeElement.querySelector('.app-sidebar__select-btn')).toBeNull();
+            expect(refs()).toEqual([]);
+
+            row('Cooking').click();
+            fixture.detectChanges();
+            expect(refs()).toEqual(['thread-2']);
+
+            (fixture.nativeElement.querySelector('.app-sidebar__ref-bar-cancel') as HTMLButtonElement).click();
+            fixture.detectChanges();
+            expect(refs()).toEqual([]);
+            expect(fixture.nativeElement.querySelector('.app-sidebar__select-btn')).toBeTruthy();
+        });
+
+        it('hides the Select button when no thread is open', () => {
+            threadsStub.activeThreadId.set(null);
+            const { fixture } = setup();
+
+            expect(fixture.nativeElement.querySelector('.app-sidebar__select-btn')).toBeNull();
+        });
+
+        it('Confirm keeps the selection and closes the drawer', () => {
+            const { fixture, row, refs } = setup();
+            row('Cooking').dispatchEvent(pointer('pointerdown'));
+            vi.advanceTimersByTime(500);
+            fixture.detectChanges();
+
+            (fixture.nativeElement.querySelector('.app-sidebar__ref-bar-confirm') as HTMLButtonElement).click();
+            fixture.detectChanges();
+
+            expect(refs()).toEqual(['thread-2']);
+            expect(navSpy.setCollapsed).toHaveBeenCalledWith(true);
+            expect(fixture.nativeElement.querySelector('.app-sidebar__ref-bar')).toBeNull();
+        });
     });
 });
