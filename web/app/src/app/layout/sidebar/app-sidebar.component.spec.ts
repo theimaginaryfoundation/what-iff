@@ -184,6 +184,22 @@ describe('AppSidebarComponent', () => {
         return fixture;
     }
 
+    // A private build swaps nav-actions-outlet for its own action (a release-notes
+    // bell); the slot must sit between help and profile, and take no space while
+    // it is empty (the open-source stub). This spec also runs in the composed
+    // private build, where the slot is filled, so "hidden" is only asserted empty.
+    it('mounts the nav actions outlet between help and profile, hidden while empty', () => {
+        const fixture = create();
+        const actions = fixture.nativeElement.querySelector('.app-sidebar-header__actions') as HTMLElement;
+        const order = Array.from(actions.children).map(el =>
+            el.tagName.toLowerCase() === 'app-nav-actions-outlet' ? 'outlet' : el.className.includes('help') ? 'help' : 'profile');
+        expect(order).toEqual(['help', 'outlet', 'profile']);
+        const outlet = actions.querySelector('app-nav-actions-outlet') as HTMLElement;
+        if (outlet.childElementCount === 0) {
+            expect(getComputedStyle(outlet).display).toBe('none');
+        }
+    });
+
     it('renders top nav tabs by default', () => {
         const fixture = create();
         const tabs = fixture.nativeElement.querySelectorAll('.app-sidebar__tab');
