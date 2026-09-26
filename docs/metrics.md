@@ -4,6 +4,8 @@ The API emits OpenTelemetry metrics. Every metric is declared once in
 [`internal/telemetry/catalog.go`](../internal/telemetry/catalog.go), with its unit, description and
 histogram buckets. This page lists what each one means, its attributes, and what it costs.
 Update both when you add or change a metric.
+The reasoning behind these conventions and the cost budget is in
+[ADR 0x022](adr/0x022-metrics-instrumentation.md).
 
 ## Turning metrics on
 
