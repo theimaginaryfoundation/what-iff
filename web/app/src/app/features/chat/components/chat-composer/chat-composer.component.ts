@@ -498,7 +498,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                     <ui-file-icon [size]="13" />
                     Attach file
                   </button>
-                  <button type="button" role="menuitem" (click)="personaButtonClicked.emit(); plusOpen.set(false); emojiOpen.set(false)">
+                  <button type="button" role="menuitem" [attr.aria-label]="personaButtonAriaLabel()" (click)="personaButtonClicked.emit(); plusOpen.set(false); emojiOpen.set(false)">
                     <span aria-hidden="true">{{ personaButtonLabel().charAt(0) }}</span>
                     {{ personaButtonLabel() }}
                   </button>

@@ -58,7 +58,8 @@ export class ChatPage {
     });
     this.modelPickerTrigger = this.page.locator('.model-picker__trigger');
     this.modelPickerOptions = this.page.locator('.model-picker__options');
-    this.composerPersonaMenuItem = this.plusMenu.getByRole('menuitem').nth(4);
+    // By name, not position: the menu gains items over time (Thread was added before this one).
+    this.composerPersonaMenuItem = this.plusMenu.getByRole('menuitem', { name: /^(Change personality|Pick a personality)/ });
     this.skillMenuItem = this.plusMenu.getByRole('menuitem', { name: 'Skill', exact: true });
     this.skillPickerDialog = this.page.getByRole('dialog', { name: 'Choose skills' });
     this.skillFilterInput = this.skillPickerDialog.getByLabel('Filter skills');
