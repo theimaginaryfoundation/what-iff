@@ -68,7 +68,9 @@ test('the reference picker shows an empty gallery for a fresh user', async ({ pe
   await expect(personalityDetailPage.generateDialog.getByText('No images yet — upload one instead.')).toBeVisible();
 });
 
-test('a failed generation job surfaces in the modal and leaves the names editable', async ({ personalityDetailPage, userWithPersonality }) => {
+// @mock-only: it relies on the mock backend failing the job. Against a real backend
+// the job succeeds and generates (and bills) real images.
+test('a failed generation job surfaces in the modal and leaves the names editable', { tag: '@mock-only' }, async ({ personalityDetailPage, userWithPersonality }) => {
   await personalityDetailPage.navigateTo(userWithPersonality.personality.id);
   await personalityDetailPage.openGenerate();
   await personalityDetailPage.generateNames.nth(8).fill('Smug');
