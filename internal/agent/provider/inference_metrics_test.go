@@ -33,3 +33,10 @@ func TestRecordChatCompletionUsage_NilSafe(t *testing.T) {
 		recordChatCompletionUsage(ctx, &telemetry.Telemetry{}, &openai.ChatCompletion{})
 	})
 }
+
+func TestRecordProviderTokenUsage_NoopWithNilMetrics(t *testing.T) {
+	t.Parallel()
+	require.NotPanics(t, func() {
+		recordProviderTokenUsage(context.Background(), telemetry.LoggerOnly(nil), 10, 5)
+	})
+}

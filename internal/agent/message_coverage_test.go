@@ -14,6 +14,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry/telemetrytest"
 	"go.uber.org/zap"
 )
 
@@ -135,48 +136,43 @@ func TestDeleteProviderFileAttachment_NoProviderConfigured(t *testing.T) {
 	require.ErrorContains(t, err, "openai provider is not configured")
 }
 
-// --- RecordFileUpload / recordCounter / recordTime / recordCountHistogram no-telemetry guards ---
+// --- RecordFileUpload / recordTurnStage ---
 
 func TestRecordFileUpload_NoopWithNilTelemetry(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
 	require.NotPanics(t, func() {
 		a.RecordFileUpload(context.Background(), "image/png", "success")
+		a.recordTurnStage(context.Background(), turnStageInference, time.Second)
 	})
 }
 
-func TestRecordTime_NoopWithNilTelemetry(t *testing.T) {
+// A Telemetry without Metrics (LoggerOnly, partial test wiring) must not panic: *Metrics methods
+// are no-ops on a nil receiver.
+func TestAgentMetrics_NoopWithNilMetrics(t *testing.T) {
 	t.Parallel()
-	a := &Agent{}
+	a := &Agent{logger: zap.NewNop(), telemetry: telemetry.LoggerOnly(zap.NewNop())}
+	require.Nil(t, a.metrics())
 	require.NotPanics(t, func() {
-		a.recordTime(context.Background(), "some_metric", 0)
+		ctx := context.Background()
+		a.RecordFileUpload(ctx, "image/png", "success")
+		a.recordTurnStage(ctx, turnStagePostProcess, time.Second)
+		a.recordToolCalls(ctx, nil)
+		a.metrics().Add(ctx, telemetry.ChatCheckpoints, 1)
 	})
 }
 
-func TestRecordCounter_NoopWithNilTelemetry(t *testing.T) {
+func TestRecordFileUpload_CountsByKindNotMIME(t *testing.T) {
 	t.Parallel()
-	a := &Agent{}
-	require.NotPanics(t, func() {
-		a.recordCounter(context.Background(), "some_counter", 1)
-	})
-}
+	tm := telemetrytest.New(t)
+	a := &Agent{telemetry: &telemetry.Telemetry{Logger: zap.NewNop(), Metrics: tm.Metrics}}
 
-func TestRecordCountHistogram_NoopWithNilTelemetry(t *testing.T) {
-	t.Parallel()
-	a := &Agent{}
-	require.NotPanics(t, func() {
-		a.recordCountHistogram(context.Background(), "some_histogram", 1)
-	})
-}
+	a.RecordFileUpload(context.Background(), "image/png", "success")
+	a.RecordFileUpload(context.Background(), "image/webp", "failure")
 
-func TestRecordTime_NoopWithNilMetrics(t *testing.T) {
-	t.Parallel()
-	a := &Agent{telemetry: &telemetry.Telemetry{}}
-	require.NotPanics(t, func() {
-		a.recordTime(context.Background(), "some_metric", 0)
-		a.recordCounter(context.Background(), "some_counter", 1)
-		a.recordCountHistogram(context.Background(), "some_histogram", 1)
-	})
+	name := telemetry.FileUploads.Name
+	require.Equal(t, int64(2), tm.CounterValue(t, name, telemetry.AttrKind.String("image")))
+	require.Equal(t, int64(1), tm.CounterValue(t, name, telemetry.AttrOutcome.String("failure")))
 }
 
 // --- mergedRitualIDsForTools / mergeRitualSets ---

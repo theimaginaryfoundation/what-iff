@@ -18,10 +18,20 @@ type checkpointPolicy struct {
 }
 
 type checkpointDecision struct {
-	ShouldCheckpoint            bool
-	Reason                      string
+	ShouldCheckpoint bool
+	// Reason explains the decision for logs, with the numbers that triggered it.
+	Reason string
+	// Trigger names which rule fired (a checkpointTrigger* constant), for the metric label.
+	Trigger                     string
 	AssistantMessagesSinceCheck int
 }
+
+// Checkpoint triggers, one per rule in shouldCheckpoint.
+const (
+	checkpointTriggerTurnCount       = "turn_count"
+	checkpointTriggerLastInput       = "last_input_tokens"
+	checkpointTriggerContextEstimate = "estimated_context_tokens"
+)
 
 type checkpointInputs struct {
 	TotalAssistantMessages          int
@@ -70,6 +80,7 @@ func decideCheckpoint(policy checkpointPolicy, in checkpointInputs) checkpointDe
 	if policy.MinAssistantMessagesSinceCheckpoint > 0 && since >= policy.MinAssistantMessagesSinceCheckpoint {
 		decision.ShouldCheckpoint = true
 		decision.Reason = fmt.Sprintf("assistant_messages_since_checkpoint(%d) >= %d", since, policy.MinAssistantMessagesSinceCheckpoint)
+		decision.Trigger = checkpointTriggerTurnCount
 		return decision
 	}
 
@@ -83,12 +94,14 @@ func decideCheckpoint(policy checkpointPolicy, in checkpointInputs) checkpointDe
 	if policy.MaxLastInputTokens > 0 && in.LastInputTokens >= policy.MaxLastInputTokens {
 		decision.ShouldCheckpoint = true
 		decision.Reason = fmt.Sprintf("last_input_tokens(%d) >= %d", in.LastInputTokens, policy.MaxLastInputTokens)
+		decision.Trigger = checkpointTriggerLastInput
 		return decision
 	}
 
 	if policy.MaxEstimatedContextTokens > 0 && in.EstimatedContextTokens >= policy.MaxEstimatedContextTokens {
 		decision.ShouldCheckpoint = true
 		decision.Reason = fmt.Sprintf("estimated_context_tokens(%d) >= %d", in.EstimatedContextTokens, policy.MaxEstimatedContextTokens)
+		decision.Trigger = checkpointTriggerContextEstimate
 		return decision
 	}
 

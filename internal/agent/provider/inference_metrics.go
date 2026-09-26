@@ -5,8 +5,6 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 )
 
 // recordChatCompletionUsage emits provider token-usage metrics for an
@@ -24,22 +22,15 @@ func recordChatCompletionUsage(ctx context.Context, tel *telemetry.Telemetry, re
 }
 
 func recordProviderTokenUsage(ctx context.Context, tel *telemetry.Telemetry, inputTokens, outputTokens int64) {
-	if tel == nil || tel.Metrics == nil {
+	if tel == nil {
 		return
 	}
-	pathStr := string(telemetry.CallPathFromContext(ctx))
+	// tel.Metrics may be nil; its methods are no-ops on a nil receiver.
+	callPath := telemetry.AttrCallPath.String(string(telemetry.CallPathFromContext(ctx)))
 	if inputTokens > 0 {
-		tel.Metrics.RecordCountHistogram(ctx, telemetry.Tokens, inputTokens, metric.WithAttributes(
-			telemetry.InputTokenAttr(),
-			attribute.String("token_basis", "provider_actual"),
-			attribute.String("call_path", pathStr),
-		))
+		tel.Metrics.Record(ctx, telemetry.GenAITokenUsage, float64(inputTokens), telemetry.AttrGenAITokenType.String(telemetry.TokenTypeInput), callPath)
 	}
 	if outputTokens > 0 {
-		tel.Metrics.RecordCountHistogram(ctx, telemetry.Tokens, outputTokens, metric.WithAttributes(
-			telemetry.OutputTokenAttr(),
-			attribute.String("token_basis", "provider_actual"),
-			attribute.String("call_path", pathStr),
-		))
+		tel.Metrics.Record(ctx, telemetry.GenAITokenUsage, float64(outputTokens), telemetry.AttrGenAITokenType.String(telemetry.TokenTypeOutput), callPath)
 	}
 }

@@ -28,7 +28,6 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/google/uuid"
@@ -73,13 +72,6 @@ const (
 	// Allow a short detached write window when the generation context is cancelled
 	// but we still need to persist terminal job state.
 	jobTerminalPersistTimeout = 5 * time.Second
-	// metrics
-	generateResponseJobDurationKey = "generate_response_job_duration"
-	generateResponseDurationKey    = "generate_response_duration"
-	postProcessMessageDurationKey  = "post_process_message_duration"
-	postProcessMessageCountKey     = "post_process_message_count"
-	toolCallCountKey               = "tool_call_count"
-	totalToolCallsHistogramKey     = "total_tool_calls"
 
 	safetyViolationAssistantMessage = "⚠️ This message has triggered a safety/ethics violation and cannot be processed"
 )
@@ -576,14 +568,13 @@ func (a *Agent) DeleteProviderFileAttachment(ctx context.Context, fileID string)
 	return a.OpenAIProvider.DeleteFileAttachment(ctx, fileID)
 }
 
-// RecordFileUpload emits a counter for a file-attachment upload attempt.
+// RecordFileUpload counts a file-attachment upload attempt by file kind.
 // status should be "success" or "failure".
 func (a *Agent) RecordFileUpload(ctx context.Context, fileType, status string) {
-	a.recordCounter(ctx, telemetry.FileAttachmentUploadTotal, 1,
-		metric.WithAttributes(
-			attribute.String("file_type", fileType),
-			attribute.String("status", status),
-		))
+	a.metrics().Add(ctx, telemetry.FileUploads, 1,
+		telemetry.AttrKind.String(telemetry.FileKind(fileType)),
+		telemetry.AttrOutcome.String(status),
+	)
 }
 
 // messageContextBuilder returns a context builder wired to this agent's datastore,
@@ -982,8 +973,6 @@ func (a *Agent) runUserChatPostInferencePhases(
 		return
 	}
 
-	a.recordTime(ctx, generateResponseJobDurationKey, time.Since(chatJob.CreatedAt))
-
 	if err := a.applyExpressionPhase(ctx, chatJob.UserID, chatJob, chatCtx, modelContext, chatMessage.Message, agentMessage); err != nil {
 		a.logger.Error("expression phase failed", zap.Error(err))
 	}
@@ -1005,7 +994,7 @@ func (a *Agent) runUserChatPostInferencePhases(
 func (a *Agent) generateAssistantForMessage(ctx context.Context, userID uuid.UUID, chatJob *models.Job, chatMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext) (*models.ChatMessage, *provider.GenerateResponse, error) {
 	start := time.Now()
 	defer func() {
-		a.recordTime(ctx, generateResponseDurationKey, time.Since(start))
+		a.recordTurnStage(ctx, turnStageInference, time.Since(start))
 	}()
 
 	a.recordModelContextSegmentEstimates(ctx, modelContext)
@@ -1524,36 +1513,35 @@ func (a *Agent) openAIChatCompletionsAdapter(chatCtx *chatContext, params openai
 }
 
 func (a *Agent) recordToolCalls(ctx context.Context, toolCalls []*models.ToolCall) {
-	a.recordCountHistogram(ctx, totalToolCallsHistogramKey, int64(len(toolCalls)))
-	for _, toolCall := range toolCalls {
-		attrs := metric.WithAttributes(attribute.String("type", toolCall.ToolName), attribute.Bool("error", toolCall.ToolError != ""))
-		a.recordCounter(ctx, toolCallCountKey, 1, attrs)
-	}
+	a.metrics().Record(ctx, telemetry.ToolCallsPerTurn, float64(len(toolCalls)), a.callPathAttr(ctx))
 }
 
-func (a *Agent) recordTime(ctx context.Context, name string, duration time.Duration, attributes ...metric.RecordOption) {
-	if a.telemetry == nil || a.telemetry.Metrics == nil {
-		return
+// metrics returns the agent's metrics recorder. It may be nil (no telemetry, or a Telemetry
+// without Metrics); every *telemetry.Metrics method is a no-op on a nil receiver, so callers
+// don't check.
+func (a *Agent) metrics() *telemetry.Metrics {
+	if a.telemetry == nil {
+		return nil
 	}
-	a.telemetry.Metrics.RecordTime(ctx, name, duration, attributes...)
+	return a.telemetry.Metrics
 }
 
-func (a *Agent) recordCounter(ctx context.Context, name string, count int64, attributes ...metric.AddOption) {
-	if a.telemetry == nil || a.telemetry.Metrics == nil {
-		return
-	}
-	a.telemetry.Metrics.RecordCounter(ctx, name, count, attributes...)
+func (a *Agent) callPathAttr(ctx context.Context) attribute.KeyValue {
+	return telemetry.AttrCallPath.String(string(telemetry.CallPathFromContext(ctx)))
 }
 
-func (a *Agent) recordCountHistogram(ctx context.Context, name string, count int64, attributes ...metric.RecordOption) {
-	if a.telemetry == nil || a.telemetry.Metrics == nil {
-		return
-	}
-	a.telemetry.Metrics.RecordCountHistogram(ctx, name, count, attributes...)
+// Chat turn stages for telemetry.ChatTurnStageDuration.
+const (
+	turnStageInference   = "inference"
+	turnStagePostProcess = "post_process"
+)
+
+func (a *Agent) recordTurnStage(ctx context.Context, stage string, d time.Duration) {
+	a.metrics().RecordDuration(ctx, telemetry.ChatTurnStageDuration, d, telemetry.AttrStage.String(stage), a.callPathAttr(ctx))
 }
 
 func (a *Agent) recordModelContextSegmentEstimates(ctx context.Context, modelContext *provider.ModelContext) {
-	if a.telemetry == nil || a.telemetry.Metrics == nil || modelContext == nil {
+	if a.metrics() == nil || modelContext == nil {
 		return
 	}
 	counter := a.tokenCounter
@@ -1564,13 +1552,12 @@ func (a *Agent) recordModelContextSegmentEstimates(ctx context.Context, modelCon
 	if len(estimates) == 0 {
 		return
 	}
-	m := make(map[string]int64, len(estimates))
-	for k, v := range estimates {
-		if v > 0 {
-			m[string(k)] = int64(v)
+	callPath := a.callPathAttr(ctx)
+	for segment, n := range estimates {
+		if n > 0 {
+			a.metrics().Record(ctx, telemetry.GenAIContextTokens, float64(n), telemetry.AttrSegment.String(string(segment)), callPath)
 		}
 	}
-	a.telemetry.Metrics.RecordSegmentTokenEstimates(ctx, m, telemetry.CallPathFromContext(ctx))
 }
 
 // recordToolDefinitionEstimate records the cl100k estimate for schemas passed out-of-band
@@ -2482,7 +2469,7 @@ func (a *Agent) resolvePersonalityName(ctx context.Context, userID, personalityI
 func (a *Agent) finalizeChat(ctx context.Context, userID uuid.UUID, chatMessage, agentMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext, qd metering.Decision) {
 	start := time.Now()
 	defer func() {
-		a.recordTime(ctx, postProcessMessageDurationKey, time.Since(start))
+		a.recordTurnStage(ctx, turnStagePostProcess, time.Since(start))
 	}()
 	// Generate chat name if it's still the default
 	if chatCtx.chat.Name == defaultChatName {
@@ -2589,11 +2576,9 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	if !decision.ShouldCheckpoint {
 		return
 	}
-	attrs := metric.WithAttributes(
-		telemetry.InputTokenAttr(),
-	)
-	a.recordCountHistogram(ctx, telemetry.Tokens, int64(estimatedContextTokens), attrs)
-	a.recordCountHistogram(ctx, postProcessMessageCountKey, int64(chatCtx.chat.CheckpointUserMessageCount))
+	a.metrics().Add(ctx, telemetry.ChatCheckpoints, 1, telemetry.AttrReason.String(decision.Trigger))
+	a.metrics().Record(ctx, telemetry.ChatCheckpointContextTokens, float64(estimatedContextTokens))
+	a.metrics().Record(ctx, telemetry.ChatCheckpointMessages, float64(chatCtx.chat.CheckpointUserMessageCount))
 	a.logger.Debug("checkpointing chat",
 		zap.String("chat_id", chatMessage.ChatID.String()),
 		zap.String("reason", decision.Reason),

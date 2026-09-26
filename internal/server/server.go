@@ -53,8 +53,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/zap"
 )
@@ -554,33 +552,14 @@ func normalizeMetricRoutePattern(s string) string {
 	return s
 }
 
-// httpStatusClass maps a numeric status to a coarse bucket (reduces metric cardinality vs per-code labels).
-func httpStatusClass(code int) string {
-	switch {
-	case code >= 100 && code < 200:
-		return "1xx"
-	case code >= 200 && code < 300:
-		return "2xx"
-	case code >= 300 && code < 400:
-		return "3xx"
-	case code >= 400 && code < 500:
-		return "4xx"
-	case code >= 500 && code < 600:
-		return "5xx"
-	default:
-		return "other"
-	}
-}
-
 // recordHTTP records request latency with method, mux route template, and status class (1xx–5xx).
 func (s *Server) recordHTTP(ctx context.Context, method, route string, status int, duration time.Duration) {
 	if s.telemetry == nil || s.telemetry.Metrics == nil {
 		return
 	}
-	attrs := metric.WithAttributes(
-		attribute.String("http.method", method),
-		attribute.String("http.route", route),
-		attribute.String("http.status_class", httpStatusClass(status)),
+	s.telemetry.Metrics.RecordDuration(ctx, telemetry.HTTPServerDuration, duration,
+		telemetry.AttrHTTPMethod.String(method),
+		telemetry.AttrHTTPRoute.String(route),
+		telemetry.AttrHTTPStatusClass.String(telemetry.HTTPStatusClass(status)),
 	)
-	s.telemetry.Metrics.RecordTime(ctx, "http_server_request_duration", duration, attrs)
 }
