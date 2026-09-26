@@ -152,3 +152,20 @@ func TestUseGlobalSwapsAndRestores(t *testing.T) {
 	})
 	require.Same(t, before, telemetry.Global())
 }
+
+func TestTrackJobRecordsInFlightAndOutcome(t *testing.T) {
+	t.Parallel()
+	tm := telemetrytest.New(t)
+	ctx := context.Background()
+	imp := telemetry.AttrJobType.String("chat_import")
+
+	finish := tm.TrackJob(ctx, "chat_import")
+	require.Equal(t, int64(1), tm.CounterValue(t, telemetry.JobsInFlight.Name, imp))
+	finish(telemetry.JobOutcomeFromError(context.Canceled))
+
+	require.Equal(t, int64(0), tm.CounterValue(t, telemetry.JobsInFlight.Name, imp))
+	require.Equal(t, uint64(1), tm.HistogramCount(t, telemetry.JobDuration.Name, imp,
+		telemetry.AttrOutcome.String(telemetry.JobOutcomeCancelled)))
+	require.Equal(t, telemetry.JobOutcomeSuccess, telemetry.JobOutcomeFromError(nil))
+	require.Equal(t, telemetry.JobOutcomeFailed, telemetry.JobOutcomeFromError(errors.New("boom")))
+}
