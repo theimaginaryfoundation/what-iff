@@ -112,7 +112,7 @@ func (h *Handler) handleWebhookAssistantMode(w http.ResponseWriter, ctx context.
 }
 
 func (h *Handler) handleWebhookBackgroundMode(w http.ResponseWriter, ctx context.Context, req models.WebhookChatMessageRequest, chatID uuid.UUID) {
-	response, err := h.agent.HandleAgentJobPromptAsync(ctx, chatID, req.Message, nil, nil)
+	response, err := h.agent.HandleAgentJobPromptAsync(ctx, chatID, req.Message, req.ModelID, nil)
 	if err != nil {
 		if errors.Is(err, datastore.ErrChatNotFound) {
 			handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Chat not found", nil)

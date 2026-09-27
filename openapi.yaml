@@ -6683,6 +6683,10 @@ components:
           $ref: '#/components/schemas/WebhookMessageMode'
         message:
           type: string
+        model_id:
+          type: string
+          format: uuid
+          description: Optional model ID used as a per-run override for background mode. Does not change the chat's saved model.
         response_id:
           type: string
         client_timezone:
