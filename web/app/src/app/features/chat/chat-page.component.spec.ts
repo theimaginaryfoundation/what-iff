@@ -4,7 +4,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient, withXhr } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ActivatedRoute, convertToParamMap, Router } from '@angular/router';
-import { BehaviorSubject, EMPTY, of } from 'rxjs';
+import { BehaviorSubject, EMPTY, of, throwError } from 'rxjs';
 import { provideMarkdown } from 'ngx-markdown';
 
 import { ChatPageComponent } from './chat-page.component';
@@ -358,6 +358,38 @@ describe('ChatPageComponent', () => {
             attachments: [expect.objectContaining({ id: 'attachment-1' })],
         }));
         expect(fixture.componentInstance.pendingAttachments()).toEqual([]);
+    });
+
+    describe('attached threads on send', () => {
+        const refId = '11111111-1111-4111-8111-111111111111';
+        const referenced = { id: refId, user_id: 'user-1', name: 'Old research', created_at: '', updated_at: '' };
+
+        it('sends the reference block ahead of the text and clears the chips on success', async () => {
+            fixture.detectChanges();
+            await fixture.whenStable();
+            const contextPanel = TestBed.inject(ContextPanelService);
+            contextPanel.toggleComposerThreadReference(referenced);
+
+            await fixture.componentInstance.send('Summarise it');
+
+            expect(messageService.sendMessage).toHaveBeenCalledWith('chat-1', expect.objectContaining({
+                message: `[Referenced thread "Old research" — read it with find_context mode="conversation" target="${refId}"]\nSummarise it`,
+            }));
+            expect(contextPanel.composerThreadReferences()).toEqual([]);
+        });
+
+        it('keeps the chips and a prefix-free draft when the send fails', async () => {
+            fixture.detectChanges();
+            await fixture.whenStable();
+            const contextPanel = TestBed.inject(ContextPanelService);
+            contextPanel.toggleComposerThreadReference(referenced);
+            messageService.sendMessage.mockReturnValue(throwError(() => new Error('network down')));
+
+            await fixture.componentInstance.send('Summarise it');
+
+            expect(contextPanel.composerThreadReferences()).toEqual([referenced]);
+            expect(TestBed.inject(DraftMessageService).saveDraft).toHaveBeenCalledWith('chat-1', 'Summarise it');
+        });
     });
 
     it('redirects bare /chat to the last active chat', () => {

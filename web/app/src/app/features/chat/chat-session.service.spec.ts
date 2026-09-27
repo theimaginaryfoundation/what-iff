@@ -666,6 +666,22 @@ describe('ChatSessionService', () => {
         expect(streamingService.startStreaming).not.toHaveBeenCalled();
     });
 
+    it('prepends the context prefix to the payload only, never to the saved/restored draft', async () => {
+        const prefix = '[Referenced thread "A" — read it with find_context mode="conversation" target="11111111-1111-4111-8111-111111111111"]\n';
+        service.setActive('chat-1');
+        service.draft.set('hello');
+        messageService.sendMessage.mockReturnValue(throwError(() => new Error('network down')));
+
+        const result = await service.sendMessage(' hello ', [], [], { contextPrefix: prefix });
+
+        expect(isChatSendFailed(result)).toBe(true);
+        expect(messageService.sendMessage).toHaveBeenCalledWith('chat-1', expect.objectContaining({
+            message: `${prefix}hello`,
+        }));
+        expect(draftService.saveDraft).toHaveBeenCalledWith('chat-1', 'hello');
+        expect(service.draft()).toBe('hello');
+    });
+
     it('surfaces an error and resets polling state when job polling errors', async () => {
         jobService.pollJob.mockReturnValue(throwError(() => new Error('poll failed')));
         service.setActive('chat-1');

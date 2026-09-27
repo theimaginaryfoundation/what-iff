@@ -11,6 +11,7 @@ import { personalityAccent } from '../../../personality/helpers/personality-vm.h
 import { thumbnailCircleToImageStyle } from '../../../../shared/ui/avatar/avatar-thumbnail.helpers';
 import { StarIconComponent, TrashIconComponent } from '../../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
+import { ContextPanelService } from '../../services/context-panel.service';
 
 @Component({
   selector: 'app-thread-row',
@@ -69,31 +70,44 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
         </span>
       </td>
       <td class="thread-row__title">
-        @if (editing()) {
-          <input
-            class="thread-row__name-input"
-            [value]="thread().name"
-            (blur)="commitRename($any($event.target).value)"
-            (keydown.enter)="commitRename($any($event.target).value)"
-            (keydown.escape)="editing.set(false)"
-            aria-label="Rename thread"
-          />
-        } @else {
-          <button
-            type="button"
-            class="thread-row__main"
-            (click)="select.emit(thread().id)"
-            (dblclick)="editing.set(true)"
-            (keydown.shift.f10)="deleteThread.emit(thread())"
-            [attr.aria-label]="'Open thread ' + thread().name + unreadAriaSuffix()"
-          >
-            <!-- Full name on hover only when cut off; on the span so it doesn't stack with the badge tooltip. -->
-            <span class="thread-row__name" [uiTooltip]="thread().name" truncatedOnly>{{ thread().name }}</span>
-            @if (thread().unread_count && thread().unread_count! > 0) {
-              <span class="thread-row__badge" [uiTooltip]="unreadLabel()">{{ thread().unread_count }}</span>
-            }
-          </button>
-        }
+        <div class="thread-row__title-wrap">
+          @if (editing()) {
+            <input
+              class="thread-row__name-input"
+              [value]="thread().name"
+              (blur)="commitRename($any($event.target).value)"
+              (keydown.enter)="commitRename($any($event.target).value)"
+              (keydown.escape)="editing.set(false)"
+              aria-label="Rename thread"
+            />
+          } @else {
+            <button
+              type="button"
+              class="thread-row__main"
+              (click)="select.emit(thread().id)"
+              (dblclick)="editing.set(true)"
+              (keydown.shift.f10)="deleteThread.emit(thread())"
+              [attr.aria-label]="'Open thread ' + thread().name + unreadAriaSuffix()"
+            >
+              <!-- Full name on hover only when cut off; on the span so it doesn't stack with the badge tooltip. -->
+              <span class="thread-row__name" [uiTooltip]="thread().name" truncatedOnly>{{ thread().name }}</span>
+              @if (thread().unread_count && thread().unread_count! > 0) {
+                <span class="thread-row__badge" [uiTooltip]="unreadLabel()">{{ thread().unread_count }}</span>
+              }
+            </button>
+            <button
+              type="button"
+              class="thread-row__context"
+              [class.thread-row__context--on]="attachedAsContext()"
+              [attr.aria-pressed]="attachedAsContext()"
+              [attr.aria-label]="'Attach thread ' + thread().name + ' to your next message'"
+              [uiTooltip]="attachedAsContext() ? 'Attached: your personality will read this with your next message' : 'Attach so your personality can read this thread, e.g. to recap decisions'"
+              (click)="toggleContext($event)"
+            >
+              {{ attachedAsContext() ? '✓ Context' : '+ Context' }}
+            </button>
+          }
+        </div>
       </td>
       <td class="thread-row__date thread-row__created">{{ formatTimestamp(thread().created_at) }}</td>
       <td class="thread-row__date thread-row__updated">{{ formatTimestamp(thread().last_message_time ?? thread().updated_at) }}</td>
@@ -186,6 +200,42 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
       padding: 0;
       text-align: left;
       width: 100%;
+    }
+
+    .thread-row__title-wrap {
+      align-items: center;
+      display: flex;
+      gap: 0.5rem;
+      min-width: 0;
+    }
+
+    .thread-row__title-wrap .thread-row__main {
+      flex: 1;
+      width: auto;
+    }
+
+    .thread-row__context {
+      background: transparent;
+      border: 1px solid var(--color-border-base);
+      border-radius: 999px;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      flex: 0 0 auto;
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 0.2rem 0.5rem;
+    }
+
+    .thread-row__context:hover,
+    .thread-row__context:focus-visible {
+      border-color: var(--color-accent);
+      color: var(--color-accent);
+    }
+
+    .thread-row__context--on {
+      background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+      border-color: var(--color-accent);
+      color: var(--color-accent);
     }
 
     .thread-row__title {
@@ -379,6 +429,7 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
       }
 
       .thread-row__archive,
+      .thread-row__context,
       .thread-row__delete,
       .thread-row__star {
         min-height: 2.25rem;
@@ -395,12 +446,27 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
         min-width: 8rem;
         width: auto;
       }
+
+      .thread-row__context {
+        font-size: 0;
+        padding-inline: 0.45rem;
+      }
+
+      .thread-row__context::after {
+        content: '+';
+        font-size: 0.875rem;
+      }
+
+      .thread-row__context--on::after {
+        content: '✓';
+      }
     }
   `],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ThreadRowComponent {
   private readonly imageGallery = inject(ImageGalleryService);
+  private readonly contextPanel = inject(ContextPanelService);
   readonly thread = input.required<Chat>();
   readonly personality = input<Personality | null>(null);
   readonly active = input(false);
@@ -418,6 +484,10 @@ export class ThreadRowComponent {
   readonly archiveThread = output<Chat>();
   readonly restoreThread = output<Chat>();
   readonly editing = signal(false);
+  /** Whether this thread is attached as context for the next message (composer chip). */
+  readonly attachedAsContext = computed(() =>
+    this.contextPanel.composerThreadReferences().some(ref => ref.id === this.thread().id),
+  );
   readonly personalityLabel = computed(() =>
     this.personality()?.name ?? this.thread().personality_name ?? 'Unassigned',
   );
@@ -440,6 +510,12 @@ export class ThreadRowComponent {
   readonly personalityThumbnailStyle = computed(() =>
     thumbnailCircleToImageStyle(this.personality()?.thumbnail_circle),
   );
+
+  /** Attaches/detaches this thread as a composer chip (same state as the composer's picker). */
+  toggleContext(event: Event): void {
+    event.stopPropagation();
+    this.contextPanel.toggleComposerThreadReference(this.thread());
+  }
 
   commitRename(nextName: string): void {
     this.editing.set(false);

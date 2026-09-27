@@ -27,7 +27,9 @@ import {
   isPendingImageAttachment,
   pendingAttachmentKey,
 } from '../../../../core/models/file-attachment.model';
+import { Chat } from '../../../../core/models/chat.model';
 import { Model } from '../../../../core/models/model.model';
+import { Personality } from '../../../../core/models/personality.model';
 import { ChatMessage } from '../../../../core/models/message.model';
 import { Ritual } from '../../../../core/models/ritual.model';
 import { RitualService } from '../../../../core/services/ritual.service';
@@ -51,6 +53,9 @@ import {
   searchEmojiShortcodes,
 } from '../../helpers/emoji-shortcode.helpers';
 import { ModelPickerComponent } from '../model-picker/model-picker.component';
+import { ThreadPickerPopoverComponent } from '../thread-picker-popover/thread-picker-popover.component';
+import { ThreadRefChipsComponent } from '../thread-ref-chips/thread-ref-chips.component';
+import { THREAD_DRAG_MIME, isThreadDrag } from '../../helpers/thread-drag.helpers';
 import { EmojiAutocompleteMenuComponent } from '../emoji-autocomplete-menu/emoji-autocomplete-menu.component';
 import { SlashMenuComponent } from '../slash-menu/slash-menu.component';
 import { BoltIconComponent, EyeOffIconComponent, FileIconComponent, ImageIconComponent, PlusIconComponent } from '../../../../shared/ui/icons/icons';
@@ -65,10 +70,13 @@ const SLASH_COMMANDS: readonly SlashCommand[] = [
   { id: 'attach', label: 'Attach file', description: 'Upload a file', keywords: ['file', 'upload'] },
   { id: 'emoji', label: 'Emoji', description: 'Insert an emoji', keywords: ['reaction'] },
   { id: 'skill', label: 'Skill', description: 'Add saved instructions to this message', keywords: ['ritual', 'rit', 'routine', 'skills'] },
+  { id: 'thread', label: 'Thread', description: 'Attach threads your personality can read', keywords: ['threads', 'reference', 'context'] },
   { id: 'gallery', label: 'Gallery image', description: 'Attach an image from the gallery', keywords: ['photo', 'image'] },
   { id: 'personality', label: 'Personality', description: 'Change the thread’s personality', keywords: ['persona', 'character'] },
   { id: 'mode', label: MODE_SINGULAR, description: 'Switch the thread’s mode: its instructions, skills and model', keywords: ['emotion', 'mood'] },
 ];
+/** How long the "Thread already added." notice stays visible. */
+const THREAD_NOTICE_MS = 2000;
 const COMPOSER_DESKTOP_MAX_ROWS = 10;
 const COMPOSER_MOBILE_MAX_ROWS = 8;
 const COMPOSER_MOBILE_BREAKPOINT = 767;
@@ -85,6 +93,8 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
     FormsModule,
     PickerComponent,
     ModelPickerComponent,
+    ThreadPickerPopoverComponent,
+    ThreadRefChipsComponent,
     EmojiAutocompleteMenuComponent,
     SlashMenuComponent,
     BoltIconComponent,
@@ -96,7 +106,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
     TooltipDirective,
   ],
   template: `
-    <form class="composer" (submit)="onSubmit($event)" (drop)="onDrop($event)" (dragover)="onDragOver($event)" (dragleave)="isDragOver.set(false)">
+    <form class="composer" (submit)="onSubmit($event)" (drop)="onDrop($event)" (dragover)="onDragOver($event)" (dragleave)="onDragLeave()" [class.composer--thread-drop]="isThreadDragOver()">
       @if (quotaMessage()) {
         <p class="composer__quota" role="alert">{{ quotaMessage() }}</p>
       }
@@ -124,6 +134,20 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
       @if (isDragOver()) {
         <div class="composer__drag" aria-hidden="true">Drop files to attach</div>
       }
+
+      @if (isThreadDragOver()) {
+        <div class="composer__drag composer__drag--thread" aria-hidden="true">Drop to add thread</div>
+      }
+
+      @if (threadNotice(); as notice) {
+        <div class="composer__thread-notice" role="status">{{ notice }}</div>
+      }
+
+      <app-thread-ref-chips
+        [threads]="threadReferences()"
+        (removed)="threadReferenceRemoved.emit($event)"
+        (cleared)="threadReferencesCleared.emit()"
+      />
 
       @if (pendingRituals().length) {
         <div class="composer__pending-skills" aria-label="Skills to send with this message">
@@ -178,6 +202,19 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
       }
 
       <div class="composer__body">
+        @if (threadPickerOpen()) {
+          <app-thread-picker-popover
+            [threads]="threadOptions()"
+            [selected]="threadReferences()"
+            [activeChatId]="chatId()"
+            [personalities]="personalities()"
+            [disabled]="disabled()"
+            (toggled)="pickThread($event)"
+            (done)="closeThreadPicker()"
+            (cancelled)="cancelThreadPicker($event)"
+          />
+        }
+
         <input #fileInput type="file" class="sr-only" multiple (change)="onFileInput($event)" />
 
         <div
@@ -361,6 +398,10 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                   <button type="button" role="menuitem" (click)="openSkillPicker()">
                     <ui-bolt-icon [size]="13" />
                     Skill
+                  </button>
+                  <button type="button" role="menuitem" uiTooltip="Attach threads so your personality can read them" placement="right" (click)="openThreadPicker()">
+                    <span aria-hidden="true">#</span>
+                    Threads
                   </button>
                   <button type="button" role="menuitem" (click)="openModePicker()" [attr.aria-label]="modeMenuAriaLabel()">
                     <span aria-hidden="true">◎</span>
@@ -655,6 +696,26 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
       gap: 0.25rem;
       max-width: 100%;
       padding: 0.125rem 0.25rem 0.125rem 0.5rem;
+    }
+
+    .composer__drag--thread {
+      pointer-events: none;
+    }
+
+    .composer--thread-drop {
+      outline: 2px dashed var(--color-accent);
+      outline-offset: 2px;
+    }
+
+    .composer__thread-notice {
+      background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface-base));
+      border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border-base));
+      border-radius: 0.5rem;
+      color: var(--color-text-secondary);
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.25rem 0.625rem;
+      width: fit-content;
     }
 
     .composer__skill-chip-remove {
@@ -1244,6 +1305,12 @@ export class ChatComposerComponent {
   readonly attachments = input<readonly PendingFileAttachment[]>([]);
   readonly chatId = input<string | null>(null);
   readonly pendingRituals = input<readonly Ritual[]>([]);
+  /** Threads attached to the message being composed (chips above the input). */
+  readonly threadReferences = input<readonly Chat[]>([]);
+  /** Threads the picker can offer (the active thread and archived ones are filtered out here). */
+  readonly threadOptions = input<readonly Chat[]>([]);
+  /** Personality catalog, used for the avatars in the thread picker. */
+  readonly personalities = input<readonly Personality[]>([]);
   readonly models = input<readonly Model[]>([]);
   readonly selectedModelId = input<string | null>(null);
   readonly selectedPersonalityName = input<string | null>(null);
@@ -1263,6 +1330,11 @@ export class ChatComposerComponent {
   readonly send = output<string>();
   readonly filesSelected = output<File[]>();
   readonly pendingRitualsChange = output<readonly Ritual[]>();
+  readonly threadReferenceToggled = output<Chat>();
+  readonly threadReferenceRemoved = output<string>();
+  readonly threadReferencesCleared = output<void>();
+  /** Replace the attached threads wholesale (the picker's Cancel restores its snapshot). */
+  readonly threadReferencesReplaced = output<readonly Chat[]>();
   readonly commandSelected = output<SlashCommand>();
   readonly modelSelected = output<Model>();
   readonly personaButtonClicked = output<void>();
@@ -1288,6 +1360,7 @@ export class ChatComposerComponent {
     return name ? `Change personality (currently ${name})` : 'Pick a personality';
   });
 
+  readonly threadPickerOpen = signal(false);
   readonly fileInput = viewChild<ElementRef<HTMLInputElement>>('fileInput');
   readonly textareaRef = viewChild<ElementRef<HTMLTextAreaElement>>('composerTextarea');
   readonly slashOpen = signal(false);
@@ -1299,6 +1372,10 @@ export class ChatComposerComponent {
   private readonly emojiQuery = signal<ActiveEmojiShortcode | null>(null);
   private readonly emojiMenu = viewChild<EmojiAutocompleteMenuComponent>('emojiMenu');
   readonly isDragOver = signal(false);
+  readonly isThreadDragOver = signal(false);
+  /** Transient message about a thread action (e.g. dropping a thread that is already attached). */
+  readonly threadNotice = signal<string | null>(null);
+  private threadNoticeTimer: ReturnType<typeof setTimeout> | null = null;
   readonly plusOpen = signal(false);
   readonly emojiOpen = signal(false);
   readonly skillPickerOpen = signal(false);
@@ -1453,6 +1530,9 @@ export class ChatComposerComponent {
       });
 
     this.destroyRef.onDestroy(() => this.teardownResizeDrag());
+    this.destroyRef.onDestroy(() => {
+      if (this.threadNoticeTimer) clearTimeout(this.threadNoticeTimer);
+    });
   }
 
   onSkillFilterInput(event: Event): void {
@@ -1601,6 +1681,9 @@ export class ChatComposerComponent {
       case 'skill':
         this.openSkillPicker();
         return;
+      case 'thread':
+        this.openThreadPicker();
+        return;
       case 'gallery':
         this.openGalleryPicker();
         return;
@@ -1625,6 +1708,7 @@ export class ChatComposerComponent {
     this.plusOpen.set(false);
     this.emojiOpen.set(false);
     this.skillPickerOpen.set(false);
+    this.threadPickerOpen.set(false);
     this.galleryOpen.set(false);
     this.modePickerOpen.set(false);
   }
@@ -1633,6 +1717,7 @@ export class ChatComposerComponent {
     const submenuOpen =
       this.emojiOpen() ||
       this.skillPickerOpen() ||
+      this.threadPickerOpen() ||
       this.modePickerOpen() ||
       this.galleryOpen();
 
@@ -1648,6 +1733,7 @@ export class ChatComposerComponent {
     this.plusOpen.set(false);
     this.emojiOpen.set(false);
     this.skillPickerOpen.set(false);
+    this.threadPickerOpen.set(false);
     this.modePickerOpen.set(false);
     this.openGalleryPicker();
   }
@@ -1656,6 +1742,7 @@ export class ChatComposerComponent {
     this.slashOpen.set(false);
     this.emojiOpen.set(false);
     this.skillPickerOpen.set(false);
+    this.threadPickerOpen.set(false);
     this.modePickerOpen.set(false);
     this.galleryOpen.set(true);
     this.galleryLoading.set(true);
@@ -1694,6 +1781,7 @@ export class ChatComposerComponent {
   openEmojiPicker(): void {
     this.plusOpen.set(false);
     this.skillPickerOpen.set(false);
+    this.threadPickerOpen.set(false);
     this.galleryOpen.set(false);
     this.modePickerOpen.set(false);
     this.emojiOpen.set(true);
@@ -1703,6 +1791,7 @@ export class ChatComposerComponent {
     this.plusOpen.set(false);
     this.emojiOpen.set(false);
     this.skillPickerOpen.set(false);
+    this.threadPickerOpen.set(false);
     this.galleryOpen.set(false);
     this.slashOpen.set(false);
     this.modePickerOpen.set(true);
@@ -1761,6 +1850,38 @@ export class ChatComposerComponent {
           this.skillLoadError.set('Could not load skills.');
         },
       });
+  }
+
+  openThreadPicker(): void {
+    this.plusOpen.set(false);
+    this.emojiOpen.set(false);
+    this.galleryOpen.set(false);
+    this.modePickerOpen.set(false);
+    this.skillPickerOpen.set(false);
+    this.slashOpen.set(false);
+    this.threadPickerOpen.set(true);
+  }
+
+  pickThread(thread: Chat): void {
+    if (this.disabled()) {
+      return;
+    }
+    this.threadReferenceToggled.emit(thread);
+  }
+
+  isThreadReferenced(id: string): boolean {
+    return this.threadReferences().some(thread => thread.id === id);
+  }
+
+  closeThreadPicker(): void {
+    this.threadPickerOpen.set(false);
+    this.textareaRef()?.nativeElement.focus();
+  }
+
+  /** Cancel/Escape in the picker: put back the selection from when it opened. */
+  cancelThreadPicker(snapshot: readonly Chat[]): void {
+    this.threadReferencesReplaced.emit(snapshot);
+    this.closeThreadPicker();
   }
 
   pickSkill(ritual: Ritual): void {
@@ -1864,12 +1985,46 @@ export class ChatComposerComponent {
 
   onDragOver(event: DragEvent): void {
     event.preventDefault();
+    if (isThreadDrag(event)) {
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      this.isThreadDragOver.set(true);
+      return;
+    }
     this.isDragOver.set(true);
+  }
+
+  private showThreadNotice(message: string): void {
+    if (this.threadNoticeTimer) {
+      clearTimeout(this.threadNoticeTimer);
+    }
+    this.threadNotice.set(message);
+    this.threadNoticeTimer = setTimeout(() => {
+      this.threadNotice.set(null);
+      this.threadNoticeTimer = null;
+    }, THREAD_NOTICE_MS);
+  }
+
+  onDragLeave(): void {
+    this.isDragOver.set(false);
+    this.isThreadDragOver.set(false);
   }
 
   onDrop(event: DragEvent): void {
     event.preventDefault();
     this.isDragOver.set(false);
+    this.isThreadDragOver.set(false);
+    const threadId = event.dataTransfer?.getData(THREAD_DRAG_MIME);
+    if (threadId) {
+      const thread = this.threadOptions().find(option => option.id === threadId);
+      if (thread && thread.id !== this.chatId() && !this.disabled()) {
+        if (this.isThreadReferenced(thread.id)) {
+          this.showThreadNotice('Thread already added.');
+        } else {
+          this.threadReferenceToggled.emit(thread);
+        }
+      }
+      return;
+    }
     const files = Array.from(event.dataTransfer?.files ?? []).filter(isAllowedFile);
     this.filesSelected.emit(files);
   }
@@ -1932,6 +2087,14 @@ export class ChatComposerComponent {
       const inPlusAnchor = target.closest('.composer__plus-anchor');
       if (!inSkill && !inPlusAnchor) {
         this.skillPickerOpen.set(false);
+      }
+    }
+
+    if (this.threadPickerOpen() && target instanceof Element) {
+      const inThread = target.closest('.composer__thread-popover');
+      const inPlusAnchor = target.closest('.composer__plus-anchor');
+      if (!inThread && !inPlusAnchor) {
+        this.threadPickerOpen.set(false);
       }
     }
 

@@ -24,7 +24,7 @@ import {
   STREAMING_SCROLL_CHECK_INTERVAL,
 } from './chat.constants';
 import { isHttpErrorResponse } from './helpers/chat-send.helpers';
-import { ChatSendMessageResult } from './chat-send-result';
+import { ChatSendMessageOptions, ChatSendMessageResult } from './chat-send-result';
 import { ChatSendGate } from './services/chat-send-gate';
 import { AssistantTurn } from './assistant-turn';
 
@@ -425,10 +425,16 @@ export class ChatSessionService implements OnDestroy {
     return chat;
   }
 
+  /**
+   * Posts the user's message. `options.contextPrefix` (e.g. the attached-thread reference
+   * block) is prepended to the payload only: drafts are saved/restored from the user's own
+   * text, so a failed send never writes the prefix into the composer or localStorage.
+   */
   async sendMessage(
     text: string,
     attachments: readonly PendingFileAttachment[] = [],
     rituals: readonly Ritual[] = [],
+    options: ChatSendMessageOptions = {},
   ): Promise<ChatSendMessageResult> {
     const chat = this._thread();
     const message = text.trim();
@@ -447,7 +453,7 @@ export class ChatSessionService implements OnDestroy {
     let response;
     try {
       response = await firstValueFrom(this.messageService.sendMessage(chat.id, {
-        message,
+        message: `${options.contextPrefix ?? ''}${message}`,
         origin: 'User',
         attachments: toUploadedAttachments(attachments),
         rituals: ritualPayload,

@@ -559,7 +559,9 @@ export class ChatPageComponent implements OnInit, OnDestroy {
       return;
     }
     const rituals = this.pendingRituals();
-    const sendResult = await this.session.sendMessage(text, attachments, rituals);
+    const sendResult = await this.session.sendMessage(text, attachments, rituals, {
+      contextPrefix: this.contextPanel.composerThreadReferencesText(),
+    });
     this.sendGate.refresh();
     if (isChatSendFailed(sendResult)) {
       this.sendGate.handleSendError(sendResult.error);
@@ -571,6 +573,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     this.sendGate.sendSucceeded();
     this.pendingAttachments.set([]);
     this.pendingRituals.set([]);
+    this.contextPanel.clearComposerThreadReferences();
   }
 
   onPendingRitualsChange(next: readonly Ritual[]): void {
