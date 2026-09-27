@@ -12,6 +12,8 @@ import {
 import { ConfirmationService } from '../../../core/services/confirmation.service';
 import { FileAttachment, PendingFileAttachment } from '../../../core/models/file-attachment.model';
 import { FileAttachmentService } from '../../../core/services/file-attachment.service';
+import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 
 const SUPPORTED_FILE_TYPES = [
   '.c', '.cpp', '.cs', '.css', '.doc', '.docx', '.go', '.html',
@@ -29,7 +31,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 @Component({
   selector: 'app-personality-attachments-list',
   standalone: true,
-  imports: [],
+  imports: [HelpHintComponent, TooltipDirective],
   template: `
     <section
       [class]="containerClass()"
@@ -37,7 +39,12 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
     >
       <header class="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 class="text-base font-semibold text-(--color-text-primary)">Attachments</h2>
+          <h2 class="inline-flex items-center gap-1 text-base font-semibold text-(--color-text-primary)">
+            Attachments
+            <ui-help-hint label="What are attachments?" heading="Attachments">
+              Reference files this personality can search and read with its file tools, in any of its threads.
+            </ui-help-hint>
+          </h2>
           <p class="text-xs text-(--color-text-secondary)">{{ remaining() }} of {{ maxFiles }} slots available · 10MB max per file</p>
         </div>
         <div class="flex items-center gap-2">
@@ -73,13 +80,20 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
           @for (attachment of attachments(); track attachment.id) {
             <li class="flex items-center justify-between gap-3 py-2">
               <div class="min-w-0">
-                <p class="truncate text-sm font-medium text-(--color-text-primary)" [title]="attachment.name">{{ attachment.name }}</p>
+                <p
+                  #attachmentName
+                  class="truncate text-sm font-medium text-(--color-text-primary)"
+                  [uiTooltip]="attachment.name"
+                  truncatedOnly
+                  [truncationTarget]="attachmentName"
+                >{{ attachment.name }}</p>
                 <p class="text-xs text-(--color-text-secondary)">{{ attachment.file_type || 'file' }}</p>
               </div>
               <button
                 type="button"
                 class="rounded-lg p-1.5 text-(--color-text-secondary) outline-none hover:bg-red-500/10 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-red-500"
                 [attr.aria-label]="'Delete ' + attachment.name"
+                uiTooltip="Delete this file"
                 (click)="onDelete(attachment)"
               >✕</button>
             </li>

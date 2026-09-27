@@ -18,9 +18,9 @@ export class ModeEditModalPage {
     this.backdrop = this.page.locator('.mode-modal-backdrop');
     this.panel = this.page.locator('.mode-modal');
     this.nameInput = this.page.getByPlaceholder('Mode name');
-    this.descriptionInput = this.page.getByPlaceholder('How should this mode feel? e.g. Concise, direct, no filler.');
+    this.descriptionInput = this.page.getByPlaceholder('e.g. Quick questions that need short, direct answers.');
     this.saveButton = this.panel.getByRole('button', { name: 'Save', exact: true });
-    this.closeButton = this.panel.getByRole('button', { name: 'Close modal' });
+    this.closeButton = this.panel.getByRole('button', { name: 'Close', exact: true });
     this.cancelButton = this.panel.getByRole('button', { name: 'Cancel', exact: true });
   }
 

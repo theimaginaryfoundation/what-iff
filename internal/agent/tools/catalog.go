@@ -7,26 +7,30 @@ import "github.com/openai/openai-go/v3/responses"
 type FunctionToolDefinition struct {
 	Spec             FunctionToolSpec
 	HumanDescription string
-	AgentDefault     bool
-	MoodOnly         bool
-	UserToggleable   bool
+	// UserGuide is a short user-facing overview of what the tool can do and which options it
+	// takes, shown as the tool's tooltip in the chat Tools tab. It tells people what they can
+	// ask for; keep it in step with the spec when parameters change.
+	UserGuide      string
+	AgentDefault   bool
+	MoodOnly       bool
+	UserToggleable bool
 }
 
 var functionToolCatalog = []FunctionToolDefinition{
-	{Spec: UpdateScratchpadToolSpec, HumanDescription: "Update this personality's working notes, which persist across conversations using the same personality.", AgentDefault: true, UserToggleable: true},
-	{Spec: CreateMemoryToolSpec, HumanDescription: "Save useful information to memory for this conversation or across future conversations.", AgentDefault: true, UserToggleable: true},
-	{Spec: ListToolSpec, HumanDescription: "Browse available models, personalities, skills, files, conversations, jobs, and MCP servers.", AgentDefault: true, UserToggleable: true},
+	{Spec: UpdateScratchpadToolSpec, HumanDescription: "Update this personality's working notes, which carry over to every thread with this personality.", UserGuide: "Your personality keeps their own notes here: your preferences, their tone and their habits. Changes carry over to every thread with this personality. Ask to have something noted, or for a change in how they behave.", AgentDefault: true, UserToggleable: true},
+	{Spec: CreateMemoryToolSpec, HumanDescription: "Save useful information to memory for this thread or across future threads.", UserGuide: "Ask to remember a fact or preference. A memory can apply to all your threads or just this one, so say if it's only for this thread.", AgentDefault: true, UserToggleable: true},
+	{Spec: ListToolSpec, HumanDescription: "Browse available models, personalities, skills, files, threads, jobs, and MCP servers.", UserGuide: "Browses your threads (including archived and imported ones), files, scheduled jobs, personalities, skills, models and this thread's MCP servers. Ask for threads about a topic, then read one with Find Context.", AgentDefault: true, UserToggleable: true},
 	{Spec: ListMoodsToolSpec, AgentDefault: true, MoodOnly: true, UserToggleable: false},
 	{Spec: ChangeMoodToolSpec, AgentDefault: true, MoodOnly: true, UserToggleable: false},
-	{Spec: RunSubagentToolSpec, HumanDescription: "Run a focused sub-agent with an optional personality, model, or skills and return its result.", AgentDefault: true, UserToggleable: true},
-	{Spec: GenerateImageToolSpec, HumanDescription: "Create an image from a written description.", AgentDefault: true, UserToggleable: true},
-	{Spec: CreateAgentJobToolSpec, HumanDescription: "Create a one-time or recurring task using natural-language timing. Run it in the current or a new thread, optionally with a different model or skills.", AgentDefault: true, UserToggleable: true},
+	{Spec: RunSubagentToolSpec, HumanDescription: "Run a focused sub-agent with an optional personality, model, or skills and return its result.", UserGuide: "Hands one task to a helper, optionally with a different personality, model or skills, and brings back the answer. The helper sees only the task, not this thread. Good for a second opinion, or heavy research a smaller, cheaper model can do.", AgentDefault: true, UserToggleable: true},
+	{Spec: GenerateImageToolSpec, HumanDescription: "Create an image from a written description.", UserGuide: "Creates up to 4 images at a time. Choose square, landscape or portrait, and low, medium or high quality (higher quality costs more). Ask for a few options or a specific style.", AgentDefault: true, UserToggleable: true},
+	{Spec: CreateAgentJobToolSpec, HumanDescription: "Create a one-time or recurring task using natural-language timing. Run it in the current or a new thread, optionally with a different model or skills.", UserGuide: "Schedules a one-time or repeating task in plain language (\"in 2 hours\", \"every weekday at 8am\"). It can post in this thread or its own, with a chosen model or skills. Manage jobs under Config > Jobs.", AgentDefault: true, UserToggleable: true},
 	// First-party web search (ADR 0x021). Not user-toggleable here: GetAvailableTools already lists
 	// web_search for the toggle, and fetch_page follows it. The per-turn policy hides both when no
 	// backend is configured.
 	{Spec: WebSearchFunctionToolSpec, AgentDefault: true},
 	{Spec: FetchPageToolSpec, AgentDefault: true},
-	{Spec: RecallToolSpec, HumanDescription: "Search or retrieve memories, files, summaries, and conversation history. Often use list first to find an item, then find_context to inspect or retrieve its contents.", AgentDefault: true, UserToggleable: true},
+	{Spec: RecallToolSpec, HumanDescription: "Search or read your memories, files, thread summaries and past threads.", UserGuide: "Ask a question about past threads, memories or files and get an answer with sources. It can also read a whole thread or file, look back over a time range (\"last week\"), show a thread's bookmarks, or explain where a memory came from.", AgentDefault: true, UserToggleable: true},
 }
 
 func FunctionToolCatalog() []FunctionToolDefinition {

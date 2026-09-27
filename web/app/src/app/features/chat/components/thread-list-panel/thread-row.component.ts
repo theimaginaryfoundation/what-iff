@@ -10,11 +10,12 @@ import { personalityCoverUrl } from '../../../personality/helpers/cover-image.he
 import { personalityAccent } from '../../../personality/helpers/personality-vm.helpers';
 import { thumbnailCircleToImageStyle } from '../../../../shared/ui/avatar/avatar-thumbnail.helpers';
 import { StarIconComponent, TrashIconComponent } from '../../../../shared/ui/icons/icons';
+import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 
 @Component({
   selector: 'app-thread-row',
   standalone: true,
-  imports: [CommonModule, AsyncPipe, AuthImagePipe, StarIconComponent, TrashIconComponent],
+  imports: [CommonModule, AsyncPipe, AuthImagePipe, StarIconComponent, TrashIconComponent, TooltipDirective],
   template: `
     <tr
       class="thread-row"
@@ -40,6 +41,7 @@ import { StarIconComponent, TrashIconComponent } from '../../../../shared/ui/ico
           [class.thread-row__star--active]="thread().is_favorite"
           (click)="togglePin.emit(thread())"
           [attr.aria-label]="thread().is_favorite ? 'Unstar thread' : 'Star thread'"
+          [uiTooltip]="thread().is_favorite ? 'Unstar to remove it from the sidebar' : 'Star to keep this thread in the sidebar'"
           [attr.aria-pressed]="thread().is_favorite"
         >
           <ui-star-icon [size]="16" [filled]="!!thread().is_favorite" />
@@ -83,11 +85,12 @@ import { StarIconComponent, TrashIconComponent } from '../../../../shared/ui/ico
             (click)="select.emit(thread().id)"
             (dblclick)="editing.set(true)"
             (keydown.shift.f10)="deleteThread.emit(thread())"
-            [attr.aria-label]="'Open thread ' + thread().name"
+            [attr.aria-label]="'Open thread ' + thread().name + unreadAriaSuffix()"
           >
-            <span class="thread-row__name">{{ thread().name }}</span>
+            <!-- Full name on hover only when cut off; on the span so it doesn't stack with the badge tooltip. -->
+            <span class="thread-row__name" [uiTooltip]="thread().name" truncatedOnly>{{ thread().name }}</span>
             @if (thread().unread_count && thread().unread_count! > 0) {
-              <span class="thread-row__badge">{{ thread().unread_count }}</span>
+              <span class="thread-row__badge" [uiTooltip]="unreadLabel()">{{ thread().unread_count }}</span>
             }
           </button>
         }
@@ -119,6 +122,7 @@ import { StarIconComponent, TrashIconComponent } from '../../../../shared/ui/ico
             class="thread-row__archive thread-row__archive--restore"
             (click)="restoreThread.emit(thread())"
             aria-label="Restore thread from archive"
+            uiTooltip="Move back to active threads so you can chat in it again"
           >
             Restore
           </button>
@@ -128,6 +132,7 @@ import { StarIconComponent, TrashIconComponent } from '../../../../shared/ui/ico
             class="thread-row__archive"
             (click)="archiveThread.emit(thread())"
             aria-label="Archive thread"
+            uiTooltip="Hide from active threads and make read-only until restored"
           >
             Archive
           </button>
@@ -139,6 +144,7 @@ import { StarIconComponent, TrashIconComponent } from '../../../../shared/ui/ico
           class="thread-row__delete"
           (click)="deleteThread.emit(thread()); $event.stopPropagation()"
           [attr.aria-label]="'Delete thread ' + thread().name"
+          uiTooltip="Delete this thread permanently"
         >
           <ui-trash-icon [size]="14" />
         </button>
@@ -452,6 +458,15 @@ export class ThreadRowComponent {
       minute: '2-digit',
     });
   }
+
+  readonly unreadLabel = computed(() => {
+    const count = this.thread().unread_count ?? 0;
+    return `${count} unread ${count === 1 ? 'reply' : 'replies'}`;
+  });
+
+  readonly unreadAriaSuffix = computed(() =>
+    (this.thread().unread_count ?? 0) > 0 ? `, ${this.unreadLabel()}` : '',
+  );
 
   personalityInitial(): string {
     return this.personalityLabel().trim().charAt(0).toUpperCase() || '?';

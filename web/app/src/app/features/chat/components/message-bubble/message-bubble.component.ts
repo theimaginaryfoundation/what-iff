@@ -28,7 +28,7 @@ import { MessageContentComponent } from '../message-content/message-content.comp
           [class.bubble__reasoning--live]="reasoningLive()"
           [open]="reasoningLive()"
         >
-          <summary class="bubble__reasoning-summary">
+          <summary class="bubble__reasoning-summary" uiTooltip="Show or hide the model's reasoning for this reply">
             <ui-chev-right-icon class="bubble__reasoning-chevron" [size]="12" />
             <ui-brain-icon [size]="12" />
             <span>{{ reasoningLive() ? 'Thinking…' : 'Thought process' }}</span>
@@ -71,10 +71,10 @@ import { MessageContentComponent } from '../message-content/message-content.comp
               [attr.aria-pressed]="!!message().bookmarked"
               [attr.aria-label]="message().bookmarked ? 'Remove bookmark' : 'Bookmark this message'"
               (click)="toggleBookmark.emit(message())"
-              [title]="message().bookmarked ? 'Remove bookmark' : 'Bookmark this message'"
+              [uiTooltip]="message().bookmarked ? 'Remove bookmark' : 'Bookmark to jump back to this message later'"
             >
               <ui-star-icon [size]="12" [filled]="!!message().bookmarked" />
-              <span>{{ message().bookmarked ? 'Saved' : 'Save' }}</span>
+              <span>{{ message().bookmarked ? 'Bookmarked' : 'Bookmark' }}</span>
             </button>
           </div>
           <div class="bubble__meta-end">
@@ -83,11 +83,11 @@ import { MessageContentComponent } from '../message-content/message-content.comp
                 type="button"
                 class="bubble__context"
                 (click)="showContext.emit(message())"
-                title="Show what filled the model's context window for this reply"
+                uiTooltip="See what was sent to the model for this reply"
               >Context</button>
             }
             @if (modelMoodHint(); as hint) {
-              <span class="bubble__hint" [attr.title]="hint">{{ hint }}</span>
+              <span class="bubble__hint" uiTooltip="Model and mode used for this reply">{{ hint }}</span>
             }
           </div>
         </div>

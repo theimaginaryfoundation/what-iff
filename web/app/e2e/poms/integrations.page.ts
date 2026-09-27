@@ -2,7 +2,7 @@ import type { Locator, Page } from '@playwright/test';
 import { ConfirmationModal } from './confirmation.modal';
 
 /**
- * Integrations (`/integrations`) — connectors + webhook API tokens.
+ * Tools page (`/integrations`) — connectors + webhook API tokens. The h1 reads "Tools" to match the nav.
  *
  * Everything below the header is gated on `hasSubscriptionAccess()`
  * (integrations.component.ts): it is true unconditionally when
@@ -29,7 +29,7 @@ export class IntegrationsPage {
       exact: true,
     });
     this.createTokenHeading = this.page.getByRole('heading', {
-      name: 'Create Webhook API Token',
+      name: 'Create webhook API token',
     });
     this.tokenNameInput = this.page.getByPlaceholder('e.g. Slack trigger');
     this.createTokenButton = this.page.getByRole('button', {
@@ -42,7 +42,7 @@ export class IntegrationsPage {
     this.connectorsLoading = this.page.getByText('Loading integrations...');
     this.emptyConnectorsMessage = this.page.getByText('No connectors configured.');
     this.heading = this.page.getByRole('heading', {
-      name: 'Integrations',
+      name: 'Tools',
       level: 1,
     });
   }

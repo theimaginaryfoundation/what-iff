@@ -24,7 +24,7 @@ export class ChatPage {
     this.typingIndicator = this.page.getByLabel('Assistant is typing');
     this.stopButton = this.page.getByRole('button', { name: 'Stop response' });
     this.contextPanelToggle = this.page.getByRole('button', {
-      name: 'Open conversation context panel',
+      name: 'Open thread context panel',
     });
     this.contextPanel = this.page.getByLabel('Conversation context', {
       exact: true,
@@ -38,7 +38,7 @@ export class ChatPage {
     this.contextCostOutlet = this.contextBreakdown.locator('app-context-cost-outlet');
     this.contextCostEstimate = this.contextBreakdown.locator('.gauge__cost');
     this.scratchpadTab = this.page.getByLabel('Thread scratchpad');
-    this.scratchpadInput = this.page.getByPlaceholder('Notes this personality keeps across all of its chats');
+    this.scratchpadInput = this.page.getByPlaceholder('Notes this personality keeps across all of its threads');
     this.composerInput = this.page.locator('#chat-composer-input');
     this.plusMenuButton = this.page.getByRole('button', { name: 'Open chat options' });
     this.plusMenu = this.page.getByRole('menu');
@@ -126,7 +126,7 @@ export class ChatPage {
 
   /**
    * Both the title button and the inline input it swaps in are labelled
-   * "Rename chat"; `renameButton` is the button form specifically.
+   * "Rename thread"; `renameButton` is the button form specifically.
    */
   readonly renameButton: Locator;
 
@@ -187,7 +187,7 @@ export class ChatPage {
   // --- context panel -------------------------------------------------------
   //
   // Two entry points for the same component. The title-bar toggle
-  // ("Open conversation context panel") is styled mobile-only — on a desktop
+  // ("Open thread context panel") is styled mobile-only — on a desktop
   // viewport it is in the DOM but not visible, and the panel is opened from
   // the vertical rail beside the conversation instead. `openContextPanel()`
   // picks whichever the current viewport offers.
@@ -444,11 +444,11 @@ export class ChatPage {
 
   /**
    * The composer's "+" menu persona row (`personaButtonClicked` in
-   * chat-composer.component.ts). Its accessible name is the active
-   * personality's own name (or "Pick personality" when none is set —
-   * `personaButtonLabel()`), so unlike its fixed-label siblings (Emoji,
-   * Skill, Mode, Attach file, Add from Gallery) it has no constant name to
-   * match on; it's the 5th item in that template's fixed row order.
+   * chat-composer.component.ts). Its accessible name is
+   * `personaButtonAriaLabel()` ("Change personality (currently <name>)", or
+   * "Pick a personality" when none is set), so unlike its fixed-label siblings
+   * (Emoji, Skill, Mode, Attach file, Add from gallery) it has no constant name
+   * to match on; it's the 5th item in that template's fixed row order.
    */
   readonly composerPersonaMenuItem: Locator;
 

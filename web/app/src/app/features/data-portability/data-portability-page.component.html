@@ -11,6 +11,8 @@
       type="button"
       class="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-(--color-text-secondary) hover:bg-(--color-surface-muted) hover:text-(--color-text-primary) focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
       aria-label="Close import and export"
+      uiTooltip="Close and go back to your threads"
+      placement="left"
       (click)="close()"
     >
       <ui-x-icon [size]="18" />
@@ -99,9 +101,14 @@
           } @else {
             <div class="mt-2 max-h-40 overflow-y-auto rounded-lg border border-(--color-border-default) p-2">
               @for (p of contents.personalities; track p.id) {
-                <label class="flex items-center gap-2 py-1 text-sm text-(--color-text-primary)">
+                <label
+                  class="flex items-center gap-2 py-1 text-sm text-(--color-text-primary)"
+                  [uiTooltip]="p.name"
+                  truncatedOnly
+                  [truncationTarget]="personalityName"
+                >
                   <input type="checkbox" [checked]="selectedPersonalityIds().has(p.id)" (change)="togglePersonality(p.id, $any($event.target).checked)" />
-                  <span class="truncate">{{ p.name }}</span>
+                  <span #personalityName class="truncate">{{ p.name }}</span>
                 </label>
               }
             </div>
@@ -126,9 +133,14 @@
           } @else {
             <div class="mt-2 max-h-56 overflow-y-auto rounded-lg border border-(--color-border-default) p-2">
               @for (c of contents.conversations; track c.id) {
-                <label class="flex items-center gap-2 py-1 text-sm text-(--color-text-primary)">
+                <label
+                  class="flex items-center gap-2 py-1 text-sm text-(--color-text-primary)"
+                  [uiTooltip]="c.title"
+                  truncatedOnly
+                  [truncationTarget]="conversationTitle"
+                >
                   <input type="checkbox" [checked]="selectedConversationIds().has(c.id)" (change)="toggleConversation(c.id, $any($event.target).checked)" />
-                  <span class="truncate">{{ c.title }}</span>
+                  <span #conversationTitle class="truncate">{{ c.title }}</span>
                 </label>
               }
             </div>
@@ -137,7 +149,10 @@
 
         <!-- Memories (all-or-nothing) -->
         @if (contents.hasMemories) {
-          <label class="flex items-center gap-2 text-sm text-(--color-text-primary)">
+          <label
+            class="flex w-fit items-center gap-2 text-sm text-(--color-text-primary)"
+            uiTooltip="Imports every memory in this export; they can't be picked one by one"
+          >
             <input type="checkbox" [checked]="includeMemories()" (change)="includeMemories.set($any($event.target).checked)" />
             <span>Include memories</span>
           </label>

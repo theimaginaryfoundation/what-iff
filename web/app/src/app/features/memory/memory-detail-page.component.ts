@@ -1,4 +1,4 @@
-import { CommonModule, DatePipe } from '@angular/common';
+import { CommonModule, DatePipe, PercentPipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, OnInit, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 
@@ -7,11 +7,13 @@ import { MemoryService } from '../../core/services/memory.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { MemoryFormComponent, MemoryPersonalityOption } from './components/memory-form.component';
 import { DeleteMemoryModalComponent } from './components/delete-memory-modal.component';
+import { CONFIDENCE_HINT, levelBadgeText, levelDescription, VERIFIED_HINT } from './helpers/memory-vm.helpers';
+import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 
 @Component({
   selector: 'app-memory-detail-page',
   standalone: true,
-  imports: [CommonModule, DatePipe, MemoryFormComponent, DeleteMemoryModalComponent, RouterLink],
+  imports: [CommonModule, DatePipe, PercentPipe, MemoryFormComponent, DeleteMemoryModalComponent, RouterLink, TooltipDirective],
   templateUrl: './memory-detail-page.component.html',
   styleUrl: './memory-detail-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -31,6 +33,11 @@ export class MemoryDetailPageComponent implements OnInit {
   readonly error = signal<string | null>(null);
   readonly deleteModalOpen = signal(false);
   readonly restoring = signal(false);
+
+  readonly levelLabel = levelBadgeText;
+  readonly levelHint = levelDescription;
+  readonly confidenceHint = CONFIDENCE_HINT;
+  readonly verifiedHint = VERIFIED_HINT;
 
   readonly memoryId = computed(() => this.route.snapshot.paramMap.get('id') ?? '');
 

@@ -14,6 +14,21 @@ const (
 	WebSearchDescriptionNative     = "Look up current information on the web. Works with models whose provider has built-in search."
 )
 
+// User guides for the web_search tooltip, by web search mode (see FunctionToolDefinition.UserGuide).
+// Only first-party search takes recency and site options and can read pages.
+const (
+	WebSearchGuideFirstParty = "Ask for recent results only (past day, week, month or year), or limit it to certain sites. It can also read a page you paste in, or one it finds."
+	WebSearchGuideNative     = "Uses the model provider's own web search, so it's only available on models whose provider has one. Ask to look something up or check the latest news."
+)
+
+// WebSearchToggleGuide returns the user guide for the active web search.
+func WebSearchToggleGuide(firstParty bool) string {
+	if firstParty {
+		return WebSearchGuideFirstParty
+	}
+	return WebSearchGuideNative
+}
+
 // WebSearchToggleDescription returns the user-facing web_search description for the active
 // web search: first-party (PARALLEL_API_KEY set) or vendor-native.
 func WebSearchToggleDescription(firstParty bool) string {

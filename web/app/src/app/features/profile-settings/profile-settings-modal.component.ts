@@ -15,13 +15,14 @@ import { ThemeMode, ThemeService } from '../../core/services/theme.service';
 import { UserPreferencesService } from '../../core/services/user-preferences.service';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { UserIconComponent } from '../../shared/ui/icons/icons';
+import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { ProfileSettingsModalService, ProfileSettingsTab } from './profile-settings-modal.service';
 
 /** Profile & Settings modal: account identity, appearance, defaults, and password. */
 @Component({
   selector: 'app-profile-settings-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ReactiveFormsModule, UserIconComponent],
+  imports: [CommonModule, ModalComponent, ReactiveFormsModule, UserIconComponent, TooltipDirective],
   templateUrl: './profile-settings-modal.component.html',
   styleUrl: './profile-settings-modal.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

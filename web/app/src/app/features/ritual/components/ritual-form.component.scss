@@ -26,6 +26,13 @@
   line-height: 1.5;
 }
 
+.ritual-form__hint {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 4px 0 0;
+}
+
 .ritual-form__input,
 .ritual-form__textarea {
   background: var(--color-surface-base);

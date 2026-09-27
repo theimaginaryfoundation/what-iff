@@ -23,7 +23,7 @@
       type="button"
       class="app-sidebar-header__profile-trigger"
       [attr.aria-label]="'Open profile for ' + displayName()"
-      [uiTooltip]="collapsed() ? displayName() : ''"
+      uiTooltip="Profile & settings"
       placement="right"
       (click)="openProfile()"
     >

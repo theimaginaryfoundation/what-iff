@@ -1,4 +1,4 @@
-import { appNavItems, configNavItems, extraConfigItems, isConfigPath, NavItem } from './nav.helpers';
+import { appNavItems, configNavItems, extraConfigItems, isConfigPath, NavItem, navTooltip } from './nav.helpers';
 
 describe('nav.helpers', () => {
     describe('appNavItems', () => {
@@ -30,6 +30,7 @@ describe('nav.helpers', () => {
             const fake: NavItem = {
                 id: 'features',
                 label: 'Features',
+                hint: 'Feature toggles',
                 route: '/features',
                 icon: appNavItems()[0].icon,
             };
@@ -46,6 +47,25 @@ describe('nav.helpers', () => {
         it('uses config routes that match registered Angular paths', () => {
             const routes = configNavItems().map(i => i.route);
             expect(routes).toEqual(['/memories', '/mode', '/skills', '/integrations', '/agent-jobs']);
+        });
+    });
+
+    describe('navTooltip', () => {
+        it('explains the section when its label is visible', () => {
+            expect(navTooltip('Skills', "Saved instructions you add to a message with '/'", true))
+                .toBe("Saved instructions you add to a message with '/'");
+        });
+
+        it('leads with the label when the control is icon-only', () => {
+            expect(navTooltip('Skills', "Saved instructions you add to a message with '/'", false))
+                .toBe("Skills: saved instructions you add to a message with '/'");
+        });
+
+        it('gives every nav item a hint that says more than its label', () => {
+            for (const item of [...appNavItems(), ...configNavItems()]) {
+                expect(item.hint.length).toBeGreaterThan(item.label.length);
+                expect(item.hint.toLowerCase()).not.toBe(item.label.toLowerCase());
+            }
         });
     });
 

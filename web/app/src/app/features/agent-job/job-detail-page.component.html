@@ -14,8 +14,9 @@
           <button
             type="button"
             class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary"
+            uiTooltip="Go to the thread where this job posts its runs"
             (click)="openChat()">
-            Open chat
+            Open thread
           </button>
         }
         @if (canRunNow()) {
@@ -24,6 +25,7 @@
             class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary"
             [disabled]="runningNow()"
             [attr.aria-disabled]="runningNow()"
+            [uiTooltip]="current.schedule_type === 'cron' ? 'Run once now; the schedule stays the same' : 'Run it now instead; the job then counts as done'"
             (click)="runNow()">
             {{ runningNow() ? 'Running…' : 'Run now' }}
           </button>
@@ -32,6 +34,7 @@
           <button
             type="button"
             class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary"
+            [uiTooltip]="current.status === 'active' ? 'Skip scheduled runs until you resume' : 'Start running on its schedule again'"
             (click)="togglePauseResume()">
             {{ current.status === 'active' ? 'Pause' : 'Resume' }}
           </button>
@@ -63,7 +66,9 @@
             {{ isCreateMode() ? 'Create job' : (currentJob.title || 'Untitled job') }}
           </h1>
           @if (!isCreateMode()) {
-            <p class="mt-1 text-sm text-text-secondary">Status: {{ currentJob.status }}</p>
+            <p class="mt-1 text-sm text-text-secondary">
+              Status: <span tabindex="0" [uiTooltip]="statusDescription(currentJob.status)">{{ statusLabel(currentJob.status) }}</span>
+            </p>
           }
 
           <div class="mt-4">
@@ -84,7 +89,12 @@
 
         @if (!isCreateMode()) {
         <section class="rounded-2xl border border-border-base bg-surface-card p-4">
-          <h2 class="text-sm font-semibold text-text-primary">Attached skills</h2>
+          <h2 class="inline-flex items-center gap-1 text-sm font-semibold text-text-primary">
+            Attached skills
+            <ui-help-hint label="What do attached skills do?" heading="Attached skills" guide="advanced">
+              Attached skills, and any connectors attached to them, are used on every run of this job.
+            </ui-help-hint>
+          </h2>
           <div class="mt-2 flex flex-wrap gap-2">
             @for (ritual of attachedRituals(); track ritual.id) {
               <span class="inline-flex items-center gap-2 rounded-full bg-accent-primary/15 px-2 py-1 text-xs text-accent-primary">
@@ -93,6 +103,7 @@
                   type="button"
                   class="text-accent-primary"
                   (click)="removeRitual(ritual)"
+                  uiTooltip="Detach from this job"
                   [attr.aria-label]="'Remove ' + ritual.name">
                   ×
                 </button>

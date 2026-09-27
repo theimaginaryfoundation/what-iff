@@ -117,3 +117,19 @@ func TestGetAvailableToolsWebSearchCopyFollowsMode(t *testing.T) {
 	assert.NotContains(t, describe(false), "read web pages")
 	assert.Contains(t, describe(false), "built-in search")
 }
+
+// Only first-party search takes recency and site options, so only its tooltip offers them.
+func TestGetAvailableToolsGuidesFollowWebSearchMode(t *testing.T) {
+	guides := func(firstParty bool) map[string]string {
+		out := map[string]string{}
+		for _, tool := range GetAvailableTools(context.Background(), firstParty) {
+			out[tool.Name] = tool.Guide
+		}
+		return out
+	}
+	assert.Contains(t, guides(true)[agenttools.ToolNameWebSearch], "certain sites")
+	assert.NotContains(t, guides(false)[agenttools.ToolNameWebSearch], "certain sites")
+	for name, guide := range guides(true) {
+		assert.NotEmpty(t, guide, "%s should have a tooltip guide", name)
+	}
+}

@@ -4,6 +4,7 @@ import {
   filterAssociationOptions,
   filterMoodsBySelectedPersonalities,
   initialsForName,
+  mcpServerCountLabel,
   moodJobsChipText,
   moodSkillsChipText,
   toolSilencedCountLabel,
@@ -58,8 +59,11 @@ describe('mode-vm helpers', () => {
   });
 
   it('builds chip labels', () => {
-    expect(moodSkillsChipText(makeMood({ ritual_ids: [] }))).toBe('All skills on');
-    expect(moodSkillsChipText(makeMood({ ritual_ids: ['r1', 'r2'] }))).toBe('2 skills configured');
+    expect(moodSkillsChipText(makeMood({ ritual_ids: [] }))).toBe('No skills attached');
+    expect(moodSkillsChipText(makeMood({ ritual_ids: ['r1', 'r2'] }))).toBe('2 skills attached');
+    expect(moodSkillsChipText(makeMood({ ritual_ids: ['r1'] }))).toBe('1 skill attached');
+    expect(mcpServerCountLabel(0)).toBe('0 MCP servers');
+    expect(mcpServerCountLabel(1)).toBe('1 MCP server');
     expect(moodJobsChipText()).toBe('Jobs on');
     expect(toolSilencedCountLabel(3)).toBe('3 silenced');
   });

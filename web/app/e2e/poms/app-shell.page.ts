@@ -32,7 +32,7 @@ export const quickActions = [
   'Add memory',
   'Create skill',
   'Create mode',
-  'Import Conversations',
+  'Import threads',
   'Open command palette',
   'Help and feedback',
 ] as const;
