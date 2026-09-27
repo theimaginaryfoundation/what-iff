@@ -27,7 +27,8 @@ func TestListToolsSerializesResolvedDisplayDescriptions(t *testing.T) {
 	for _, tool := range got {
 		byName[tool.Name] = tool.Description
 	}
-	require.Equal(t, "Update this personality's working notes, which persist across conversations using the same personality.", byName["update_scratchpad"])
+	require.Equal(t, "Update this personality's working notes, which carry over to every thread with this personality.", byName["update_scratchpad"])
 	require.NotEmpty(t, byName["create_agent_job"])
 	require.NotEmpty(t, byName["find_context"])
+	require.Contains(t, recorder.Body.String(), `"guide":`, "tool tooltips need the guide in the JSON")
 }

@@ -415,12 +415,12 @@ describe('ChatComposerComponent', () => {
         expect(removed).toHaveBeenCalledWith('pending-1');
     });
 
-    it('loads gallery images when Add from Gallery is chosen', () => {
+    it('loads gallery images when Add from gallery is chosen', () => {
         const plus = fixture.nativeElement.querySelector('.composer__plus') as HTMLButtonElement;
         plus.click();
         fixture.detectChanges();
 
-        const galleryBtn = Array.from(fixture.nativeElement.querySelectorAll('.composer__plus-menu button')).find((b): b is HTMLButtonElement => b instanceof HTMLButtonElement && !!b.textContent?.includes('Add from Gallery'));
+        const galleryBtn = Array.from(fixture.nativeElement.querySelectorAll('.composer__plus-menu button')).find((b): b is HTMLButtonElement => b instanceof HTMLButtonElement && !!b.textContent?.includes('Add from gallery'));
         expect(galleryBtn).toBeTruthy();
         galleryBtn!.click();
         fixture.detectChanges();
@@ -512,7 +512,7 @@ describe('ChatComposerComponent', () => {
 
         expect(autoRow?.classList.contains('composer__skill-row--selected')).toBe(true);
         expect(autoRow?.getAttribute('aria-selected')).toBe('true');
-        expect(autoRow?.textContent).toContain('Currently: Writing');
+        expect(autoRow?.textContent).toContain('now Writing');
         expect(writingRow?.classList.contains('composer__skill-row--selected')).toBe(false);
         expect(writingRow?.textContent).toContain('Current');
     });

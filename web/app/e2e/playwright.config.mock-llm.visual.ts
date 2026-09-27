@@ -37,6 +37,11 @@ export default defineConfig({
   // makes that true by construction.
   testMatch: /tests[\\/]visual[\\/].*\.spec\.ts$/,
   grepInvert: undefined,
+  // Hover tooltips follow the last pointer position, not the screen under test; see screenshot.css.
+  expect: {
+    ...mockConfig.expect,
+    toHaveScreenshot: { stylePath: './tests/visual/screenshot.css' },
+  },
   projects: [
     {
       name: 'chromium-desktop',

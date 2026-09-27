@@ -4,11 +4,15 @@ import { Router, RouterLink } from '@angular/router';
 
 import { MemoryMergeEvent, MemoryMergeSourceMember } from '../../core/models/memory.model';
 import { MemoryService } from '../../core/services/memory.service';
+import { ConfirmationService } from '../../core/services/confirmation.service';
+import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
+import { memoryScopeLabel, mergeTypeDescription, mergeTypeLabel, mergeUndoDescription } from './helpers/memory-vm.helpers';
 
 @Component({
   selector: 'app-memory-merge-history-page',
   standalone: true,
-  imports: [CommonModule, DatePipe, RouterLink, UpperCasePipe],
+  imports: [CommonModule, DatePipe, RouterLink, UpperCasePipe, HelpHintComponent, TooltipDirective],
   templateUrl: './memory-merge-history-page.component.html',
   styleUrl: './memory-merge-history-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -16,6 +20,7 @@ import { MemoryService } from '../../core/services/memory.service';
 export class MemoryMergeHistoryPageComponent implements OnInit {
   private readonly memoryService = inject(MemoryService);
   private readonly router = inject(Router);
+  private readonly confirmation = inject(ConfirmationService);
 
   /** When true, hide the standalone page chrome (used as a Memories tab). */
   readonly embedded = input(false);
@@ -51,16 +56,14 @@ export class MemoryMergeHistoryPageComponent implements OnInit {
     });
   }
 
-  mergeTypeLabel(event: MemoryMergeEvent): string {
-    switch (event.merge_type) {
-      case 'link':
-        return 'Linked related memories';
-      case 'fold_live':
-        return 'Memories Merged';
-      default:
-        return 'Created from batch';
-    }
-  }
+  readonly introText = 'Automatic merges and links from memory extraction. Expand an event to see exactly what happened.';
+  readonly undoText =
+    "Undoing a merge restores the kept memory's confidence and verified count; merged duplicates stay archived. " +
+    'Undoing a created memory deletes it.';
+  readonly mergeTypeLabel = mergeTypeLabel;
+  readonly mergeTypeDescription = mergeTypeDescription;
+  readonly undoDescription = mergeUndoDescription;
+  readonly scopeLabel = memoryScopeLabel;
 
   /** Source memories that went into a fold (stored duplicates_folded is absorb-count = n-1). */
   mergedSourceCount(event: MemoryMergeEvent): number {
@@ -101,9 +104,20 @@ export class MemoryMergeHistoryPageComponent implements OnInit {
     return member.is_new ? 'New extraction' : 'Stored memory';
   }
 
-  undo(event: MemoryMergeEvent): void {
+  async undo(event: MemoryMergeEvent): Promise<void> {
     if (this.isReverted(event) || this.undoingId()) {
       return;
+    }
+    // Undoing a create permanently deletes the memory it made, so ask first.
+    if (this.isCreate(event)) {
+      const confirmed = await this.confirmation.confirm({
+        title: 'Delete this memory?',
+        message: 'Undoing this event permanently deletes the memory it created. This cannot be undone.',
+        type: 'danger',
+        confirmText: 'Delete memory',
+        cancelText: 'Cancel',
+      });
+      if (!confirmed) return;
     }
     this.undoingId.set(event.id);
     this.memoryService.undoMergeEvent(event.id).subscribe({

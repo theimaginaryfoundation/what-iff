@@ -46,13 +46,13 @@ describe('MemoryFocusPanelComponent', () => {
     fixture.detectChanges();
   });
 
-  it('renders memory content and confidence info control', () => {
+  it('renders memory content and the confidence help hint', () => {
     const text = fixture.nativeElement.textContent as string;
     expect(text).toContain('Based in New York, not Chicago.');
     expect(text).toContain('45%');
-    const info = fixture.nativeElement.querySelector('.focus-panel__info') as HTMLButtonElement;
+    const info = fixture.nativeElement.querySelector('ui-help-hint .ui-help-hint__trigger') as HTMLButtonElement;
     expect(info).toBeTruthy();
-    expect(info.getAttribute('aria-label')).toBe('About confidence');
+    expect(info.getAttribute('aria-label')).toBe('What is confidence?');
   });
 
   it('filters merge events to this survivor and skips reverted ones', () => {
@@ -204,34 +204,14 @@ describe('MemoryFocusPanelComponent', () => {
     expect(fixture.nativeElement.querySelector('.focus-panel__link-btn')).toBeNull();
   });
 
-  it('shows the confidence tooltip with the exact copy on hover/focus', () => {
-    const infoButton = fixture.nativeElement.querySelector('.focus-panel__info') as HTMLButtonElement;
-
-    infoButton.dispatchEvent(new Event('mouseenter'));
+  it('opens the confidence help hint with an explanation', () => {
+    const trigger = fixture.nativeElement.querySelector('ui-help-hint .ui-help-hint__trigger') as HTMLButtonElement;
+    trigger.click();
     fixture.detectChanges();
 
-    const tooltip = document.body.querySelector('[role="tooltip"]');
-    expect(tooltip?.textContent).toBe('Your personalities rate their confidence when writing and updating memories');
-  });
-
-  it('still shows the confidence tooltip under a simulated coarse (touch) pointer, since disabledOnTouch is false', () => {
-    vi.spyOn(window, 'matchMedia').mockReturnValue({
-      matches: true,
-      media: '(pointer: coarse)',
-      onchange: null,
-      addListener: () => undefined,
-      removeListener: () => undefined,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-      dispatchEvent: () => false,
-    } as MediaQueryList);
-
-    const infoButton = fixture.nativeElement.querySelector('.focus-panel__info') as HTMLButtonElement;
-    infoButton.dispatchEvent(new Event('focus'));
-    fixture.detectChanges();
-
-    const tooltip = document.body.querySelector('[role="tooltip"]');
-    expect(tooltip?.textContent).toContain('confidence');
+    const panel = fixture.nativeElement.querySelector('.ui-help-hint__panel') as HTMLElement;
+    expect(panel.textContent).toContain('Confidence');
+    expect(panel.textContent).toContain('highest confidence is');
   });
 
   it('shows the verified count when set and omits it when null', () => {

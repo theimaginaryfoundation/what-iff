@@ -316,6 +316,20 @@ h1 {
   width: 100%;
 }
 
+.chat-page__summary-row {
+  align-items: center;
+  background: var(--color-surface-muted);
+  border-bottom: 1px solid var(--color-border-base);
+  display: flex;
+  padding-inline-end: 0.625rem;
+}
+
+.chat-page__summary-row .chat-page__summary-bar {
+  border-bottom: 0;
+  flex: 1;
+  min-width: 0;
+}
+
 .chat-page__summary-label {
   color: var(--color-accent);
   font-size: 0.625rem;

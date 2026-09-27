@@ -2,11 +2,12 @@ import { ChangeDetectionStrategy, Component, computed, input, output, signal } f
 
 import { ToolCall, ToolCallView } from '../../../../core/models/toolcall.model';
 import { ToolCallComponent } from '../tool-call/tool-call.component';
+import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 
 @Component({
   selector: 'app-tool-call-group',
   standalone: true,
-  imports: [ToolCallComponent],
+  imports: [ToolCallComponent, TooltipDirective],
   template: `
     <section class="tool-call-group" [attr.aria-label]="live() ? 'Tool calls in progress' : 'Tool calls'">
       @if (hasMultipleCalls()) {
@@ -15,6 +16,7 @@ import { ToolCallComponent } from '../tool-call/tool-call.component';
           class="tool-call-group__toggle"
           [attr.aria-expanded]="showItems()"
           [attr.aria-controls]="panelId"
+          [uiTooltip]="showItems() ? 'Hide the tools used for this reply' : 'Show the tools used for this reply'"
           (click)="toggle()"
         >
           <span class="tool-call-group__title">{{ title() }}</span>

@@ -1,9 +1,8 @@
 import type { Locator, Page } from '@playwright/test';
-import { AppShell } from './app-shell.page';
 import { ConfirmationModal } from './confirmation.modal';
 
 /**
- * Integrations (`/integrations`) — connectors + webhook API tokens.
+ * Tools page (`/integrations`) — connectors + webhook API tokens. The h1 reads "Tools" to match the nav.
  *
  * Everything below the header is gated on `hasSubscriptionAccess()`
  * (integrations.component.ts): it is true unconditionally when
@@ -16,11 +15,9 @@ import { ConfirmationModal } from './confirmation.modal';
  * rather than assuming either.
  */
 export class IntegrationsPage {
-  private readonly shell: AppShell;
   readonly confirmation: ConfirmationModal;
 
   constructor(private readonly page: Page) {
-    this.shell = new AppShell(page);
     this.confirmation = new ConfirmationModal(page);
     this.unavailableNotice = this.page.getByRole('status').filter({ hasText: 'Integrations are unavailable for this account' });
     this.connectorsTab = this.page.getByRole('button', {
@@ -32,7 +29,7 @@ export class IntegrationsPage {
       exact: true,
     });
     this.createTokenHeading = this.page.getByRole('heading', {
-      name: 'Create Webhook API Token',
+      name: 'Create webhook API token',
     });
     this.tokenNameInput = this.page.getByPlaceholder('e.g. Slack trigger');
     this.createTokenButton = this.page.getByRole('button', {
@@ -45,14 +42,13 @@ export class IntegrationsPage {
     this.connectorsLoading = this.page.getByText('Loading integrations...');
     this.emptyConnectorsMessage = this.page.getByText('No connectors configured.');
     this.heading = this.page.getByRole('heading', {
-      name: 'Integrations',
+      name: 'Tools',
       level: 1,
     });
   }
 
   async navigateTo(): Promise<void> {
     await this.page.goto('/integrations');
-    await this.shell.dismissAnnouncementIfPresent();
   }
 
   readonly heading: Locator;

@@ -4,11 +4,12 @@ import { FormsModule } from '@angular/forms';
 
 import { AgentJobScheduleType, AgentJobStatus } from '../../../core/models/agent-job.model';
 import { JobViewFilters } from '../../../core/services/job-view.service';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 
 @Component({
   selector: 'app-job-filter-bar',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, TooltipDirective],
   templateUrl: './job-filter-bar.component.html',
   styleUrl: './job-filter-bar.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

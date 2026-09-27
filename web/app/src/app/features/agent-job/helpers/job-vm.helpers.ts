@@ -1,5 +1,5 @@
 import { AgentJob, AgentJobStatus } from '../../../core/models/agent-job.model';
-import { JobStatusTone, statusLabel, statusTone } from './job-status.helpers';
+import { JobStatusTone, statusDescription, statusLabel, statusTone } from './job-status.helpers';
 
 export interface JobCardVm {
   id: string;
@@ -9,6 +9,7 @@ export interface JobCardVm {
   scheduleValue: string;
   status: AgentJobStatus;
   statusLabel: string;
+  statusDescription: string;
   statusTone: JobStatusTone;
   timezone: string;
   nextRunLabel: string;
@@ -30,6 +31,7 @@ export function toJobCardVm(job: AgentJob): JobCardVm {
     scheduleValue,
     status: job.status,
     statusLabel: statusLabel(job.status),
+    statusDescription: statusDescription(job.status),
     statusTone: statusTone(job.status),
     timezone: job.timezone,
     nextRunLabel: formatDate(job.next_run_at),

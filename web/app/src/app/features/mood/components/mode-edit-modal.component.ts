@@ -3,6 +3,7 @@ import { Component, HostListener, input, output, ChangeDetectionStrategy } from 
 import { FormsModule } from '@angular/forms';
 import { XIconComponent } from '../../../shared/ui/icons/icons';
 import { ModeSearchPickerComponent, ModeSearchPickerOption } from './mode-search-picker.component';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 
 export interface ModeEditModalState {
   mode: 'create' | 'edit' | null;
@@ -22,7 +23,7 @@ export interface ModeEditModalState {
 @Component({
   selector: 'app-mode-edit-modal',
   standalone: true,
-  imports: [FormsModule, XIconComponent, ModeSearchPickerComponent],
+  imports: [FormsModule, XIconComponent, ModeSearchPickerComponent, TooltipDirective],
   templateUrl: './mode-edit-modal.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./mode-edit-modal.component.scss'],

@@ -94,7 +94,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   Metadata remains encoded with its human-readable message for historical storage compatibility, but `ListAccountActivity` splits valid metadata into `AccountActivityEntry.Metadata`; an uninitialized datastore returns an error rather than appearing as an empty activity log.
 - **Actor on audit rows:** `actor_user_id` is filled from request context via `internal/apicontext` (middleware dual-writes the authenticated user id next to `middleware.UserIDKey` so datastore avoids an import cycle).
   Background jobs that propagate user id should use the same dual-write when building exec contexts.
-- **`UpdateUserPreferences` writes per field, not wholesale:** the DTO has no pointers, so each field picks its own rule and they are not consistent — `default_model` is written unconditionally, `default_personality` is **cleared** when the incoming value is `uuid.Nil`, and `theme` and `last_seen_announcement` are skipped when empty.
+- **`UpdateUserPreferences` writes per field, not wholesale:** the DTO has no pointers, so each field picks its own rule and they are not consistent — `default_model` is written unconditionally, `default_personality` is **cleared** when the incoming value is `uuid.Nil`, and `theme` is skipped when empty.
   Adding a scalar field means choosing one of those and living with the ambiguity that a zero value cannot be distinguished from an omitted one.
   **`favorite_model_ids` sidesteps it**: a nil slice means "field omitted, leave the stored list alone" and an empty non-nil slice means "clear it", a distinction JSON gives slices for free.
   Prefer slice/map-shaped fields here when the semantics allow.

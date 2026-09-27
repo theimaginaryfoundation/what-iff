@@ -9,13 +9,15 @@ import { apiErrorMessage } from '../../../../../core/utils/api-error.helpers';
 import { ButtonComponent } from '../../../../../shared/ui/button/button.component';
 import { ModalComponent } from '../../../../../shared/ui/modal/modal.component';
 
-type MemoryContextTab = 'thread' | 'global';
 import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../../../../shared/ui/tooltip/tooltip.directive';
+
+type MemoryContextTab = 'thread' | 'global';
 
 @Component({
   selector: 'app-context-memories-tab',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, ModalComponent, HelpHintComponent],
+  imports: [CommonModule, ButtonComponent, ModalComponent, HelpHintComponent, TooltipDirective],
   template: `
     <section class="tab-body">
       <div class="memory-scope-row">
@@ -27,7 +29,7 @@ import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.
             [class.context-tabs__button--active]="activeMemoryTab() === 'thread'"
             (click)="activeMemoryTab.set('thread')"
           >
-            This Thread
+            This thread
           </button>
           <button
             type="button"
@@ -40,8 +42,9 @@ import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.
           </button>
         </div>
         <ui-help-hint label="What are memories?" heading="Memories" guide="continuity" align="end">
-          Things this personality has saved to remember. <strong>This Thread</strong> memories apply to this conversation;
-          <strong>Global</strong> ones carry into future conversations. You can edit or remove any of them.
+          Things the personality has saved to remember. <strong>This thread</strong> memories are used only in this
+          thread. <strong>Global</strong> lists memories used with every personality, plus ones pinned to this
+          personality. You can edit or remove any of them.
         </ui-help-hint>
       </div>
 
@@ -56,7 +59,9 @@ import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.
       </div>
 
       <div class="memory-actions">
-        <button type="button" class="add-memory" (click)="openCreateModal()">Add Memory</button>
+        <button type="button" class="add-memory" uiTooltip="Adds a memory for this thread only" (click)="openCreateModal()">
+          Add memory
+        </button>
         <button type="button" (click)="goToMemoryList()">Manage all memories</button>
       </div>
     </section>

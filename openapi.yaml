@@ -5820,9 +5820,6 @@ components:
           type: string
           enum: [light, dark, system]
           description: The theme to use for the user's interface
-        last_seen_announcement:
-          type: string
-          description: ID of the most recently seen announcement banner; an empty string means none seen
         favorite_model_ids:
           type: array
           items:
@@ -5840,7 +5837,6 @@ components:
         - default_model_id
         - default_personality_id
         - theme
-        - last_seen_announcement
         - favorite_model_ids
       example:
         id: "123e4567-e89b-12d3-a456-426614174000"
@@ -5848,7 +5844,6 @@ components:
         default_model_id: "123e4567-e89b-12d3-a456-426614174002"
         default_personality_id: "123e4567-e89b-12d3-a456-426614174003"
         theme: "dark"
-        last_seen_announcement: ""
         favorite_model_ids:
           - "123e4567-e89b-12d3-a456-426614174002"
           - "123e4567-e89b-12d3-a456-426614174004"
@@ -5884,12 +5879,6 @@ components:
             The theme to use for the user's interface. Preserved when absent: only `light`,
             `dark`, and `system` are written, and any other value — including omission —
             leaves the stored theme unchanged.
-        last_seen_announcement:
-          type: string
-          description: |
-            ID of the most recently seen announcement banner. Preserved when absent: only a
-            non-empty value is written, so omitting this field or sending an empty string
-            leaves the stored value unchanged. This endpoint cannot clear it.
         favorite_model_ids:
           type: array
           items:
@@ -5911,7 +5900,6 @@ components:
         default_model_id: "123e4567-e89b-12d3-a456-426614174002"
         default_personality_id: "123e4567-e89b-12d3-a456-426614174003"
         theme: "dark"
-        last_seen_announcement: "2026-08-release"
         favorite_model_ids:
           - "123e4567-e89b-12d3-a456-426614174002"
           - "123e4567-e89b-12d3-a456-426614174004"

@@ -109,7 +109,7 @@ export class GalleryImportModalComponent {
       return;
     }
     if (scope === 'personality' && !personalityId) {
-      this.error.set('Choose a personality when using "Pin to character".');
+      this.error.set('Choose a personality when using "Pin to personality".');
       return;
     }
     const normalizedTitle = normalizeTitleWithFileExtension(title, file.name);

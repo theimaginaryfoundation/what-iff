@@ -1,7 +1,13 @@
 <section class="memories-shell">
   <header class="memories-shell__header">
     <div class="memories-shell__copy">
-      <h1>Memory Manager</h1>
+      <h1 class="memories-shell__title">
+        Memory Manager
+        <ui-help-hint label="What is memory?" heading="Memory" guide="continuity">
+          Memories are facts your personalities saved from your threads. Each turn, the most relevant active memories
+          are pulled into the reply; archived ones are never used.
+        </ui-help-hint>
+      </h1>
       <p>Review and correct saved context that informs your conversations.</p>
     </div>
   </header>
@@ -22,6 +28,8 @@
       class="memories-shell__tab"
       [class.memories-shell__tab--active]="activeTab() === 'merge-history'"
       [attr.aria-selected]="activeTab() === 'merge-history'"
+      uiTooltip="Automatic merges and links between duplicate or related memories"
+      placement="bottom"
       (click)="setActiveTab('merge-history')">
       Merge history
     </button>
@@ -31,6 +39,8 @@
       class="memories-shell__tab"
       [class.memories-shell__tab--active]="activeTab() === 'compaction-log'"
       [attr.aria-selected]="activeTab() === 'compaction-log'"
+      uiTooltip="What each thread checkpoint changed: summaries, scratchpads and memories"
+      placement="bottom"
       (click)="setActiveTab('compaction-log')">
       Compaction log
     </button>

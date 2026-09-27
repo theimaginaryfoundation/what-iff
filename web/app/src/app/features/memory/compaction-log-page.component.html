@@ -5,17 +5,29 @@
   @if (!embedded()) {
   <header class="compaction-log-header">
     <a routerLink="/memories" class="compaction-log-header__back">← Back to memories</a>
-    <h1>Compaction log</h1>
+    <h1 class="compaction-log-title">
+      Compaction log
+      <ui-help-hint label="What is the compaction log?" heading="Compaction log" guide="continuity">
+        When a thread gets long, a checkpoint rewrites its summary and the personality's scratchpad, and saves new
+        memories. Each entry shows what changed so you can restore an earlier version.
+      </ui-help-hint>
+    </h1>
     <p>
-      Every conversation checkpoint and personality prompt change, captured like a diff. Review summary,
+      Every thread checkpoint and personality prompt change, captured like a diff. Review summary,
       scratchpad, memory, and prompt changes here and restore a known-good state when needed.
     </p>
   </header>
   } @else {
     <div class="compaction-log-embedded-header">
-      <h2>Compaction log</h2>
+      <h2 class="compaction-log-title">
+        Compaction log
+        <ui-help-hint label="What is the compaction log?" heading="Compaction log" guide="continuity">
+          When a thread gets long, a checkpoint rewrites its summary and the personality's scratchpad, and saves new
+          memories. Each entry shows what changed so you can restore an earlier version.
+        </ui-help-hint>
+      </h2>
       <p>
-        Every conversation checkpoint and personality prompt change, captured like a diff. Restore a known-good state when needed.
+        Every thread checkpoint and personality prompt change, captured like a diff. Restore a known-good state when needed.
       </p>
     </div>
   }
@@ -51,6 +63,8 @@
       class="compaction-section-toggle"
       data-testid="prompt-change-toggle"
       [attr.aria-expanded]="promptChangesExpanded()"
+      uiTooltip="Edits to each personality's system prompt, with before and after"
+      placement="right"
       (click)="togglePromptChanges()">
       <span id="prompt-change-heading">Personality prompt changes</span>
       <span class="compaction-toggle__chevron" aria-hidden="true"></span>
@@ -92,6 +106,7 @@
                       type="button"
                       class="diff-pane__revert"
                       [disabled]="revertingPromptChangeId() === change.id"
+                      uiTooltip="Put the Before prompt back; saved as a new change"
                       (click)="revertPromptChange(change)">
                       {{ revertingPromptChangeId() === change.id ? 'Restoring…' : 'Restore previous' }}
                     </button>
@@ -120,7 +135,7 @@
   } @else if (error()) {
     <p class="compaction-log-error" role="alert">{{ error() }}</p>
   } @else if (events().length === 0) {
-    <p class="compaction-log-status">No compactions logged yet. They appear here after a conversation checkpoints.</p>
+    <p class="compaction-log-status">No compactions logged yet. They appear here after a thread reaches a checkpoint.</p>
   } @else {
     <ul class="compaction-log-list" role="list">
       @for (event of events(); track event.id) {
@@ -128,13 +143,18 @@
           <div class="compaction-card__head">
             <div class="compaction-card__badges">
               @if (event.chat_name) {
-                <span class="compaction-card__badge compaction-card__badge--muted compaction-card__badge--chat" [title]="event.chat_name">
+                <span
+                  class="compaction-card__badge compaction-card__badge--muted compaction-card__badge--chat"
+                  [uiTooltip]="event.chat_name"
+                  truncatedOnly
+                  [truncationTarget]="chatNameValue"
+                >
                   <span class="compaction-card__badge-label">Thread</span>
-                  <span class="compaction-card__badge-value">{{ event.chat_name }}</span>
+                  <span #chatNameValue class="compaction-card__badge-value">{{ event.chat_name }}</span>
                 </span>
               }
               @if (event.reason) {
-                <span class="compaction-card__badge compaction-card__badge--muted">
+                <span class="compaction-card__badge compaction-card__badge--muted" uiTooltip="Why this checkpoint ran">
                   <span class="compaction-card__badge-label">Checkpoint</span>
                   <span class="compaction-card__badge-value">{{ checkpointReasonLabel(event.reason) }}</span>
                 </span>
@@ -164,13 +184,13 @@
             <div class="compaction-card__body">
 
               <button type="button" class="compaction-section-toggle" [attr.aria-expanded]="!isSectionCollapsed(event, 'summary')" (click)="toggleSection(event, 'summary')">
-                <span>Summaries</span>
+                <span uiTooltip="The thread summary and personality scratchpad, before and after">Summaries</span>
                 <span class="compaction-toggle__chevron" aria-hidden="true"></span>
               </button>
               @if (!isSectionCollapsed(event, 'summary')) {
               <section class="diff-block">
                 <div class="diff-block__title-row">
-                  <h3 class="diff-block__title">Conversation summary</h3>
+                  <h3 class="diff-block__title">Thread summary</h3>
                   @if (!summaryChanged(event)) {
                     <span class="diff-block__unchanged">unchanged</span>
                   }
@@ -184,6 +204,7 @@
                           type="button"
                           class="diff-pane__revert"
                           [disabled]="revertingId() === event.old_summary?.id || isSnapshotReverted(event.old_summary)"
+                          uiTooltip="Make this the thread's live summary again"
                           (click)="revert(event.old_summary)">
                           {{ isSnapshotReverted(event.old_summary) ? 'Restored' : (revertingId() === event.old_summary?.id ? 'Reverting…' : 'Revert to this') }}
                         </button>
@@ -199,6 +220,7 @@
                           type="button"
                           class="diff-pane__revert"
                           [disabled]="revertingId() === event.new_summary?.id || isSnapshotReverted(event.new_summary)"
+                          uiTooltip="Make this the thread's live summary again"
                           (click)="revert(event.new_summary)">
                           {{ isSnapshotReverted(event.new_summary) ? 'Restored' : (revertingId() === event.new_summary?.id ? 'Reverting…' : 'Revert to this') }}
                         </button>
@@ -212,7 +234,10 @@
               @if (event.old_scratchpad || event.new_scratchpad) {
                 <section class="diff-block">
                   <div class="diff-block__title-row">
-                    <h3 class="diff-block__title">Scratchpad <span class="diff-block__hint">(personality-wide)</span></h3>
+                    <h3 class="diff-block__title">
+                      Scratchpad
+                      <span class="diff-block__hint" uiTooltip="Notes shared across all of this personality's threads">(personality-wide)</span>
+                    </h3>
                     @if (!scratchpadChanged(event)) {
                       <span class="diff-block__unchanged">unchanged</span>
                     }
@@ -226,6 +251,7 @@
                             type="button"
                             class="diff-pane__revert"
                             [disabled]="revertingId() === event.old_scratchpad?.id || isSnapshotReverted(event.old_scratchpad)"
+                            uiTooltip="Restore this scratchpad for all of this personality's threads"
                             (click)="revert(event.old_scratchpad)">
                             {{ isSnapshotReverted(event.old_scratchpad) ? 'Restored' : (revertingId() === event.old_scratchpad?.id ? 'Reverting…' : 'Revert to this') }}
                           </button>
@@ -241,6 +267,7 @@
                             type="button"
                             class="diff-pane__revert"
                             [disabled]="revertingId() === event.new_scratchpad?.id || isSnapshotReverted(event.new_scratchpad)"
+                            uiTooltip="Restore this scratchpad for all of this personality's threads"
                             (click)="revert(event.new_scratchpad)">
                             {{ isSnapshotReverted(event.new_scratchpad) ? 'Restored' : (revertingId() === event.new_scratchpad?.id ? 'Reverting…' : 'Revert to this') }}
                           </button>
@@ -254,7 +281,7 @@
               }
 
               <button type="button" class="compaction-section-toggle" [attr.aria-expanded]="!isSectionCollapsed(event, 'memory')" (click)="toggleSection(event, 'memory')">
-                <span>Memory</span>
+                <span uiTooltip="Memories used, created and merged during this checkpoint">Memory</span>
                 <span class="compaction-toggle__chevron" aria-hidden="true"></span>
               </button>
               @if (!isSectionCollapsed(event, 'memory')) {
@@ -264,7 +291,7 @@
                   class="loaded-memories-toggle"
                   [attr.aria-expanded]="!isLoadedMemoriesCollapsed(event)"
                   (click)="toggleLoadedMemories(event)">
-                  <span>Loaded memories ({{ event.loaded_memories?.length ?? 0 }})</span>
+                  <span uiTooltip="Memories retrieved for replies in this part of the thread">Loaded memories ({{ event.loaded_memories?.length ?? 0 }})</span>
                   <span class="compaction-toggle__chevron" aria-hidden="true"></span>
                 </button>
                 @if (!isLoadedMemoriesCollapsed(event)) {
@@ -275,9 +302,9 @@
                       @for (mem of event.loaded_memories; track $index) {
                         <li class="loaded-item">
                           <div class="loaded-item__head">
-                            <span class="loaded-item__scope">{{ mem.scope }}</span>
+                            <span class="loaded-item__scope">{{ scopeLabel(mem.scope) }}</span>
                             @if (mem.confidence) {
-                              <span class="loaded-item__confidence">conf {{ mem.confidence | number:'1.2-2' }}</span>
+                              <span class="loaded-item__confidence">{{ mem.confidence | percent }} confidence</span>
                             }
                             @if (mem.memory_id) {
                               <button type="button" class="loaded-item__link" (click)="openMemory(mem.memory_id)">View</button>
@@ -320,12 +347,12 @@
                     @for (me of updatedMemoryEvents(event); track me.id) {
                       <li class="merge-item">
                         <div class="merge-item__head">
-                          <span class="merge-item__type merge-item__type--{{ me.merge_type }}">{{ mergeTypeLabel(me) }}</span>
+                          <span class="merge-item__type merge-item__type--{{ me.merge_type }}" [uiTooltip]="mergeTypeDescription(me.merge_type)">{{ mergeTypeLabel(me.merge_type) }}</span>
                           @if (me.merge_type === 'fold_live' && mergedSourceCount(me) >= 2) {
-                            <span class="merge-item__count">{{ mergedSourceCount(me) }}×</span>
+                            <span class="merge-item__count" [uiTooltip]="mergedSourceCount(me) + ' memories folded into one'">{{ mergedSourceCount(me) }}×</span>
                           }
                           @if (me.reverted_at) {
-                            <span class="merge-item__reverted">Undone</span>
+                            <span class="merge-item__reverted" uiTooltip="This event was undone and no longer applies">Undone</span>
                           }
                           <button type="button" class="merge-item__link" (click)="openMemory(me.survivor_memory_id)">View memory</button>
                         </div>

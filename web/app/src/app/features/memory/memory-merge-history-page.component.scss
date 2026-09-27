@@ -9,6 +9,12 @@
   color: var(--color-text-primary);
 }
 
+.merge-history-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .merge-history-header p {
   margin: 0;
   color: var(--color-text-secondary);

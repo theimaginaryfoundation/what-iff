@@ -12,7 +12,8 @@ export class PersonalityDetailPage {
     this.autoPinToggle = this.page.getByRole('switch', { name: 'Auto-pin new User memories' });
     this.promptEditor = this.page.getByLabel('System prompt editor');
     this.editPromptButton = this.promptEditor.getByRole('button', { name: 'Edit' });
-    this.promptTextarea = this.promptEditor.getByLabel('Prompt');
+    // By role: the section's help hint ("What is the system prompt?") also matches a label search.
+    this.promptTextarea = this.promptEditor.getByRole('textbox', { name: /^Prompt\b/ });
     this.savePromptButton = this.promptEditor.getByRole('button', { name: 'Save' });
     this.cancelPromptButton = this.promptEditor.getByRole('button', { name: 'Cancel' });
     this.attachments = this.page.getByLabel('Personality attachments');
@@ -54,7 +55,7 @@ export class PersonalityDetailPage {
   }
 
   async useInNewChat(): Promise<void> {
-    await this.page.getByRole('button', { name: 'Use in new chat' }).click();
+    await this.page.getByRole('button', { name: 'Use in new thread' }).click();
   }
 
   /** Renames the personality via the header field and persists it. */

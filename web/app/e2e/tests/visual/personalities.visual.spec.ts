@@ -17,10 +17,8 @@ test.describe('personalities screens', () => {
   test(
     'empty state for a fresh user',
     { tag: ['@visual', '@mock-only'] },
-    async ({ authenticatedPage: page, personalitiesPage, shell }) => {
-      await shell.dismissAnnouncementIfPresent();
+    async ({ authenticatedPage: page, personalitiesPage }) => {
       await personalitiesPage.navigateTo();
-      await shell.dismissAnnouncementIfPresent();
 
       await expect(page).toHaveScreenshot('personalities-empty.png', {
         animations: 'disabled',
@@ -32,14 +30,12 @@ test.describe('personalities screens', () => {
   test(
     'personality detail page',
     { tag: ['@visual', '@mock-only'] },
-    async ({ authenticatedPage: page, personalitiesPage, personalityDetailPage, shell }) => {
+    async ({ authenticatedPage: page, personalitiesPage, personalityDetailPage }) => {
       // Fixed, non-time-based name — a Date.now()-suffixed name (the pattern
       // used elsewhere in this suite) would break the baseline on every run.
       const personalityName = 'E2E Visual Persona';
 
-      await shell.dismissAnnouncementIfPresent();
       await personalitiesPage.navigateTo();
-      await shell.dismissAnnouncementIfPresent();
       await personalitiesPage.openCreateManually();
       await personalitiesPage.createManually(
         personalityName,
@@ -70,10 +66,8 @@ test.describe('personalities screens', () => {
   test(
     'generate expressions modal',
     { tag: ['@visual', '@mock-only'] },
-    async ({ authenticatedPage: page, personalitiesPage, personalityDetailPage, shell }) => {
-      await shell.dismissAnnouncementIfPresent();
+    async ({ authenticatedPage: page, personalitiesPage, personalityDetailPage }) => {
       await personalitiesPage.navigateTo();
-      await shell.dismissAnnouncementIfPresent();
       await personalitiesPage.openCreateManually();
       await personalitiesPage.createManually('E2E Visual Expressions', 'You are used only for visual regression testing.');
       await expect(page).toHaveURL(/\/personality\/[^/]+$/);

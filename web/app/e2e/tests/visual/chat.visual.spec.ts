@@ -19,9 +19,7 @@ test(
     // in the chat header stay stable across runs.
     const personalityName = 'E2E Visual Chat Persona';
 
-    await shell.dismissAnnouncementIfPresent();
     await personalitiesPage.navigateTo();
-    await shell.dismissAnnouncementIfPresent();
     await personalitiesPage.openCreateManually();
     await personalitiesPage.createManually(
       personalityName,

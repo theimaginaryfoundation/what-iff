@@ -4,13 +4,15 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { MemoriesListTabComponent } from './memories-list-tab.component';
 import { MemoryMergeHistoryPageComponent } from './memory-merge-history-page.component';
 import { CompactionLogPageComponent } from './compaction-log-page.component';
+import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 
 export type MemoriesPageTab = 'memories' | 'merge-history' | 'compaction-log';
 
 @Component({
   selector: 'app-memories-page',
   standalone: true,
-  imports: [MemoriesListTabComponent, MemoryMergeHistoryPageComponent, CompactionLogPageComponent],
+  imports: [MemoriesListTabComponent, MemoryMergeHistoryPageComponent, CompactionLogPageComponent, HelpHintComponent, TooltipDirective],
   templateUrl: './memories-page.component.html',
   styleUrl: './memories-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
