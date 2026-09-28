@@ -21,7 +21,9 @@ const (
 	snippetMaxRunes = 600
 	pageMaxRunes    = 20000
 
-	defaultTimeout = 20 * time.Second
+	// DefaultTimeout bounds each call when Config.HTTPClient is nil; callers that supply their
+	// own client (e.g. an instrumented one) should keep it.
+	DefaultTimeout = 20 * time.Second
 )
 
 // ErrNotConfigured is returned by New when no API key is set.
@@ -166,7 +168,7 @@ func New(cfg Config) (*Service, error) {
 	}
 	client := cfg.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: defaultTimeout}
+		client = &http.Client{Timeout: DefaultTimeout}
 	}
 	parallel := NewParallel(key, cfg.ParallelMode, client)
 	return &Service{Backend: parallel, Extractor: parallel}, nil

@@ -45,6 +45,7 @@ func TestDecideCheckpoint(t *testing.T) {
 			want: checkpointDecision{
 				ShouldCheckpoint:            true,
 				Reason:                      "assistant_messages_since_checkpoint(5) >= 5",
+				Trigger:                     checkpointTriggerTurnCount,
 				AssistantMessagesSinceCheck: 5,
 			},
 		},
@@ -59,6 +60,7 @@ func TestDecideCheckpoint(t *testing.T) {
 			want: checkpointDecision{
 				ShouldCheckpoint:            true,
 				Reason:                      "last_input_tokens(20000) >= 20000",
+				Trigger:                     checkpointTriggerLastInput,
 				AssistantMessagesSinceCheck: 1,
 			},
 		},
@@ -73,6 +75,7 @@ func TestDecideCheckpoint(t *testing.T) {
 			want: checkpointDecision{
 				ShouldCheckpoint:            true,
 				Reason:                      "estimated_context_tokens(25000) >= 25000",
+				Trigger:                     checkpointTriggerContextEstimate,
 				AssistantMessagesSinceCheck: 1,
 			},
 		},
@@ -156,6 +159,7 @@ func TestDecideCheckpoint_MinTurnsBetweenCheckpoints(t *testing.T) {
 			want: checkpointDecision{
 				ShouldCheckpoint:            true,
 				Reason:                      "last_input_tokens(80000) >= 30000",
+				Trigger:                     checkpointTriggerLastInput,
 				AssistantMessagesSinceCheck: 5,
 			},
 		},
@@ -170,6 +174,7 @@ func TestDecideCheckpoint_MinTurnsBetweenCheckpoints(t *testing.T) {
 			want: checkpointDecision{
 				ShouldCheckpoint:            true,
 				Reason:                      "assistant_messages_since_checkpoint(20) >= 20",
+				Trigger:                     checkpointTriggerTurnCount,
 				AssistantMessagesSinceCheck: 20,
 			},
 		},

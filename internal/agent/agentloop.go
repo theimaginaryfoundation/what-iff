@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -125,13 +127,21 @@ func (a *Agent) notifyToolUseGeneratedAttachments(chatCtx *chatContext, use prov
 	onToolUseGeneratedAttachmentsForChat(a, chatCtx.chat, use, attachments)
 }
 
-// executeToolUseWithRecovery executes a single tool use with panic recovery.
+// errToolPanicked stands in for a tool call that panicked, for its error.type label.
+var errToolPanicked = errors.New("tool panicked")
+
+// executeToolUseWithRecovery executes a single tool use with panic recovery, timing it on
+// telemetry.ToolDuration under a bounded tool label (see toolMetricName).
 func (a *Agent) executeToolUseWithRecovery(ctx context.Context, chatCtx *chatContext, use provider.ToolUse) (result provider.ToolResult, attachments []*models.FileAttachment) {
 	result.ID = use.ID
+	done := a.metrics().Time(ctx, telemetry.ToolDuration, telemetry.AttrTool.String(toolMetricName(use.Name)))
+	var toolErr error
+	defer func() { done(toolErr) }()
 
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
+				toolErr = errToolPanicked
 				result.IsErr = true
 				// Expose only a stable, opaque message to the model — full panic
 				// detail stays in the log to avoid leaking internal stack info.
@@ -145,6 +155,7 @@ func (a *Agent) executeToolUseWithRecovery(ctx context.Context, chatCtx *chatCon
 		}()
 
 		output, generatedAttachments, err := a.dispatchToolUse(ctx, chatCtx, use)
+		toolErr = err
 		if err != nil {
 			result.IsErr = true
 			result.Output = err.Error()

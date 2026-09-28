@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -33,7 +34,10 @@ func (a *OpenAIProvider) GenerateImagePNGBase64WithOptions(ctx context.Context, 
 		return "", fmt.Errorf("prompt is required")
 	}
 
-	resp, err := a.oaiClient.Images.Generate(ctx, buildImageGenerateParams(prompt, quality, aspectRatio))
+	params := buildImageGenerateParams(prompt, quality, aspectRatio)
+	call := startGenAICall(ctx, a.tel, telemetry.DependencyOpenAI, string(params.Model), genAIOpGenerateImage)
+	resp, err := a.oaiClient.Images.Generate(ctx, params)
+	endImageCall(call, resp, err)
 	if err != nil {
 		return "", err
 	}
@@ -54,11 +58,22 @@ func (a *OpenAIProvider) EditImagePNGBase64WithQuality(ctx context.Context, prom
 		return "", fmt.Errorf("reference image is required")
 	}
 
-	resp, err := a.oaiClient.Images.Edit(ctx, buildImageEditParams(prompt, quality, referenceImage, referenceMIME))
+	params := buildImageEditParams(prompt, quality, referenceImage, referenceMIME)
+	call := startGenAICall(ctx, a.tel, telemetry.DependencyOpenAI, string(params.Model), genAIOpEditImage)
+	resp, err := a.oaiClient.Images.Edit(ctx, params)
+	endImageCall(call, resp, err)
 	if err != nil {
 		return "", err
 	}
 	return a.firstImageB64(resp)
+}
+
+// endImageCall records an Images API call's duration and, when reported, its token usage.
+func endImageCall(call *genAICall, resp *openai.ImagesResponse, err error) {
+	if err == nil && resp != nil {
+		call.recordUsage(genAIUsage{Input: resp.Usage.InputTokens, Output: resp.Usage.OutputTokens})
+	}
+	call.end(err)
 }
 
 func (a *OpenAIProvider) firstImageB64(resp *openai.ImagesResponse) (string, error) {

@@ -166,6 +166,7 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 	if m.inFlight[agentJobID] {
 		m.mu.Unlock()
 		m.logger.Info("skipping overlapping agent job execution", zap.String("agent_job_id", agentJobID.String()))
+		recordRun(ctx, runOutcomeSkippedOverlap)
 		return
 	}
 	m.inFlight[agentJobID] = true
@@ -179,19 +180,23 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 	job, err := m.ds.GetAgentJob(ctx, userID, agentJobID)
 	if err != nil {
 		if err == datastore.ErrAgentJobNotFound {
+			recordRun(ctx, runOutcomeSkippedInactive)
 			return
 		}
 		m.logger.Error("failed to load agent job for execution",
 			zap.String("agent_job_id", agentJobID.String()),
 			zap.Error(err),
 		)
+		recordRun(ctx, runOutcomeLoadFailed)
 		return
 	}
 	if job == nil || !isExecutableAgentJobStatus(job.Status, opts.allowPaused) {
+		recordRun(ctx, runOutcomeSkippedInactive)
 		return
 	}
 
 	runAt := time.Now().UTC()
+	recordLateness(ctx, job.NextRunAt, runAt, opts)
 	nextRunAt, nextErr := computeNextRunAt(*job, runAt)
 	scheduleErrText := ""
 	if nextErr != nil {
@@ -222,6 +227,7 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 			zap.String("agent_job_id", agentJobID.String()),
 			zap.Error(chatErr),
 		)
+		recordRun(ctx, runOutcomeChatResolveFailed)
 		statusUpdate, errText := deriveStatusAndErrorText(job, chatErr, scheduleErrText)
 
 		// One-off jobs do not have a next run.
@@ -269,7 +275,14 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 			ritualIDs = append(ritualIDs, r.ID)
 		}
 	}
+	runStart := time.Now()
 	_, runErr := m.agent.HandleAgentJobPrompt(execCtx, *chatID, job.Prompt, job.ModelID, job.PersonalityID, ritualIDs, nil)
+	runOutcome := runOutcomeRan
+	if runErr != nil {
+		runOutcome = runOutcomeFailed
+	}
+	recordRun(ctx, runOutcome)
+	recordRunDuration(ctx, runOutcome, time.Since(runStart))
 	statusUpdate, errText := deriveStatusAndErrorText(job, runErr, scheduleErrText)
 
 	if runErr != nil {
@@ -317,6 +330,7 @@ func (m *Manager) handleSchedulerCongestion(
 	since := runAt.Add(-schedulerExecutionWindow)
 	executions, err := m.ds.CountRecentSuccessfulAgentJobExecutions(ctx, userID, since)
 	if err != nil {
+		recordRun(ctx, runOutcomeSkippedCongestion)
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			m.logger.Debug("scheduler congestion check cancelled", zap.String("user_id", userID.String()))
 			return true
@@ -355,6 +369,7 @@ func (m *Manager) handleSchedulerCongestion(
 				zap.Int("retry_count", nextRetryCount),
 				zap.Error(err),
 			)
+			recordRun(ctx, runOutcomeSkippedCongestion)
 			m.postSchedulerMessage(ctx, userID, chatID, schedulerSkipInfraMessage)
 			return true
 		} else {
@@ -363,10 +378,12 @@ func (m *Manager) handleSchedulerCongestion(
 				zap.Int("retry_count", nextRetryCount),
 				zap.Int("executions_in_window", executions),
 			)
+			recordRun(ctx, runOutcomeDeferred)
 			return true
 		}
 	}
 
+	recordRun(ctx, runOutcomeSkippedCongestion)
 	m.postSchedulerMessage(ctx, userID, chatID, schedulerSkipMessage)
 	return true
 }

@@ -20,8 +20,6 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 
 	"github.com/google/uuid"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 )
 
@@ -236,10 +234,7 @@ func (d *Datastore) createContextItemsBulk(ctx context.Context, tx *ent.Tx, msgI
 			SetChatMessageID(msgID))
 	}
 	if _, err := tx.ChatMessageContextItem.CreateBulk(builders...).Save(ctx); err != nil {
-		if d.metrics != nil {
-			d.metrics.RecordCounter(ctx, telemetry.ChatMessageContextItemsPersistFailures, 1,
-				metric.WithAttributes(attribute.String("operation", operation)))
-		}
+		d.metrics.Add(ctx, telemetry.ChatContextItemsPersistFailures, 1, telemetry.AttrOperation.String(operation))
 		d.logger.Error("failed to persist chat message context items",
 			zap.String("chat_message_id", msgID.String()),
 			zap.String("operation", operation),

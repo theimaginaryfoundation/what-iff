@@ -49,15 +49,10 @@ func NewGeminiProvider(apiKey, baseURL string, tel *telemetry.Telemetry, httpCli
 	}
 }
 
-// completionsNew is the single entry point for Chat Completions HTTP calls; it
-// records token-usage metrics on success.
+// completionsNew is the single entry point for Gemini Chat Completions HTTP calls; it
+// records the call's duration and token-usage metrics.
 func (c *GeminiProvider) completionsNew(ctx context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
-	resp, err := c.client.Chat.Completions.New(ctx, params)
-	if err != nil {
-		return nil, err
-	}
-	recordChatCompletionUsage(ctx, c.tel, resp)
-	return resp, nil
+	return chatCompletionsNew(ctx, c.tel, telemetry.DependencyGemini, c.client, params)
 }
 
 // geminiCompletionTokenUsage is an alias for chatCompletionTokenUsage (defined in
@@ -91,7 +86,7 @@ func (c *GeminiProvider) Call(ctx context.Context, params openai.ChatCompletionN
 // than mis-associating.
 func (c *GeminiProvider) CallStreaming(ctx context.Context, params openai.ChatCompletionNewParams, onTextDelta func(delta string)) (*openai.ChatCompletion, map[int64]string, error) {
 	thoughtSignatures := map[int64]string{}
-	resp, err := streamChatCompletionCapturing(ctx, c.client, params, chatCompletionStreamHooks{
+	resp, err := chatCompletionsStream(ctx, c.tel, telemetry.DependencyGemini, c.client, params, chatCompletionStreamHooks{
 		onTextDelta: onTextDelta,
 		onToolCallDelta: func(index int64, raw string) {
 			if _, seen := thoughtSignatures[index]; seen {
@@ -105,7 +100,6 @@ func (c *GeminiProvider) CallStreaming(ctx context.Context, params openai.ChatCo
 	if err != nil {
 		return nil, nil, err
 	}
-	recordChatCompletionUsage(ctx, c.tel, resp)
 	return resp, thoughtSignatures, nil
 }
 

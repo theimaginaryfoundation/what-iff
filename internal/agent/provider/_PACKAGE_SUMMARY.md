@@ -57,10 +57,20 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
   The agent's empty-turn guard reads it to surface a clearer truncation message.
   Also carries **`Reasoning`** (see "Model reasoning capture").
 - **`TokenCounter` + carry-over selection:** Token budget and `SelectCarryOverTurns` for history trimming.
-- **Inference metrics:** `responsesNew` / `messagesNew` are the only SDK call sites for OpenAI Responses and Anthropic Messages; they call `recordProviderTokenUsage` (`tel.Metrics`, `call_path` from context).
+- **Inference metrics (`genai_metrics.go`):** every vendor call goes through one wrapper, and each wrapper records through a `genAICall` (`startGenAICall`, then `end(err)`) on `tel.Metrics`.
+  Wrappers: `responsesNew`/`responsesNewStreaming` (timed once per logical call in `callWithRetry`), `messagesNew`/`betaMessagesNew`, the Claude streaming calls (timed in `callClaudeWithRetry`), `chatCompletionsNew`/`chatCompletionsStream` for every Chat Completions provider, the Images API calls and the Files/Containers calls.
+  `gen_ai.client.operation.duration` has provider, model, operation (`chat`, `generate_image`, `edit_image`, `file`), `call_path` and, on failure, `error.type`; the duration includes app-level retries and their waits, and a stream is timed to its terminal event.
+  `whatiff.gen_ai.time_to_first_token` is the first text or reasoning delta of the attempt that succeeded (each retry attempt calls `beginAttempt`).
+  Tokens go to `gen_ai.client.token.usage` (no model label) and `whatiff.gen_ai.tokens` (with model) as `input`, `output`, `cached_input` and `reasoning`, recorded only when positive.
+  Anthropic `input` keeps the full total (uncached + cache reads + cache writes); `cached_input` is cache reads only, because cache writes are not hits.
+  DeepSeek's `prompt_cache_hit_tokens` counts as `cached_input`; returned usage values (used for metering) are unchanged.
+  `whatiff.gen_ai.retries` counts `callWithRetry`/`callClaudeWithRetry` retries (`rate_limited`, `server_error`), the Claude truncation fallback (`truncated`) and the Xiaomi thinking-off retry (`length`).
+  `whatiff.gen_ai.safety_blocks` counts calls that failed with a safety violation, or finished with a `content_filter` / `refusal` stop reason.
+  The provider name is a `telemetry.Dependency*` constant; `ClaudeProvider` reports `zai` when built with a custom base URL (only z.ai uses one).
+  An `init` registers `*openai.Error` and `*anthropic.Error` with `telemetry.RegisterStatusCodeFunc`, so `error.type` is status based wherever those errors are classified.
   `ModelContext.EstimatedTokensBySegment` supports segment-level token estimates for telemetry.
   Providers take `*telemetry.Telemetry`; `OpenAIProvider.zapLog()` uses `tel.Logger` for attachment/image helpers (falls back to zap Nop when nil).
-- **`GenerateSchema`:** JSON-schema helper for structured model outputs (also used from `internal/gate`).
+- **`GenerateSchema`:** JSON-schema helper for structured model outputs.
 
 ## Key types and entry points
 
@@ -80,7 +90,7 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 
 ## Dependencies
 
-- **Inbound:** `internal/agent` (message handling, loops), `internal/gate` (safety helpers use `OpenAIProvider` + schema).
+- **Inbound:** `internal/agent` (message handling, loops), `internal/agentjobs/schedule` (schedule parsing via `CallWithRetry`).
 - **Outbound:** `internal/datastore` (OpenAI provider for some ops), OpenAI and Anthropic SDKs, `go.uber.org/zap`.
 
 ## Non-obvious decisions

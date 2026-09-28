@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"github.com/tidwall/gjson"
 )
 
@@ -51,6 +52,8 @@ type chatCompletionStreamHooks struct {
 	// onReasoningDelta receives incremental reasoning_content — the non-standard field
 	// DeepSeek-style reasoning models (Xiaomi MiMo) stream their reasoning in.
 	onReasoningDelta func(delta string)
+	// call, when set, is told about the first streamed output for time to first token.
+	call *genAICall
 }
 
 // streamChatCompletionCapturing is streamChatCompletion with the full hook set.
@@ -107,6 +110,10 @@ func streamChatCompletionCapturing(
 					hooks.onReasoningDelta(d)
 				}
 			}
+			if hooks.call != nil && !hooks.call.sawToken &&
+				(delta.Content != "" || gjson.Get(delta.RawJSON(), "reasoning_content").String() != "") {
+				hooks.call.firstToken()
+			}
 		}
 	}
 	if err := stream.Err(); err != nil {
@@ -119,6 +126,29 @@ func streamChatCompletionCapturing(
 		acc.ChatCompletion.Usage = finalUsage
 	}
 	return &acc.ChatCompletion, nil
+}
+
+// chatCompletionsNew is the single non-streaming Chat Completions call for every
+// OpenAI-compatible provider (Gemini, DeepSeek, Mistral, Qwen, Xiaomi, local); it records the
+// call's duration and token usage under providerName (a telemetry.Dependency* name).
+func chatCompletionsNew(ctx context.Context, tel *telemetry.Telemetry, providerName string, client *openai.Client, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
+	call := startGenAICall(ctx, tel, providerName, string(params.Model), genAIOpChat)
+	resp, err := client.Chat.Completions.New(ctx, params)
+	call.endChatCompletion(resp, err)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// chatCompletionsStream is chatCompletionsNew for streaming calls: the duration covers the
+// whole stream, and the time to first token is recorded too.
+func chatCompletionsStream(ctx context.Context, tel *telemetry.Telemetry, providerName string, client *openai.Client, params openai.ChatCompletionNewParams, hooks chatCompletionStreamHooks) (*openai.ChatCompletion, error) {
+	call := startGenAICall(ctx, tel, providerName, string(params.Model), genAIOpChat)
+	hooks.call = call
+	resp, err := streamChatCompletionCapturing(ctx, client, params, hooks)
+	call.endChatCompletion(resp, err)
+	return resp, err
 }
 
 // ChatCompletionReasoning returns the non-standard reasoning_content from the first

@@ -9,6 +9,8 @@
 - Connection string assembly from environment (`DB_HOST`, `DB_PASSWORD`, etc.).
   `DB_PASSWORD` always comes from the process environment — in deployed environments ECS injects it from Secrets Manager via the task definition's `secrets` block (the old in-process `DB_SECRET_ARN` fetch path was removed).
 - **`NewClient`:** Returns `*ent.Client` and `*sql.DB` for health checks (see `db.go`).
+- **`RegisterPoolMetrics`** (`poolmetrics.go`): samples `sql.DBStats` at each metrics export as `db.client.connection.count` (`db.client.connection.state` = `idle`/`used`) plus cumulative pool waits and wait time.
+  Called once from `internal/server`; a rising wait count means `MaxOpenConns` (100) is too low.
 - Driver imports: PostgreSQL (and MySQL driver may be present for tooling compatibility — verify `db.go`).
 
 ## Key types and entry points
@@ -34,6 +36,7 @@
 ## Testing
 
 - *(Typically integration-tested via app startup; add focused tests if connection logic grows.)*
+- `poolmetrics_test.go` — pool gauges against an in-memory sqlite `*sql.DB`.
 
 ## Related documentation
 

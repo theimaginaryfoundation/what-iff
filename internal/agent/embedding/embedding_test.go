@@ -11,6 +11,8 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry/telemetrytest"
 )
 
 func newTestClient(handler http.HandlerFunc) *openai.Client {
@@ -197,4 +199,25 @@ func TestCreateEmbeddingsBatchesInputsAndPreservesResponseOrder(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, [][]float32{{1, 1}, {2, 2}}, embeddings)
+}
+
+// Not parallel: records through telemetry.Global().
+func TestCreateEmbeddings_RecordsMetrics(t *testing.T) {
+	rec := telemetrytest.UseGlobal(t)
+	client := newTestClient(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1]}],` +
+			`"model":"text-embedding-3-small","usage":{"prompt_tokens":7,"total_tokens":7}}`))
+	})
+	ctx := telemetry.WithCallPath(context.Background(), telemetry.CallPathMemory)
+	_, err := CreateEmbeddings(ctx, client, []string{"hello"})
+	require.NoError(t, err)
+
+	provider := telemetry.AttrGenAIProvider.String(telemetry.DependencyOpenAI)
+	model := telemetry.AttrGenAIModel.String(string(openai.EmbeddingModelTextEmbedding3Small))
+	callPath := telemetry.AttrCallPath.String(string(telemetry.CallPathMemory))
+	require.Equal(t, uint64(1), rec.HistogramCount(t, telemetry.GenAIOperationDuration.Name,
+		provider, model, callPath, telemetry.AttrGenAIOperation.String("embeddings")))
+	require.Equal(t, int64(7), rec.CounterValue(t, telemetry.GenAITokens.Name, provider, model,
+		telemetry.AttrGenAITokenType.String(telemetry.TokenTypeInput), callPath))
 }

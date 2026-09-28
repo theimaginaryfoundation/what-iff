@@ -66,11 +66,10 @@ func NewXiaomiProvider(apiKey, baseURL string, tel *telemetry.Telemetry, httpCli
 // Call issues a non-streaming request and returns the response plus its
 // reasoning_content (MiMo always reasons unless thinking is disabled).
 func (p *XiaomiProvider) Call(ctx context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, string, error) {
-	resp, err := p.client.Chat.Completions.New(ctx, params)
+	resp, err := chatCompletionsNew(ctx, p.tel, telemetry.DependencyXiaomi, p.client, params)
 	if err != nil {
 		return nil, "", err
 	}
-	recordChatCompletionUsage(ctx, p.tel, resp)
 	return resp, ChatCompletionReasoning(resp), nil
 }
 
@@ -81,7 +80,7 @@ func (p *XiaomiProvider) Call(ctx context.Context, params openai.ChatCompletionN
 // replayed and live reasoning cannot be duplicated by a transport retry.)
 func (p *XiaomiProvider) CallStreaming(ctx context.Context, params openai.ChatCompletionNewParams, onTextDelta func(delta string), onReasoningDelta func(delta string)) (*openai.ChatCompletion, string, error) {
 	var reasoning strings.Builder
-	resp, err := streamChatCompletionCapturing(ctx, p.client, params, chatCompletionStreamHooks{
+	resp, err := chatCompletionsStream(ctx, p.tel, telemetry.DependencyXiaomi, p.client, params, chatCompletionStreamHooks{
 		onTextDelta: onTextDelta,
 		onReasoningDelta: func(d string) {
 			reasoning.WriteString(d)
@@ -93,8 +92,16 @@ func (p *XiaomiProvider) CallStreaming(ctx context.Context, params openai.ChatCo
 	if err != nil {
 		return nil, "", err
 	}
-	recordChatCompletionUsage(ctx, p.tel, resp)
 	return resp, reasoning.String(), nil
+}
+
+// recordRetry counts an adapter-level fallback (the thinking-off length retry) for model.
+func (p *XiaomiProvider) recordRetry(ctx context.Context, model, reason string) {
+	var tel *telemetry.Telemetry
+	if p != nil {
+		tel = p.tel
+	}
+	startGenAICall(ctx, tel, telemetry.DependencyXiaomi, model, genAIOpChat).retry(reason)
 }
 
 func NewXiaomiAdapter(provider *XiaomiProvider, params openai.ChatCompletionNewParams, functionTools []openai.ChatCompletionToolUnionParam, disabledTools map[string]bool) *XiaomiAdapter {
@@ -152,6 +159,7 @@ func (a *XiaomiAdapter) ForceFinalResponse(ctx context.Context) (*GenerateRespon
 func (a *XiaomiAdapter) call(ctx context.Context) (*openai.ChatCompletion, error) {
 	resp, reasoning, err := a.callOnce(ctx)
 	if err == nil && !a.thinkingDisabled && chatCompletionTruncatedWithoutText(resp) {
+		a.provider.recordRetry(ctx, string(a.params.Model), retryReasonLength)
 		a.thinkingDisabled = true
 		a.params.SetExtraFields(map[string]any{"thinking": map[string]any{"type": "disabled"}})
 		a.liveReasoning.reset()

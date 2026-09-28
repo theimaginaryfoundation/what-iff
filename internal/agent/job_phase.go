@@ -112,6 +112,8 @@ func (a *Agent) applyExpressionPhase(ctx context.Context, userID uuid.UUID, chat
 		}
 		return a.advanceChatJobStatus(ctx, chatJob, models.JobStatusExpressionComplete)
 	}
+	// Timed only when the picker can run, so skipped turns don't flood the stage with zeros.
+	defer a.timeTurnStage(ctx, turnStageExpression)()
 	pid := chatCtx.chat.PersonalityID
 	var exprID *uuid.UUID
 	var reasoning string

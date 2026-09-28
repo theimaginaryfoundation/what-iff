@@ -243,7 +243,7 @@ func TestCallClaudeWithRetry_StopsRetryAfterDeltaEmission(t *testing.T) {
 	t.Parallel()
 
 	attempts := 0
-	_, err := callClaudeWithRetry(context.Background(), func(context.Context) (*string, bool, error) {
+	_, err := callClaudeWithRetry(context.Background(), nil, func(context.Context) (*string, bool, error) {
 		attempts++
 		return nil, true, errors.New("429 rate limit")
 	})

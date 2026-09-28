@@ -17,6 +17,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"github.com/theimaginaryfoundation/what-iff/internal/utils"
 	"go.uber.org/zap"
 )
@@ -39,13 +40,21 @@ var sandboxLinkRegex = regexp.MustCompile(`\[[^\]]*\]\(sandbox:/mnt/data/[^)]+\)
 // Split text into sentences by looking for sentence-ending punctuation followed by whitespace or end of string
 var sentenceRegex = regexp.MustCompile(`([.!?]+)\s+`)
 
+// startFileCall starts GenAIOperationDuration metrics for one OpenAI Files/Containers API call
+// (upload, delete or container file download), which has no model.
+func (a *OpenAIProvider) startFileCall(ctx context.Context) *genAICall {
+	return startGenAICall(ctx, a.tel, telemetry.DependencyOpenAI, genAIModelNone, genAIOpFile)
+}
+
 func (a *OpenAIProvider) UploadFileAttachment(ctx context.Context, userID uuid.UUID, attrs map[string]string, file io.Reader, fileName string, fileTypeInfo utils.FileTypeInfo) (string, error) {
 	inputFile := openai.File(file, normalizeUploadFileNameExtension(fileName), fileTypeInfo.ContentType)
 
+	call := a.startFileCall(ctx)
 	storedFile, err := a.oaiClient.Files.New(ctx, openai.FileNewParams{
 		File:    inputFile,
 		Purpose: openai.FilePurposeUserData,
 	})
+	call.end(err)
 	if err != nil {
 		a.zapLog().Error("failed to upload file attachment", zap.Error(err))
 		return "", err
@@ -71,7 +80,9 @@ func normalizeUploadFileNameExtension(fileName string) string {
 }
 
 func (a *OpenAIProvider) DeleteFileAttachment(ctx context.Context, fileID string) error {
+	call := a.startFileCall(ctx)
 	_, err := a.oaiClient.Files.Delete(ctx, fileID)
+	call.end(err)
 	if err != nil {
 		a.zapLog().Error("failed to delete file attachment from OpenAI", zap.Error(err))
 		return err
@@ -171,7 +182,9 @@ func (a *OpenAIProvider) processAnnotations(ctx context.Context, userID, chatMes
 }
 
 func (a *OpenAIProvider) saveInterpreterAttachment(ctx context.Context, userID, chatMessageID uuid.UUID, annotation responses.ResponseOutputTextAnnotationContainerFileCitation) {
+	call := a.startFileCall(ctx)
 	resp, err := a.oaiClient.Containers.Files.Content.Get(ctx, annotation.ContainerID, annotation.FileID)
+	call.end(err)
 	if err != nil {
 		a.zapLog().Error("failed to get container file", zap.Error(err))
 		return

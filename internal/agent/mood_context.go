@@ -11,6 +11,7 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -177,7 +178,7 @@ func (a *Agent) autoSelectMood(ctx context.Context, moods []*models.Mood, userMe
 		},
 	}
 
-	resp, err := a.OpenAIProvider.CallWithRetry(ctx, params)
+	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathModeSelect), params)
 	if err != nil {
 		a.logger.Warn("mood auto-select: inference failed", zap.Error(err))
 		return nil

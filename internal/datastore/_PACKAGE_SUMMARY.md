@@ -32,6 +32,9 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   - Safety violations: `safety_violation_event.go`.
   - Tool call persistence: `toolcall.go`.
 - **`errors.go`:** Sentinel errors for handlers and agent.
+- **DB metrics** (`dbmetrics.go`): **`InstrumentEntClient`** adds an ent interceptor and hook that record `db.client.operation.duration` for every query and mutation, with `db.collection.name` = snake_case entity (`chat_message`) and `db.operation.name` = `query`/`create`/`update`/`delete`.
+  `internal/server` calls it once at startup; calling it twice double-counts.
+  Raw SQL statements are timed on the same histogram with a fixed statement name (`file_chunks`/`vector_search`, `scheduler_lock`/`advisory_lock`, `advisory_lock_check`, `advisory_unlock`).
 
 ## Key types and entry points
 
@@ -48,6 +51,8 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 
 ## Non-obvious decisions
 
+- **Memory import metrics:** `importMemories` (behind `ImportMemories` and `ImportMemoriesWithBatchEmbeddings`, used by `/memory/import` and account import) records `parse`, `embed` and `store` times on `whatiff.file.operation.duration` (operation `memory_import`), with embed and store summed across batches so each import records one value per phase.
+  It also records per-import memory counts (imported, skipped, failed) on `whatiff.file.operation.items`, including on partial failures.
 - **Chat message context items:** `createContextItemsBulk` returns errors to callers; failed inserts **roll back** the surrounding transaction and increment `telemetry.ChatMessageContextItemsPersistFailures` when metrics are configured.
 - **Message pagination:** `ListChatMessages` is newest-first and offset-paginated for the chat UI's initial page.
   `ListChatMessagesBefore` is the newest-first keyset path for scroll-back and jump-to-bookmark: it filters `(sent_at, id) <` the cursor so the UI can request large batches (e.g. a far-back bookmark jump) without the offset math that couples page number to page size, and its response's `NextCursor` continues the walk.
@@ -57,6 +62,16 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Context X-ray column:** `chat_message.context_breakdown` is a typed **`jsonb`** column (`field.JSON` over `*models.ContextBreakdown`); ent handles (un)marshalling, so `toChatMessageModel` just surfaces it (guarding empty snapshots) and `SetChatMessageContextBreakdown` sets the pointer (assistant rows only; best-effort).
   It is a scalar column rather than a `ChatMessageContextItem` row on purpose — context items are re-fed into the model context, and this snapshot must not be.
   It's a value object (write-once, read-with-parent, never queried by field), so no child table; `jsonb` (not text) keeps DB-side JSON queries open and the embedded `version` guards shape evolution.
+- **DB metric semantics:** one sample per logical ent call as the caller sees it (scanning included).
+  Eager-loaded edges are folded into their parent query, and a `CreateBulk` is one `create` sample: ent re-enters every builder's hooks with the caller's own context, so nested creates on the same context are skipped (two concurrent creates sharing one context can fold into one sample, a deliberate undercount).
+  ent NotFound from `First`/`Only` is produced after the query returns, so an empty result is a successful `query`; NotFound from `UpdateOne`/`DeleteOne` is `error.type=not_found`, and constraint violations are `client_error`.
+  The startup-only `RepairImportedMessageOrder` SQL is not timed: a one-shot statement would add permanently exported series for no dashboard value.
+- **Job metrics:** `CreateJob` counts `whatiff.jobs.enqueued` by `job_type`.
+  Status writers (`UpdateJob`, `UpdateJobStatus`, `SetJobResult`, the partial-response finalizers and `MarkChatJobCancelled`) record `whatiff.job.age_at_status` (time since creation) by `job_type` and `status`, only when the status actually changes, so a repeated write of the same status never counts twice.
+  To tell, the writers read the prior status in place of the old existence check (no extra round trip); `MarkChatJobCancelled` does one extra `created_at` read only when it cancelled something.
+  The startup bulk `FailInterruptedJobs` is not recorded.
+- **Job backlog gauges:** `job_backlog.go`'s `JobBacklog` groups unfinished jobs by type and status (one grouped count on the indexed `status` column, plus one oldest-row read per group), and `RegisterJobBacklogGauges` samples it into `whatiff.jobs.backlog` and `whatiff.jobs.oldest_age` once per metrics export.
+  Every API instance reports the same database-wide values, so dashboards take the max across instances, not the sum.
 - **Scheduler lock:** `scheduler_lock.go` supports single active scheduler instance in multi-replica deployments (see `internal/server` config flags).
 - **Quota buckets:** `models.QuotaBucket` (`internal/models/quotabucket.go`) is the shared type for free-tier/billing quota state.
   The enforcement logic that reads and reconciles it — free-tier limits, trial grants, subscription-driven renewal — lives in a private extension, not this tree; see `internal/metering` for the public seam it plugs into.
@@ -111,11 +126,14 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 
 - `chat_checkpoint_test.go`, `chatmessage_test.go`, `chatmessage_mark_read_test.go` — message and checkpoint behavior.
 - `memory_test.go`, `memory2_test.go`, `filechunk_test.go` — retrieval (including **`ListMemories`** excluding Summary unless `level=summary`), ZIP export/import helpers, full import count/persist coverage, and chunks.
+- `memory_import_metrics_test.go` — memory import stage timings and item counts, including a failed embed stage.
 - `compaction_event_test.go`, `memory_merge_test.go` — SQLite harness mirrors ent FK semantics (`memory_merge_events.compaction_event_id` → `compaction_events` ON DELETE SET NULL); compaction tests cover content-addressed snapshots, merge grouping, page-size cap, and FK null-on-delete.
 - `accountbackup_test.go` — backup JSONL parsing edge cases such as large records and optional sections.
 - `accountexport_test.go` — conversation export’s timestamp/ID cursor covers a batch boundary where all messages share a timestamp.
 - `token_crypto_test.go` — round-trip encryption.
 - `user_test.go`, `quotabucket_test.go`, `scheduler_lock_test.go`, `free_tier_quota_test.go`, `trial_quota_test.go` — quotas, locking, and trial-credit grant/backfill (sqlite harness must include the unique `(owner_type, owner_id, resource_type)` index).
+- `job_telemetry_test.go` — job enqueue and age-at-status labels (no double count on a repeated status), cancel-without-worker, and the backlog query feeding its gauges.
+- `dbmetrics_test.go` — ent instrumentation on the sqlite harness: collections, operation names, bulk create as one sample, eager loads folded, NotFound handling, transactions.
 - `agentjob_schedule_reactivate_test.go` — terminal-state → active when rescheduling with a next run.
 - `userpreferences_test.go` — favorites mapping plus the nil-vs-empty write rule.
   The write assertions capture the SQL Ent emits and filter to `UPDATE` statements, because "was this column written at all" is the behaviour under test and the re-read that follows names every column regardless.

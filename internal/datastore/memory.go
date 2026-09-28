@@ -24,10 +24,12 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 
 	"entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
 	"github.com/pgvector/pgvector-go"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
 
@@ -1473,6 +1475,10 @@ func (d *Datastore) ImportMemoriesWithBatchEmbeddings(
 // importMemories implements ImportMemories. When writePackAudit is false, no audit_log
 // rows are written for this ZIP (used by account backup import, which records memory
 // totals in the account_backup audit entry).
+//
+// Metrics (operation memory_import, for both /memory/import and account import): parse, embed
+// and store phase times, with embed and store summed across batches so each import records one
+// value per phase, plus per-import memory counts by outcome.
 func (d *Datastore) importMemories(
 	ctx context.Context,
 	userID uuid.UUID,
@@ -1480,13 +1486,14 @@ func (d *Datastore) importMemories(
 	createEmbedding func(context.Context, string) ([]float32, error),
 	createEmbeddings MemoryImportBatchEmbeddingFunc,
 	writePackAudit bool,
-) (models.MemoryImportResult, error) {
-	result := models.MemoryImportResult{}
+) (result models.MemoryImportResult, err error) {
 	candidates := make([]memoryImportCandidate, 0)
 
+	doneParse := d.metrics.TimeFileStage(ctx, telemetry.FileOpMemoryImport, telemetry.FileStageParse)
 	for _, zf := range zr.File {
 		fileCandidates, invalidCount, invalidReasons, err := parseMemoryImportFile(zf, d.logger)
 		if err != nil {
+			doneParse(err)
 			if writePackAudit {
 				d.auditMemoryPackImport(ctx, userID, result, err)
 			}
@@ -1500,6 +1507,19 @@ func (d *Datastore) importMemories(
 		result.InvalidReasons.MissingChatID += invalidReasons.MissingChatID
 		candidates = append(candidates, fileCandidates...)
 	}
+	doneParse(nil)
+	// From here on every return (including partial failures) reports the counts so far.
+	defer func() { d.recordMemoryImportItems(ctx, result) }()
+	var embedTime, storeTime time.Duration
+	var embedErr, storeErr error
+	defer func() {
+		if embedTime > 0 || embedErr != nil {
+			d.recordMemoryImportStage(ctx, telemetry.FileStageEmbed, embedTime, embedErr)
+		}
+		if storeTime > 0 || storeErr != nil {
+			d.recordMemoryImportStage(ctx, telemetry.FileStageStore, storeTime, storeErr)
+		}
+	}()
 	d.logger.Info("memory import parsed archive",
 		zap.String("user_id", userID.String()),
 		zap.Int("candidate_count", len(candidates)),
@@ -1599,12 +1619,15 @@ func (d *Datastore) importMemories(
 		chunk := toPrepare[start:end]
 
 		var prepared []memoryImportPrepared
+		embedStart := time.Now()
 		if createEmbeddings != nil {
 			prepared, err = buildImportEmbeddingsBatch(ctx, chunk, createEmbeddings)
 		} else {
 			prepared, err = buildImportEmbeddingsChunk(ctx, chunk, createEmbedding)
 		}
+		embedTime += time.Since(embedStart)
 		if err != nil {
+			embedErr = err
 			if writePackAudit {
 				d.auditMemoryPackImport(ctx, userID, result, err)
 			}
@@ -1616,8 +1639,11 @@ func (d *Datastore) importMemories(
 			zap.Int("embedded", processed),
 			zap.Int("total", total))
 
+		storeStart := time.Now()
 		imported, duplicates, err := d.importPreparedMemories(ctx, userID, prepared)
+		storeTime += time.Since(storeStart)
 		if err != nil {
+			storeErr = err
 			if writePackAudit {
 				d.auditMemoryPackImport(ctx, userID, result, err)
 			}
@@ -1639,6 +1665,31 @@ func (d *Datastore) importMemories(
 		d.auditMemoryPackImport(ctx, userID, result, nil)
 	}
 	return result, nil
+}
+
+// recordMemoryImportStage records one summed memory import phase on FileOperationDuration.
+func (d *Datastore) recordMemoryImportStage(ctx context.Context, stage string, elapsed time.Duration, err error) {
+	if d.metrics == nil {
+		return
+	}
+	attrs := append([]attribute.KeyValue{
+		telemetry.AttrOperation.String(telemetry.FileOpMemoryImport),
+		telemetry.AttrStage.String(stage),
+	}, telemetry.ErrorAttrs(err)...)
+	d.metrics.RecordDuration(ctx, telemetry.FileOperationDuration, elapsed, attrs...)
+}
+
+// recordMemoryImportItems records one import's memory counts: imported, skipped (duplicates and
+// memories whose chat or personality is missing) and failed (invalid records).
+func (d *Datastore) recordMemoryImportItems(ctx context.Context, result models.MemoryImportResult) {
+	if d.metrics == nil {
+		return
+	}
+	op, kind := telemetry.FileOpMemoryImport, telemetry.FileItemMemory
+	skipped := result.DuplicateCount + result.SkippedMissingChat + result.SkippedMissingPersonality
+	d.metrics.RecordFileItems(ctx, op, kind, telemetry.FileItemImported, result.ImportedCount)
+	d.metrics.RecordFileItems(ctx, op, kind, telemetry.FileItemSkipped, skipped)
+	d.metrics.RecordFileItems(ctx, op, kind, telemetry.FileItemFailed, result.InvalidRecordCount)
 }
 
 func (d *Datastore) importPreparedMemories(ctx context.Context, userID uuid.UUID, prepared []memoryImportPrepared) (imported int, duplicates int, err error) {

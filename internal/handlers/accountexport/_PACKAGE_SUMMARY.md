@@ -45,10 +45,15 @@ Authenticated user account portability: ZIP export by email and additive ZIP imp
   `indexSummaryMemories` takes the embed/upsert as injected dependencies so this is unit-testable.
 - The optional `selection` is **size- and cardinality-bounded** (`maxSelectionBytes`, `maxSelectionIDs`) via `parseImportSelection` before the archive is even validated, so a caller can't force large allocations/UUID parsing up front.
 - Interrupted (server-restart-orphaned) import/export jobs are reconciled to `failed` at startup via `datastore.FailInterruptedJobs` (staleness-bounded so a live job on another instance is never clobbered) — they run in detached in-process workers and would otherwise stay `processing` forever.
+- **Metrics** (through `telemetry.Global()`): exports and imports are tracked as `account_export` / `account_import` jobs (`TrackJob`, with panic and timeout outcomes).
+  The wait for an import slot (`acquireImportSlot`, capacity `maxConcurrentAccountImports`) is recorded on `whatiff.job.queue.wait`; it is the only real queue in the API.
+  Phases are timed on `whatiff.file.operation.duration` (export: `build_zip`, `email`; import: `validate`, `personalities`, `conversations`, `summaries`, `memories`), and archive sizes and section counts go on `whatiff.file.size` and `whatiff.file.operation.items`.
+  Memory counts are recorded by the datastore memory importer (operation `memory_import`), not repeated here.
 - Account-import uploads are staged to temporary files, restored by a bounded detached worker, and deleted regardless of terminal outcome; `AccountImportProgress` carries phases and the terminal result for polling.
 
 ## Testing
 - `import_test.go` covers bounded ZIP reads, archive-entry limits, duplicate nested-memory entries, reference remapping, and best-effort Summary-scope indexing candidates.
+- `metrics_test.go` covers the import-slot queue wait and the bounded item kinds recorded for imports and exports.
 - `internal/handlers/chat/accountexport_roundtrip_test.go` verifies exported conversations round-trip through the existing importer.
 
 ## Related

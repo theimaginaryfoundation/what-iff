@@ -47,21 +47,15 @@ func NewQwenProvider(apiKey, baseURL string, tel *telemetry.Telemetry, httpClien
 }
 
 func (p *QwenProvider) Call(ctx context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
-	resp, err := p.client.Chat.Completions.New(ctx, params)
-	if err != nil {
-		return nil, err
-	}
-	recordChatCompletionUsage(ctx, p.tel, resp)
-	return resp, nil
+	return chatCompletionsNew(ctx, p.tel, telemetry.DependencyQwen, p.client, params)
 }
 
 // CallStreaming streams a Chat Completions request, forwarding text deltas to onTextDelta.
 func (p *QwenProvider) CallStreaming(ctx context.Context, params openai.ChatCompletionNewParams, onTextDelta func(delta string)) (*openai.ChatCompletion, error) {
-	resp, err := streamChatCompletion(ctx, p.client, params, onTextDelta)
+	resp, err := chatCompletionsStream(ctx, p.tel, telemetry.DependencyQwen, p.client, params, chatCompletionStreamHooks{onTextDelta: onTextDelta})
 	if err != nil {
 		return nil, err
 	}
-	recordChatCompletionUsage(ctx, p.tel, resp)
 	return resp, nil
 }
 

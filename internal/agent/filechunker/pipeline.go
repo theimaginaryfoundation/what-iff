@@ -12,6 +12,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/fileattachment"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/embedding"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -135,8 +136,12 @@ func (p *FileChunkPipeline) ProcessAndStore(ctx context.Context, fileAttachmentI
 	// 2. Convert content bytes to string.
 	text := string(content)
 
-	// 3. Chunk the text.
+	// 3. Chunk the text. Stage timings and the chunk count go on the file metrics under the
+	// upload operation (this pipeline only runs for uploads).
+	metrics := telemetry.Global()
+	doneChunk := metrics.TimeFileStage(ctx, telemetry.FileOpUpload, telemetry.FileStageChunk)
 	textChunks := ChunkText(text, DefaultChunkSize, DefaultOverlap)
+	doneChunk(nil)
 
 	// 4. If no chunks returned (empty file), mark as chunked and return.
 	if len(textChunks) == 0 {
@@ -154,9 +159,12 @@ func (p *FileChunkPipeline) ProcessAndStore(ctx context.Context, fileAttachmentI
 
 	// 5. Embed each chunk and build storage inputs.
 	chunkInputs := make([]datastore.FileChunkInput, 0, len(textChunks))
+	doneEmbed := metrics.TimeFileStage(ctx, telemetry.FileOpUpload, telemetry.FileStageEmbed)
 	for _, tc := range textChunks {
 		vec, err := embedding.CreateEmbedding(ctx, p.oaiClient, tc.Content)
 		if err != nil {
+			doneEmbed(err)
+			metrics.RecordFileItems(ctx, telemetry.FileOpUpload, telemetry.FileItemChunk, telemetry.FileItemFailed, len(textChunks))
 			p.logger.Error("failed to create embedding for chunk",
 				zap.Error(err),
 				zap.String("file_name", fileName),
@@ -172,19 +180,30 @@ func (p *FileChunkPipeline) ProcessAndStore(ctx context.Context, fileAttachmentI
 			Metadata:  map[string]string{"fileName": fileName},
 		})
 	}
+	doneEmbed(nil)
 
 	// 6. Store chunks. The datastore handles setting chunk_status to "chunked" on
 	//    success and "failed" on error.
 	// TODO: Add nil check for p.ds before calling CreateFileChunks. Currently all
 	// callers provide a datastore, but defensive check would prevent nil panic.
-	if err := p.ds.CreateFileChunks(ctx, fileAttachmentID, chunkInputs); err != nil {
+	doneStore := metrics.TimeFileStage(ctx, telemetry.FileOpUpload, telemetry.FileStageStore)
+	err := p.ds.CreateFileChunks(ctx, fileAttachmentID, chunkInputs)
+	alreadyChunked := errors.Is(err, datastore.ErrAlreadyChunked)
+	if alreadyChunked {
+		doneStore(nil)
+	} else {
+		doneStore(err)
+	}
+	if err != nil {
 		// Idempotency: if already chunked, treat as success.
-		if errors.Is(err, datastore.ErrAlreadyChunked) {
+		if alreadyChunked {
+			metrics.RecordFileItems(ctx, telemetry.FileOpUpload, telemetry.FileItemChunk, telemetry.FileItemSkipped, len(chunkInputs))
 			p.logger.Info("file already chunked, skipping",
 				zap.String("file_name", fileName),
 				zap.String("file_attachment_id", fileAttachmentID.String()))
 			return nil
 		}
+		metrics.RecordFileItems(ctx, telemetry.FileOpUpload, telemetry.FileItemChunk, telemetry.FileItemFailed, len(chunkInputs))
 		p.logger.Error("failed to store file chunks",
 			zap.Error(err),
 			zap.String("file_name", fileName),
@@ -192,6 +211,7 @@ func (p *FileChunkPipeline) ProcessAndStore(ctx context.Context, fileAttachmentI
 		return fmt.Errorf("storing chunks for %q: %w", fileName, err)
 	}
 
+	metrics.RecordFileItems(ctx, telemetry.FileOpUpload, telemetry.FileItemChunk, telemetry.FileItemImported, len(chunkInputs))
 	p.logger.Info("file chunked and stored successfully",
 		zap.String("file_name", fileName),
 		zap.Int("chunk_count", len(chunkInputs)),

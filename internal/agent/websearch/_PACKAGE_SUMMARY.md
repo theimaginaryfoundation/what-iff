@@ -25,11 +25,16 @@ When it is configured, every model gets the same capability and vendor-native we
 
 - `fetch_page` goes through the provider's extract API, so our servers never fetch model-chosen URLs themselves.
 - Parallel's v1 APIs reject unknown request fields (422 `extra_forbidden`), so tests pin request bodies to the documented JSON rather than comparing structs.
+- Each Search/Extract call records `whatiff.dependency.duration` (dependency `parallel`, operation `search`/`extract`) through `telemetry.Global()`.
+  The server's instrumented client also records the HTTP attempt, but only this metric separates search from extract and includes body decoding.
+  Non-2xx responses are a `statusError` exposing `HTTPStatusCode()`, so `error.type` is `rate_limited`/`auth`/`server_error` rather than `other`; the error text is unchanged.
+- `Config.HTTPClient` replaces the default client (`DefaultTimeout`, 20s); `internal/server` passes an instrumented client that keeps that timeout.
 - Provider errors are summarised from Parallel's error envelope (message plus field errors), bounded to 300 runes and cut on a rune boundary, and never include the API key.
 
 ## Testing
 
 - `websearch_test.go` runs the backend against `httptest` servers: auth header, exact request bodies (including recency and extract options), parsing, limits, truncation, extract errors and error summaries.
+- `metrics_test.go` — dependency metric per operation and HTTP-status error classification.
 - `cmd/websearch-bakeoff` runs sample queries (`scripts/websearch-bakeoff-queries.txt`) against the real API to review quality and latency; it needs a real key and is not part of CI.
 
 ## Related documentation

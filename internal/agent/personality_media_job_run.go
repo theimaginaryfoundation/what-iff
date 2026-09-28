@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -20,6 +21,12 @@ func (a *Agent) runPersonalityMediaJob(
 	userID := job.UserID
 	jobID := job.ID
 
+	// Registered first so it runs last, after the panic guard below; a panic leaves the
+	// outcome at its initial value.
+	finish := a.startJobRun(parentCtx, job)
+	outcome := telemetry.JobOutcomePanic
+	defer func() { finish(outcome) }()
+
 	runCtx, ok := middleware.CopyUserToIDContext(parentCtx, context.Background())
 	if !ok {
 		const msg = "user ID not found in context"
@@ -30,6 +37,7 @@ func (a *Agent) runPersonalityMediaJob(
 		}
 		a.logger.Error("personality media job: missing user in context",
 			zap.String("job_id", jobID.String()))
+		outcome = telemetry.JobOutcomeFailed
 		return
 	}
 
@@ -60,6 +68,7 @@ func (a *Agent) runPersonalityMediaJob(
 		a.logger.Error("personality media job: failed to mark processing",
 			zap.String("job_id", jobID.String()),
 			zap.Error(err))
+		outcome = telemetry.JobOutcomeFailed
 		return
 	}
 
@@ -74,6 +83,7 @@ func (a *Agent) runPersonalityMediaJob(
 			zap.String("job_id", jobID.String()),
 			zap.String("job_type", job.JobType),
 			zap.Error(err))
+		outcome = chatJobOutcome(err)
 		return
 	}
 
@@ -87,5 +97,8 @@ func (a *Agent) runPersonalityMediaJob(
 		a.logger.Error("personality media job: failed to set result",
 			zap.String("job_id", jobID.String()),
 			zap.Error(err))
+		outcome = telemetry.JobOutcomeFailed
+		return
 	}
+	outcome = telemetry.JobOutcomeSuccess
 }

@@ -279,6 +279,7 @@ func (a *ClaudeAdapter) SetTruncationFallback(fn func(params *anthropic.MessageN
 func (a *ClaudeAdapter) callMessages(ctx context.Context) (*anthropic.Message, error) {
 	msg, err := a.callMessagesOnce(ctx)
 	if err == nil && a.truncationFallback != nil && claudeTruncatedWithoutText(msg) {
+		a.provider.recordRetry(ctx, string(a.params.Model), retryReasonTruncated)
 		fallback := a.truncationFallback
 		a.truncationFallback = nil
 		fallback(&a.params)

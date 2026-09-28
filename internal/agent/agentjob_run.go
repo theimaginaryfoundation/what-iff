@@ -70,6 +70,10 @@ func (a *Agent) handleEphemeralPromptAsync(ctx context.Context, chatID uuid.UUID
 	go func(jobID uuid.UUID, runCtx context.Context) {
 		defer cancel()
 		defer a.unregisterRunningJobCancel(jobID)
+		// Registered before the panic guard so it runs after it; a panic keeps the initial outcome.
+		finish := a.startJobRun(runCtx, backgroundJob)
+		outcome := telemetry.JobOutcomePanic
+		defer func() { finish(outcome) }()
 		// Ensure unexpected panics do not leave jobs stuck in processing.
 		defer func() {
 			if recovered := recover(); recovered != nil {
@@ -96,6 +100,7 @@ func (a *Agent) handleEphemeralPromptAsync(ctx context.Context, chatID uuid.UUID
 				zap.String("job_id", jobID.String()),
 				zap.Error(statusErr),
 			)
+			outcome = telemetry.JobOutcomeFailed
 			return
 		}
 		if clearErr := a.ds.ClearJobDraftDeltas(runCtx, userID, jobID); clearErr != nil {
@@ -117,6 +122,7 @@ func (a *Agent) handleEphemeralPromptAsync(ctx context.Context, chatID uuid.UUID
 			telemetry.CallPathAgentJob,
 			opts,
 		)
+		outcome = chatJobOutcome(runErr)
 		if runErr != nil {
 			if errors.Is(runErr, context.Canceled) {
 				persistCtx, persistCancel := context.WithTimeout(context.Background(), jobTerminalPersistTimeout)
@@ -274,11 +280,14 @@ func (a *Agent) handleEphemeralPrompt(
 	if !opts.skipQuotaCheck {
 		qd = a.meter.Check(ctx, userID, chatCtx.modelSubscriptionTier, actionType)
 		if !qd.Allowed {
+			a.recordQuotaRejection(ctx)
 			return nil, fmt.Errorf("%w for user %s", ErrQuotaExceeded, userID)
 		}
 	}
 
+	doneBuildContext := a.timeTurnStage(ctx, turnStageBuildContext)
 	modelContext, err := a.buildModelContextForChatMessage(ctx, userID, ephemeralUserMessage, chatCtx, nil)
+	doneBuildContext()
 	if err != nil {
 		return nil, fmt.Errorf("failed to build model context: %w", err)
 	}
@@ -311,7 +320,9 @@ func (a *Agent) handleEphemeralPrompt(
 
 	exprErr := a.applyExpressionPhase(ctx, userID, trackingJob, chatCtx, modelContext, prompt, agentMessage)
 
+	donePostProcess := a.timeTurnStage(ctx, turnStagePostProcess)
 	a.postMessageProcessing(ctx, userID, ephemeralUserMessage, agentMessage, chatCtx, modelContext, actionType, qd, opts.skipUsageRecording)
+	donePostProcess()
 
 	if exprErr != nil {
 		return nil, fmt.Errorf("agent job expression phase: %w", exprErr)

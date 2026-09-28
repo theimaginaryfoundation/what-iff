@@ -17,14 +17,25 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/exporter"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 )
 
 // runAccountExport builds the export ZIP, uploads it, presigns a link, and emails it. All failures
 // are recorded on the job and swallowed so a panic never takes down the request path. The download
 // link is emailed and never written to the job (email-only delivery is the security control).
+// The run is tracked as an account_export job, with build/email stage timings, the archive size
+// and per-section counts on the file metrics.
 func (h *Handler) runAccountExport(ctx context.Context, userID, jobID uuid.UUID) {
+	metrics := telemetry.Global()
+	finishJob := metrics.TrackJob(ctx, models.JobTypeAccountExport)
+	// Every early return below is a failure; fail() distinguishes cancelled/timeout from failed.
+	// finishJob is deferred first so it runs after the recover below and sees a panic outcome.
+	outcome := telemetry.JobOutcomeFailed
+	defer func() { finishJob(outcome) }()
+	fail := func(err error) { outcome = telemetry.JobOutcomeFromError(err) }
 	defer func() {
 		if v := recover(); v != nil {
+			outcome = telemetry.JobOutcomePanic
 			h.logger.Error("account export: panic in build",
 				zap.String("job_id", jobID.String()), zap.Any("panic", v), zap.ByteString("stack", debug.Stack()))
 			h.failExport(ctx, userID, jobID, "Export failed unexpectedly")
@@ -39,22 +50,29 @@ func (h *Handler) runAccountExport(ctx context.Context, userID, jobID uuid.UUID)
 	userEmail, username, err := h.ds.ExportAccountIdentity(ctx, userID)
 	if err != nil {
 		h.logger.Error("account export: identity load failed", zap.String("job_id", jobID.String()), zap.Error(err))
+		fail(err)
 		h.failExport(ctx, userID, jobID, "Failed to build export")
 		return
 	}
 
+	doneBuild := metrics.TimeFileStage(ctx, telemetry.FileOpAccountExport, telemetry.FileStageBuildZip)
 	zipBytes, counts, err := h.buildAccountZip(ctx, userID, userEmail, username)
+	doneBuild(err)
 	if err != nil {
+		fail(err)
 		h.logger.Error("account export: build failed", zap.String("job_id", jobID.String()), zap.Error(err))
 		h.failExport(ctx, userID, jobID, "Failed to build export")
 		return
 	}
 
+	metrics.RecordFileSize(ctx, telemetry.FileOpAccountExport, telemetry.FileKind("application/zip"), int64(len(zipBytes)))
+	recordAccountExportItems(ctx, metrics, counts)
 	h.setProgress(ctx, userID, jobID, models.AccountExportProgress{Phase: models.AccountExportPhaseUploading, Counts: counts})
 
 	key := path.Join(bundlePrefix, userID.String(), fmt.Sprintf("account-export-%s.zip", time.Now().UTC().Format("20060102-150405")))
 	if err := h.fileStore.UploadFile(ctx, key, zipBytes, "application/zip"); err != nil {
 		h.logger.Error("account export: upload failed", zap.String("job_id", jobID.String()), zap.Error(err))
+		fail(err)
 		h.failExport(ctx, userID, jobID, "Failed to store export")
 		return
 	}
@@ -62,18 +80,23 @@ func (h *Handler) runAccountExport(ctx context.Context, userID, jobID uuid.UUID)
 	url, expiresAt, err := h.presignBundle(ctx, key)
 	if err != nil {
 		h.logger.Error("account export: presign failed", zap.String("job_id", jobID.String()), zap.Error(err))
+		fail(err)
 		h.failExport(ctx, userID, jobID, "Failed to prepare download link")
 		return
 	}
 
 	// Email is the sole delivery channel; if it fails the user can't get the link, so fail the job.
-	if err := h.sender.SendExportReady(ctx, userEmail, email.ExportReadyData{
+	doneEmail := metrics.TimeFileStage(ctx, telemetry.FileOpAccountExport, telemetry.FileStageEmail)
+	err = h.sender.SendExportReady(ctx, userEmail, email.ExportReadyData{
 		Username:   username,
 		BundleURL:  url,
 		ExpiresAt:  expiresAt,
 		FilesCount: counts["files"],
-	}); err != nil {
+	})
+	doneEmail(err)
+	if err != nil {
 		h.logger.Error("account export: email send failed", zap.String("job_id", jobID.String()), zap.Error(err))
+		fail(err)
 		// The link is undeliverable, so the uploaded archive is unreachable — clean it up rather than
 		// leaving an orphan (best effort; an S3 lifecycle rule is the backstop).
 		if delErr := h.fileStore.DeleteFile(ctx, key); delErr != nil {
@@ -83,6 +106,7 @@ func (h *Handler) runAccountExport(ctx context.Context, userID, jobID uuid.UUID)
 		return
 	}
 
+	outcome = telemetry.JobOutcomeSuccess
 	h.setProgress(ctx, userID, jobID, models.AccountExportProgress{
 		Phase:   models.AccountExportPhaseComplete,
 		Counts:  counts,
@@ -96,6 +120,20 @@ func (h *Handler) runAccountExport(ctx context.Context, userID, jobID uuid.UUID)
 		"counts": counts,
 	})
 	h.logger.Info("account export complete", zap.String("job_id", jobID.String()), zap.String("key", key))
+}
+
+// accountExportItemKinds maps the export's section counts to FileOperationItems kinds.
+var accountExportItemKinds = map[string]string{
+	"conversations": telemetry.FileItemConversation,
+	"personalities": telemetry.FileItemPersonality,
+	"files":         telemetry.FileItemFile,
+}
+
+// recordAccountExportItems records how many items of each section one export wrote.
+func recordAccountExportItems(ctx context.Context, metrics *telemetry.Metrics, counts map[string]int) {
+	for section, kind := range accountExportItemKinds {
+		metrics.RecordFileItems(ctx, telemetry.FileOpAccountExport, kind, telemetry.FileItemExported, counts[section])
+	}
 }
 
 // buildAccountZip assembles the in-memory export archive and returns it with section counts. The

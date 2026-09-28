@@ -22,6 +22,9 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
   Both parsers pass the conversation title through `models.NormalizeImportedTitle` before persisting, because `Chat.name` is `NotEmpty` and `MaxLen(200)` counted in **bytes**: an untrimmed title made only of spaces or zero-width characters would land as a nameless thread, and a title of 200 CJK or emoji characters (600-800 bytes) would fail validation and drop that conversation from the import with nothing but a server-side log.
   The Angular importer always lands the Thread Manager on the **Archived** tab after import.
   Client-side zip extraction merges ChatGPT shards matching `conversations.json` / `conversations-NNN.json` (thread-complete chunks) before upload.
+  Metrics (through `telemetry.Global()`): the staged payload size goes on `whatiff.file.size` (operation `chat_import`), the background run is tracked as a `chat_import` job (`TrackJob`, including a panic outcome), `parse` and `insert` are timed on `whatiff.file.operation.duration`, and conversation counts by outcome go on `whatiff.file.operation.items`.
+- **File attachments (`fileattachment.go`):** upload metrics are recorded inside the shared `handlerutils` upload helpers, so this handler does not count uploads itself.
+- **Export (`export.go`):** the streamed ZIP's byte count is recorded on `whatiff.file.size` (operation `chat_export`); latency is left to the HTTP server metric.
 - **Lazy rehydration trigger (`PatchChat`):** When an imported thread (`source` set, no checkpoint yet) is unarchived, the handler calls `agent.EnqueueThreadRehydration` to summarize it **and seed long-term memories** in the background (see `internal/agent`).
   The frontend's post-import picker reuses this path: selecting threads simply PATCHes `archived=false` on each, so no dedicated "prepare" endpoint exists.
 - **Resuming a running turn:** `GET /chat/{chatId}/active-job` (`GetActiveChatJob`) returns the newest non-terminal `chat_message` job for any user turn in the chat, plus the `message_id` it answers (204 when idle).
@@ -51,6 +54,7 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
 
 - `update_patch_test.go`, `mark_read_test.go`, `export_test.go`, `free_tier_quota_test.go`, `chatmessage_quota_test.go` — HTTP and quota behavior (including list `archived` query parsing and PATCH `archived`).
 - `welcome_message_test.go` covers onboarding welcome endpoint eligibility and job enqueue behavior.
+- `import_metrics_test.go` checks the chat import job outcome, stage timings, payload size and item counts.
 - `import_test.go` exercises the async import pipeline end-to-end (202 handoff, OpenAI + Anthropic happy paths, terminal job status on datastore failure); `import_unit_test.go` and `anthropic_import_test.go` cover the parsers and format detection.
 
 ## Related documentation

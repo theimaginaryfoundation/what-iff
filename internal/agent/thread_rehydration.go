@@ -68,6 +68,8 @@ func (a *Agent) WaitForThreadRehydration(ctx context.Context, userID, chatID uui
 	if !isRehydrationInFlight(state) {
 		return
 	}
+	// Only a turn that actually stalls records the stage, so its count is the stalled-turn rate.
+	defer a.timeTurnStage(ctx, turnStageRehydrationWait)()
 
 	a.logger.Info("rehydration gate: stalling turn until summary ready", zap.String("chat_id", chatID.String()))
 	deadline := time.Now().Add(rehydrationWaitTimeout)
@@ -134,14 +136,21 @@ func (a *Agent) EnqueueThreadRehydration(ctx context.Context, userID, chatID uui
 		return
 	}
 
-	go a.runThreadRehydration(detachedCtx, userID, chatID, job.ID)
+	go func() {
+		finish := a.startJobRun(detachedCtx, job)
+		outcome := telemetry.JobOutcomePanic
+		defer func() { finish(outcome) }()
+		outcome = a.runThreadRehydration(detachedCtx, userID, chatID, job.ID)
+	}()
 }
 
 // runThreadRehydration executes the summarization and persists the checkpoint + window pointer.
 // On any failure it marks the chat rehydration_state=failed so the inference gate stops waiting.
-func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID uuid.UUID) {
+// It returns the job outcome for telemetry (success, failed or panic).
+func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID uuid.UUID) (outcome string) {
 	defer func() {
 		if v := recover(); v != nil {
+			outcome = telemetry.JobOutcomePanic
 			a.logger.Error("thread rehydration: panic",
 				zap.String("chat_id", chatID.String()),
 				zap.Any("panic", v),
@@ -160,7 +169,7 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 	msgs, err := a.ds.GetChatMessagesForSummary(ctx, userID, chatID)
 	if err != nil {
 		a.failRehydration(ctx, userID, chatID, jobID, fmt.Sprintf("load messages: %v", err))
-		return
+		return telemetry.JobOutcomeFailed
 	}
 
 	summarizeMsgs, windowStartIdx, needs := splitForRehydration(msgs, rehydrationKeepTurns)
@@ -169,7 +178,7 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 		// so the entire (small) history is used as context.
 		if err := a.ds.SetChatRehydrationState(ctx, userID, chatID, models.RehydrationStateReady); err != nil {
 			a.failRehydration(ctx, userID, chatID, jobID, fmt.Sprintf("mark ready: %v", err))
-			return
+			return telemetry.JobOutcomeFailed
 		}
 		// Seed long-term memories from the (short) thread too — even a few turns can carry durable
 		// facts. Runs after the gate is released; best-effort so it never fails the job.
@@ -179,7 +188,7 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 		}
 		a.logger.Info("thread rehydration: thread short enough, no summary needed",
 			zap.String("chat_id", chatID.String()), zap.Int("messages", len(msgs)))
-		return
+		return telemetry.JobOutcomeSuccess
 	}
 
 	var summary string
@@ -194,7 +203,7 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 		summary, err = a.summarizeImportedThread(ctx, userID, summarizeMsgs)
 		if err != nil {
 			a.failRehydration(ctx, userID, chatID, jobID, fmt.Sprintf("summarize: %v", err))
-			return
+			return telemetry.JobOutcomeFailed
 		}
 	}
 
@@ -203,7 +212,7 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 
 	if err := a.ds.SetImportedThreadRehydrated(ctx, userID, chatID, summary, assistantCount, windowStart); err != nil {
 		a.failRehydration(ctx, userID, chatID, jobID, fmt.Sprintf("persist: %v", err))
-		return
+		return telemetry.JobOutcomeFailed
 	}
 
 	// Best-effort: index the summary as a searchable Summary-scope memory, mirroring live checkpoints.
@@ -229,6 +238,7 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 		zap.Int("summarized_messages", len(summarizeMsgs)),
 		zap.Int("kept_turns", rehydrationKeepTurns),
 		zap.Time("window_start", windowStart))
+	return telemetry.JobOutcomeSuccess
 }
 
 func (a *Agent) failRehydration(ctx context.Context, userID, chatID, jobID uuid.UUID, reason string) {
