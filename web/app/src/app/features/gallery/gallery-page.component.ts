@@ -8,7 +8,7 @@ import { GalleryViewService } from '../../core/services/gallery-view.service';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
-import { Personality, PersonalityExpression, UpdatePersonalityRequest } from '../../core/models/personality.model';
+import { Personality, PersonalityExpression, buildPersonalityUpdateRequest } from '../../core/models/personality.model';
 import { environment } from '../../../environments/environment';
 import { GalleryFilters, toGalleryTileVm } from './helpers/gallery-vm.helpers';
 import { AssignAsExpressionFlowComponent } from './components/assign-as-expression-flow.component';
@@ -228,16 +228,7 @@ export class GalleryPageComponent implements OnInit {
     this.personalities.update(rows =>
       rows.map(row => row.id === personality.id ? { ...row, expressions_enabled: enabled } : row),
     );
-    const request: UpdatePersonalityRequest = {
-      name: personality.name,
-      system_prompt: personality.system_prompt,
-      auto_pin_memories: personality.auto_pin_memories,
-      cover_image_id: personality.cover_image_id,
-      scratchpad: personality.scratchpad,
-      scratchpad_update_prompt: personality.scratchpad_update_prompt,
-      expressions_enabled: enabled,
-      image_style: personality.image_style,
-    };
+    const request = buildPersonalityUpdateRequest(personality, { expressions_enabled: enabled });
     this.personalityService.updatePersonality(personality.id, request).subscribe({
       next: updated => {
         this.personalities.update(rows =>
