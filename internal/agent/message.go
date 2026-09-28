@@ -659,34 +659,10 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 	runCtx, cancel := context.WithCancel(ctx)
 	a.registerRunningJobCancel(newJob.ID, userID, cancel)
 	go a.watchChatJobCancel(runCtx, userID, newJob.ID, cancel)
-	go func() {
-		defer cancel()
-		defer a.unregisterRunningJobCancel(newJob.ID)
-		// An unrecovered panic in any goroutine takes down the whole process (and so the
-		// pod). Recover here so a failure while processing one message fails just that job
-		// instead — e.g. a post-inference checkpoint summary that a provider rejects must
-		// not crash every other in-flight chat. Registered after cancel/unregister so it
-		// runs first (LIFO) and UpdateJobStatus still sees a live runCtx.
-		defer a.recoverAsyncMessageJob(runCtx, userID, newJob.ID, chatMessage.ID)
-		err := a.runTrackedJob(runCtx, newJob, func() error {
-			_, err := a.handleUserMessage(runCtx, newJob, chatMessage)
-			return err
-		})
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				a.logger.Info("async agent message processing cancelled",
-					zap.String("job_id", newJob.ID.String()),
-					zap.String("chat_message_id", chatMessage.ID.String()),
-				)
-				return
-			}
-			a.logger.Error("async agent message processing failed",
-				zap.String("job_id", newJob.ID.String()),
-				zap.String("chat_message_id", chatMessage.ID.String()),
-				zap.Error(err),
-			)
-		}
-	}()
+	go a.runAsyncChatMessageJob(runCtx, cancel, newJob, chatMessage.ID, "processing", func() error {
+		_, err := a.handleUserMessage(runCtx, newJob, chatMessage)
+		return err
+	})
 
 	// Return response with job details
 	return &models.ChatMessageResponse{
@@ -694,6 +670,35 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 		JobID: newJob.ID.String(),
 		Type:  JobTypeChatMessage,
 	}, nil
+}
+
+// runAsyncChatMessageJob is the background goroutine body shared by a new send
+// (HandleUserMessage) and a retry (RetryUserChatMessage): it runs turn under job telemetry and
+// logs how it ended, where action ("processing", "retry") names the path in the log messages.
+// An unrecovered panic in any goroutine takes down the whole process (and so the pod), so it
+// recovers here and fails just that job instead — e.g. a post-inference checkpoint summary that
+// a provider rejects must not crash every other in-flight chat. The recover is registered after
+// cancel/unregister so it runs first (LIFO) and UpdateJobStatus still sees a live runCtx.
+func (a *Agent) runAsyncChatMessageJob(runCtx context.Context, cancel context.CancelFunc, job *models.Job, chatMessageID uuid.UUID, action string, turn func() error) {
+	defer cancel()
+	defer a.unregisterRunningJobCancel(job.ID)
+	defer a.recoverAsyncMessageJob(runCtx, job.UserID, job.ID, chatMessageID)
+	err := a.runTrackedJob(runCtx, job, turn)
+	if err == nil {
+		return
+	}
+	if errors.Is(err, context.Canceled) {
+		a.logger.Info("async agent message "+action+" cancelled",
+			zap.String("job_id", job.ID.String()),
+			zap.String("chat_message_id", chatMessageID.String()),
+		)
+		return
+	}
+	a.logger.Error("async agent message "+action+" failed",
+		zap.String("job_id", job.ID.String()),
+		zap.String("chat_message_id", chatMessageID.String()),
+		zap.Error(err),
+	)
 }
 
 // recoverAsyncMessageJob is the deferred panic guard for async chat-message processing.
@@ -771,28 +776,10 @@ func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid
 
 	runCtx, cancel := context.WithCancel(detachedCtx)
 	a.registerRunningJobCancel(newJob.ID, userID, cancel)
-	go func(runCtx context.Context, job *models.Job, chat *models.ChatMessage) {
-		defer cancel()
-		defer a.unregisterRunningJobCancel(job.ID)
-		err := a.runTrackedJob(runCtx, job, func() error {
-			_, err := a.handleUserMessage(runCtx, job, chat)
-			return err
-		})
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				a.logger.Info("async agent message retry cancelled",
-					zap.String("job_id", job.ID.String()),
-					zap.String("chat_message_id", chat.ID.String()),
-				)
-				return
-			}
-			a.logger.Error("async agent message retry failed",
-				zap.String("job_id", job.ID.String()),
-				zap.String("chat_message_id", chat.ID.String()),
-				zap.Error(err),
-			)
-		}
-	}(runCtx, newJob, msg)
+	go a.runAsyncChatMessageJob(runCtx, cancel, newJob, msg.ID, "retry", func() error {
+		_, err := a.handleUserMessage(runCtx, newJob, msg)
+		return err
+	})
 
 	return &models.ChatMessageResponse{
 		ID:    messageID,
