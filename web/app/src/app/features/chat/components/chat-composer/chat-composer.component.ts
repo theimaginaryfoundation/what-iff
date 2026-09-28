@@ -106,7 +106,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
     TooltipDirective,
   ],
   template: `
-    <form class="composer" (submit)="onSubmit($event)" (drop)="onDrop($event)" (dragover)="onDragOver($event)" (dragleave)="onDragLeave()" [class.composer--thread-drop]="isThreadDragOver()">
+    <form class="composer" (submit)="onSubmit($event)" (drop)="onDrop($event)" (dragover)="onDragOver($event)" (dragleave)="onDragLeave($event)" [class.composer--thread-drop]="isThreadDragOver()">
       @if (quotaMessage()) {
         <p class="composer__quota" role="alert">{{ quotaMessage() }}</p>
       }
@@ -1227,6 +1227,12 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
 
     .composer__drag {
       align-items: center;
+      /* Never become the drag target itself: an overlay that appears under the
+         pointer fires dragleave on the element below it, which hid the overlay,
+         which re-exposed that element, and so on. A drop that landed while the
+         overlay was being torn down could miss the form's handler, and the
+         browser then opened the file itself. */
+      pointer-events: none;
       background: color-mix(in srgb, var(--color-accent) 16%, transparent);
       border: 2px dashed var(--color-accent);
       border-radius: 1.25rem;
@@ -2004,7 +2010,15 @@ export class ChatComposerComponent {
     }, THREAD_NOTICE_MS);
   }
 
-  onDragLeave(): void {
+  onDragLeave(event: DragEvent): void {
+    // dragleave also fires when the pointer moves between the form's own
+    // children (textarea -> send button). Only a leave to outside the form ends
+    // the drag highlight; otherwise the overlay flickers on every child boundary.
+    const next = event.relatedTarget;
+    const form = event.currentTarget;
+    if (next instanceof Node && form instanceof Node && form.contains(next)) {
+      return;
+    }
     this.isDragOver.set(false);
     this.isThreadDragOver.set(false);
   }

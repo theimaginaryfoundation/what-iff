@@ -718,4 +718,68 @@ describe('ChatComposerComponent', () => {
             expect(fixture.componentInstance.isThreadDragOver()).toBe(false);
         });
     });
+
+    describe('file drag and drop', () => {
+        const fileDrag = (type: string, opts: { files?: File[]; relatedTarget?: EventTarget | null } = {}): DragEvent => {
+            const event = new Event(type, { bubbles: true, cancelable: true }) as DragEvent;
+            Object.defineProperty(event, 'dataTransfer', {
+                value: { types: ['Files'], getData: () => '', files: opts.files ?? [], dropEffect: 'none' },
+            });
+            Object.defineProperty(event, 'relatedTarget', { value: opts.relatedTarget ?? null });
+            return event;
+        };
+        const form = (): HTMLElement => fixture.nativeElement.querySelector('form.composer');
+        const textarea = (): HTMLTextAreaElement => fixture.nativeElement.querySelector('textarea');
+
+        it('keeps the drop overlay while the pointer moves between the composer\'s own children', () => {
+            textarea().dispatchEvent(fileDrag('dragover'));
+            fixture.detectChanges();
+            const overlay: HTMLElement = fixture.nativeElement.querySelector('.composer__drag');
+            expect(overlay).not.toBeNull();
+
+            // Leaving the textarea for the overlay (or any other child) is not leaving the composer.
+            textarea().dispatchEvent(fileDrag('dragleave', { relatedTarget: overlay }));
+            fixture.detectChanges();
+            expect(fixture.componentInstance.isDragOver()).toBe(true);
+            expect(fixture.nativeElement.querySelector('.composer__drag')).toBe(overlay);
+
+            // Leaving to somewhere outside the composer ends the highlight.
+            form().dispatchEvent(fileDrag('dragleave', { relatedTarget: document.body }));
+            fixture.detectChanges();
+            expect(fixture.componentInstance.isDragOver()).toBe(false);
+            expect(fixture.nativeElement.querySelector('.composer__drag')).toBeNull();
+        });
+
+        it('clears the overlay when the drag leaves the window (no related target)', () => {
+            form().dispatchEvent(fileDrag('dragover'));
+            form().dispatchEvent(fileDrag('dragleave'));
+            expect(fixture.componentInstance.isDragOver()).toBe(false);
+        });
+
+        it('never lets the overlay become the drag target itself', () => {
+            form().dispatchEvent(fileDrag('dragover'));
+            fixture.detectChanges();
+            const overlay: HTMLElement = fixture.nativeElement.querySelector('.composer__drag');
+            expect(getComputedStyle(overlay).pointerEvents).toBe('none');
+        });
+
+        it('attaches a file dropped on the focused textarea instead of letting the browser open it', () => {
+            const emitted = vi.fn().mockName('filesSelected');
+            fixture.componentInstance.filesSelected.subscribe(emitted);
+            textarea().focus();
+            const file = new File(['%PDF'], 'notes.pdf', { type: 'application/pdf' });
+
+            textarea().dispatchEvent(fileDrag('dragover'));
+            const over = fileDrag('dragover');
+            textarea().dispatchEvent(over);
+            const drop = fileDrag('drop', { files: [file] });
+            textarea().dispatchEvent(drop);
+            fixture.detectChanges();
+
+            expect(over.defaultPrevented).toBe(true);
+            expect(drop.defaultPrevented).toBe(true);
+            expect(emitted).toHaveBeenCalledWith([file]);
+            expect(fixture.nativeElement.querySelector('.composer__drag')).toBeNull();
+        });
+    });
 });
