@@ -281,6 +281,25 @@ export class ChatService {
       );
   }
 
+  /**
+   * Marks every unread message across all of the user's chats (archived included) as read.
+   * The server applies it as one all-or-nothing update, so the cached badges are only
+   * cleared once it succeeds.
+   */
+  markAllChatsRead(): Observable<MarkChatReadResponse> {
+    return this.http.post<MarkChatReadResponse>(`${this.apiUrl}/mark-all-read`, {})
+      .pipe(
+        tap(() => {
+          this.chatsSubject.next(this.chatsSubject.getValue().map(chat => ({ ...chat, unread_count: 0 })));
+          const activeChat = this.activeChatSubject.getValue();
+          if (activeChat) {
+            this.activeChatSubject.next({ ...activeChat, unread_count: 0 });
+          }
+        }),
+        catchError(this.handleError)
+      );
+  }
+
   createWelcomeMessage(chatId: string): Observable<ChatMessageResponse | null> {
     return this.http
       .post<ChatMessageResponse>(`${this.apiUrl}/${chatId}/welcome-message`, {}, { observe: 'response' })

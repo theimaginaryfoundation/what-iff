@@ -58,6 +58,7 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 
 	// Specific routes first (before routes with path variables)
 	chatRouter.HandleFunc("/import", h.ImportChats).Methods("POST")
+	chatRouter.HandleFunc("/mark-all-read", h.MarkAllChatsRead).Methods("POST")
 
 	chatRouter.HandleFunc("/{chatId}/chat-message/{messageId}/retry", h.RetryChatMessage).Methods("POST")
 	chatRouter.HandleFunc("/{chatId}/chat-message/{messageId}/active-job", h.GetActiveChatMessageJob).Methods("GET")

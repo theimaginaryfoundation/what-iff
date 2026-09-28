@@ -3,7 +3,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient, withXhr } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 
 import { Chat } from '../../../../core/models/chat.model';
 import { ChatService } from '../../../../core/services/chat.service';
@@ -22,7 +22,7 @@ function makeChat(overrides: Partial<Chat> = {}): Chat {
     };
 }
 
-type ChatServiceMock = Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat'>;
+type ChatServiceMock = Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat' | 'markAllChatsRead'>;
 type ConfirmationServiceMock = Pick<MockedObject<ConfirmationService>, 'confirm'>;
 
 describe('ThreadListPanelComponent', () => {
@@ -39,7 +39,8 @@ describe('ThreadListPanelComponent', () => {
             listChats: vi.fn().mockName("ChatService.listChats"),
             listAllChats: vi.fn().mockName("ChatService.listAllChats"),
             patchChat: vi.fn().mockName("ChatService.patchChat"),
-            deleteChat: vi.fn().mockName("ChatService.deleteChat")
+            deleteChat: vi.fn().mockName("ChatService.deleteChat"),
+            markAllChatsRead: vi.fn().mockName("ChatService.markAllChatsRead")
         } as unknown as ChatServiceMock;
         confirmationSpy = {
             confirm: vi.fn().mockName("ConfirmationService.confirm")
@@ -378,6 +379,87 @@ describe('ThreadListPanelComponent', () => {
             await fixture.whenStable();
 
             expect(service.selectedCount()).toBe(0);
+        });
+    });
+
+    describe('Mark all read', () => {
+        const markAllButton = () =>
+            fixture.nativeElement.querySelector('.panel__mark-read-btn') as HTMLButtonElement;
+
+        async function reloadWithUnread(): Promise<void> {
+            chatService.listAllChats.mockReturnValue(of({
+                chats: [
+                    makeChat({ id: 'phantom', name: 'The Lighthouse Draft', unread_count: 3 }),
+                    makeChat({ id: 'aster', name: 'Equity Resilience Readout', unread_count: 1 }),
+                ],
+                truncated: false,
+            }));
+            await service.refresh();
+            fixture.detectChanges();
+        }
+
+        const badges = () => fixture.nativeElement.querySelectorAll('.thread-row__badge').length;
+
+        it('is labelled and disabled when nothing is unread', () => {
+            expect(markAllButton().getAttribute('aria-label')).toBe('Mark all threads as read');
+            expect(markAllButton().disabled).toBe(true);
+            expect(component.markAllReadTooltip()).toBe('No unread threads');
+        });
+
+        it('confirms, then clears every badge with one request', async () => {
+            await reloadWithUnread();
+            chatService.markAllChatsRead.mockReturnValue(of({ updated_count: 4 }));
+            expect(badges()).toBe(2);
+            expect(markAllButton().disabled).toBe(false);
+
+            markAllButton().click();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            expect(confirmationSpy.confirm).toHaveBeenCalledWith(
+                expect.objectContaining({ title: 'Mark all threads as read?' }),
+            );
+            expect(chatService.markAllChatsRead).toHaveBeenCalledTimes(1);
+            expect(badges()).toBe(0);
+            expect(component.markAllReadStatus()).toBe('Marked 4 messages as read');
+        });
+
+        it('does nothing when the confirmation is cancelled', async () => {
+            await reloadWithUnread();
+            confirmationSpy.confirm.mockResolvedValue(false);
+
+            markAllButton().click();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            expect(chatService.markAllChatsRead).not.toHaveBeenCalled();
+            expect(badges()).toBe(2);
+        });
+
+        it('reports failure without clearing badges, and retries without re-confirming', async () => {
+            await reloadWithUnread();
+            chatService.markAllChatsRead.mockReturnValueOnce(throwError(() => new Error('Network down')));
+
+            markAllButton().click();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            const alert = fixture.nativeElement.querySelector('.panel__notice--error') as HTMLElement;
+            expect(alert.textContent).toContain('Could not mark threads as read (Network down)');
+            expect(badges()).toBe(2);
+            expect(component.markAllReadStatus()).toBe('');
+
+            confirmationSpy.confirm.mockClear();
+            chatService.markAllChatsRead.mockReturnValueOnce(of({ updated_count: 4 }));
+            (Array.from(alert.querySelectorAll('button')) as HTMLButtonElement[])
+                .find(b => b.textContent?.trim() === 'Retry')!
+                .click();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            expect(confirmationSpy.confirm).not.toHaveBeenCalled();
+            expect(fixture.nativeElement.querySelector('.panel__notice--error')).toBeNull();
+            expect(badges()).toBe(0);
         });
     });
 });

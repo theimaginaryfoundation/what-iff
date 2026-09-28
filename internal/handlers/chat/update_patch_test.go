@@ -28,6 +28,7 @@ type fakeStore struct {
 	listChatsFn            func(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.ChatFilters) (*models.PaginatedResponse, error)
 	updateChatFn           func(ctx context.Context, userID uuid.UUID, chat models.Chat) (*models.Chat, error)
 	markChatMessagesReadFn func(ctx context.Context, userID, chatID uuid.UUID) (int, error)
+	markAllChatMessagesReadFn func(ctx context.Context, userID uuid.UUID) (int, error)
 	getModelByNameFn       func(ctx context.Context, name string) (*models.Model, error)
 	isFirstChatFn          func(ctx context.Context, userID, chatID uuid.UUID) (bool, error)
 	countAllMessagesFn     func(ctx context.Context, userID uuid.UUID, cap int) (int, error)
@@ -63,6 +64,12 @@ func (f *fakeStore) GetChatMessage(ctx context.Context, userID, messageID uuid.U
 func (f *fakeStore) MarkChatMessagesRead(ctx context.Context, userID, chatID uuid.UUID) (int, error) {
 	if f.markChatMessagesReadFn != nil {
 		return f.markChatMessagesReadFn(ctx, userID, chatID)
+	}
+	return 0, errors.New("not implemented")
+}
+func (f *fakeStore) MarkAllChatMessagesRead(ctx context.Context, userID uuid.UUID) (int, error) {
+	if f.markAllChatMessagesReadFn != nil {
+		return f.markAllChatMessagesReadFn(ctx, userID)
 	}
 	return 0, errors.New("not implemented")
 }

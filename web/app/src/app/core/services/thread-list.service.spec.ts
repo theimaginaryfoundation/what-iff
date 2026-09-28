@@ -22,7 +22,7 @@ function makeChat(overrides: Partial<Chat> = {}): Chat {
 
 describe('ThreadListService', () => {
     let service: ThreadListService;
-    let chatService: Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat'>;
+    let chatService: Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat' | 'markAllChatsRead'>;
 
     beforeEach(() => {
         clearRecentOpenedThreadIds();
@@ -30,8 +30,9 @@ describe('ThreadListService', () => {
             listChats: vi.fn().mockName("ChatService.listChats"),
             listAllChats: vi.fn().mockName("ChatService.listAllChats"),
             patchChat: vi.fn().mockName("ChatService.patchChat"),
-            deleteChat: vi.fn().mockName("ChatService.deleteChat")
-        } as unknown as Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat'>;
+            deleteChat: vi.fn().mockName("ChatService.deleteChat"),
+            markAllChatsRead: vi.fn().mockName("ChatService.markAllChatsRead")
+        } as unknown as Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat' | 'markAllChatsRead'>;
         chatService.listAllChats.mockReturnValue(of({
             chats: [makeChat({ id: 'a', name: 'Alpha' }), makeChat({ id: 'b', name: 'Bravo' })],
             truncated: false,
@@ -193,5 +194,36 @@ describe('ThreadListService', () => {
         service.clearUnreadForThread('a');
         const alpha = service.filteredThreads().find(t => t.id === 'a');
         expect(alpha?.unread_count).toBe(0);
+    });
+
+    describe('markAllRead', () => {
+        it('clears every unread badge in a large list with a single request', async () => {
+            const many = Array.from({ length: 500 }, (_, i) =>
+                makeChat({ id: `t${i}`, name: `Thread ${i}`, unread_count: i % 3 }),
+            );
+            chatService.listAllChats.mockReturnValue(of({ chats: many, truncated: false }));
+            chatService.markAllChatsRead.mockReturnValue(of({ updated_count: 499 }));
+            await service.refresh();
+            expect(service.unreadThreadCount()).toBe(333);
+
+            await expect(service.markAllRead()).resolves.toBe(499);
+
+            expect(chatService.markAllChatsRead).toHaveBeenCalledTimes(1);
+            expect(service.unreadThreadCount()).toBe(0);
+            expect(service.loadedThreads().every(t => (t.unread_count ?? 0) === 0)).toBe(true);
+        });
+
+        it('leaves badges untouched and rejects when the server fails', async () => {
+            chatService.listAllChats.mockReturnValue(of({
+                chats: [makeChat({ id: 'a', unread_count: 2 }), makeChat({ id: 'b', unread_count: 1 })],
+                truncated: false,
+            }));
+            chatService.markAllChatsRead.mockReturnValue(throwError(() => new Error('offline')));
+            await service.refresh();
+
+            await expect(service.markAllRead()).rejects.toThrow('offline');
+
+            expect(service.unreadThreadCount()).toBe(2);
+        });
     });
 });

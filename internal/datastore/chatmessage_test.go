@@ -9,6 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
+	"github.com/theimaginaryfoundation/what-iff/ent/chatmessage"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 )
@@ -497,6 +499,53 @@ func TestMarkChatMessagesRead_WrongOwner(t *testing.T) {
 
 	_, err := ds.MarkChatMessagesRead(ctx, otherID, chatID)
 	require.ErrorIs(t, err, ErrChatNotFound)
+}
+
+func TestMarkAllChatMessagesRead_ScopedToOwner(t *testing.T) {
+	ds, cleanup := newChatMessageTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	ownerID := createCMTestUser(t, ds)
+	otherID := createCMTestUser(t, ds)
+	modelID := createCMTestModel(t, ds)
+	activeChat := createCMTestChat(t, ds, ownerID, modelID)
+	archivedChat := createCMTestChat(t, ds, ownerID, modelID)
+	require.NoError(t, ds.dbClient.Chat.UpdateOneID(archivedChat).SetArchived(true).Exec(ctx))
+	otherChat := createCMTestChat(t, ds, otherID, modelID)
+
+	addAssistant := func(uid, chatID uuid.UUID, n int) {
+		for i := 0; i < n; i++ {
+			_, err := ds.CreateChatMessage(ctx, uid, models.ChatMessage{
+				ChatID: chatID, Message: "assistant reply", Origin: models.MessageOriginAssistant,
+			})
+			require.NoError(t, err)
+		}
+	}
+	addAssistant(ownerID, activeChat, 2)
+	addAssistant(ownerID, archivedChat, 1)
+	addAssistant(otherID, otherChat, 3)
+
+	count, err := ds.MarkAllChatMessagesRead(ctx, ownerID)
+	require.NoError(t, err)
+	require.Equal(t, 3, count, "owner's active and archived chats are cleared")
+
+	otherUnread, err := ds.dbClient.ChatMessage.Query().
+		Where(
+			chatmessage.HasChatWith(entchat.ID(otherChat)),
+			chatmessage.ReadStatusEQ(chatmessage.ReadStatusUnread),
+		).
+		Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 3, otherUnread, "another user's unread state is preserved")
+
+	// Second call is a no-op, as is a user with no chats at all.
+	count, err = ds.MarkAllChatMessagesRead(ctx, ownerID)
+	require.NoError(t, err)
+	require.Equal(t, 0, count)
+	count, err = ds.MarkAllChatMessagesRead(ctx, createCMTestUser(t, ds))
+	require.NoError(t, err)
+	require.Equal(t, 0, count)
 }
 
 func TestGetChatMessageCount_OriginFilters(t *testing.T) {

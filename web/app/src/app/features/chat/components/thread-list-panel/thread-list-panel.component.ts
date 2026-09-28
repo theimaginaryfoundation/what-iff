@@ -7,6 +7,7 @@ import { Chat } from '../../../../core/models/chat.model';
 import { Personality } from '../../../../core/models/personality.model';
 import { ThreadListService } from '../../../../core/services/thread-list.service';
 import { ConfirmationService } from '../../../../core/services/confirmation.service';
+import { apiErrorMessage } from '../../../../core/utils/api-error.helpers';
 import { ModalComponent } from '../../../../shared/ui/modal/modal.component';
 import { HelpHintComponent } from '../../../../shared/ui/help-hint/help-hint.component';
 import { ThreadRowComponent } from './thread-row.component';
@@ -38,6 +39,21 @@ type ThreadListTab = 'active' | 'archived';
                 <polyline points="8,2 4,6.5 8,11"/>
               </svg>
               <span class="panel__back-label">Back</span>
+            </button>
+            <button
+              type="button"
+              class="panel__mark-read-btn"
+              aria-label="Mark all threads as read"
+              [uiTooltip]="markAllReadTooltip()"
+              placement="left"
+              [disabled]="markingAllRead() || threads.unreadThreadCount() === 0"
+              (click)="markAllRead()"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="1.5,7.5 4,10 9,4"/>
+                <polyline points="6.5,9 7.5,10 12.5,4"/>
+              </svg>
+              <span class="panel__mark-read-label">Mark all read</span>
             </button>
             <button
               type="button"
@@ -113,6 +129,15 @@ type ThreadListTab = 'active' | 'archived';
           </div>
         </div>
       </header>
+
+      @if (markAllReadError(); as error) {
+        <div class="panel__notice panel__notice--error" role="alert">
+          <span>{{ error }}</span>
+          <button type="button" (click)="markAllRead(true)">Retry</button>
+          <button type="button" (click)="markAllReadError.set(null)" aria-label="Dismiss">×</button>
+        </div>
+      }
+      <p class="panel__sr-only" role="status" aria-live="polite">{{ markAllReadStatus() }}</p>
 
       @if (threads.listTruncated()) {
         <p class="panel__truncate-hint" role="status">
@@ -371,6 +396,7 @@ type ThreadListTab = 'active' | 'archived';
     }
 
     .panel__back-btn,
+    .panel__mark-read-btn,
     .panel__import-btn {
       align-items: center;
       background: transparent;
@@ -389,6 +415,40 @@ type ThreadListTab = 'active' | 'archived';
         border-color: var(--color-accent);
         color: var(--color-accent);
       }
+    }
+
+    .panel__mark-read-btn:disabled {
+      cursor: default;
+      opacity: 0.5;
+
+      &:hover {
+        border-color: var(--color-border-base);
+        color: var(--color-text-secondary);
+      }
+    }
+
+    .panel__notice {
+      align-items: center;
+      border-bottom: 1px solid var(--color-border-base);
+      display: flex;
+      font-size: 0.8125rem;
+      gap: 0.5rem;
+      justify-content: center;
+      padding: 0.5rem 1.25rem;
+
+      button {
+        background: transparent;
+        border: 1px solid currentColor;
+        border-radius: 6px;
+        color: inherit;
+        cursor: pointer;
+        font-size: 0.75rem;
+        padding: 1px 8px;
+      }
+    }
+
+    .panel__notice--error {
+      color: var(--color-danger, #c0392b);
     }
 
     .panel__truncate-hint {
@@ -785,7 +845,8 @@ type ThreadListTab = 'active' | 'archived';
         display: none;
       }
 
-      .panel__import-btn {
+      .panel__import-btn,
+      .panel__mark-read-label {
         display: none;
       }
 
@@ -934,6 +995,15 @@ export class ThreadListPanelComponent implements OnInit {
   readonly tagInputValue = signal('');
   readonly tagEditError = signal<string | null>(null);
   readonly tagEditTitleId = `thread-tag-edit-${Math.random().toString(36).slice(2, 10)}`;
+  readonly markingAllRead = signal(false);
+  readonly markAllReadError = signal<string | null>(null);
+  /** Screen-reader announcement for the outcome of Mark all read. */
+  readonly markAllReadStatus = signal('');
+  readonly markAllReadTooltip = computed(() =>
+    this.threads.unreadThreadCount() === 0
+      ? 'No unread threads'
+      : 'Mark every thread as read, including archived ones. Nothing is deleted.',
+  );
   readonly bulkActionMenuOpen = signal(false);
   readonly bulkPersonalityPickerOpen = signal(false);
   readonly bulkPersonalityTitleId = `thread-bulk-personality-${Math.random().toString(36).slice(2, 10)}`;
@@ -1029,6 +1099,41 @@ export class ThreadListPanelComponent implements OnInit {
 
   async restoreThread(thread: Chat): Promise<void> {
     await this.threads.setThreadArchived(thread, false);
+  }
+
+  /**
+   * Clears unread badges on every thread the user owns after a confirmation.
+   * @param skipConfirm true when retrying a clear the user already confirmed
+   */
+  async markAllRead(skipConfirm = false): Promise<void> {
+    if (this.markingAllRead()) return;
+    if (!skipConfirm) {
+      const count = this.threads.unreadThreadCount();
+      const confirmed = await this.confirmation.confirm({
+        title: 'Mark all threads as read?',
+        message:
+          `This clears the unread badge on ${count} thread${count === 1 ? '' : 's'} here, plus any of your ` +
+          "archived threads. No messages are deleted, but unread markers can't be restored.",
+        confirmText: 'Mark all read',
+        cancelText: 'Cancel',
+        type: 'warning',
+      });
+      if (!confirmed) return;
+    }
+    this.markingAllRead.set(true);
+    this.markAllReadError.set(null);
+    this.markAllReadStatus.set('');
+    try {
+      const updated = await this.threads.markAllRead();
+      this.markAllReadStatus.set(
+        updated === 0 ? 'Nothing was unread' : `Marked ${updated} message${updated === 1 ? '' : 's'} as read`,
+      );
+    } catch (error) {
+      const reason = apiErrorMessage(error, 'Request failed').replace(/\.$/, '');
+      this.markAllReadError.set(`Could not mark threads as read (${reason}). No threads were changed.`);
+    } finally {
+      this.markingAllRead.set(false);
+    }
   }
 
   onSelectAllChange(): void {

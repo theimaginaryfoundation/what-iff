@@ -63,6 +63,11 @@ export class ThreadListService implements OnDestroy {
     applyThreadFilters(this.allThreads(), this.filterState()),
   );
 
+  /** Loaded threads (current tab, ignoring filters) that still show an unread badge. */
+  readonly unreadThreadCount = computed(
+    () => this.allThreads().filter(thread => (thread.unread_count ?? 0) > 0).length,
+  );
+
   readonly groups = computed<ThreadGroup[]>(() => buildThreadGroups(this.filteredThreads()));
   readonly pinnedThreads = computed(() =>
     this.filteredThreads().filter(thread => !!thread.is_favorite && !!thread.id),
@@ -120,6 +125,20 @@ export class ThreadListService implements OnDestroy {
     const selectedCount = ids.reduce((count, id) => count + (selected.has(id) ? 1 : 0), 0);
     if (selectedCount === 0) return 'none';
     return selectedCount === ids.length ? 'all' : 'some';
+  }
+
+  /**
+   * Marks every thread the user owns as read (archived included) in one server call.
+   * The server update is all-or-nothing, so badges are cleared only after it succeeds;
+   * on failure the error propagates and every badge is left as it was.
+   * @returns how many messages the server flipped from unread to read
+   */
+  async markAllRead(): Promise<number> {
+    const response = await firstValueFrom(this.chatService.markAllChatsRead());
+    this.allThreads.update(threads =>
+      threads.map(t => ((t.unread_count ?? 0) > 0 ? { ...t, unread_count: 0 } : t)),
+    );
+    return response.updated_count;
   }
 
   /** Clears local unread badge for a thread (e.g. after mark-read); does not hit the API. */
