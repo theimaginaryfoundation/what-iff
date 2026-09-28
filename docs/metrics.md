@@ -22,7 +22,8 @@ The export interval defaults to 5 minutes. That's a cost decision, because inges
 with export frequency. Change it with `OTEL_METRIC_EXPORT_INTERVAL` (milliseconds).
 
 In Prometheus, metric names have dots replaced with underscores and get a unit and `_total`
-suffix. For example, `whatiff.job.duration` becomes `whatiff_job_duration_seconds_bucket` and
+suffix. For example, `whatiff.job.duration` becomes `whatiff_job_duration_seconds` (plus
+`_bucket`, `_sum` and `_count` series for classic histograms) and
 `whatiff.jobs.enqueued` becomes `whatiff_jobs_enqueued_total`. Attribute keys become labels the
 same way (`error.type` becomes `error_type`).
 
@@ -35,7 +36,7 @@ same way (`error.type` becomes `error_type`).
   [`buckets.go`](../internal/telemetry/buckets.go). Never use the SDK default, which stops at 10.
 - **Errors:** `error.type` is set only on failures. Its values come from `telemetry.ClassifyError`:
   `canceled`, `timeout`, `rate_limited`, `server_error`, `client_error`, `auth`, `not_found`,
-  `network`, `other`. Traffic and error rates come from a histogram's `_count`, so most flows have
+  `network`, `other`. Traffic and error rates come from a histogram's count, so most flows have
   no separate error counter.
 - **Label values:** always from a fixed set. Never IDs, URLs, file names, free text, or strings a
   model produced. Tool names are mapped to known tools, `mcp` or `other`. Checkpoint reasons are
@@ -73,8 +74,8 @@ Notes on these metrics:
   For streamed responses this measures time to the response headers; full LLM call time is in
   `gen_ai.client.operation.duration`.
 - **`dependency` values:** `postgres`, `s3`, `local_fs`, `ses`, `parallel`, `openai`, `anthropic`,
-  `zai`, `gemini`, `deepseek`, `mistral`, `qwen`, `xiaomi`, `local_llm`, `stripe`, `cognito`,
-  `jira`, `fcm`, `c4a`, `other`.
+  `zai`, `gemini`, `deepseek`, `mistral`, `qwen`, `xiaomi`, `local_llm`, `other`.
+  Plugins linked into the server can add their own vendor names.
 - **DB:**
   - `db.operation.name` is `query`, `create`, `update` or `delete`.
   - An empty result from `First`/`Only` counts as a successful query.
@@ -205,30 +206,48 @@ combinations:
 | Files, imports and exports | ~960 |
 | **Total** | **~13,600** |
 
-That comes to about 119M samples a month, or roughly $11 per instance-month. Levers, if it grows:
+That comes to about 119M samples a month, or roughly $11 per instance-month, if histograms are
+stored the classic way. That's the upper bound.
+
+### Native histograms
+
+The app emits explicit-bucket histograms. A collector that remote-writes to Prometheus can store
+them as native histograms with custom buckets (NHCB), which keeps the same boundaries:
+
+```yaml
+exporters:
+  prometheusremotewrite:
+    convert_explicit_histograms_to_nhcb: true # collector-contrib v0.158+
+```
+
+Each label combination then becomes one series instead of one per bucket plus `_sum` and
+`_count`. Managed Prometheus meters only populated buckets, at 0.25 samples each, so an
+18-boundary histogram with 8 populated buckets costs 2 samples per export instead of 21. Grafana
+needs version 10.4 or later to chart them. See
+[ADR 0x022](adr/0x022-metrics-instrumentation.md) for why we chose these over exponential
+histograms.
+
+Levers, if cost grows:
 - **Drop labels:** remove a label that doesn't change a decision.
 - **Change a family:** move a histogram to a family with fewer buckets.
-- **Native histograms:** Managed Prometheus bills a populated native (exponential) histogram bucket
-  at 0.25 samples, and empty buckets are free. Moving to exponential histograms could cut
-  histogram cost a lot, if the collector's remote-write path supports them.
 
 The per-instance cardinality limit is 1,000 attribute sets per metric. Anything beyond that is
 folded into an `otel.metric.overflow` series.
 
 ## Queries
 
-Some example PromQL:
+Some example PromQL, for histograms stored as native histograms (NHCB):
 
 ```promql
 # p95 LLM call latency by model, 1h window
-histogram_quantile(0.95, sum by (le, gen_ai_request_model) (rate(gen_ai_client_operation_duration_seconds_bucket[1h])))
+histogram_quantile(0.95, sum by (gen_ai_request_model) (rate(gen_ai_client_operation_duration_seconds[1h])))
 
 # LLM error ratio by model and error type
-sum by (gen_ai_request_model, error_type) (rate(gen_ai_client_operation_duration_seconds_count{error_type!=""}[1h]))
-  / ignoring(error_type) group_left sum by (gen_ai_request_model) (rate(gen_ai_client_operation_duration_seconds_count[1h]))
+sum by (gen_ai_request_model, error_type) (histogram_count(rate(gen_ai_client_operation_duration_seconds{error_type!=""}[1h])))
+  / ignoring(error_type) group_left sum by (gen_ai_request_model) (histogram_count(rate(gen_ai_client_operation_duration_seconds[1h])))
 
 # Time until a chat answer is ready (p50/p95)
-histogram_quantile(0.95, sum by (le) (rate(whatiff_job_age_at_status_seconds_bucket{job_type="chat_message",status="inference_complete"}[1h])))
+histogram_quantile(0.95, sum(rate(whatiff_job_age_at_status_seconds{job_type="chat_message",status="inference_complete"}[1h])))
 
 # Tokens per hour by model and type
 sum by (gen_ai_request_model, gen_ai_token_type) (increase(whatiff_gen_ai_tokens_total[1h]))
@@ -236,5 +255,8 @@ sum by (gen_ai_request_model, gen_ai_token_type) (increase(whatiff_gen_ai_tokens
 # Oldest unfinished job (take max across instances)
 max by (job_type) (whatiff_jobs_oldest_age_seconds)
 ```
+
+For classic histograms (for example the local `prometheus` exporter), use the `_bucket` series
+with `sum by (le, ...)` for quantiles, and `_count` in place of `histogram_count()`.
 
 With a 5-minute export, use rate windows of at least 15 minutes.

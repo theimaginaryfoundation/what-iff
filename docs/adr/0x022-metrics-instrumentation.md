@@ -23,7 +23,7 @@ What existed was hard to use:
    Names, units and label keys followed no pattern (`_total` on some counters, `_count` on histograms, `http.method` next to `token_io`).
    A label on one metric took model-generated tool names, so its cardinality was unbounded.
 4. **Only some code could record.**
-   Handlers, the scheduler, storage, web search and the private plugins had no metrics handle.
+   Handlers, the scheduler, storage, web search and linked plugins had no metrics handle.
 
 The project runs on a small budget.
 A monitoring bill over roughly $100 a month would hurt, so cost is a design constraint, not an afterthought.
@@ -50,10 +50,15 @@ This ADR records why they look the way they do.
   Every histogram picks one of seven explicit families in `internal/telemetry/buckets.go`: HTTP, fast, slow, job, tokens, bytes and counts.
   Each family is sized to the range its metrics actually span.
   The slow family, used for LLM and outbound calls, has 18 boundaries from 0.1s to 300s, packed densely between 1s and 60s.
-  Families are kept short, because every bucket costs a series (see Cost).
+  Families are kept short, because every bucket costs a series when histograms are stored the classic way (see Cost).
+- **Native histograms with custom buckets.**
+  The app always emits explicit-bucket histograms; how they are stored is the collector's choice.
+  Deployments that remote-write to Prometheus should set the `prometheusremotewrite` exporter's `convert_explicit_histograms_to_nhcb` option (collector-contrib v0.158 and later).
+  Each label combination is then written as one native histogram with custom buckets (NHCB, schema -53), with exactly the bucket family's boundaries, instead of a `_bucket` series per boundary plus `_sum` and `_count`.
+  Queries change shape: `histogram_quantile(0.95, sum by (le) (rate(x_bucket[15m])))` becomes `histogram_quantile(0.95, sum(rate(x[15m])))`, and `_count`/`_sum` become `histogram_count()`/`histogram_sum()`.
 - **Errors.**
   `error.type` is set only on failures, and its values come from a fixed set (`canceled`, `timeout`, `rate_limited`, `server_error`, `client_error`, `auth`, `not_found`, `network`, `other`), produced by `telemetry.ClassifyError`.
-  Success and failure share one histogram, so traffic and error rates both come from its `_count` and most flows need no separate error counter.
+  Success and failure share one histogram, so traffic and error rates both come from its count and most flows need no separate error counter.
   SDK error types register how to extract their HTTP status (`RegisterStatusCodeFunc`), so classification is status-based everywhere.
 - **Label values.**
   Label values always come from a fixed set.
@@ -112,11 +117,13 @@ The HTTP attempt metric only sees time to response headers on streams, which its
 
 ## Options considered
 
-- **Exponential (native) histograms instead of explicit buckets.**
-  Managed Prometheus bills a populated native-histogram bucket at 0.25 samples, and empty buckets are free.
-  That would make histograms much cheaper and give finer resolution.
-  Rejected for now: the collector's remote-write support for them and Grafana's handling weren't verified.
-  It's the first cost lever to revisit.
+- **Classic histograms only.**
+  Rejected once the collector could convert to NHCB.
+  Classic storage costs (buckets + 2) samples per label combination on every export, empty buckets included, which is most of the estimate below.
+- **Exponential native histograms instead of explicit buckets.**
+  They are just as cheap to store, but their boundaries follow a base-2 formula and shift with the scale the SDK picks.
+  Latency thresholds we care about (1s, 10s, 60s) wouldn't be exact bucket edges, and the local Prometheus and console exporters would show a different shape from production.
+  Rejected in favour of NHCB, which keeps the explicit families and gets the storage savings.
 - **A shorter export interval (60s or less).**
   Rejected.
   Samples ingested scale linearly with export frequency, so 60s would cost 5× as much.
@@ -167,17 +174,26 @@ Two instances in production plus dev comes to roughly $30–35 a month, well ins
 - **Keep a margin:** the total should stay comfortably under what $100 a month buys, about 1.1B samples a month across all instances.
 - **Know the cap:** the per-instrument cardinality limit (1,000 attribute sets per instance) stays as a safety net; anything above it is folded into an `otel.metric.overflow` series.
 
+**Native histograms change this estimate.**
+The table above prices the classic representation, so it's the upper bound.
+With NHCB, a histogram label combination is one series, and Managed Prometheus meters only its populated buckets, at 0.25 samples each; empty buckets are free.
+An 18-boundary slow histogram with 8 populated buckets meters as 2 samples instead of 21.
+Buckets are cumulative since the process started, so the populated count grows towards the buckets a metric ever uses, then stays there.
+The real saving depends on those distributions; measure it from the workspace's ingestion metrics after rollout rather than assuming it.
+
 **Levers if cost grows**, in order:
-1. Native histograms.
-2. Dropping a label that doesn't change a decision.
-3. Moving a histogram to a shorter bucket family.
-4. Dropping the per-task `hostname` resource label at the collector, if series churn on deploys becomes noticeable.
+1. Dropping a label that doesn't change a decision.
+2. Moving a histogram to a shorter bucket family.
+3. Dropping the per-task `hostname` resource label at the collector, if series churn on deploys becomes noticeable.
 
 ## Consequences
 
 - **Breaking rename.**
   Every metric has a new name, unit or labels, and existing Grafana panels need rebuilding.
   That was accepted because there was only a handful of panels.
+- **Native histogram tooling.**
+  With NHCB storage, dashboards and alerts use native-histogram PromQL and Grafana 10.4 or later.
+  The local `prometheus` exporter still serves classic histograms, so local queries use the `_bucket` form.
 - **Coarse resolution.**
   Five-minute resolution limits how fast alerts can fire: rate windows should be at least 15 minutes, and very short incidents may not show up.
   Paging on sub-5-minute blips is out of scope for this setup.
@@ -192,7 +208,5 @@ Two instances in production plus dev comes to roughly $30–35 a month, well ins
 
 ## Follow-ups
 
-- **Private overlay:** instrument Stripe, Jira, c4a, Cognito and push notifications with the same helpers.
-- **Collector:** add batch and memory-limit processors to the ADOT config, and remove the unused `AMP_METRICS_NAMESPACE` setting.
-- **Dashboards as code:** define dashboards, recording rules and SLO burn-rate alerts in the private infrastructure repo.
-- **Native histograms:** verify end-to-end support and switch the heaviest histograms.
+- **Collector:** add batch and memory-limit processors to the collector config.
+- **Dashboards as code:** define dashboards, recording rules and SLO burn-rate alerts alongside the deployment, written against the NHCB query shapes.

@@ -46,6 +46,8 @@ const (
 )
 
 // Dependency names for AttrDependency. Add new ones here so dashboards can rely on the set.
+// Plugins linked into the server may declare their own names under the same rules: a short,
+// fixed, lowercase string per vendor.
 const (
 	DependencyPostgres  = "postgres"
 	DependencyS3        = "s3"
@@ -61,11 +63,6 @@ const (
 	DependencyQwen      = "qwen"
 	DependencyXiaomi    = "xiaomi"
 	DependencyLocalLLM  = "local_llm"
-	DependencyStripe    = "stripe"
-	DependencyCognito   = "cognito"
-	DependencyJira      = "jira"
-	DependencyFCM       = "fcm"
-	DependencyC4A       = "c4a"
 	DependencyOther     = "other"
 )
 
