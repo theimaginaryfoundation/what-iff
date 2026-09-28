@@ -97,6 +97,18 @@ describe('ThreadListPanelComponent', () => {
         expect(text).toContain('ARCHIVE?');
     });
 
+    it('explains the Thread Manager and marks the starred filter as a toggle', () => {
+        const hint = fixture.nativeElement.querySelector('h2 ui-help-hint button') as HTMLButtonElement;
+        expect(hint.getAttribute('aria-label')).toBe('What is the Thread Manager?');
+
+        const starredHeader = Array.from(fixture.nativeElement.querySelectorAll('th button') as NodeListOf<HTMLButtonElement>)
+            .find(button => button.textContent?.includes('STARRED?'))!;
+        expect(starredHeader.getAttribute('aria-pressed')).toBe('false');
+        starredHeader.click();
+        fixture.detectChanges();
+        expect(starredHeader.getAttribute('aria-pressed')).toBe('true');
+    });
+
     it('loads archived threads when archived tab is selected', async () => {
         chatService.listAllChats.mockClear();
 

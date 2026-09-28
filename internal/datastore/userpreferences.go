@@ -39,8 +39,6 @@ func toUserPreferencesModel(e *ent.UserPreference) *models.UserPreferences {
 		prefs.DefaultPersonalityID = e.Edges.Personality.ID
 	}
 
-	prefs.LastSeenAnnouncement = e.LastSeenAnnouncement
-
 	// Normalise to a non-nil slice so the field always serialises as [] rather than
 	// null. NOT NULL constrains the SQL value, not the JSON inside it — a jsonb column
 	// can still hold the literal null, which unmarshals to a nil slice — so this is what
@@ -113,8 +111,8 @@ func (d *Datastore) UpdateUserPreferences(ctx context.Context, userID uuid.UUID,
 	// a required foreign key, so writing the zero UUID unconditionally turned a request that
 	// merely omitted the field into a constraint violation and a 500 — the guard below ran
 	// after the value had already been staged, so it gated the permission check but not the
-	// write. Absent now means "leave the current default alone", matching how theme and
-	// last_seen_announcement already behave.
+	// write. Absent now means "leave the current default alone", matching how theme
+	// already behaves.
 	if prefs.DefaultModelID != uuid.Nil {
 		if err := d.assertUserCanUseModel(ctx, tx, userID, prefs.DefaultModelID); err != nil {
 			if rerr := tx.Rollback(); rerr != nil {
@@ -133,10 +131,6 @@ func (d *Datastore) UpdateUserPreferences(ctx context.Context, userID uuid.UUID,
 		update.SetPersonalityID(prefs.DefaultPersonalityID)
 	} else {
 		update.ClearPersonality()
-	}
-
-	if prefs.LastSeenAnnouncement != "" {
-		update.SetLastSeenAnnouncement(prefs.LastSeenAnnouncement)
 	}
 
 	// Favorites use nil-vs-empty rather than a sentinel: a nil slice means the caller

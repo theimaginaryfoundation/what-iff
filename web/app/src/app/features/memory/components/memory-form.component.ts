@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 
 import { Memory } from '../../../core/models/memory.model';
 import { PersonalityThumbnailCircle } from '../../../core/models/personality.model';
-import { isUserScopedMemoryLevel } from '../helpers/memory-vm.helpers';
+import { GLOBAL_SCOPE_LABEL, isUserScopedMemoryLevel, levelDescription } from '../helpers/memory-vm.helpers';
 
 export interface MemoryPersonalityOption {
   id: string;
@@ -34,11 +34,14 @@ export class MemoryFormComponent {
   readonly save = output<{ content: string; level: Memory['level'] }>();
   readonly pinChange = output<string | null>();
 
+  readonly globalScopeLabel = GLOBAL_SCOPE_LABEL;
+
   readonly content = signal('');
   readonly level = signal<Memory['level']>('thread');
   readonly pinnedPersonalityId = signal<string | null>(null);
 
   readonly canSave = computed(() => this.content().trim().length > 0);
+  readonly levelHint = computed(() => levelDescription(this.level()));
   readonly showPinControl = computed(() => isUserScopedMemoryLevel(this.level()));
 
   ngOnChanges(): void {

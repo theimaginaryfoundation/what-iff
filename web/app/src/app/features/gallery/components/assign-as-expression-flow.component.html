@@ -9,6 +9,7 @@
       <select
         class="rounded-xl border border-border-base bg-surface-base px-3 py-2 text-text-primary"
         [ngModel]="selectedPersonalityId()"
+        uiTooltip="Whose expressions this image joins"
         (ngModelChange)="onPersonalityChange($event)">
         <option value="" disabled>Select personality</option>
         @for (personality of personalities(); track personality.id) {
@@ -25,6 +26,7 @@
           <button
             type="button"
             class="rounded-full border border-border-base px-2 py-1 text-xs text-text-secondary hover:border-accent hover:text-text-primary"
+            uiTooltip="Use this existing expression; its current image is replaced"
             (click)="chooseKey(key)">
             {{ key }}
           </button>
@@ -39,6 +41,7 @@
         placeholder="happy"
         class="rounded-xl border border-border-base bg-surface-base px-3 py-2 text-text-primary"
         [ngModel]="expressionKey()"
+        uiTooltip="Pick an existing expression above or type a new one"
         (ngModelChange)="expressionKey.set($event)" />
     </label>
 

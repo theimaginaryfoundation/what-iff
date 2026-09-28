@@ -4,6 +4,8 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
 import { ContextBreakdown, ContextSegmentStat } from '../../../../../core/models/message.model';
 import { ContextCostOutletComponent } from '../../../../../extensions/context-cost-outlet.component';
 import { estimateInputAPICost } from '../../../helpers/api-pricing.helpers';
+import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../../../../shared/ui/tooltip/tooltip.directive';
 
 interface KindMeta {
   label: string;
@@ -14,9 +16,9 @@ interface KindMeta {
 const KIND_META: Record<string, KindMeta> = {
   system_prompt: { label: 'System prompt', description: 'Base instructions + personality', color: 'hsl(221 70% 58%)' },
   checkpoint_summary: { label: 'Checkpoint summary', description: 'Compressed recap of earlier turns', color: 'hsl(199 75% 50%)' },
-  scratchpad: { label: 'Scratchpad', description: 'The assistant’s working notes', color: 'hsl(48 85% 55%)' },
+  scratchpad: { label: 'Scratchpad', description: 'This personality’s working notes about you', color: 'hsl(48 85% 55%)' },
   memory_context: { label: 'Memories', description: 'Long-term memories retrieved for this turn', color: 'hsl(280 60% 62%)' },
-  mood: { label: 'Mood', description: 'Active mood snippet', color: 'hsl(330 70% 62%)' },
+  mood: { label: 'Mode', description: 'Instructions from the thread’s active mode', color: 'hsl(330 70% 62%)' },
   history_turn: { label: 'History', description: 'Recent verbatim conversation turns', color: 'hsl(162 62% 45%)' },
   attachment_context: { label: 'Attachments', description: 'Labels + content from attached files', color: 'hsl(24 80% 56%)' },
   tool_result: { label: 'Tool results', description: 'Tool calls and outputs carried in context', color: 'hsl(14 72% 58%)' },
@@ -44,7 +46,7 @@ interface BreakdownRow {
 @Component({
   selector: 'app-context-breakdown-tab',
   standalone: true,
-  imports: [ContextCostOutletComponent, DatePipe, DecimalPipe],
+  imports: [ContextCostOutletComponent, DatePipe, DecimalPipe, HelpHintComponent, TooltipDirective],
   template: `
     <section class="tab-body" aria-label="Context breakdown">
       @if (breakdown(); as b) {
@@ -52,7 +54,13 @@ interface BreakdownRow {
           <p class="state">No context snapshot for this turn yet.</p>
         } @else {
           <header class="xray-head">
-            <span class="xray-head__label">Turn context</span>
+            <span class="xray-head__title">
+              <span class="xray-head__label">Turn context</span>
+              <ui-help-hint label="What is turn context?" heading="Turn context" guide="context">
+                Everything sent to the model for this reply, split by source. When a turn passes the checkpoint budget,
+                older turns are compressed into the thread summary at the next checkpoint.
+              </ui-help-hint>
+            </span>
             @if (b.captured_at) {
               <time class="xray-head__time" [attr.datetime]="b.captured_at">{{ b.captured_at | date: 'MMM d, h:mm a' }}</time>
             }
@@ -60,7 +68,10 @@ interface BreakdownRow {
           <div class="gauge">
             <div class="gauge__top">
               <span class="gauge__total">{{ format(total()) }}</span>
-              <span class="gauge__budget">/ {{ format(displayBudget()) }} tokens</span>
+              <span
+                class="gauge__budget"
+                uiTooltip="Checkpoint budget: past this, older turns get summarized"
+              >/ {{ format(displayBudget()) }} tokens</span>
               @if (inputCost() || messageId()) {
                 <app-context-cost-outlet [cost]="inputCost()" [messageId]="messageId()" />
               }
@@ -76,7 +87,7 @@ interface BreakdownRow {
                   class="gauge__slice"
                   [style.width.%]="row.budgetPct"
                   [style.background]="row.color"
-                  [title]="row.label"
+                  [uiTooltip]="row.label + ': ' + format(row.tokens) + ' tokens'"
                 ></span>
               }
             </div>
@@ -103,14 +114,14 @@ interface BreakdownRow {
                     <span class="legend__bar-fill" [style.width.%]="row.sharePct" [style.background]="row.color"></span>
                   </div>
                   <div class="legend__meta">
-                    <span>{{ row.segments }} {{ row.segments === 1 ? 'segment' : 'segments' }}</span>
+                    <span uiTooltip="Separate pieces of this kind in the prompt">{{ row.segments }} {{ row.segments === 1 ? 'segment' : 'segments' }}</span>
                     @if (row.images > 0) {
                       <span>·</span>
                       <span>{{ row.images }} img</span>
                     }
                     @if (row.cacheable) {
                       <span>·</span>
-                      <span class="legend__cache" title="Part of the cacheable prompt prefix">cached</span>
+                      <span class="legend__cache" uiTooltip="In the stable prompt prefix the provider can cache; not a confirmed hit">cacheable</span>
                     }
                   </div>
                   <p class="legend__desc">{{ row.description }}</p>
@@ -153,6 +164,7 @@ interface BreakdownRow {
       justify-content: space-between;
       padding-bottom: 0.5rem;
     }
+    .xray-head__title { align-items: center; display: inline-flex; gap: 0.25rem; }
     .xray-head__label {
       color: var(--color-text-muted);
       font-size: 0.625rem;

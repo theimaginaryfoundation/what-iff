@@ -115,8 +115,8 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
 
     const defaults = fixture.nativeElement.querySelector('[data-testid="chat-defaults"]') as HTMLElement | null;
     expect(defaults).not.toBeNull();
-    expect(defaults?.textContent).toContain('Chat defaults');
-    expect(defaults?.textContent).toContain('Choose what new chats start with.');
+    expect(defaults?.textContent).toContain('Thread defaults');
+    expect(defaults?.textContent).toContain('Choose what new threads start with.');
     expect(defaults?.textContent).toContain('Default model');
     expect(defaults?.textContent).toContain('Default personality');
     expect(defaults?.textContent).toContain('No default personality');

@@ -22,6 +22,47 @@ class DestroyableTooltipHostComponent {
     readonly showButton = signal(true);
 }
 
+@Component({
+    standalone: true,
+    imports: [TooltipDirective],
+    changeDetection: ChangeDetectionStrategy.Eager,
+    template: '<button uiTooltip="A very long thread name" truncatedOnly [truncationTarget]="name"><span #name>A very long thread name</span></button>',
+})
+class TruncatedTooltipHostComponent {
+}
+
+describe('TooltipDirective truncatedOnly', () => {
+    const focusAndFindTooltip = (overflowing: boolean): HTMLElement | null => {
+        const fixture = TestBed.createComponent(TruncatedTooltipHostComponent);
+        fixture.detectChanges();
+        const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+        const name = button.querySelector('span') as HTMLElement;
+        vi.spyOn(name, 'clientWidth', 'get').mockReturnValue(100);
+        vi.spyOn(name, 'scrollWidth', 'get').mockReturnValue(overflowing ? 240 : 100);
+        button.dispatchEvent(new Event('focus'));
+        const tooltip = document.body.querySelector(`#${button.getAttribute('aria-describedby')}`) as HTMLElement | null;
+        fixture.destroy();
+        return tooltip;
+    };
+
+    beforeEach(async () => {
+        await TestBed.configureTestingModule({
+            imports: [TruncatedTooltipHostComponent],
+            providers: [provideZonelessChangeDetection()],
+        }).compileComponents();
+    });
+
+    afterEach(() => vi.restoreAllMocks());
+
+    it('shows the full text when the target is cut off', () => {
+        expect(focusAndFindTooltip(true)?.textContent).toBe('A very long thread name');
+    });
+
+    it('stays hidden when the text fits', () => {
+        expect(focusAndFindTooltip(false)).toBeNull();
+    });
+});
+
 describe('TooltipDirective', () => {
     let fixture: ComponentFixture<TooltipHostComponent>;
 

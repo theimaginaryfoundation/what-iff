@@ -12,6 +12,7 @@ import {
   TEXT_LIMIT_HARD_MAX,
   TEXT_LIMIT_WARNING_THRESHOLD,
 } from '../../../core/constants/text-limits.constants';
+import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.component';
 
 export interface SystemPromptValue {
   systemPrompt: string;
@@ -31,7 +32,13 @@ export interface SystemPromptValue {
       aria-label="System prompt editor"
     >
       <header class="flex items-center justify-between gap-2">
-        <h2 class="text-base font-semibold text-(--color-text-primary)">System prompt</h2>
+        <h2 class="inline-flex items-center gap-1 text-base font-semibold text-(--color-text-primary)">
+          System prompt
+          <ui-help-hint label="What is the system prompt?" heading="System prompt" guide="context">
+            Core instructions that define this personality's voice and behaviour. They're sent with every message in
+            its threads.
+          </ui-help-hint>
+        </h2>
         @if (!isEditing()) {
           <button
             type="button"
@@ -86,7 +93,7 @@ export interface SystemPromptValue {
     </section>
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [],
+  imports: [HelpHintComponent],
 })
 export class PersonalitySystemPromptEditorComponent {
   readonly value = input.required<SystemPromptValue>();

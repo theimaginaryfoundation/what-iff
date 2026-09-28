@@ -8143,7 +8143,6 @@ export interface components {
          *       "default_model_id": "123e4567-e89b-12d3-a456-426614174002",
          *       "default_personality_id": "123e4567-e89b-12d3-a456-426614174003",
          *       "theme": "dark",
-         *       "last_seen_announcement": "",
          *       "favorite_model_ids": [
          *         "123e4567-e89b-12d3-a456-426614174002",
          *         "123e4567-e89b-12d3-a456-426614174004"
@@ -8177,8 +8176,6 @@ export interface components {
              * @enum {string}
              */
             theme: "light" | "dark" | "system";
-            /** @description ID of the most recently seen announcement banner; an empty string means none seen */
-            last_seen_announcement: string;
             /**
              * @description Model IDs the user has starred in the model picker, in the order they were
              *     added. Favorites are user-global rather than per-personality. Always an array;
@@ -8199,7 +8196,6 @@ export interface components {
          *       "default_model_id": "123e4567-e89b-12d3-a456-426614174002",
          *       "default_personality_id": "123e4567-e89b-12d3-a456-426614174003",
          *       "theme": "dark",
-         *       "last_seen_announcement": "2026-08-release",
          *       "favorite_model_ids": [
          *         "123e4567-e89b-12d3-a456-426614174002",
          *         "123e4567-e89b-12d3-a456-426614174004"
@@ -8228,12 +8224,6 @@ export interface components {
              * @enum {string}
              */
             theme?: "light" | "dark" | "system";
-            /**
-             * @description ID of the most recently seen announcement banner. Preserved when absent: only a
-             *     non-empty value is written, so omitting this field or sending an empty string
-             *     leaves the stored value unchanged. This endpoint cannot clear it.
-             */
-            last_seen_announcement?: string;
             /**
              * @description Model IDs to star in the model picker. Preserved when absent: omitting the field
              *     (or sending null) leaves the stored list untouched. When present the array
@@ -8720,6 +8710,11 @@ export interface components {
         WebhookChatMessageRequest: {
             mode: components["schemas"]["WebhookMessageMode"];
             message: string;
+            /**
+             * Format: uuid
+             * @description Optional model ID used as a per-run override for background mode. Does not change the chat's saved model.
+             */
+            model_id?: string;
             response_id?: string;
             /** @description IANA timezone name from the caller. */
             client_timezone?: string;

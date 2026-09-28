@@ -14,20 +14,22 @@
       class="mt-1 min-h-36 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
       [ngModel]="prompt()"
       (ngModelChange)="prompt.set($event)"
+      uiTooltip="What to ask on each run; the reply is posted to the thread"
       name="prompt"></textarea>
   </label>
 
   <div class="grid gap-3 md:grid-cols-2">
     <label class="text-sm text-text-secondary">
-      Chat
+      Thread
       <select
         class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
         [ngModel]="chatId()"
         (ngModelChange)="chatId.set($event)"
+        uiTooltip="Where replies go; with no thread, one is made on the first run"
         name="chatId">
-        <option value="">No chat association</option>
+        <option value="">New thread on first run</option>
         @for (chat of chats(); track chat.id) {
-          <option [value]="chat.id">{{ chat.name || 'Untitled chat' }}</option>
+          <option [value]="chat.id">{{ chat.name || 'Untitled thread' }}</option>
         }
       </select>
     </label>
@@ -38,8 +40,9 @@
         class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
         [ngModel]="personalityId()"
         (ngModelChange)="personalityId.set($event)"
+        uiTooltip="Reply as this personality on job runs only; the thread keeps its own"
         name="personalityId">
-        <option value="">Use chat default</option>
+        <option value="">Use thread default</option>
         @for (personality of personalities(); track personality.id) {
           <option [value]="personality.id">{{ personality.name }}</option>
         }
@@ -52,8 +55,9 @@
         class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
         [ngModel]="modelId()"
         (ngModelChange)="modelId.set($event)"
+        uiTooltip="Use this model on job runs only; the thread keeps its own"
         name="modelId">
-        <option value="">Use chat default</option>
+        <option value="">Use thread default</option>
         @for (model of models(); track model.id) {
           <option [value]="model.id">{{ model.display_name }}</option>
         }
@@ -61,18 +65,25 @@
     </label>
   </div>
 
-  <label class="block text-sm text-text-secondary">
-    Schedule input
+  <div class="block text-sm text-text-secondary">
+    <span class="inline-flex items-center gap-1">
+      <label for="schedule-input">Schedule</label>
+      <ui-help-hint label="How do schedules work?" heading="Schedule" guide="advanced">
+        Describe when to run in plain language, like "every weekday at 9am" or "tomorrow at 6pm". One-off jobs run
+        once; recurring jobs repeat, at most every 5 minutes.
+      </ui-help-hint>
+    </span>
     <input
       id="schedule-input"
       class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
       [ngModel]="scheduleInput()"
       (ngModelChange)="onScheduleChange($event)"
       [attr.aria-describedby]="'schedule-parse-help schedule-parse-preview'"
+      placeholder="e.g. every weekday at 9am"
       name="scheduleInput" />
-  </label>
+  </div>
   <p id="schedule-parse-help" class="text-xs text-text-muted">
-    Enter natural language or cron text. Parsing preview updates as you type.
+    Describe it in plain language. The preview below updates as you type.
   </p>
 
   <div class="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
@@ -82,12 +93,14 @@
         class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
         [ngModel]="timezone()"
         (ngModelChange)="onTimezoneChange($event)"
+        uiTooltip="IANA time zone used to read schedule times, e.g. Europe/London"
         name="timezone" />
     </label>
     <button
       type="button"
       class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary"
       [disabled]="previewLoading()"
+      uiTooltip="Check how the schedule was understood and list upcoming runs"
       (click)="requestPreview()">
       {{ previewLoading() ? 'Previewing…' : 'Preview schedule' }}
     </button>

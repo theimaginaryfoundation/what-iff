@@ -21,7 +21,7 @@ describe('ModeCardComponent', () => {
       title: 'Focused',
       description: 'desc',
       toolsSilencedLabel: '0 tools silenced',
-      skillsLabel: 'All skills on',
+      skillsLabel: 'No skills attached',
       jobsLabel: 'Jobs on',
       personalities: [
         {

@@ -6,6 +6,7 @@ import { ContextMemoriesTabComponent } from './tabs/context-memories-tab.compone
 import { ContextScratchpadTabComponent } from './tabs/context-scratchpad-tab.component';
 import { ContextToolsTabComponent } from './tabs/context-tools-tab.component';
 import { XIconComponent } from '../../../../shared/ui/icons/icons';
+import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 
 @Component({
   selector: 'app-context-panel',
@@ -16,6 +17,7 @@ import { XIconComponent } from '../../../../shared/ui/icons/icons';
     ContextToolsTabComponent,
     ContextBreakdownTabComponent,
     XIconComponent,
+    TooltipDirective,
   ],
   template: `
     <section class="context-panel" aria-label="Conversation context">
@@ -25,6 +27,8 @@ import { XIconComponent } from '../../../../shared/ui/icons/icons';
           type="button"
           class="context-panel__close"
           aria-label="Close context panel"
+          uiTooltip="Close context panel"
+          placement="left"
           (click)="closePanel()"
         >
           <ui-x-icon [size]="14" />

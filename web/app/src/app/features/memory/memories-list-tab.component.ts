@@ -9,7 +9,7 @@ import { MemoryService } from '../../core/services/memory.service';
 import { MemoryViewService } from '../../core/services/memory-view.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { MemoryMergeEvent, MemorySort } from '../../core/models/memory.model';
-import { toMemoryCardVm } from './helpers/memory-vm.helpers';
+import { GLOBAL_SCOPE_LABEL, toMemoryCardVm } from './helpers/memory-vm.helpers';
 import {
   parseQueryParams,
   serializeFilters,
@@ -23,6 +23,7 @@ import { MemoryCardGridComponent } from './components/memory-card-grid.component
 import { MemoryFocusPanelComponent } from './components/memory-focus-panel.component';
 import { DeleteMemoryModalComponent } from './components/delete-memory-modal.component';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
+import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { CalendarIconComponent, ChevDownIconComponent, SearchIconComponent } from '../../shared/ui/icons/icons';
 
 /** Matches memories-list-tab SCSS: rail beside list at >960px, modal below. */
@@ -40,6 +41,7 @@ const DESKTOP_FOCUS_QUERY = '(min-width: 961px)';
     CalendarIconComponent,
     ChevDownIconComponent,
     SearchIconComponent,
+    TooltipDirective,
   ],
   templateUrl: './memories-list-tab.component.html',
   styleUrl: './memories-list-tab.component.scss',
@@ -78,6 +80,7 @@ export class MemoriesListTabComponent implements OnInit {
   readonly selectedCount = this.view.selectedCount;
   readonly allSelected = this.view.allSelected;
   readonly globalPersonalityFilter = GLOBAL_PERSONALITY_FILTER;
+  readonly globalScopeLabel = GLOBAL_SCOPE_LABEL;
   readonly deleting = this.view.deleting;
   readonly mutating = this.view.mutating;
 

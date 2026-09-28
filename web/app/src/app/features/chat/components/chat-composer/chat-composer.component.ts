@@ -27,7 +27,9 @@ import {
   isPendingImageAttachment,
   pendingAttachmentKey,
 } from '../../../../core/models/file-attachment.model';
+import { Chat } from '../../../../core/models/chat.model';
 import { Model } from '../../../../core/models/model.model';
+import { Personality } from '../../../../core/models/personality.model';
 import { ChatMessage } from '../../../../core/models/message.model';
 import { Ritual } from '../../../../core/models/ritual.model';
 import { RitualService } from '../../../../core/services/ritual.service';
@@ -51,6 +53,9 @@ import {
   searchEmojiShortcodes,
 } from '../../helpers/emoji-shortcode.helpers';
 import { ModelPickerComponent } from '../model-picker/model-picker.component';
+import { ThreadPickerPopoverComponent } from '../thread-picker-popover/thread-picker-popover.component';
+import { ThreadRefChipsComponent } from '../thread-ref-chips/thread-ref-chips.component';
+import { THREAD_DRAG_MIME, isThreadDrag } from '../../helpers/thread-drag.helpers';
 import { EmojiAutocompleteMenuComponent } from '../emoji-autocomplete-menu/emoji-autocomplete-menu.component';
 import { SlashMenuComponent } from '../slash-menu/slash-menu.component';
 import { BoltIconComponent, EyeOffIconComponent, FileIconComponent, ImageIconComponent, PlusIconComponent } from '../../../../shared/ui/icons/icons';
@@ -64,11 +69,14 @@ import {
 const SLASH_COMMANDS: readonly SlashCommand[] = [
   { id: 'attach', label: 'Attach file', description: 'Upload a file', keywords: ['file', 'upload'] },
   { id: 'emoji', label: 'Emoji', description: 'Insert an emoji', keywords: ['reaction'] },
-  { id: 'skill', label: 'Skill', description: 'Add a skill to send', keywords: ['ritual', 'rit', 'routine', 'skills'] },
+  { id: 'skill', label: 'Skill', description: 'Add saved instructions to this message', keywords: ['ritual', 'rit', 'routine', 'skills'] },
+  { id: 'thread', label: 'Thread', description: 'Attach threads your personality can read', keywords: ['threads', 'reference', 'context'] },
   { id: 'gallery', label: 'Gallery image', description: 'Attach an image from the gallery', keywords: ['photo', 'image'] },
-  { id: 'personality', label: 'Personality', description: 'Change chat personality', keywords: ['persona', 'character'] },
-  { id: 'mode', label: MODE_SINGULAR, description: `Set the generation ${MODE_SINGULAR.toLowerCase()}`, keywords: ['emotion', 'mood'] },
+  { id: 'personality', label: 'Personality', description: 'Change the thread’s personality', keywords: ['persona', 'character'] },
+  { id: 'mode', label: MODE_SINGULAR, description: 'Switch the thread’s mode: its instructions, skills and model', keywords: ['emotion', 'mood'] },
 ];
+/** How long the "Thread already added." notice stays visible. */
+const THREAD_NOTICE_MS = 2000;
 const COMPOSER_DESKTOP_MAX_ROWS = 10;
 const COMPOSER_MOBILE_MAX_ROWS = 8;
 const COMPOSER_MOBILE_BREAKPOINT = 767;
@@ -85,6 +93,8 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
     FormsModule,
     PickerComponent,
     ModelPickerComponent,
+    ThreadPickerPopoverComponent,
+    ThreadRefChipsComponent,
     EmojiAutocompleteMenuComponent,
     SlashMenuComponent,
     BoltIconComponent,
@@ -96,7 +106,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
     TooltipDirective,
   ],
   template: `
-    <form class="composer" (submit)="onSubmit($event)" (drop)="onDrop($event)" (dragover)="onDragOver($event)" (dragleave)="isDragOver.set(false)">
+    <form class="composer" (submit)="onSubmit($event)" (drop)="onDrop($event)" (dragover)="onDragOver($event)" (dragleave)="onDragLeave()" [class.composer--thread-drop]="isThreadDragOver()">
       @if (quotaMessage()) {
         <p class="composer__quota" role="alert">{{ quotaMessage() }}</p>
       }
@@ -125,16 +135,31 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
         <div class="composer__drag" aria-hidden="true">Drop files to attach</div>
       }
 
+      @if (isThreadDragOver()) {
+        <div class="composer__drag composer__drag--thread" aria-hidden="true">Drop to add thread</div>
+      }
+
+      @if (threadNotice(); as notice) {
+        <div class="composer__thread-notice" role="status">{{ notice }}</div>
+      }
+
+      <app-thread-ref-chips
+        [threads]="threadReferences()"
+        (removed)="threadReferenceRemoved.emit($event)"
+        (cleared)="threadReferencesCleared.emit()"
+      />
+
       @if (pendingRituals().length) {
         <div class="composer__pending-skills" aria-label="Skills to send with this message">
           @for (r of pendingRituals(); track r.id) {
             <span class="composer__skill-chip">
-              {{ r.name }}
+              <span uiTooltip="Sent with your next message only">{{ r.name }}</span>
               <button
                 type="button"
                 class="composer__skill-chip-remove"
                 [disabled]="disabled()"
                 [attr.aria-label]="'Remove skill ' + r.name"
+                uiTooltip="Remove skill"
                 (click)="removePendingRitual(r.id)"
               >×</button>
             </span>
@@ -168,6 +193,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                 class="composer__attachment-remove"
                 [disabled]="disabled()"
                 [attr.aria-label]="'Remove attachment ' + (attachment.attachment?.name ?? attachment.file?.name)"
+                [uiTooltip]="notSeen ? '' : 'Remove attachment'"
                 (click)="removeAttachment(pendingAttachmentKey(attachment))"
               >×</button>
             </span>
@@ -176,6 +202,19 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
       }
 
       <div class="composer__body">
+        @if (threadPickerOpen()) {
+          <app-thread-picker-popover
+            [threads]="threadOptions()"
+            [selected]="threadReferences()"
+            [activeChatId]="chatId()"
+            [personalities]="personalities()"
+            [disabled]="disabled()"
+            (toggled)="pickThread($event)"
+            (done)="closeThreadPicker()"
+            (cancelled)="cancelThreadPicker($event)"
+          />
+        }
+
         <input #fileInput type="file" class="sr-only" multiple (change)="onFileInput($event)" />
 
         <div
@@ -186,7 +225,8 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
           <button
             type="button"
             class="composer__resizer"
-            aria-label="chat input resizer"
+            aria-label="Resize message box"
+            uiTooltip="Click to expand or shrink; drag to resize"
             [class.composer__resizer--active]="inputExpanded()"
             (mousedown)="onResizerMouseDown($event)"
             (touchstart)="onResizerTouchStart($event)"
@@ -226,6 +266,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                 class="composer__plus"
                 [disabled]="disabled()"
                 aria-label="Open chat options"
+                uiTooltip="Add emoji, skills, files or images; change mode or personality"
                 [attr.aria-expanded]="plusOpen()"
                 (click)="togglePlusMenu()"
               >
@@ -270,12 +311,17 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                           [class.composer__skill-row--selected]="isAutoMood()"
                           [disabled]="disabled()"
                           [attr.aria-selected]="isAutoMood()"
+                          aria-label="Auto"
+                          aria-describedby="composer-auto-mode-desc"
                           (click)="pickAutoMode()"
                         >
                           <span class="composer__skill-row-main">
                             <span class="composer__skill-name">Auto</span>
+                            <!-- Auto lets the model pick and switch the mode; choosing one below locks it. -->
                             @if (isAutoMood() && activeMode(); as current) {
-                              <span class="composer__skill-subtitle">Currently: {{ current.name }}</span>
+                              <span id="composer-auto-mode-desc" class="composer__skill-subtitle">Your personality picks the mode · now {{ current.name }}</span>
+                            } @else {
+                              <span id="composer-auto-mode-desc" class="composer__skill-subtitle">Your personality picks and switches the mode itself</span>
                             }
                           </span>
                         </button>
@@ -353,6 +399,10 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                     <ui-bolt-icon [size]="13" />
                     Skill
                   </button>
+                  <button type="button" role="menuitem" uiTooltip="Attach threads so your personality can read them" placement="right" (click)="openThreadPicker()">
+                    <span aria-hidden="true">#</span>
+                    Threads
+                  </button>
                   <button type="button" role="menuitem" (click)="openModePicker()" [attr.aria-label]="modeMenuAriaLabel()">
                     <span aria-hidden="true">◎</span>
                     {{ modeMenuLabel() }}
@@ -361,13 +411,18 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                     <ui-file-icon [size]="13" />
                     Attach file
                   </button>
-                  <button type="button" role="menuitem" (click)="personaButtonClicked.emit(); plusOpen.set(false); emojiOpen.set(false)">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    [attr.aria-label]="personaButtonAriaLabel()"
+                    (click)="personaButtonClicked.emit(); plusOpen.set(false); emojiOpen.set(false)"
+                  >
                     <span aria-hidden="true">{{ personaButtonLabel().charAt(0) }}</span>
                     {{ personaButtonLabel() }}
                   </button>
                   <button type="button" role="menuitem" (click)="openGalleryFromMenu()">
                     <ui-image-icon [size]="13" />
-                    Add from Gallery
+                    Add from gallery
                   </button>
                 </div>
               }
@@ -410,6 +465,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                 type="button"
                 class="composer__stop"
                 aria-label="Stop response"
+                uiTooltip="Stop generating this reply"
                 (click)="stop.emit()"
               >
                 <span class="composer__stop-icon" aria-hidden="true"></span>
@@ -419,6 +475,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                 type="submit"
                 class="composer__send"
                 aria-label="Send message"
+                [uiTooltip]="softKeyboard() ? '' : 'Send (Enter). Shift+Enter adds a new line'"
                 [disabled]="composerDisabled() || hasUploadingAttachments() || !draft().trim() || isOverLimit()"
               >
                 <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -639,6 +696,26 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
       gap: 0.25rem;
       max-width: 100%;
       padding: 0.125rem 0.25rem 0.125rem 0.5rem;
+    }
+
+    .composer__drag--thread {
+      pointer-events: none;
+    }
+
+    .composer--thread-drop {
+      outline: 2px dashed var(--color-accent);
+      outline-offset: 2px;
+    }
+
+    .composer__thread-notice {
+      background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface-base));
+      border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border-base));
+      border-radius: 0.5rem;
+      color: var(--color-text-secondary);
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.25rem 0.625rem;
+      width: fit-content;
     }
 
     .composer__skill-chip-remove {
@@ -1228,6 +1305,12 @@ export class ChatComposerComponent {
   readonly attachments = input<readonly PendingFileAttachment[]>([]);
   readonly chatId = input<string | null>(null);
   readonly pendingRituals = input<readonly Ritual[]>([]);
+  /** Threads attached to the message being composed (chips above the input). */
+  readonly threadReferences = input<readonly Chat[]>([]);
+  /** Threads the picker can offer (the active thread and archived ones are filtered out here). */
+  readonly threadOptions = input<readonly Chat[]>([]);
+  /** Personality catalog, used for the avatars in the thread picker. */
+  readonly personalities = input<readonly Personality[]>([]);
   readonly models = input<readonly Model[]>([]);
   readonly selectedModelId = input<string | null>(null);
   readonly selectedPersonalityName = input<string | null>(null);
@@ -1247,6 +1330,11 @@ export class ChatComposerComponent {
   readonly send = output<string>();
   readonly filesSelected = output<File[]>();
   readonly pendingRitualsChange = output<readonly Ritual[]>();
+  readonly threadReferenceToggled = output<Chat>();
+  readonly threadReferenceRemoved = output<string>();
+  readonly threadReferencesCleared = output<void>();
+  /** Replace the attached threads wholesale (the picker's Cancel restores its snapshot). */
+  readonly threadReferencesReplaced = output<readonly Chat[]>();
   readonly commandSelected = output<SlashCommand>();
   readonly modelSelected = output<Model>();
   readonly personaButtonClicked = output<void>();
@@ -1263,8 +1351,8 @@ export class ChatComposerComponent {
     }
     const name = this.selectedPersonalityName()?.trim() || '';
     return name
-      ? `Message ${name}... (type / for skills)`
-      : 'Message... (type / for skills)';
+      ? `Message ${name}... (type '/' for commands)`
+      : "Message... (type '/' for commands)";
   });
   readonly personaButtonLabel = computed(() => this.selectedPersonalityName() || 'Pick personality');
   readonly personaButtonAriaLabel = computed(() => {
@@ -1272,6 +1360,7 @@ export class ChatComposerComponent {
     return name ? `Change personality (currently ${name})` : 'Pick a personality';
   });
 
+  readonly threadPickerOpen = signal(false);
   readonly fileInput = viewChild<ElementRef<HTMLInputElement>>('fileInput');
   readonly textareaRef = viewChild<ElementRef<HTMLTextAreaElement>>('composerTextarea');
   readonly slashOpen = signal(false);
@@ -1283,6 +1372,10 @@ export class ChatComposerComponent {
   private readonly emojiQuery = signal<ActiveEmojiShortcode | null>(null);
   private readonly emojiMenu = viewChild<EmojiAutocompleteMenuComponent>('emojiMenu');
   readonly isDragOver = signal(false);
+  readonly isThreadDragOver = signal(false);
+  /** Transient message about a thread action (e.g. dropping a thread that is already attached). */
+  readonly threadNotice = signal<string | null>(null);
+  private threadNoticeTimer: ReturnType<typeof setTimeout> | null = null;
   readonly plusOpen = signal(false);
   readonly emojiOpen = signal(false);
   readonly skillPickerOpen = signal(false);
@@ -1330,7 +1423,7 @@ export class ChatComposerComponent {
   readonly hardLimitLabel = TEXT_LIMIT_HARD_MAX.toLocaleString();
   readonly warningLimitLabel = TEXT_LIMIT_WARNING_THRESHOLD.toLocaleString();
   readonly hasUploadingAttachments = computed(() => this.attachments().some(attachment => attachment.isUploading));
-  readonly noVisionTooltip = "This model can't see images. They'll still be saved to your gallery and chat history, where later agents can find them — they just won't be sent to this model.";
+  readonly noVisionTooltip = "This model can't see images. It's saved to your gallery, not sent";
   /** True when the selected model is known to be text-only; its image chips then show the no-vision style. */
   readonly selectedModelLacksVision = computed(
     () => this.models().find(m => m.id === this.selectedModelId())?.vision_support === false,
@@ -1437,6 +1530,9 @@ export class ChatComposerComponent {
       });
 
     this.destroyRef.onDestroy(() => this.teardownResizeDrag());
+    this.destroyRef.onDestroy(() => {
+      if (this.threadNoticeTimer) clearTimeout(this.threadNoticeTimer);
+    });
   }
 
   onSkillFilterInput(event: Event): void {
@@ -1585,6 +1681,9 @@ export class ChatComposerComponent {
       case 'skill':
         this.openSkillPicker();
         return;
+      case 'thread':
+        this.openThreadPicker();
+        return;
       case 'gallery':
         this.openGalleryPicker();
         return;
@@ -1609,6 +1708,7 @@ export class ChatComposerComponent {
     this.plusOpen.set(false);
     this.emojiOpen.set(false);
     this.skillPickerOpen.set(false);
+    this.threadPickerOpen.set(false);
     this.galleryOpen.set(false);
     this.modePickerOpen.set(false);
   }
@@ -1617,6 +1717,7 @@ export class ChatComposerComponent {
     const submenuOpen =
       this.emojiOpen() ||
       this.skillPickerOpen() ||
+      this.threadPickerOpen() ||
       this.modePickerOpen() ||
       this.galleryOpen();
 
@@ -1632,6 +1733,7 @@ export class ChatComposerComponent {
     this.plusOpen.set(false);
     this.emojiOpen.set(false);
     this.skillPickerOpen.set(false);
+    this.threadPickerOpen.set(false);
     this.modePickerOpen.set(false);
     this.openGalleryPicker();
   }
@@ -1640,6 +1742,7 @@ export class ChatComposerComponent {
     this.slashOpen.set(false);
     this.emojiOpen.set(false);
     this.skillPickerOpen.set(false);
+    this.threadPickerOpen.set(false);
     this.modePickerOpen.set(false);
     this.galleryOpen.set(true);
     this.galleryLoading.set(true);
@@ -1678,6 +1781,7 @@ export class ChatComposerComponent {
   openEmojiPicker(): void {
     this.plusOpen.set(false);
     this.skillPickerOpen.set(false);
+    this.threadPickerOpen.set(false);
     this.galleryOpen.set(false);
     this.modePickerOpen.set(false);
     this.emojiOpen.set(true);
@@ -1687,6 +1791,7 @@ export class ChatComposerComponent {
     this.plusOpen.set(false);
     this.emojiOpen.set(false);
     this.skillPickerOpen.set(false);
+    this.threadPickerOpen.set(false);
     this.galleryOpen.set(false);
     this.slashOpen.set(false);
     this.modePickerOpen.set(true);
@@ -1745,6 +1850,38 @@ export class ChatComposerComponent {
           this.skillLoadError.set('Could not load skills.');
         },
       });
+  }
+
+  openThreadPicker(): void {
+    this.plusOpen.set(false);
+    this.emojiOpen.set(false);
+    this.galleryOpen.set(false);
+    this.modePickerOpen.set(false);
+    this.skillPickerOpen.set(false);
+    this.slashOpen.set(false);
+    this.threadPickerOpen.set(true);
+  }
+
+  pickThread(thread: Chat): void {
+    if (this.disabled()) {
+      return;
+    }
+    this.threadReferenceToggled.emit(thread);
+  }
+
+  isThreadReferenced(id: string): boolean {
+    return this.threadReferences().some(thread => thread.id === id);
+  }
+
+  closeThreadPicker(): void {
+    this.threadPickerOpen.set(false);
+    this.textareaRef()?.nativeElement.focus();
+  }
+
+  /** Cancel/Escape in the picker: put back the selection from when it opened. */
+  cancelThreadPicker(snapshot: readonly Chat[]): void {
+    this.threadReferencesReplaced.emit(snapshot);
+    this.closeThreadPicker();
   }
 
   pickSkill(ritual: Ritual): void {
@@ -1848,12 +1985,46 @@ export class ChatComposerComponent {
 
   onDragOver(event: DragEvent): void {
     event.preventDefault();
+    if (isThreadDrag(event)) {
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      this.isThreadDragOver.set(true);
+      return;
+    }
     this.isDragOver.set(true);
+  }
+
+  private showThreadNotice(message: string): void {
+    if (this.threadNoticeTimer) {
+      clearTimeout(this.threadNoticeTimer);
+    }
+    this.threadNotice.set(message);
+    this.threadNoticeTimer = setTimeout(() => {
+      this.threadNotice.set(null);
+      this.threadNoticeTimer = null;
+    }, THREAD_NOTICE_MS);
+  }
+
+  onDragLeave(): void {
+    this.isDragOver.set(false);
+    this.isThreadDragOver.set(false);
   }
 
   onDrop(event: DragEvent): void {
     event.preventDefault();
     this.isDragOver.set(false);
+    this.isThreadDragOver.set(false);
+    const threadId = event.dataTransfer?.getData(THREAD_DRAG_MIME);
+    if (threadId) {
+      const thread = this.threadOptions().find(option => option.id === threadId);
+      if (thread && thread.id !== this.chatId() && !this.disabled()) {
+        if (this.isThreadReferenced(thread.id)) {
+          this.showThreadNotice('Thread already added.');
+        } else {
+          this.threadReferenceToggled.emit(thread);
+        }
+      }
+      return;
+    }
     const files = Array.from(event.dataTransfer?.files ?? []).filter(isAllowedFile);
     this.filesSelected.emit(files);
   }
@@ -1916,6 +2087,14 @@ export class ChatComposerComponent {
       const inPlusAnchor = target.closest('.composer__plus-anchor');
       if (!inSkill && !inPlusAnchor) {
         this.skillPickerOpen.set(false);
+      }
+    }
+
+    if (this.threadPickerOpen() && target instanceof Element) {
+      const inThread = target.closest('.composer__thread-popover');
+      const inPlusAnchor = target.closest('.composer__plus-anchor');
+      if (!inThread && !inPlusAnchor) {
+        this.threadPickerOpen.set(false);
       }
     }
 

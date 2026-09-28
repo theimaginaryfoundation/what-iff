@@ -25,6 +25,8 @@ export class ThreadListService implements OnDestroy {
   private readonly chatService = inject(ChatService);
 
   private readonly allThreads = signal<Chat[]>([]);
+  /** Every loaded thread, ignoring the Thread Manager's search/tag filters (used by pickers). */
+  readonly loadedThreads = this.allThreads.asReadonly();
   /** True when {@link ChatService.listAllChats} hit client-side total/page caps. */
   readonly listTruncated = signal(false);
   readonly loading = signal(false);

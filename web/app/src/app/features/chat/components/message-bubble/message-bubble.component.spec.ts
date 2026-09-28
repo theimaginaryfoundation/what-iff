@@ -1,10 +1,12 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
+import { Router } from '@angular/router';
 import { provideMarkdown } from 'ngx-markdown';
 
 import { MessageBubbleComponent } from './message-bubble.component';
 import { ChatMessage } from '../../../../core/models/message.model';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../../chat.constants';
+import { formatThreadReferences } from '../../helpers/thread-reference.helpers';
 
 describe('MessageBubbleComponent', () => {
     let fixture: ComponentFixture<MessageBubbleComponent>;
@@ -19,6 +21,49 @@ describe('MessageBubbleComponent', () => {
         fixture.componentRef.setInput('message', message('User'));
         fixture.componentRef.setInput('displayContent', 'Hello');
         fixture.detectChanges();
+    });
+
+    describe('attached-thread block in user messages', () => {
+        const ID_A = '11111111-1111-4111-8111-111111111111';
+        const ID_B = '22222222-2222-4222-8222-222222222222';
+        const block = formatThreadReferences([
+            { id: ID_A, name: 'Trip "plans"' },
+            { id: ID_B, name: 'Budget' },
+        ]);
+
+        it('renders the leading reference lines as thread chips and the rest as the message', () => {
+            fixture.componentRef.setInput('displayContent', `${block}What did we decide?`);
+            fixture.detectChanges();
+            const root: HTMLElement = fixture.nativeElement;
+            const chips = [...root.querySelectorAll('.bubble__thread-ref')] as HTMLAnchorElement[];
+
+            expect(chips.map(c => c.querySelector('.bubble__thread-ref-name')?.textContent)).toEqual(['Trip "plans"', 'Budget']);
+            expect(chips[0].getAttribute('href')).toBe(`/chat/${ID_A}`);
+            expect(fixture.componentInstance.bodyContent()).toBe('What did we decide?');
+        });
+
+        it('navigates in-app when a chip is clicked', () => {
+            const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+            fixture.componentRef.setInput('displayContent', `${block}Hi`);
+            fixture.detectChanges();
+
+            (fixture.nativeElement.querySelector('.bubble__thread-ref') as HTMLAnchorElement).click();
+
+            expect(navigate).toHaveBeenCalledWith(['/chat', ID_A]);
+        });
+
+        it('leaves assistant messages and non-matching text untouched', () => {
+            fixture.componentRef.setInput('message', message('Assistant'));
+            fixture.componentRef.setInput('displayContent', `${block}Hi`);
+            fixture.detectChanges();
+            expect(fixture.nativeElement.querySelector('.bubble__thread-refs')).toBeNull();
+
+            fixture.componentRef.setInput('message', message('User'));
+            fixture.componentRef.setInput('displayContent', '[Referenced thread "x"] not really');
+            fixture.detectChanges();
+            expect(fixture.nativeElement.querySelector('.bubble__thread-refs')).toBeNull();
+            expect(fixture.componentInstance.bodyContent()).toBe('[Referenced thread "x"] not really');
+        });
     });
 
     it('shows model/mood hint for assistant messages when present', () => {

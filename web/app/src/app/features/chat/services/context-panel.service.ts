@@ -4,6 +4,7 @@ import { Chat } from '../../../core/models/chat.model';
 import { ContextBreakdown } from '../../../core/models/message.model';
 import { RightPanelService } from '../../../core/services/right-panel.service';
 import { ToolCall } from '../../../core/models/toolcall.model';
+import { formatThreadReferences } from '../helpers/thread-reference.helpers';
 
 export type ContextPanelTab = 'scratchpad' | 'memories' | 'tools' | 'context';
 
@@ -15,6 +16,7 @@ export class ContextPanelService {
   private readonly _activeChat = signal<Chat | null>(null);
   private readonly _mobileOpen = signal(false);
   private readonly _composerInsert = signal<string | null>(null);
+  private readonly _composerThreadReferences = signal<Chat[]>([]);
   private readonly _toolCalls = signal<readonly ToolCall[]>([]);
   private readonly _latestBreakdown = signal<ContextBreakdown | null>(null);
   private readonly _latestBreakdownId = signal<string | null>(null);
@@ -27,6 +29,8 @@ export class ContextPanelService {
   readonly activeChat = this._activeChat.asReadonly();
   readonly mobileOpen = this._mobileOpen.asReadonly();
   readonly composerInsert = this._composerInsert.asReadonly();
+  /** Threads attached to the message being composed; rendered as chips above the composer. */
+  readonly composerThreadReferences = this._composerThreadReferences.asReadonly();
   readonly toolCalls = this._toolCalls.asReadonly();
   /** Most recent assistant turn's Context X-ray for the active chat, or null. */
   readonly latestBreakdown = this._latestBreakdown.asReadonly();
@@ -47,7 +51,62 @@ export class ContextPanelService {
   constructor(private readonly rightPanel: RightPanelService) {}
 
   setActiveChat(chat: Chat | null): void {
+    const previousId = this.activeChatId();
     this._activeChat.set(chat);
+    this.rebindComposerThreadReferences(previousId, chat?.id ?? null);
+  }
+
+  /**
+   * Keeps attached threads tied to the chat they were attached for. References added while a
+   * chat is open belong to it and are dropped when the user moves to another chat (or none).
+   * References added with no chat open (e.g. from the Thread Manager) are unbound and follow
+   * the user into the next chat they open, minus that chat itself (no self-references).
+   */
+  private rebindComposerThreadReferences(previousId: string | null, activeId: string | null): void {
+    if (previousId === activeId) {
+      return;
+    }
+    if (previousId !== null) {
+      this._composerThreadReferences.set([]);
+    } else if (activeId !== null) {
+      this._composerThreadReferences.update(current => current.filter(thread => thread.id !== activeId));
+    }
+  }
+
+  isComposerThreadReferenced(threadId: string): boolean {
+    return this._composerThreadReferences().some(thread => thread.id === threadId);
+  }
+
+  /** Adds the thread to the composer references, or removes it if already attached. */
+  toggleComposerThreadReference(thread: Chat): void {
+    if (this.isComposerThreadReferenced(thread.id)) {
+      this.removeComposerThreadReference(thread.id);
+      return;
+    }
+    // A thread can't reference itself.
+    if (!thread.id || thread.id === this.activeChatId()) {
+      return;
+    }
+    this._composerThreadReferences.update(current => [...current, thread]);
+  }
+
+  removeComposerThreadReference(threadId: string): void {
+    this._composerThreadReferences.update(current => current.filter(thread => thread.id !== threadId));
+  }
+
+  /** Replaces the composer references wholesale (e.g. restoring a selection snapshot). */
+  setComposerThreadReferences(threads: readonly Chat[]): void {
+    const activeId = this.activeChatId();
+    this._composerThreadReferences.set(threads.filter(thread => !!thread.id && thread.id !== activeId));
+  }
+
+  clearComposerThreadReferences(): void {
+    this._composerThreadReferences.set([]);
+  }
+
+  /** Text block sent ahead of the user's message for the attached threads ('' when none). */
+  composerThreadReferencesText(): string {
+    return formatThreadReferences(this._composerThreadReferences());
   }
 
   setToolCalls(toolCalls: readonly ToolCall[]): void {

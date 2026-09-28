@@ -15,6 +15,7 @@ const (
 type WebhookChatMessageRequest struct {
 	Mode           WebhookMessageMode `json:"mode"`
 	Message        string             `json:"message"`
+	ModelID        *uuid.UUID         `json:"model_id,omitempty"`
 	ResponseID     *string            `json:"response_id,omitempty"`
 	Attachments    []*FileAttachment  `json:"attachments,omitempty"`
 	Rituals        []*Ritual          `json:"rituals,omitempty"`

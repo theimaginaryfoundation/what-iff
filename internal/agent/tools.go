@@ -40,6 +40,9 @@ type turnToolPolicy struct {
 type ToolMeta struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	// Guide is a short overview of what the tool can do, for its tooltip. Empty for tools
+	// without one (e.g. external tools).
+	Guide string `json:"guide,omitempty"`
 }
 
 // humanFacingToolDescription resolves the presentation copy for a tool.
@@ -60,12 +63,16 @@ func GetAvailableTools(ctx context.Context, firstPartyWebSearch bool) []ToolMeta
 	_ = ctx
 	definitions := agenttools.FunctionToolCatalog()
 	out := make([]ToolMeta, 0, len(definitions)+1)
-	out = append(out, ToolMeta{Name: agenttools.ToolNameWebSearch, Description: agenttools.WebSearchToggleDescription(firstPartyWebSearch)})
+	out = append(out, ToolMeta{
+		Name:        agenttools.ToolNameWebSearch,
+		Description: agenttools.WebSearchToggleDescription(firstPartyWebSearch),
+		Guide:       agenttools.WebSearchToggleGuide(firstPartyWebSearch),
+	})
 	for _, def := range definitions {
 		if !def.UserToggleable {
 			continue
 		}
-		out = append(out, ToolMeta{Name: def.Spec.Name, Description: humanFacingToolDescription(def)})
+		out = append(out, ToolMeta{Name: def.Spec.Name, Description: humanFacingToolDescription(def), Guide: strings.TrimSpace(def.UserGuide)})
 	}
 	return out
 }

@@ -1,6 +1,12 @@
 <section class="skills-page mx-auto flex w-full max-w-4xl flex-col gap-4 p-4 md:p-6">
   <header class="skills-page__header">
-    <h1>Skills</h1>
+    <h1 class="skills-page__title">
+      Skills
+      <ui-help-hint label="What is a skill?" heading="Skills" guide="advanced">
+        A skill is a saved prompt. Calling it with '/' adds its content to your message and turns on its MCP servers for
+        that turn. Global skills work in every thread; personality skills only in that personality's threads.
+      </ui-help-hint>
+    </h1>
     <p>Reusable prompt templates. Type / in chat to call a skill.</p>
   </header>
 
@@ -10,11 +16,12 @@
       <input
         type="text"
         placeholder="Search skills..."
+        aria-label="Search skills"
         [value]="filters().query"
         (input)="onSearch($any($event.target).value)" />
     </div>
     <div class="skills-page__sort-wrap">
-      <select [value]="filters().sort" (change)="onSortChanged($any($event.target).value)">
+      <select aria-label="Sort skills" [value]="filters().sort" (change)="onSortChanged($any($event.target).value)">
         <option value="name_asc">Name (A-Z)</option>
         <option value="created_desc">Created date</option>
         <option value="updated_desc">Last updated</option>
@@ -53,9 +60,9 @@
                   [style.--persona-accent]="rowAccent(row)"
                   [style.--persona-accent-surface]="rowAccentSurface(row)" />
               } @else {
-                <span class="skills-page__card-global-avatar">G</span>
+                <span class="skills-page__card-global-avatar" aria-hidden="true" [uiTooltip]="rowScopeHint(row)">G</span>
               }
-              <span class="skills-page__card-persona-label">{{ rowPersonaLabel(row) }}</span>
+              <span class="skills-page__card-persona-label" [uiTooltip]="rowScopeHint(row)">{{ rowPersonaLabel(row) }}</span>
             </div>
 
             <div class="skills-page__card-copy">
@@ -68,21 +75,33 @@
             </div>
 
             <div class="skills-page__card-actions">
-              <button type="button" class="skills-page__call-btn" (click)="callRitual(row)">
+              <button
+                type="button"
+                class="skills-page__call-btn"
+                [uiTooltip]="callHint(row)"
+                (click)="callRitual(row)">
                 <ui-bolt-icon [size]="11" />
                 Call
               </button>
-              <button type="button" class="skills-page__icon-btn" title="Edit" (click)="onOpen(row.id)">
-                <ui-edit-icon [size]="13" />
-              </button>
               <button
                 type="button"
-                class="skills-page__icon-btn skills-page__icon-btn--delete"
-                title="Delete"
-                [disabled]="row.isSystem"
-                (click)="onDelete(row.id)">
-                <ui-trash-icon [size]="13" />
+                class="skills-page__icon-btn"
+                [attr.aria-label]="(row.isSystem ? 'View ' : 'Edit ') + row.name"
+                [uiTooltip]="row.isSystem ? 'View built-in skill' : 'Edit skill'"
+                (click)="onOpen(row.id)">
+                <ui-edit-icon [size]="13" />
               </button>
+              <!-- Disabled buttons don't fire hover events, so the tooltip sits on a wrapper. -->
+              <span class="skills-page__icon-wrap" [uiTooltip]="row.isSystem ? 'Built-in skills can\'t be deleted' : 'Delete skill'">
+                <button
+                  type="button"
+                  class="skills-page__icon-btn skills-page__icon-btn--delete"
+                  [attr.aria-label]="'Delete ' + row.name"
+                  [disabled]="row.isSystem"
+                  (click)="onDelete(row.id)">
+                  <ui-trash-icon [size]="13" />
+                </button>
+              </span>
             </div>
           </article>
         }

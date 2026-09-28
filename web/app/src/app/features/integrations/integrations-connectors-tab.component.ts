@@ -1,6 +1,7 @@
 import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { MCPServerService } from '../../core/services/mcp-server.service';
 import { RitualService } from '../../core/services/ritual.service';
@@ -10,7 +11,7 @@ import { Ritual } from '../../core/models/ritual.model';
 @Component({
   selector: 'app-integrations-connectors-tab',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, TooltipDirective],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './integrations-connectors-tab.component.html'
 })

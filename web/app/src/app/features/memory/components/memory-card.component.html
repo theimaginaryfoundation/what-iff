@@ -34,9 +34,16 @@
     <div class="memory-card__top">
       <div class="memory-card__identity">
         <span class="memory-card__name">{{ association() }}</span>
-        <span class="memory-card__level" [attr.data-level]="memory().level">{{ memory().levelLabel }}</span>
+        <span class="memory-card__level" [attr.data-level]="memory().level" [uiTooltip]="levelHint()">{{ memory().levelLabel }}</span>
         @if (memory().starred) {
-          <ui-star-icon [size]="12" [filled]="true" class="memory-card__star memory-card__star--on" />
+          <ui-star-icon
+            [size]="12"
+            [filled]="true"
+            class="memory-card__star memory-card__star--on"
+            role="img"
+            aria-label="Starred"
+            uiTooltip="Starred for your own filtering; doesn't affect replies"
+          />
         }
       </div>
       <div class="memory-card__top-right">
@@ -47,6 +54,7 @@
               type="button"
               class="memory-card__menu-btn"
               aria-label="More actions"
+              uiTooltip="Edit, move, star, archive or delete"
               [attr.aria-expanded]="menuOpen()"
               (click)="toggleMenu($event)"
             >
@@ -56,12 +64,32 @@
               <div class="memory-card__menu" role="menu">
                 <button type="button" role="menuitem" (click)="startEdit($event)">Edit</button>
                 @if (memory().level !== "thread") {
-                  <button type="button" role="menuitem" (click)="onMove($event)">Move</button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    uiTooltip="Change which personality can use this memory"
+                    placement="left"
+                    (click)="onMove($event)"
+                  >
+                    Move
+                  </button>
                 }
-                <button type="button" role="menuitem" (click)="onStar($event)">
+                <button
+                  type="button"
+                  role="menuitem"
+                  uiTooltip="A flag for your own filtering; doesn't affect replies"
+                  placement="left"
+                  (click)="onStar($event)"
+                >
                   {{ memory().starred ? "Unstar" : "Star" }}
                 </button>
-                <button type="button" role="menuitem" (click)="onArchive($event)">
+                <button
+                  type="button"
+                  role="menuitem"
+                  [uiTooltip]="isArchivedView() ? 'Make this memory usable in replies again' : 'Keep it, but stop using it in replies'"
+                  placement="left"
+                  (click)="onArchive($event)"
+                >
                   {{ isArchivedView() ? "Unarchive" : "Archive" }}
                 </button>
                 <button type="button" role="menuitem" class="memory-card__menu-danger" (click)="onDelete($event)">Delete</button>
@@ -78,7 +106,7 @@
           <label class="memory-card__pin-label">
             Pin to personality
             <select class="memory-card__pin-select" [ngModel]="pinDraft()" [disabled]="pinUpdating()" (ngModelChange)="onPinChange($event)">
-              <option [ngValue]="null">All personalities</option>
+              <option [ngValue]="null">{{ globalScopeLabel }}</option>
               @for (personality of personalities(); track personality.id) {
                 <option [ngValue]="personality.id">{{ personality.label }}</option>
               }
@@ -99,9 +127,9 @@
       @if (readOnly()) {
         <span>Thread checkpoint summary</span>
       } @else {
-        <span>{{ memory().confidencePercent }}% · {{ memory().confidenceLabel }} confidence</span>
+        <span [uiTooltip]="confidenceHint">{{ memory().confidencePercent }}% · {{ memory().confidenceLabel }} confidence</span>
         @if (memory().verifiedCount; as count) {
-          <span class="memory-card__verified" title="Verified duplicate count">{{ count }}×</span>
+          <span class="memory-card__verified" [attr.aria-label]="'Verified ' + count + ' times'" [uiTooltip]="verifiedHint">{{ count }}×</span>
         }
       }
     </div>

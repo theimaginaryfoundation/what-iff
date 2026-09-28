@@ -3,16 +3,18 @@ import { ChangeDetectionStrategy, Component, computed, inject, input } from '@an
 import { AuthService } from '../../core/services/auth.service';
 import { ProfileSettingsModalService } from '../../features/profile-settings/profile-settings-modal.service';
 import { HelpActionService } from '../../extensions/help-action.service';
+import { NavActionsOutletComponent } from '../../extensions/nav-actions-outlet.component';
 import { CircleHelpIconComponent, UserIconComponent } from '../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 
 /**
- * Sidebar header: help trigger and profile trigger.
+ * Sidebar header: help trigger, extension actions (see NavActionsOutletComponent)
+ * and profile trigger.
  */
 @Component({
   selector: 'app-sidebar-header',
   standalone: true,
-  imports: [TooltipDirective, CircleHelpIconComponent, UserIconComponent],
+  imports: [TooltipDirective, CircleHelpIconComponent, UserIconComponent, NavActionsOutletComponent],
   templateUrl: './app-sidebar-header.component.html',
   styleUrl: './app-sidebar-header.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

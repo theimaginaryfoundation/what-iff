@@ -2,16 +2,33 @@ import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
-import { associationLabel, isUserScopedMemoryLevel, MemoryCardVm } from '../helpers/memory-vm.helpers';
+import {
+  associationLabel,
+  CONFIDENCE_HINT,
+  GLOBAL_SCOPE_LABEL,
+  isUserScopedMemoryLevel,
+  levelDescription,
+  MemoryCardVm,
+  VERIFIED_HINT,
+} from '../helpers/memory-vm.helpers';
 import { MemoryPersonalityOption } from './memory-form.component';
 import { GlobeIconComponent, StarIconComponent } from '../../../shared/ui/icons/icons';
 import { PersonaAccentScopeComponent } from '../../personality/picker/persona-accent-scope.component';
 import { PersonaCoverComponent } from '../../personality/picker/persona-cover.component';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 
 @Component({
   selector: 'app-memory-card',
   standalone: true,
-  imports: [DatePipe, FormsModule, GlobeIconComponent, StarIconComponent, PersonaAccentScopeComponent, PersonaCoverComponent],
+  imports: [
+    DatePipe,
+    FormsModule,
+    GlobeIconComponent,
+    StarIconComponent,
+    PersonaAccentScopeComponent,
+    PersonaCoverComponent,
+    TooltipDirective,
+  ],
   templateUrl: './memory-card.component.html',
   styleUrl: './memory-card.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -33,6 +50,11 @@ export class MemoryCardComponent {
   readonly move = output<string>();
   readonly archive = output<string>();
   readonly delete = output<string>();
+
+  readonly globalScopeLabel = GLOBAL_SCOPE_LABEL;
+  readonly confidenceHint = CONFIDENCE_HINT;
+  readonly verifiedHint = VERIFIED_HINT;
+  readonly levelHint = computed(() => levelDescription(this.memory().level));
 
   readonly editing = signal(false);
   readonly draft = signal('');

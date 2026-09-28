@@ -80,14 +80,15 @@
         <fieldset
           class="profile-settings__callout profile-settings__form"
           data-testid="chat-defaults">
-          <legend>Chat defaults</legend>
-          <small>Choose what new chats start with. Changes save immediately; you can leave personality unset.</small>
+          <legend>Thread defaults</legend>
+          <small>Choose what new threads start with. Changes save immediately; you can leave personality unset.</small>
 
           <label class="profile-settings__field">
             <span>Default model</span>
             <select
               [value]="preferences()?.default_model_id ?? ''"
               [disabled]="loadingAction()"
+              uiTooltip="Model new threads start with; you can switch it in any thread"
               (change)="onDefaultModelChange($any($event.target).value)">
               @for (model of models(); track model.id) {
                 <option [value]="model.id">{{ model.display_name }}</option>
@@ -99,6 +100,7 @@
             <select
               [value]="preferences()?.default_personality_id ?? ''"
               [disabled]="loadingAction()"
+              uiTooltip="Personality new threads start with unless you pick another"
               (change)="onDefaultPersonalityChange($any($event.target).value)">
               <option value="">No default personality</option>
               @for (personality of personalities(); track personality.id) {

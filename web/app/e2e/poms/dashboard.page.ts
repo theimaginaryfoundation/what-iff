@@ -34,7 +34,6 @@ export class DashboardPage {
 
   async navigateTo(): Promise<void> {
     await this.page.goto('/dashboard');
-    await this.shell.dismissAnnouncementIfPresent();
   }
 
   /**

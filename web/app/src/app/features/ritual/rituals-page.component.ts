@@ -24,6 +24,8 @@ import { PersonaPickerDialogComponent } from '../personality/picker/persona-pick
 import { PersonaCoverComponent } from '../personality/picker/persona-cover.component';
 import { BoltIconComponent, ChevDownIconComponent, EditIconComponent, SearchIconComponent, TrashIconComponent } from '../../shared/ui/icons/icons';
 import { personalityAccent, personalityAccentSurface } from '../personality/helpers/personality-vm.helpers';
+import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 
@@ -40,6 +42,8 @@ const NIL_UUID = '00000000-0000-0000-0000-000000000000';
     SearchIconComponent,
     EditIconComponent,
     TrashIconComponent,
+    HelpHintComponent,
+    TooltipDirective,
   ],
   templateUrl: './rituals-page.component.html',
   styleUrl: './rituals-page.component.scss',
@@ -313,6 +317,19 @@ export class RitualsPageComponent implements OnInit {
     if (row.isSystem) return 'SYSTEM';
     if (!this.normalizePersonalityId(row.personalityId)) return 'GLOBAL';
     return row.affinityLabel.trim().toUpperCase();
+  }
+
+  /** Tooltip for the scope avatar/label on a skill card. */
+  rowScopeHint(row: { personalityId: string | null; isSystem: boolean }): string {
+    if (row.isSystem) return "Built-in skill; it can't be edited or deleted";
+    if (!this.normalizePersonalityId(row.personalityId)) return 'Global: works in threads with every personality';
+    return "Works only in this personality's threads";
+  }
+
+  callHint(row: { personalityId: string | null }): string {
+    return this.normalizePersonalityId(row.personalityId)
+      ? 'Start a new thread with this skill ready to send'
+      : 'Pick a personality, then start a new thread with this skill';
   }
 
   async callRitual(row: { id: string; name: string; personalityId: string | null }): Promise<void> {

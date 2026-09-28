@@ -10,13 +10,16 @@ import { ChatService } from '../../core/services/chat.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { MemoryService } from '../../core/services/memory.service';
 import { PersonalityService } from '../../core/services/personality.service';
+import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
+import { memoryScopeLabel, mergeTypeDescription, mergeTypeLabel } from './helpers/memory-vm.helpers';
 
 type PromptAuditEntry = PersonalityPromptChange & { personality_name: string };
 
 @Component({
   selector: 'app-compaction-log-page',
   standalone: true,
-  imports: [CommonModule, DatePipe, RouterLink, UpperCasePipe],
+  imports: [CommonModule, DatePipe, RouterLink, UpperCasePipe, HelpHintComponent, TooltipDirective],
   templateUrl: './compaction-log-page.component.html',
   styleUrl: './compaction-log-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -221,16 +224,9 @@ export class CompactionLogPageComponent implements OnInit {
     return parts.join(' · ');
   }
 
-  mergeTypeLabel(event: MemoryMergeEvent): string {
-    switch (event.merge_type) {
-      case 'link':
-        return 'Linked';
-      case 'fold_live':
-        return 'Memories Merged';
-      default:
-        return 'Updated';
-    }
-  }
+  readonly mergeTypeLabel = mergeTypeLabel;
+  readonly mergeTypeDescription = mergeTypeDescription;
+  readonly scopeLabel = memoryScopeLabel;
 
   mergedSourceCount(event: MemoryMergeEvent): number {
     const fromMembers = event.source_members?.length ?? 0;
@@ -255,10 +251,10 @@ export class CompactionLogPageComponent implements OnInit {
 
     const isScratchpad = snapshot.kind === 'scratchpad';
     const confirmed = await this.confirmation.confirm({
-      title: isScratchpad ? 'Restore personality scratchpad?' : 'Restore conversation summary?',
+      title: isScratchpad ? 'Restore personality scratchpad?' : 'Restore thread summary?',
       message: isScratchpad
-        ? 'This restores the scratchpad for every chat using this personality. Continue?'
-        : 'This restores this conversation to the selected checkpoint summary. Continue?',
+        ? 'This restores the scratchpad for every thread using this personality. Continue?'
+        : 'This restores this thread to the selected checkpoint summary. Continue?',
       type: 'warning',
       confirmText: 'Restore',
       cancelText: 'Cancel',
@@ -276,8 +272,8 @@ export class CompactionLogPageComponent implements OnInit {
         this.revertedIds.set(next);
         this.notice.set(
           snapshot.kind === 'scratchpad'
-            ? 'Scratchpad restored for this personality (shared across its chats).'
-            : 'Conversation summary restored for this thread.',
+            ? 'Scratchpad restored for this personality (shared across its threads).'
+            : 'Thread summary restored.',
         );
       },
       error: err => {

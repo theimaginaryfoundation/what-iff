@@ -224,7 +224,6 @@ func TestCreatePersonality_FirstPersonality_PreservesUnrelatedPreferences(t *tes
 		DefaultModelID:       uuid.New(),
 		DefaultPersonalityID: uuid.Nil,
 		Theme:                "dark",
-		LastSeenAnnouncement: "2026-08-release",
 		FavoriteModelIDs:     []string{"model-a", "model-b"},
 	}
 

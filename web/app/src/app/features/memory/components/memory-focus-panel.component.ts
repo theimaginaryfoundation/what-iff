@@ -3,10 +3,18 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
 import { RouterLink } from '@angular/router';
 
 import { MemoryMergeEvent } from '../../../core/models/memory.model';
-import { associationLabel, MemoryCardVm } from '../helpers/memory-vm.helpers';
+import {
+  associationLabel,
+  levelDescription,
+  MemoryCardVm,
+  mergeTypeDescription,
+  mergeTypeLabel,
+  VERIFIED_HINT,
+} from '../helpers/memory-vm.helpers';
 import { MemoryPersonalityOption } from './memory-form.component';
 import { StarIconComponent } from '../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
+import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.component';
 import { PersonaAccentScopeComponent } from '../../personality/picker/persona-accent-scope.component';
 import { PersonaCoverComponent } from '../../personality/picker/persona-cover.component';
 
@@ -18,6 +26,7 @@ import { PersonaCoverComponent } from '../../personality/picker/persona-cover.co
     RouterLink,
     StarIconComponent,
     TooltipDirective,
+    HelpHintComponent,
     PersonaAccentScopeComponent,
     PersonaCoverComponent,
   ],
@@ -54,16 +63,10 @@ export class MemoryFocusPanelComponent {
   });
   readonly mergedFromIds = computed(() => this.memory().mergedFromIds);
 
-  mergeTypeLabel(event: MemoryMergeEvent): string {
-    switch (event.merge_type) {
-      case 'link':
-        return 'Linked related memories';
-      case 'fold_live':
-        return 'Memories merged';
-      default:
-        return 'Created from batch';
-    }
-  }
+  readonly mergeTypeLabel = mergeTypeLabel;
+  readonly mergeTypeDescription = mergeTypeDescription;
+  readonly verifiedHint = VERIFIED_HINT;
+  readonly levelHint = computed(() => levelDescription(this.memory().level));
 
   sourceCount(event: MemoryMergeEvent): number {
     const fromMembers = event.source_members?.length ?? 0;

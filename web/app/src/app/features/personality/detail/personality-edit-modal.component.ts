@@ -38,6 +38,7 @@ import {
 } from '../../../shared/ui/icons/icons';
 import { PersonalityAttachmentsListComponent } from './personality-attachments-list.component';
 import { PersonalityPortraitFocusEditorComponent } from './personality-portrait-focus-editor.component';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 import {
   TEXT_LIMIT_HARD_MAX,
   TEXT_LIMIT_WARNING_THRESHOLD,
@@ -65,16 +66,18 @@ const THUMBNAIL_PREVIEW_SIZE = 96;
     BrainIconComponent,
     ArrowRightIconComponent,
     ExpandIconComponent,
+    TooltipDirective,
   ],
   template: `
     <ui-modal [open]="open()" [labelledBy]="titleId" size="lg" (dismiss)="onModalDismiss($event)">
       <div modal-header class="flex min-w-0 flex-1 items-center justify-between gap-3">
-        <h2 [id]="titleId" class="text-base font-semibold text-(--color-text-primary)">Edit Personality</h2>
+        <h2 [id]="titleId" class="text-base font-semibold text-(--color-text-primary)">Edit personality</h2>
         <button
           type="button"
           class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-(--color-text-secondary) hover:bg-(--color-surface-elevated) hover:text-(--color-text-primary) focus:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)"
           aria-label="Expand editor"
-          title="Expand editor"
+          uiTooltip="Open the full-page editor"
+          placement="left"
           (click)="requestExpand()"
         >
           <ui-expand-icon [size]="18" />
@@ -94,6 +97,7 @@ const THUMBNAIL_PREVIEW_SIZE = 96;
                 <p class="text-xs font-semibold text-(--color-text-secondary)">Thumbnail preview</p>
                 <div
                   class="relative h-24 w-24 overflow-hidden rounded-full border-2 shadow-[0_2px_12px_rgba(0,0,0,0.25)]"
+                  uiTooltip="The circle crop used as this personality's avatar"
                   [style.border-color]="value.accent_color || 'rgb(194,87,42)'"
                 >
                   @if (coverImageUrl(); as url) {
@@ -122,18 +126,21 @@ const THUMBNAIL_PREVIEW_SIZE = 96;
                     type="button"
                     class="w-full rounded-md border border-border-base bg-(--color-surface-input) px-3 py-1.5 text-xs text-(--color-text-secondary) hover:bg-(--color-surface-card)"
                     [disabled]="coverUploading()"
+                    uiTooltip="Upload an image to use as the portrait"
                     (click)="uploadCoverPhoto()"
                   >{{ coverUploading() ? 'Uploading…' : 'Upload photo' }}</button>
                   <button
                     type="button"
                     class="w-full rounded-md border border-border-base bg-(--color-surface-input) px-3 py-1.5 text-xs text-(--color-text-secondary) hover:bg-(--color-surface-card)"
+                    uiTooltip="Use an image from your gallery as the portrait"
                     (click)="loadGallery()"
                   >Select from gallery</button>
                   <button
                     type="button"
                     class="w-full rounded-md border border-border-base bg-(--color-surface-input) px-3 py-1.5 text-xs text-(--color-text-secondary) hover:bg-(--color-surface-card)"
+                    uiTooltip="Set the portraits shown next to replies, in the gallery"
                     (click)="manageExpressions()"
-                  >Manage Expressions</button>
+                  >Manage expressions</button>
                   <button
                     type="button"
                     class="w-full rounded-md border border-red-600/40 bg-red-500/15 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-500/25 dark:text-red-300 dark:hover:bg-red-500/20"
@@ -143,7 +150,7 @@ const THUMBNAIL_PREVIEW_SIZE = 96;
                 </div>
                 @if (galleryOpen()) {
                   <section class="rounded-lg border border-border-base bg-(--color-surface-elevated) p-3">
-                    <p class="mb-2 text-sm font-medium text-(--color-text-primary)">Choose Portrait</p>
+                    <p class="mb-2 text-sm font-medium text-(--color-text-primary)">Choose portrait</p>
                     @if (galleryLoading()) {
                       <p class="text-xs text-(--color-text-secondary)">Loading gallery…</p>
                     } @else {
@@ -182,7 +189,7 @@ const THUMBNAIL_PREVIEW_SIZE = 96;
             </label>
 
             <div class="flex flex-col gap-1">
-              <p class="text-xs font-semibold text-(--color-text-secondary)">Accent Color</p>
+              <p class="text-xs font-semibold text-(--color-text-secondary)">Accent color</p>
               <div class="flex flex-wrap items-center gap-2">
                 @for (preset of accentPresets; track preset) {
                   <button
@@ -195,16 +202,18 @@ const THUMBNAIL_PREVIEW_SIZE = 96;
                 }
                 <input
                   type="color"
+                  aria-label="Custom accent color"
+                  uiTooltip="Choose a custom color"
                   class="h-8 w-10 rounded bg-(--color-surface-input) p-1"
                   [ngModel]="value.accent_color ?? '#4f46e5'"
                   (ngModelChange)="setDraftField('accent_color', $event)"
                 />
               </div>
-              <span class="text-[11px] text-(--color-text-muted)">Pick a preset or choose a custom color</span>
+              <span class="text-[11px] text-(--color-text-muted)">Tints this personality's cards, borders and thread view. Pick a preset or a custom color.</span>
             </div>
 
             <label class="flex flex-col gap-1">
-              <span class="text-xs font-semibold text-(--color-text-secondary)">System Prompt</span>
+              <span class="text-xs font-semibold text-(--color-text-secondary)">System prompt</span>
               <textarea
                 rows="6"
                 class="w-full resize-y rounded-lg border border-border-base bg-(--color-surface-input) px-3 py-2 text-sm leading-relaxed text-(--color-text-primary) outline-none focus:border-accent focus:ring-1 focus:ring-accent"
@@ -300,7 +309,7 @@ const THUMBNAIL_PREVIEW_SIZE = 96;
 
           @if (personality(); as current) {
             <div class="flex flex-col gap-1">
-              <span class="text-xs font-semibold text-(--color-text-secondary)">Attached Files</span>
+              <span class="text-xs font-semibold text-(--color-text-secondary)">Attached files</span>
               <app-personality-attachments-list [personalityId]="current.id" [borderless]="true" />
             </div>
           }
@@ -311,10 +320,11 @@ const THUMBNAIL_PREVIEW_SIZE = 96;
         <button
           type="button"
           class="inline-flex items-center gap-1.5 rounded-lg border border-border-base bg-transparent px-3 py-1.5 text-sm font-medium text-(--color-text-primary) hover:bg-(--color-surface-elevated)"
+          uiTooltip="See the memories for this personality"
           (click)="viewMemories()"
         >
           <ui-brain-icon [size]="12" />
-          <span>View Memories</span>
+          <span>View memories</span>
           <ui-arrow-right-icon [size]="12" />
         </button>
         <div class="flex items-center gap-2">
@@ -328,7 +338,7 @@ const THUMBNAIL_PREVIEW_SIZE = 96;
             class="rounded-lg bg-(--color-accent) px-3 py-1.5 text-sm font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
             [disabled]="saving() || deleting() || !draft() || systemPromptOverLimit()"
             (click)="save()"
-          >{{ saving() ? 'Saving…' : 'Save Changes' }}</button>
+          >{{ saving() ? 'Saving…' : 'Save changes' }}</button>
         </div>
       </div>
     </ui-modal>

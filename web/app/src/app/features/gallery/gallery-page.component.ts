@@ -21,6 +21,8 @@ import { ImageDetailModalComponent } from './components/image-detail-modal.compo
 import { PersonalityExpressionsManagerComponent } from '../personality/detail/personality-expressions-manager.component';
 import { PersonalityMediaJobBannerComponent } from '../personality/components/personality-media-job-banner.component';
 import { sourceForImage } from './helpers/image-source.helpers';
+import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { personalityAccent } from '../personality/helpers/personality-vm.helpers';
 import { personalityCoverUrl } from '../personality/helpers/cover-image.helpers';
 
@@ -37,6 +39,8 @@ type GallerySort = 'created' | 'last_used';
     AssignAsExpressionFlowComponent,
     PersonalityExpressionsManagerComponent,
     PersonalityMediaJobBannerComponent,
+    HelpHintComponent,
+    TooltipDirective,
   ],
   templateUrl: './gallery-page.component.html',
   styleUrl: './gallery-page.component.scss',
@@ -193,6 +197,17 @@ export class GalleryPageComponent implements OnInit {
     this.onFilterChange({ source });
   }
 
+  /**
+   * Tooltip for a sort button, reflecting the current direction. "Last used" has no direction
+   * wording because the API doesn't expose last-used dates yet (it falls back to created time).
+   */
+  sortTooltip(sort: GallerySort): string {
+    const active = this.sort() === sort;
+    if (sort === 'last_used') return active ? 'Click again to flip the order' : '';
+    if (!active) return 'Sort by date created, newest first';
+    return this.sortDescending() ? 'Newest first — click to flip' : 'Oldest first — click to flip';
+  }
+
   setSort(sort: GallerySort): void {
     if (this.sort() === sort) {
       this.sortDescending.update(value => !value);
@@ -302,7 +317,7 @@ export class GalleryPageComponent implements OnInit {
       error: async () => {
         await this.confirmationService.alert({
           title: 'Could not start thread',
-          message: 'Failed to create a new chat. Please try again from the chat page.',
+          message: 'Failed to create a new thread. Please try again.',
           type: 'danger',
         });
       },
@@ -357,7 +372,7 @@ export class GalleryPageComponent implements OnInit {
       this.importSubmitting.set(false);
       void this.confirmationService.alert({
         title: 'Import failed',
-        message: 'Please choose a personality for "Pin to character" imports.',
+        message: 'Please choose a personality for "Pin to personality" imports.',
         type: 'danger',
       });
       return;

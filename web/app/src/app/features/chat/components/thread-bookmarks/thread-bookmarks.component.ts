@@ -2,7 +2,9 @@ import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, ElementRef, input, output, signal, viewChild, viewChildren } from '@angular/core';
 
 import { MessageBookmark } from '../../../../core/models/message.model';
+import { HelpHintComponent } from '../../../../shared/ui/help-hint/help-hint.component';
 import { StarIconComponent } from '../../../../shared/ui/icons/icons';
+import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 
 /**
  * Thread bookmark navigator: a small toolbar button (shown only when the thread has bookmarks)
@@ -12,7 +14,7 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
 @Component({
   selector: 'app-thread-bookmarks',
   standalone: true,
-  imports: [DatePipe, StarIconComponent],
+  imports: [DatePipe, HelpHintComponent, StarIconComponent, TooltipDirective],
   template: `
     @if (bookmarks().length) {
       <div class="tb">
@@ -25,7 +27,8 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
           aria-haspopup="menu"
           aria-controls="thread-bookmarks-menu"
           (click)="toggle()"
-          title="Jump to a bookmark"
+          uiTooltip="Jump to a bookmarked message"
+          placement="bottom"
           #trigger
         >
           <ui-star-icon [size]="12" [filled]="true" />
@@ -35,7 +38,13 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
         @if (open()) {
           <div class="tb__backdrop" (click)="close(true)"></div>
           <div id="thread-bookmarks-menu" class="tb__panel" role="menu" aria-label="Bookmarks">
-            <div class="tb__head">Bookmarks · {{ bookmarks().length }}</div>
+            <div class="tb__head">
+              <span>Bookmarks · {{ bookmarks().length }}</span>
+              <ui-help-hint label="What are bookmarks?" heading="Bookmarks" align="end">
+                Messages you've bookmarked in this thread. Pick one to jump to it. The personality can also look up
+                your bookmarks when you ask about them.
+              </ui-help-hint>
+            </div>
             <ul class="tb__list">
               @for (b of bookmarks(); track b.id; let index = $index) {
                 <li class="tb__row">
@@ -62,7 +71,8 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
                     tabindex="-1"
                     [attr.aria-pressed]="isPending(b.id)"
                     [attr.aria-label]="(isPending(b.id) ? 'Restore bookmark: ' : 'Remove bookmark: ') + (b.snippet || 'this message')"
-                    [title]="isPending(b.id) ? 'Restore bookmark' : 'Remove bookmark'"
+                    [uiTooltip]="isPending(b.id) ? 'Keep this bookmark' : 'Remove this bookmark when the menu closes'"
+                    placement="left"
                     (click)="toggleRemoval(b, $event)"
                   >
                     <ui-star-icon [size]="13" [filled]="!isPending(b.id)" />
@@ -71,7 +81,7 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
               }
             </ul>
             @if (pendingRemovals().size) {
-              <p class="tb__hint">Unstarred bookmarks are removed when you close this menu.</p>
+              <p class="tb__hint">Removed bookmarks are deleted when you close this menu.</p>
             }
           </div>
         }
@@ -115,7 +125,10 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
     }
 
     .tb__head {
+      align-items: center;
       color: var(--color-text-muted);
+      display: flex;
+      justify-content: space-between;
       font-size: 0.625rem;
       font-weight: 700;
       letter-spacing: 0.06em;
