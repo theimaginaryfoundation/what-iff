@@ -174,21 +174,12 @@ func (d *Datastore) CreateMemory(ctx context.Context, userID uuid.UUID, mem mode
 		}
 	}
 
-	// Determine pinned personality ID for User-scoped memories. Decision order:
+	// Determine pinned personality ID. Decision order:
 	//  1. Manual: mem.PinnedPersonalityID set — use it directly.
-	//  2. Auto:   scope=User + active personality — pin if personality.AutoPinMemories.
-	//  3. None:   scope=Chat, or no active personality, or auto-pin disabled — leave unpinned.
-	var pinnedPersonalityID *uuid.UUID
-
-	if mem.PinnedPersonalityID != nil {
-		pinnedPersonalityID = mem.PinnedPersonalityID
-	} else if mem.Scope == "User" && activePersonalityID != uuid.Nil {
-		personality, err := tx.Personality.Get(ctx, activePersonalityID)
-		if err != nil {
-			d.logger.Warn(i18n.T1("memory.personality_auto_pin_failed", "PersonalityID", activePersonalityID.String()), zap.Error(err))
-		} else if personality != nil && personality.AutoPinMemories {
-			pinnedPersonalityID = &activePersonalityID
-		}
+	//  2. Auto:   see autoPinPersonalityIDTx.
+	pinnedPersonalityID := mem.PinnedPersonalityID
+	if pinnedPersonalityID == nil {
+		pinnedPersonalityID = d.autoPinPersonalityIDTx(ctx, tx, memory.Scope(mem.Scope), activePersonalityID)
 	}
 
 	// Create memory
@@ -256,6 +247,27 @@ func (d *Datastore) CreateMemory(ctx context.Context, userID uuid.UUID, mem mode
 	}
 
 	return newMem, nil
+}
+
+// autoPinPersonalityIDTx is the auto-pin rule shared by every path that creates a memory while a
+// personality is active (create_memory, checkpoint folds and checkpoint link members): a new
+// User-scoped memory is pinned to the active personality when that personality has
+// auto_pin_memories on. Chat-scoped memories, no active personality, auto-pin off, or a failed
+// personality lookup all return nil (unpinned); a lookup failure is logged, never fatal.
+func (d *Datastore) autoPinPersonalityIDTx(ctx context.Context, tx *ent.Tx, scope memory.Scope, activePersonalityID uuid.UUID) *uuid.UUID {
+	if scope != memory.ScopeUser || activePersonalityID == uuid.Nil {
+		return nil
+	}
+	personality, err := tx.Personality.Get(ctx, activePersonalityID)
+	if err != nil {
+		d.logger.Warn(i18n.T1("memory.personality_auto_pin_failed", "PersonalityID", activePersonalityID.String()), zap.Error(err))
+		return nil
+	}
+	if !personality.AutoPinMemories {
+		return nil
+	}
+	id := activePersonalityID
+	return &id
 }
 
 func scopeFromLevel(level models.MemoryLevel) (memory.Scope, error) {
