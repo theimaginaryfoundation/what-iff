@@ -71,6 +71,9 @@ type Handler struct {
 	limiter       *cooldownLimiter
 	importLimiter *cooldownLimiter
 	imports       chan struct{}
+	// importTimeout bounds one account import, including its wait for a slot (importJobTimeout;
+	// tests shorten it).
+	importTimeout time.Duration
 }
 
 // NewHandler builds the handler. openAIKey enables memory-embedding regeneration on import; when
@@ -84,6 +87,7 @@ func NewHandler(ds *datastore.Datastore, logger *zap.Logger, fileStore storage.F
 		limiter:       newCooldownLimiter(exportCooldown),
 		importLimiter: newCooldownLimiter(importCooldown),
 		imports:       make(chan struct{}, maxConcurrentAccountImports),
+		importTimeout: importJobTimeout,
 	}
 	if openAIKey != "" {
 		client := openai.NewClient(option.WithAPIKey(openAIKey))

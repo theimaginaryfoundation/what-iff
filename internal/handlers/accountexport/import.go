@@ -196,10 +196,25 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, sele
 		}
 	}()
 
-	release := h.acquireImportSlot(context.Background())
-	defer release()
-	ctx, cancel := context.WithTimeout(context.Background(), importJobTimeout)
+	// The job's timeout covers the wait for a slot too, so an import stuck ahead of this one
+	// can't hold it queued forever.
+	timeout := h.importTimeout
+	if timeout <= 0 {
+		timeout = importJobTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	release, err := h.acquireImportSlot(ctx)
+	if err != nil {
+		// Still tracked (as a near-zero run) so the give-up is counted with a timeout outcome.
+		finishJob = metrics.TrackJob(ctx, models.JobTypeAccountImport)
+		outcome = telemetry.JobOutcomeFromError(err)
+		h.logger.Warn("account import: gave up waiting for an import slot",
+			zap.String("job_id", jobID.String()), zap.Error(err))
+		h.failAccountImport(ctx, userID, jobID, "Import timed out waiting for other imports to finish; please try again", nil)
+		return
+	}
+	defer release()
 	finishJob = metrics.TrackJob(ctx, models.JobTypeAccountImport)
 	doneValidate := metrics.TimeFileStage(ctx, telemetry.FileOpAccountImport, telemetry.FileStageValidate)
 	validated := false
@@ -404,13 +419,20 @@ var errAccountImportInvalid = errors.New("account import archive rejected")
 
 // acquireImportSlot waits for one of the per-process import slots, recording the wait on
 // JobQueueWait (the only place in the API where background work queues), and returns the
-// function that frees the slot.
-func (h *Handler) acquireImportSlot(ctx context.Context) (release func()) {
+// function that frees the slot. It gives up with ctx's error when ctx ends first; the wait is
+// recorded either way.
+func (h *Handler) acquireImportSlot(ctx context.Context) (release func(), err error) {
 	start := time.Now()
-	h.imports <- struct{}{}
-	telemetry.Global().RecordDuration(ctx, telemetry.JobQueueWait, time.Since(start),
-		telemetry.AttrJobType.String(models.JobTypeAccountImport))
-	return func() { <-h.imports }
+	defer func() {
+		telemetry.Global().RecordDuration(ctx, telemetry.JobQueueWait, time.Since(start),
+			telemetry.AttrJobType.String(models.JobTypeAccountImport))
+	}()
+	select {
+	case h.imports <- struct{}{}:
+		return func() { <-h.imports }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // recordAccountImportItems records the conversation and personality counts of one import run.
