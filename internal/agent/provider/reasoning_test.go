@@ -193,7 +193,7 @@ func TestClaudeAdapter_StreamsThinkingLiveAndResetsOnTruncationFallback(t *testi
 	require.Equal(t, "brief thought", resp.Reasoning)
 }
 
-// A transient failure mid-thinking is retried by callClaudeWithRetry (only streamed
+// A transient failure mid-thinking is retried by retryLLMCall (only streamed
 // *text* blocks a retry), so the next attempt must reset the live draft first.
 func TestRetryAwareThinking_ResetsOnlyAfterStreamedAttempt(t *testing.T) {
 	var rec liveRecorder

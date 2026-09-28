@@ -230,8 +230,3 @@ func TestWaitForRetry(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 	})
 }
-
-func TestIsRateLimitAndServerError_NilError(t *testing.T) {
-	require.False(t, isRateLimitError(nil))
-	require.False(t, isServerError(nil))
-}
