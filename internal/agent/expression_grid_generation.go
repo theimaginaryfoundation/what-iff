@@ -101,6 +101,12 @@ type expressionGridReference struct {
 	sendToImageModel bool
 }
 
+// coverImageReference grounds both the likeness pass and the image model (edit endpoint) with a
+// personality's cover image. Empty bytes (missing or unusable image) yield a prompt-only reference.
+func coverImageReference(b []byte, mime string) expressionGridReference {
+	return expressionGridReference{bytes: b, mime: mime, sendToImageModel: len(b) > 0}
+}
+
 // GenerateDefaultExpressionGrid runs likeness (nano) + one medium-quality square image generation,
 // splices the 3×3 grid into PNG cells, uploads all nine cells, and upserts each expression key.
 // Quota: not metered (personality tooling); approximate cost ~nano chat + one medium image generation (~$0.01).
@@ -130,10 +136,11 @@ func (a *Agent) GenerateDefaultExpressionGrid(ctx context.Context, userID, perso
 
 	ctx = telemetry.WithCallPath(ctx, telemetry.CallPathExpressionGrid)
 
-	// The cover image, when present, grounds the likeness pass only.
+	// The cover image, when present, is the direct reference for the grid, as on the
+	// expression-candidates path, so a new personality's expressions look like its portrait.
 	var ref expressionGridReference
 	if person.CoverImageID != nil {
-		ref.bytes, ref.mime = a.loadExpressionReferenceImage(ctx, userID, *person.CoverImageID)
+		ref = coverImageReference(a.loadExpressionReferenceImage(ctx, userID, *person.CoverImageID))
 	}
 
 	cells, err := a.generateExpressionGridCells(ctx, person, ExpressionGridKeys, ref)

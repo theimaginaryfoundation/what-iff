@@ -164,12 +164,31 @@ func TestGenerateExpressionGridCells_ReferenceGoesToEditEndpoint(t *testing.T) {
 	require.Contains(t, api.likenessBodies[0], "data:image/png;base64,")
 }
 
+func TestCoverImageReference_GoesToEditEndpoint(t *testing.T) {
+	t.Parallel()
+	api := &fakeImageAPI{likenessText: "A knight.", editB64: gridPNGBase64(t, 90)}
+	a := newGridTestAgent(api.server(t))
+
+	// The default grid (first expressions for a new personality) uses the cover image directly.
+	_, err := a.generateExpressionGridCells(context.Background(), &models.Personality{SystemPrompt: "x"},
+		ExpressionGridKeys, coverImageReference([]byte("cover"), "image/jpeg"))
+	require.NoError(t, err)
+	require.Len(t, api.editBodies, 1)
+	require.Empty(t, api.genBodies)
+	require.Contains(t, api.likenessBodies[0], "data:image/jpeg;base64,")
+}
+
+func TestCoverImageReference_EmptyImageIsPromptOnly(t *testing.T) {
+	t.Parallel()
+	require.False(t, coverImageReference(nil, "").sendToImageModel)
+}
+
 func TestGenerateExpressionGridCells_LikenessOnlyReferenceSkipsEdit(t *testing.T) {
 	t.Parallel()
 	api := &fakeImageAPI{likenessText: "A knight.", genB64: gridPNGBase64(t, 60)}
 	a := newGridTestAgent(api.server(t))
 
-	// The default-grid path grounds only the likeness pass with the cover image.
+	// A reference not marked for the image model grounds only the likeness pass.
 	ref := expressionGridReference{bytes: []byte("cover"), mime: "image/jpeg"}
 	_, err := a.generateExpressionGridCells(context.Background(), &models.Personality{SystemPrompt: "x"}, ExpressionGridKeys, ref)
 	require.NoError(t, err)
