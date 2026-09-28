@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/filechunker"
@@ -73,13 +74,53 @@ type FileAttachmentUploader interface {
 	) (string, error)
 }
 
+// FileAttachmentDeleter deletes a file from the provider's Files API by the FileID that
+// FileAttachmentUploader returned. Like FileAttachmentUploader it is declared here to keep this
+// package leaf-level; *provider.OpenAIProvider satisfies it, pinned by an assertion next to the
+// implementation in internal/agent/provider/fileattachment.go.
+type FileAttachmentDeleter interface {
+	DeleteFileAttachment(ctx context.Context, fileID string) error
+}
+
+// providerFileCleanupTimeout bounds the best-effort provider delete in DeleteProviderFile.
+const providerFileCleanupTimeout = 30 * time.Second
+
+// DeleteProviderFile best-effort deletes the provider-side copy of an upload whose attachment
+// record will not be kept (it failed to save, or was rolled back), so the file is not left
+// orphaned in the provider's storage. It detaches from ctx's cancellation, since the failure that
+// triggers it is often the request context ending. Failures are logged, never returned.
+func DeleteProviderFile(ctx context.Context, logger *zap.Logger, d FileAttachmentDeleter, fileID *string) {
+	if d == nil || fileID == nil || *fileID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerFileCleanupTimeout)
+	defer cancel()
+	if err := d.DeleteFileAttachment(ctx, *fileID); err != nil {
+		logger.Warn("failed to delete orphaned provider file",
+			zap.Error(err),
+			zap.String("file_id", *fileID))
+	}
+}
+
+// AbandonFileAttachmentUpload cleans up after UploadFileAttachment succeeded but the attachment
+// record could not be saved: it deletes the provider-side file (best effort) and the temp file,
+// and counts the upload as failed on FileUploads, since TriggerAsyncFileChunking will not run.
+func AbandonFileAttachmentUpload(ctx context.Context, logger *zap.Logger, d FileAttachmentDeleter, attachment models.FileAttachment, tempFilePath string) {
+	DeleteProviderFile(ctx, logger, d, attachment.FileID)
+	if tempFilePath != "" {
+		_ = os.Remove(tempFilePath)
+	}
+	telemetry.Global().RecordFileUpload(ctx, attachment.FileType, telemetry.FileUploadFailure)
+}
+
 // UploadFileAttachment parses a multipart file upload, validates the file type,
 // streams it to a temp file, normalizes image uploads, uploads from disk, and
 // returns the attachment model plus temp file path for optional async chunking.
 //
 // Upload metrics: any failure here counts as a failed upload on FileUploads; success is counted
 // later by TriggerAsyncFileChunking, which every upload path calls once the attachment is stored,
-// so each upload is counted exactly once.
+// so each upload is counted exactly once. A caller that fails to store the attachment calls
+// AbandonFileAttachmentUpload instead, which counts the failure and deletes the provider file.
 func UploadFileAttachment(w http.ResponseWriter, r *http.Request, logger *zap.Logger, a FileAttachmentUploader, userID uuid.UUID, attrs map[string]string) (_ models.FileAttachment, _ string, err error) {
 	metrics := telemetry.Global()
 	var uploadContentType string // set once the extension is recognised

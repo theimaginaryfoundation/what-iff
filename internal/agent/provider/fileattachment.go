@@ -33,6 +33,9 @@ import (
 // models, storage, utils and agent/filechunker, none of which reach provider.
 var _ handlerutils.FileAttachmentUploader = (*OpenAIProvider)(nil)
 
+// The same holds for the best-effort cleanup of an upload whose attachment record is not kept.
+var _ handlerutils.FileAttachmentDeleter = (*OpenAIProvider)(nil)
+
 // Regex to match sentences containing sandbox:/mnt/data/* links
 // This matches markdown links like [text](sandbox:/mnt/data/file.ext) within sentences
 var sandboxLinkRegex = regexp.MustCompile(`\[[^\]]*\]\(sandbox:/mnt/data/[^)]+\)`)

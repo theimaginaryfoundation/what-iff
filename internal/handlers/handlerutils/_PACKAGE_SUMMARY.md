@@ -11,6 +11,9 @@
   `UploadFileAttachment` records the spooled size (`whatiff.file.size`, operation `upload`) and the image `normalize` stage time.
   `whatiff.file.uploads` counts each upload once: failures in `UploadFileAttachment` or `UploadToS3`, success in `TriggerAsyncFileChunking`, which every path calls exactly once after the attachment is stored.
   Callers must not count uploads themselves.
+  A caller whose attachment record fails to save calls `AbandonFileAttachmentUpload`, which counts the failure, removes the temp file, and best-effort deletes the provider-side file.
+  Rolling back a saved record (e.g. after an S3 failure) calls `DeleteProviderFile`, so the provider copy is not orphaned either.
+  Both detach from the request context's cancellation and only log a failed delete.
 - **`httpresponse.go`:** The response helpers every handler writes through — `RespondWithJSON`, `RespondWithHTML`, `RespondWithNoContent`, and `RespondWithError`.
   The last takes a code as its fourth argument: either a specific code from the models taxonomy, or `CodeNotSet` where none has been assigned yet, in which case the helper fills in the generic code for the status.
   A blank or whitespace-only code is treated as `CodeNotSet`.
@@ -29,6 +32,7 @@
   `UploadFileAttachment` now accepts a narrow `FileAttachmentUploader` interface instead; callers pass `agent.OpenAIProvider`.
   Re-introducing an `internal/agent` import here would close that ring again.
   The structural match is pinned by `var _ handlerutils.FileAttachmentUploader = (*OpenAIProvider)(nil)` in `internal/agent/provider/fileattachment.go` — it must live on that side, since asserting it here would need the very import the interface exists to avoid.
+  `FileAttachmentDeleter` (the provider delete used by that cleanup) follows the same pattern and is pinned the same way.
 - **`RespondWithJSON` sets `X-Content-Type-Options: nosniff`.**
   `http.Error` sets it automatically; hand-written JSON responses do not, so call sites converted away from `http.Error` would otherwise silently lose it.
 - **`RespondWithJSON` handles its own marshal failure inline.**
@@ -47,7 +51,7 @@
 ## Testing
 
 - `fileattachment_test.go` — multipart and edge cases.
-- `fileattachment_metrics_test.go` — upload size/kind, the normalize stage, and that each upload is counted exactly once.
+- `fileattachment_metrics_test.go` — upload size/kind, the normalize stage, that each upload is counted exactly once, and provider-file cleanup for abandoned uploads.
 - `httpresponse_test.go` — that raw errors never reach the body, and that every error response carries a code (including unmapped statuses).
 
 ## Related documentation

@@ -37,6 +37,7 @@ func (h *Handler) CreateFileAttachment(w http.ResponseWriter, r *http.Request) {
 
 	createdAttachment, err := h.ds.CreateFileAttachment(r.Context(), userID, fileAttachment)
 	if err != nil {
+		handlerutils.AbandonFileAttachmentUpload(r.Context(), h.logger, h.agent.OpenAIProvider, fileAttachment, tempFilePath)
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Error creating file attachment", err)
 		return
 	}
@@ -62,6 +63,7 @@ func (h *Handler) CreateFileAttachment(w http.ResponseWriter, r *http.Request) {
 				zap.Error(err),
 				zap.String("file_attachment_id", createdAttachment.ID.String()))
 			_ = h.ds.DeleteFileAttachment(r.Context(), userID, createdAttachment.ID)
+			handlerutils.DeleteProviderFile(r.Context(), h.logger, h.agent.OpenAIProvider, fileAttachment.FileID)
 			_ = os.Remove(tempFilePath)
 			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Error saving file — please retry", err)
 			return
@@ -82,6 +84,7 @@ func (h *Handler) CreateFileAttachment(w http.ResponseWriter, r *http.Request) {
 				zap.Error(err),
 				zap.String("file_attachment_id", createdAttachment.ID.String()))
 			_ = h.ds.DeleteFileAttachment(r.Context(), userID, createdAttachment.ID)
+			handlerutils.DeleteProviderFile(r.Context(), h.logger, h.agent.OpenAIProvider, fileAttachment.FileID)
 			_ = os.Remove(tempFilePath)
 			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Error saving file — please retry", err)
 			return
