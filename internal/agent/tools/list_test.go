@@ -437,6 +437,37 @@ func TestListMCPServers_IncludesDiscoverableAndLoadedTools(t *testing.T) {
 	requireContains(res.Items[0].LoadedTools, "mcp__jira__get_issue")
 }
 
+func TestListMCPServers_DiscoveryErrorWithPartialToolsStillReturnsInventory(t *testing.T) {
+	chat := listTestChat()
+	serverID := uuid.New()
+	store := &fakeListStore{
+		mcp: []*models.MCPServer{
+			{ID: serverID, Name: "jira", ServerURL: "https://jira.example/mcp", Status: models.MCPServerStatusActive},
+		},
+	}
+	tool := newTestListTool(store)
+	tool.SetMCPDiscoverer(fakeMCPDiscoverer{
+		out: mcpclient.DiscoveryResult{
+			Tools: []mcpclient.ConnectorTool{
+				{ConnectorID: serverID, FullName: "mcp__jira__search_issues"},
+			},
+			Errors: map[uuid.UUID]string{serverID: "temporary timeout"},
+		},
+		err: errors.New("mcp tool discovery failed for all eligible connectors"),
+	})
+	out, err := tool.List(context.Background(), chat, []byte(`{"kind":"mcp_servers"}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	res := decodeList(t, out)
+	if len(res.Items) != 1 || len(res.Items[0].MCPTools) != 1 {
+		t.Fatalf("expected one discoverable tool despite discovery error, got %+v", res)
+	}
+	if !strings.Contains(res.Note, "load_mcp_tools") {
+		t.Fatalf("expected MCP lifecycle guidance note, got %q", res.Note)
+	}
+}
+
 func TestListPersonalities(t *testing.T) {
 	now := time.Now()
 	store := &fakeListStore{pers: []*models.Personality{

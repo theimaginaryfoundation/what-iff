@@ -737,6 +737,49 @@ func TestClearAllChatMCPLoadedTools(t *testing.T) {
 	require.Empty(t, loaded)
 }
 
+func TestRemoveMCPServerFromChat_ClearsLoadedToolState(t *testing.T) {
+	ds, cleanup := newMCPServerTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMCPServerTestUser(t, ds)
+	modelID := createMCPServerTestModel(t, ds)
+	chatID := createMCPServerTestChat(t, ds, userID, modelID)
+	server, err := ds.CreateMCPServer(ctx, userID, baseMCPServerModel())
+	require.NoError(t, err)
+	require.NoError(t, ds.AddMCPServerToChat(ctx, userID, chatID, server.ID))
+	require.NoError(t, ds.SetChatMCPLoadedTools(ctx, userID, chatID, server.ID, []string{"mcp__x__y"}))
+
+	require.NoError(t, ds.RemoveMCPServerFromChat(ctx, userID, chatID, server.ID))
+	loaded, err := ds.ListChatMCPLoadedTools(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Empty(t, loaded[server.ID])
+}
+
+func TestSetChatMCPLoadedTools_NormalizesAndClearsInvalidValues(t *testing.T) {
+	ds, cleanup := newMCPServerTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMCPServerTestUser(t, ds)
+	modelID := createMCPServerTestModel(t, ds)
+	chatID := createMCPServerTestChat(t, ds, userID, modelID)
+	server, err := ds.CreateMCPServer(ctx, userID, baseMCPServerModel())
+	require.NoError(t, err)
+	require.NoError(t, ds.AddMCPServerToChat(ctx, userID, chatID, server.ID))
+
+	require.NoError(t, ds.SetChatMCPLoadedTools(ctx, userID, chatID, server.ID, []string{" mcp__x__a ", "mcp__x__a", "bad", ""}))
+	loaded, err := ds.ListChatMCPLoadedTools(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"mcp__x__a"}, loaded[server.ID])
+
+	// invalid-only list should clear stored state
+	require.NoError(t, ds.SetChatMCPLoadedTools(ctx, userID, chatID, server.ID, []string{"bad", "  "}))
+	loaded, err = ds.ListChatMCPLoadedTools(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Empty(t, loaded[server.ID])
+}
+
 func TestSaveMCPServerOAuthTokens_RefreshTokenOnlyPreservesStatus(t *testing.T) {
 	ds, cleanup := newMCPServerTestDatastore(t)
 	defer cleanup()
