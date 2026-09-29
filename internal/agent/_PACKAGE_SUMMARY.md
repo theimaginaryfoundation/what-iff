@@ -111,6 +111,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   Per-turn side calls label themselves so they don't inherit the turn's path: mood auto-selection uses `mode_select` and the expression picker uses `expression_pick`.
 - **Job and turn metrics** (`job_telemetry.go`): every async job worker (chat send/retry, the sync webhook path, `agent_job_run`, the three personality media jobs, thread rehydration) records `whatiff.job.queue.wait` and runs under `telemetry.TrackJob`.
   Outcomes come from the worker's result: `quota` for `ErrQuotaExceeded`, `cancelled`/`timeout` for context errors, `panic` when the worker panics (the tracker's defer runs after the worker's own recover), else `success`/`failed`.
+  A new send and a retry share one goroutine body, `runAsyncChatMessageJob` (`message.go`), so both get the same panic guard (`recoverAsyncMessageJob` marks the job failed instead of crashing the process), cancel cleanup and outcome recording.
   Chat turns record `whatiff.chat.turn.stage.duration` for a fixed stage set (`rehydration_wait`, `prepare_context` including `memory_enrichment`, `mood`, `build_context`, `inference`, `expression`, `post_process` including `chat_name` and `checkpoint_scratchpad`/`memory`/`summary`/`persist`), labeled by the turn's `call_path` (`user_chat` or `agent_job`).
   `rehydration_wait` and `expression` are recorded only when the turn actually waits or runs the picker, so skipped turns don't add zero samples.
   Quota-gate rejections count `whatiff.quota.rejections` by `call_path`.
