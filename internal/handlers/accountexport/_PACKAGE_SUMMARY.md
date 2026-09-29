@@ -50,6 +50,7 @@ Authenticated user account portability: ZIP export by email and additive ZIP imp
 - **Metrics** (through `telemetry.Global()`): exports and imports are tracked as `account_export` / `account_import` jobs (`TrackJob`, with panic and timeout outcomes).
   The wait for an import slot (`acquireImportSlot`, capacity `maxConcurrentAccountImports`) is recorded on `whatiff.job.queue.wait`; it is the only real queue in the API.
   The import timeout (`importJobTimeout`, 30 minutes) starts before that wait and covers it, so an import stuck ahead of a queued one can't hold it forever: a queued import that times out without a slot is failed with a retry message and tracked with a `timeout` outcome.
+  Imports run under the server's lifecycle context (passed to `NewHandler`), not the request that started them, so a shutdown interrupts a queued or running import: it is failed with a retry message and tracked with a `cancelled` outcome.
   Phases are timed on `whatiff.file.operation.duration` (export: `build_zip`, `email`; import: `validate`, `personalities`, `conversations`, `summaries`, `memories`), and archive sizes and section counts go on `whatiff.file.size` and `whatiff.file.operation.items`.
   Memory counts are recorded by the datastore memory importer (operation `memory_import`), not repeated here.
 - Account-import uploads are staged to temporary files, restored by a bounded detached worker, and deleted regardless of terminal outcome; `AccountImportProgress` carries phases and the terminal result for polling.

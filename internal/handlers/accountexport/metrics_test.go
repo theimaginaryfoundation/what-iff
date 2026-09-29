@@ -99,6 +99,48 @@ func TestRunAccountImportTimesOutWaitingForSlot(t *testing.T) {
 	require.Len(t, h.imports, 1, "the busy slot is untouched")
 }
 
+// A server shutdown reaches an import that is still queued: it stops waiting, ends as a failed job
+// with a cancelled outcome (not a timeout), and leaves the busy slot alone.
+func TestRunAccountImportStopsWhenServerShutsDown(t *testing.T) {
+	tm := telemetrytest.UseGlobal(t)
+	db, _, err := sqlmock.New()
+	require.NoError(t, err)
+	client := ent.NewClient(ent.Driver(entsql.OpenDB(dialect.SQLite, db)))
+	defer client.Close()
+	ds, err := datastore.NewDatastore(client, db, zap.NewNop(), "12345678901234567890123456789012", nil)
+	require.NoError(t, err)
+
+	lifecycle, shutdown := context.WithCancel(context.Background())
+	// A long timeout, so only the shutdown can end the wait.
+	h := &Handler{ds: ds, logger: zap.NewNop(), imports: make(chan struct{}, 1), importTimeout: time.Hour, lifecycleCtx: lifecycle}
+	h.imports <- struct{}{}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.runAccountImport(uuid.New(), uuid.New(), filepath.Join(t.TempDir(), "missing.zip"), nil)
+	}()
+	time.Sleep(20 * time.Millisecond) // let it start waiting for the slot
+	shutdown()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("account import ignored the server shutting down")
+	}
+
+	jt := telemetry.AttrJobType.String(models.JobTypeAccountImport)
+	require.Equal(t, uint64(1), tm.HistogramCount(t, telemetry.JobDuration.Name, jt,
+		telemetry.AttrOutcome.String(telemetry.JobOutcomeCancelled)))
+	require.Len(t, h.imports, 1, "the busy slot is untouched")
+}
+
+func TestBackgroundContextDefaultsToBackground(t *testing.T) {
+	require.NoError(t, (&Handler{}).backgroundContext().Err())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.Error(t, (&Handler{lifecycleCtx: ctx}).backgroundContext().Err())
+}
+
 func TestRecordAccountImportItems(t *testing.T) {
 	tm := telemetrytest.UseGlobal(t)
 	recordAccountImportItems(context.Background(), telemetry.Global(), models.AccountImportResult{

@@ -202,7 +202,7 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, sele
 	if timeout <= 0 {
 		timeout = importJobTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(h.backgroundContext(), timeout)
 	defer cancel()
 	release, err := h.acquireImportSlot(ctx)
 	if err != nil {
@@ -211,7 +211,11 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, sele
 		outcome = telemetry.JobOutcomeFromError(err)
 		h.logger.Warn("account import: gave up waiting for an import slot",
 			zap.String("job_id", jobID.String()), zap.Error(err))
-		h.failAccountImport(ctx, userID, jobID, "Import timed out waiting for other imports to finish; please try again", nil)
+		message := "Import was interrupted while waiting for other imports to finish; please try again"
+		if errors.Is(err, context.DeadlineExceeded) {
+			message = "Import timed out waiting for other imports to finish; please try again"
+		}
+		h.failAccountImport(ctx, userID, jobID, message, nil)
 		return
 	}
 	defer release()

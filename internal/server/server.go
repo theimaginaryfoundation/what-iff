@@ -302,7 +302,7 @@ func (s *Server) setupRoutes() {
 			exportSender = email.Instrument(snd, telemetry.DependencySES)
 		}
 	}
-	accountExportHandler := accountexport.NewHandler(dataStore, s.logger, fileStore, exportSender, s.config.OpenAIKey, providerHTTPClient)
+	accountExportHandler := accountexport.NewHandler(dataStore, s.logger, fileStore, exportSender, s.config.OpenAIKey, providerHTTPClient, s.lifecycleCtx)
 	mcpServerHandler := mcpserver.NewHandler(dataStore, s.logger)
 	modelHandler := model.NewHandler(dataStore, s.logger)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)
