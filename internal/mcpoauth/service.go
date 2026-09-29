@@ -53,6 +53,8 @@ var (
 	ErrInvalidRedirectAfter = errors.New("invalid redirect_after")
 )
 
+const defaultOAuthCallbackURL = "http://localhost:8080/api/mcp-servers/oauth/callback"
+
 func New(store Store, client *http.Client, logger *zap.Logger, cfg Config) *Service {
 	if client == nil {
 		client = &http.Client{Timeout: 20 * time.Second}
@@ -60,6 +62,7 @@ func New(store Store, client *http.Client, logger *zap.Logger, cfg Config) *Serv
 	if logger == nil {
 		logger = zap.NewNop()
 	}
+	redirectURL := sanitizeCallbackRedirectURL(strings.TrimSpace(cfg.RedirectURL), logger)
 	safePostAuthURL := sanitizePostAuthRedirectURL(strings.TrimSpace(cfg.PostAuthRedirectURL))
 	allowed := normalizeAllowedRedirectOrigins(cfg.AllowedRedirects)
 	allowed[redirectOrigin(safePostAuthURL)] = struct{}{}
@@ -68,7 +71,7 @@ func New(store Store, client *http.Client, logger *zap.Logger, cfg Config) *Serv
 		store:               store,
 		httpClient:          client,
 		logger:              logger,
-		redirectURL:         strings.TrimSpace(cfg.RedirectURL),
+		redirectURL:         redirectURL,
 		postAuthRedirectURL: safePostAuthURL,
 		allowedRedirects:    allowed,
 	}
@@ -288,12 +291,13 @@ func (s *Service) tokenRequest(ctx context.Context, tokenURL string, form url.Va
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, parseOAuthTokenHTTPError(resp.StatusCode, body)
+	}
+
 	var tr tokenResponse
 	if err := json.Unmarshal(body, &tr); err != nil {
 		return nil, fmt.Errorf("oauth token endpoint returned malformed json")
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("oauth token endpoint error (%d)", resp.StatusCode)
 	}
 	if strings.TrimSpace(tr.Error) != "" {
 		return nil, fmt.Errorf("oauth token error: %s", sanitizeProviderError(tr.Error))
@@ -370,6 +374,35 @@ func sanitizePostAuthRedirectURL(raw string) string {
 		return "http://localhost:4200/integrations"
 	}
 	return parsed.String()
+}
+
+func sanitizeCallbackRedirectURL(raw string, logger *zap.Logger) string {
+	parsed, err := parseOAuthEndpointURL(raw)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("invalid MCP_OAUTH_REDIRECT_URL, falling back to default callback URL", zap.String("redirect_url", raw))
+		}
+		return defaultOAuthCallbackURL
+	}
+	return parsed.String()
+}
+
+func parseOAuthTokenHTTPError(statusCode int, body []byte) error {
+	var tr tokenResponse
+	if err := json.Unmarshal(body, &tr); err == nil {
+		providerErr := sanitizeProviderError(tr.Error)
+		providerDesc := sanitizeProviderError(tr.ErrorDesc)
+		switch {
+		case providerErr != "" && providerDesc != "":
+			return fmt.Errorf("oauth token endpoint error (%d): %s: %s", statusCode, providerErr, providerDesc)
+		case providerErr != "":
+			return fmt.Errorf("oauth token endpoint error (%d): %s", statusCode, providerErr)
+		case providerDesc != "":
+			return fmt.Errorf("oauth token endpoint error (%d): %s", statusCode, providerDesc)
+		}
+		return fmt.Errorf("oauth token endpoint error (%d)", statusCode)
+	}
+	return fmt.Errorf("oauth token endpoint returned HTTP %d with non-JSON body", statusCode)
 }
 
 func normalizeAllowedRedirectOrigins(in []string) map[string]struct{} {

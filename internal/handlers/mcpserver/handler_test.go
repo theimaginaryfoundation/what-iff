@@ -95,13 +95,19 @@ func newAuthedRequest(t *testing.T, method, target string, body []byte) *http.Re
 
 func newRouter(provider Provider, prober ConnectionProber) *mux.Router {
 	r := mux.NewRouter()
-	NewHandler(provider, prober, nil, zap.NewNop()).RegisterRoutes(r)
+	NewHandler(provider, prober, nil, zap.NewNop(), Config{}).RegisterRoutes(r)
+	return r
+}
+
+func newRouterWithConfig(provider Provider, prober ConnectionProber, cfg Config) *mux.Router {
+	r := mux.NewRouter()
+	NewHandler(provider, prober, nil, zap.NewNop(), cfg).RegisterRoutes(r)
 	return r
 }
 
 func newRouterWithOAuth(provider Provider, prober ConnectionProber, oauth OAuthService) *mux.Router {
 	r := mux.NewRouter()
-	h := NewHandler(provider, prober, oauth, zap.NewNop())
+	h := NewHandler(provider, prober, oauth, zap.NewNop(), Config{})
 	h.RegisterRoutes(r)
 	h.RegisterPublicRoutes(r)
 	return r
@@ -220,6 +226,49 @@ func TestTestMCPServerConnection_ValidationAndFailure(t *testing.T) {
 		require.False(t, resp.Pass)
 		require.Zero(t, resp.ToolCount)
 		require.NotEmpty(t, resp.Message)
+	})
+
+	t.Run("rejects http for non-localhost", func(t *testing.T) {
+		prober := &fakeProber{toolCount: 1}
+		router := newRouter(&fakeProvider{}, prober)
+		req := newAuthedRequest(t, http.MethodPost, "/mcp-servers/test-connection", []byte(`{"server_url":"http://example.com/mcp"}`))
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+		require.Zero(t, prober.calls)
+		require.Contains(t, rr.Body.String(), "https")
+	})
+
+	t.Run("rejects localhost by default", func(t *testing.T) {
+		prober := &fakeProber{toolCount: 1}
+		router := newRouter(&fakeProvider{}, prober)
+		req := newAuthedRequest(t, http.MethodPost, "/mcp-servers/test-connection", []byte(`{"server_url":"http://localhost:9000/mcp"}`))
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+		require.Zero(t, prober.calls)
+		require.Contains(t, rr.Body.String(), "localhost")
+	})
+
+	t.Run("rejects private network ip", func(t *testing.T) {
+		prober := &fakeProber{toolCount: 1}
+		router := newRouter(&fakeProvider{}, prober)
+		req := newAuthedRequest(t, http.MethodPost, "/mcp-servers/test-connection", []byte(`{"server_url":"https://10.1.2.3/mcp"}`))
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+		require.Zero(t, prober.calls)
+		require.Contains(t, rr.Body.String(), "private network")
+	})
+
+	t.Run("allows localhost when explicitly enabled", func(t *testing.T) {
+		prober := &fakeProber{toolCount: 1}
+		router := newRouterWithConfig(&fakeProvider{}, prober, Config{AllowLocalhostConnections: true})
+		req := newAuthedRequest(t, http.MethodPost, "/mcp-servers/test-connection", []byte(`{"server_url":"http://localhost:9000/mcp"}`))
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		require.Equal(t, 1, prober.calls)
 	})
 }
 

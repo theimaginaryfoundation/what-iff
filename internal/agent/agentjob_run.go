@@ -121,6 +121,7 @@ func (a *Agent) handleEphemeralPromptAsync(ctx context.Context, chatID uuid.UUID
 			models.ActionTypeJobRun,
 			telemetry.CallPathAgentJob,
 			opts,
+			false,
 		)
 		outcome = chatJobOutcome(runErr)
 		if runErr != nil {
@@ -172,13 +173,13 @@ func (a *Agent) handleEphemeralPromptAsync(ctx context.Context, chatID uuid.UUID
 // When trackingJob is non-nil (e.g. async agent_job_run), job status advances through the same
 // inference → expression → compaction phases as user chat jobs.
 func (a *Agent) HandleAgentJobPrompt(ctx context.Context, chatID uuid.UUID, prompt string, modelOverrideID *uuid.UUID, personalityOverrideID *uuid.UUID, ritualIDs []uuid.UUID, trackingJob *models.Job) (*models.ChatMessage, error) {
-	return a.handleEphemeralPrompt(ctx, chatID, prompt, modelOverrideID, personalityOverrideID, ritualIDs, trackingJob, models.ActionTypeJobRun, telemetry.CallPathAgentJob, ephemeralPromptOptions{})
+	return a.handleEphemeralPrompt(ctx, chatID, prompt, modelOverrideID, personalityOverrideID, ritualIDs, trackingJob, models.ActionTypeJobRun, telemetry.CallPathAgentJob, ephemeralPromptOptions{}, true)
 }
 
 // HandleEphemeralPromptSync runs a synchronous autonomous prompt against a chat
 // without persisting the injected user prompt. Only the assistant response is saved.
 func (a *Agent) HandleEphemeralPromptSync(ctx context.Context, chatID uuid.UUID, prompt string, modelOverrideID *uuid.UUID, personalityOverrideID *uuid.UUID) (*models.ChatMessage, error) {
-	return a.handleEphemeralPrompt(ctx, chatID, prompt, modelOverrideID, personalityOverrideID, nil, nil, models.ActionTypeChatMessage, telemetry.CallPathUserChat, ephemeralPromptOptions{})
+	return a.handleEphemeralPrompt(ctx, chatID, prompt, modelOverrideID, personalityOverrideID, nil, nil, models.ActionTypeChatMessage, telemetry.CallPathUserChat, ephemeralPromptOptions{}, true)
 }
 
 func (a *Agent) handleEphemeralPrompt(
@@ -192,10 +193,18 @@ func (a *Agent) handleEphemeralPrompt(
 	actionType string,
 	callPath telemetry.CallPath,
 	opts ephemeralPromptOptions,
+	detachFromCaller bool,
 ) (*models.ChatMessage, error) {
-	ctx, ok := middleware.CopyUserToIDContext(ctx, context.Background())
-	if !ok {
-		return nil, errors.New("user ID not found in context")
+	var ok bool
+	if detachFromCaller {
+		ctx, ok = middleware.CopyUserToIDContext(ctx, context.Background())
+		if !ok {
+			return nil, errors.New("user ID not found in context")
+		}
+	} else {
+		if _, ok = middleware.GetUserIDFromContext(ctx); !ok {
+			return nil, errors.New("user ID not found in context")
+		}
 	}
 
 	userID, _ := middleware.GetUserIDFromContext(ctx)

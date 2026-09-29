@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"strings"
 
 	"github.com/google/uuid"
@@ -24,18 +28,26 @@ type Handler struct {
 	prober   ConnectionProber
 	oauth    OAuthService
 	logger   *zap.Logger
+	config   Config
+}
+
+type Config struct {
+	// AllowLocalhostConnections permits testing localhost/loopback MCP URLs.
+	// Keep false by default to reduce SSRF risk in shared deployments.
+	AllowLocalhostConnections bool
 }
 
 type ConnectionProber interface {
 	ProbeConnection(ctx context.Context, server *models.MCPServer) (int, error)
 }
 
-func NewHandler(provider Provider, prober ConnectionProber, oauth OAuthService, logger *zap.Logger) *Handler {
+func NewHandler(provider Provider, prober ConnectionProber, oauth OAuthService, logger *zap.Logger, cfg Config) *Handler {
 	return &Handler{
 		provider: provider,
 		prober:   prober,
 		oauth:    oauth,
 		logger:   logger,
+		config:   cfg,
 	}
 }
 
@@ -175,6 +187,10 @@ func (h *Handler) TestMCPServerConnection(w http.ResponseWriter, r *http.Request
 	serverURL := strings.TrimSpace(req.ServerURL)
 	if serverURL == "" {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "server_url is required", nil)
+		return
+	}
+	if err := validateConnectionTestURL(serverURL, h.config.AllowLocalhostConnections); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
 		return
 	}
 
@@ -590,4 +606,61 @@ func normalizeScopes(in []string) []string {
 		out = append(out, trimmed)
 	}
 	return out
+}
+
+func validateConnectionTestURL(rawURL string, allowLocalhost bool) error {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed == nil {
+		return fmt.Errorf("server_url must be a valid absolute URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("server_url must use http or https")
+	}
+	if strings.TrimSpace(parsed.Host) == "" {
+		return fmt.Errorf("server_url host is required")
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return fmt.Errorf("server_url host is required")
+	}
+
+	if isLocalhostName(host) {
+		if !allowLocalhost {
+			return fmt.Errorf("localhost MCP URLs are disabled by server policy")
+		}
+		return nil
+	}
+
+	if ip, err := netip.ParseAddr(host); err == nil {
+		if ip.IsLoopback() {
+			if !allowLocalhost {
+				return fmt.Errorf("localhost MCP URLs are disabled by server policy")
+			}
+			return nil
+		}
+		if ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+			return fmt.Errorf("private network MCP URLs are not allowed")
+		}
+	} else if parsedIP := net.ParseIP(host); parsedIP != nil {
+		// Fallback path for unusual forms netip.ParseAddr rejects.
+		if parsedIP.IsLoopback() {
+			if !allowLocalhost {
+				return fmt.Errorf("localhost MCP URLs are disabled by server policy")
+			}
+			return nil
+		}
+		if parsedIP.IsPrivate() || parsedIP.IsLinkLocalUnicast() || parsedIP.IsLinkLocalMulticast() || parsedIP.IsMulticast() || parsedIP.IsUnspecified() {
+			return fmt.Errorf("private network MCP URLs are not allowed")
+		}
+	}
+
+	if parsed.Scheme != "https" {
+		return fmt.Errorf("server_url must use https for non-local hosts")
+	}
+	return nil
+}
+
+func isLocalhostName(host string) bool {
+	h := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	return h == "localhost" || strings.HasSuffix(h, ".localhost")
 }

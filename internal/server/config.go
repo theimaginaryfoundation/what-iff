@@ -56,27 +56,28 @@ type Config struct {
 	// GeminiKey enables Google Gemini models (OpenAI-compatible Chat Completions); optional.
 	GeminiKey string
 	// GeminiBaseURL overrides Google's OpenAI-compatible base URL; optional.
-	GeminiBaseURL          string
-	MistralKey             string
-	MistralBaseURL         string
-	DeepSeekKey            string
-	DeepSeekBaseURL        string
-	QwenKey                string
-	QwenBaseURL            string
-	XiaomiKey              string
-	XiaomiBaseURL          string
+	GeminiBaseURL   string
+	MistralKey      string
+	MistralBaseURL  string
+	DeepSeekKey     string
+	DeepSeekBaseURL string
+	QwenKey         string
+	QwenBaseURL     string
+	XiaomiKey       string
+	XiaomiBaseURL   string
 	// First-party web search (ADR 0x021). An empty key leaves the tools off.
-	ParallelAPIKey        string
-	ParallelSearchMode    string
-	TokenEncryptionSecret string
-	MCPOAuthRedirectURL      string
-	MCPOAuthPostAuthURL      string
-	MCPOAuthAllowedRedirects []string
-	MCPOAuthSweepInterval    time.Duration
-	MCPOAuthRefreshAhead     time.Duration
-	MCPOAuthMaxFailures      int
-	AllowedEmails            []string
-	RequireBilling           bool // Feature flag to enable/disable billing
+	ParallelAPIKey               string
+	ParallelSearchMode           string
+	TokenEncryptionSecret        string
+	MCPOAuthRedirectURL          string
+	MCPOAuthPostAuthURL          string
+	MCPOAuthAllowedRedirects     []string
+	MCPAllowLocalhostConnections bool
+	MCPOAuthSweepInterval        time.Duration
+	MCPOAuthRefreshAhead         time.Duration
+	MCPOAuthMaxFailures          int
+	AllowedEmails                []string
+	RequireBilling               bool // Feature flag to enable/disable billing
 	// EnableAgentJobsScheduler starts the in-process AgentJob scheduler (single-server MVP).
 	EnableAgentJobsScheduler bool
 	// AgentJobsSchedulerDistributed enables Postgres-backed leader election so only one
@@ -196,6 +197,7 @@ func NewConfig() *Config {
 			}
 		}
 	}
+	mcpAllowLocalhostConnections := strings.TrimSpace(os.Getenv("MCP_ALLOW_LOCALHOST_CONNECTIONS")) == "true"
 	mcpOAuthSweepInterval := 2 * time.Minute
 	if v := strings.TrimSpace(os.Getenv("MCP_OAUTH_SWEEP_INTERVAL")); v != "" {
 		if parsed, err := time.ParseDuration(v); err == nil && parsed > 0 {
@@ -334,6 +336,7 @@ func NewConfig() *Config {
 		MCPOAuthRedirectURL:                 mcpOAuthRedirectURL,
 		MCPOAuthPostAuthURL:                 mcpOAuthPostAuthURL,
 		MCPOAuthAllowedRedirects:            mcpOAuthAllowedRedirects,
+		MCPAllowLocalhostConnections:        mcpAllowLocalhostConnections,
 		MCPOAuthSweepInterval:               mcpOAuthSweepInterval,
 		MCPOAuthRefreshAhead:                mcpOAuthRefreshAhead,
 		MCPOAuthMaxFailures:                 mcpOAuthMaxFailures,

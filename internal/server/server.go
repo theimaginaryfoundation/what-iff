@@ -311,7 +311,9 @@ func (s *Server) setupRoutes() {
 		AllowedRedirects:    s.config.MCPOAuthAllowedRedirects,
 	})
 	go mcpoauth.NewSweeper(oauthService, s.config.MCPOAuthSweepInterval, s.config.MCPOAuthRefreshAhead, s.config.MCPOAuthMaxFailures).Run(s.lifecycleCtx)
-	mcpServerHandler := mcpserver.NewHandler(dataStore, mcpclient.New(nil, s.logger), oauthService, s.logger)
+	mcpServerHandler := mcpserver.NewHandler(dataStore, mcpclient.New(nil, s.logger), oauthService, s.logger, mcpserver.Config{
+		AllowLocalhostConnections: s.config.MCPAllowLocalhostConnections,
+	})
 	modelHandler := model.NewHandler(dataStore, s.logger)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)
 	chatHandler := chat.NewHandler(dataStore, s.logger, agent, chat.HandlerConfig{

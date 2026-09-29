@@ -2,6 +2,7 @@ package mcpoauth
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -240,4 +241,48 @@ func TestHandleCallbackFallsBackWhenSessionRedirectNotAllowed(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, success)
 	require.True(t, strings.HasPrefix(redirectURL, "http://localhost:4200/integrations"))
+}
+
+func TestNew_InvalidRedirectURLFallsBackToDefaultCallback(t *testing.T) {
+	store := &fakeStore{
+		server: &models.MCPServer{
+			ID:            uuid.New(),
+			UserID:        uuid.New(),
+			AuthMode:      models.MCPServerAuthModeOAuth,
+			OAuthAuthURL:  "https://accounts.example.com/auth",
+			OAuthTokenURL: "https://oauth.example.com/token",
+			OAuthClientID: "client-id",
+		},
+	}
+	svc := New(store, nil, nil, Config{
+		RedirectURL:      "://bad",
+		AllowedRedirects: []string{"http://localhost:4200"},
+	})
+	authURL, err := svc.StartAuth(context.Background(), store.server.UserID, store.server.ID, "")
+	require.NoError(t, err)
+	require.Contains(t, authURL, url.QueryEscape(defaultOAuthCallbackURL))
+}
+
+func TestTokenRequest_HTTPErrorIncludesProviderDescription(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"bad code"}`))
+	}))
+	defer tokenSrv.Close()
+
+	svc := New(&fakeStore{}, nil, nil, Config{})
+	_, err := svc.tokenRequest(context.Background(), tokenSrv.URL, url.Values{"grant_type": {"authorization_code"}})
+	require.EqualError(t, err, "oauth token endpoint error (400): invalid_grant: bad code")
+}
+
+func TestTokenRequest_HTTPErrorNonJSONBody(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`not-json`))
+	}))
+	defer tokenSrv.Close()
+
+	svc := New(&fakeStore{}, nil, nil, Config{})
+	_, err := svc.tokenRequest(context.Background(), tokenSrv.URL, url.Values{"grant_type": {"authorization_code"}})
+	require.EqualError(t, err, fmt.Sprintf("oauth token endpoint returned HTTP %d with non-JSON body", http.StatusBadRequest))
 }
