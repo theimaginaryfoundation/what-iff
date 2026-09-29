@@ -69,8 +69,10 @@ func (a *Agent) prepareTurnMCPToolSpecs(ctx context.Context, chatCtx *chatContex
 
 // bindMCPToolSync lets the agent loop re-declare MCP tools on this turn's adapter, so tools
 // loaded by load_mcp_tools are callable in the same turn rather than only from the next one.
-// Adapters without an MCP tool setter (mock) leave syncMCPTools nil.
-func bindMCPToolSync(chatCtx *chatContext, adapter provider.AgentAdapter) {
+// A new adapter opts in by implementing SetMCPTools with the tool type it sends (Chat
+// Completions, Anthropic or Responses tool unions, matched below); adapters without one (mock)
+// leave syncMCPTools nil and simply see loaded tools from the next turn.
+func bindMCPToolSync(chatCtx *chatContext, adapter provider.AgentAdapter, logger *zap.Logger) {
 	if chatCtx == nil {
 		return
 	}
@@ -78,7 +80,7 @@ func bindMCPToolSync(chatCtx *chatContext, adapter provider.AgentAdapter) {
 	switch ad := adapter.(type) {
 	case *provider.GeminiAdapter:
 		chatCtx.syncMCPTools = func(specs []agenttools.FunctionToolSpec) {
-			ad.SetMCPTools(geminiFunctionTools(specs))
+			ad.SetMCPTools(geminiFunctionTools(specs, logger))
 		}
 	case interface {
 		SetMCPTools([]openai.ChatCompletionToolUnionParam)
@@ -104,8 +106,9 @@ func bindMCPToolSync(chatCtx *chatContext, adapter provider.AgentAdapter) {
 }
 
 // syncLoadedMCPTools re-declares the loaded MCP tools on the adapter after a tool round in
-// which load_mcp_tools/unload_mcp_tools changed the loaded set. Discovery is cached, so this
-// does not re-list tools from the connector on every round.
+// which load_mcp_tools/unload_mcp_tools changed the loaded set. It only runs after such a round,
+// and discovery is cached per connector (mcpclient, 5 min TTL), so it reuses the tool listing the
+// turn already fetched instead of calling the connector again.
 func (a *Agent) syncLoadedMCPTools(ctx context.Context, chatCtx *chatContext) {
 	if chatCtx == nil || !chatCtx.mcpToolsChanged {
 		return
@@ -230,11 +233,22 @@ func openAIChatCompletionFunctionTools(specs []agenttools.FunctionToolSpec) []op
 }
 
 // geminiFunctionTools rewrites each schema into the subset Gemini accepts; MCP connector schemas
-// otherwise draw a bare 400 "invalid argument" from Gemini's OpenAI-compatible endpoint.
-func geminiFunctionTools(specs []agenttools.FunctionToolSpec) []openai.ChatCompletionToolUnionParam {
+// otherwise draw a bare 400 "invalid argument" from Gemini's OpenAI-compatible endpoint. The one
+// unverified rewrite (free-form object -> untyped schema) is logged so a remaining Gemini 400 can
+// be matched to the tool and property that caused it.
+func geminiFunctionTools(specs []agenttools.FunctionToolSpec, logger *zap.Logger) []openai.ChatCompletionToolUnionParam {
 	out := make([]openai.ChatCompletionToolUnionParam, 0, len(specs))
+	var relaxed []string
 	for _, spec := range specs {
-		out = append(out, provider.GeminiFunctionTool(spec.Name, spec.Description, spec.Properties, spec.Required))
+		tool, paths := provider.GeminiFunctionToolWithRelaxations(spec.Name, spec.Description, spec.Properties, spec.Required)
+		out = append(out, tool)
+		for _, p := range paths {
+			relaxed = append(relaxed, spec.Name+":"+p)
+		}
+	}
+	if len(relaxed) > 0 && logger != nil {
+		logger.Info("gemini tool schemas: free-form object properties relaxed to untyped schemas",
+			zap.Strings("tool_properties", relaxed))
 	}
 	return out
 }

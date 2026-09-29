@@ -18,7 +18,7 @@ func TestMCPToolLifecycleArgsLenientDecoding(t *testing.T) {
 	}{
 		"declared shape":      {`{"mcp_server_id":"abc","tools":["a","b"]}`, "abc", []string{"a", "b"}},
 		"json-encoded array":  {`{"mcp_server_id":"abc","tools":"[\"a\",\"b\"]"}`, "abc", []string{"a", "b"}},
-		"comma string":        {`{"mcp_server_id":"abc","tools":"a, b"}`, "abc", []string{"a", " b"}},
+		"comma string":        {`{"mcp_server_id":"abc","tools":"a, b"}`, "abc", []string{"a", "b"}},
 		"single string":       {`{"mcp_server_id":"abc","tools":"all"}`, "abc", []string{"all"}},
 		"aliases":             {`{"server_id":"abc","tool_names":["a"]}`, "abc", []string{"a"}},
 		"empty id falls back": {`{"mcp_server_id":"","connector_id":"abc","tools":["a"]}`, "abc", []string{"a"}},

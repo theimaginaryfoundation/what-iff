@@ -57,6 +57,9 @@ func (args *mcpToolLifecycleArgs) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// decodeLenientStringList decodes a JSON array of strings, or a string holding either a
+// JSON-encoded array or a comma-separated list (elements trimmed). Any other JSON type (object,
+// number, bool) is an error, which the caller reports as "tools must be an array of tool names".
 func decodeLenientStringList(v json.RawMessage) ([]string, error) {
 	var list []string
 	if err := json.Unmarshal(v, &list); err == nil {
@@ -72,7 +75,11 @@ func decodeLenientStringList(v json.RawMessage) ([]string, error) {
 			return list, nil
 		}
 	}
-	return strings.Split(single, ","), nil
+	parts := strings.Split(single, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return parts, nil
 }
 
 type mcpToolLifecycleResult struct {
@@ -267,6 +274,13 @@ func (a *Agent) unloadMCPToolsTool(ctx context.Context, chatCtx *chatContext, in
 // chat has a single connector. Candidates include ritual-attached connectors cached for this
 // turn, not only connectors attached to the chat itself. Errors name the valid connectors so
 // the model can retry with a correct id.
+//
+// Resolution order:
+//  1. empty id: the only connector, if there is exactly one (else an error listing them)
+//  2. a parseable UUID: exact id match only (no fallback to name/prefix)
+//  3. otherwise, with an optional mcp__ prefix / __ suffix stripped: a case-insensitive name
+//     match, or a prefix of the dash-less UUID at least 8 hex chars long (the mcp__<prefix>__
+//     key in tool names is its first 8). Exactly one connector must match.
 func (a *Agent) resolveChatMCPServer(ctx context.Context, chatCtx *chatContext, raw string) (*models.MCPServer, error) {
 	servers, err := a.lifecycleCandidateServers(ctx, chatCtx)
 	if err != nil {
@@ -305,7 +319,9 @@ func (a *Agent) resolveChatMCPServer(ctx context.Context, chatCtx *chatContext, 
 }
 
 // lifecycleCandidateServers merges the chat's own connectors with this turn's cached connectors
-// (which include ritual/mood-attached ones).
+// (which include ritual/mood-attached ones). The chat list is re-read rather than trusted from
+// the turn cache because chatCtx.mcpServers is empty until the turn's tools are prepared (and
+// on paths that never prepare them); lifecycle calls are rare, so one indexed read is cheap.
 func (a *Agent) lifecycleCandidateServers(ctx context.Context, chatCtx *chatContext) ([]*models.MCPServer, error) {
 	chatServers, err := a.ds.ListChatMCPServers(ctx, chatCtx.userID, chatCtx.chat.ID)
 	if err != nil {

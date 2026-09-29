@@ -12,6 +12,10 @@ import (
 func chatCompletionToolNames(tools []openai.ChatCompletionToolUnionParam) []string {
 	out := make([]string, 0, len(tools))
 	for _, t := range tools {
+		if t.OfFunction == nil {
+			out = append(out, "<non-function>")
+			continue
+		}
 		out = append(out, t.OfFunction.Function.Name)
 	}
 	return out

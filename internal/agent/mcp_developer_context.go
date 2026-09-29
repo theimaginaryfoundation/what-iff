@@ -36,17 +36,30 @@ func (a *Agent) mcpLifecycleDeveloperContext(ctx context.Context, userID, chatID
 			zap.Error(err))
 	}
 	toolsByServer := map[uuid.UUID][]string{}
+	var discoveryErrors map[uuid.UUID]string
 	if a.mcpClient != nil {
 		// Discovery is cached per connector, so the turn's tool registration reuses this result.
-		out, _ := a.mcpClient.DiscoverTools(ctx, userID, servers)
+		out, err := a.mcpClient.DiscoverTools(ctx, userID, servers)
 		for _, t := range out.Tools {
 			toolsByServer[t.ConnectorID] = append(toolsByServer[t.ConnectorID], t.Name)
 		}
+		discoveryErrors = out.Errors
+		if len(out.Errors) > 0 {
+			failed := make([]string, 0, len(out.Errors))
+			for id, msg := range out.Errors {
+				failed = append(failed, id.String()+": "+msg)
+			}
+			sort.Strings(failed)
+			a.logger.Warn("mcp discovery failed for some connectors while building developer context",
+				zap.String("chat_id", chatID.String()),
+				zap.Strings("connector_errors", failed),
+				zap.Error(err))
+		}
 	}
-	return formatMCPLifecycleDeveloperContext(servers, toolsByServer, loadedByServer)
+	return formatMCPLifecycleDeveloperContext(servers, toolsByServer, loadedByServer, discoveryErrors)
 }
 
-func formatMCPLifecycleDeveloperContext(servers []*models.MCPServer, toolsByServer, loadedByServer map[uuid.UUID][]string) string {
+func formatMCPLifecycleDeveloperContext(servers []*models.MCPServer, toolsByServer, loadedByServer map[uuid.UUID][]string, discoveryErrors map[uuid.UUID]string) string {
 	var b strings.Builder
 	b.WriteString("MCP connectors in this chat. Their tools are NOT callable until loaded: call load_mcp_tools with the connector's mcp_server_id and the tool names you need (or [\"all\"]). ")
 	b.WriteString("Loaded tools can be called right away in this same turn, as mcp__<connector>__<tool>, and stay loaded in later turns until you call unload_mcp_tools. ")
@@ -70,6 +83,8 @@ func formatMCPLifecycleDeveloperContext(servers []*models.MCPServer, toolsByServ
 			if extra := len(names) - len(shown); extra > 0 {
 				fmt.Fprintf(&b, " (+%d more; see list(kind=\"mcp_servers\"))", extra)
 			}
+		} else if strings.TrimSpace(discoveryErrors[s.ID]) != "" {
+			b.WriteString(" tools: (discovery failed; the connector may need re-authentication. Retry with list(kind=\"mcp_servers\"))")
 		} else {
 			b.WriteString(" tools: (not discovered yet; call list(kind=\"mcp_servers\"))")
 		}

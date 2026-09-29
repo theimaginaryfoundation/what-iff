@@ -12,7 +12,20 @@ import (
 // Our own tool specs stay inside that subset, but MCP connectors ship arbitrary JSON Schema
 // ($schema, $defs/$ref, oneOf, const, type arrays, nested additionalProperties, formats such as
 // "uri", free-form objects with no properties). geminiSanitizeSchema rewrites a schema into the
-// subset, keeping what can be kept and dropping the rest.
+// subset, keeping what can be kept and dropping the rest:
+//
+//   - keywords outside geminiSchemaKeys are dropped ($schema, $ref/$defs, additionalProperties,
+//     examples, exclusiveMinimum, ...)
+//   - oneOf becomes anyOf; a single-schema allOf is flattened into its parent; const becomes enum
+//   - type arrays and {"type":"null"} alternatives become one type plus nullable
+//   - formats Gemini does not accept for the node's type are dropped
+//   - enums survive only as string enums on string schemas
+//   - OBJECT schemas never have empty properties, and required only names declared properties
+//   - ARRAY schemas always have items
+//
+// The one rewrite not yet verified against Gemini is a free-form object (no properties) becoming
+// an untyped {} schema; GeminiFunctionToolWithRelaxations reports where that happened so callers
+// can log it and correlate any remaining Gemini 400s.
 
 // geminiSchemaKeys are the Schema fields Gemini function declarations accept.
 var geminiSchemaKeys = map[string]struct{}{
@@ -36,11 +49,19 @@ var geminiTypes = map[string]struct{}{
 // GeminiFunctionTool builds a Chat Completions function tool whose parameter schema has been
 // rewritten into the subset Gemini accepts (see geminiSanitizeSchema).
 func GeminiFunctionTool(name, description string, properties map[string]interface{}, required []string) openai.ChatCompletionToolUnionParam {
+	tool, _ := GeminiFunctionToolWithRelaxations(name, description, properties, required)
+	return tool
+}
+
+// GeminiFunctionToolWithRelaxations is GeminiFunctionTool plus the property paths (e.g.
+// "labels", "filter.tags[]") whose free-form object schema was relaxed to an untyped {}.
+func GeminiFunctionToolWithRelaxations(name, description string, properties map[string]interface{}, required []string) (openai.ChatCompletionToolUnionParam, []string) {
+	var relaxed []string
 	params := shared.FunctionParameters{
 		"type":                 "object",
 		"additionalProperties": false,
 	}
-	sanitized := geminiSanitizeProperties(sanitizeClaudeSchemaProperties(properties))
+	sanitized := geminiSanitizeProperties(sanitizeClaudeSchemaProperties(properties), "", &relaxed)
 	if len(sanitized) > 0 {
 		params["properties"] = sanitized
 		if req := geminiFilterRequired(required, sanitized); len(req) > 0 {
@@ -51,10 +72,12 @@ func GeminiFunctionTool(name, description string, properties map[string]interfac
 		Name:        name,
 		Description: openai.String(description),
 		Parameters:  params,
-	})
+	}), relaxed
 }
 
-func geminiSanitizeProperties(props map[string]interface{}) map[string]interface{} {
+// geminiSanitizeProperties sanitizes each property schema. path is the parent's property path
+// ("" at the top level); relaxed, when non-nil, collects paths relaxed to an untyped schema.
+func geminiSanitizeProperties(props map[string]interface{}, path string, relaxed *[]string) map[string]interface{} {
 	if len(props) == 0 {
 		return nil
 	}
@@ -66,13 +89,13 @@ func geminiSanitizeProperties(props map[string]interface{}) map[string]interface
 			out[name] = map[string]interface{}{}
 			continue
 		}
-		out[name] = geminiSanitizeSchema(schema)
+		out[name] = geminiSanitizeSchema(schema, joinSchemaPath(path, name), relaxed)
 	}
 	return out
 }
 
-// geminiSanitizeSchema rewrites one JSON Schema node into Gemini's subset.
-func geminiSanitizeSchema(in map[string]interface{}) map[string]interface{} {
+// geminiSanitizeSchema rewrites one JSON Schema node (at property path) into Gemini's subset.
+func geminiSanitizeSchema(in map[string]interface{}, path string, relaxed *[]string) map[string]interface{} {
 	out := map[string]interface{}{}
 
 	// oneOf is anyOf for Gemini's purposes; allOf of a single schema is that schema.
@@ -109,13 +132,13 @@ func geminiSanitizeSchema(in map[string]interface{}) map[string]interface{} {
 		switch k {
 		case "properties":
 			if props, ok := v.(map[string]interface{}); ok {
-				if p := geminiSanitizeProperties(props); len(p) > 0 {
+				if p := geminiSanitizeProperties(props, path, relaxed); len(p) > 0 {
 					out["properties"] = p
 				}
 			}
 		case "items":
 			if items, ok := v.(map[string]interface{}); ok {
-				out["items"] = geminiSanitizeSchema(items)
+				out["items"] = geminiSanitizeSchema(items, path+"[]", relaxed)
 			}
 		case "anyOf":
 			alts, ok := v.([]interface{})
@@ -133,7 +156,7 @@ func geminiSanitizeSchema(in map[string]interface{}) map[string]interface{} {
 					out["nullable"] = true
 					continue
 				}
-				kept = append(kept, geminiSanitizeSchema(m))
+				kept = append(kept, geminiSanitizeSchema(m, path, relaxed))
 			}
 			switch len(kept) {
 			case 0:
@@ -175,6 +198,10 @@ func geminiSanitizeSchema(in map[string]interface{}) map[string]interface{} {
 		if len(props) == 0 {
 			// Gemini rejects OBJECT schemas with no properties ("should be non-empty for OBJECT
 			// type"). A free-form object becomes an untyped schema that accepts any value.
+			// Unverified against Gemini, so report it for logging.
+			if relaxed != nil {
+				*relaxed = append(*relaxed, path)
+			}
 			delete(out, "type")
 			delete(out, "properties")
 			delete(out, "required")
@@ -200,6 +227,13 @@ func geminiSanitizeSchema(in map[string]interface{}) map[string]interface{} {
 		out["items"] = map[string]interface{}{"type": "string"}
 	}
 	return out
+}
+
+func joinSchemaPath(parent, name string) string {
+	if parent == "" {
+		return name
+	}
+	return parent + "." + name
 }
 
 // geminiType maps a JSON Schema "type" (string or array) to one Gemini type plus nullability.

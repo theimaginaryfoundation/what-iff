@@ -35,6 +35,7 @@ func TestMCPLifecycleDeveloperContextNamesConnectorsAndTools(t *testing.T) {
 		[]*models.MCPServer{grafana, oura},
 		map[uuid.UUID][]string{grafana.ID: {"search_dashboards", "list_datasources"}},
 		map[uuid.UUID][]string{grafana.ID: {"mcp__abc__search_dashboards"}},
+		nil,
 	)
 
 	require.Contains(t, ctx, "load_mcp_tools")
@@ -48,13 +49,20 @@ func TestMCPLifecycleDeveloperContextNamesConnectorsAndTools(t *testing.T) {
 	require.NotContains(t, ctx, "status=active")
 }
 
+func TestMCPLifecycleDeveloperContextFlagsDiscoveryFailure(t *testing.T) {
+	s := &models.MCPServer{ID: uuid.New(), Name: "Grafana"}
+	ctx := formatMCPLifecycleDeveloperContext([]*models.MCPServer{s}, nil, nil, map[uuid.UUID]string{s.ID: "401 unauthorized"})
+	require.Contains(t, ctx, "tools: (discovery failed;")
+	require.NotContains(t, ctx, "not discovered yet")
+}
+
 func TestMCPLifecycleDeveloperContextCapsToolNames(t *testing.T) {
 	s := &models.MCPServer{ID: uuid.New(), Name: "Big"}
 	names := make([]string, mcpDeveloperContextMaxToolsPerConnector+5)
 	for i := range names {
 		names[i] = fmt.Sprintf("tool_%03d", i)
 	}
-	ctx := formatMCPLifecycleDeveloperContext([]*models.MCPServer{s}, map[uuid.UUID][]string{s.ID: names}, nil)
+	ctx := formatMCPLifecycleDeveloperContext([]*models.MCPServer{s}, map[uuid.UUID][]string{s.ID: names}, nil, nil)
 	require.Contains(t, ctx, "(+5 more;")
 	require.NotContains(t, ctx, fmt.Sprintf("tool_%03d", mcpDeveloperContextMaxToolsPerConnector))
 }

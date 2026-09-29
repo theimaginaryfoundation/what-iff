@@ -1106,7 +1106,7 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 	draftBuffer := newJobDraftDeltaBuffer(a.lifecycleCtx, a.ds, a.logger, chatJob, jobDraftDeltaFlushMinChars, jobDraftDeltaFlushMaxWait)
 	adapter.SetTextDeltaHandler(draftBuffer.HandleDelta)
 	defer draftBuffer.Flush()
-	bindMCPToolSync(chatCtx, adapter)
+	bindMCPToolSync(chatCtx, adapter, a.logger)
 	// Stream reasoning live too, so always-on reasoning models (GLM, MiMo) show
 	// something while they think instead of a bare typing indicator.
 	flushReasoning := func() {}
@@ -1415,7 +1415,7 @@ func (a *Agent) generateAssistantForMessageGemini(ctx context.Context, userID uu
 	if policy.toolsEnabled {
 		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
 	}
-	geminiFunctionTools := geminiFunctionTools(specs)
+	geminiFunctionTools := geminiFunctionTools(specs, a.logger)
 	a.recordToolDefinitionEstimate(modelContext, geminiFunctionTools)
 	toolNames := make([]string, 0, len(geminiFunctionTools))
 	for _, t := range geminiFunctionTools {

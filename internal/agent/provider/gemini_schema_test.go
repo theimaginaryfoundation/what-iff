@@ -37,7 +37,7 @@ func mcpStyleProperties() map[string]interface{} {
 }
 
 func TestGeminiSanitizeSchemaRewritesMCPSchemas(t *testing.T) {
-	got := geminiSanitizeProperties(mcpStyleProperties())
+	got := geminiSanitizeProperties(mcpStyleProperties(), "", nil)
 
 	require.Equal(t, map[string]interface{}{"type": "string", "description": "search text"}, got["query"])
 	require.Equal(t, map[string]interface{}{"type": "integer", "nullable": true}, got["limit"])
@@ -70,7 +70,25 @@ func TestGeminiSanitizeLeavesAgentToolSchemasIntact(t *testing.T) {
 		"mode":  map[string]interface{}{"type": "string", "enum": []string{"a", "b"}, "description": "d"},
 		"tools": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "minItems": 1},
 	}
-	got := geminiSanitizeProperties(in)
+	got := geminiSanitizeProperties(in, "", nil)
 	require.Equal(t, map[string]interface{}{"type": "string", "enum": []interface{}{"a", "b"}, "description": "d"}, got["mode"])
 	require.Equal(t, in["tools"], got["tools"])
+}
+
+func TestGeminiFunctionToolWithRelaxationsReportsFreeFormObjects(t *testing.T) {
+	props := map[string]interface{}{
+		"labels": map[string]interface{}{"type": "object", "additionalProperties": map[string]interface{}{"type": "string"}},
+		"filter": map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"meta": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}},
+			},
+		},
+		"query": map[string]interface{}{"type": "string"},
+	}
+	_, relaxed := GeminiFunctionToolWithRelaxations("mcp__abc__search", "", props, nil)
+	require.ElementsMatch(t, []string{"labels", "filter.meta[]"}, relaxed)
+
+	_, relaxed = GeminiFunctionToolWithRelaxations("list", "", map[string]interface{}{"query": map[string]interface{}{"type": "string"}}, nil)
+	require.Empty(t, relaxed)
 }
