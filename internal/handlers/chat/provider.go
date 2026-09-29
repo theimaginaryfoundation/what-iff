@@ -25,6 +25,7 @@ type Store interface {
 	ListChatMessagesBefore(ctx context.Context, userID, chatID uuid.UUID, beforeSentAt time.Time, beforeID uuid.UUID, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
 	GetChatMessage(ctx context.Context, userID, messageID uuid.UUID) (*models.ChatMessage, error)
 	MarkChatMessagesRead(ctx context.Context, userID, chatID uuid.UUID) (int, error)
+	MarkAllChatMessagesRead(ctx context.Context, userID uuid.UUID) (int, error)
 	SetChatMessageBookmarked(ctx context.Context, userID, messageID uuid.UUID, bookmarked bool) (*models.ChatMessage, error)
 	ListChatMessageBookmarks(ctx context.Context, userID, chatID uuid.UUID) ([]*models.ChatMessage, error)
 	CreateFileAttachment(ctx context.Context, userID uuid.UUID, fileAttachment models.FileAttachment) (*models.FileAttachment, error)

@@ -30,6 +30,8 @@ Authenticated user account portability: ZIP export by email and additive ZIP imp
   personalities are skipped without inflating the `skipped` count (the user opted out, they were not
   duplicates). Memories are all-or-nothing (an account can carry thousands).
 - Local development uses the filesystem store plus `email.NoopSender`, preserving the production flow without AWS.
+- The OpenAI client used to regenerate memory embeddings on import is built on the server's shared provider HTTP client (passed to `NewHandler`).
+  That keeps import embeddings on the instrumented transport, and on the deny-network transport under a non-vendor `LLM_BACKEND`, like every other provider call.
 - Files are an inventory only; their bytes are deliberately outside this export format.
 - `conversations.json` remains Anthropic-compatible but carries `whatiff_*` state for account round-trips.
   Personality IDs are source references only; import maps them to fresh destination IDs before restoring chats.

@@ -583,6 +583,27 @@ func (d *Datastore) MarkChatMessagesRead(ctx context.Context, userID, chatID uui
 	return updated, nil
 }
 
+// MarkAllChatMessagesRead marks every unread assistant message in every chat
+// the user owns (archived included) as read, in a single UPDATE so the result
+// is all-or-nothing. Chats owned by other users are never touched.
+func (d *Datastore) MarkAllChatMessagesRead(ctx context.Context, userID uuid.UUID) (int, error) {
+	updated, err := d.dbClient.ChatMessage.Update().
+		Where(
+			chatmessage.HasChatWith(entchat.HasOwnerWith(user.ID(userID))),
+			chatmessage.OriginEQ(chatmessage.Origin(models.MessageOriginAssistant)),
+			chatmessage.ReadStatusEQ(chatmessage.ReadStatusUnread),
+		).
+		SetReadStatus(chatmessage.ReadStatusRead).
+		Save(ctx)
+	if err != nil {
+		d.logger.Error("failed to mark all chat messages read",
+			zap.Error(err),
+			zap.String("user_id", userID.String()))
+		return 0, err
+	}
+	return updated, nil
+}
+
 // GetChatMessage retrieves a chat message from the datastore by ID
 func (d *Datastore) GetChatMessage(ctx context.Context, userID, id uuid.UUID) (*models.ChatMessage, error) {
 	// Start transaction

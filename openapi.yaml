@@ -4052,6 +4052,38 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /chat/mark-all-read:
+    post:
+      summary: Mark all chats as read
+      description: |
+        Marks every unread assistant-origin message in every chat the caller owns
+        (archived chats included) as read, in a single all-or-nothing update.
+        Other users' chats are never affected. Messages are not deleted.
+      tags: [Chat Management]
+      responses:
+        '200':
+          description: All of the caller's chat messages marked as read
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated_count:
+                    type: integer
+                    description: Number of messages updated from unread to read (0 when nothing was unread)
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Update failed; no messages were changed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   # Chat Message Endpoints
   /chat/{chatId}/welcome-message:
     post:

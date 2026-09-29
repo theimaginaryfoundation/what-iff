@@ -8,10 +8,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // --- loadImageBytesForClaude ---
@@ -90,24 +92,39 @@ func TestHandleUserMessage_UpdateJobStatusFailureReturnsEarly(t *testing.T) {
 	t.Parallel()
 	ds, mock, cleanup := newTestDatastore(t)
 	defer cleanup()
-	// First exist-check failure drives updateJobStatus's UpdateJob call to fail.
+	// UpdateJob's ownership read (prior status) finds no row, so updateJobStatus fails
+	// with ErrJobNotFound before any UPDATE is issued.
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT .*").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectQuery("SELECT .*").WillReturnRows(sqlmock.NewRows([]string{"status"}))
 	mock.ExpectRollback()
-	// setJobStatusFailed's own UpdateJob call also fails its exist check, so it
-	// logs and returns without touching draft deltas or the user message.
+	// setJobStatusFailed's own UpdateJob call hits the same missing row, so it logs and
+	// returns without touching draft deltas or the user message.
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT .*").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectQuery("SELECT .*").WillReturnRows(sqlmock.NewRows([]string{"status"}))
 	mock.ExpectRollback()
 
-	a := &Agent{ds: ds, logger: zap.NewNop()}
-	chatJob := &models.Job{ID: uuid.New(), UserID: uuid.New(), JobType: JobTypeChatMessage, Status: models.JobStatusPending}
+	core, logs := observer.New(zap.InfoLevel)
+	a := &Agent{ds: ds, logger: zap.New(core)}
 	chatMessage := &models.ChatMessage{ID: uuid.New(), ChatID: uuid.New()}
+	// A real chat job references its user message; an empty reference would fail ent's
+	// validator on the UPDATE and mask the not-found path this test covers.
+	chatJob := &models.Job{
+		ID:        uuid.New(),
+		UserID:    uuid.New(),
+		JobType:   JobTypeChatMessage,
+		Reference: chatMessage.ID.String(),
+		Status:    models.JobStatusPending,
+	}
 
 	msg, err := a.handleUserMessage(context.Background(), chatJob, chatMessage)
 	require.Nil(t, msg)
-	require.Error(t, err)
+	require.ErrorIs(t, err, datastore.ErrJobNotFound)
+	require.ErrorContains(t, err, "failed to update job status")
 	require.NoError(t, mock.ExpectationsWereMet())
+	// Returned before the turn started: no draft-delta clear, no "starting job" log.
+	require.Zero(t, logs.FilterMessage("starting job for user message").Len())
+	require.Zero(t, logs.FilterMessage("failed to clear job draft deltas on failed job").Len())
+	require.Equal(t, 1, logs.FilterMessage("failed to update job").Len())
 }
 
 // --- prepareChatContext ---

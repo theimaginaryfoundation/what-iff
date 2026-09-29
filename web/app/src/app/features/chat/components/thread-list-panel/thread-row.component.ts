@@ -12,11 +12,14 @@ import { thumbnailCircleToImageStyle } from '../../../../shared/ui/avatar/avatar
 import { StarIconComponent, TrashIconComponent } from '../../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 import { ContextPanelService } from '../../services/context-panel.service';
+import { RouterLink } from '@angular/router';
+import { ThreadJobSummary, jobDisplayName } from '../../helpers/thread-jobs.helpers';
+import { statusDescription, statusLabel, statusTone } from '../../../agent-job/helpers/job-status.helpers';
 
 @Component({
   selector: 'app-thread-row',
   standalone: true,
-  imports: [CommonModule, AsyncPipe, AuthImagePipe, StarIconComponent, TrashIconComponent, TooltipDirective],
+  imports: [CommonModule, AsyncPipe, AuthImagePipe, RouterLink, StarIconComponent, TrashIconComponent, TooltipDirective],
   template: `
     <tr
       class="thread-row"
@@ -109,6 +112,29 @@ import { ContextPanelService } from '../../services/context-panel.service';
           }
         </div>
       </td>
+      @if (showJobColumn()) {
+        <td class="thread-row__job" (click)="$event.stopPropagation()">
+          @if (jobs(); as summary) {
+            <span class="thread-row__job-line">
+              <span
+                class="thread-row__job-status"
+                [attr.data-tone]="jobTone()"
+                [uiTooltip]="jobStatusHint()"
+              >{{ jobStatusText() }}</span>
+              <a
+                class="thread-row__job-name"
+                [routerLink]="['/agent-jobs', summary.primary.id]"
+                [uiTooltip]="jobName()"
+                truncatedOnly
+              >{{ jobName() }}</a>
+              @if (summary.others.length > 0) {
+                <span class="thread-row__job-more" [uiTooltip]="otherJobsHint()">+{{ summary.others.length }} more</span>
+              }
+            </span>
+            <span class="thread-row__job-when">{{ jobWhen() }}</span>
+          }
+        </td>
+      }
       <td class="thread-row__date thread-row__created">{{ formatTimestamp(thread().created_at) }}</td>
       <td class="thread-row__date thread-row__updated">{{ formatTimestamp(thread().last_message_time ?? thread().updated_at) }}</td>
       <td class="thread-row__tags-cell">
@@ -436,6 +462,56 @@ import { ContextPanelService } from '../../services/context-panel.service';
       }
     }
 
+    .thread-row__job {
+      font-size: 0.75rem;
+      max-width: 16rem;
+    }
+
+    .thread-row__job-line {
+      align-items: center;
+      display: flex;
+      gap: 0.375rem;
+      min-width: 0;
+    }
+
+    .thread-row__job-status {
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      flex: none;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      padding: 0 0.4rem;
+    }
+
+    .thread-row__job-status[data-tone='success'] { color: var(--color-success, #2e7d32); }
+    .thread-row__job-status[data-tone='warning'] { color: var(--color-warning, #b26a00); }
+    .thread-row__job-status[data-tone='danger'] { color: var(--color-danger, #c0392b); }
+    .thread-row__job-status[data-tone='neutral'] { color: var(--color-text-muted); }
+
+    .thread-row__job-name {
+      color: var(--color-text-primary);
+      overflow: hidden;
+      text-decoration: none;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+
+      &:hover,
+      &:focus-visible {
+        text-decoration: underline;
+      }
+    }
+
+    .thread-row__job-more {
+      color: var(--color-text-muted);
+      flex: none;
+    }
+
+    .thread-row__job-when {
+      color: var(--color-text-muted);
+      display: block;
+      margin-top: 0.125rem;
+    }
+
     @media (max-width: 767px) {
       .thread-row__created,
       .thread-row__tags-cell {
@@ -472,6 +548,43 @@ export class ThreadRowComponent {
   readonly active = input(false);
   /** Archived tab: show Restore instead of Archive. */
   readonly isArchivedView = input(false);
+  /** Thread Manager Jobs tab: render the JOB cell. */
+  readonly showJobColumn = input(false);
+  readonly jobs = input<ThreadJobSummary | null>(null);
+
+  readonly jobName = computed(() => {
+    const summary = this.jobs();
+    return summary ? jobDisplayName(summary.primary) : '';
+  });
+  readonly jobTone = computed(() => {
+    const summary = this.jobs();
+    return summary ? statusTone(summary.primary.status) : 'neutral';
+  });
+  readonly jobStatusText = computed(() => {
+    const summary = this.jobs();
+    return summary ? statusLabel(summary.primary.status) : '';
+  });
+  readonly jobStatusHint = computed(() => {
+    const job = this.jobs()?.primary;
+    if (!job) return '';
+    const description = statusDescription(job.status);
+    return job.last_error ? `${description}. Last error: ${job.last_error}` : description;
+  });
+  /** Next run for jobs that will still run; otherwise when it last ran. */
+  readonly jobWhen = computed(() => {
+    const job = this.jobs()?.primary;
+    if (!job) return '';
+    if (job.status === 'active' && job.next_run_at) {
+      return `Next run ${this.formatTimestamp(job.next_run_at)}`;
+    }
+    if (job.last_run_at) {
+      return `Last run ${this.formatTimestamp(job.last_run_at)}`;
+    }
+    return job.status === 'paused' ? 'Paused before its first run' : 'Not run yet';
+  });
+  readonly otherJobsHint = computed(() =>
+    (this.jobs()?.others ?? []).map(job => `${jobDisplayName(job)} (${statusLabel(job.status)})`).join(', '),
+  );
   /** Bulk-selection: whether this row's checkbox is checked. */
   readonly checked = input(false);
 
