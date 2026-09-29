@@ -181,7 +181,7 @@ func TestPersistMemoryLinkGroup_LinksAndUndo(t *testing.T) {
 
 	event, err := ds.PersistMemoryLinkGroup(ctx, userID, chatID, "User",
 		"Apple Cobbler event (technical/emotional/narrative registers)",
-		[]uuid.UUID{techID, emoID}, newMembers, nil, nil)
+		[]uuid.UUID{techID, emoID}, newMembers, nil, nil, uuid.Nil)
 	require.NoError(t, err)
 	require.NotNil(t, event)
 	require.Equal(t, models.MemoryMergeTypeLink, event.MergeType)
@@ -299,4 +299,100 @@ func testEmbeddingVector() []float32 {
 	vec := make([]float32, 8)
 	vec[0] = 1
 	return vec
+}
+
+// TestAutoPin_AppliesToEveryMemoryCreationPath pins down the auto-pin rule (ent/schema
+// Personality.auto_pin_memories) for each path that creates a memory while a personality is
+// active: the create_memory tool (CreateMemory), a new-only checkpoint fold
+// (PersistMemoryMergeGroup) and a new checkpoint link-group member (PersistMemoryLinkGroup).
+// A new User-scoped memory is pinned iff the active personality has auto-pin on; Chat-scoped
+// memories are never pinned.
+func TestAutoPin_AppliesToEveryMemoryCreationPath(t *testing.T) {
+	type createFn func(t *testing.T, ds *Datastore, userID, chatID, personalityID uuid.UUID, scope string) uuid.UUID
+
+	paths := map[string]createFn{
+		"create_memory": func(t *testing.T, ds *Datastore, userID, chatID, personalityID uuid.UUID, scope string) uuid.UUID {
+			mem, err := ds.CreateMemory(context.Background(), userID, models.Memory{
+				ChatID:  chatID,
+				Content: "Prefers oolong",
+				Scope:   scope,
+			}, testEmbeddingVector(), personalityID)
+			require.NoError(t, err)
+			return mem.ID
+		},
+		"checkpoint_fold": func(t *testing.T, ds *Datastore, userID, chatID, personalityID uuid.UUID, scope string) uuid.UUID {
+			mem, err := ds.PersistMemoryMergeGroup(context.Background(), userID, chatID, models.MemoryMergeGroupProposal{
+				CanonicalContent: "Prefers oolong",
+				Scope:            scope,
+				Confidence:       models.MemoryConfidenceMedium,
+			}, 2, nil, nil, testEmbeddingVector(), personalityID, nil, nil)
+			require.NoError(t, err)
+			return mem.ID
+		},
+		"checkpoint_link": func(t *testing.T, ds *Datastore, userID, chatID, personalityID uuid.UUID, scope string) uuid.UUID {
+			existingID := uuid.New()
+			require.NoError(t, insertMemoryMergeTestMemory(t, ds, existingID, userID, chatID, entmemory.Scope(scope), "Tea ritual matters", nil))
+			event, err := ds.PersistMemoryLinkGroup(context.Background(), userID, chatID, scope, "Tea",
+				[]uuid.UUID{existingID},
+				[]LinkGroupNewMember{{Content: "Prefers oolong", Confidence: models.MemoryConfidenceMedium, Embedding: testEmbeddingVector()}},
+				nil, nil, personalityID)
+			require.NoError(t, err)
+			require.NotNil(t, event)
+			created, err := ds.dbClient.Memory.Query().
+				Where(entmemory.LinkGroupID(*event.LinkGroupID), entmemory.IDNEQ(existingID)).
+				Only(context.Background())
+			require.NoError(t, err)
+			// Linking never repins an existing member.
+			existing, err := ds.dbClient.Memory.Get(context.Background(), existingID)
+			require.NoError(t, err)
+			require.Nil(t, existing.PinnedPersonalityID)
+			return created.ID
+		},
+	}
+
+	cases := []struct {
+		name         string
+		autoPin      bool
+		scope        string
+		noPersona    bool
+		expectPinned bool
+	}{
+		{name: "auto-pin on, User scope", autoPin: true, scope: "User", expectPinned: true},
+		{name: "auto-pin off, User scope", autoPin: false, scope: "User"},
+		{name: "auto-pin on, Chat scope", autoPin: true, scope: "Chat"},
+		{name: "no active personality", scope: "User", noPersona: true},
+	}
+
+	for pathName, create := range paths {
+		for _, tc := range cases {
+			t.Run(pathName+"/"+tc.name, func(t *testing.T) {
+				ds, cleanup := newMemoryMergeTestDatastore(t)
+				defer cleanup()
+				ctx := context.Background()
+				userID := uuid.New()
+				chatID := uuid.New()
+				require.NoError(t, insertMemoryMergeTestUser(t, ds, userID))
+				require.NoError(t, insertMemoryMergeTestChat(t, ds, userID, chatID))
+				personalityID := uuid.New()
+				createTestPersonality(t, ds, personalityID, userID)
+				_, err := ds.dbClient.Personality.UpdateOneID(personalityID).SetAutoPinMemories(tc.autoPin).Save(ctx)
+				require.NoError(t, err)
+				active := personalityID
+				if tc.noPersona {
+					active = uuid.Nil
+				}
+
+				memID := create(t, ds, userID, chatID, active, tc.scope)
+
+				got, err := ds.dbClient.Memory.Get(ctx, memID)
+				require.NoError(t, err)
+				if tc.expectPinned {
+					require.NotNil(t, got.PinnedPersonalityID)
+					require.Equal(t, personalityID, *got.PinnedPersonalityID)
+				} else {
+					require.Nil(t, got.PinnedPersonalityID)
+				}
+			})
+		}
+	}
 }

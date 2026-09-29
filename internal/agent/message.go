@@ -659,34 +659,10 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 	runCtx, cancel := context.WithCancel(ctx)
 	a.registerRunningJobCancel(newJob.ID, userID, cancel)
 	go a.watchChatJobCancel(runCtx, userID, newJob.ID, cancel)
-	go func() {
-		defer cancel()
-		defer a.unregisterRunningJobCancel(newJob.ID)
-		// An unrecovered panic in any goroutine takes down the whole process (and so the
-		// pod). Recover here so a failure while processing one message fails just that job
-		// instead — e.g. a post-inference checkpoint summary that a provider rejects must
-		// not crash every other in-flight chat. Registered after cancel/unregister so it
-		// runs first (LIFO) and UpdateJobStatus still sees a live runCtx.
-		defer a.recoverAsyncMessageJob(runCtx, userID, newJob.ID, chatMessage.ID)
-		err := a.runTrackedJob(runCtx, newJob, func() error {
-			_, err := a.handleUserMessage(runCtx, newJob, chatMessage)
-			return err
-		})
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				a.logger.Info("async agent message processing cancelled",
-					zap.String("job_id", newJob.ID.String()),
-					zap.String("chat_message_id", chatMessage.ID.String()),
-				)
-				return
-			}
-			a.logger.Error("async agent message processing failed",
-				zap.String("job_id", newJob.ID.String()),
-				zap.String("chat_message_id", chatMessage.ID.String()),
-				zap.Error(err),
-			)
-		}
-	}()
+	go a.runAsyncChatMessageJob(runCtx, cancel, newJob, chatMessage.ID, "processing", func() error {
+		_, err := a.handleUserMessage(runCtx, newJob, chatMessage)
+		return err
+	})
 
 	// Return response with job details
 	return &models.ChatMessageResponse{
@@ -694,6 +670,35 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 		JobID: newJob.ID.String(),
 		Type:  JobTypeChatMessage,
 	}, nil
+}
+
+// runAsyncChatMessageJob is the background goroutine body shared by a new send
+// (HandleUserMessage) and a retry (RetryUserChatMessage): it runs turn under job telemetry and
+// logs how it ended, where action ("processing", "retry") names the path in the log messages.
+// An unrecovered panic in any goroutine takes down the whole process (and so the pod), so it
+// recovers here and fails just that job instead — e.g. a post-inference checkpoint summary that
+// a provider rejects must not crash every other in-flight chat. The recover is registered after
+// cancel/unregister so it runs first (LIFO) and UpdateJobStatus still sees a live runCtx.
+func (a *Agent) runAsyncChatMessageJob(runCtx context.Context, cancel context.CancelFunc, job *models.Job, chatMessageID uuid.UUID, action string, turn func() error) {
+	defer cancel()
+	defer a.unregisterRunningJobCancel(job.ID)
+	defer a.recoverAsyncMessageJob(runCtx, job.UserID, job.ID, chatMessageID)
+	err := a.runTrackedJob(runCtx, job, turn)
+	if err == nil {
+		return
+	}
+	if errors.Is(err, context.Canceled) {
+		a.logger.Info("async agent message "+action+" cancelled",
+			zap.String("job_id", job.ID.String()),
+			zap.String("chat_message_id", chatMessageID.String()),
+		)
+		return
+	}
+	a.logger.Error("async agent message "+action+" failed",
+		zap.String("job_id", job.ID.String()),
+		zap.String("chat_message_id", chatMessageID.String()),
+		zap.Error(err),
+	)
 }
 
 // recoverAsyncMessageJob is the deferred panic guard for async chat-message processing.
@@ -771,28 +776,10 @@ func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid
 
 	runCtx, cancel := context.WithCancel(detachedCtx)
 	a.registerRunningJobCancel(newJob.ID, userID, cancel)
-	go func(runCtx context.Context, job *models.Job, chat *models.ChatMessage) {
-		defer cancel()
-		defer a.unregisterRunningJobCancel(job.ID)
-		err := a.runTrackedJob(runCtx, job, func() error {
-			_, err := a.handleUserMessage(runCtx, job, chat)
-			return err
-		})
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				a.logger.Info("async agent message retry cancelled",
-					zap.String("job_id", job.ID.String()),
-					zap.String("chat_message_id", chat.ID.String()),
-				)
-				return
-			}
-			a.logger.Error("async agent message retry failed",
-				zap.String("job_id", job.ID.String()),
-				zap.String("chat_message_id", chat.ID.String()),
-				zap.Error(err),
-			)
-		}
-	}(runCtx, newJob, msg)
+	go a.runAsyncChatMessageJob(runCtx, cancel, newJob, msg.ID, "retry", func() error {
+		_, err := a.handleUserMessage(runCtx, newJob, msg)
+		return err
+	})
 
 	return &models.ChatMessageResponse{
 		ID:    messageID,
@@ -826,6 +813,9 @@ type chatContext struct {
 	// toolProgress records the live tool timeline into the chat job's Progress. Nil when the
 	// turn has no job to report to; its methods are nil-safe.
 	toolProgress *jobToolProgress
+	// memoryProgress is the memory-load row already shown in that timeline; the tool recorder
+	// starts from it so its snapshots keep the row. Nil when retrieval showed nothing.
+	memoryProgress *memoryLoadProgress
 }
 
 // handleUserMessage handles the agent processing flow for a user message
@@ -862,7 +852,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 	a.WaitForThreadRehydration(ctx, chatJob.UserID, chatMessage.ChatID)
 
 	// Prepare chat context (chat, memories, model)
-	chatCtx, err := a.prepareChatContext(ctx, chatJob.UserID, chatMessage)
+	chatCtx, err := a.prepareChatContext(ctx, chatJob.UserID, chatMessage, a.newMemoryLoadProgress(chatJob))
 	if err != nil {
 		a.logger.Error("failed to prepare chat context", zap.Error(err))
 		a.setJobStatusFailed(ctx, chatJob, err)
@@ -1096,6 +1086,7 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 		draftBuffer.Flush()
 		draftBuffer.MarkRoundBoundary()
 	})
+	chatCtx.toolProgress.Seed(chatCtx.memoryProgress.Entries())
 	if progress := chatCtx.toolProgress; progress != nil {
 		defer progress.Close()
 	}
@@ -1115,7 +1106,7 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 	if opts.mergeToolCalls != nil {
 		toolCalls = opts.mergeToolCalls(toolCalls)
 	}
-	toolCalls = append(toolCalls, memoryToolCallsForChatContext(chatCtx)...)
+	toolCalls = append(memoryToolCallsForChatContext(chatCtx), toolCalls...)
 	a.recordToolCalls(ctx, toolCalls)
 
 	// Checked after tool-call metrics and the web-search count: the work in this turn
@@ -1425,6 +1416,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 		draftBuffer.Flush()
 		draftBuffer.MarkRoundBoundary()
 	})
+	chatCtx.toolProgress.Seed(chatCtx.memoryProgress.Entries())
 	if progress := chatCtx.toolProgress; progress != nil {
 		defer progress.Close()
 	}
@@ -1441,7 +1433,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	}
 	chatCtx.webSearchCount = a.turnWebSearchCount(adapter, toolCalls)
 
-	toolCalls = append(toolCalls, memoryToolCallsForChatContext(chatCtx)...)
+	toolCalls = append(memoryToolCallsForChatContext(chatCtx), toolCalls...)
 	a.recordToolCalls(ctx, toolCalls)
 
 	// See runGeneration: guard after metrics so a failed turn still counts its work.
@@ -1992,7 +1984,9 @@ func memoryToolCallsForChatContext(chatCtx *chatContext) []*models.ToolCall {
 }
 
 // prepareChatContext prepares the chat context including chat, memories, and model selection
-func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage) (*chatContext, error) {
+// memoryProgress (nil-safe) shows memory retrieval in the chat job's live tool timeline; pass nil
+// when the turn has no job to report to.
+func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage, memoryProgress *memoryLoadProgress) (*chatContext, error) {
 	defer a.timeTurnStage(ctx, turnStagePrepareContext)()
 	// Get parent chat
 	parentChat, err := a.ds.GetChat(ctx, userID, chatMessage.ChatID)
@@ -2001,7 +1995,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 	}
 
 	// Get relevant memories.
-	memories, liveMemories, memoryEnrichmentFailed := a.getMemoriesBestEffort(ctx, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message)
+	memories, liveMemories, memoryEnrichmentFailed := a.loadTurnMemories(ctx, memoryProgress, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message)
 	// Resolve model from the chat's model_id (authoritative). Do not trust model_name
 	// alone — it can be stale, and a missing edge used to fall through to defaultModel
 	// (gpt-5.1) even when the user selected a different provider.
@@ -2023,6 +2017,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 		modelSubscriptionTier:  resolved.subscriptionTier,
 		modelVisionSupport:     resolved.visionSupport,
 		expressionsEnabled:     expressionsEnabled,
+		memoryProgress:         memoryProgress,
 	}, nil
 }
 
@@ -2129,14 +2124,34 @@ func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, 
 		formatted, err := a.testHooks.GetMemoriesOverride(ctx, userID, chatID, personalityID, userMessage)
 		return formatted, nil, err
 	}
-	// Mock/local mode: memory enrichment needs a provider call (query inference +
-	// embeddings), so it is a deliberate no-op rather than a surprise
-	// deny-transport failure mid-flow.
-	if a.nonVendorLLM() {
+	if !a.memoryEnrichmentRuns() {
 		a.logger.Debug("mock/local mode: skipping memory enrichment", zap.String("chat_id", chatID.String()))
 		return nil, nil, nil
 	}
 	return a.getMemories(ctx, userID, chatID, personalityID, userMessage)
+}
+
+// memoryEnrichmentRuns reports whether getMemoriesForEnrichment will actually retrieve memories.
+// Mock/local mode: memory enrichment needs a provider call (query inference + embeddings), so it
+// is a deliberate no-op rather than a surprise deny-transport failure mid-flow. A test override
+// always counts as running.
+func (a *Agent) memoryEnrichmentRuns() bool {
+	return a.testHooks.GetMemoriesOverride != nil || !a.nonVendorLLM()
+}
+
+// loadTurnMemories runs best-effort memory enrichment for a turn, shown in the job's live tool
+// timeline as a "Load Memory" row: running during retrieval, then complete with the memories (or
+// an error). The row is only added when retrieval really runs, so mock/local turns (which skip
+// it) never show one.
+func (a *Agent) loadTurnMemories(ctx context.Context, progress *memoryLoadProgress, userID, chatID, personalityID uuid.UUID, userMessage string) ([]string, []*models.Memory, bool) {
+	if progress != nil && a.memoryEnrichmentRuns() {
+		progress.Started(ctx)
+	}
+	memories, liveMemories, failed := a.getMemoriesBestEffort(ctx, userID, chatID, personalityID, userMessage)
+	if progress != nil {
+		progress.Finished(ctx, memories, failed)
+	}
+	return memories, liveMemories, failed
 }
 
 // getMemoriesBestEffort attempts memory enrichment and degrades gracefully on any failure.

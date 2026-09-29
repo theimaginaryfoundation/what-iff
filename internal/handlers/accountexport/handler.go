@@ -77,8 +77,10 @@ type Handler struct {
 }
 
 // NewHandler builds the handler. openAIKey enables memory-embedding regeneration on import; when
-// empty, memory import is skipped (export is unaffected).
-func NewHandler(ds *datastore.Datastore, logger *zap.Logger, fileStore storage.FileStore, sender email.Sender, openAIKey string) *Handler {
+// empty, memory import is skipped (export is unaffected). httpClient is the server's shared provider
+// HTTP client (instrumented, and the deny-network transport under a non-vendor LLM_BACKEND); nil
+// keeps the SDK default.
+func NewHandler(ds *datastore.Datastore, logger *zap.Logger, fileStore storage.FileStore, sender email.Sender, openAIKey string, httpClient *http.Client) *Handler {
 	h := &Handler{
 		ds:            ds,
 		logger:        logger,
@@ -90,7 +92,11 @@ func NewHandler(ds *datastore.Datastore, logger *zap.Logger, fileStore storage.F
 		importTimeout: importJobTimeout,
 	}
 	if openAIKey != "" {
-		client := openai.NewClient(option.WithAPIKey(openAIKey))
+		opts := []option.RequestOption{option.WithAPIKey(openAIKey)}
+		if httpClient != nil {
+			opts = append(opts, option.WithHTTPClient(httpClient))
+		}
+		client := openai.NewClient(opts...)
 		h.oaiClient = &client
 	} else {
 		logger.Warn("account export: OpenAI key not configured — memory import will be skipped")

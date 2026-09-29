@@ -210,6 +210,31 @@ describe('appendLiveToolCallGroup', () => {
     });
 });
 
+describe('appendLiveToolCallGroup: memory load row', () => {
+    const pending = pendingAssistantPlaceholderMessage({
+        chatId: 'chat-1', draftText: '', generationPersonality: 'Kai', thinkingImageUrl: null,
+    });
+    const memory = { id: 'memory-enrichment', name: 'Load Memory', round: 0, started_at: 't0' };
+
+    it('shows a running Load Memory row as an in-progress tool while memories load', () => {
+        const group = appendLiveToolCallGroup([], pending, [{ ...memory, status: 'running' }])[0];
+        expect(group.kind).toBe('tool-call-group');
+        if (group.kind !== 'tool-call-group') return;
+        expect(group.live).toBe(true);
+        expect(group.toolCalls.map(c => [c.tool_name, c.status, c.tool_output])).toEqual([['Load Memory', 'running', '']]);
+    });
+
+    it('keeps the completed row, with the retrieved memories, ahead of later tool calls', () => {
+        const group = appendLiveToolCallGroup([], pending, [
+            { ...memory, status: 'complete', output: 'Retrieved memories:\n\n User likes tea', finished_at: 't1' },
+            { id: 'call-1', name: 'find_context', status: 'running', round: 0, started_at: 't2' },
+        ])[0];
+        if (group.kind !== 'tool-call-group') throw new Error('expected a tool-call group');
+        expect(group.toolCalls.map(c => c.tool_name)).toEqual(['Load Memory', 'find_context']);
+        expect(group.toolCalls[0].tool_output).toContain('User likes tea');
+    });
+});
+
 describe('lastUserTurnWithGenerationError', () => {
     it('returns the user message when it has an error and no assistant follows', () => {
         const u = message('u1', 'User', { last_error_message: 'boom' });

@@ -348,6 +348,7 @@ func (a *Agent) applyMemoryCompactionPlan(
 			newMembers,
 			link.SourceMembers,
 			compactionEventID,
+			activePersonalityID,
 		); err != nil {
 			a.logger.Error("failed to persist memory link group", zap.Error(err))
 		}

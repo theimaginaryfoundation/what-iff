@@ -284,6 +284,10 @@ test('a picked model does not leak into a different thread', async ({ chatPage, 
 // whole job typically completes within a single ~2s poll cycle, so "immediately" is
 // asserted against a 1s bound: comfortably tight enough to catch a regression back to
 // "wait for the job to fully finish" while leaving headroom for CI scheduling jitter.
+//
+// Since #203 the textarea itself stays editable during a reply (the next message can be
+// composed ahead), so the lock is observed on the composer's other controls (the "+" menu)
+// and the typed-ahead draft must survive the unlock.
 test('composer unlocks immediately after clicking stop, not after post-inference phases finish', async ({
   chatPage,
   seed,
@@ -294,12 +298,15 @@ test('composer unlocks immediately after clicking stop, not after post-inference
 
   await chatPage.sendMessage('stop response regression probe');
   await expect(chatPage.stopButton).toBeVisible({ timeout: UI_REACTION_TIMEOUT });
-  await expect(chatPage.composerInput).toBeDisabled();
+  await expect(chatPage.plusMenuButton).toBeDisabled();
+  await expect(chatPage.composerInput).toBeEditable();
+  await chatPage.composerInput.fill('typed while the reply was running');
 
   await chatPage.stopResponse();
 
   await expect(chatPage.stopButton).toBeHidden({ timeout: IMMEDIATE_UI_UPDATE_TIMEOUT });
-  await expect(chatPage.composerInput).toBeEnabled({ timeout: IMMEDIATE_UI_UPDATE_TIMEOUT });
+  await expect(chatPage.plusMenuButton).toBeEnabled({ timeout: IMMEDIATE_UI_UPDATE_TIMEOUT });
+  await expect(chatPage.composerInput).toHaveValue('typed while the reply was running');
 });
 
 // Regression test for PR #322: switching away from a chat tab and back showed no

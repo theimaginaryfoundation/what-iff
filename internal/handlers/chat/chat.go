@@ -746,6 +746,29 @@ func (h *Handler) MarkChatRead(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// MarkAllChatsRead marks every unread assistant message across all of the
+// caller's chats (archived included) as read in one all-or-nothing update.
+func (h *Handler) MarkAllChatsRead(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		handlerutils.RespondWithError(w, h.logger, http.StatusUnauthorized, handlerutils.CodeNotSet, "Unauthorized", nil)
+		return
+	}
+
+	updatedCount, err := h.ds.MarkAllChatMessagesRead(r.Context(), userID)
+	if err != nil {
+		h.logger.Error("failed to mark all chats read",
+			zap.String("user_id", userID.String()),
+			zap.Error(err))
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to mark all chats as read", err)
+		return
+	}
+
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, markChatReadResponse{
+		UpdatedCount: updatedCount,
+	})
+}
+
 // DeleteChat deletes a chat and all its messages
 func (h *Handler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserIDFromContext(r.Context())

@@ -4,7 +4,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient, withXhr } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ActivatedRoute, convertToParamMap, Router } from '@angular/router';
-import { BehaviorSubject, EMPTY, of, throwError } from 'rxjs';
+import { BehaviorSubject, EMPTY, Subject, of, throwError } from 'rxjs';
 import { provideMarkdown } from 'ngx-markdown';
 
 import { ChatPageComponent } from './chat-page.component';
@@ -358,6 +358,45 @@ describe('ChatPageComponent', () => {
             attachments: [expect.objectContaining({ id: 'attachment-1' })],
         }));
         expect(fixture.componentInstance.pendingAttachments()).toEqual([]);
+    });
+
+    it('keeps files attached while a send was in flight for the next message', async () => {
+        fixture.detectChanges();
+        const first = new File(['a'], 'first.txt', { type: 'text/plain' });
+        const second = new File(['b'], 'second.txt', { type: 'text/plain' });
+        fileAttachmentService.uploadChatFileAttachment.mockImplementation((_chatId: string, file: File) =>
+            of(fileAttachment({ id: `att-${file.name}`, name: file.name })));
+        fixture.componentInstance.onFilesSelected([first]);
+        const post$ = new Subject<any>();
+        messageService.sendMessage.mockReturnValue(post$ as any);
+
+        const sending = fixture.componentInstance.send('Use this file');
+        fixture.componentInstance.onFilesSelected([second]);
+        post$.next({ id: 'msg-1', job_id: '', type: 'message' });
+        post$.complete();
+        await sending;
+
+        expect(messageService.sendMessage).toHaveBeenCalledWith('chat-1', expect.objectContaining({
+            attachments: [expect.objectContaining({ id: 'att-first.txt' })],
+        }));
+        expect(fixture.componentInstance.pendingAttachments().map(a => a.attachment?.id)).toEqual(['att-second.txt']);
+    });
+
+    it('leaves the composer textarea editable while a reply is in flight, with sending and other controls locked', async () => {
+        (TestBed.inject(JobService) as MockedObject<JobService>).pollJob.mockReturnValue(new Subject<any>() as any);
+        messageService.sendMessage.mockReturnValue(of({ id: 'msg-1', job_id: 'job-1', type: 'message' }));
+        fixture.detectChanges();
+        await fixture.whenStable();
+
+        await fixture.componentInstance.send('first');
+        fixture.detectChanges();
+
+        const root: HTMLElement = fixture.nativeElement;
+        expect(fixture.componentInstance.session.composerBusy()).toBe(true);
+        expect((root.querySelector('#chat-composer-input') as HTMLTextAreaElement).disabled).toBe(false);
+        expect((root.querySelector('button[aria-label="Open chat options"]') as HTMLButtonElement).disabled).toBe(true);
+        expect(root.querySelector('button[aria-label="Send message"]')).toBeNull();
+        expect(root.querySelector('button[aria-label="Stop response"]')).not.toBeNull();
     });
 
     describe('attached threads on send', () => {

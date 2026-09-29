@@ -143,6 +143,17 @@ func (p *jobToolProgress) scheduleLocked() {
 	}
 }
 
+// Seed starts the timeline with rows recorded before the agent loop (the memory-load row), so
+// later snapshots keep them. Call it once, before the first Started; it writes nothing itself.
+func (p *jobToolProgress) Seed(entries []models.ChatTurnToolCall) {
+	if p == nil || len(entries) == 0 {
+		return
+	}
+	p.mu.Lock()
+	p.entries = append(p.entries, entries...)
+	p.mu.Unlock()
+}
+
 // Started records use as running.
 func (p *jobToolProgress) Started(round int, use provider.ToolUse) {
 	if p == nil {

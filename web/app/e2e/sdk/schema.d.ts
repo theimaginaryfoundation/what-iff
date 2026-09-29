@@ -5948,6 +5948,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chat/mark-all-read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark all chats as read
+         * @description Marks every unread assistant-origin message in every chat the caller owns
+         *     (archived chats included) as read, in a single all-or-nothing update.
+         *     Other users' chats are never affected. Messages are not deleted.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description All of the caller's chat messages marked as read */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @description Number of messages updated from unread to read (0 when nothing was unread) */
+                            updated_count?: number;
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Update failed; no messages were changed */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chat/{chatId}/welcome-message": {
         parameters: {
             query?: never;
