@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
@@ -43,18 +44,96 @@ func (d *Datastore) toMCPServerModel(e *ent.MCPServer) *models.MCPServer {
 			decryptedToken = token
 		}
 	}
+	decryptedOAuthClientSecret := ""
+	if strings.TrimSpace(e.OauthClientSecret) != "" {
+		secret, err := d.decryptTokenForRead(e.OauthClientSecret)
+		if err != nil {
+			if errorMessage == "" {
+				errorMessage = "OAuth client secret decryption failed. Please re-enter and save credentials."
+			}
+			if d.logger != nil {
+				d.logger.Error("failed to decrypt mcp oauth client secret",
+					zap.String("mcp_server_id", e.ID.String()),
+					zap.Error(err))
+			}
+		} else {
+			decryptedOAuthClientSecret = secret
+		}
+	}
+	decryptedOAuthAccessToken := ""
+	if strings.TrimSpace(e.OauthAccessToken) != "" {
+		token, err := d.decryptTokenForRead(e.OauthAccessToken)
+		if err != nil {
+			if errorMessage == "" {
+				errorMessage = "OAuth access token decryption failed. Please reauthenticate connector."
+			}
+			if d.logger != nil {
+				d.logger.Error("failed to decrypt mcp oauth access token",
+					zap.String("mcp_server_id", e.ID.String()),
+					zap.Error(err))
+			}
+		} else {
+			decryptedOAuthAccessToken = token
+		}
+	}
+	decryptedOAuthRefreshToken := ""
+	if strings.TrimSpace(e.OauthRefreshToken) != "" {
+		token, err := d.decryptTokenForRead(e.OauthRefreshToken)
+		if err != nil {
+			if errorMessage == "" {
+				errorMessage = "OAuth refresh token decryption failed. Please reauthenticate connector."
+			}
+			if d.logger != nil {
+				d.logger.Error("failed to decrypt mcp oauth refresh token",
+					zap.String("mcp_server_id", e.ID.String()),
+					zap.Error(err))
+			}
+		} else {
+			decryptedOAuthRefreshToken = token
+		}
+	}
 
 	m := &models.MCPServer{
-		ID:             e.ID,
-		UserID:         userID,
-		Name:           e.Name,
-		Description:    e.Description,
-		ServerURL:      e.ServerURL,
-		AuthToken:      decryptedToken,
-		ErrorMessage:   errorMessage,
-		DefaultEnabled: e.DefaultEnabled,
-		CreatedAt:      e.CreatedAt,
-		UpdatedAt:      e.UpdatedAt,
+		ID:                         e.ID,
+		UserID:                     userID,
+		Name:                       e.Name,
+		Description:                e.Description,
+		ServerURL:                  e.ServerURL,
+		AuthMode:                   strings.TrimSpace(e.AuthMode),
+		AuthToken:                  decryptedToken,
+		OAuthAuthURL:               strings.TrimSpace(e.OauthAuthURL),
+		OAuthTokenURL:              strings.TrimSpace(e.OauthTokenURL),
+		OAuthClientID:              strings.TrimSpace(e.OauthClientID),
+		OAuthClientSecret:          decryptedOAuthClientSecret,
+		OAuthScopes:                e.OauthScopes,
+		OAuthPKCEPolicy:            strings.TrimSpace(e.OauthPkcePolicy),
+		OAuthAccessToken:           decryptedOAuthAccessToken,
+		OAuthRefreshToken:          decryptedOAuthRefreshToken,
+		OAuthAccessTokenExpiresAt:  e.OauthAccessTokenExpiresAt,
+		OAuthRefreshTokenExpiresAt: e.OauthRefreshTokenExpiresAt,
+		OAuthAuthenticatedAt:       e.OauthAuthenticatedAt,
+		OAuthLastRefreshAt:         e.OauthLastRefreshAt,
+		OAuthRefreshFailCount:      e.OauthRefreshFailCount,
+		OAuthHasAccessToken:        strings.TrimSpace(e.OauthAccessToken) != "",
+		OAuthHasRefreshToken:       strings.TrimSpace(e.OauthRefreshToken) != "",
+		Status:                     strings.TrimSpace(e.Status),
+		StatusReason:               strings.TrimSpace(e.StatusReason),
+		ErrorMessage:               errorMessage,
+		DefaultEnabled:             e.DefaultEnabled,
+		LastCheckedAt:              e.LastCheckedAt,
+		LastHealthyAt:              e.LastHealthyAt,
+		ToolCount:                  e.ToolCount,
+		CreatedAt:                  e.CreatedAt,
+		UpdatedAt:                  e.UpdatedAt,
+	}
+	if m.Status == "" {
+		m.Status = models.MCPServerStatusActive
+	}
+	if m.AuthMode == "" {
+		m.AuthMode = models.MCPServerAuthModeHeader
+	}
+	if m.OAuthPKCEPolicy == "" {
+		m.OAuthPKCEPolicy = models.MCPServerPKCESupported
 	}
 	if len(e.Edges.Rituals) > 0 {
 		m.RitualIDs = make([]uuid.UUID, len(e.Edges.Rituals))
@@ -93,8 +172,14 @@ func (d *Datastore) CreateMCPServer(ctx context.Context, userID uuid.UUID, serve
 		SetName(server.Name).
 		SetDescription(server.Description).
 		SetServerURL(server.ServerURL).
+		SetAuthMode(strings.TrimSpace(server.AuthMode)).
+		SetStatus(models.MCPServerStatusActive).
 		SetDefaultEnabled(server.DefaultEnabled).
 		SetOwnerID(userID)
+
+	if strings.TrimSpace(server.AuthMode) == "" {
+		create.SetAuthMode(models.MCPServerAuthModeHeader)
+	}
 
 	if strings.TrimSpace(server.AuthToken) != "" {
 		encryptedToken, err := d.encryptTokenForWrite(server.AuthToken)
@@ -104,6 +189,30 @@ func (d *Datastore) CreateMCPServer(ctx context.Context, userID uuid.UUID, serve
 			return nil, err
 		}
 		create.SetAuthToken(encryptedToken)
+	}
+	if s := strings.TrimSpace(server.OAuthAuthURL); s != "" {
+		create.SetOauthAuthURL(s)
+	}
+	if s := strings.TrimSpace(server.OAuthTokenURL); s != "" {
+		create.SetOauthTokenURL(s)
+	}
+	if s := strings.TrimSpace(server.OAuthClientID); s != "" {
+		create.SetOauthClientID(s)
+	}
+	if len(server.OAuthScopes) > 0 {
+		create.SetOauthScopes(server.OAuthScopes)
+	}
+	if s := strings.TrimSpace(server.OAuthPKCEPolicy); s != "" {
+		create.SetOauthPkcePolicy(s)
+	}
+	if s := strings.TrimSpace(server.OAuthClientSecret); s != "" {
+		encryptedSecret, err := d.encryptTokenForWrite(s)
+		if err != nil {
+			d.logger.Error("failed to encrypt mcp oauth client secret", zap.Error(err))
+			tx.Rollback()
+			return nil, err
+		}
+		create.SetOauthClientSecret(encryptedSecret)
 	}
 
 	entServer, err := create.Save(ctx)
@@ -302,10 +411,12 @@ func (d *Datastore) validateUserOwnsMCPServerIDs(ctx context.Context, tx *ent.Tx
 	return nil
 }
 
-// UpdateMCPServer updates an existing MCP server owned by the user.
+// UpdateMCPServer updates user-editable MCP server configuration owned by the user.
+// Runtime health/token state is intentionally excluded; use UpdateMCPServerRuntimeState
+// and OAuth token-specific methods for those fields.
 // Auth token update semantics are controlled via authTokenUpdate.
 // ritualIDsUpdate: nil means do not change ritual links; non-nil replaces the set (empty clears).
-func (d *Datastore) UpdateMCPServer(ctx context.Context, userID uuid.UUID, server models.MCPServer, authTokenUpdate models.MCPServerAuthTokenUpdate, ritualIDsUpdate *[]uuid.UUID) (*models.MCPServer, error) {
+func (d *Datastore) UpdateMCPServer(ctx context.Context, userID uuid.UUID, server models.MCPServer, authTokenUpdate models.MCPServerAuthTokenUpdate, oauthSecretUpdate models.MCPOAuthSecretUpdate, ritualIDsUpdate *[]uuid.UUID) (*models.MCPServer, error) {
 	tx, err := d.dbClient.Tx(ctx)
 	if err != nil {
 		d.logger.Error("failed to start transaction", zap.Error(err))
@@ -338,7 +449,20 @@ func (d *Datastore) UpdateMCPServer(ctx context.Context, userID uuid.UUID, serve
 		SetName(server.Name).
 		SetDescription(server.Description).
 		SetServerURL(server.ServerURL).
+		SetAuthMode(strings.TrimSpace(server.AuthMode)).
+		SetOauthAuthURL(strings.TrimSpace(server.OAuthAuthURL)).
+		SetOauthTokenURL(strings.TrimSpace(server.OAuthTokenURL)).
+		SetOauthClientID(strings.TrimSpace(server.OAuthClientID)).
+		SetOauthScopes(server.OAuthScopes).
+		SetOauthPkcePolicy(strings.TrimSpace(server.OAuthPKCEPolicy)).
 		SetDefaultEnabled(server.DefaultEnabled)
+
+	if strings.TrimSpace(server.AuthMode) == "" {
+		update.SetAuthMode(models.MCPServerAuthModeHeader)
+	}
+	if strings.TrimSpace(server.OAuthPKCEPolicy) == "" {
+		update.SetOauthPkcePolicy(models.MCPServerPKCESupported)
+	}
 
 	if authTokenUpdate.Provided {
 		if authTokenUpdate.Clear {
@@ -353,7 +477,19 @@ func (d *Datastore) UpdateMCPServer(ctx context.Context, userID uuid.UUID, serve
 			update.SetAuthToken(encryptedToken)
 		}
 	}
-
+	if oauthSecretUpdate.Provided {
+		if oauthSecretUpdate.Clear {
+			update.ClearOauthClientSecret()
+		} else if secret := strings.TrimSpace(oauthSecretUpdate.Value); secret != "" {
+			encryptedSecret, err := d.encryptTokenForWrite(secret)
+			if err != nil {
+				d.logger.Error("failed to encrypt mcp oauth client secret for update", zap.Error(err))
+				tx.Rollback()
+				return nil, err
+			}
+			update.SetOauthClientSecret(encryptedSecret)
+		}
+	}
 	entServer, err := update.Save(ctx)
 	if err != nil {
 		d.logger.Error("failed to update mcp server", zap.Error(err))
@@ -755,6 +891,64 @@ func (d *Datastore) RemoveMCPServerFromChat(ctx context.Context, userID, chatID,
 
 	if err := tx.Commit(); err != nil {
 		d.logger.Error("failed to commit transaction", zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// UpdateMCPServerRuntimeState updates runtime health metadata for one user-owned connector.
+// Empty status defaults to active; zero-value pointers clear corresponding timestamps.
+func (d *Datastore) UpdateMCPServerRuntimeState(ctx context.Context, userID, mcpServerID uuid.UUID, status, reason string, toolCount int, checkedAt, healthyAt *time.Time) error {
+	tx, err := d.dbClient.Tx(ctx)
+	if err != nil {
+		d.logger.Error("failed to start transaction", zap.Error(err))
+		return err
+	}
+	defer func() {
+		if v := recover(); v != nil {
+			tx.Rollback()
+			panic(v)
+		}
+	}()
+
+	exists, err := tx.MCPServer.Query().
+		Where(
+			entmcp.ID(mcpServerID),
+			entmcp.HasOwnerWith(user.ID(userID)),
+		).
+		Exist(ctx)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	if !exists {
+		tx.Rollback()
+		return ErrMCPServerNotFound
+	}
+
+	nextStatus := strings.TrimSpace(status)
+	if nextStatus == "" {
+		nextStatus = models.MCPServerStatusActive
+	}
+	upd := tx.MCPServer.UpdateOneID(mcpServerID).
+		SetStatus(nextStatus).
+		SetStatusReason(strings.TrimSpace(reason)).
+		SetToolCount(max(toolCount, 0))
+	if checkedAt != nil {
+		upd.SetLastCheckedAt(*checkedAt)
+	} else {
+		upd.ClearLastCheckedAt()
+	}
+	if healthyAt != nil {
+		upd.SetLastHealthyAt(*healthyAt)
+	} else {
+		upd.ClearLastHealthyAt()
+	}
+	if _, err := upd.Save(ctx); err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 	return nil

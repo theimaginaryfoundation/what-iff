@@ -15,6 +15,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/embedding"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
 	agentjobscheduler "github.com/theimaginaryfoundation/what-iff/internal/agentjobs/scheduler"
@@ -43,6 +44,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/user"
 	versionhandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/version"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/webhook"
+	"github.com/theimaginaryfoundation/what-iff/internal/mcpoauth"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -293,7 +295,6 @@ func (s *Server) setupRoutes() {
 	userHandler := user.NewHandler(dataStore, s.logger, s.config.AllowedEmails, s.config.Environment)
 	jobHandler := job.NewHandlerWithCanceller(dataStore, agent, s.logger)
 	memoryHandler := memory.NewHandler(dataStore, s.logger, s.config.OpenAIKey, providerHTTPClient)
-
 	// Account export: async export runs in-process here in the main app; the bundle lands in the
 	// file store and its download link is delivered ONLY out-of-band (a deliberate control — app
 	// access alone cannot exfiltrate the account). The concrete email transport is provided by
@@ -308,7 +309,15 @@ func (s *Server) setupRoutes() {
 		}
 	}
 	accountExportHandler := accountexport.NewHandler(dataStore, s.logger, fileStore, exportSender, s.config.OpenAIKey, providerHTTPClient, s.lifecycleCtx)
-	mcpServerHandler := mcpserver.NewHandler(dataStore, s.logger)
+	oauthService := mcpoauth.New(dataStore, providerHTTPClient, s.logger, mcpoauth.Config{
+		RedirectURL:         s.config.MCPOAuthRedirectURL,
+		PostAuthRedirectURL: s.config.MCPOAuthPostAuthURL,
+		AllowedRedirects:    s.config.MCPOAuthAllowedRedirects,
+	})
+	go mcpoauth.NewSweeper(oauthService, s.config.MCPOAuthSweepInterval, s.config.MCPOAuthRefreshAhead, s.config.MCPOAuthMaxFailures).Run(s.lifecycleCtx)
+	mcpServerHandler := mcpserver.NewHandler(dataStore, mcpclient.New(nil, s.logger), oauthService, s.logger, mcpserver.Config{
+		AllowLocalhostConnections: s.config.MCPAllowLocalhostConnections,
+	})
 	modelHandler := model.NewHandler(dataStore, s.logger)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)
 	chatHandler := chat.NewHandler(dataStore, s.logger, agent, chat.HandlerConfig{
@@ -342,6 +351,7 @@ func (s *Server) setupRoutes() {
 	webhookRouter := apiRouter.PathPrefix("/webhooks").Subrouter()
 	webhookRouter.Use(middleware.WebhookAuthMiddleware(dataStore, s.logger))
 	webhookHandler.RegisterWebhookRoutes(webhookRouter)
+	mcpServerHandler.RegisterPublicRoutes(apiRouter)
 
 	// Protected routes
 	authRouter := apiRouter.NewRoute().Subrouter()
@@ -358,7 +368,7 @@ func (s *Server) setupRoutes() {
 
 		s.logger.Info("Test handler: Successfully authenticated", zap.String("user_id", userID.String()))
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fmt.Sprintf(`{"status":"authenticated","user_id":"%s"}`, userID.String())))
+		_, _ = fmt.Fprintf(w, `{"status":"authenticated","user_id":"%s"}`, userID.String())
 	}).Methods("GET")
 
 	// Register protected routes
@@ -539,6 +549,13 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Flush() {
+	flusher, ok := r.ResponseWriter.(http.Flusher)
+	if ok {
+		flusher.Flush()
+	}
 }
 
 func (s *Server) metricsMiddleware(next http.Handler) http.Handler {

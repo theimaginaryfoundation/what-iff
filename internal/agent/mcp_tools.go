@@ -2,13 +2,13 @@ package agent
 
 import (
 	"context"
-	"strconv"
+	"fmt"
 	"strings"
+	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
@@ -18,7 +18,7 @@ import (
 
 // getSubagentMCPTools returns MCP tool params for ritual-only contexts (e.g. run_subagent).
 // It loads ritual MCP servers only — no chat-level MCP servers are included.
-func (a *Agent) getSubagentMCPTools(ctx context.Context, userID uuid.UUID, ritualIDs []uuid.UUID, model string) []responses.ToolUnionParam {
+func (a *Agent) getSubagentMCPTools(ctx context.Context, userID uuid.UUID, ritualIDs []uuid.UUID, _ string) []responses.ToolUnionParam {
 	if len(ritualIDs) == 0 {
 		return nil
 	}
@@ -29,31 +29,29 @@ func (a *Agent) getSubagentMCPTools(ctx context.Context, userID uuid.UUID, ritua
 			zap.Error(err))
 		return nil
 	}
-	enableDeferredLoading := modelSupportsMCPDeferLoading(model)
-	tools := buildMCPToolsFromServers(servers, enableDeferredLoading)
-	return appendToolSearchIfNeeded(tools, enableDeferredLoading)
+	specs := a.discoverMCPFunctionToolSpecs(ctx, userID, servers)
+	return agenttools.OpenAIFunctionTools(specs)
 }
 
-// getSubagentClaudeMCPConfig returns a ClaudeMCPConfig for ritual-only contexts.
-func (a *Agent) getSubagentClaudeMCPConfig(ctx context.Context, userID uuid.UUID, ritualIDs []uuid.UUID) *provider.ClaudeMCPConfig {
+func (a *Agent) getSubagentMCPFunctionToolSpecs(ctx context.Context, userID uuid.UUID, ritualIDs []uuid.UUID) ([]agenttools.FunctionToolSpec, []*models.MCPServer) {
 	if len(ritualIDs) == 0 {
-		return nil
+		return nil, nil
 	}
 	servers, err := a.ds.ListRitualMCPServers(ctx, userID, ritualIDs)
 	if err != nil {
-		a.logger.Warn("failed to load ritual mcp servers for claude subagent",
+		a.logger.Warn("failed to load ritual mcp servers for subagent",
 			zap.String("user_id", userID.String()),
 			zap.Error(err))
-		return nil
+		return nil, nil
 	}
-	return buildClaudeMCPConfigFromServers(servers)
+	return a.discoverMCPFunctionToolSpecs(ctx, userID, servers), servers
 }
 
 func (a *Agent) getChatMCPTools(ctx context.Context, userID, chatID uuid.UUID, ritualIDs []uuid.UUID, model string) []responses.ToolUnionParam {
 	servers := a.getChatMCPServers(ctx, userID, chatID, ritualIDs)
-	enableDeferredLoading := modelSupportsMCPDeferLoading(model)
-	tools := buildMCPToolsFromServers(servers, enableDeferredLoading)
-	return appendToolSearchIfNeeded(tools, enableDeferredLoading)
+	specs := a.discoverMCPFunctionToolSpecs(ctx, userID, servers)
+	_ = model // preserved for call-site compatibility
+	return agenttools.OpenAIFunctionTools(specs)
 }
 
 func (a *Agent) getChatClaudeMCPConfig(ctx context.Context, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) *provider.ClaudeMCPConfig {
@@ -61,24 +59,12 @@ func (a *Agent) getChatClaudeMCPConfig(ctx context.Context, userID, chatID uuid.
 	return buildClaudeMCPConfigFromServers(servers)
 }
 
-func claudeFunctionTools(specs []agenttools.FunctionToolSpec) []anthropic.ToolUnionParam {
-	out := make([]anthropic.ToolUnionParam, 0, len(specs))
-	for _, spec := range specs {
-		out = append(out, provider.ClaudeFunctionTool(spec.Name, spec.Description, spec.Properties, spec.Required, agenttools.ClaudeToolStrict(spec)))
+func (a *Agent) prepareTurnMCPToolSpecs(ctx context.Context, chatCtx *chatContext, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) []agenttools.FunctionToolSpec {
+	servers := a.getChatMCPServers(ctx, userID, chatID, ritualIDs)
+	if chatCtx != nil {
+		chatCtx.mcpServers = servers
 	}
-	return out
-}
-
-func openAIChatCompletionFunctionTools(specs []agenttools.FunctionToolSpec) []openai.ChatCompletionToolUnionParam {
-	out := make([]openai.ChatCompletionToolUnionParam, 0, len(specs))
-	for _, spec := range specs {
-		out = append(out, provider.OpenAIChatCompletionFunctionTool(spec.Name, spec.Description, spec.Properties, spec.Required))
-	}
-	return out
-}
-
-func geminiFunctionTools(specs []agenttools.FunctionToolSpec) []openai.ChatCompletionToolUnionParam {
-	return openAIChatCompletionFunctionTools(specs)
+	return a.discoverMCPFunctionToolSpecs(ctx, userID, servers)
 }
 
 func (a *Agent) getChatMCPServers(ctx context.Context, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) []*models.MCPServer {
@@ -121,56 +107,75 @@ func (a *Agent) getChatMCPServers(ctx context.Context, userID, chatID uuid.UUID,
 	return servers
 }
 
-func buildMCPToolsFromServers(servers []*models.MCPServer, enableDeferredLoading bool) []responses.ToolUnionParam {
-	tools := make([]responses.ToolUnionParam, 0, len(servers))
-	for _, server := range servers {
-		if server == nil {
-			continue
+func (a *Agent) discoverMCPFunctionToolSpecs(ctx context.Context, userID uuid.UUID, servers []*models.MCPServer) []agenttools.FunctionToolSpec {
+	if a.mcpClient == nil || len(servers) == 0 {
+		return nil
+	}
+	out, discoverErr := a.mcpClient.DiscoverTools(ctx, userID, servers)
+	if discoverErr != nil {
+		a.logger.Warn("mcp tool discovery encountered only connector failures",
+			zap.String("user_id", userID.String()),
+			zap.Int("connector_count", len(servers)),
+			zap.Error(discoverErr))
+	}
+	now := time.Now().UTC()
+	specs := make([]agenttools.FunctionToolSpec, 0, len(out.Tools))
+	healthy := map[uuid.UUID]bool{}
+	countByConnector := map[uuid.UUID]int{}
+	for _, t := range out.Tools {
+		props := t.Properties
+		if props == nil {
+			props = map[string]any{}
 		}
-		if strings.TrimSpace(server.ErrorMessage) != "" {
-			// Skip unhealthy integrations so agent calls don't use known-bad credentials.
-			continue
-		}
-
-		mcpTool := &responses.ToolMcpParam{
-			ServerLabel:       server.Name,
-			ServerURL:         param.NewOpt(server.ServerURL),
-			ServerDescription: param.NewOpt(server.Description),
-			Type:              "mcp",
-			RequireApproval: responses.ToolMcpRequireApprovalUnionParam{
-				OfMcpToolApprovalSetting: param.NewOpt("never"),
-			},
-		}
-
-		if token := strings.TrimSpace(server.AuthToken); token != "" {
-			mcpTool.Headers = map[string]string{
-				"Authorization": token,
-			}
-		}
-
-		if enableDeferredLoading {
-			mcpTool.DeferLoading = param.NewOpt(true)
-		}
-
-		tools = append(tools, responses.ToolUnionParam{OfMcp: mcpTool})
+		specs = append(specs, agenttools.FunctionToolSpec{
+			Name:        t.FullName,
+			Description: t.Description,
+			Properties:  props,
+			Required:    t.Required,
+		})
+		healthy[t.ConnectorID] = true
+		countByConnector[t.ConnectorID]++
 	}
 
-	return tools
+	for _, s := range servers {
+		if s == nil || s.ID == uuid.Nil {
+			continue
+		}
+		if a.ds == nil {
+			continue
+		}
+		if healthy[s.ID] {
+			_ = a.ds.UpdateMCPServerRuntimeState(ctx, userID, s.ID, models.MCPServerStatusActive, "", countByConnector[s.ID], &now, &now)
+			continue
+		}
+		if errMsg := strings.TrimSpace(out.Errors[s.ID]); errMsg != "" {
+			_ = a.ds.UpdateMCPServerRuntimeState(ctx, userID, s.ID, discoveryFailureStatus(s, errMsg), errMsg, 0, &now, nil)
+			continue
+		}
+		_ = a.ds.UpdateMCPServerRuntimeState(ctx, userID, s.ID, s.Status, s.StatusReason, 0, &now, s.LastHealthyAt)
+	}
+
+	return specs
 }
 
-func appendToolSearchIfNeeded(tools []responses.ToolUnionParam, enableDeferredLoading bool) []responses.ToolUnionParam {
-	// OpenAI requires tool_search to be present whenever deferred loading is enabled.
-	if !enableDeferredLoading || len(tools) == 0 {
-		return tools
+func claudeFunctionTools(specs []agenttools.FunctionToolSpec) []anthropic.ToolUnionParam {
+	out := make([]anthropic.ToolUnionParam, 0, len(specs))
+	for _, spec := range specs {
+		out = append(out, provider.ClaudeFunctionTool(spec.Name, spec.Description, spec.Properties, spec.Required, agenttools.ClaudeToolStrict(spec)))
 	}
+	return out
+}
 
-	toolSearch := responses.ToolUnionParam{
-		OfToolSearch: &responses.ToolSearchToolParam{
-			Execution: responses.ToolSearchToolExecutionServer,
-			Type:      "tool_search",
-		},
+func openAIChatCompletionFunctionTools(specs []agenttools.FunctionToolSpec) []openai.ChatCompletionToolUnionParam {
+	out := make([]openai.ChatCompletionToolUnionParam, 0, len(specs))
+	for _, spec := range specs {
+		out = append(out, provider.OpenAIChatCompletionFunctionTool(spec.Name, spec.Description, spec.Properties, spec.Required))
 	}
-	return append(tools, toolSearch)
+	return out
+}
+
+func geminiFunctionTools(specs []agenttools.FunctionToolSpec) []openai.ChatCompletionToolUnionParam {
+	return openAIChatCompletionFunctionTools(specs)
 }
 
 func buildClaudeMCPConfigFromServers(servers []*models.MCPServer) *provider.ClaudeMCPConfig {
@@ -179,7 +184,7 @@ func buildClaudeMCPConfigFromServers(servers []*models.MCPServer) *provider.Clau
 		Toolsets: make([]anthropic.BetaToolUnionParam, 0, len(servers)),
 	}
 	for _, server := range servers {
-		if server == nil {
+		if server == nil || server.ID == uuid.Nil {
 			continue
 		}
 		if strings.TrimSpace(server.ErrorMessage) != "" {
@@ -190,7 +195,7 @@ func buildClaudeMCPConfigFromServers(servers []*models.MCPServer) *provider.Clau
 			Name: serverName,
 			URL:  server.ServerURL,
 		}
-		if token := strings.TrimSpace(server.AuthToken); token != "" {
+		if token := claudeMCPAuthorizationToken(server); token != "" {
 			def.AuthorizationToken = anthropic.String(token)
 		}
 		cfg.Servers = append(cfg.Servers, def)
@@ -202,49 +207,67 @@ func buildClaudeMCPConfigFromServers(servers []*models.MCPServer) *provider.Clau
 	return cfg
 }
 
-func modelSupportsMCPDeferLoading(model string) bool {
-	m := strings.ToLower(strings.TrimSpace(model))
-	if !strings.HasPrefix(m, "gpt-") {
-		return false
+func claudeMCPAuthorizationToken(server *models.MCPServer) string {
+	if server == nil {
+		return ""
 	}
-
-	version := strings.TrimPrefix(m, "gpt-")
-	majorPart := version
-	if idx := strings.Index(version, "."); idx >= 0 {
-		majorPart = version[:idx]
+	mode := strings.TrimSpace(server.AuthMode)
+	if mode == "" || mode == models.MCPServerAuthModeHeader {
+		return strings.TrimSpace(server.AuthToken)
 	}
-	majorPart = trimNumericPrefix(majorPart)
-	major, err := strconv.Atoi(majorPart)
-	if err != nil {
-		return false
+	if mode != models.MCPServerAuthModeOAuth {
+		return ""
 	}
-	if major > 5 {
-		return true
+	access := strings.TrimSpace(server.OAuthAccessToken)
+	if access == "" {
+		return ""
 	}
-	if major < 5 {
-		return false
+	if server.OAuthAccessTokenExpiresAt != nil && time.Now().UTC().After(server.OAuthAccessTokenExpiresAt.UTC()) {
+		return ""
 	}
-
-	// For major version 5, require minor version >= 4.
-	if !strings.Contains(version, ".") {
-		return false
-	}
-	minorPart := strings.SplitN(version, ".", 2)[1]
-	minorPart = trimNumericPrefix(minorPart)
-	minor, err := strconv.Atoi(minorPart)
-	if err != nil {
-		return false
-	}
-	return minor >= 4
+	return fmt.Sprintf("Bearer %s", access)
 }
 
-func trimNumericPrefix(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			break
-		}
-		b.WriteRune(r)
+func discoveryFailureStatus(server *models.MCPServer, errMsg string) string {
+	current := strings.TrimSpace(server.Status)
+	if current == "" {
+		current = models.MCPServerStatusActive
 	}
-	return b.String()
+	// Discovery reports "connector status ... not eligible" for disabled/invalid
+	// connectors; preserve their state instead of escalating to another status.
+	if !statusEligibleForDiscovery(current) {
+		return current
+	}
+	if isPermanentDiscoveryError(errMsg) {
+		return models.MCPServerStatusInvalid
+	}
+	return models.MCPServerStatusRefreshError
+}
+
+func statusEligibleForDiscovery(status string) bool {
+	switch strings.TrimSpace(status) {
+	case models.MCPServerStatusActive, models.MCPServerStatusExpiring, models.MCPServerStatusRefreshError:
+		return true
+	default:
+		return false
+	}
+}
+
+func isPermanentDiscoveryError(errMsg string) bool {
+	msg := strings.ToLower(strings.TrimSpace(errMsg))
+	switch {
+	case strings.Contains(msg, "returned status 400"),
+		strings.Contains(msg, "returned status 401"),
+		strings.Contains(msg, "returned status 403"),
+		strings.Contains(msg, "returned status 404"),
+		strings.Contains(msg, "oauth connector is not authenticated"),
+		strings.Contains(msg, "oauth access token is expired"),
+		strings.Contains(msg, "server_url host could not be resolved"),
+		strings.Contains(msg, "invalid mcp"),
+		strings.Contains(msg, "invalid oauth"),
+		strings.Contains(msg, "connector status"):
+		return true
+	default:
+		return false
+	}
 }

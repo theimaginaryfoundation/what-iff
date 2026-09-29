@@ -29,11 +29,13 @@ func TestOpenAIFunctionToolsMatchSharedSpecs(t *testing.T) {
 		ft := tu.OfFunction
 		require.Equal(t, spec.Name, ft.Name, "tool %d name", i)
 		require.Equal(t, spec.Description, ft.Description.Or(""), "tool %d description text", i)
-		// Parameters is a JSON-schema map (type/properties/required).
+		// Parameters is a JSON-schema map (type/properties/required when non-empty).
 		wantParams := map[string]any{
 			"type":       "object",
 			"properties": spec.Properties,
-			"required":   spec.Required,
+		}
+		if len(spec.Required) > 0 {
+			wantParams["required"] = spec.Required
 		}
 		requireJSONEqual(t, wantParams, ft.Parameters)
 	}
@@ -61,4 +63,19 @@ func TestCreateMemoryToolScopeEnumExcludesSummary(t *testing.T) {
 
 	require.Equal(t, []string{MemoryScopeUser, MemoryScopeChat}, scopeProperty["enum"])
 	require.NotContains(t, scopeProperty["enum"], "Summary")
+}
+
+func TestOpenAIToolUnionParam_OmitsNilRequired(t *testing.T) {
+	tu := OpenAIToolUnionParam(FunctionToolSpec{
+		Name:        "mcp__abc__get_me",
+		Description: "MCP test tool",
+		Properties: map[string]any{
+			"login": map[string]any{"type": "string"},
+		},
+		Required: nil,
+	})
+	require.NotNil(t, tu.OfFunction)
+	params := map[string]any(tu.OfFunction.Parameters)
+	_, hasRequired := params["required"]
+	require.False(t, hasRequired, "required must be omitted when empty to avoid null schema values")
 }
