@@ -92,7 +92,7 @@ export class ChatSessionService implements OnDestroy {
   readonly personalityId = computed(() => this._thread()?.personality_id ?? null);
   /** True while the assistant is generating (core inference pending and/or UI streaming). */
   readonly isGenerating = this.turn.isGenerating;
-  /** Keep composer disabled while generation is in progress. */
+  /** A reply is in flight: the composer accepts typing but holds sends until it clears. */
   readonly composerBusy = computed(() => this.isGenerating());
   /** True while a chat_message job is in flight (after send) but not yet finished. */
   readonly assistantJobPending = this.turn.jobPending;
@@ -459,7 +459,13 @@ export class ChatSessionService implements OnDestroy {
         rituals: ritualPayload,
       }));
     } catch (error) {
-      this.draftService.saveDraft(chat.id, message);
+      // The composer stays editable while the POST is in flight, so the user may have started
+      // the next message already; put the failed text back in front of it rather than over it.
+      const typedAhead = this.isActiveThread(chat.id)
+        ? this.draft()
+        : (this.draftService.getDraft(chat.id)?.message ?? '');
+      const restored = restoreFailedSend(message, typedAhead);
+      this.draftService.saveDraft(chat.id, restored);
       if (!isHttpErrorResponse(error)) {
         console.warn('[chat.sendMessage] send failed with non-HTTP error', error);
       }
@@ -469,7 +475,7 @@ export class ChatSessionService implements OnDestroy {
         return { status: 'failed', error };
       }
       this.turn.sendFailed();
-      this.draft.set(message);
+      this.draft.set(restored);
       this._error.set(apiErrorMessage(error, 'Failed to send message'));
       return { status: 'failed', error };
     }
@@ -649,4 +655,9 @@ function toUploadedAttachments(attachments: readonly PendingFileAttachment[]): F
     .map(item => item.attachment)
     .filter((attachment): attachment is FileAttachment => attachment !== undefined);
   return uploaded.length ? uploaded : undefined;
+}
+
+/** The failed message, followed by anything typed after it was sent. */
+function restoreFailedSend(failed: string, typedAhead: string): string {
+  return typedAhead.trim() ? `${failed}\n\n${typedAhead}` : failed;
 }

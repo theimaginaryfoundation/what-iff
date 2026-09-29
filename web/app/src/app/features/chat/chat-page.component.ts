@@ -571,7 +571,8 @@ export class ChatPageComponent implements OnInit, OnDestroy {
       return;
     }
     this.sendGate.sendSucceeded();
-    this.pendingAttachments.set([]);
+    // Only drop what went out: files attached while the POST was in flight belong to the next message.
+    this.pendingAttachments.update(current => current.filter(attachment => !attachments.includes(attachment)));
     this.pendingRituals.set([]);
     this.contextPanel.clearComposerThreadReferences();
   }

@@ -292,6 +292,96 @@ describe('ChatComposerComponent', () => {
         expect(stopSpy).toHaveBeenCalled();
     });
 
+    describe('composing while a reply is in flight', () => {
+        const textarea = (): HTMLTextAreaElement => fixture.nativeElement.querySelector('#chat-composer-input');
+        const type = (value: string): void => {
+            textarea().value = value;
+            textarea().dispatchEvent(new Event('input'));
+            fixture.detectChanges();
+        };
+
+        beforeEach(() => {
+            fixture.componentRef.setInput('draft', '');
+            fixture.componentRef.setInput('busy', true);
+            fixture.componentRef.setInput('isGenerating', true);
+            fixture.detectChanges();
+        });
+
+        it('keeps the textarea focusable and editable', () => {
+            expect(textarea().disabled).toBe(false);
+            textarea().focus();
+            expect(document.activeElement).toBe(textarea());
+
+            type('next question');
+            expect(fixture.componentInstance.draft()).toBe('next question');
+            type('');
+            expect(fixture.componentInstance.draft()).toBe('');
+        });
+
+        it('lets text be pasted without treating it as an attachment', () => {
+            const files = vi.fn().mockName('filesSelected');
+            fixture.componentInstance.filesSelected.subscribe(files);
+            const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+            Object.defineProperty(event, 'clipboardData', {
+                value: { items: [{ kind: 'string', type: 'text/plain', getAsFile: () => null }] },
+            });
+
+            textarea().dispatchEvent(event);
+
+            expect(event.defaultPrevented).toBe(false);
+            expect(files).not.toHaveBeenCalled();
+        });
+
+        it('does not send on Enter, submit or slash-only drafts until the reply finishes', () => {
+            const send = vi.fn().mockName('send');
+            fixture.componentInstance.send.subscribe(send);
+            type('next question');
+
+            const enter = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true });
+            textarea().dispatchEvent(enter);
+            fixture.nativeElement.querySelector('form.composer').dispatchEvent(new Event('submit', { cancelable: true }));
+
+            expect(enter.defaultPrevented).toBe(true);
+            expect(send).not.toHaveBeenCalled();
+            expect(fixture.componentInstance.draft()).toBe('next question');
+
+            type('/mode');
+            expect(fixture.componentInstance.slashOpen()).toBe(false);
+            textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
+            expect(fixture.componentInstance.modePickerOpen()).toBe(false);
+            expect(fixture.componentInstance.draft()).toBe('/mode');
+        });
+
+        it('keeps the other composer controls locked', () => {
+            const plus = fixture.nativeElement.querySelector('button[aria-label="Open chat options"]') as HTMLButtonElement;
+            expect(plus.disabled).toBe(true);
+        });
+
+        it('sends the kept draft once the reply finishes', () => {
+            const send = vi.fn().mockName('send');
+            fixture.componentInstance.send.subscribe(send);
+            type('next question');
+
+            fixture.componentRef.setInput('busy', false);
+            fixture.componentRef.setInput('isGenerating', false);
+            fixture.detectChanges();
+
+            const button = fixture.nativeElement.querySelector('.composer__send') as HTMLButtonElement;
+            expect(button.disabled).toBe(false);
+            expect(textarea().value).toBe('next question');
+            textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
+            expect(send).toHaveBeenCalledExactlyOnceWith('next question');
+        });
+
+        it('keeps the send button disabled while busy even when the stop button is not shown', () => {
+            fixture.componentRef.setInput('isGenerating', false);
+            type('next question');
+
+            const button = fixture.nativeElement.querySelector('.composer__send') as HTMLButtonElement;
+            expect(button.disabled).toBe(true);
+        });
+    });
+
     it('blocks send when draft exceeds hard limit', () => {
         const sendSpy = vi.fn().mockName('send');
         fixture.componentInstance.send.subscribe(sendSpy);
@@ -716,6 +806,70 @@ describe('ChatComposerComponent', () => {
 
             expect(fixture.componentInstance.isDragOver()).toBe(true);
             expect(fixture.componentInstance.isThreadDragOver()).toBe(false);
+        });
+    });
+
+    describe('file drag and drop', () => {
+        const fileDrag = (type: string, opts: { files?: File[]; relatedTarget?: EventTarget | null } = {}): DragEvent => {
+            const event = new Event(type, { bubbles: true, cancelable: true }) as DragEvent;
+            Object.defineProperty(event, 'dataTransfer', {
+                value: { types: ['Files'], getData: () => '', files: opts.files ?? [], dropEffect: 'none' },
+            });
+            Object.defineProperty(event, 'relatedTarget', { value: opts.relatedTarget ?? null });
+            return event;
+        };
+        const form = (): HTMLElement => fixture.nativeElement.querySelector('form.composer');
+        const textarea = (): HTMLTextAreaElement => fixture.nativeElement.querySelector('textarea');
+
+        it('keeps the drop overlay while the pointer moves between the composer\'s own children', () => {
+            textarea().dispatchEvent(fileDrag('dragover'));
+            fixture.detectChanges();
+            const overlay: HTMLElement = fixture.nativeElement.querySelector('.composer__drag');
+            expect(overlay).not.toBeNull();
+
+            // Leaving the textarea for the overlay (or any other child) is not leaving the composer.
+            textarea().dispatchEvent(fileDrag('dragleave', { relatedTarget: overlay }));
+            fixture.detectChanges();
+            expect(fixture.componentInstance.isDragOver()).toBe(true);
+            expect(fixture.nativeElement.querySelector('.composer__drag')).toBe(overlay);
+
+            // Leaving to somewhere outside the composer ends the highlight.
+            form().dispatchEvent(fileDrag('dragleave', { relatedTarget: document.body }));
+            fixture.detectChanges();
+            expect(fixture.componentInstance.isDragOver()).toBe(false);
+            expect(fixture.nativeElement.querySelector('.composer__drag')).toBeNull();
+        });
+
+        it('clears the overlay when the drag leaves the window (no related target)', () => {
+            form().dispatchEvent(fileDrag('dragover'));
+            form().dispatchEvent(fileDrag('dragleave'));
+            expect(fixture.componentInstance.isDragOver()).toBe(false);
+        });
+
+        it('never lets the overlay become the drag target itself', () => {
+            form().dispatchEvent(fileDrag('dragover'));
+            fixture.detectChanges();
+            const overlay: HTMLElement = fixture.nativeElement.querySelector('.composer__drag');
+            expect(getComputedStyle(overlay).pointerEvents).toBe('none');
+        });
+
+        it('attaches a file dropped on the focused textarea instead of letting the browser open it', () => {
+            const emitted = vi.fn().mockName('filesSelected');
+            fixture.componentInstance.filesSelected.subscribe(emitted);
+            textarea().focus();
+            const file = new File(['%PDF'], 'notes.pdf', { type: 'application/pdf' });
+
+            textarea().dispatchEvent(fileDrag('dragover'));
+            const over = fileDrag('dragover');
+            textarea().dispatchEvent(over);
+            const drop = fileDrag('drop', { files: [file] });
+            textarea().dispatchEvent(drop);
+            fixture.detectChanges();
+
+            expect(over.defaultPrevented).toBe(true);
+            expect(drop.defaultPrevented).toBe(true);
+            expect(emitted).toHaveBeenCalledWith([file]);
+            expect(fixture.nativeElement.querySelector('.composer__drag')).toBeNull();
         });
     });
 });
