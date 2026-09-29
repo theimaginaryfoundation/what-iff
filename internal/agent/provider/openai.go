@@ -23,21 +23,15 @@ type OpenAIProvider struct {
 	tokenCounter *TokenCounter
 	fileStore    storage.FileStore
 	tel          *telemetry.Telemetry
-	speechModels SpeechModelConfig
 }
 
 func NewOpenAIProvider(ds *datastore.Datastore, oaiClient *openai.Client, fileStore storage.FileStore, tel *telemetry.Telemetry) *OpenAIProvider {
-	return NewOpenAIProviderWithSpeechModels(ds, oaiClient, fileStore, tel, DefaultSpeechModelConfig())
-}
-
-func NewOpenAIProviderWithSpeechModels(ds *datastore.Datastore, oaiClient *openai.Client, fileStore storage.FileStore, tel *telemetry.Telemetry, speechModels SpeechModelConfig) *OpenAIProvider {
 	return &OpenAIProvider{
 		ds:           ds,
 		oaiClient:    oaiClient,
 		tokenCounter: NewTokenCounter(),
 		fileStore:    fileStore,
 		tel:          tel,
-		speechModels: normalizeSpeechModelConfig(speechModels),
 	}
 }
 

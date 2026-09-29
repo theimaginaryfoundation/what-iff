@@ -40,7 +40,6 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/ritual"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/role"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/search"
-	"github.com/theimaginaryfoundation/what-iff/internal/handlers/speech"
 	toolshandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/user"
 	versionhandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/version"
@@ -319,16 +318,6 @@ func (s *Server) setupRoutes() {
 	chatHandler := chat.NewHandler(dataStore, s.logger, agent, chat.HandlerConfig{
 		RequireBilling: s.config.RequireBilling,
 	})
-	clientOptions := []option.RequestOption{option.WithAPIKey(s.config.OpenAIKey)}
-	if providerHTTPClient != nil {
-		clientOptions = append(clientOptions, option.WithHTTPClient(providerHTTPClient))
-	}
-	oaiClient := openai.NewClient(clientOptions...)
-	speechProvider := provider.NewOpenAIProviderWithSpeechModels(dataStore, &oaiClient, fileStore, s.telemetry, provider.SpeechModelConfig{
-		STTModel: s.config.SpeechSTTModel,
-		TTSModel: s.config.SpeechTTSModel,
-	})
-	speechHandler := speech.NewHandler(dataStore, s.logger, s.telemetry.Metrics, speechProvider)
 	agentJobHandler := agentjob.NewHandler(dataStore, agent, s.agentJobScheduler, s.logger)
 	ritualHandler := ritual.NewHandler(dataStore, s.logger)
 	fileAttachmentHandler := fileattachment.NewHandler(dataStore, s.logger, agent)
@@ -382,7 +371,6 @@ func (s *Server) setupRoutes() {
 	webhookHandler.RegisterTokenRoutes(authRouter)
 	jobHandler.RegisterRoutes(authRouter)
 	chatHandler.RegisterRoutes(authRouter)
-	speechHandler.RegisterRoutes(authRouter)
 	agentJobHandler.RegisterRoutes(authRouter)
 	memoryHandler.RegisterRoutes(authRouter)
 	accountExportHandler.RegisterRoutes(authRouter)
