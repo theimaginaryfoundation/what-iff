@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -155,7 +156,7 @@ func TestTestMCPServerConnection_UsesStoredTokenWhenAuthOmitted(t *testing.T) {
 
 	router := newRouter(provider, prober)
 	req := newAuthedRequest(t, http.MethodPost, "/mcp-servers/test-connection", []byte(`{
-		"server_url":"https://unsaved.example/mcp",
+		"server_url":"https://8.8.8.8/mcp",
 		"connector_id":"`+connectorID.String()+`"
 	}`))
 	rr := httptest.NewRecorder()
@@ -164,7 +165,7 @@ func TestTestMCPServerConnection_UsesStoredTokenWhenAuthOmitted(t *testing.T) {
 	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 	require.NotNil(t, prober.last)
 	require.Equal(t, "saved-token", prober.last.AuthToken)
-	require.Equal(t, "https://unsaved.example/mcp", prober.last.ServerURL)
+	require.Equal(t, "https://8.8.8.8/mcp", prober.last.ServerURL)
 }
 
 func TestTestMCPServerConnection_ExplicitNullAuthClearsSavedToken(t *testing.T) {
@@ -217,7 +218,7 @@ func TestTestMCPServerConnection_ValidationAndFailure(t *testing.T) {
 	t.Run("probe error returns pass false", func(t *testing.T) {
 		prober := &fakeProber{err: context.DeadlineExceeded}
 		router := newRouter(&fakeProvider{}, prober)
-		req := newAuthedRequest(t, http.MethodPost, "/mcp-servers/test-connection", []byte(`{"server_url":"https://bad.example/mcp"}`))
+		req := newAuthedRequest(t, http.MethodPost, "/mcp-servers/test-connection", []byte(`{"server_url":"https://8.8.8.8/mcp"}`))
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
 		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
@@ -259,6 +260,52 @@ func TestTestMCPServerConnection_ValidationAndFailure(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
 		require.Zero(t, prober.calls)
 		require.Contains(t, rr.Body.String(), "private network")
+	})
+
+	t.Run("rejects hostnames that resolve to private ip", func(t *testing.T) {
+		prober := &fakeProber{toolCount: 1}
+		router := newRouterWithConfig(&fakeProvider{}, prober, Config{
+			ResolveHostIPs: func(_ context.Context, host string) ([]net.IPAddr, error) {
+				require.Equal(t, "internal.example.com", host)
+				return []net.IPAddr{{IP: net.ParseIP("10.1.2.3")}}, nil
+			},
+		})
+		req := newAuthedRequest(t, http.MethodPost, "/mcp-servers/test-connection", []byte(`{"server_url":"https://internal.example.com/mcp"}`))
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+		require.Zero(t, prober.calls)
+		require.Contains(t, rr.Body.String(), "private network")
+	})
+
+	t.Run("allows hostnames that resolve to public ip", func(t *testing.T) {
+		prober := &fakeProber{toolCount: 1}
+		router := newRouterWithConfig(&fakeProvider{}, prober, Config{
+			ResolveHostIPs: func(_ context.Context, host string) ([]net.IPAddr, error) {
+				require.Equal(t, "public.example.com", host)
+				return []net.IPAddr{{IP: net.ParseIP("8.8.8.8")}}, nil
+			},
+		})
+		req := newAuthedRequest(t, http.MethodPost, "/mcp-servers/test-connection", []byte(`{"server_url":"https://public.example.com/mcp"}`))
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		require.Equal(t, 1, prober.calls)
+	})
+
+	t.Run("rejects unresolvable hostnames", func(t *testing.T) {
+		prober := &fakeProber{toolCount: 1}
+		router := newRouterWithConfig(&fakeProvider{}, prober, Config{
+			ResolveHostIPs: func(_ context.Context, _ string) ([]net.IPAddr, error) {
+				return nil, context.DeadlineExceeded
+			},
+		})
+		req := newAuthedRequest(t, http.MethodPost, "/mcp-servers/test-connection", []byte(`{"server_url":"https://unknown.example.com/mcp"}`))
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+		require.Zero(t, prober.calls)
+		require.Contains(t, rr.Body.String(), "could not be resolved")
 	})
 
 	t.Run("allows localhost when explicitly enabled", func(t *testing.T) {

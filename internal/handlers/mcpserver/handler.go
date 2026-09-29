@@ -24,17 +24,21 @@ import (
 )
 
 type Handler struct {
-	provider Provider
-	prober   ConnectionProber
-	oauth    OAuthService
-	logger   *zap.Logger
-	config   Config
+	provider       Provider
+	prober         ConnectionProber
+	oauth          OAuthService
+	logger         *zap.Logger
+	config         Config
+	resolveHostIPs func(ctx context.Context, host string) ([]net.IPAddr, error)
 }
 
 type Config struct {
 	// AllowLocalhostConnections permits testing localhost/loopback MCP URLs.
 	// Keep false by default to reduce SSRF risk in shared deployments.
 	AllowLocalhostConnections bool
+	// ResolveHostIPs optionally overrides hostname-to-IP resolution (test seam).
+	// Nil defaults to net.DefaultResolver.LookupIPAddr.
+	ResolveHostIPs func(ctx context.Context, host string) ([]net.IPAddr, error)
 }
 
 type ConnectionProber interface {
@@ -42,12 +46,17 @@ type ConnectionProber interface {
 }
 
 func NewHandler(provider Provider, prober ConnectionProber, oauth OAuthService, logger *zap.Logger, cfg Config) *Handler {
+	resolver := cfg.ResolveHostIPs
+	if resolver == nil {
+		resolver = net.DefaultResolver.LookupIPAddr
+	}
 	return &Handler{
-		provider: provider,
-		prober:   prober,
-		oauth:    oauth,
-		logger:   logger,
-		config:   cfg,
+		provider:       provider,
+		prober:         prober,
+		oauth:          oauth,
+		logger:         logger,
+		config:         cfg,
+		resolveHostIPs: resolver,
 	}
 }
 
@@ -189,7 +198,7 @@ func (h *Handler) TestMCPServerConnection(w http.ResponseWriter, r *http.Request
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "server_url is required", nil)
 		return
 	}
-	if err := validateConnectionTestURL(serverURL, h.config.AllowLocalhostConnections); err != nil {
+	if err := validateConnectionTestURL(r.Context(), serverURL, h.config.AllowLocalhostConnections, h.resolveHostIPs); err != nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
 		return
 	}
@@ -608,7 +617,15 @@ func normalizeScopes(in []string) []string {
 	return out
 }
 
-func validateConnectionTestURL(rawURL string, allowLocalhost bool) error {
+func validateConnectionTestURL(
+	ctx context.Context,
+	rawURL string,
+	allowLocalhost bool,
+	resolveHostIPs func(context.Context, string) ([]net.IPAddr, error),
+) error {
+	if resolveHostIPs == nil {
+		resolveHostIPs = net.DefaultResolver.LookupIPAddr
+	}
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || parsed == nil {
 		return fmt.Errorf("server_url must be a valid absolute URL")
@@ -632,25 +649,34 @@ func validateConnectionTestURL(rawURL string, allowLocalhost bool) error {
 	}
 
 	if ip, err := netip.ParseAddr(host); err == nil {
-		if ip.IsLoopback() {
-			if !allowLocalhost {
-				return fmt.Errorf("localhost MCP URLs are disabled by server policy")
-			}
-			return nil
-		}
-		if ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
-			return fmt.Errorf("private network MCP URLs are not allowed")
+		if err := validateResolvedIP(ip, allowLocalhost); err != nil {
+			return err
 		}
 	} else if parsedIP := net.ParseIP(host); parsedIP != nil {
-		// Fallback path for unusual forms netip.ParseAddr rejects.
-		if parsedIP.IsLoopback() {
-			if !allowLocalhost {
-				return fmt.Errorf("localhost MCP URLs are disabled by server policy")
+		if addr, ok := netip.AddrFromSlice(parsedIP); ok {
+			if err := validateResolvedIP(addr.Unmap(), allowLocalhost); err != nil {
+				return err
 			}
-			return nil
 		}
-		if parsedIP.IsPrivate() || parsedIP.IsLinkLocalUnicast() || parsedIP.IsLinkLocalMulticast() || parsedIP.IsMulticast() || parsedIP.IsUnspecified() {
-			return fmt.Errorf("private network MCP URLs are not allowed")
+	} else {
+		ips, err := resolveHostIPs(ctx, host)
+		if err != nil {
+			return fmt.Errorf("server_url host could not be resolved")
+		}
+		if len(ips) == 0 {
+			return fmt.Errorf("server_url host could not be resolved")
+		}
+		for _, ipAddr := range ips {
+			if ipAddr.IP == nil {
+				continue
+			}
+			addr, ok := netip.AddrFromSlice(ipAddr.IP)
+			if !ok {
+				continue
+			}
+			if err := validateResolvedIP(addr.Unmap(), allowLocalhost); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -663,4 +689,17 @@ func validateConnectionTestURL(rawURL string, allowLocalhost bool) error {
 func isLocalhostName(host string) bool {
 	h := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
 	return h == "localhost" || strings.HasSuffix(h, ".localhost")
+}
+
+func validateResolvedIP(ip netip.Addr, allowLocalhost bool) error {
+	if ip.IsLoopback() {
+		if !allowLocalhost {
+			return fmt.Errorf("localhost MCP URLs are disabled by server policy")
+		}
+		return nil
+	}
+	if ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return fmt.Errorf("private network MCP URLs are not allowed")
+	}
+	return nil
 }
