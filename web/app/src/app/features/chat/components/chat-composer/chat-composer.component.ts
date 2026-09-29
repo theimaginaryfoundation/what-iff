@@ -123,7 +123,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
           <button
             type="button"
             class="composer__retry-btn"
-            [disabled]="disabled()"
+            [disabled]="controlsDisabled()"
             (click)="retryGeneration.emit()"
           >
             Retry
@@ -157,7 +157,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
               <button
                 type="button"
                 class="composer__skill-chip-remove"
-                [disabled]="disabled()"
+                [disabled]="controlsDisabled()"
                 [attr.aria-label]="'Remove skill ' + r.name"
                 uiTooltip="Remove skill"
                 (click)="removePendingRitual(r.id)"
@@ -191,7 +191,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
               <button
                 type="button"
                 class="composer__attachment-remove"
-                [disabled]="disabled()"
+                [disabled]="controlsDisabled()"
                 [attr.aria-label]="'Remove attachment ' + (attachment.attachment?.name ?? attachment.file?.name)"
                 [uiTooltip]="notSeen ? '' : 'Remove attachment'"
                 (click)="removeAttachment(pendingAttachmentKey(attachment))"
@@ -208,7 +208,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
             [selected]="threadReferences()"
             [activeChatId]="chatId()"
             [personalities]="personalities()"
-            [disabled]="disabled()"
+            [disabled]="controlsDisabled()"
             (toggled)="pickThread($event)"
             (done)="closeThreadPicker()"
             (cancelled)="cancelThreadPicker($event)"
@@ -264,7 +264,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
               <button
                 type="button"
                 class="composer__plus"
-                [disabled]="disabled()"
+                [disabled]="controlsDisabled()"
                 aria-label="Open chat options"
                 uiTooltip="Add emoji, skills, files or images; change mode or personality"
                 [attr.aria-expanded]="plusOpen()"
@@ -294,7 +294,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                     class="composer__skill-search"
                     placeholder="Filter by name…"
                     [value]="modeFilter()"
-                    [disabled]="disabled() || modeLoading()"
+                    [disabled]="controlsDisabled() || modeLoading()"
                     (input)="onModeFilterInput($event)"
                   />
                   @if (modeLoading()) {
@@ -309,7 +309,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                           role="option"
                           class="composer__skill-row"
                           [class.composer__skill-row--selected]="isAutoMood()"
-                          [disabled]="disabled()"
+                          [disabled]="controlsDisabled()"
                           [attr.aria-selected]="isAutoMood()"
                           aria-label="Auto"
                           aria-describedby="composer-auto-mode-desc"
@@ -333,7 +333,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                             role="option"
                             class="composer__skill-row"
                             [class.composer__skill-row--selected]="!isAutoMood() && activeMoodId() === m.id"
-                            [disabled]="disabled()"
+                            [disabled]="controlsDisabled()"
                             [attr.aria-selected]="!isAutoMood() && activeMoodId() === m.id"
                             (click)="pickMode(m)"
                           >
@@ -357,7 +357,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                     class="composer__skill-search"
                     placeholder="Filter by name…"
                     [value]="skillFilter()"
-                    [disabled]="disabled() || skillLoading()"
+                    [disabled]="controlsDisabled() || skillLoading()"
                     (input)="onSkillFilterInput($event)"
                   />
                   @if (skillLoading()) {
@@ -374,7 +374,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                             type="button"
                             role="option"
                             class="composer__skill-row"
-                            [disabled]="disabled() || isRitualPending(r.id)"
+                            [disabled]="controlsDisabled() || isRitualPending(r.id)"
                             [attr.aria-selected]="isRitualPending(r.id)"
                             (click)="pickSkill(r)"
                           >
@@ -476,7 +476,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                 class="composer__send"
                 aria-label="Send message"
                 [uiTooltip]="softKeyboard() ? '' : 'Send (Enter). Shift+Enter adds a new line'"
-                [disabled]="composerDisabled() || hasUploadingAttachments() || !draft().trim() || isOverLimit()"
+                [disabled]="composerDisabled() || busy() || hasUploadingAttachments() || !draft().trim() || isOverLimit()"
               >
                 <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M 2.5 7 L 7 2 L 11.5 7 M 7 7 L 7 12"/>
@@ -1321,6 +1321,11 @@ export class ChatComposerComponent {
   readonly selectedModelId = input<string | null>(null);
   readonly selectedPersonalityName = input<string | null>(null);
   readonly disabled = input(false);
+  /**
+   * A reply is in flight. The textarea stays editable so the next message can be
+   * composed ahead, but sending and every other control stay locked until it clears.
+   */
+  readonly busy = input(false);
   /** When false while {@link disabled} is true, user can still change model (e.g. switch to a free-tier model). */
   readonly modelPickerDisabled = input(false);
   readonly threadArchived = input(false);
@@ -1435,7 +1440,10 @@ export class ChatComposerComponent {
     () => this.models().find(m => m.id === this.selectedModelId())?.vision_support === false,
   );
   readonly isPendingImageAttachment = isPendingImageAttachment;
+  /** Locks the textarea itself: only a hard block (quota, archived thread), never a busy reply. */
   readonly composerDisabled = computed(() => this.disabled() || this.threadArchived());
+  /** Locks everything except the textarea: a hard block, or a reply still in flight. */
+  readonly controlsDisabled = computed(() => this.disabled() || this.busy());
   readonly characterCount = computed(() => this.draft().length);
   readonly characterCountLabel = computed(() => this.characterCount().toLocaleString());
   readonly isOverLimit = computed(() => this.characterCount() > TEXT_LIMIT_HARD_MAX);
@@ -1558,7 +1566,8 @@ export class ChatComposerComponent {
       this.limitWarningOpen.set(false);
     }
     const parsed = parseSlash(value);
-    this.slashOpen.set(parsed.command !== null);
+    // Commands open pickers and menus, which stay locked while a reply is in flight.
+    this.slashOpen.set(parsed.command !== null && !this.controlsDisabled());
     this.slashQuery.set(parsed.command ?? '');
     this.updateEmojiAutocomplete(textarea);
     this.scheduleTextareaResize();
@@ -1639,6 +1648,11 @@ export class ChatComposerComponent {
     // On soft-keyboard devices Enter is a newline; submitting happens via the
     // Send button. This avoids needing a Shift key those devices don't have.
     const enterSends = event.key === 'Enter' && !event.shiftKey && !this.softKeyboard();
+    if (enterSends && this.busy()) {
+      // Composing ahead: Enter neither sends nor inserts a newline until the reply finishes.
+      event.preventDefault();
+      return;
+    }
     if (this.slashOpen()) {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -1675,6 +1689,7 @@ export class ChatComposerComponent {
   }
 
   runCommand(command: SlashCommand): void {
+    if (this.controlsDisabled()) return;
     this.clearSlashFromDraft();
     this.slashOpen.set(false);
     switch (command.id) {
@@ -1869,7 +1884,7 @@ export class ChatComposerComponent {
   }
 
   pickThread(thread: Chat): void {
-    if (this.disabled()) {
+    if (this.controlsDisabled()) {
       return;
     }
     this.threadReferenceToggled.emit(thread);
@@ -1891,7 +1906,7 @@ export class ChatComposerComponent {
   }
 
   pickSkill(ritual: Ritual): void {
-    if (this.disabled() || this.isRitualPending(ritual.id)) {
+    if (this.controlsDisabled() || this.isRitualPending(ritual.id)) {
       return;
     }
     this.pendingRitualsChange.emit([...this.pendingRituals(), ritual]);
@@ -2030,7 +2045,7 @@ export class ChatComposerComponent {
     const threadId = event.dataTransfer?.getData(THREAD_DRAG_MIME);
     if (threadId) {
       const thread = this.threadOptions().find(option => option.id === threadId);
-      if (thread && thread.id !== this.chatId() && !this.disabled()) {
+      if (thread && thread.id !== this.chatId() && !this.controlsDisabled()) {
         if (this.isThreadReferenced(thread.id)) {
           this.showThreadNotice('Thread already added.');
         } else {
@@ -2158,7 +2173,7 @@ export class ChatComposerComponent {
 
   private submitDraft(): void {
     const text = this.draft().trim();
-    if (!text || this.isGenerating() || this.composerDisabled() || this.hasUploadingAttachments()) return;
+    if (!text || this.busy() || this.isGenerating() || this.composerDisabled() || this.hasUploadingAttachments()) return;
     if (this.isOverLimit()) {
       return;
     }

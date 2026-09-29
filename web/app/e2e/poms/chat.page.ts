@@ -348,8 +348,18 @@ export class ChatPage {
    * and Enter runs it (`onKeydown`/`runCommand` in chat-composer.component.ts).
    */
   async openModePickerViaSlashCommand(): Promise<void> {
+    await this.waitForComposerControls();
     await this.composerInput.fill('/mode');
     await this.composerInput.press('Enter');
+  }
+
+  /**
+   * Waits until a reply in flight (if any) has cleared. The textarea stays editable while a
+   * reply runs, so `fill` no longer waits for that on its own, but slash commands and Enter
+   * stay locked until it clears; a trial click waits for the "+" button to be enabled.
+   */
+  private async waitForComposerControls(): Promise<void> {
+    await this.plusMenuButton.click({ trial: true });
   }
 
   /** An option row in the open mode picker (`role="option"`), by mode name or "Auto". */
@@ -401,6 +411,7 @@ export class ChatPage {
    * against the composer's `skill` command entry.
    */
   async openSkillPickerViaSlashCommand(): Promise<void> {
+    await this.waitForComposerControls();
     await this.composerInput.fill('/skill');
     await this.composerInput.press('Enter');
   }

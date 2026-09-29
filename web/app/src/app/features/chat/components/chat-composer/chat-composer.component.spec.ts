@@ -292,6 +292,96 @@ describe('ChatComposerComponent', () => {
         expect(stopSpy).toHaveBeenCalled();
     });
 
+    describe('composing while a reply is in flight', () => {
+        const textarea = (): HTMLTextAreaElement => fixture.nativeElement.querySelector('#chat-composer-input');
+        const type = (value: string): void => {
+            textarea().value = value;
+            textarea().dispatchEvent(new Event('input'));
+            fixture.detectChanges();
+        };
+
+        beforeEach(() => {
+            fixture.componentRef.setInput('draft', '');
+            fixture.componentRef.setInput('busy', true);
+            fixture.componentRef.setInput('isGenerating', true);
+            fixture.detectChanges();
+        });
+
+        it('keeps the textarea focusable and editable', () => {
+            expect(textarea().disabled).toBe(false);
+            textarea().focus();
+            expect(document.activeElement).toBe(textarea());
+
+            type('next question');
+            expect(fixture.componentInstance.draft()).toBe('next question');
+            type('');
+            expect(fixture.componentInstance.draft()).toBe('');
+        });
+
+        it('lets text be pasted without treating it as an attachment', () => {
+            const files = vi.fn().mockName('filesSelected');
+            fixture.componentInstance.filesSelected.subscribe(files);
+            const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+            Object.defineProperty(event, 'clipboardData', {
+                value: { items: [{ kind: 'string', type: 'text/plain', getAsFile: () => null }] },
+            });
+
+            textarea().dispatchEvent(event);
+
+            expect(event.defaultPrevented).toBe(false);
+            expect(files).not.toHaveBeenCalled();
+        });
+
+        it('does not send on Enter, submit or slash-only drafts until the reply finishes', () => {
+            const send = vi.fn().mockName('send');
+            fixture.componentInstance.send.subscribe(send);
+            type('next question');
+
+            const enter = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true });
+            textarea().dispatchEvent(enter);
+            fixture.nativeElement.querySelector('form.composer').dispatchEvent(new Event('submit', { cancelable: true }));
+
+            expect(enter.defaultPrevented).toBe(true);
+            expect(send).not.toHaveBeenCalled();
+            expect(fixture.componentInstance.draft()).toBe('next question');
+
+            type('/mode');
+            expect(fixture.componentInstance.slashOpen()).toBe(false);
+            textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
+            expect(fixture.componentInstance.modePickerOpen()).toBe(false);
+            expect(fixture.componentInstance.draft()).toBe('/mode');
+        });
+
+        it('keeps the other composer controls locked', () => {
+            const plus = fixture.nativeElement.querySelector('button[aria-label="Open chat options"]') as HTMLButtonElement;
+            expect(plus.disabled).toBe(true);
+        });
+
+        it('sends the kept draft once the reply finishes', () => {
+            const send = vi.fn().mockName('send');
+            fixture.componentInstance.send.subscribe(send);
+            type('next question');
+
+            fixture.componentRef.setInput('busy', false);
+            fixture.componentRef.setInput('isGenerating', false);
+            fixture.detectChanges();
+
+            const button = fixture.nativeElement.querySelector('.composer__send') as HTMLButtonElement;
+            expect(button.disabled).toBe(false);
+            expect(textarea().value).toBe('next question');
+            textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
+            expect(send).toHaveBeenCalledExactlyOnceWith('next question');
+        });
+
+        it('keeps the send button disabled while busy even when the stop button is not shown', () => {
+            fixture.componentRef.setInput('isGenerating', false);
+            type('next question');
+
+            const button = fixture.nativeElement.querySelector('.composer__send') as HTMLButtonElement;
+            expect(button.disabled).toBe(true);
+        });
+    });
+
     it('blocks send when draft exceeds hard limit', () => {
         const sendSpy = vi.fn().mockName('send');
         fixture.componentInstance.send.subscribe(sendSpy);
