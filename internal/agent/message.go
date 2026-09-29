@@ -217,6 +217,10 @@ type AgentConfig struct {
 	// LocalLLMModel is the model requested from the local server. Required
 	// when LLMBackend == "local".
 	LocalLLMModel string
+	// LLMCallTimeouts bounds each HTTP attempt of the local LLM client, which is built here
+	// rather than from HTTPClient (the server applies the same limits to HTTPClient). The
+	// zero value sets no limits.
+	LLMCallTimeouts provider.CallTimeouts
 
 	// ZAIKey enables z.ai GLM models (Anthropic-compatible endpoint) when set.
 	ZAIKey string
@@ -352,7 +356,8 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		// other consumer stays egress-denied), but the local adapter itself
 		// must reach the local server over a real client.
 		a.LocalProvider = provider.NewLocalProvider(cfg.LocalLLMBaseURL, tel,
-			telemetry.InstrumentHTTPClient(nil, telemetry.WithDependencyHost(cfg.LocalLLMBaseURL, telemetry.DependencyLocalLLM)))
+			telemetry.InstrumentHTTPClient(provider.WithCallTimeouts(nil, cfg.LLMCallTimeouts),
+				telemetry.WithDependencyHost(cfg.LocalLLMBaseURL, telemetry.DependencyLocalLLM)))
 	}
 
 	if a.mockLLM {

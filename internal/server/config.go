@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 )
 
 type Config struct {
@@ -42,13 +44,20 @@ type Config struct {
 	LocalLLMBaseURL string
 	// LocalLLMModel is the model name requested from the local server
 	// (LOCAL_LLM_MODEL). Required when LLMBackend == "local".
-	LocalLLMModel  string
-	AllowedOrigins []string
-	ReadTimeout    time.Duration
-	WriteTimeout   time.Duration
-	IdleTimeout    time.Duration
-	OpenAIKey      string
-	AnthropicKey   string
+	LocalLLMModel string
+	// LLMRequestTimeout, LLMStreamTimeout and LLMStreamIdleTimeout bound each HTTP attempt
+	// of a provider SDK call (LLM_REQUEST_TIMEOUT, LLM_STREAM_TIMEOUT,
+	// LLM_STREAM_IDLE_TIMEOUT; Go durations, 0 disables). Defaults and their rationale are
+	// in provider.DefaultCallTimeouts.
+	LLMRequestTimeout    time.Duration
+	LLMStreamTimeout     time.Duration
+	LLMStreamIdleTimeout time.Duration
+	AllowedOrigins       []string
+	ReadTimeout          time.Duration
+	WriteTimeout         time.Duration
+	IdleTimeout          time.Duration
+	OpenAIKey            string
+	AnthropicKey         string
 	// ZAIKey enables z.ai GLM models (Anthropic-compatible endpoint); optional.
 	ZAIKey string
 	// ZAIBaseURL overrides the z.ai Anthropic-compatible base URL; optional.
@@ -94,6 +103,20 @@ type Config struct {
 
 	// RunMigrations controls whether startup migrations and data backfills run.
 	RunMigrations bool
+}
+
+// durationEnv reads a Go duration (e.g. "90s", "10m") from name, or returns def when it is
+// unset, invalid or negative. "0" is kept, and means no limit.
+func durationEnv(name string, def time.Duration) time.Duration {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return def
+	}
+	parsed, err := time.ParseDuration(v)
+	if err != nil || parsed < 0 {
+		return def
+	}
+	return parsed
 }
 
 // parseMockLLMConfig reads the LLM_BACKEND/MOCK_LLM_* env vars into the
@@ -244,6 +267,8 @@ func NewConfig() *Config {
 		}
 	}
 
+	callTimeouts := provider.DefaultCallTimeouts()
+
 	// Load Stripe configuration (only needed if billing is required)
 	stripeSecretKey := os.Getenv("STRIPE_SECRET_KEY")
 	stripePublishableKey := os.Getenv("STRIPE_PUBLISHABLE_KEY")
@@ -269,6 +294,9 @@ func NewConfig() *Config {
 		MockLLMStreamDelay:                  mockLLMStreamDelay,
 		LocalLLMBaseURL:                     localLLMBaseURL,
 		LocalLLMModel:                       localLLMModel,
+		LLMRequestTimeout:                   durationEnv("LLM_REQUEST_TIMEOUT", callTimeouts.Request),
+		LLMStreamTimeout:                    durationEnv("LLM_STREAM_TIMEOUT", callTimeouts.Stream),
+		LLMStreamIdleTimeout:                durationEnv("LLM_STREAM_IDLE_TIMEOUT", callTimeouts.StreamIdle),
 		AllowedOrigins:                      allowedOrigins,
 		ReadTimeout:                         15 * time.Second,
 		WriteTimeout:                        15 * time.Second,
