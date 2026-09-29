@@ -2,10 +2,12 @@ import type { MockedObject } from "vitest";
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient, withXhr } from '@angular/common/http';
-import { Router } from '@angular/router';
-import { of } from 'rxjs';
+import { Router, provideRouter } from '@angular/router';
+import { of, throwError } from 'rxjs';
 
 import { Chat } from '../../../../core/models/chat.model';
+import { AgentJob } from '../../../../core/models/agent-job.model';
+import { AgentJobService } from '../../../../core/services/agent-job.service';
 import { ChatService } from '../../../../core/services/chat.service';
 import { ConfirmationService } from '../../../../core/services/confirmation.service';
 import { ThreadListService } from '../../../../core/services/thread-list.service';
@@ -22,7 +24,7 @@ function makeChat(overrides: Partial<Chat> = {}): Chat {
     };
 }
 
-type ChatServiceMock = Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat'>;
+type ChatServiceMock = Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat' | 'markAllChatsRead'>;
 type ConfirmationServiceMock = Pick<MockedObject<ConfirmationService>, 'confirm'>;
 
 describe('ThreadListPanelComponent', () => {
@@ -31,15 +33,19 @@ describe('ThreadListPanelComponent', () => {
     let service: ThreadListService;
     let chatService: ChatServiceMock;
     let confirmationSpy: ConfirmationServiceMock;
-    let router: { navigate: ReturnType<typeof vi.fn> };
+    let navigateSpy: ReturnType<typeof vi.spyOn>;
+    let agentJobService: { listAgentJobs: ReturnType<typeof vi.fn> };
 
     beforeEach(async () => {
-        router = { navigate: vi.fn().mockName('Router.navigate') };
+        agentJobService = {
+            listAgentJobs: vi.fn().mockReturnValue(of({ results: [], total_count: 0, page: 1 })),
+        };
         chatService = {
             listChats: vi.fn().mockName("ChatService.listChats"),
             listAllChats: vi.fn().mockName("ChatService.listAllChats"),
             patchChat: vi.fn().mockName("ChatService.patchChat"),
-            deleteChat: vi.fn().mockName("ChatService.deleteChat")
+            deleteChat: vi.fn().mockName("ChatService.deleteChat"),
+            markAllChatsRead: vi.fn().mockName("ChatService.markAllChatsRead")
         } as unknown as ChatServiceMock;
         confirmationSpy = {
             confirm: vi.fn().mockName("ConfirmationService.confirm")
@@ -74,14 +80,16 @@ describe('ThreadListPanelComponent', () => {
                 provideHttpClient(withXhr()),
                 ThreadListService,
                 { provide: ChatService, useValue: chatService },
+                { provide: AgentJobService, useValue: agentJobService },
                 { provide: ConfirmationService, useValue: confirmationSpy },
-                { provide: Router, useValue: router },
+                provideRouter([]),
             ],
         }).compileComponents();
 
         fixture = TestBed.createComponent(ThreadListPanelComponent);
         component = fixture.componentInstance;
         service = TestBed.inject(ThreadListService);
+        navigateSpy = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
         await service.refresh();
         fixture.detectChanges();
     });
@@ -112,7 +120,7 @@ describe('ThreadListPanelComponent', () => {
     it('loads archived threads when archived tab is selected', async () => {
         chatService.listAllChats.mockClear();
 
-        const archivedTab = fixture.nativeElement.querySelectorAll('.panel__tabs button')[1] as HTMLButtonElement;
+        const archivedTab = fixture.nativeElement.querySelectorAll('.panel__tabs button')[2] as HTMLButtonElement;
         archivedTab.click();
         fixture.detectChanges();
 
@@ -131,7 +139,7 @@ describe('ThreadListPanelComponent', () => {
         const importButton = fixture.nativeElement.querySelector('.panel__import-btn') as HTMLButtonElement;
         importButton.click();
 
-        expect(router.navigate).toHaveBeenCalledWith(['/data']);
+        expect(navigateSpy).toHaveBeenCalledWith(['/data']);
         expect(fixture.nativeElement.querySelector('app-chat-import-modal')).toBeNull();
     });
 
@@ -372,12 +380,191 @@ describe('ThreadListPanelComponent', () => {
             fixture.detectChanges();
             expect(service.selectedCount()).toBe(1);
 
-            const archivedTab = fixture.nativeElement.querySelectorAll('.panel__tabs button')[1] as HTMLButtonElement;
+            const archivedTab = fixture.nativeElement.querySelectorAll('.panel__tabs button')[2] as HTMLButtonElement;
             archivedTab.click();
             fixture.detectChanges();
             await fixture.whenStable();
 
             expect(service.selectedCount()).toBe(0);
+        });
+    });
+
+    describe('Mark all read', () => {
+        const markAllButton = () =>
+            fixture.nativeElement.querySelector('.panel__mark-read-btn') as HTMLButtonElement;
+
+        async function reloadWithUnread(): Promise<void> {
+            chatService.listAllChats.mockReturnValue(of({
+                chats: [
+                    makeChat({ id: 'phantom', name: 'The Lighthouse Draft', unread_count: 3 }),
+                    makeChat({ id: 'aster', name: 'Equity Resilience Readout', unread_count: 1 }),
+                ],
+                truncated: false,
+            }));
+            await service.refresh();
+            fixture.detectChanges();
+        }
+
+        const badges = () => fixture.nativeElement.querySelectorAll('.thread-row__badge').length;
+
+        it('is labelled and disabled when nothing is unread', () => {
+            expect(markAllButton().getAttribute('aria-label')).toBe('Mark all threads as read');
+            expect(markAllButton().disabled).toBe(true);
+            expect(component.markAllReadTooltip()).toBe('No unread threads');
+        });
+
+        it('confirms, then clears every badge with one request', async () => {
+            await reloadWithUnread();
+            chatService.markAllChatsRead.mockReturnValue(of({ updated_count: 4 }));
+            expect(badges()).toBe(2);
+            expect(markAllButton().disabled).toBe(false);
+
+            markAllButton().click();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            expect(confirmationSpy.confirm).toHaveBeenCalledWith(
+                expect.objectContaining({ title: 'Mark all threads as read?' }),
+            );
+            expect(chatService.markAllChatsRead).toHaveBeenCalledTimes(1);
+            expect(badges()).toBe(0);
+            expect(component.markAllReadStatus()).toBe('Marked 4 messages as read');
+        });
+
+        it('does nothing when the confirmation is cancelled', async () => {
+            await reloadWithUnread();
+            confirmationSpy.confirm.mockResolvedValue(false);
+
+            markAllButton().click();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            expect(chatService.markAllChatsRead).not.toHaveBeenCalled();
+            expect(badges()).toBe(2);
+        });
+
+        it('reports failure without clearing badges, and retries without re-confirming', async () => {
+            await reloadWithUnread();
+            chatService.markAllChatsRead.mockReturnValueOnce(throwError(() => new Error('Network down')));
+
+            markAllButton().click();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            const alert = fixture.nativeElement.querySelector('.panel__notice--error') as HTMLElement;
+            expect(alert.textContent).toContain('Could not mark threads as read (Network down)');
+            expect(badges()).toBe(2);
+            expect(component.markAllReadStatus()).toBe('');
+
+            confirmationSpy.confirm.mockClear();
+            chatService.markAllChatsRead.mockReturnValueOnce(of({ updated_count: 4 }));
+            (Array.from(alert.querySelectorAll('button')) as HTMLButtonElement[])
+                .find(b => b.textContent?.trim() === 'Retry')!
+                .click();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            expect(confirmationSpy.confirm).not.toHaveBeenCalled();
+            expect(fixture.nativeElement.querySelector('.panel__notice--error')).toBeNull();
+            expect(badges()).toBe(0);
+        });
+    });
+
+    describe('Jobs tab', () => {
+        const tabs = () =>
+            Array.from(fixture.nativeElement.querySelectorAll('.panel__tabs [role="tab"]') as NodeListOf<HTMLButtonElement>);
+
+        function job(overrides: Partial<AgentJob>): AgentJob {
+            return {
+                id: 'job',
+                user_id: 'user-1',
+                prompt: 'Summarize',
+                schedule_input: 'every morning',
+                schedule_type: 'cron',
+                timezone: 'UTC',
+                status: 'active',
+                run_count: 1,
+                created_at: '2026-04-01T00:00:00Z',
+                updated_at: '2026-04-01T00:00:00Z',
+                ...overrides,
+            };
+        }
+
+        async function openJobsTab(): Promise<void> {
+            tabs()[1].click();
+            await vi.waitFor(() => expect(service.loading()).toBe(false));
+            fixture.detectChanges();
+        }
+
+        it('sits between Active and Archived', () => {
+            expect(tabs().map(tab => tab.textContent?.trim())).toEqual(['Active', 'Jobs', 'Archived']);
+        });
+
+        it('lists only job threads, fetched by id, with job status and next run', async () => {
+            agentJobService.listAgentJobs.mockReturnValue(of({
+                results: [
+                    job({ id: 'j1', chat_id: 'aster', title: 'Morning digest', next_run_at: '2026-10-01T09:00:00Z' }),
+                    job({ id: 'j2', chat_id: 'aster', title: 'Old one-off', status: 'complete', schedule_type: 'at' }),
+                    job({ id: 'j3', title: 'Never ran' }),
+                ],
+                total_count: 3,
+                page: 1,
+            }));
+            chatService.listAllChats.mockClear();
+            chatService.listAllChats.mockReturnValue(of({
+                chats: [makeChat({ id: 'aster', name: 'Equity Resilience Readout', archived: true })],
+                truncated: false,
+            }));
+
+            await openJobsTab();
+
+            expect(component.threadListTab()).toBe('jobs');
+            const filters = vi.mocked(chatService.listAllChats).mock.lastCall![1]!;
+            expect(filters.ids).toBe('aster');
+            expect(filters.archived).toBeUndefined();
+
+            const text = fixture.nativeElement.textContent as string;
+            expect(text).toContain('JOB');
+            expect(text).toContain('Morning digest');
+            expect(text).toContain('+1 more');
+            expect(text).toContain('Next run');
+            expect(text).not.toContain('The Lighthouse Draft');
+            const link = fixture.nativeElement.querySelector('.thread-row__job-name') as HTMLAnchorElement;
+            expect(link.getAttribute('href')).toBe('/agent-jobs/j1');
+            // Archived job threads can be restored from the Jobs tab.
+            expect(fixture.nativeElement.querySelector('.thread-row__archive--restore')).not.toBeNull();
+        });
+
+        it('shows an empty state when no job has a thread yet', async () => {
+            agentJobService.listAgentJobs.mockReturnValue(of({ results: [job({ id: 'j3' })], total_count: 1, page: 1 }));
+            chatService.listAllChats.mockClear();
+
+            await openJobsTab();
+
+            expect(chatService.listAllChats).not.toHaveBeenCalled();
+            expect(fixture.nativeElement.textContent).toContain('No threads have a scheduled job yet');
+        });
+
+        it('shows an error when jobs fail to load', async () => {
+            agentJobService.listAgentJobs.mockReturnValue(throwError(() => new Error('Jobs unavailable')));
+
+            await openJobsTab();
+
+            expect(fixture.nativeElement.querySelector('.panel__error')?.textContent).toContain('Jobs unavailable');
+        });
+
+        it('leaves the Active tab unchanged after visiting Jobs', async () => {
+            await openJobsTab();
+            chatService.listAllChats.mockClear();
+            tabs()[0].click();
+            await vi.waitFor(() => expect(service.loading()).toBe(false));
+            fixture.detectChanges();
+
+            const filters = vi.mocked(chatService.listAllChats).mock.lastCall?.[1];
+            expect(filters?.ids).toBeUndefined();
+            expect(filters?.archived).toBeUndefined();
+            expect(fixture.nativeElement.textContent).not.toContain('JOB');
+            expect(fixture.nativeElement.textContent).toContain('ARCHIVE?');
         });
     });
 });

@@ -54,6 +54,8 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Memory import metrics:** `importMemories` (behind `ImportMemories` and `ImportMemoriesWithBatchEmbeddings`, used by `/memory/import` and account import) records `parse`, `embed` and `store` times on `whatiff.file.operation.duration` (operation `memory_import`), with embed and store summed across batches so each import records one value per phase.
   It also records per-import memory counts (imported, skipped, failed) on `whatiff.file.operation.items`, including on partial failures.
 - **Chat message context items:** `createContextItemsBulk` returns errors to callers; failed inserts **roll back** the surrounding transaction and increment `telemetry.ChatMessageContextItemsPersistFailures` when metrics are configured.
+- **Mark all read:** `MarkAllChatMessagesRead` flips every unread assistant message in the user's own chats (archived included) to read in one scoped UPDATE, so it either clears everything or nothing.
+  Other users' chats are excluded by the owner predicate, not by a pre-check.
 - **Message pagination:** `ListChatMessages` is newest-first and offset-paginated for the chat UI's initial page.
   `ListChatMessagesBefore` is the newest-first keyset path for scroll-back and jump-to-bookmark: it filters `(sent_at, id) <` the cursor so the UI can request large batches (e.g. a far-back bookmark jump) without the offset math that couples page number to page size, and its response's `NextCursor` continues the walk.
   Because it is user-facing via the `limit` query param, it clamps the batch size to `[1, maxMessagePageSize]` (500, matching the OpenAPI max) rather than erroring on an oversized request.

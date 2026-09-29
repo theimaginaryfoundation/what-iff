@@ -7,7 +7,7 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
 ## Responsibilities
 
 - **`Handler`:** `RegisterRoutes` mounts `/api/chat/...` (under parent `/api` from server).
-  Key routes: list/create/get/update/patch/delete chat, chat messages CRUD, `welcome-message`, `mark-read`, export, **`import`**, `available-rituals`, file attachments on a chat, `context` for debugging.
+  Key routes: list/create/get/update/patch/delete chat, chat messages CRUD, `welcome-message`, `mark-read`, `mark-all-read` (all of the caller's chats, one all-or-nothing update), export, **`import`**, `available-rituals`, file attachments on a chat, `context` for debugging.
 - List chats accepts `search`, which the datastore applies to chat names and checkpoint summaries.
   Query `archived=true` lists archived threads only; omit or `false` for active threads (default).
   Query `source=openai|anthropic` filters to imported threads (used by the post-import thread picker, sorted by recency via the default `last_message_time DESC` order).

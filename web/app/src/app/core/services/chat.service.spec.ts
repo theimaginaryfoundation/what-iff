@@ -65,4 +65,44 @@ describe('ChatService', () => {
             updated_at: '2026-06-23T00:00:00Z',
         });
     });
+
+    describe('markAllChatsRead', () => {
+        function seedActiveChatWithUnread(): void {
+            service.createChat({ name: 'Unread chat' }).subscribe();
+            httpMock.expectOne(`${environment.apiUrl}/chat`).flush({
+                id: 'chat-3',
+                user_id: 'user-1',
+                name: 'Unread chat',
+                unread_count: 4,
+                created_at: '2026-06-23T00:00:00Z',
+                updated_at: '2026-06-23T00:00:00Z',
+            });
+        }
+
+        it('posts once and clears cached badges on success', () => {
+            seedActiveChatWithUnread();
+            let updated: number | undefined;
+            service.markAllChatsRead().subscribe(res => (updated = res.updated_count));
+
+            const req = httpMock.expectOne(`${environment.apiUrl}/chat/mark-all-read`);
+            expect(req.request.method).toBe('POST');
+            req.flush({ updated_count: 4 });
+
+            expect(updated).toBe(4);
+            expect(service.getActiveChat()?.unread_count).toBe(0);
+        });
+
+        it('keeps cached badges and errors when the server fails', () => {
+            seedActiveChatWithUnread();
+            let failed = false;
+            service.markAllChatsRead().subscribe({ error: () => (failed = true) });
+
+            httpMock
+                .expectOne(`${environment.apiUrl}/chat/mark-all-read`)
+                .flush({ error: 'boom' }, { status: 500, statusText: 'Server Error' });
+
+            expect(failed).toBe(true);
+            expect(service.getActiveChat()?.unread_count).toBe(4);
+        });
+    });
 });
