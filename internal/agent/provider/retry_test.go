@@ -230,3 +230,43 @@ func claudeTestParams() anthropic.MessageNewParams {
 		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("hi"))},
 	}
 }
+
+// fastRetryableError is a 503 whose Retry-After-Ms shortens the retry wait to a millisecond.
+func fastRetryableError() error {
+	return &openai.Error{
+		StatusCode: http.StatusServiceUnavailable,
+		Response:   &http.Response{Header: http.Header{"Retry-After-Ms": {"1"}}},
+	}
+}
+
+// Callers that record no metrics pass a nil call (and may pass a nil logger). The loop must
+// run its retries and finish without touching a nil call, so genAICall's methods staying
+// nil-safe is an invariant this test pins.
+func TestRetryLLMCall_NilCallAndLoggerAreSafe(t *testing.T) {
+	t.Parallel()
+
+	t.Run("recovers after a retry", func(t *testing.T) {
+		attempts := 0
+		got, err := retryLLMCall(t.Context(), nil, nil, func(context.Context) (*string, bool, error) {
+			attempts++
+			if attempts == 1 {
+				return nil, false, fastRetryableError()
+			}
+			ok := "ok"
+			return &ok, false, nil
+		})
+		require.NoError(t, err)
+		require.Equal(t, "ok", *got)
+		require.Equal(t, 2, attempts)
+	})
+
+	t.Run("gives up after the last attempt", func(t *testing.T) {
+		attempts := 0
+		_, err := retryLLMCall(t.Context(), nil, nil, func(context.Context) (*string, bool, error) {
+			attempts++
+			return nil, false, fastRetryableError()
+		})
+		require.Error(t, err)
+		require.Equal(t, llmMaxAttempts, attempts)
+	})
+}
