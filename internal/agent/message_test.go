@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -41,6 +42,37 @@ func TestRecoverAsyncMessageJob_NoPanicIsNoop(t *testing.T) {
 		defer a.recoverAsyncMessageJob(context.Background(), uuid.New(), uuid.New(), uuid.New())
 	})
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestRunAsyncChatMessageJob_ContainsPanic covers the goroutine body that both a new send and a
+// retry run their turn in: a panicking turn must be contained (not crash the process), still
+// release the job's cancel registration, and be recorded as a panic job outcome.
+func TestRunAsyncChatMessageJob_ContainsPanic(t *testing.T) {
+	for _, action := range []string{"processing", "retry"} {
+		t.Run(action, func(t *testing.T) {
+			ds, _, cleanup := newTestDatastore(t)
+			defer cleanup()
+			a, tm := newMetricsAgent(t)
+			a.ds = ds
+			a.runningJobCancels = map[uuid.UUID]runningJobCancel{}
+			job := &models.Job{ID: uuid.New(), UserID: uuid.New(), JobType: JobTypeChatMessage}
+			runCtx, cancel := context.WithCancel(context.Background())
+			a.registerRunningJobCancel(job.ID, job.UserID, cancel)
+
+			require.NotPanics(t, func() {
+				a.runAsyncChatMessageJob(runCtx, cancel, job, uuid.New(), action, func() error {
+					panic("boom in retried turn")
+				})
+			})
+			require.ErrorIs(t, runCtx.Err(), context.Canceled, "run context is released")
+			a.runningJobCancelsMu.Lock()
+			_, stillRegistered := a.runningJobCancels[job.ID]
+			a.runningJobCancelsMu.Unlock()
+			require.False(t, stillRegistered, "job's cancel is unregistered")
+			require.Equal(t, uint64(1), tm.HistogramCount(t, telemetry.JobDuration.Name,
+				telemetry.AttrJobType.String(JobTypeChatMessage), telemetry.AttrOutcome.String(telemetry.JobOutcomePanic)))
+		})
+	}
 }
 
 // Test buildAttachmentLabels function

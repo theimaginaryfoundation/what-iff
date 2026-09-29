@@ -181,6 +181,10 @@ func (s *Server) setupRoutes() {
 	if s.config.LLMBackend != "vendor" {
 		providerHTTPClient = provider.DenyNetworkHTTPClient()
 	}
+	// Every provider call is bounded per HTTP attempt (issue #193). The timeout transport sits
+	// inside the instrumentation so a timed-out attempt is recorded with error.type=timeout.
+	callTimeouts := s.llmCallTimeouts()
+	providerHTTPClient = provider.WithCallTimeouts(providerHTTPClient, callTimeouts)
 	providerHTTPClient = telemetry.InstrumentHTTPClient(providerHTTPClient, s.dependencyHosts()...)
 
 	agentCfg := agent.AgentConfig{
@@ -193,6 +197,7 @@ func (s *Server) setupRoutes() {
 		MockLLMStreamDelay: s.config.MockLLMStreamDelay,
 		LocalLLMBaseURL:    s.config.LocalLLMBaseURL,
 		LocalLLMModel:      s.config.LocalLLMModel,
+		LLMCallTimeouts:    callTimeouts,
 		ZAIKey:             s.config.ZAIKey,
 		ZAIBaseURL:         s.config.ZAIBaseURL,
 		GeminiKey:          s.config.GeminiKey,
@@ -302,7 +307,7 @@ func (s *Server) setupRoutes() {
 			exportSender = email.Instrument(snd, telemetry.DependencySES)
 		}
 	}
-	accountExportHandler := accountexport.NewHandler(dataStore, s.logger, fileStore, exportSender, s.config.OpenAIKey)
+	accountExportHandler := accountexport.NewHandler(dataStore, s.logger, fileStore, exportSender, s.config.OpenAIKey, providerHTTPClient, s.lifecycleCtx)
 	mcpServerHandler := mcpserver.NewHandler(dataStore, s.logger)
 	modelHandler := model.NewHandler(dataStore, s.logger)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)
@@ -408,6 +413,15 @@ func (s *Server) setupRoutes() {
 	// be registered through the handler's RegisterRoutes method, which applies
 	// RequireRole("admin", "super_admin") middleware.
 	roleHandler.RegisterRoutes(apiV1Router)
+}
+
+// llmCallTimeouts is the configured per-attempt limits for provider calls.
+func (s *Server) llmCallTimeouts() provider.CallTimeouts {
+	return provider.CallTimeouts{
+		Request:    s.config.LLMRequestTimeout,
+		Stream:     s.config.LLMStreamTimeout,
+		StreamIdle: s.config.LLMStreamIdleTimeout,
+	}
 }
 
 // dependencyHosts labels the configured provider base URL overrides, so an LLM provider

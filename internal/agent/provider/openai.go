@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -46,7 +46,7 @@ func (a *OpenAIProvider) zapLog() *zap.Logger {
 // responsesNew is the single entry point for Responses API HTTP calls; records token usage
 // (and content-filter blocks) on call, which callWithRetry owns and ends.
 func (c *OpenAIProvider) responsesNew(ctx context.Context, params responses.ResponseNewParams, call *genAICall) (*responses.Response, error) {
-	resp, err := c.oaiClient.Responses.New(ctx, params)
+	resp, err := c.oaiClient.Responses.New(ctx, params, option.WithMaxRetries(sdkNoRetries))
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (c *OpenAIProvider) responsesNewStreaming(
 	call *genAICall,
 ) (*responses.Response, bool, error) {
 	call.beginAttempt()
-	stream := c.oaiClient.Responses.NewStreaming(ctx, params)
+	stream := c.oaiClient.Responses.NewStreaming(ctx, params, option.WithMaxRetries(sdkNoRetries))
 	defer stream.Close()
 
 	var finalResp *responses.Response
@@ -113,14 +113,16 @@ func (c *OpenAIProvider) responsesNewStreaming(
 				zap.Bool("delta_emitted", deltaEmitted))
 		case "response.failed":
 			resp := ev.AsResponseFailed().Response
-			return nil, deltaEmitted, fmt.Errorf(
+			return nil, deltaEmitted, withStreamStatus(fmt.Errorf(
 				"openai responses stream failed: %s (code %q, response_id %q)",
-				strings.TrimSpace(resp.Error.Message), string(resp.Error.Code), resp.ID)
+				strings.TrimSpace(resp.Error.Message), string(resp.Error.Code), resp.ID),
+				openAIStreamErrorStatus(string(resp.Error.Code)))
 		case "error":
 			errEv := ev.AsError()
-			return nil, deltaEmitted, fmt.Errorf(
+			return nil, deltaEmitted, withStreamStatus(fmt.Errorf(
 				"openai responses stream error: %s (code %q, param %q)",
-				strings.TrimSpace(errEv.Message), errEv.Code, errEv.Param)
+				strings.TrimSpace(errEv.Message), errEv.Code, errEv.Param),
+				openAIStreamErrorStatus(errEv.Code))
 		}
 	}
 
@@ -167,75 +169,17 @@ func (c *OpenAIProvider) CallWithRetryStreaming(
 	}, params)
 }
 
-// callWithRetry runs caller with app-level retries. It is also where the logical call's
+// callWithRetry runs caller under retryLLMCall. It is also where the logical call's
 // GenAIOperationDuration is recorded (all attempts and waits included) and retries counted.
 func (c *OpenAIProvider) callWithRetry(
 	ctx context.Context,
 	caller func(context.Context, responses.ResponseNewParams, *genAICall) (*responses.Response, bool, error),
 	params responses.ResponseNewParams,
-) (resp *responses.Response, err error) {
+) (*responses.Response, error) {
 	call := startGenAICall(ctx, c.tel, telemetry.DependencyOpenAI, string(params.Model), genAIOpChat)
-	defer func() { call.end(err) }()
-
-	const maxRetries = 3
-	rateLimitWaitTimes := []time.Duration{65 * time.Second, 100 * time.Second, 135 * time.Second}
-	serverErrorWaitTimes := []time.Duration{5 * time.Second, 30 * time.Second, 60 * time.Second}
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		resp, streamedAnyDelta, err := caller(ctx, params, call)
-		if err != nil {
-			if isRateLimitError(err) {
-				waitTime := rateLimitWaitTimes[attempt]
-				if attempt < maxRetries-1 {
-					if streamedAnyDelta {
-						return nil, err
-					}
-					call.retry(retryReasonRateLimited)
-					c.zapLog().Warn("openai rate limited; retrying",
-						zap.Int("attempt", attempt+1),
-						zap.Int("max_retries", maxRetries),
-						zap.Duration("wait", waitTime),
-						zap.Error(err))
-					if waitErr := waitForRetry(ctx, waitTime); waitErr != nil {
-						return nil, waitErr
-					}
-					continue
-				}
-			} else if isServerError(err) {
-				waitTime := serverErrorWaitTimes[attempt]
-				if attempt < maxRetries-1 {
-					if streamedAnyDelta {
-						return nil, err
-					}
-					call.retry(retryReasonServerError)
-					c.zapLog().Warn("openai server error; retrying",
-						zap.Int("attempt", attempt+1),
-						zap.Int("max_retries", maxRetries),
-						zap.Duration("wait", waitTime),
-						zap.Error(err))
-					if waitErr := waitForRetry(ctx, waitTime); waitErr != nil {
-						return nil, waitErr
-					}
-					continue
-				}
-			}
-			return nil, err
-		}
-		return resp, nil
-	}
-
-	return nil, fmt.Errorf("failed after %d attempts due to OpenAI API issues", maxRetries)
-}
-
-func waitForRetry(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
+	return retryLLMCall(ctx, call, c.zapLog(), func(ctx context.Context) (*responses.Response, bool, error) {
+		return caller(ctx, params, call)
+	})
 }
 
 func (c *OpenAIProvider) CountTokens(text string) (int, error) {
@@ -293,26 +237,4 @@ func dedupeParagraphs(paragraphs []string) []string {
 		}
 	}
 	return uniqueParagraphs
-}
-
-// isRateLimitError checks if an error is a rate limit error
-func isRateLimitError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := strings.ToLower(err.Error())
-	return strings.Contains(errStr, "429") ||
-		strings.Contains(errStr, "rate limit") ||
-		strings.Contains(errStr, "too many requests")
-}
-
-// isServerError checks if an error is a server error
-func isServerError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := strings.ToLower(err.Error())
-	return strings.Contains(errStr, "500") ||
-		strings.Contains(errStr, "internal server error") ||
-		strings.Contains(errStr, "server_error")
 }

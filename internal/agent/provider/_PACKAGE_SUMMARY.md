@@ -58,13 +58,13 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
   Also carries **`Reasoning`** (see "Model reasoning capture").
 - **`TokenCounter` + carry-over selection:** Token budget and `SelectCarryOverTurns` for history trimming.
 - **Inference metrics (`genai_metrics.go`):** every vendor call goes through one wrapper, and each wrapper records through a `genAICall` (`startGenAICall`, then `end(err)`) on `tel.Metrics`.
-  Wrappers: `responsesNew`/`responsesNewStreaming` (timed once per logical call in `callWithRetry`), `messagesNew`/`betaMessagesNew`, the Claude streaming calls (timed in `callClaudeWithRetry`), `chatCompletionsNew`/`chatCompletionsStream` for every Chat Completions provider, the Images API calls and the Files/Containers calls.
+  Wrappers: `responsesNew`/`responsesNewStreaming` (timed once per logical call in `callWithRetry`), `messagesNew`/`betaMessagesNew`, the Claude streaming calls (timed in `retryLLMCall`), `chatCompletionsNew`/`chatCompletionsStream` for every Chat Completions provider, the Images API calls and the Files/Containers calls.
   `gen_ai.client.operation.duration` has provider, model, operation (`chat`, `generate_image`, `edit_image`, `file`), `call_path` and, on failure, `error.type`; the duration includes app-level retries and their waits, and a stream is timed to its terminal event.
   `whatiff.gen_ai.time_to_first_token` is the first text or reasoning delta of the attempt that succeeded (each retry attempt calls `beginAttempt`).
   Tokens go to `gen_ai.client.token.usage` (no model label) and `whatiff.gen_ai.tokens` (with model) as `input`, `output`, `cached_input` and `reasoning`, recorded only when positive.
   Anthropic `input` keeps the full total (uncached + cache reads + cache writes); `cached_input` is cache reads only, because cache writes are not hits.
   DeepSeek's `prompt_cache_hit_tokens` counts as `cached_input`; returned usage values (used for metering) are unchanged.
-  `whatiff.gen_ai.retries` counts `callWithRetry`/`callClaudeWithRetry` retries (`rate_limited`, `server_error`), the Claude truncation fallback (`truncated`) and the Xiaomi thinking-off retry (`length`).
+  `whatiff.gen_ai.retries` counts `retryLLMCall` retries (`rate_limited`, `server_error`, `network`), the Claude truncation fallback (`truncated`) and the Xiaomi thinking-off retry (`length`).
   `whatiff.gen_ai.safety_blocks` counts calls that failed with a safety violation, or finished with a `content_filter` / `refusal` stop reason.
   The provider name is a `telemetry.Dependency*` constant; `ClaudeProvider` reports `zai` when built with a custom base URL (only z.ai uses one).
   An `init` registers `*openai.Error` and `*anthropic.Error` with `telemetry.RegisterStatusCodeFunc`, so `error.type` is status based wherever those errors are classified.
@@ -86,6 +86,7 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 | `NewOpenAIProvider` / `NewClaudeProvider` | SDK clients; optional `*telemetry.Telemetry` (metrics + logger). All provider constructors take an optional `*http.Client` (nil = SDK default) so mock mode can inject the deny transport. |
 | `MockAdapter` / `NewMockAdapter` | In-process `AgentAdapter` fake for `LLM_BACKEND=mock` (echo/fixed/scripted modes, whitespace-preserving word-delta streaming, ctx cancellation). Built per request. |
 | `LocalProvider` / `LocalAdapter` | Real `AgentAdapter` for `LLM_BACKEND=local`: an OpenAI-compatible Chat Completions client pointed at a local server (Ollama default via `DefaultLocalBaseURL`; any compatible server via `LOCAL_LLM_BASE_URL`). Placeholder API key; non-streaming, mirrors the Mistral/DeepSeek adapter shape. |
+| `WithCallTimeouts` / `CallTimeouts` / `CallTimeoutError` | Wraps an `http.Client` so every provider HTTP attempt is bounded: `Request` until headers (and a non-streamed body), then `Stream` total and `StreamIdle` between bytes once a `text/event-stream` response starts. A fired limit surfaces as `CallTimeoutError`, which matches `context.DeadlineExceeded` (error.type `timeout`, not retried by `retryLLMCall`) and never `context.Canceled`, which the streaming paths read as a user stop. Defaults and their rationale are on `DefaultCallTimeouts`. |
 | `DenyNetworkHTTPClient` / `ErrNetworkDenied` | `http.Client` whose transport fails every request before egress; injected into all provider clients under mock mode ("no provider egress" guarantee). |
 
 ## Dependencies
@@ -130,8 +131,14 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
   `response.failed` and `error` return descriptive errors carrying the provider's code/message/response-id.
   Only a stream that ends with `stream.Err()==nil` and none of those events is treated as a truncated/dropped stream.
   Capturing only `response.completed` was the root cause of the opaque "stream finished without response.completed event" (issue #132).
+- **One retry layer per call (`retry.go`).**
+  OpenAI Responses (`callWithRetry`, streaming and not) and Claude streaming retry in `retryLLMCall`: at most `llmMaxAttempts` (3) attempts, 65s/100s waits after a 429 and 5s/30s after a 5xx or connection error, shortened by a smaller `Retry-After`/`Retry-After-Ms`.
+  Every request inside the loop passes `option.WithMaxRetries(0)`, so the SDK doesn't retry underneath it (before, one call could make about 9 HTTP attempts).
+  Everything else (Claude non-streaming `Call`/`CallBeta`, the Chat Completions providers, images, files, embeddings) has no app loop and keeps the SDK's own retries.
+  Retryability comes from `telemetry.ClassifyError`, i.e. the SDK error's status code (429, any 5xx including Anthropic's 529) or a network error, never from message text.
+  Failures reported inside a 200 stream get the equivalent status via `streamStatusError`: OpenAI `response.failed`/`error` codes `server_error` and `rate_limit_exceeded`, and Anthropic `error` events (`overloaded_error`, `api_error`, `rate_limit_error`, parsed from the SDK's `received error while streaming:` text by `classifyAnthropicStreamError`).
 - **Only two of the three streaming paths need a mid-stream retry guard, and that asymmetry is deliberate.**
-  Claude (`callClaudeWithRetry`) and OpenAI Responses (`callWithRetry`) wrap their calls in application-level retry loops, so both carry a "delta already emitted" flag and refuse to re-issue a call whose output the user has already seen.
+  Claude streaming and OpenAI Responses wrap their calls in `retryLLMCall`, so both carry a "delta already emitted" flag and refuse to re-issue a call whose output the user has already seen.
   `streamChatCompletion` has no such loop — its only retries come from openai-go's `WithMaxRetries`, which decides from the response status and headers before any SSE body is read, and `ssestream` has no reconnect logic.
   Once a chunk is delivered nothing can re-issue, so no guard is needed.
   Pinned by `TestStreamChatCompletion_DoesNotRetryAfterDeltasDelivered` plus a control that proves a pre-body failure *is* retried, so an SDK bump breaking the invariant fails the suite rather than passing quietly.
@@ -146,6 +153,7 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 ## Testing
 
 - `mock_adapter_test.go` — echo/fixed/scripted modes, delta concatenation (unicode, no-space, newline-heavy), mid-stream cancellation.
+  `call_timeouts_test.go` — each limit against `httptest` servers (slow response, stalled and endless streams), a healthy stream outliving `Request`, caller cancel staying a cancel, and a stalled Claude stream timing out after one attempt.
   `deny_transport_test.go` — proves an `httptest` server is never reached, including through a real openai-go client built on the deny client.
 - `model_context_test.go`, `model_context_hydrate_test.go`, `model_context_openai_test.go` — segment assembly, hydration helpers, OpenAI/Claude rendering (including Claude text fallback when image bytes absent).
 - `model_context_breakdown_test.go` — `SegmentBreakdown` aggregation, first-appearance ordering, cacheable-any / image counting, and nil-receiver/nil-counter guards.

@@ -70,7 +70,10 @@ Streaming and polling endpoints record their full duration.
 | `whatiff.db.pool.wait_time` | gauge (cumulative), s | — | | |
 
 Notes on these metrics:
-- **HTTP client:** there is one sample per HTTP attempt, so SDK retries appear as extra attempts.
+- **HTTP client:** there is one sample per HTTP attempt, so retries appear as extra attempts.
+  For OpenAI Responses and Claude streaming calls those are the app-level retries counted on
+  `whatiff.gen_ai.retries` (the SDK doesn't retry under them); other provider calls retry in the
+  SDK, which counts nowhere else.
   For streamed responses this measures time to the response headers; full LLM call time is in
   `gen_ai.client.operation.duration`.
 - **`dependency` values:** `postgres`, `s3`, `local_fs`, `ses`, `parallel`, `openai`, `anthropic`,
@@ -91,7 +94,7 @@ Notes on these metrics:
 | `whatiff.gen_ai.time_to_first_token` | histogram, s | slow | provider, model, `call_path` |
 | `gen_ai.client.token.usage` | histogram, {token} | tokens (16–1M) | provider, `gen_ai.token.type`, `call_path` |
 | `whatiff.gen_ai.tokens` | counter, {token} | — | provider, model, `gen_ai.token.type`, `call_path` |
-| `whatiff.gen_ai.retries` | counter | — | provider, model, `reason` (rate_limited, server_error, truncated, length) |
+| `whatiff.gen_ai.retries` | counter | — | provider, model, `reason` (rate_limited, server_error, network, truncated, length) |
 | `whatiff.gen_ai.safety_blocks` | counter | — | provider, model, `call_path` |
 | `whatiff.gen_ai.context.tokens` | histogram, {token} | tokens | `segment`, `call_path` |
 
@@ -100,6 +103,13 @@ Notes on these metrics:
   - One value per logical call, including app-level retries and their waits.
   - Streams are timed to their final event.
   - The model label stays on error series, so you can see one model failing.
+  - `error.type=timeout` includes attempts cut off by the `LLM_*_TIMEOUT` limits. A stalled
+    stream fails after its headers, so it shows up here but not on `http.client.request.duration`.
+- **Retries:** app-level retries and fallbacks.
+  - `rate_limited`, `server_error` and `network` are transport retries of OpenAI Responses and
+    Claude streaming calls: up to 3 attempts per call, decided by status code (429, any 5xx
+    including 529) or a failed connection.
+  - `truncated` and `length` re-issue a reasoning model's call that ran out of output tokens.
 - **Time to first token:** recorded only for streamed calls that succeed, and measured from the
   start of the attempt that succeeded.
 - **Token histogram vs. counter:** the histogram has no model label, which keeps its bucket series

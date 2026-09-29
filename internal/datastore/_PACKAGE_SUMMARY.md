@@ -54,6 +54,8 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Memory import metrics:** `importMemories` (behind `ImportMemories` and `ImportMemoriesWithBatchEmbeddings`, used by `/memory/import` and account import) records `parse`, `embed` and `store` times on `whatiff.file.operation.duration` (operation `memory_import`), with embed and store summed across batches so each import records one value per phase.
   It also records per-import memory counts (imported, skipped, failed) on `whatiff.file.operation.items`, including on partial failures.
 - **Chat message context items:** `createContextItemsBulk` returns errors to callers; failed inserts **roll back** the surrounding transaction and increment `telemetry.ChatMessageContextItemsPersistFailures` when metrics are configured.
+- **Mark all read:** `MarkAllChatMessagesRead` flips every unread assistant message in the user's own chats (archived included) to read in one scoped UPDATE, so it either clears everything or nothing.
+  Other users' chats are excluded by the owner predicate, not by a pre-check.
 - **Message pagination:** `ListChatMessages` is newest-first and offset-paginated for the chat UI's initial page.
   `ListChatMessagesBefore` is the newest-first keyset path for scroll-back and jump-to-bookmark: it filters `(sent_at, id) <` the cursor so the UI can request large batches (e.g. a far-back bookmark jump) without the offset math that couples page number to page size, and its response's `NextCursor` continues the walk.
   Because it is user-facing via the `limit` query param, it clamps the batch size to `[1, maxMessagePageSize]` (500, matching the OpenAPI max) rather than erroring on an oversized request.
@@ -101,6 +103,10 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **User account export:** `ExportConversationInputs` walks each chat's messages by the ordered `(sent_at, id)` cursor, rather than `OFFSET`, so very long conversations preserve stable ordering without progressively slower page scans.
 - **Batched embedding imports:** imported embeddings use the deterministic memory UUID as their primary key and conflict on that primary key.
   This preserves retry safety for legacy PostgreSQL databases that lack the Ent-declared unique constraint on `embedding_memory`.
+- **Personality auto-pin:** `autoPinPersonalityIDTx` (`memory.go`) is the one rule for every memory created while a personality is active: `CreateMemory` (the `create_memory` tool), `PersistMemoryMergeGroup` new-only folds and `PersistMemoryLinkGroup` new members.
+  A new User-scoped memory is pinned to the active personality when that personality has `auto_pin_memories` on.
+  Chat-scoped memories, no active personality (e.g. rehydration passes `uuid.Nil`), auto-pin off, or a failed personality lookup leave it unpinned.
+  An explicit `PinnedPersonalityID` on `CreateMemory` wins; folds and links never repin existing memories, and toggling the setting never repins old ones.
 - **Memory scope versus source chat:** `Memory.Scope` controls retrieval scope (`User`, `Chat`, or `Summary`); the optional `chat` edge records a memory's source conversation and is valid for User-scoped Global and Personality memories too.
   Moves preserve that provenance edge.
   `PatchMemoriesBatch` rejects changes to actual Chat-scoped Thread memories before individual updates begin, preventing a mixed bulk Move from partially moving User memories.
@@ -128,6 +134,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - `memory_test.go`, `memory2_test.go`, `filechunk_test.go` — retrieval (including **`ListMemories`** excluding Summary unless `level=summary`), ZIP export/import helpers, full import count/persist coverage, and chunks.
 - `memory_import_metrics_test.go` — memory import stage timings and item counts, including a failed embed stage.
 - `compaction_event_test.go`, `memory_merge_test.go` — SQLite harness mirrors ent FK semantics (`memory_merge_events.compaction_event_id` → `compaction_events` ON DELETE SET NULL); compaction tests cover content-addressed snapshots, merge grouping, page-size cap, and FK null-on-delete.
+  `TestAutoPin_AppliesToEveryMemoryCreationPath` covers the auto-pin rule on each creation path.
 - `accountbackup_test.go` — backup JSONL parsing edge cases such as large records and optional sections.
 - `accountexport_test.go` — conversation export’s timestamp/ID cursor covers a batch boundary where all messages share a timestamp.
 - `token_crypto_test.go` — round-trip encryption.

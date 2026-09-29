@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
 )
 
 // ClaudeProvider wraps the Anthropic Messages API and exposes the same utility
@@ -48,7 +48,8 @@ func NewClaudeProviderWithBaseURL(apiKey, baseURL string, tel *telemetry.Telemet
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),
 		// 2 retries = 3 total attempts with SDK-managed exponential back-off
-		// for 429/500/529 responses.
+		// for 429/500/529 responses. Streaming calls turn this off per request
+		// and retry in retryLLMCall instead, so there is only one layer.
 		option.WithMaxRetries(2),
 	}
 	if strings.TrimSpace(baseURL) != "" {
@@ -230,6 +231,14 @@ func (c *ClaudeProvider) startCall(ctx context.Context, model string) *genAICall
 	return startGenAICall(ctx, tel, name, model, genAIOpChat)
 }
 
+// zapLog returns the configured logger, or a no-op logger when telemetry is nil (e.g. tests).
+func (c *ClaudeProvider) zapLog() *zap.Logger {
+	if c != nil && c.tel != nil && c.tel.Logger != nil {
+		return c.tel.Logger
+	}
+	return zap.NewNop()
+}
+
 // recordRetry counts an adapter-level fallback (e.g. the truncation fallback) for model.
 func (c *ClaudeProvider) recordRetry(ctx context.Context, model, reason string) {
 	c.startCall(ctx, model).retry(reason)
@@ -271,7 +280,7 @@ func recordClaudeOutcome(call *genAICall, usage genAIUsage, stopReason string) {
 }
 
 // messagesNewStreaming streams one Messages API attempt. call (may be nil) gets the attempt's
-// time to first token and, on success, its token usage; callClaudeWithRetry ends it.
+// time to first token and, on success, its token usage; retryLLMCall ends it.
 func (c *ClaudeProvider) messagesNewStreaming(
 	ctx context.Context,
 	params anthropic.MessageNewParams,
@@ -280,7 +289,7 @@ func (c *ClaudeProvider) messagesNewStreaming(
 	call *genAICall,
 ) (*anthropic.Message, bool, error) {
 	call.beginAttempt()
-	stream := c.client.Messages.NewStreaming(ctx, params)
+	stream := c.client.Messages.NewStreaming(ctx, params, option.WithMaxRetries(sdkNoRetries))
 	defer stream.Close()
 
 	var (
@@ -313,7 +322,7 @@ func (c *ClaudeProvider) messagesNewStreaming(
 				Source:       "claude_stream_usage",
 			})
 		}
-		return nil, deltaEmitted, err
+		return nil, deltaEmitted, classifyAnthropicStreamError(err)
 	}
 	if finalMsg.ID == "" {
 		return nil, deltaEmitted, fmt.Errorf("stream finished without message_start event")
@@ -331,7 +340,7 @@ func (c *ClaudeProvider) betaMessagesNewStreaming(
 	call *genAICall,
 ) (*anthropic.BetaMessage, bool, error) {
 	call.beginAttempt()
-	stream := c.client.Beta.Messages.NewStreaming(ctx, params)
+	stream := c.client.Beta.Messages.NewStreaming(ctx, params, option.WithMaxRetries(sdkNoRetries))
 	defer stream.Close()
 
 	var (
@@ -363,7 +372,7 @@ func (c *ClaudeProvider) betaMessagesNewStreaming(
 				Source:       "claude_beta_stream_usage",
 			})
 		}
-		return nil, deltaEmitted, err
+		return nil, deltaEmitted, classifyAnthropicStreamError(err)
 	}
 	if finalMsg.ID == "" {
 		return nil, deltaEmitted, fmt.Errorf("beta stream finished without message_start event")
@@ -408,7 +417,7 @@ func (c *ClaudeProvider) CallWithRetryStreamingReasoning(
 ) (*anthropic.Message, error) {
 	onThinking, beforeAttempt := retryAwareThinking(reasoning)
 	call := c.startCall(ctx, string(params.Model))
-	return callClaudeWithRetry(ctx, call, func(ctx context.Context) (*anthropic.Message, bool, error) {
+	return retryLLMCall(ctx, call, c.zapLog(), func(ctx context.Context) (*anthropic.Message, bool, error) {
 		beforeAttempt()
 		return c.messagesNewStreaming(ctx, params, onTextDelta, onThinking, call)
 	})
@@ -446,56 +455,9 @@ func (c *ClaudeProvider) CallBetaWithRetryStreaming(
 	onTextDelta func(delta string),
 ) (*anthropic.BetaMessage, error) {
 	call := c.startCall(ctx, string(params.Model))
-	return callClaudeWithRetry(ctx, call, func(ctx context.Context) (*anthropic.BetaMessage, bool, error) {
+	return retryLLMCall(ctx, call, c.zapLog(), func(ctx context.Context) (*anthropic.BetaMessage, bool, error) {
 		return c.betaMessagesNewStreaming(ctx, params, onTextDelta, call)
 	})
-}
-
-// callClaudeWithRetry runs caller with app-level retries and ends call (may be nil) with the
-// final outcome, so its duration covers every attempt and wait. Time to first token comes from
-// the attempt that succeeded (each attempt calls call.beginAttempt).
-func callClaudeWithRetry[T any](
-	ctx context.Context,
-	call *genAICall,
-	caller func(context.Context) (*T, bool, error),
-) (resp *T, err error) {
-	defer func() { call.end(err) }()
-	const maxRetries = 3
-	rateLimitWaitTimes := []time.Duration{65 * time.Second, 100 * time.Second, 135 * time.Second}
-	serverErrorWaitTimes := []time.Duration{5 * time.Second, 30 * time.Second, 60 * time.Second}
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		resp, streamedAnyDelta, err := caller(ctx)
-		if err != nil {
-			if isRateLimitError(err) {
-				if attempt < maxRetries-1 {
-					if streamedAnyDelta {
-						return nil, err
-					}
-					call.retry(retryReasonRateLimited)
-					if waitErr := waitForRetry(ctx, rateLimitWaitTimes[attempt]); waitErr != nil {
-						return nil, waitErr
-					}
-					continue
-				}
-			} else if isServerError(err) {
-				if attempt < maxRetries-1 {
-					if streamedAnyDelta {
-						return nil, err
-					}
-					call.retry(retryReasonServerError)
-					if waitErr := waitForRetry(ctx, serverErrorWaitTimes[attempt]); waitErr != nil {
-						return nil, waitErr
-					}
-					continue
-				}
-			}
-			return nil, err
-		}
-		return resp, nil
-	}
-
-	return nil, fmt.Errorf("failed after %d attempts due to Anthropic API issues", maxRetries)
 }
 
 // claudeEventHasOutput reports whether a stream event carries model output (text or thinking),

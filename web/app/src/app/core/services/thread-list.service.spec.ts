@@ -4,6 +4,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { signal } from '@angular/core';
 import { of, Subject, throwError } from 'rxjs';
 
+import { AgentJobService } from './agent-job.service';
 import { ChatService } from './chat.service';
 import { ThreadListService } from './thread-list.service';
 import { Chat, PatchChatRequest } from '../models/chat.model';
@@ -22,16 +23,20 @@ function makeChat(overrides: Partial<Chat> = {}): Chat {
 
 describe('ThreadListService', () => {
     let service: ThreadListService;
-    let chatService: Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat'>;
+    let chatService: Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat' | 'markAllChatsRead'>;
+
+    let agentJobService: { listAgentJobs: ReturnType<typeof vi.fn> };
 
     beforeEach(() => {
         clearRecentOpenedThreadIds();
+        agentJobService = { listAgentJobs: vi.fn().mockReturnValue(of({ results: [], total_count: 0, page: 1 })) };
         chatService = {
             listChats: vi.fn().mockName("ChatService.listChats"),
             listAllChats: vi.fn().mockName("ChatService.listAllChats"),
             patchChat: vi.fn().mockName("ChatService.patchChat"),
-            deleteChat: vi.fn().mockName("ChatService.deleteChat")
-        } as unknown as Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat'>;
+            deleteChat: vi.fn().mockName("ChatService.deleteChat"),
+            markAllChatsRead: vi.fn().mockName("ChatService.markAllChatsRead")
+        } as unknown as Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat' | 'markAllChatsRead'>;
         chatService.listAllChats.mockReturnValue(of({
             chats: [makeChat({ id: 'a', name: 'Alpha' }), makeChat({ id: 'b', name: 'Bravo' })],
             truncated: false,
@@ -44,6 +49,7 @@ describe('ThreadListService', () => {
                 provideZonelessChangeDetection(),
                 ThreadListService,
                 { provide: ChatService, useValue: chatService },
+                { provide: AgentJobService, useValue: agentJobService },
             ],
         });
         service = TestBed.inject(ThreadListService);
@@ -193,5 +199,77 @@ describe('ThreadListService', () => {
         service.clearUnreadForThread('a');
         const alpha = service.filteredThreads().find(t => t.id === 'a');
         expect(alpha?.unread_count).toBe(0);
+    });
+
+    describe('markAllRead', () => {
+        it('clears every unread badge in a large list with a single request', async () => {
+            const many = Array.from({ length: 500 }, (_, i) =>
+                makeChat({ id: `t${i}`, name: `Thread ${i}`, unread_count: i % 3 }),
+            );
+            chatService.listAllChats.mockReturnValue(of({ chats: many, truncated: false }));
+            chatService.markAllChatsRead.mockReturnValue(of({ updated_count: 499 }));
+            await service.refresh();
+            expect(service.unreadThreadCount()).toBe(333);
+
+            await expect(service.markAllRead()).resolves.toBe(499);
+
+            expect(chatService.markAllChatsRead).toHaveBeenCalledTimes(1);
+            expect(service.unreadThreadCount()).toBe(0);
+            expect(service.loadedThreads().every(t => (t.unread_count ?? 0) === 0)).toBe(true);
+        });
+
+        it('leaves badges untouched and rejects when the server fails', async () => {
+            chatService.listAllChats.mockReturnValue(of({
+                chats: [makeChat({ id: 'a', unread_count: 2 }), makeChat({ id: 'b', unread_count: 1 })],
+                truncated: false,
+            }));
+            chatService.markAllChatsRead.mockReturnValue(throwError(() => new Error('offline')));
+            await service.refresh();
+
+            await expect(service.markAllRead()).rejects.toThrow('offline');
+
+            expect(service.unreadThreadCount()).toBe(2);
+        });
+    });
+
+    describe('jobs scope', () => {
+        beforeEach(() => {
+            agentJobService.listAgentJobs.mockReturnValue(of({
+                results: [{ id: 'j1', chat_id: 'a', status: 'active' }],
+                total_count: 1,
+                page: 1,
+            }));
+            chatService.listAllChats.mockReturnValue(of({
+                chats: [makeChat({ id: 'a', name: 'Alpha', archived: true })],
+                truncated: false,
+            }));
+        });
+
+        it('loads job threads by id and exposes their jobs', async () => {
+            service.setScope('jobs');
+            await vi.waitFor(() => expect(service.loadedThreads().length).toBe(1));
+
+            expect(chatService.listAllChats).toHaveBeenLastCalledWith(200, expect.objectContaining({ ids: 'a' }));
+            expect(service.jobsByChatId().get('a')?.primary.id).toBe('j1');
+            expect(service.showArchivedOnly()).toBe(false);
+        });
+
+        it('keeps a thread in the list when it is restored or archived from the Jobs tab', async () => {
+            service.setScope('jobs');
+            await vi.waitFor(() => expect(service.loadedThreads().length).toBe(1));
+
+            await service.setThreadArchived(service.loadedThreads()[0], false);
+
+            expect(service.loadedThreads().map(t => t.id)).toEqual(['a']);
+        });
+
+        it('clears job summaries when switching back to active', async () => {
+            service.setScope('jobs');
+            await vi.waitFor(() => expect(service.jobsByChatId().size).toBe(1));
+            chatService.listAllChats.mockReturnValue(of({ chats: [], truncated: false }));
+
+            service.setScope('active');
+            await vi.waitFor(() => expect(service.jobsByChatId().size).toBe(0));
+        });
     });
 });

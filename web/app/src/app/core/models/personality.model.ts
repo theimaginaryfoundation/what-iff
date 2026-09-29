@@ -117,6 +117,33 @@ export interface UpdatePersonalityRequest {
   image_style?: string;
 }
 
+/**
+ * Builds a full PUT body from a saved personality plus the fields being changed. The update
+ * endpoint has PUT semantics, so any field left out is cleared (the cover image, accent color and
+ * thumbnail circle included); always start from this rather than listing fields by hand.
+ */
+export function buildPersonalityUpdateRequest(
+  personality: Personality,
+  overrides: Partial<UpdatePersonalityRequest> = {},
+): UpdatePersonalityRequest {
+  return {
+    name: personality.name,
+    system_prompt: personality.system_prompt,
+    auto_pin_memories: personality.auto_pin_memories,
+    cover_image_id: personality.cover_image_id,
+    accent_color: personality.accent_color,
+    thumbnail_circle: personality.thumbnail_circle,
+    scratchpad: personality.scratchpad,
+    scratchpad_update_prompt: personality.scratchpad_update_prompt,
+    archival_model: personality.archival_model,
+    memory_search_prompt: personality.memory_search_prompt,
+    memory_write_prompt: personality.memory_write_prompt,
+    expressions_enabled: personality.expressions_enabled,
+    image_style: personality.image_style,
+    ...overrides,
+  };
+}
+
 export interface PaginatedPersonalityResponse {
   results: Personality[];
   total_count: number;

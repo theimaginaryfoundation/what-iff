@@ -7,13 +7,14 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
 ## Responsibilities
 
 - **`Handler`:** `RegisterRoutes` mounts `/api/chat/...` (under parent `/api` from server).
-  Key routes: list/create/get/update/patch/delete chat, chat messages CRUD, `welcome-message`, `mark-read`, export, **`import`**, `available-rituals`, file attachments on a chat, `context` for debugging.
+  Key routes: list/create/get/update/patch/delete chat, chat messages CRUD, `welcome-message`, `mark-read`, `mark-all-read` (all of the caller's chats, one all-or-nothing update), export, **`import`**, `available-rituals`, file attachments on a chat, `context` for debugging.
 - List chats accepts `search`, which the datastore applies to chat names and checkpoint summaries.
   Query `archived=true` lists archived threads only; omit or `false` for active threads (default).
   Query `source=openai|anthropic` filters to imported threads (used by the post-import thread picker, sorted by recency via the default `last_message_time DESC` order).
 - Chat create/update/patch accepts `tags` (max 10 items, max 10 chars each, no empty tags), `is_favorite`, and **`archived`** on PATCH to archive or restore.
 - **Conversation import (`POST /chat/import`, `import.go`/`anthropic_import.go`):** Accepts a multipart `conversations.json` from an **OpenAI** or **Anthropic** export (format auto-detected by `detectImportFormat`).
   The upload is spooled to a temp file (capped ~60MB; larger exports are split client-side) and parsed + persisted as **archived** threads in a detached background job (`JobTypeChatImport`); the handler returns `202` with the Job and writes `models.ImportProgress` JSON to `Job.progress` (phase/source/total/imported/skipped) for the client to poll.
+  The background run is bounded by `chatImportJobTimeout` (30 minutes, like account import); a run that times out is failed with a timeout message written on a fresh context, so the job never stays `processing`.
   OpenAI parsing uses `internal/chatimport`; Anthropic parsing is in-package.
   Per-conversation dedup via `sha256(conversationID)`.
   Terminal job status distinguishes three outcomes that all import zero threads: everything already present (`Skipped == total`) completes, since a re-import is a successful no-op; an empty archive completes; but a run where nothing was imported **and** nothing was deduplicated means every conversation failed individually — those failures are collected in `ImportResult.Errors` rather than returned as an error, so the job is marked `failed` instead of quietly completing with a zero count.
@@ -54,7 +55,7 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
 
 - `update_patch_test.go`, `mark_read_test.go`, `export_test.go`, `free_tier_quota_test.go`, `chatmessage_quota_test.go` — HTTP and quota behavior (including list `archived` query parsing and PATCH `archived`).
 - `welcome_message_test.go` covers onboarding welcome endpoint eligibility and job enqueue behavior.
-- `import_metrics_test.go` checks the chat import job outcome, stage timings, payload size and item counts.
+- `import_metrics_test.go` checks the chat import job outcome (including a timed-out run), stage timings, payload size and item counts.
 - `import_test.go` exercises the async import pipeline end-to-end (202 handoff, OpenAI + Anthropic happy paths, terminal job status on datastore failure); `import_unit_test.go` and `anthropic_import_test.go` cover the parsers and format detection.
 
 ## Related documentation

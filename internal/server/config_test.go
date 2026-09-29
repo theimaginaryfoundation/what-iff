@@ -256,3 +256,31 @@ func TestNewConfig_MockLLMOptions(t *testing.T) {
 		t.Errorf("MockLLMStreamDelay = %v", cfg.MockLLMStreamDelay)
 	}
 }
+
+func TestNewConfig_LLMCallTimeouts(t *testing.T) {
+	tests := []struct {
+		name                string
+		request, stream     string
+		idle                string
+		wantReq, wantStream time.Duration
+		wantIdle            time.Duration
+	}{
+		{"unset uses defaults", "", "", "", 10 * time.Minute, 30 * time.Minute, 5 * time.Minute},
+		{"overrides", "90s", "45m", "2m", 90 * time.Second, 45 * time.Minute, 2 * time.Minute},
+		{"zero disables", "0", "0s", "0", 0, 0, 0},
+		{"invalid or negative keeps default", "soon", "-1m", "5", 10 * time.Minute, 30 * time.Minute, 5 * time.Minute},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("LLM_REQUEST_TIMEOUT", tt.request)
+			t.Setenv("LLM_STREAM_TIMEOUT", tt.stream)
+			t.Setenv("LLM_STREAM_IDLE_TIMEOUT", tt.idle)
+
+			cfg := NewConfig()
+			if cfg.LLMRequestTimeout != tt.wantReq || cfg.LLMStreamTimeout != tt.wantStream || cfg.LLMStreamIdleTimeout != tt.wantIdle {
+				t.Errorf("timeouts = %v/%v/%v, want %v/%v/%v", cfg.LLMRequestTimeout, cfg.LLMStreamTimeout,
+					cfg.LLMStreamIdleTimeout, tt.wantReq, tt.wantStream, tt.wantIdle)
+			}
+		})
+	}
+}

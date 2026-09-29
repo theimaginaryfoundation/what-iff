@@ -157,7 +157,8 @@ type LinkGroupNewMember struct {
 //
 // V1 simplifications (documented priors): a memory belongs to at most one link group, so linking
 // overwrites any prior link_group_id on existing members, and revert clears to null rather than
-// restoring a prior group. New members are not auto-pinned to a personality.
+// restoring a prior group. New members are auto-pinned to activePersonalityID under the same rule
+// as any other new memory (autoPinPersonalityIDTx); existing members are never repinned.
 func (d *Datastore) PersistMemoryLinkGroup(
 	ctx context.Context,
 	userID uuid.UUID,
@@ -168,6 +169,7 @@ func (d *Datastore) PersistMemoryLinkGroup(
 	newMembers []LinkGroupNewMember,
 	sourceMembers []models.MemoryMergeSourceMember,
 	compactionEventID *uuid.UUID,
+	activePersonalityID uuid.UUID,
 ) (*models.MemoryMergeEvent, error) {
 	if len(existingMemberIDs)+len(newMembers) < 2 {
 		// A link needs at least two surfaces to relate.
@@ -192,6 +194,13 @@ func (d *Datastore) PersistMemoryLinkGroup(
 		targetScope = memory.ScopeChat
 	}
 
+	// New members follow the same auto-pin rule as any other new memory; existing members keep
+	// whatever pin they already have.
+	var pinnedPersonalityID *uuid.UUID
+	if len(newMembers) > 0 {
+		pinnedPersonalityID = d.autoPinPersonalityIDTx(ctx, tx, targetScope, activePersonalityID)
+	}
+
 	allMemberIDs := make([]uuid.UUID, 0, len(existingMemberIDs)+len(newMembers))
 	createdForAudit := make([]models.CompactionLoadedMemory, 0, len(newMembers))
 
@@ -212,6 +221,9 @@ func (d *Datastore) PersistMemoryLinkGroup(
 			SetUpdatedAt(now)
 		if targetScope == memory.ScopeChat {
 			create = create.SetChatID(chatID)
+		}
+		if pinnedPersonalityID != nil {
+			create = create.SetPinnedPersonalityID(*pinnedPersonalityID)
 		}
 		newMem, createErr := create.Save(ctx)
 		if createErr != nil {
@@ -542,11 +554,9 @@ func (d *Datastore) createMergedMemory(
 
 	if targetScope == memory.ScopeChat {
 		create = create.SetChatID(chatID)
-	} else if activePersonalityID != uuid.Nil {
-		p, pErr := tx.Personality.Get(ctx, activePersonalityID)
-		if pErr == nil && p != nil && p.AutoPinMemories {
-			create = create.SetPinnedPersonalityID(activePersonalityID)
-		}
+	}
+	if pinned := d.autoPinPersonalityIDTx(ctx, tx, targetScope, activePersonalityID); pinned != nil {
+		create = create.SetPinnedPersonalityID(*pinned)
 	}
 
 	newMem, err := create.Save(ctx)

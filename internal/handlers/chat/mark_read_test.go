@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -145,5 +146,59 @@ func TestMarkChatRead_InternalError(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+func TestMarkAllChatsRead(t *testing.T) {
+	t.Parallel()
+
+	userID := uuid.New()
+	tests := []struct {
+		name       string
+		withUser   bool
+		storeErr   error
+		wantStatus int
+		wantBody   string
+	}{
+		{name: "success", withUser: true, wantStatus: http.StatusOK, wantBody: `"updated_count":7`},
+		{name: "unauthorized", withUser: false, wantStatus: http.StatusUnauthorized},
+		{name: "store error is not reported as success", withUser: true, storeErr: errors.New("boom"), wantStatus: http.StatusInternalServerError},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var gotUser uuid.UUID
+			store := &fakeStore{
+				markAllChatMessagesReadFn: func(ctx context.Context, uid uuid.UUID) (int, error) {
+					gotUser = uid
+					if tt.storeErr != nil {
+						return 0, tt.storeErr
+					}
+					return 7, nil
+				},
+			}
+
+			h := NewHandler(store, zap.NewNop(), nil, HandlerConfig{})
+			router := mux.NewRouter()
+			h.RegisterRoutes(router)
+
+			req := httptest.NewRequest(http.MethodPost, "/chat/mark-all-read", nil)
+			if tt.withUser {
+				req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, userID))
+			}
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			if w.Code != tt.wantStatus {
+				t.Fatalf("expected status %d, got %d (%s)", tt.wantStatus, w.Code, w.Body.String())
+			}
+			if tt.withUser && gotUser != userID {
+				t.Fatalf("store called with user %s, want %s", gotUser, userID)
+			}
+			if tt.wantBody != "" && !strings.Contains(w.Body.String(), tt.wantBody) {
+				t.Fatalf("body %q does not contain %q", w.Body.String(), tt.wantBody)
+			}
+		})
 	}
 }

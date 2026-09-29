@@ -30,6 +30,8 @@ Authenticated user account portability: ZIP export by email and additive ZIP imp
   personalities are skipped without inflating the `skipped` count (the user opted out, they were not
   duplicates). Memories are all-or-nothing (an account can carry thousands).
 - Local development uses the filesystem store plus `email.NoopSender`, preserving the production flow without AWS.
+- The OpenAI client used to regenerate memory embeddings on import is built on the server's shared provider HTTP client (passed to `NewHandler`).
+  That keeps import embeddings on the instrumented transport, and on the deny-network transport under a non-vendor `LLM_BACKEND`, like every other provider call.
 - Files are an inventory only; their bytes are deliberately outside this export format.
 - `conversations.json` remains Anthropic-compatible but carries `whatiff_*` state for account round-trips.
   Personality IDs are source references only; import maps them to fresh destination IDs before restoring chats.
@@ -47,6 +49,8 @@ Authenticated user account portability: ZIP export by email and additive ZIP imp
 - Interrupted (server-restart-orphaned) import/export jobs are reconciled to `failed` at startup via `datastore.FailInterruptedJobs` (staleness-bounded so a live job on another instance is never clobbered) — they run in detached in-process workers and would otherwise stay `processing` forever.
 - **Metrics** (through `telemetry.Global()`): exports and imports are tracked as `account_export` / `account_import` jobs (`TrackJob`, with panic and timeout outcomes).
   The wait for an import slot (`acquireImportSlot`, capacity `maxConcurrentAccountImports`) is recorded on `whatiff.job.queue.wait`; it is the only real queue in the API.
+  The import timeout (`importJobTimeout`, 30 minutes) starts before that wait and covers it, so an import stuck ahead of a queued one can't hold it forever: a queued import that times out without a slot is failed with a retry message and tracked with a `timeout` outcome.
+  Imports run under the server's lifecycle context (passed to `NewHandler`), not the request that started them, so a shutdown interrupts a queued or running import: it is failed with a retry message and tracked with a `cancelled` outcome.
   Phases are timed on `whatiff.file.operation.duration` (export: `build_zip`, `email`; import: `validate`, `personalities`, `conversations`, `summaries`, `memories`), and archive sizes and section counts go on `whatiff.file.size` and `whatiff.file.operation.items`.
   Memory counts are recorded by the datastore memory importer (operation `memory_import`), not repeated here.
 - Account-import uploads are staged to temporary files, restored by a bounded detached worker, and deleted regardless of terminal outcome; `AccountImportProgress` carries phases and the terminal result for polling.

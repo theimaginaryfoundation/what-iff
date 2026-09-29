@@ -94,7 +94,8 @@ var GenAITokenUsage = Histogram{"gen_ai.client.token.usage", "{token}", "Tokens 
 var GenAITokens = Counter{"whatiff.gen_ai.tokens", "{token}", "Tokens used, as reported by the provider."}
 
 // GenAIRetries counts app-level retries and fallbacks of LLM calls. Attributes:
-// gen_ai.provider.name, gen_ai.request.model, reason (rate_limited, server_error, truncated...).
+// gen_ai.provider.name, gen_ai.request.model, reason (rate_limited, server_error, network,
+// truncated, length).
 var GenAIRetries = Counter{"whatiff.gen_ai.retries", "{retry}", "LLM call retries and fallbacks."}
 
 // GenAISafetyBlocks counts responses refused by provider safety systems. Attributes:

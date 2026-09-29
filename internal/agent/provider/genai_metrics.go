@@ -29,6 +29,7 @@ const genAIModelNone = "none"
 const (
 	retryReasonRateLimited = "rate_limited"
 	retryReasonServerError = "server_error"
+	retryReasonNetwork     = "network"
 	retryReasonTruncated   = "truncated"
 	retryReasonLength      = "length"
 )

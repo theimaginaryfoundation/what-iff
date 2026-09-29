@@ -682,6 +682,24 @@ describe('ChatSessionService', () => {
         expect(service.draft()).toBe('hello');
     });
 
+    it('puts a failed send back in front of a follow-up typed while it was in flight', async () => {
+        service.setActive('chat-1');
+        const post$ = new Subject<any>();
+        messageService.sendMessage.mockReturnValue(post$ as any);
+
+        const pending = service.sendMessage('first');
+        expect(service.composerBusy()).toBe(true);
+        expect(service.draft()).toBe('');
+        service.draft.set('follow-up');
+        post$.error(new Error('network down'));
+        const result = await pending;
+
+        expect(isChatSendFailed(result)).toBe(true);
+        expect(service.draft()).toBe('first\n\nfollow-up');
+        expect(draftService.saveDraft).toHaveBeenCalledWith('chat-1', 'first\n\nfollow-up');
+        expect(service.composerBusy()).toBe(false);
+    });
+
     it('surfaces an error and resets polling state when job polling errors', async () => {
         jobService.pollJob.mockReturnValue(throwError(() => new Error('poll failed')));
         service.setActive('chat-1');
