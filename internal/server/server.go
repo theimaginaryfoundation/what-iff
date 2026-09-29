@@ -304,7 +304,7 @@ func (s *Server) setupRoutes() {
 			exportSender = email.Instrument(snd, telemetry.DependencySES)
 		}
 	}
-	accountExportHandler := accountexport.NewHandler(dataStore, s.logger, fileStore, exportSender, s.config.OpenAIKey, providerHTTPClient)
+	accountExportHandler := accountexport.NewHandler(dataStore, s.logger, fileStore, exportSender, s.config.OpenAIKey, providerHTTPClient, s.lifecycleCtx)
 	oauthService := mcpoauth.New(dataStore, providerHTTPClient, s.logger, mcpoauth.Config{
 		RedirectURL:         s.config.MCPOAuthRedirectURL,
 		PostAuthRedirectURL: s.config.MCPOAuthPostAuthURL,

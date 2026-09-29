@@ -37,7 +37,7 @@ func TestNewHandlerUsesProvidedHTTPClient(t *testing.T) {
 		}, nil
 	})}
 
-	h := NewHandler(nil, zap.NewNop(), nil, nil, "test-key", httpClient)
+	h := NewHandler(nil, zap.NewNop(), nil, nil, "test-key", httpClient, nil)
 	require.NotNil(t, h.oaiClient)
 
 	got, err := h.createEmbeddings(context.Background(), []string{"a", "b"})
@@ -47,7 +47,7 @@ func TestNewHandlerUsesProvidedHTTPClient(t *testing.T) {
 }
 
 func TestNewHandlerWithoutKeyDisablesMemoryImport(t *testing.T) {
-	h := NewHandler(nil, zap.NewNop(), nil, nil, "", &http.Client{})
+	h := NewHandler(nil, zap.NewNop(), nil, nil, "", &http.Client{}, nil)
 	assert.Nil(t, h.oaiClient)
 	_, err := h.createEmbeddings(context.Background(), []string{"a"})
 	assert.ErrorIs(t, err, errMemoryImportUnavailable)

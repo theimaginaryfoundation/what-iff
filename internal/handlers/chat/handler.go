@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -38,6 +39,8 @@ type Handler struct {
 	messageAgent MessageAgent
 	welcomeAgent WelcomeMessageAgent
 	cfg          HandlerConfig
+	// importTimeout bounds one background chat import (chatImportJobTimeout; tests shorten it).
+	importTimeout time.Duration
 }
 
 // NewHandler creates a new assistant handler instance
@@ -49,6 +52,8 @@ func NewHandler(ds Store, logger *zap.Logger, agent *agent.Agent, cfg HandlerCon
 		messageAgent: agent,
 		welcomeAgent: agent,
 		cfg:          cfg,
+
+		importTimeout: chatImportJobTimeout,
 	}
 }
 

@@ -37,6 +37,11 @@ const (
 	multipartMemory = 32 << 10 // 32 KiB
 	// importProgressInterval throttles progress DB writes during a large import.
 	importProgressInterval = 750 * time.Millisecond
+	// chatImportJobTimeout bounds one background chat import, like account import's timeout.
+	chatImportJobTimeout = 30 * time.Minute
+	// importTerminalWriteTimeout bounds recording a failed import's status once its own context
+	// has ended (it timed out), so the job still reaches a terminal state.
+	importTerminalWriteTimeout = 15 * time.Second
 )
 
 // ImportChats handles POST /chat/import — accepts an OpenAI (ChatGPT) or Anthropic (Claude)
@@ -161,6 +166,12 @@ func (h *Handler) runChatImport(ctx context.Context, userID, jobID uuid.UUID, tm
 			h.logger.Warn("chat import: failed to remove temp file", zap.String("path", tmpPath), zap.Error(err))
 		}
 	}()
+	timeout := h.importTimeout
+	if timeout <= 0 {
+		timeout = chatImportJobTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	metrics := telemetry.Global()
 	finishJob := metrics.TrackJob(ctx, JobTypeChatImport)
 	// Every early return below is a failure. finishJob is deferred before the recover below so it
@@ -210,7 +221,7 @@ func (h *Handler) runChatImport(ctx context.Context, userID, jobID uuid.UUID, tm
 		outcome = telemetry.JobOutcomeFromError(err)
 		h.logger.Error("chat import: parse failed",
 			zap.String("job_id", jobID.String()), zap.String("format", format), zap.Error(err))
-		h.failImportJob(ctx, userID, jobID, "Failed to parse conversations.json")
+		h.failImportJob(ctx, userID, jobID, importFailureMessage(err, "Failed to parse conversations.json"))
 		return
 	}
 
@@ -238,7 +249,7 @@ func (h *Handler) runChatImport(ctx context.Context, userID, jobID uuid.UUID, tm
 		// result may be partial (e.g. context cancellation); record what we have, then fail.
 		h.logger.Error("chat import: datastore error",
 			zap.String("job_id", jobID.String()), zap.Error(err))
-		h.failImportJob(ctx, userID, jobID, "Failed to import some conversations")
+		h.failImportJob(ctx, userID, jobID, importFailureMessage(err, "Failed to import some conversations"))
 		return
 	}
 
@@ -312,8 +323,24 @@ func recordChatImportItems(ctx context.Context, metrics *telemetry.Metrics, resu
 	metrics.RecordFileItems(ctx, telemetry.FileOpChatImport, telemetry.FileItemConversation, telemetry.FileItemFailed, len(result.Errors))
 }
 
+// importFailureMessage is the user-safe job error for err: a timeout says so (anything already
+// imported stays imported), anything else gets fallback.
+func importFailureMessage(err error, fallback string) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "Import timed out before completing; some conversations may have been imported"
+	}
+	return fallback
+}
+
 // failImportJob marks the import job failed with a user-safe message, preserving last-known progress.
+// When the run's context has already ended (it timed out), the status is written on a fresh
+// short-lived one so the job doesn't stay "processing".
 func (h *Handler) failImportJob(ctx context.Context, userID, jobID uuid.UUID, msg string) {
+	if ctx.Err() != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), importTerminalWriteTimeout)
+		defer cancel()
+	}
 	if _, err := h.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusFailed, msg); err != nil {
 		h.logger.Error("chat import: failed to mark job failed", zap.String("job_id", jobID.String()), zap.Error(err))
 	}
