@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry/telemetrytest"
+	"go.uber.org/zap"
 )
 
 const oneAnthropicConversation = `[
@@ -81,4 +83,44 @@ func TestImportChats_DatastoreFailureRecordsFailedJob(t *testing.T) {
 
 	require.Equal(t, []string{telemetry.ErrorTypeOther}, tm.AttributeValues(t, telemetry.FileOperationDuration.Name, telemetry.AttrErrorType))
 	require.Zero(t, tm.HistogramCount(t, telemetry.FileOperationItems.Name), "no result, no item counts")
+}
+
+// liveCtxImportStore records whether the terminal status write got a live context.
+type liveCtxImportStore struct {
+	*importStore
+	terminalCtxErr chan error
+}
+
+func (s *liveCtxImportStore) UpdateJobStatus(ctx context.Context, userID, id uuid.UUID, status models.JobStatus, errorMsg string) (*models.Job, error) {
+	if status == models.JobStatusComplete || status == models.JobStatusFailed {
+		s.terminalCtxErr <- ctx.Err()
+	}
+	return s.importStore.UpdateJobStatus(ctx, userID, id, status, errorMsg)
+}
+
+// A chat import that outlives its timeout is failed with a timeout message (written on a live
+// context, so the job doesn't stay "processing") and recorded as a timeout job outcome.
+func TestImportChats_TimeoutFailsJobWithTimeoutOutcome(t *testing.T) {
+	tm := telemetrytest.UseGlobal(t)
+	store := &liveCtxImportStore{
+		importStore: newImportStore(func(ctx context.Context, _ uuid.UUID, _ []models.ImportConversation) (*models.ImportResult, error) {
+			<-ctx.Done()
+			return &models.ImportResult{}, ctx.Err()
+		}),
+		terminalCtxErr: make(chan error, 1),
+	}
+	h := NewHandler(store, zap.NewNop(), nil, HandlerConfig{})
+	h.importTimeout = 50 * time.Millisecond
+	router := mux.NewRouter()
+	router.HandleFunc("/chat/import", h.ImportChats).Methods(http.MethodPost)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, importRequest(t, uuid.New(), []byte(oneAnthropicConversation)))
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	store.waitDone(t)
+	waitForJobDuration(t, tm, telemetry.JobOutcomeTimeout)
+
+	require.Equal(t, models.JobStatusFailed, store.status())
+	require.Contains(t, store.statusError(), "timed out")
+	require.NoError(t, <-store.terminalCtxErr, "terminal status written on a live context")
 }
