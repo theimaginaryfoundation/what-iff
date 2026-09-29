@@ -7,6 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -106,4 +108,56 @@ func TestHandleEphemeralPromptSync_PrepareChatContextErrorIsReturned(t *testing.
 	require.Nil(t, msg)
 	require.ErrorContains(t, err, "failed to get chat")
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestHandleEphemeralPrompt_KeepsCallerCancellation locks in #195: the async agent_job_run
+// worker passes its cancellable run context, and cancelling it must stop the turn. With the
+// context already cancelled the turn fails on its first datastore call with context.Canceled
+// (no sqlmock expectations: nothing reaches the database).
+func TestHandleEphemeralPrompt_KeepsCallerCancellation(t *testing.T) {
+	t.Parallel()
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	a := newTestAgent(ds)
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), middleware.UserIDKey, uuid.New()))
+	cancel()
+	msg, err := a.handleEphemeralPrompt(ctx, uuid.New(), "hi", nil, nil, nil, nil,
+		models.ActionTypeJobRun, telemetry.CallPathAgentJob, ephemeralPromptOptions{})
+	require.Nil(t, msg)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestHandleEphemeralPromptSync_DetachesFromCallerCancellation checks the sync entry points
+// still run detached: a caller context that has already ended does not stop the turn, which
+// here reaches the database (and fails there on the mocked GetChat instead).
+func TestHandleEphemeralPromptSync_DetachesFromCallerCancellation(t *testing.T) {
+	t.Parallel()
+	for name, run := range map[string]func(a *Agent, ctx context.Context) (*models.ChatMessage, error){
+		"HandleEphemeralPromptSync": func(a *Agent, ctx context.Context) (*models.ChatMessage, error) {
+			return a.HandleEphemeralPromptSync(ctx, uuid.New(), "hi", nil, nil)
+		},
+		"HandleAgentJobPrompt": func(a *Agent, ctx context.Context) (*models.ChatMessage, error) {
+			return a.HandleAgentJobPrompt(ctx, uuid.New(), "hi", nil, nil, nil, nil)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			ds, mock, cleanup := newTestDatastore(t)
+			defer cleanup()
+			mock.ExpectBegin()
+			mock.ExpectQuery("SELECT .*").WillReturnError(errCoverageTestSentinel)
+			mock.ExpectRollback()
+
+			a := newTestAgent(ds)
+			ctx, cancel := context.WithCancel(context.WithValue(context.Background(), middleware.UserIDKey, uuid.New()))
+			cancel()
+			msg, err := run(a, ctx)
+			require.Nil(t, msg)
+			require.ErrorContains(t, err, "failed to get chat")
+			require.NotErrorIs(t, err, context.Canceled)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
 }

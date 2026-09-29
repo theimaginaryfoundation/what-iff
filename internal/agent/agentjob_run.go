@@ -122,9 +122,15 @@ func (a *Agent) handleEphemeralPromptAsync(ctx context.Context, chatID uuid.UUID
 			telemetry.CallPathAgentJob,
 			opts,
 		)
+		// As on the chat path, a cancelled run context means the job was cancelled even when the
+		// error it surfaced as (a provider or datastore failure) doesn't wrap context.Canceled.
+		cancelled := runErr != nil && (errors.Is(runErr, context.Canceled) || errors.Is(runCtx.Err(), context.Canceled))
 		outcome = chatJobOutcome(runErr)
+		if cancelled {
+			outcome = telemetry.JobOutcomeCancelled
+		}
 		if runErr != nil {
-			if errors.Is(runErr, context.Canceled) {
+			if cancelled {
 				persistCtx, persistCancel := context.WithTimeout(context.Background(), jobTerminalPersistTimeout)
 				defer persistCancel()
 				_, cancelErr := a.ds.UpdateJobStatus(persistCtx, userID, jobID, models.JobStatusCancelled, "")
@@ -172,15 +178,38 @@ func (a *Agent) handleEphemeralPromptAsync(ctx context.Context, chatID uuid.UUID
 // When trackingJob is non-nil (e.g. async agent_job_run), job status advances through the same
 // inference → expression → compaction phases as user chat jobs.
 func (a *Agent) HandleAgentJobPrompt(ctx context.Context, chatID uuid.UUID, prompt string, modelOverrideID *uuid.UUID, personalityOverrideID *uuid.UUID, ritualIDs []uuid.UUID, trackingJob *models.Job) (*models.ChatMessage, error) {
+	ctx, err := detachedUserContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return a.handleEphemeralPrompt(ctx, chatID, prompt, modelOverrideID, personalityOverrideID, ritualIDs, trackingJob, models.ActionTypeJobRun, telemetry.CallPathAgentJob, ephemeralPromptOptions{})
 }
 
 // HandleEphemeralPromptSync runs a synchronous autonomous prompt against a chat
 // without persisting the injected user prompt. Only the assistant response is saved.
 func (a *Agent) HandleEphemeralPromptSync(ctx context.Context, chatID uuid.UUID, prompt string, modelOverrideID *uuid.UUID, personalityOverrideID *uuid.UUID) (*models.ChatMessage, error) {
+	ctx, err := detachedUserContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return a.handleEphemeralPrompt(ctx, chatID, prompt, modelOverrideID, personalityOverrideID, nil, nil, models.ActionTypeChatMessage, telemetry.CallPathUserChat, ephemeralPromptOptions{})
 }
 
+// detachedUserContext copies the caller's user ID and timezone onto a fresh Background context,
+// so a synchronous run finishes even if the caller's context ends first. It returns an error
+// when ctx carries no user ID.
+func detachedUserContext(ctx context.Context) (context.Context, error) {
+	detached, ok := middleware.CopyUserToIDContext(ctx, context.Background())
+	if !ok {
+		return nil, errors.New("user ID not found in context")
+	}
+	return detached, nil
+}
+
+// handleEphemeralPrompt runs the turn on ctx as given, which must carry the user ID: callers
+// decide whether it is detached from their own lifetime. The async agent_job_run worker passes
+// its cancellable run context, so cancelling that job stops the turn; the sync entry points
+// pass a detached one (detachedUserContext).
 func (a *Agent) handleEphemeralPrompt(
 	ctx context.Context,
 	chatID uuid.UUID,
@@ -193,11 +222,6 @@ func (a *Agent) handleEphemeralPrompt(
 	callPath telemetry.CallPath,
 	opts ephemeralPromptOptions,
 ) (*models.ChatMessage, error) {
-	ctx, ok := middleware.CopyUserToIDContext(ctx, context.Background())
-	if !ok {
-		return nil, errors.New("user ID not found in context")
-	}
-
 	userID, _ := middleware.GetUserIDFromContext(ctx)
 	if userID == uuid.Nil {
 		return nil, errors.New("user ID not found in context")
