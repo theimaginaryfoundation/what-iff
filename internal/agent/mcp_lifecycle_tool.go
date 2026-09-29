@@ -22,6 +22,7 @@ type mcpToolLifecycleArgs struct {
 // tools as a JSON array, a JSON-encoded array string, a comma-separated string or a single name,
 // plus a few common key aliases (server_id, connector_id, tool_names).
 func (args *mcpToolLifecycleArgs) UnmarshalJSON(b []byte) error {
+	*args = mcpToolLifecycleArgs{}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err

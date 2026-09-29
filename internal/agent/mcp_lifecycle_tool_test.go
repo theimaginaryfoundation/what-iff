@@ -38,6 +38,10 @@ func TestMCPToolLifecycleArgsLenientDecoding(t *testing.T) {
 
 	var args mcpToolLifecycleArgs
 	require.Error(t, json.Unmarshal([]byte(`{"tools":{"a":1}}`), &args))
+
+	reused := mcpToolLifecycleArgs{MCPServerID: "old", Tools: []string{"stale"}}
+	require.NoError(t, json.Unmarshal([]byte(`{}`), &reused))
+	require.Equal(t, mcpToolLifecycleArgs{}, reused, "decoding must not keep a previous value's fields")
 }
 
 func TestNormalizeRequestedTools(t *testing.T) {
