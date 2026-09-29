@@ -16,8 +16,9 @@ func isMCPToolName(name string) bool {
 	return strings.HasPrefix(name, MCPToolNamePrefix)
 }
 
-// replaceChatCompletionMCPTools drops every mcp__ function tool from tools and appends mcpTools.
-// A nil tool list (ForceFinalResponse already stripped tools) stays nil.
+// replaceChatCompletionMCPTools drops every mcp__ function tool from tools and appends mcpTools;
+// nil mcpTools therefore removes all MCP tools and keeps the rest. A nil tool list
+// (ForceFinalResponse already stripped tools) stays nil.
 func replaceChatCompletionMCPTools(tools []openai.ChatCompletionToolUnionParam, mcpTools []openai.ChatCompletionToolUnionParam) []openai.ChatCompletionToolUnionParam {
 	if tools == nil {
 		return nil

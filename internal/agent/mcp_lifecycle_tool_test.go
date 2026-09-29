@@ -23,6 +23,9 @@ func TestMCPToolLifecycleArgsLenientDecoding(t *testing.T) {
 		"aliases":             {`{"server_id":"abc","tool_names":["a"]}`, "abc", []string{"a"}},
 		"empty id falls back": {`{"mcp_server_id":"","connector_id":"abc","tools":["a"]}`, "abc", []string{"a"}},
 		"missing everything":  {`{}`, "", nil},
+		"empty string":        {`{"tools":"","tool_names":["a"]}`, "", []string{"a"}},
+		"blank elements":      {`{"tools":["", " x ", ""]}`, "", []string{"x"}},
+		"only commas":         {`{"tools":" , "}`, "", nil},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -58,12 +58,14 @@ func (args *mcpToolLifecycleArgs) UnmarshalJSON(b []byte) error {
 }
 
 // decodeLenientStringList decodes a JSON array of strings, or a string holding either a
-// JSON-encoded array or a comma-separated list (elements trimmed). Any other JSON type (object,
-// number, bool) is an error, which the caller reports as "tools must be an array of tool names".
+// JSON-encoded array or a comma-separated list. Elements are trimmed and empty ones dropped, so
+// "" or [""] yields nil (no tools given) and the next key alias is tried. Any other JSON type
+// (object, number, bool) is an error, which the caller reports as "tools must be an array of
+// tool names".
 func decodeLenientStringList(v json.RawMessage) ([]string, error) {
 	var list []string
 	if err := json.Unmarshal(v, &list); err == nil {
-		return list, nil
+		return nonEmptyTrimmed(list), nil
 	}
 	var single string
 	if err := json.Unmarshal(v, &single); err != nil {
@@ -72,14 +74,20 @@ func decodeLenientStringList(v json.RawMessage) ([]string, error) {
 	single = strings.TrimSpace(single)
 	if strings.HasPrefix(single, "[") {
 		if err := json.Unmarshal([]byte(single), &list); err == nil {
-			return list, nil
+			return nonEmptyTrimmed(list), nil
 		}
 	}
-	parts := strings.Split(single, ",")
-	for i := range parts {
-		parts[i] = strings.TrimSpace(parts[i])
+	return nonEmptyTrimmed(strings.Split(single, ",")), nil
+}
+
+func nonEmptyTrimmed(items []string) []string {
+	var out []string
+	for _, item := range items {
+		if t := strings.TrimSpace(item); t != "" {
+			out = append(out, t)
+		}
 	}
-	return parts, nil
+	return out
 }
 
 type mcpToolLifecycleResult struct {
@@ -312,10 +320,14 @@ func (a *Agent) resolveChatMCPServer(ctx context.Context, chatCtx *chatContext, 
 			matches = append(matches, s)
 		}
 	}
-	if len(matches) == 1 {
+	switch len(matches) {
+	case 1:
 		return matches[0], nil
+	case 0:
+		return nil, fmt.Errorf("invalid mcp_server_id %q; pass one of: %s", raw, describeMCPServers(servers))
+	default:
+		return nil, fmt.Errorf("mcp_server_id %q matches more than one connector; pass the full id of one of: %s", raw, describeMCPServers(matches))
 	}
-	return nil, fmt.Errorf("invalid mcp_server_id %q; pass one of: %s", raw, describeMCPServers(servers))
 }
 
 // lifecycleCandidateServers merges the chat's own connectors with this turn's cached connectors
@@ -346,7 +358,11 @@ func (a *Agent) lifecycleCandidateServers(ctx context.Context, chatCtx *chatCont
 func describeMCPServers(servers []*models.MCPServer) string {
 	parts := make([]string, 0, len(servers))
 	for _, s := range servers {
-		parts = append(parts, fmt.Sprintf("%q (mcp_server_id=%s)", strings.TrimSpace(s.Name), s.ID.String()))
+		name := strings.TrimSpace(s.Name)
+		if name == "" {
+			name = "(unnamed connector)"
+		}
+		parts = append(parts, fmt.Sprintf("%q (mcp_server_id=%s)", name, s.ID.String()))
 	}
 	return strings.Join(parts, ", ")
 }

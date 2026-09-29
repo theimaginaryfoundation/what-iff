@@ -1,8 +1,6 @@
 package provider
 
 import (
-	"fmt"
-
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/shared"
 )
@@ -265,6 +263,8 @@ func geminiType(v interface{}) (string, bool) {
 	return "", false
 }
 
+// geminiStringEnum returns the enum when every member is a string (nulls skipped). An enum with
+// any non-string member is dropped rather than stringified, since "1" is not the value 1.
 func geminiStringEnum(v interface{}) ([]interface{}, bool) {
 	var vals []interface{}
 	switch e := v.(type) {
@@ -282,7 +282,7 @@ func geminiStringEnum(v interface{}) ([]interface{}, bool) {
 			out = append(out, s)
 		case nil:
 		default:
-			out = append(out, fmt.Sprint(s))
+			return nil, false
 		}
 	}
 	return out, len(out) > 0

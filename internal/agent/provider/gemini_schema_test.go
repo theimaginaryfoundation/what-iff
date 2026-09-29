@@ -20,6 +20,7 @@ func mcpStyleProperties() map[string]interface{} {
 		"anything":   true,
 		"start":      {"type": "string", "format": "date-time"},
 		"level":      {"type": "integer", "enum": [1, 2, 3]},
+		"mixed":      {"enum": ["a", 1]},
 		"tags":       {"type": "array"},
 		"filter":     {"$ref": "#/$defs/Filter", "description": "filter"},
 		"nested":     {
@@ -47,6 +48,7 @@ func TestGeminiSanitizeSchemaRewritesMCPSchemas(t *testing.T) {
 	require.Equal(t, map[string]interface{}{}, got["anything"])
 	require.Equal(t, map[string]interface{}{"type": "string", "format": "date-time"}, got["start"])
 	require.Equal(t, map[string]interface{}{"type": "integer"}, got["level"], "non-string enums are dropped")
+	require.Equal(t, map[string]interface{}{}, got["mixed"], "an enum with any non-string member is dropped, not stringified")
 	require.Equal(t, map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}}, got["tags"])
 	require.Equal(t, map[string]interface{}{"description": "filter"}, got["filter"])
 	require.Equal(t, map[string]interface{}{
