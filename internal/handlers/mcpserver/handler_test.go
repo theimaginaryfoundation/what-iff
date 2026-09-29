@@ -161,15 +161,21 @@ func TestTestMCPServerConnection_UsesStoredTokenWhenAuthOmitted(t *testing.T) {
 	require.Equal(t, "https://unsaved.example/mcp", prober.last.ServerURL)
 }
 
-func TestTestMCPServerConnection_ExplicitNullAuthDoesNotFallback(t *testing.T) {
+func TestTestMCPServerConnection_ExplicitNullAuthClearsSavedToken(t *testing.T) {
 	t.Parallel()
 
 	connectorID := uuid.New()
 	prober := &fakeProber{toolCount: 1}
+	getCalls := 0
 	provider := &fakeProvider{
 		getFn: func(_ context.Context, _ uuid.UUID, _ uuid.UUID) (*models.MCPServer, error) {
-			t.Fatalf("GetMCPServer should not be called when authentication is explicitly null")
-			return nil, nil
+			getCalls++
+			return &models.MCPServer{
+				ID:        connectorID,
+				ServerURL: "https://saved.example/mcp",
+				AuthMode:  models.MCPServerAuthModeHeader,
+				AuthToken: "saved-token",
+			}, nil
 		},
 	}
 
@@ -184,6 +190,8 @@ func TestTestMCPServerConnection_ExplicitNullAuthDoesNotFallback(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 	require.NotNil(t, prober.last)
+	// Connector settings are loaded first, then explicit null auth clears token use.
+	require.Equal(t, 1, getCalls)
 	require.Equal(t, "", prober.last.AuthToken)
 }
 
