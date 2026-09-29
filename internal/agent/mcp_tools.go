@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
@@ -232,10 +233,14 @@ func openAIChatCompletionFunctionTools(specs []agenttools.FunctionToolSpec) []op
 	return out
 }
 
+// geminiRelaxationsLogged dedupes the relaxed-schema log: each tool:path is logged once per
+// process rather than on every Gemini turn.
+var geminiRelaxationsLogged sync.Map
+
 // geminiFunctionTools rewrites each schema into the subset Gemini accepts; MCP connector schemas
 // otherwise draw a bare 400 "invalid argument" from Gemini's OpenAI-compatible endpoint. The one
-// unverified rewrite (free-form object -> untyped schema) is logged so a remaining Gemini 400 can
-// be matched to the tool and property that caused it.
+// unverified rewrite (free-form object -> untyped schema) is logged (once per tool:path) so a
+// remaining Gemini 400 can be matched to the tool and property that caused it.
 func geminiFunctionTools(specs []agenttools.FunctionToolSpec, logger *zap.Logger) []openai.ChatCompletionToolUnionParam {
 	out := make([]openai.ChatCompletionToolUnionParam, 0, len(specs))
 	var relaxed []string
@@ -243,7 +248,10 @@ func geminiFunctionTools(specs []agenttools.FunctionToolSpec, logger *zap.Logger
 		tool, paths := provider.GeminiFunctionToolWithRelaxations(spec.Name, spec.Description, spec.Properties, spec.Required)
 		out = append(out, tool)
 		for _, p := range paths {
-			relaxed = append(relaxed, spec.Name+":"+p)
+			key := spec.Name + ":" + p
+			if _, seen := geminiRelaxationsLogged.LoadOrStore(key, struct{}{}); !seen {
+				relaxed = append(relaxed, key)
+			}
 		}
 	}
 	if len(relaxed) > 0 && logger != nil {

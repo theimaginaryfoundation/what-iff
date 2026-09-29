@@ -172,6 +172,30 @@ func TestLoadMCPToolsTool_SyncsToolsIntoSameTurn(t *testing.T) {
 	require.Empty(t, synced[1])
 }
 
+func TestLifecycleCandidateServers_IncludesTurnOnlyConnectorsOnce(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestMCPRPCServer()
+	defer srv.Close()
+
+	agent, chatCtx, mcpServerID, cleanup := newMCPLifecycleAgentFixture(t, srv.URL)
+	defer cleanup()
+
+	ritualOnly := &models.MCPServer{ID: uuid.New(), Name: "ritual connector", ServerURL: srv.URL}
+	chatCtx.mcpServers = []*models.MCPServer{{ID: mcpServerID, Name: "tracker"}, ritualOnly}
+
+	servers, err := agent.lifecycleCandidateServers(ctx, chatCtx)
+	require.NoError(t, err)
+	ids := make([]uuid.UUID, 0, len(servers))
+	for _, s := range servers {
+		ids = append(ids, s.ID)
+	}
+	require.ElementsMatch(t, []uuid.UUID{mcpServerID, ritualOnly.ID}, ids, "chat connector once, ritual-only connector included")
+
+	got, err := agent.resolveChatMCPServer(ctx, chatCtx, "Ritual Connector")
+	require.NoError(t, err)
+	require.Equal(t, ritualOnly.ID, got.ID)
+}
+
 func newMCPLifecycleAgentFixture(t *testing.T, serverURL string) (*Agent, *chatContext, uuid.UUID, func()) {
 	t.Helper()
 	ctx := context.Background()

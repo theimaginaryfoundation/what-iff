@@ -39,7 +39,8 @@ func (a *Agent) mcpLifecycleDeveloperContext(ctx context.Context, userID, chatID
 	var discoveryErrors map[uuid.UUID]string
 	if a.mcpClient != nil {
 		// Discovery is cached per connector, so the turn's tool registration reuses this result.
-		out, err := a.mcpClient.DiscoverTools(ctx, userID, servers)
+		// Per-connector failures are in out.Errors; the aggregate error adds nothing here.
+		out, _ := a.mcpClient.DiscoverTools(ctx, userID, servers)
 		for _, t := range out.Tools {
 			toolsByServer[t.ConnectorID] = append(toolsByServer[t.ConnectorID], t.Name)
 		}
@@ -52,8 +53,7 @@ func (a *Agent) mcpLifecycleDeveloperContext(ctx context.Context, userID, chatID
 			sort.Strings(failed)
 			a.logger.Warn("mcp discovery failed for some connectors while building developer context",
 				zap.String("chat_id", chatID.String()),
-				zap.Strings("connector_errors", failed),
-				zap.Error(err))
+				zap.Strings("connector_errors", failed))
 		}
 	}
 	return formatMCPLifecycleDeveloperContext(servers, toolsByServer, loadedByServer, discoveryErrors)

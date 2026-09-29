@@ -332,7 +332,7 @@ func (a *Agent) resolveChatMCPServer(ctx context.Context, chatCtx *chatContext, 
 }
 
 // lifecycleCandidateServers merges the chat's own connectors with this turn's cached connectors
-// (which include ritual/mood-attached ones). The chat list is re-read rather than trusted from
+// (which include ritual/mood-attached ones that the datastore's chat list does not). The chat list is re-read rather than trusted from
 // the turn cache because chatCtx.mcpServers is empty until the turn's tools are prepared (and
 // on paths that never prepare them); lifecycle calls are rare, so one indexed read is cheap.
 func (a *Agent) lifecycleCandidateServers(ctx context.Context, chatCtx *chatContext) ([]*models.MCPServer, error) {
