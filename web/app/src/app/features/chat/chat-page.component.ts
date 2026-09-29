@@ -124,7 +124,6 @@ export class ChatPageComponent implements OnInit, OnDestroy {
         chatId: threadId,
         draftText: this.session.pendingAssistantDraftText(),
         draftReasoning: this.session.pendingAssistantDraftReasoning(),
-        loadingMemories: this.session.loadingMemories(),
         generationPersonality: name,
         thinkingImageUrl: this.selectedPersonality()?.expressions_enabled === false
           ? null

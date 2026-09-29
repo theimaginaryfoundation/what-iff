@@ -143,6 +143,17 @@ func (p *jobToolProgress) scheduleLocked() {
 	}
 }
 
+// Seed starts the timeline with rows recorded before the agent loop (the memory-load row), so
+// later snapshots keep them. Call it once, before the first Started; it writes nothing itself.
+func (p *jobToolProgress) Seed(entries []models.ChatTurnToolCall) {
+	if p == nil || len(entries) == 0 {
+		return
+	}
+	p.mu.Lock()
+	p.entries = append(p.entries, entries...)
+	p.mu.Unlock()
+}
+
 // Started records use as running.
 func (p *jobToolProgress) Started(round int, use provider.ToolUse) {
 	if p == nil {
@@ -194,9 +205,7 @@ func (p *jobToolProgress) Finished(result provider.ToolResult) {
 }
 
 func (p *jobToolProgress) snapshotLocked() string {
-	// The recorder only exists once generation has started, so every snapshot is past memory
-	// loading; stamping the phase keeps a tool write from reading as an older phase.
-	raw, err := json.Marshal(models.ChatTurnProgress{Phase: models.ChatTurnPhaseInference, ToolCalls: p.entries})
+	raw, err := json.Marshal(models.ChatTurnProgress{ToolCalls: p.entries})
 	if err != nil {
 		p.logger.Warn("failed to encode chat turn progress", zap.String("job_id", p.jobID.String()), zap.Error(err))
 		return ""

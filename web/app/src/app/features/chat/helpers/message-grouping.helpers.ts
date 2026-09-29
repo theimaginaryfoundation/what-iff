@@ -140,8 +140,6 @@ export function pendingAssistantPlaceholderMessage(opts: {
   draftReasoning?: string;
   generationPersonality: string;
   thinkingImageUrl: string | null;
-  /** True while the turn is still loading memories (shown in place of bare typing dots). */
-  loadingMemories?: boolean;
 }): ChatMessage {
   return {
     id: CHAT_PENDING_ASSISTANT_MESSAGE_ID,
@@ -153,7 +151,6 @@ export function pendingAssistantPlaceholderMessage(opts: {
     generation_personality: opts.generationPersonality,
     generation_expression_key: 'thinking',
     generation_expression_image_url: opts.thinkingImageUrl ?? undefined,
-    pending_phase: opts.loadingMemories ? 'loading_memories' : undefined,
   };
 }
 

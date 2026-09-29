@@ -813,6 +813,9 @@ type chatContext struct {
 	// toolProgress records the live tool timeline into the chat job's Progress. Nil when the
 	// turn has no job to report to; its methods are nil-safe.
 	toolProgress *jobToolProgress
+	// memoryProgress is the memory-load row already shown in that timeline; the tool recorder
+	// starts from it so its snapshots keep the row. Nil when retrieval showed nothing.
+	memoryProgress *memoryLoadProgress
 }
 
 // handleUserMessage handles the agent processing flow for a user message
@@ -849,7 +852,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 	a.WaitForThreadRehydration(ctx, chatJob.UserID, chatMessage.ChatID)
 
 	// Prepare chat context (chat, memories, model)
-	chatCtx, err := a.prepareChatContext(ctx, chatJob.UserID, chatMessage, a.newChatTurnPhases(chatJob))
+	chatCtx, err := a.prepareChatContext(ctx, chatJob.UserID, chatMessage, a.newMemoryLoadProgress(chatJob))
 	if err != nil {
 		a.logger.Error("failed to prepare chat context", zap.Error(err))
 		a.setJobStatusFailed(ctx, chatJob, err)
@@ -1083,6 +1086,7 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 		draftBuffer.Flush()
 		draftBuffer.MarkRoundBoundary()
 	})
+	chatCtx.toolProgress.Seed(chatCtx.memoryProgress.Entries())
 	if progress := chatCtx.toolProgress; progress != nil {
 		defer progress.Close()
 	}
@@ -1102,7 +1106,7 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 	if opts.mergeToolCalls != nil {
 		toolCalls = opts.mergeToolCalls(toolCalls)
 	}
-	toolCalls = append(toolCalls, memoryToolCallsForChatContext(chatCtx)...)
+	toolCalls = append(memoryToolCallsForChatContext(chatCtx), toolCalls...)
 	a.recordToolCalls(ctx, toolCalls)
 
 	// Checked after tool-call metrics and the web-search count: the work in this turn
@@ -1412,6 +1416,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 		draftBuffer.Flush()
 		draftBuffer.MarkRoundBoundary()
 	})
+	chatCtx.toolProgress.Seed(chatCtx.memoryProgress.Entries())
 	if progress := chatCtx.toolProgress; progress != nil {
 		defer progress.Close()
 	}
@@ -1428,7 +1433,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	}
 	chatCtx.webSearchCount = a.turnWebSearchCount(adapter, toolCalls)
 
-	toolCalls = append(toolCalls, memoryToolCallsForChatContext(chatCtx)...)
+	toolCalls = append(memoryToolCallsForChatContext(chatCtx), toolCalls...)
 	a.recordToolCalls(ctx, toolCalls)
 
 	// See runGeneration: guard after metrics so a failed turn still counts its work.
@@ -1979,9 +1984,9 @@ func memoryToolCallsForChatContext(chatCtx *chatContext) []*models.ToolCall {
 }
 
 // prepareChatContext prepares the chat context including chat, memories, and model selection
-// phases (nil-safe) records the loading-memories progress phase for chat jobs; pass nil when the
-// turn has no job to report to.
-func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage, phases *chatTurnPhases) (*chatContext, error) {
+// memoryProgress (nil-safe) shows memory retrieval in the chat job's live tool timeline; pass nil
+// when the turn has no job to report to.
+func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage, memoryProgress *memoryLoadProgress) (*chatContext, error) {
 	defer a.timeTurnStage(ctx, turnStagePrepareContext)()
 	// Get parent chat
 	parentChat, err := a.ds.GetChat(ctx, userID, chatMessage.ChatID)
@@ -1990,7 +1995,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 	}
 
 	// Get relevant memories.
-	memories, liveMemories, memoryEnrichmentFailed := a.loadTurnMemories(ctx, phases, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message)
+	memories, liveMemories, memoryEnrichmentFailed := a.loadTurnMemories(ctx, memoryProgress, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message)
 	// Resolve model from the chat's model_id (authoritative). Do not trust model_name
 	// alone — it can be stale, and a missing edge used to fall through to defaultModel
 	// (gpt-5.1) even when the user selected a different provider.
@@ -2012,6 +2017,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 		modelSubscriptionTier:  resolved.subscriptionTier,
 		modelVisionSupport:     resolved.visionSupport,
 		expressionsEnabled:     expressionsEnabled,
+		memoryProgress:         memoryProgress,
 	}, nil
 }
 
@@ -2133,16 +2139,19 @@ func (a *Agent) memoryEnrichmentRuns() bool {
 	return a.testHooks.GetMemoriesOverride != nil || !a.nonVendorLLM()
 }
 
-// loadTurnMemories runs best-effort memory enrichment for a turn, bracketed by the
-// loading-memories progress phase. The phase is only written when retrieval really runs, so
-// mock/local turns (which skip it) never flash a misleading "loading memories"; whatever the
-// outcome (memories, none, or a failure), the turn then moves on to inference.
-func (a *Agent) loadTurnMemories(ctx context.Context, phases *chatTurnPhases, userID, chatID, personalityID uuid.UUID, userMessage string) ([]string, []*models.Memory, bool) {
-	if a.memoryEnrichmentRuns() {
-		phases.LoadingMemories(ctx)
+// loadTurnMemories runs best-effort memory enrichment for a turn, shown in the job's live tool
+// timeline as a "Load Memory" row: running during retrieval, then complete with the memories (or
+// an error). The row is only added when retrieval really runs, so mock/local turns (which skip
+// it) never show one.
+func (a *Agent) loadTurnMemories(ctx context.Context, progress *memoryLoadProgress, userID, chatID, personalityID uuid.UUID, userMessage string) ([]string, []*models.Memory, bool) {
+	if progress != nil && a.memoryEnrichmentRuns() {
+		progress.Started(ctx)
 	}
-	defer phases.MemoriesLoaded(ctx)
-	return a.getMemoriesBestEffort(ctx, userID, chatID, personalityID, userMessage)
+	memories, liveMemories, failed := a.getMemoriesBestEffort(ctx, userID, chatID, personalityID, userMessage)
+	if progress != nil {
+		progress.Finished(ctx, memories, failed)
+	}
+	return memories, liveMemories, failed
 }
 
 // getMemoriesBestEffort attempts memory enrichment and degrades gracefully on any failure.

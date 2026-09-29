@@ -67,11 +67,6 @@ export interface ChatMessage {
   context_breakdown?: ContextBreakdown | null;
   /** Whether the user has bookmarked this message for long-thread navigation. */
   bookmarked?: boolean;
-  /**
-   * Client-only: set on the synthesized pending-assistant placeholder while the turn is still
-   * loading memories, so the bubble can say so instead of showing bare typing dots.
-   */
-  pending_phase?: 'loading_memories';
 }
 
 /** Lightweight bookmark entry for the thread navigator (from GET /chat/{id}/bookmarks). */

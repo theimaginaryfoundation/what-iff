@@ -140,15 +140,6 @@ describe('needsPendingAssistantPlaceholder', () => {
     });
 });
 
-describe('pendingAssistantPlaceholderMessage', () => {
-    it('marks the placeholder while memories are loading, and only then', () => {
-        const base = { chatId: 'chat-1', draftText: '', generationPersonality: 'Kai', thinkingImageUrl: null };
-        expect(pendingAssistantPlaceholderMessage({ ...base, loadingMemories: true }).pending_phase).toBe('loading_memories');
-        expect(pendingAssistantPlaceholderMessage({ ...base, loadingMemories: false }).pending_phase).toBeUndefined();
-        expect(pendingAssistantPlaceholderMessage(base).pending_phase).toBeUndefined();
-    });
-});
-
 describe('appendPendingAssistantGroup', () => {
     it('appends a single-assistant message group', () => {
         const pending = pendingAssistantPlaceholderMessage({
@@ -216,6 +207,31 @@ describe('appendLiveToolCallGroup', () => {
             expect(new Set(dupes.toolCalls.map(c => c.id)).size).toBe(2);
         }
         expect(group.toolCalls[2].updated_at).toBe('t4');
+    });
+});
+
+describe('appendLiveToolCallGroup: memory load row', () => {
+    const pending = pendingAssistantPlaceholderMessage({
+        chatId: 'chat-1', draftText: '', generationPersonality: 'Kai', thinkingImageUrl: null,
+    });
+    const memory = { id: 'memory-enrichment', name: 'Load Memory', round: 0, started_at: 't0' };
+
+    it('shows a running Load Memory row as an in-progress tool while memories load', () => {
+        const group = appendLiveToolCallGroup([], pending, [{ ...memory, status: 'running' }])[0];
+        expect(group.kind).toBe('tool-call-group');
+        if (group.kind !== 'tool-call-group') return;
+        expect(group.live).toBe(true);
+        expect(group.toolCalls.map(c => [c.tool_name, c.status, c.tool_output])).toEqual([['Load Memory', 'running', '']]);
+    });
+
+    it('keeps the completed row, with the retrieved memories, ahead of later tool calls', () => {
+        const group = appendLiveToolCallGroup([], pending, [
+            { ...memory, status: 'complete', output: 'Retrieved memories:\n\n User likes tea', finished_at: 't1' },
+            { id: 'call-1', name: 'find_context', status: 'running', round: 0, started_at: 't2' },
+        ])[0];
+        if (group.kind !== 'tool-call-group') throw new Error('expected a tool-call group');
+        expect(group.toolCalls.map(c => c.tool_name)).toEqual(['Load Memory', 'find_context']);
+        expect(group.toolCalls[0].tool_output).toContain('User likes tea');
     });
 });
 
