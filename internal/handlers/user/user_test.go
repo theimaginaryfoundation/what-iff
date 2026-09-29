@@ -27,15 +27,15 @@ func (m *mockUserStore) CreateUser(_ context.Context, req models.UserRegisterReq
 	m.createUserCalled = true
 	m.createUserReq = req
 	return &models.UserResponse{
-		ID:       uuid.New(),
-		Username: req.Username,
-		Email:    req.Email,
-		Role:     "user",
-		Status:   "active",
-	}, &models.TokenPair{
-		AccessToken:  "access-token",
-		RefreshToken: "refresh-token",
-	}, nil
+			ID:       uuid.New(),
+			Username: req.Username,
+			Email:    req.Email,
+			Role:     "user",
+			Status:   "active",
+		}, &models.TokenPair{
+			AccessToken:  "access-token",
+			RefreshToken: "refresh-token",
+		}, nil
 }
 
 func (m *mockUserStore) GetUserByCredentials(context.Context, models.UserLoginRequest) (*models.UserResponse, *models.TokenPair, error) {
