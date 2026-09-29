@@ -140,6 +140,15 @@ describe('needsPendingAssistantPlaceholder', () => {
     });
 });
 
+describe('pendingAssistantPlaceholderMessage', () => {
+    it('marks the placeholder while memories are loading, and only then', () => {
+        const base = { chatId: 'chat-1', draftText: '', generationPersonality: 'Kai', thinkingImageUrl: null };
+        expect(pendingAssistantPlaceholderMessage({ ...base, loadingMemories: true }).pending_phase).toBe('loading_memories');
+        expect(pendingAssistantPlaceholderMessage({ ...base, loadingMemories: false }).pending_phase).toBeUndefined();
+        expect(pendingAssistantPlaceholderMessage(base).pending_phase).toBeUndefined();
+    });
+});
+
 describe('appendPendingAssistantGroup', () => {
     it('appends a single-assistant message group', () => {
         const pending = pendingAssistantPlaceholderMessage({

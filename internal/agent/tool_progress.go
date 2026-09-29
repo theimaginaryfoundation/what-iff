@@ -194,7 +194,9 @@ func (p *jobToolProgress) Finished(result provider.ToolResult) {
 }
 
 func (p *jobToolProgress) snapshotLocked() string {
-	raw, err := json.Marshal(models.ChatTurnProgress{ToolCalls: p.entries})
+	// The recorder only exists once generation has started, so every snapshot is past memory
+	// loading; stamping the phase keeps a tool write from reading as an older phase.
+	raw, err := json.Marshal(models.ChatTurnProgress{Phase: models.ChatTurnPhaseInference, ToolCalls: p.entries})
 	if err != nil {
 		p.logger.Warn("failed to encode chat turn progress", zap.String("job_id", p.jobID.String()), zap.Error(err))
 		return ""

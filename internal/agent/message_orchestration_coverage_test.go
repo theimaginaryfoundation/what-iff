@@ -123,7 +123,7 @@ func TestPrepareChatContext_GetChatErrorIsWrapped(t *testing.T) {
 	a := &Agent{ds: ds, logger: zap.NewNop()}
 	chatMessage := &models.ChatMessage{ChatID: uuid.New()}
 
-	got, err := a.prepareChatContext(context.Background(), uuid.New(), chatMessage)
+	got, err := a.prepareChatContext(context.Background(), uuid.New(), chatMessage, nil)
 	require.Nil(t, got)
 	require.ErrorContains(t, err, "failed to get chat")
 	require.NoError(t, mock.ExpectationsWereMet())

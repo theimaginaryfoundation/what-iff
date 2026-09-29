@@ -862,7 +862,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 	a.WaitForThreadRehydration(ctx, chatJob.UserID, chatMessage.ChatID)
 
 	// Prepare chat context (chat, memories, model)
-	chatCtx, err := a.prepareChatContext(ctx, chatJob.UserID, chatMessage)
+	chatCtx, err := a.prepareChatContext(ctx, chatJob.UserID, chatMessage, a.newChatTurnPhases(chatJob))
 	if err != nil {
 		a.logger.Error("failed to prepare chat context", zap.Error(err))
 		a.setJobStatusFailed(ctx, chatJob, err)
@@ -1992,7 +1992,9 @@ func memoryToolCallsForChatContext(chatCtx *chatContext) []*models.ToolCall {
 }
 
 // prepareChatContext prepares the chat context including chat, memories, and model selection
-func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage) (*chatContext, error) {
+// phases (nil-safe) records the loading-memories progress phase for chat jobs; pass nil when the
+// turn has no job to report to.
+func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage, phases *chatTurnPhases) (*chatContext, error) {
 	defer a.timeTurnStage(ctx, turnStagePrepareContext)()
 	// Get parent chat
 	parentChat, err := a.ds.GetChat(ctx, userID, chatMessage.ChatID)
@@ -2001,7 +2003,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 	}
 
 	// Get relevant memories.
-	memories, liveMemories, memoryEnrichmentFailed := a.getMemoriesBestEffort(ctx, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message)
+	memories, liveMemories, memoryEnrichmentFailed := a.loadTurnMemories(ctx, phases, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message)
 	// Resolve model from the chat's model_id (authoritative). Do not trust model_name
 	// alone — it can be stale, and a missing edge used to fall through to defaultModel
 	// (gpt-5.1) even when the user selected a different provider.
@@ -2129,14 +2131,31 @@ func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, 
 		formatted, err := a.testHooks.GetMemoriesOverride(ctx, userID, chatID, personalityID, userMessage)
 		return formatted, nil, err
 	}
-	// Mock/local mode: memory enrichment needs a provider call (query inference +
-	// embeddings), so it is a deliberate no-op rather than a surprise
-	// deny-transport failure mid-flow.
-	if a.nonVendorLLM() {
+	if !a.memoryEnrichmentRuns() {
 		a.logger.Debug("mock/local mode: skipping memory enrichment", zap.String("chat_id", chatID.String()))
 		return nil, nil, nil
 	}
 	return a.getMemories(ctx, userID, chatID, personalityID, userMessage)
+}
+
+// memoryEnrichmentRuns reports whether getMemoriesForEnrichment will actually retrieve memories.
+// Mock/local mode: memory enrichment needs a provider call (query inference + embeddings), so it
+// is a deliberate no-op rather than a surprise deny-transport failure mid-flow. A test override
+// always counts as running.
+func (a *Agent) memoryEnrichmentRuns() bool {
+	return a.testHooks.GetMemoriesOverride != nil || !a.nonVendorLLM()
+}
+
+// loadTurnMemories runs best-effort memory enrichment for a turn, bracketed by the
+// loading-memories progress phase. The phase is only written when retrieval really runs, so
+// mock/local turns (which skip it) never flash a misleading "loading memories"; whatever the
+// outcome (memories, none, or a failure), the turn then moves on to inference.
+func (a *Agent) loadTurnMemories(ctx context.Context, phases *chatTurnPhases, userID, chatID, personalityID uuid.UUID, userMessage string) ([]string, []*models.Memory, bool) {
+	if a.memoryEnrichmentRuns() {
+		phases.LoadingMemories(ctx)
+	}
+	defer phases.MemoriesLoaded(ctx)
+	return a.getMemoriesBestEffort(ctx, userID, chatID, personalityID, userMessage)
 }
 
 // getMemoriesBestEffort attempts memory enrichment and degrades gracefully on any failure.

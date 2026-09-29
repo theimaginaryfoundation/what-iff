@@ -8338,8 +8338,10 @@ export interface components {
              *     job_type. For `chat_import` it is `{phase, source, total, imported, skipped}`; for
              *     `account_import` it is `{phase, message, counts, conversations, personalities, memories,
              *     warnings, result}`, where `result` is present on terminal success. For `chat_message` it is
-             *     the live tool-call timeline of the in-flight turn: `{tool_calls: [{id, name, input, status,
-             *     output, round, started_at, finished_at}]}`, where `status` is `running`, `complete` or
+             *     the in-flight turn's phase and live tool-call timeline: `{phase, tool_calls: [{id, name, input,
+             *     status, output, round, started_at, finished_at}]}`. `phase` is `loading_memories` while memory
+             *     retrieval runs (written only when it actually runs) and `inference` once the model and its tools
+             *     take over; it may be absent, which clients treat like `inference`. `status` is `running`, `complete` or
              *     `error`, `input`/`output` are truncated previews, and `output`/`finished_at` are set once the
              *     call finishes. It is display-only; the saved assistant message's `tool_calls` are authoritative.
              */

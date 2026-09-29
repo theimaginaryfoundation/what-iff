@@ -204,6 +204,29 @@ describe('MessageBubbleComponent', () => {
         expect(fixture.nativeElement.querySelector('.bubble__copy')).toBeNull();
     });
 
+    it('says it is loading memories while the pending turn reports that phase', () => {
+        fixture.componentRef.setInput('message', { ...pendingAssistantMessage(), pending_phase: 'loading_memories' });
+        fixture.componentRef.setInput('displayContent', '');
+        fixture.detectChanges();
+
+        expect(fixture.nativeElement.querySelector('article').getAttribute('aria-label')).toBe('Assistant is loading memories');
+        expect(fixture.nativeElement.querySelector('.bubble__pending-dots')).toBeTruthy();
+        expect(fixture.nativeElement.querySelector('.bubble__pending-status')?.textContent?.trim()).toBe('Loading memories…');
+    });
+
+    it('drops the loading label once the pending turn moves on', () => {
+        fixture.componentRef.setInput('message', pendingAssistantMessage());
+        fixture.componentRef.setInput('displayContent', '');
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.bubble__pending-status')).toBeNull();
+
+        // Reply text arriving hides the dots and any phase label with them.
+        fixture.componentRef.setInput('message', { ...pendingAssistantMessage(), pending_phase: 'loading_memories' });
+        fixture.componentRef.setInput('displayContent', 'Hi');
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('.bubble__pending-status')).toBeNull();
+    });
+
     it('renders streamed placeholder content once available', () => {
         fixture.componentRef.setInput('message', pendingAssistantMessage());
         fixture.componentRef.setInput('displayContent', 'Partial streamed text');

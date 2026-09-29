@@ -6,7 +6,7 @@ import { ChatStreamingService } from '../../core/services/chat-streaming.service
 import { JobService } from '../../core/services/job.service';
 import { MessageService } from '../../core/services/message.service';
 import { ChatMessage } from '../../core/models/message.model';
-import { ChatTurnProgress, ChatTurnToolCall, Job } from '../../core/models/job.model';
+import { ChatTurnPhase, ChatTurnProgress, ChatTurnToolCall, Job } from '../../core/models/job.model';
 import { apiErrorMessage } from '../../core/utils/api-error.helpers';
 import { CHAT_JOB_POLL_INTERVAL_MS, CHAT_PENDING_ASSISTANT_MESSAGE_ID } from './chat.constants';
 import { ChatSendGate } from './services/chat-send-gate';
@@ -43,6 +43,8 @@ export class AssistantTurn {
   private readonly _streamingMessageId = signal<string | null>(null);
   private readonly _pendingAssistantDraftText = signal('');
   private readonly _liveToolCalls = signal<readonly ChatTurnToolCall[]>([]);
+  /** The active job's progress phase (Job.progress `phase`); null until one is reported. */
+  private readonly _liveTurnPhase = signal<ChatTurnPhase | null>(null);
   /** Live model reasoning for the pending reply; replaced wholesale on each job snapshot. */
   private readonly _pendingAssistantDraftReasoning = signal('');
 
@@ -72,6 +74,18 @@ export class AssistantTurn {
   readonly pendingAssistantDraftReasoning = this._pendingAssistantDraftReasoning.asReadonly();
   /** True while a chat_message job is in flight (after send) but not yet finished. */
   readonly jobPending = computed(() => this._activeChatJobId() !== null);
+  /**
+   * True while the active job reports it is loading memories, before inference. The server only
+   * reports it when retrieval really runs, and moves to `inference` when it returns; a cancel
+   * or any status past inference ends it too.
+   */
+  readonly loadingMemories = computed(
+    () =>
+      this.jobPending() &&
+      this._liveTurnPhase() === 'loading_memories' &&
+      !isPostInferencePhase(this._activeJobPhase()) &&
+      !this.cancellationPending(),
+  );
   /**
    * True only while *core inference* is still running. Once the job reaches
    * inference_complete, the assistant reply is fully available and the post-inference
@@ -117,6 +131,7 @@ export class AssistantTurn {
     this._cancelRequestedJobId.set(null);
     this._streamingMessageId.set(null);
     this._liveToolCalls.set([]);
+    this._liveTurnPhase.set(null);
   }
 
   dispose(): void {
@@ -131,6 +146,7 @@ export class AssistantTurn {
     this._activeChatJobId.set(AssistantTurn.PENDING_SEND_JOB_ID);
     // The placeholder shows from here; it must not carry the previous turn's tool rows.
     this._liveToolCalls.set([]);
+    this._liveTurnPhase.set(null);
   }
 
   sendFailed(): void {
@@ -155,6 +171,7 @@ export class AssistantTurn {
 
   beginRetry(userMessageId: string): void {
     this._liveToolCalls.set([]);
+    this._liveTurnPhase.set(null);
     this.expectingAssistantResponse = true;
     this.expectedAssistantAfterUserMessageId = userMessageId;
   }
@@ -193,6 +210,7 @@ export class AssistantTurn {
     this._activeChatJobId.set(jobId);
     this._activeJobPhase.set(null);
     this._liveToolCalls.set([]);
+    this._liveTurnPhase.set(null);
     if (this._cancelRequestedJobId() !== jobId) {
       this._pendingAssistantDraftText.set('');
       this._pendingAssistantDraftReasoning.set('');
@@ -218,6 +236,7 @@ export class AssistantTurn {
             if (!this.isActiveThread(chatId)) return;
             if (this._activeChatJobId() === jobId) {
               this._liveToolCalls.set([]);
+              this._liveTurnPhase.set(null);
               this._activeChatJobId.set(null);
               this._activeJobPhase.set(null);
             }
@@ -327,8 +346,10 @@ export class AssistantTurn {
     // composer unlocked, and its late snapshots must not overwrite the new job's phase.
     if (this._activeChatJobId() === job.id) {
       this._activeJobPhase.set(job.status);
-      const toolCalls = parseChatTurnToolCalls(job.progress);
-      if (toolCalls) this._liveToolCalls.set(toolCalls);
+      const progress = parseChatTurnProgress(job.progress);
+      if (progress?.toolCalls) this._liveToolCalls.set(progress.toolCalls);
+      // A progress payload without a phase (older servers) reads as inference.
+      if (progress) this._liveTurnPhase.set(progress.phase ?? 'inference');
     }
     const cancelPendingForJob = this._cancelRequestedJobId() === job.id;
     if (cancelPendingForJob && job.status === 'cancelled') {
@@ -423,13 +444,28 @@ export class AssistantTurn {
 
 /** The tool timeline from a chat_message job's progress payload; undefined when absent or unreadable. */
 export function parseChatTurnToolCalls(progress: string | undefined): ChatTurnToolCall[] | undefined {
+  return parseChatTurnProgress(progress)?.toolCalls;
+}
+
+/**
+ * A chat_message job's progress payload: its phase (when it names a known one) and tool
+ * timeline (when it has one). Undefined when absent, unreadable, or not a chat turn payload.
+ */
+export function parseChatTurnProgress(
+  progress: string | undefined,
+): { phase?: ChatTurnPhase; toolCalls?: ChatTurnToolCall[] } | undefined {
   if (!progress) return undefined;
+  let parsed: Partial<ChatTurnProgress>;
   try {
-    const parsed = JSON.parse(progress) as Partial<ChatTurnProgress>;
-    return Array.isArray(parsed.tool_calls) ? parsed.tool_calls : undefined;
+    parsed = JSON.parse(progress) as Partial<ChatTurnProgress>;
   } catch {
     return undefined;
   }
+  if (!parsed || typeof parsed !== 'object') return undefined;
+  const toolCalls = Array.isArray(parsed.tool_calls) ? parsed.tool_calls : undefined;
+  const phase = parsed.phase === 'loading_memories' || parsed.phase === 'inference' ? parsed.phase : undefined;
+  if (!toolCalls && !phase) return undefined;
+  return { phase, toolCalls };
 }
 
 function isTerminalJobStatus(status: Job['status']): boolean {

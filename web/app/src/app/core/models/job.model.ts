@@ -39,8 +39,15 @@ export interface Job {
 
 /** Decoded shape of {@link Job.progress} for `chat_message` jobs: the live tool-call timeline. */
 export interface ChatTurnProgress {
+  /**
+   * Coarse stage of the in-flight turn. `loading_memories` is written only while memory
+   * retrieval actually runs; absent (older jobs, turns without retrieval) reads as inference.
+   */
+  phase?: ChatTurnPhase;
   tool_calls: ChatTurnToolCall[];
 }
+
+export type ChatTurnPhase = 'loading_memories' | 'inference';
 
 /** One tool call in {@link ChatTurnProgress}; input/output are truncated previews. */
 export interface ChatTurnToolCall {

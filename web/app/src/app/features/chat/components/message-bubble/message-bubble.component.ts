@@ -58,6 +58,9 @@ import { MessageContentComponent } from '../message-content/message-content.comp
           <span class="bubble__pending-dots" aria-hidden="true">
             <span></span><span></span><span></span>
           </span>
+          @if (loadingMemories()) {
+            <span class="bubble__pending-status" role="status">Loading memories…</span>
+          }
         } @else {
           <app-message-content
             [content]="bodyContent()"
@@ -412,6 +415,12 @@ import { MessageContentComponent } from '../message-content/message-content.comp
       opacity: 1;
     }
 
+    .bubble__pending-status {
+      margin-left: 0.5rem;
+      font-size: 0.8125rem;
+      color: var(--color-text-secondary);
+    }
+
     .bubble__pending-dots {
       display: inline-flex;
       gap: 0.25rem;
@@ -543,9 +552,15 @@ export class MessageBubbleComponent {
     return [...new Set(names)];
   });
 
-  readonly ariaLabel = computed(() =>
-    this.showPendingDots() ? 'Assistant is composing a reply' : `${this.message().origin} message`,
+  /** The pending placeholder is still loading memories (no reply text yet). */
+  readonly loadingMemories = computed(
+    () => this.showPendingDots() && this.message().pending_phase === 'loading_memories',
   );
+
+  readonly ariaLabel = computed(() => {
+    if (this.loadingMemories()) return 'Assistant is loading memories';
+    return this.showPendingDots() ? 'Assistant is composing a reply' : `${this.message().origin} message`;
+  });
 
   /** Plain click navigates in-app; modified clicks keep the browser's new-tab behaviour. */
   openReferencedThread(event: MouseEvent, threadId: string): void {
