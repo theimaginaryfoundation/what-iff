@@ -3,11 +3,13 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"go.uber.org/zap"
 )
 
 func (t *ListTool) listModels(ctx context.Context) (string, error) {
@@ -209,6 +211,24 @@ func (t *ListTool) listMCPServers(ctx context.Context, chat *models.Chat) (strin
 	if err != nil {
 		return t.fail(listKindMCPServers, fmt.Sprintf("failed to list MCP servers: %v", err))
 	}
+	loadedByServer, err := t.store.ListChatMCPLoadedTools(ctx, chat.UserID, chat.ID)
+	if err != nil {
+		return t.fail(listKindMCPServers, fmt.Sprintf("failed to list loaded MCP tools: %v", err))
+	}
+	toolsByServer := map[uuid.UUID][]string{}
+	discoveryErrors := map[uuid.UUID]string{}
+	if t.mcpDiscoverer != nil && len(servers) > 0 {
+		out, discoverErr := t.mcpDiscoverer.DiscoverTools(ctx, chat.UserID, servers)
+		for _, tool := range out.Tools {
+			toolsByServer[tool.ConnectorID] = append(toolsByServer[tool.ConnectorID], tool.FullName)
+		}
+		for id, msg := range out.Errors {
+			discoveryErrors[id] = strings.TrimSpace(msg)
+		}
+		if discoverErr != nil && t.logger != nil {
+			t.logger.Warn("list mcp_servers discovery had no healthy connectors", zap.Error(discoverErr))
+		}
+	}
 	items := make([]listItem, 0, len(servers))
 	failedDiscovery := 0
 	for _, s := range servers {
@@ -222,6 +242,17 @@ func (t *ListTool) listMCPServers(ctx context.Context, chat *models.Chat) (strin
 		if status == models.MCPServerStatusInvalid {
 			failedDiscovery++
 		}
+		loadedTools := loadedByServer[s.ID]
+		knownTools := toolsByServer[s.ID]
+		if len(knownTools) > 1 {
+			sort.Strings(knownTools)
+		}
+		if len(loadedTools) > 1 {
+			sort.Strings(loadedTools)
+		}
+		if status != models.MCPServerStatusInvalid && strings.TrimSpace(discoveryErrors[s.ID]) != "" {
+			failedDiscovery++
+		}
 		items = append(items, listItem{
 			ID:           s.ID.String(),
 			Name:         s.Name,
@@ -229,13 +260,15 @@ func (t *ListTool) listMCPServers(ctx context.Context, chat *models.Chat) (strin
 			URL:          s.ServerURL,
 			Status:       status,
 			StatusDetail: agentFriendlyMCPStatusDetail(status),
+			MCPTools:     knownTools,
+			LoadedTools:  loadedTools,
 		})
 	}
 	result := listResult{
 		Kind:  listKindMCPServers,
 		Count: len(items),
 		Items: items,
-		Note:  "MCP servers connected to the current conversation.",
+		Note:  "MCP servers connected to the current conversation. Use load_mcp_tools before calling MCP tools.",
 	}
 	if len(items) > 0 && failedDiscovery == len(items) {
 		result.Error = "MCP discovery failed for all connected servers. MCP tools are currently unavailable; review connector auth/settings and retry."

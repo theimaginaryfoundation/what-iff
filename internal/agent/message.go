@@ -289,6 +289,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		localLLM:                     cfg.LLMBackend == "local",
 		localLLMModel:                cfg.LocalLLMModel,
 	}
+	a.listTool.SetMCPDiscoverer(a.mcpClient)
 	if a.lifecycleCtx == nil {
 		a.lifecycleCtx = context.Background()
 	}
@@ -598,9 +599,12 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 	}
 	// Attachment labels are only injected when tools are enabled, matching the
 	// previous behavior for OpenAI chat turns.
-	additionalDevContext := ""
+	additionalDevContext := mcpLifecycleDeveloperContext()
 	if additionalDeveloperContextForChat != nil {
-		additionalDevContext = additionalDeveloperContextForChat(a, chatCtx.chat)
+		additionalDevContext = strings.TrimSpace(strings.Join([]string{
+			additionalDevContext,
+			additionalDeveloperContextForChat(a, chatCtx.chat),
+		}, "\n\n"))
 	}
 	return b.build(ctx, messageContextBuildRequest{
 		UserID:                     userID,
@@ -620,6 +624,10 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 		AdditionalDeveloperContext: additionalDevContext,
 		LoadHistoryImageBytes:      models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model),
 	})
+}
+
+func mcpLifecycleDeveloperContext() string {
+	return "MCP tool lifecycle: MCP tools are NOT auto-loaded. First call list(kind=\"mcp_servers\") to inspect connectors and discoverable tool names. Then call load_mcp_tools with mcp_server_id + tools to activate only the tools you need. Loaded MCP tools remain active across future turns in this chat until you call unload_mcp_tools. Use unload_mcp_tools with tools [\"all\"] or [\"*\"] (optionally with mcp_server_id) to clear loaded tools."
 }
 
 // loadImageBytesForClaude downloads raw image bytes for each image attachment on the
@@ -827,6 +835,29 @@ type chatContext struct {
 	memoryProgress *memoryLoadProgress
 	// mcpServers caches chat/ritual connectors for this turn's dynamic mcp__ tool dispatch.
 	mcpServers []*models.MCPServer
+	// loadedMCPTools tracks the per-connector set of loaded MCP full tool names for this chat.
+	loadedMCPTools map[uuid.UUID]map[string]struct{}
+}
+
+func (c *chatContext) setMCPServerCache(servers []*models.MCPServer, loadedByServer map[uuid.UUID][]string) {
+	c.mcpServers = servers
+	c.loadedMCPTools = make(map[uuid.UUID]map[string]struct{}, len(loadedByServer))
+	for serverID, names := range loadedByServer {
+		if serverID == uuid.Nil || len(names) == 0 {
+			continue
+		}
+		set := make(map[string]struct{}, len(names))
+		for _, name := range names {
+			n := strings.TrimSpace(name)
+			if n == "" {
+				continue
+			}
+			set[n] = struct{}{}
+		}
+		if len(set) > 0 {
+			c.loadedMCPTools[serverID] = set
+		}
+	}
 }
 
 // handleUserMessage handles the agent processing flow for a user message
@@ -1250,7 +1281,8 @@ func (a *Agent) openAIResponseParamsForChat(ctx context.Context, chatCtx *chatCo
 			NativeWebSearch: policy.nativeWebSearch,
 		})
 		agentTools := getAgentToolsList(policy.disabledTools, policy.showMoodTools)
-		mcpTools := a.getChatMCPTools(ctx, userID, chatMessage.ChatID, policy.ritualIDs, chatCtx.model)
+		mcpSpecs := a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)
+		mcpTools := tools.OpenAIFunctionTools(mcpSpecs)
 		toolParams = provider.BuildOpenAITools(chatCtx.model, chatTools, agentTools, mcpTools)
 	}
 	a.recordToolDefinitionEstimate(modelCtx, toolParams)
@@ -1334,17 +1366,14 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 	}
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
-	// Anthropic-native features (beta MCP, native web search) are not available on
-	// z.ai's compatible endpoint — gate them to native Anthropic only.
-	var mcpConfig *provider.ClaudeMCPConfig
-	if policy.toolsEnabled && nativeAnthropic {
-		mcpConfig = a.getChatClaudeMCPConfig(ctx, userID, chatMessage.ChatID, policy.ritualIDs)
+	specs := tools.AgentFunctionToolSpecs(policy.showMoodTools)
+	if policy.toolsEnabled {
+		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
 	}
-
-	claudeFunctionTools := claudeFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
+	claudeFunctionTools := claudeFunctionTools(specs)
 	a.recordToolDefinitionEstimate(modelContext, claudeFunctionTools)
 	webSearchEnabled := nativeAnthropic && policy.nativeWebSearch
-	adapter := provider.NewClaudeAdapter(claudeProvider, claudeParams, claudeFunctionTools, webSearchEnabled, mcpConfig, policy.disabledTools)
+	adapter := provider.NewClaudeAdapter(claudeProvider, claudeParams, claudeFunctionTools, webSearchEnabled, nil, policy.disabledTools)
 	if zai {
 		adapter.SetTruncationFallback(func(params *anthropic.MessageNewParams) {
 			a.logger.Warn("z.ai response truncated before any reply text; retrying at lower reasoning effort",
@@ -1377,7 +1406,11 @@ func (a *Agent) generateAssistantForMessageGemini(ctx context.Context, userID uu
 	geminiParams := visionRenderContext(chatCtx, modelContext).BuildGeminiParams(chatCtx.model)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
-	geminiFunctionTools := geminiFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
+	specs := tools.AgentFunctionToolSpecs(policy.showMoodTools)
+	if policy.toolsEnabled {
+		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
+	}
+	geminiFunctionTools := geminiFunctionTools(specs)
 	a.recordToolDefinitionEstimate(modelContext, geminiFunctionTools)
 	toolNames := make([]string, 0, len(geminiFunctionTools))
 	for _, t := range geminiFunctionTools {
@@ -1416,7 +1449,11 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	params := renderCtx.BuildOpenAIChatCompletionParams(a.localLLMModel)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
-	functionTools := openAIChatCompletionFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
+	specs := tools.AgentFunctionToolSpecs(policy.showMoodTools)
+	if policy.toolsEnabled {
+		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
+	}
+	functionTools := openAIChatCompletionFunctionTools(specs)
 	a.recordToolDefinitionEstimate(modelContext, functionTools)
 
 	adapter := provider.NewLocalAdapter(a.LocalProvider, params, functionTools, policy.disabledTools)
@@ -1469,7 +1506,11 @@ func (a *Agent) generateAssistantForMessageOpenAIChatCompletions(ctx context.Con
 	params := buildOpenAIChatCompletionsParams(chatCtx, modelContext)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
-	functionTools := openAIChatCompletionFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
+	specs := tools.AgentFunctionToolSpecs(policy.showMoodTools)
+	if policy.toolsEnabled {
+		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
+	}
+	functionTools := openAIChatCompletionFunctionTools(specs)
 	a.recordToolDefinitionEstimate(modelContext, functionTools)
 
 	adapter, err := a.openAIChatCompletionsAdapter(chatCtx, params, functionTools, policy.disabledTools)

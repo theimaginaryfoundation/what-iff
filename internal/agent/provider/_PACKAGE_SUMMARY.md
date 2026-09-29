@@ -13,10 +13,9 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 - **Claude:** `BuildClaudeParams`, `ClaudeProvider`, `ClaudeAdapter`, `ClaudeFunctionTool`, `ExtractClaudeText`, `ExtractClaudeBetaText`, `UnmarshalClaudeTextJSON`.
   **`renderClaudeContext`** splits **developer continuity + portrait** like OpenAI: text turn includes `ExpressionPortraitContinuityPointerNote`; the next user message carries caption + image blocks.
   **Prompt caching:** the last block of the leading **contiguous `Cacheable` segment prefix** gets Anthropic **`cache_control` `ephemeral`** with **5m TTL** (see `model_context_claude.go`).
-- **Claude remote MCP:** `ClaudeAdapter` switches to Anthropic Beta Messages MCP client mode when MCP server config is supplied (`mcp_servers` + MCP toolsets).
 - **z.ai GLM (Anthropic-compatible):** GLM models (`provider = "zai"`) reuse the **entire Claude path** via `NewClaudeProviderWithBaseURL` pointed at z.ai's Anthropic-compatible endpoint (`DefaultZAIBaseURL`).
   Routing uses `models.UsesAnthropicMessagesAPI` (true for anthropic + zai).
-  Anthropic-native features (native web search, beta MCP) are gated off for z.ai via `models.IsNativeAnthropicModel`; prompt caching (`cache_control`) is left on (z.ai supports it).
+  Anthropic-native features (native web search) are gated off for z.ai via `models.IsNativeAnthropicModel`; prompt caching (`cache_control`) is left on (z.ai supports it).
   **Reasoning effort:** GLM always thinks (disabling is rejected) and **ignores `thinking.budget_tokens`** (verified live 2026-09-22), so unbounded reasoning could consume the whole output cap and truncate the turn before any answer.
   `ApplyZAIReasoningEffort` (called on the zai path in `internal/agent`) raises `MaxTokens` to `ReasoningMaxOutputTokens` (2× `DefaultMaxContentLength`) and sets **`output_config.effort`** — the one lever z.ai honors.
   Unset behaves like `max`; `ZAIReasoningEffort` = `"high"` cut reasoning ~5× in testing (z.ai accepts only `low`/`high`/`max`; `medium` is rejected).

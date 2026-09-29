@@ -81,7 +81,7 @@ func TestGetChatMCPServers_NoRitualIDsReturnsChatServersOnly(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestGetChatMCPTools_ChatServersLoadFailureYieldsNoTools(t *testing.T) {
+func TestPrepareTurnMCPToolSpecs_ChatServersLoadFailureYieldsNoTools(t *testing.T) {
 	t.Parallel()
 	ds, mock, cleanup := newTestDatastore(t)
 	defer cleanup()
@@ -92,7 +92,7 @@ func TestGetChatMCPTools_ChatServersLoadFailureYieldsNoTools(t *testing.T) {
 
 	a := newTestAgent(ds)
 	a.mcpClient = mcpclient.New(nil, nil)
-	got := a.getChatMCPTools(context.Background(), uuid.New(), uuid.New(), nil, "gpt-5.4")
+	got := a.prepareTurnMCPToolSpecs(context.Background(), nil, uuid.New(), uuid.New(), nil)
 	require.Empty(t, got)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

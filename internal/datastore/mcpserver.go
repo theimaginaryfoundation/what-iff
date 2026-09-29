@@ -3,11 +3,14 @@ package datastore
 import (
 	"context"
 	"fmt"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
+	entchatmcptoolstate "github.com/theimaginaryfoundation/what-iff/ent/chatmcptoolstate"
 	entmcp "github.com/theimaginaryfoundation/what-iff/ent/mcpserver"
 	"github.com/theimaginaryfoundation/what-iff/ent/ritual"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
@@ -888,12 +891,228 @@ func (d *Datastore) RemoveMCPServerFromChat(ctx context.Context, userID, chatID,
 		tx.Rollback()
 		return err
 	}
+	if _, err := tx.ChatMCPToolState.Delete().
+		Where(
+			entchatmcptoolstate.ChatIDEQ(chatID),
+			entchatmcptoolstate.McpServerIDEQ(mcpServerID),
+		).
+		Exec(ctx); err != nil {
+		d.logger.Error("failed to clear chat mcp tool state", zap.Error(err))
+		tx.Rollback()
+		return err
+	}
 
 	if err := tx.Commit(); err != nil {
 		d.logger.Error("failed to commit transaction", zap.Error(err))
 		return err
 	}
 	return nil
+}
+
+// ListChatMCPLoadedTools returns loaded MCP full tool names grouped by connector for one chat.
+func (d *Datastore) ListChatMCPLoadedTools(ctx context.Context, userID, chatID uuid.UUID) (map[uuid.UUID][]string, error) {
+	tx, err := d.dbClient.Tx(ctx)
+	if err != nil {
+		d.logger.Error("failed to start transaction", zap.Error(err))
+		return nil, err
+	}
+	defer func() {
+		if v := recover(); v != nil {
+			tx.Rollback()
+			panic(v)
+		}
+	}()
+
+	chatExists, err := tx.Chat.Query().
+		Where(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))).
+		Exist(ctx)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if !chatExists {
+		tx.Rollback()
+		return nil, ErrChatNotFound
+	}
+
+	rows, err := tx.ChatMCPToolState.Query().
+		Where(entchatmcptoolstate.ChatIDEQ(chatID)).
+		All(ctx)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	out := make(map[uuid.UUID][]string, len(rows))
+	for _, row := range rows {
+		if row == nil || row.McpServerID == uuid.Nil {
+			continue
+		}
+		tools := normalizeLoadedMCPToolNames(row.LoadedTools)
+		if len(tools) == 0 {
+			continue
+		}
+		out[row.McpServerID] = tools
+	}
+	return out, nil
+}
+
+// SetChatMCPLoadedTools replaces the loaded MCP tool set for one chat+connector.
+func (d *Datastore) SetChatMCPLoadedTools(ctx context.Context, userID, chatID, mcpServerID uuid.UUID, fullToolNames []string) error {
+	tx, err := d.dbClient.Tx(ctx)
+	if err != nil {
+		d.logger.Error("failed to start transaction", zap.Error(err))
+		return err
+	}
+	defer func() {
+		if v := recover(); v != nil {
+			tx.Rollback()
+			panic(v)
+		}
+	}()
+
+	chatExists, err := tx.Chat.Query().
+		Where(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))).
+		Exist(ctx)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	if !chatExists {
+		tx.Rollback()
+		return ErrChatNotFound
+	}
+
+	serverAttached, err := tx.MCPServer.Query().
+		Where(
+			entmcp.ID(mcpServerID),
+			entmcp.HasOwnerWith(user.ID(userID)),
+			entmcp.HasChatsWith(entchat.ID(chatID)),
+		).
+		Exist(ctx)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	if !serverAttached {
+		tx.Rollback()
+		return ErrMCPServerNotFound
+	}
+
+	tools := normalizeLoadedMCPToolNames(fullToolNames)
+	if len(tools) == 0 {
+		if _, err := tx.ChatMCPToolState.Delete().
+			Where(
+				entchatmcptoolstate.ChatIDEQ(chatID),
+				entchatmcptoolstate.McpServerIDEQ(mcpServerID),
+			).
+			Exec(ctx); err != nil {
+			tx.Rollback()
+			return err
+		}
+	} else {
+		existing, err := tx.ChatMCPToolState.Query().
+			Where(
+				entchatmcptoolstate.ChatIDEQ(chatID),
+				entchatmcptoolstate.McpServerIDEQ(mcpServerID),
+			).
+			Only(ctx)
+		if err != nil && !ent.IsNotFound(err) {
+			tx.Rollback()
+			return err
+		}
+		if ent.IsNotFound(err) {
+			if _, err := tx.ChatMCPToolState.Create().
+				SetChatID(chatID).
+				SetMcpServerID(mcpServerID).
+				SetLoadedTools(tools).
+				Save(ctx); err != nil {
+				tx.Rollback()
+				return err
+			}
+		} else {
+			if _, err := tx.ChatMCPToolState.UpdateOneID(existing.ID).
+				SetLoadedTools(tools).
+				Save(ctx); err != nil {
+				tx.Rollback()
+				return err
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (d *Datastore) ClearChatMCPLoadedTools(ctx context.Context, userID, chatID, mcpServerID uuid.UUID) error {
+	return d.SetChatMCPLoadedTools(ctx, userID, chatID, mcpServerID, nil)
+}
+
+func (d *Datastore) ClearAllChatMCPLoadedTools(ctx context.Context, userID, chatID uuid.UUID) error {
+	tx, err := d.dbClient.Tx(ctx)
+	if err != nil {
+		d.logger.Error("failed to start transaction", zap.Error(err))
+		return err
+	}
+	defer func() {
+		if v := recover(); v != nil {
+			tx.Rollback()
+			panic(v)
+		}
+	}()
+
+	chatExists, err := tx.Chat.Query().
+		Where(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))).
+		Exist(ctx)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	if !chatExists {
+		tx.Rollback()
+		return ErrChatNotFound
+	}
+
+	if _, err := tx.ChatMCPToolState.Delete().
+		Where(entchatmcptoolstate.ChatIDEQ(chatID)).
+		Exec(ctx); err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func normalizeLoadedMCPToolNames(fullToolNames []string) []string {
+	if len(fullToolNames) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(fullToolNames))
+	out := make([]string, 0, len(fullToolNames))
+	for _, name := range fullToolNames {
+		n := strings.TrimSpace(name)
+		if n == "" || !strings.HasPrefix(n, "mcp__") {
+			continue
+		}
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		out = append(out, n)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	return slices.Clip(out)
 }
 
 // UpdateMCPServerRuntimeState updates runtime health metadata for one user-owned connector.

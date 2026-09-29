@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -47,24 +46,25 @@ func (a *Agent) getSubagentMCPFunctionToolSpecs(ctx context.Context, userID uuid
 	return a.discoverMCPFunctionToolSpecs(ctx, userID, servers), servers
 }
 
-func (a *Agent) getChatMCPTools(ctx context.Context, userID, chatID uuid.UUID, ritualIDs []uuid.UUID, model string) []responses.ToolUnionParam {
-	servers := a.getChatMCPServers(ctx, userID, chatID, ritualIDs)
-	specs := a.discoverMCPFunctionToolSpecs(ctx, userID, servers)
-	_ = model // preserved for call-site compatibility
-	return agenttools.OpenAIFunctionTools(specs)
-}
-
-func (a *Agent) getChatClaudeMCPConfig(ctx context.Context, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) *provider.ClaudeMCPConfig {
-	servers := a.getChatMCPServers(ctx, userID, chatID, ritualIDs)
-	return buildClaudeMCPConfigFromServers(servers)
-}
-
 func (a *Agent) prepareTurnMCPToolSpecs(ctx context.Context, chatCtx *chatContext, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) []agenttools.FunctionToolSpec {
 	servers := a.getChatMCPServers(ctx, userID, chatID, ritualIDs)
-	if chatCtx != nil {
-		chatCtx.mcpServers = servers
+	loadedByServer := map[uuid.UUID][]string{}
+	if a.ds != nil {
+		loaded, err := a.ds.ListChatMCPLoadedTools(ctx, userID, chatID)
+		if err != nil {
+			a.logger.Warn("failed to load chat mcp loaded tool state",
+				zap.String("user_id", userID.String()),
+				zap.String("chat_id", chatID.String()),
+				zap.Error(err))
+		} else if loaded != nil {
+			loadedByServer = loaded
+		}
 	}
-	return a.discoverMCPFunctionToolSpecs(ctx, userID, servers)
+	if chatCtx != nil {
+		chatCtx.setMCPServerCache(servers, loadedByServer)
+	}
+	specs := a.discoverMCPFunctionToolSpecs(ctx, userID, servers)
+	return filterMCPToolSpecsByLoaded(specs, loadedByServer)
 }
 
 func (a *Agent) getChatMCPServers(ctx context.Context, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) []*models.MCPServer {
@@ -178,54 +178,32 @@ func geminiFunctionTools(specs []agenttools.FunctionToolSpec) []openai.ChatCompl
 	return openAIChatCompletionFunctionTools(specs)
 }
 
-func buildClaudeMCPConfigFromServers(servers []*models.MCPServer) *provider.ClaudeMCPConfig {
-	cfg := &provider.ClaudeMCPConfig{
-		Servers:  make([]anthropic.BetaRequestMCPServerURLDefinitionParam, 0, len(servers)),
-		Toolsets: make([]anthropic.BetaToolUnionParam, 0, len(servers)),
-	}
-	for _, server := range servers {
-		if server == nil || server.ID == uuid.Nil {
-			continue
-		}
-		if strings.TrimSpace(server.ErrorMessage) != "" {
-			continue
-		}
-		serverName := "mcp-" + server.ID.String()
-		def := anthropic.BetaRequestMCPServerURLDefinitionParam{
-			Name: serverName,
-			URL:  server.ServerURL,
-		}
-		if token := claudeMCPAuthorizationToken(server); token != "" {
-			def.AuthorizationToken = anthropic.String(token)
-		}
-		cfg.Servers = append(cfg.Servers, def)
-		cfg.Toolsets = append(cfg.Toolsets, anthropic.BetaToolUnionParamOfMCPToolset(serverName))
-	}
-	if len(cfg.Servers) == 0 {
+func filterMCPToolSpecsByLoaded(specs []agenttools.FunctionToolSpec, loadedByServer map[uuid.UUID][]string) []agenttools.FunctionToolSpec {
+	// Intentional behavior: MCP tools are opt-in per chat.
+	// If no loaded state exists yet, expose zero MCP tools until load_mcp_tools is called.
+	if len(specs) == 0 || len(loadedByServer) == 0 {
 		return nil
 	}
-	return cfg
-}
-
-func claudeMCPAuthorizationToken(server *models.MCPServer) string {
-	if server == nil {
-		return ""
+	loadedSet := make(map[string]struct{}, len(specs))
+	for _, names := range loadedByServer {
+		for _, name := range names {
+			n := strings.TrimSpace(name)
+			if n == "" {
+				continue
+			}
+			loadedSet[n] = struct{}{}
+		}
 	}
-	mode := strings.TrimSpace(server.AuthMode)
-	if mode == "" || mode == models.MCPServerAuthModeHeader {
-		return strings.TrimSpace(server.AuthToken)
+	if len(loadedSet) == 0 {
+		return nil
 	}
-	if mode != models.MCPServerAuthModeOAuth {
-		return ""
+	out := make([]agenttools.FunctionToolSpec, 0, len(specs))
+	for _, spec := range specs {
+		if _, ok := loadedSet[spec.Name]; ok {
+			out = append(out, spec)
+		}
 	}
-	access := strings.TrimSpace(server.OAuthAccessToken)
-	if access == "" {
-		return ""
-	}
-	if server.OAuthAccessTokenExpiresAt != nil && time.Now().UTC().After(server.OAuthAccessTokenExpiresAt.UTC()) {
-		return ""
-	}
-	return fmt.Sprintf("Bearer %s", access)
+	return out
 }
 
 func discoveryFailureStatus(server *models.MCPServer, errMsg string) string {
