@@ -411,7 +411,9 @@ func (d *Datastore) validateUserOwnsMCPServerIDs(ctx context.Context, tx *ent.Tx
 	return nil
 }
 
-// UpdateMCPServer updates an existing MCP server owned by the user.
+// UpdateMCPServer updates user-editable MCP server configuration owned by the user.
+// Runtime health/token state is intentionally excluded; use UpdateMCPServerRuntimeState
+// and OAuth token-specific methods for those fields.
 // Auth token update semantics are controlled via authTokenUpdate.
 // ritualIDsUpdate: nil means do not change ritual links; non-nil replaces the set (empty clears).
 func (d *Datastore) UpdateMCPServer(ctx context.Context, userID uuid.UUID, server models.MCPServer, authTokenUpdate models.MCPServerAuthTokenUpdate, oauthSecretUpdate models.MCPOAuthSecretUpdate, ritualIDsUpdate *[]uuid.UUID) (*models.MCPServer, error) {
@@ -453,7 +455,6 @@ func (d *Datastore) UpdateMCPServer(ctx context.Context, userID uuid.UUID, serve
 		SetOauthClientID(strings.TrimSpace(server.OAuthClientID)).
 		SetOauthScopes(server.OAuthScopes).
 		SetOauthPkcePolicy(strings.TrimSpace(server.OAuthPKCEPolicy)).
-		SetOauthRefreshFailCount(max(server.OAuthRefreshFailCount, 0)).
 		SetDefaultEnabled(server.DefaultEnabled)
 
 	if strings.TrimSpace(server.AuthMode) == "" {
@@ -461,24 +462,6 @@ func (d *Datastore) UpdateMCPServer(ctx context.Context, userID uuid.UUID, serve
 	}
 	if strings.TrimSpace(server.OAuthPKCEPolicy) == "" {
 		update.SetOauthPkcePolicy(models.MCPServerPKCESupported)
-	}
-
-	if status := strings.TrimSpace(server.Status); status != "" {
-		update.SetStatus(status)
-	}
-	update.SetStatusReason(strings.TrimSpace(server.StatusReason))
-	if server.LastCheckedAt != nil {
-		update.SetLastCheckedAt(*server.LastCheckedAt)
-	} else {
-		update.ClearLastCheckedAt()
-	}
-	if server.LastHealthyAt != nil {
-		update.SetLastHealthyAt(*server.LastHealthyAt)
-	} else {
-		update.ClearLastHealthyAt()
-	}
-	if server.ToolCount >= 0 {
-		update.SetToolCount(server.ToolCount)
 	}
 
 	if authTokenUpdate.Provided {
@@ -507,45 +490,6 @@ func (d *Datastore) UpdateMCPServer(ctx context.Context, userID uuid.UUID, serve
 			update.SetOauthClientSecret(encryptedSecret)
 		}
 	}
-	if token := strings.TrimSpace(server.OAuthAccessToken); token != "" {
-		encryptedAccessToken, err := d.encryptTokenForWrite(token)
-		if err != nil {
-			d.logger.Error("failed to encrypt mcp oauth access token for update", zap.Error(err))
-			tx.Rollback()
-			return nil, err
-		}
-		update.SetOauthAccessToken(encryptedAccessToken)
-	}
-	if token := strings.TrimSpace(server.OAuthRefreshToken); token != "" {
-		encryptedRefreshToken, err := d.encryptTokenForWrite(token)
-		if err != nil {
-			d.logger.Error("failed to encrypt mcp oauth refresh token for update", zap.Error(err))
-			tx.Rollback()
-			return nil, err
-		}
-		update.SetOauthRefreshToken(encryptedRefreshToken)
-	}
-	if server.OAuthAccessTokenExpiresAt != nil {
-		update.SetOauthAccessTokenExpiresAt(*server.OAuthAccessTokenExpiresAt)
-	} else {
-		update.ClearOauthAccessTokenExpiresAt()
-	}
-	if server.OAuthRefreshTokenExpiresAt != nil {
-		update.SetOauthRefreshTokenExpiresAt(*server.OAuthRefreshTokenExpiresAt)
-	} else {
-		update.ClearOauthRefreshTokenExpiresAt()
-	}
-	if server.OAuthAuthenticatedAt != nil {
-		update.SetOauthAuthenticatedAt(*server.OAuthAuthenticatedAt)
-	} else {
-		update.ClearOauthAuthenticatedAt()
-	}
-	if server.OAuthLastRefreshAt != nil {
-		update.SetOauthLastRefreshAt(*server.OAuthLastRefreshAt)
-	} else {
-		update.ClearOauthLastRefreshAt()
-	}
-
 	entServer, err := update.Save(ctx)
 	if err != nil {
 		d.logger.Error("failed to update mcp server", zap.Error(err))

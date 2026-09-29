@@ -729,3 +729,61 @@ func TestSaveMCPServerOAuthTokens_AccessTokenResetsStatus(t *testing.T) {
 	require.Equal(t, "new-access-token", got.OAuthAccessToken)
 	require.Equal(t, "new-refresh-token", got.OAuthRefreshToken)
 }
+
+func TestUpdateMCPServer_DoesNotOverwriteRuntimeState(t *testing.T) {
+	ds, cleanup := newMCPServerTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMCPServerTestUser(t, ds)
+	server := baseMCPServerModel()
+	server.AuthMode = models.MCPServerAuthModeOAuth
+	created, err := ds.CreateMCPServer(ctx, userID, server)
+	require.NoError(t, err)
+
+	checked := time.Now().UTC().Add(-2 * time.Minute)
+	healthy := checked.Add(-time.Minute)
+	require.NoError(t, ds.UpdateMCPServerRuntimeState(ctx, userID, created.ID, models.MCPServerStatusRefreshError, "runtime-failure", 7, &checked, &healthy))
+
+	now := time.Now().UTC()
+	accessExpiry := now.Add(30 * time.Minute)
+	refreshExpiry := now.Add(24 * time.Hour)
+	require.NoError(t, ds.SaveMCPServerOAuthTokens(ctx, userID, created.ID, models.MCPOAuthTokenSet{
+		AccessToken:           "access-token",
+		RefreshToken:          "refresh-token",
+		AccessTokenExpiresAt:  &accessExpiry,
+		RefreshTokenExpiresAt: &refreshExpiry,
+		AuthenticatedAt:       &now,
+		LastRefreshAt:         &now,
+	}))
+
+	updated := *created
+	updated.Name = "Renamed"
+	updated.Status = models.MCPServerStatusInvalid
+	updated.StatusReason = "should-not-apply"
+	updated.ToolCount = 0
+	updated.LastCheckedAt = nil
+	updated.LastHealthyAt = nil
+	updated.OAuthAccessToken = "should-not-apply"
+	updated.OAuthRefreshToken = "should-not-apply"
+	updated.OAuthAccessTokenExpiresAt = nil
+	updated.OAuthRefreshTokenExpiresAt = nil
+	updated.OAuthAuthenticatedAt = nil
+	updated.OAuthLastRefreshAt = nil
+	updated.OAuthRefreshFailCount = 0
+
+	got, err := ds.UpdateMCPServer(ctx, userID, updated, models.MCPServerAuthTokenUpdate{}, models.MCPOAuthSecretUpdate{}, nil)
+	require.NoError(t, err)
+	require.Equal(t, "Renamed", got.Name)
+	require.Equal(t, models.MCPServerStatusActive, got.Status)
+	require.Equal(t, "", got.StatusReason)
+	require.Equal(t, 7, got.ToolCount)
+	require.NotNil(t, got.LastCheckedAt)
+	require.NotNil(t, got.LastHealthyAt)
+	require.Equal(t, "access-token", got.OAuthAccessToken)
+	require.Equal(t, "refresh-token", got.OAuthRefreshToken)
+	require.NotNil(t, got.OAuthAccessTokenExpiresAt)
+	require.NotNil(t, got.OAuthRefreshTokenExpiresAt)
+	require.NotNil(t, got.OAuthAuthenticatedAt)
+	require.NotNil(t, got.OAuthLastRefreshAt)
+}
