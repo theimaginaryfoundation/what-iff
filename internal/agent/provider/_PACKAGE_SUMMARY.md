@@ -86,6 +86,7 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 | `NewOpenAIProvider` / `NewClaudeProvider` | SDK clients; optional `*telemetry.Telemetry` (metrics + logger). All provider constructors take an optional `*http.Client` (nil = SDK default) so mock mode can inject the deny transport. |
 | `MockAdapter` / `NewMockAdapter` | In-process `AgentAdapter` fake for `LLM_BACKEND=mock` (echo/fixed/scripted modes, whitespace-preserving word-delta streaming, ctx cancellation). Built per request. |
 | `LocalProvider` / `LocalAdapter` | Real `AgentAdapter` for `LLM_BACKEND=local`: an OpenAI-compatible Chat Completions client pointed at a local server (Ollama default via `DefaultLocalBaseURL`; any compatible server via `LOCAL_LLM_BASE_URL`). Placeholder API key; non-streaming, mirrors the Mistral/DeepSeek adapter shape. |
+| `WithCallTimeouts` / `CallTimeouts` / `CallTimeoutError` | Wraps an `http.Client` so every provider HTTP attempt is bounded: `Request` until headers (and a non-streamed body), then `Stream` total and `StreamIdle` between bytes once a `text/event-stream` response starts. A fired limit surfaces as `CallTimeoutError`, which matches `context.DeadlineExceeded` (error.type `timeout`, not retried by `retryLLMCall`) and never `context.Canceled`, which the streaming paths read as a user stop. Defaults and their rationale are on `DefaultCallTimeouts`. |
 | `DenyNetworkHTTPClient` / `ErrNetworkDenied` | `http.Client` whose transport fails every request before egress; injected into all provider clients under mock mode ("no provider egress" guarantee). |
 
 ## Dependencies
@@ -152,6 +153,7 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 ## Testing
 
 - `mock_adapter_test.go` — echo/fixed/scripted modes, delta concatenation (unicode, no-space, newline-heavy), mid-stream cancellation.
+  `call_timeouts_test.go` — each limit against `httptest` servers (slow response, stalled and endless streams), a healthy stream outliving `Request`, caller cancel staying a cancel, and a stalled Claude stream timing out after one attempt.
   `deny_transport_test.go` — proves an `httptest` server is never reached, including through a real openai-go client built on the deny client.
 - `model_context_test.go`, `model_context_hydrate_test.go`, `model_context_openai_test.go` — segment assembly, hydration helpers, OpenAI/Claude rendering (including Claude text fallback when image bytes absent).
 - `model_context_breakdown_test.go` — `SegmentBreakdown` aggregation, first-appearance ordering, cacheable-any / image counting, and nil-receiver/nil-counter guards.

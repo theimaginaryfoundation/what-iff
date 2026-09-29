@@ -103,6 +103,8 @@ Notes on these metrics:
   - One value per logical call, including app-level retries and their waits.
   - Streams are timed to their final event.
   - The model label stays on error series, so you can see one model failing.
+  - `error.type=timeout` includes attempts cut off by the `LLM_*_TIMEOUT` limits. A stalled
+    stream fails after its headers, so it shows up here but not on `http.client.request.duration`.
 - **Retries:** app-level retries and fallbacks.
   - `rate_limited`, `server_error` and `network` are transport retries of OpenAI Responses and
     Claude streaming calls: up to 3 attempts per call, decided by status code (429, any 5xx
