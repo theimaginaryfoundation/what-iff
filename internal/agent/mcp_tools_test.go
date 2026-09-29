@@ -53,3 +53,15 @@ func TestGetSubagentMCPTools_ReturnsFunctionToolsFromDiscovery(t *testing.T) {
 	require.Len(t, tools, 1)
 	require.Contains(t, tools[0].Name, "mcp__")
 }
+
+func TestDiscoveryFailureStatus(t *testing.T) {
+	server := &models.MCPServer{Status: models.MCPServerStatusActive}
+
+	require.Equal(t, models.MCPServerStatusInvalid, discoveryFailureStatus(server, "mcp server returned status 401 for tools/list"))
+	require.Equal(t, models.MCPServerStatusInvalid, discoveryFailureStatus(server, "oauth connector is not authenticated"))
+	require.Equal(t, models.MCPServerStatusRefreshError, discoveryFailureStatus(server, "mcp server returned status 503 for tools/list"))
+	require.Equal(t, models.MCPServerStatusRefreshError, discoveryFailureStatus(server, "Post https://example.com: context deadline exceeded"))
+
+	disabled := &models.MCPServer{Status: models.MCPServerStatusDisabled}
+	require.Equal(t, models.MCPServerStatusDisabled, discoveryFailureStatus(disabled, `connector status "disabled" not eligible`))
+}

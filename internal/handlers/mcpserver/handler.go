@@ -636,6 +636,9 @@ func validateConnectionTestURL(
 	if strings.TrimSpace(parsed.Host) == "" {
 		return fmt.Errorf("server_url host is required")
 	}
+	// Path is intentionally unrestricted: self-hosted MCP servers may expose
+	// JSON-RPC under non-root routes. Risk is mitigated by scheme/host policy
+	// here plus transport safeguards (timeouts/body limits) in the MCP client.
 	host := strings.TrimSpace(parsed.Hostname())
 	if host == "" {
 		return fmt.Errorf("server_url host is required")

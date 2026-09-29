@@ -20,6 +20,7 @@ import (
 const (
 	defaultDiscoveryTTL = 5 * time.Minute
 	streamableAccept    = "application/json, text/event-stream"
+	maxRPCResponseBytes = 5 * 1024 * 1024 // 5 MiB cap to bound memory on malformed/abusive servers.
 )
 
 var toolNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9_]`)
@@ -437,14 +438,17 @@ func (c *Client) rpcCall(ctx context.Context, server *models.MCPServer, method s
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := readBoundedBody(resp.Body, maxRPCResponseBytes)
+		if err != nil {
+			return nil, err
+		}
 		detail := strings.TrimSpace(string(body))
 		if detail != "" {
 			return nil, fmt.Errorf("mcp server returned status %d for %s: %s", resp.StatusCode, method, truncateForError(detail, 1024))
 		}
 		return nil, fmt.Errorf("mcp server returned status %d for %s", resp.StatusCode, method)
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := readBoundedBody(resp.Body, maxRPCResponseBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -531,6 +535,21 @@ func truncateForError(s string, max int) string {
 		return s
 	}
 	return s[:max] + "...(truncated)"
+}
+
+func readBoundedBody(r io.Reader, max int64) ([]byte, error) {
+	if max <= 0 {
+		return io.ReadAll(r)
+	}
+	limited := io.LimitReader(r, max+1)
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > max {
+		return nil, fmt.Errorf("mcp rpc response exceeded size limit (%d bytes)", max)
+	}
+	return body, nil
 }
 
 func authHeaderForServer(server *models.MCPServer, now time.Time) (string, error) {

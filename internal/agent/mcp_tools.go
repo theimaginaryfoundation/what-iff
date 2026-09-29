@@ -143,7 +143,7 @@ func (a *Agent) discoverMCPFunctionToolSpecs(ctx context.Context, userID uuid.UU
 			continue
 		}
 		if errMsg := strings.TrimSpace(out.Errors[s.ID]); errMsg != "" {
-			_ = a.ds.UpdateMCPServerRuntimeState(ctx, userID, s.ID, models.MCPServerStatusInvalid, errMsg, 0, &now, nil)
+			_ = a.ds.UpdateMCPServerRuntimeState(ctx, userID, s.ID, discoveryFailureStatus(s, errMsg), errMsg, 0, &now, nil)
 			continue
 		}
 		_ = a.ds.UpdateMCPServerRuntimeState(ctx, userID, s.ID, s.Status, s.StatusReason, 0, &now, s.LastHealthyAt)
@@ -170,4 +170,48 @@ func openAIChatCompletionFunctionTools(specs []agenttools.FunctionToolSpec) []op
 
 func geminiFunctionTools(specs []agenttools.FunctionToolSpec) []openai.ChatCompletionToolUnionParam {
 	return openAIChatCompletionFunctionTools(specs)
+}
+
+func discoveryFailureStatus(server *models.MCPServer, errMsg string) string {
+	current := strings.TrimSpace(server.Status)
+	if current == "" {
+		current = models.MCPServerStatusActive
+	}
+	// Discovery reports "connector status ... not eligible" for disabled/invalid
+	// connectors; preserve their state instead of escalating to another status.
+	if !statusEligibleForDiscovery(current) {
+		return current
+	}
+	if isPermanentDiscoveryError(errMsg) {
+		return models.MCPServerStatusInvalid
+	}
+	return models.MCPServerStatusRefreshError
+}
+
+func statusEligibleForDiscovery(status string) bool {
+	switch strings.TrimSpace(status) {
+	case models.MCPServerStatusActive, models.MCPServerStatusExpiring, models.MCPServerStatusRefreshError:
+		return true
+	default:
+		return false
+	}
+}
+
+func isPermanentDiscoveryError(errMsg string) bool {
+	msg := strings.ToLower(strings.TrimSpace(errMsg))
+	switch {
+	case strings.Contains(msg, "returned status 400"),
+		strings.Contains(msg, "returned status 401"),
+		strings.Contains(msg, "returned status 403"),
+		strings.Contains(msg, "returned status 404"),
+		strings.Contains(msg, "oauth connector is not authenticated"),
+		strings.Contains(msg, "oauth access token is expired"),
+		strings.Contains(msg, "server_url host could not be resolved"),
+		strings.Contains(msg, "invalid mcp"),
+		strings.Contains(msg, "invalid oauth"),
+		strings.Contains(msg, "connector status"):
+		return true
+	default:
+		return false
+	}
 }

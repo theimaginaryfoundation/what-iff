@@ -1,6 +1,7 @@
 package mcpclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -225,4 +226,32 @@ func TestParseInputSchema_EmptyPropertiesRemainEmptyMap(t *testing.T) {
 	})
 	require.Empty(t, req)
 	require.Equal(t, map[string]any{}, props)
+}
+
+func TestProbeConnection_RejectsOversizedResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var req map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		method, _ := req["method"].(string)
+		switch method {
+		case "initialize", "notifications/initialized":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{}})
+		case "tools/list":
+			// Body larger than maxRPCResponseBytes to assert hard cap behavior.
+			_, _ = w.Write(bytes.Repeat([]byte("x"), maxRPCResponseBytes+1))
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(nil, nil)
+	_, err := client.ProbeConnection(context.Background(), &models.MCPServer{
+		ID:        uuid.New(),
+		ServerURL: srv.URL,
+		Status:    models.MCPServerStatusActive,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "exceeded size limit")
 }
