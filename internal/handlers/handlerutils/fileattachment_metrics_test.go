@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry/telemetrytest"
 	"github.com/theimaginaryfoundation/what-iff/internal/utils"
@@ -95,4 +96,78 @@ func TestUploadFileAttachmentRecordsImageNormalizeStage(t *testing.T) {
 	require.Equal(t, uint64(1), tm.HistogramCount(t, telemetry.FileOperationDuration.Name,
 		telemetry.AttrOperation.String(telemetry.FileOpUpload), telemetry.AttrStage.String(telemetry.FileStageNormalize)))
 	require.Equal(t, uint64(1), tm.HistogramCount(t, telemetry.FileSize.Name, telemetry.AttrKind.String("image")))
+}
+
+type recordingFileAttachmentDeleter struct {
+	deleted []string
+	ctxErr  error
+	err     error
+}
+
+func (d *recordingFileAttachmentDeleter) DeleteFileAttachment(ctx context.Context, fileID string) error {
+	d.deleted = append(d.deleted, fileID)
+	d.ctxErr = ctx.Err()
+	return d.err
+}
+
+// When the attachment record can't be saved after a good provider upload, the provider file and
+// temp file are cleaned up and the upload is counted once, as a failure.
+func TestAbandonFileAttachmentUpload(t *testing.T) {
+	tm := telemetrytest.UseGlobal(t)
+
+	attachment, tempPath, err := UploadFileAttachment(httptest.NewRecorder(),
+		multipartUploadRequest(t, "notes.txt", []byte("hi")), zap.NewNop(), &capturingFileAttachmentUploader{}, uuid.New(), nil)
+	require.NoError(t, err)
+	require.NotNil(t, attachment.FileID)
+
+	// The request context is often what ended (client gone); cleanup must still run.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	deleter := &recordingFileAttachmentDeleter{}
+	AbandonFileAttachmentUpload(ctx, zap.NewNop(), deleter, attachment, tempPath)
+
+	require.Equal(t, []string{*attachment.FileID}, deleter.deleted)
+	require.NoError(t, deleter.ctxErr, "provider delete must not inherit the request's cancellation")
+	_, statErr := os.Stat(tempPath)
+	require.True(t, os.IsNotExist(statErr), "temp file is removed")
+	require.Equal(t, int64(1), uploadCount(tm, t, "text", telemetry.FileUploadFailure))
+	require.Equal(t, int64(1), tm.CounterValue(t, telemetry.FileUploads.Name))
+}
+
+func TestDeleteProviderFile(t *testing.T) {
+	fileID := "file-123"
+	empty := ""
+
+	tests := []struct {
+		name    string
+		fileID  *string
+		err     error
+		deleted []string
+	}{
+		{name: "deletes the provider file", fileID: &fileID, deleted: []string{fileID}},
+		{name: "delete failure is swallowed", fileID: &fileID, err: errors.New("provider down"), deleted: []string{fileID}},
+		{name: "no file id", fileID: nil},
+		{name: "empty file id", fileID: &empty},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deleter := &recordingFileAttachmentDeleter{err: tt.err}
+			DeleteProviderFile(context.Background(), zap.NewNop(), deleter, tt.fileID)
+			require.Equal(t, tt.deleted, deleter.deleted)
+		})
+	}
+
+	require.NotPanics(t, func() { DeleteProviderFile(context.Background(), zap.NewNop(), nil, &fileID) })
+}
+
+// Cleanup is best-effort and runs on failure paths, so a nil logger must not turn a failed
+// provider delete into a panic.
+func TestDeleteProviderFile_NilLoggerIsSafe(t *testing.T) {
+	fileID := "file-123"
+	deleter := &recordingFileAttachmentDeleter{err: errors.New("provider down")}
+	require.NotPanics(t, func() { DeleteProviderFile(context.Background(), nil, deleter, &fileID) })
+	require.Equal(t, []string{fileID}, deleter.deleted)
+
+	attachment := models.FileAttachment{FileID: &fileID, FileType: "text"}
+	require.NotPanics(t, func() { AbandonFileAttachmentUpload(context.Background(), nil, deleter, attachment, "") })
 }
