@@ -131,11 +131,14 @@ test('restoring a previous prompt appends a second, reversed entry and updates t
 });
 
 test('the compaction log no longer lists personality prompt changes', async ({
-  authenticatedPage: page,
-  compactionLogPage,
+  memoriesPage,
+  userWithPersonality,
 }) => {
-  await compactionLogPage.navigateTo();
-  await expect(compactionLogPage.heading).toBeVisible();
+  // Memory Manager needs a personality to show its tabs, like the other memory specs.
+  const { page } = userWithPersonality;
+  await memoriesPage.navigateTo();
+  await memoriesPage.compactionLogTab.click();
+  await expect(memoriesPage.compactionLogTab).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('prompt-change-toggle')).toHaveCount(0);
   await expect(page.getByRole('list', { name: 'Personality prompt changes' })).toHaveCount(0);
 });
