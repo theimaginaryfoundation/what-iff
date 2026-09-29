@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -51,6 +52,11 @@ func (a *Agent) getChatMCPTools(ctx context.Context, userID, chatID uuid.UUID, r
 	specs := a.discoverMCPFunctionToolSpecs(ctx, userID, servers)
 	_ = model // preserved for call-site compatibility
 	return agenttools.OpenAIFunctionTools(specs)
+}
+
+func (a *Agent) getChatClaudeMCPConfig(ctx context.Context, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) *provider.ClaudeMCPConfig {
+	servers := a.getChatMCPServers(ctx, userID, chatID, ritualIDs)
+	return buildClaudeMCPConfigFromServers(servers)
 }
 
 func (a *Agent) prepareTurnMCPToolSpecs(ctx context.Context, chatCtx *chatContext, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) []agenttools.FunctionToolSpec {
@@ -170,6 +176,56 @@ func openAIChatCompletionFunctionTools(specs []agenttools.FunctionToolSpec) []op
 
 func geminiFunctionTools(specs []agenttools.FunctionToolSpec) []openai.ChatCompletionToolUnionParam {
 	return openAIChatCompletionFunctionTools(specs)
+}
+
+func buildClaudeMCPConfigFromServers(servers []*models.MCPServer) *provider.ClaudeMCPConfig {
+	cfg := &provider.ClaudeMCPConfig{
+		Servers:  make([]anthropic.BetaRequestMCPServerURLDefinitionParam, 0, len(servers)),
+		Toolsets: make([]anthropic.BetaToolUnionParam, 0, len(servers)),
+	}
+	for _, server := range servers {
+		if server == nil || server.ID == uuid.Nil {
+			continue
+		}
+		if strings.TrimSpace(server.ErrorMessage) != "" {
+			continue
+		}
+		serverName := "mcp-" + server.ID.String()
+		def := anthropic.BetaRequestMCPServerURLDefinitionParam{
+			Name: serverName,
+			URL:  server.ServerURL,
+		}
+		if token := claudeMCPAuthorizationToken(server); token != "" {
+			def.AuthorizationToken = anthropic.String(token)
+		}
+		cfg.Servers = append(cfg.Servers, def)
+		cfg.Toolsets = append(cfg.Toolsets, anthropic.BetaToolUnionParamOfMCPToolset(serverName))
+	}
+	if len(cfg.Servers) == 0 {
+		return nil
+	}
+	return cfg
+}
+
+func claudeMCPAuthorizationToken(server *models.MCPServer) string {
+	if server == nil {
+		return ""
+	}
+	mode := strings.TrimSpace(server.AuthMode)
+	if mode == "" || mode == models.MCPServerAuthModeHeader {
+		return strings.TrimSpace(server.AuthToken)
+	}
+	if mode != models.MCPServerAuthModeOAuth {
+		return ""
+	}
+	access := strings.TrimSpace(server.OAuthAccessToken)
+	if access == "" {
+		return ""
+	}
+	if server.OAuthAccessTokenExpiresAt != nil && time.Now().UTC().After(server.OAuthAccessTokenExpiresAt.UTC()) {
+		return ""
+	}
+	return fmt.Sprintf("Bearer %s", access)
 }
 
 func discoveryFailureStatus(server *models.MCPServer, errMsg string) string {

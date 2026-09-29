@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"runtime/debug"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/filechunker"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
@@ -150,6 +152,7 @@ type Agent struct {
 	mockStreamDelay    time.Duration
 	localLLM           bool
 	localLLMModel      string
+	mcpClient          *mcpclient.Client
 
 	// testHooks holds optional test-only seams (memory/history overrides, image ritual fakes).
 	// Must be zero in production; see assertNoTestHooksInProduction.
@@ -790,6 +793,7 @@ func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid
 
 // chatContext holds the context needed for processing a chat message
 type chatContext struct {
+	userID                 uuid.UUID
 	chat                   *models.Chat
 	memories               []string
 	liveMemories           []*models.Memory
@@ -816,6 +820,8 @@ type chatContext struct {
 	// memoryProgress is the memory-load row already shown in that timeline; the tool recorder
 	// starts from it so its snapshots keep the row. Nil when retrieval showed nothing.
 	memoryProgress *memoryLoadProgress
+	// mcpServers caches chat/ritual connectors for this turn's dynamic mcp__ tool dispatch.
+	mcpServers []*models.MCPServer
 }
 
 // handleUserMessage handles the agent processing flow for a user message
@@ -2008,6 +2014,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 	expressionsEnabled := parentChat.PersonalityExpressionsEnabled
 
 	return &chatContext{
+		userID:                 userID,
 		chat:                   parentChat,
 		memories:               memories,
 		liveMemories:           liveMemories,

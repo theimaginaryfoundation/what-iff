@@ -207,7 +207,7 @@ func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelNa
 		claudeParams := modelContext.BuildClaudeParams(modelName)
 		mcpSpecs, mcpServers := a.getSubagentMCPFunctionToolSpecs(ctx, userID, ritualIDs)
 		if len(mcpSpecs) > 0 {
-			adapter := provider.NewClaudeAdapter(claudeProvider, claudeParams, claudeFunctionTools(mcpSpecs), false, nil)
+			adapter := provider.NewClaudeAdapter(claudeProvider, claudeParams, claudeFunctionTools(mcpSpecs), false, nil, nil)
 			toolCtx := &chatContext{
 				userID:     userID,
 				chat:       &models.Chat{ID: uuid.New(), UserID: userID},
