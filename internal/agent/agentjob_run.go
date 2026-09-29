@@ -242,7 +242,7 @@ func (a *Agent) handleEphemeralPrompt(
 	// Rehydration gate: stall if this thread's import summary is still in flight (no-op otherwise).
 	a.WaitForThreadRehydration(ctx, userID, chatID)
 
-	chatCtx, err := a.prepareChatContext(ctx, userID, ephemeralUserMessage)
+	chatCtx, err := a.prepareChatContext(ctx, userID, ephemeralUserMessage, nil)
 	if err != nil {
 		return nil, err
 	}
