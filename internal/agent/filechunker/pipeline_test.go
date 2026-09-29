@@ -2,8 +2,12 @@ package filechunker
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -250,4 +254,57 @@ func TestProcessAndStore_RecordsStageMetrics(t *testing.T) {
 		upload, telemetry.AttrKind.String(telemetry.FileItemChunk), telemetry.AttrOutcome.String(telemetry.FileItemFailed)))
 	require.Zero(t, tm.HistogramCount(t, telemetry.FileOperationDuration.Name,
 		upload, telemetry.AttrStage.String(telemetry.FileStageStore)), "store is not reached")
+}
+
+// Chunks are embedded in batches of embedBatchSize, one Embeddings request per batch, and each
+// request is still recorded as its own gen_ai operation. The second batch fails here so the
+// pipeline stops before the (nil) datastore is reached.
+func TestProcessAndStore_BatchesChunkEmbeddings(t *testing.T) {
+	tm := telemetrytest.UseGlobal(t)
+
+	text := strings.Repeat("lorem ipsum dolor sit amet ", 6000)
+	totalChunks := len(ChunkText(text, DefaultChunkSize, DefaultOverlap))
+	require.Greater(t, totalChunks, embedBatchSize, "fixture must span more than one batch")
+	require.LessOrEqual(t, totalChunks, 2*embedBatchSize, "fixture must fit in two batches")
+
+	var mu sync.Mutex
+	var batchSizes []int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Input []string `json:"input"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		mu.Lock()
+		batchSizes = append(batchSizes, len(req.Input))
+		call := len(batchSizes)
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		if call > 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"bad input","type":"invalid_request_error"}}`))
+			return
+		}
+		data := make([]string, len(req.Input))
+		for i := range req.Input {
+			data[i] = fmt.Sprintf(`{"object":"embedding","index":%d,"embedding":[0.1,0.2]}`, i)
+		}
+		_, _ = fmt.Fprintf(w, `{"object":"list","data":[%s],"model":"text-embedding-3-small","usage":{"prompt_tokens":%d,"total_tokens":%d}}`,
+			strings.Join(data, ","), len(req.Input), len(req.Input))
+	}))
+	defer srv.Close()
+	client := openai.NewClient(option.WithBaseURL(srv.URL), option.WithAPIKey("test"), option.WithMaxRetries(0))
+	p := NewFileChunkPipeline(&client, nil, zap.NewNop())
+
+	err := p.ProcessAndStore(context.Background(), uuid.New(), []byte(text), "notes.txt", "text/plain")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), fmt.Sprintf("chunks %d-%d", embedBatchSize, totalChunks-1))
+
+	require.Equal(t, []int{embedBatchSize, totalChunks - embedBatchSize}, batchSizes,
+		"one request per batch, not one per chunk")
+	require.Equal(t, uint64(2), tm.HistogramCount(t, telemetry.GenAIOperationDuration.Name,
+		telemetry.AttrGenAIOperation.String("embeddings")), "each batch request is its own gen_ai operation")
+	upload := telemetry.AttrOperation.String(telemetry.FileOpUpload)
+	require.Equal(t, uint64(1), tm.HistogramCount(t, telemetry.FileOperationDuration.Name,
+		upload, telemetry.AttrStage.String(telemetry.FileStageEmbed)), "the embed stage spans all batches")
 }

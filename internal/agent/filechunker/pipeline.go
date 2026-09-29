@@ -83,6 +83,12 @@ func IsTextFileByExtension(fileName string) bool {
 	return ok
 }
 
+// embedBatchSize bounds how many chunks go into one Embeddings request. At the current
+// DefaultChunkSize (~512 tokens of English, more for dense scripts) this stays well under the
+// API's per-request input and token limits while turning a large file into a handful of round
+// trips; revisit it if the chunk size or embedding model changes.
+const embedBatchSize = 64
+
 // FileChunkPipeline orchestrates chunking and embedding of file content.
 type FileChunkPipeline struct {
 	oaiClient *openai.Client
@@ -110,7 +116,7 @@ func NewMockFileChunkPipeline(ds *datastore.Datastore, logger *zap.Logger) *File
 	return &FileChunkPipeline{ds: ds, logger: logger, skipEmbeddings: true}
 }
 
-// ProcessAndStore extracts text from content, chunks it, embeds each chunk, and stores them.
+// ProcessAndStore extracts text from content, chunks it, embeds the chunks in batches, and stores them.
 // It updates chunk_status on the FileAttachment to "chunked" (on success) or "failed" (on error).
 // This method is safe to call from a goroutine — it logs errors rather than panicking.
 func (p *FileChunkPipeline) ProcessAndStore(ctx context.Context, fileAttachmentID uuid.UUID, content []byte, fileName string, contentType string) error {
@@ -157,37 +163,36 @@ func (p *FileChunkPipeline) ProcessAndStore(ctx context.Context, fileAttachmentI
 		return nil
 	}
 
-	// 5. Embed each chunk and build storage inputs.
-	chunkInputs := make([]datastore.FileChunkInput, 0, len(textChunks))
+	// 5. Embed the chunks in bounded batches, then build storage inputs. All or nothing: a
+	//    failed batch fails the file and no chunk is stored, so every chunk counts as failed.
 	doneEmbed := metrics.TimeFileStage(ctx, telemetry.FileOpUpload, telemetry.FileStageEmbed)
-	for _, tc := range textChunks {
-		vec, err := embedding.CreateEmbedding(ctx, p.oaiClient, tc.Content)
-		if err != nil {
-			doneEmbed(err)
-			metrics.RecordFileItems(ctx, telemetry.FileOpUpload, telemetry.FileItemChunk, telemetry.FileItemFailed, len(textChunks))
-			p.logger.Error("failed to create embedding for chunk",
-				zap.Error(err),
-				zap.String("file_name", fileName),
-				zap.Int("sequence", tc.Sequence),
-				zap.String("file_attachment_id", fileAttachmentID.String()))
-			return fmt.Errorf("embedding chunk %d of %q: %w", tc.Sequence, fileName, err)
-		}
-
-		chunkInputs = append(chunkInputs, datastore.FileChunkInput{
+	vecs, err := p.embedChunks(ctx, textChunks)
+	doneEmbed(err)
+	if err != nil {
+		metrics.RecordFileItems(ctx, telemetry.FileOpUpload, telemetry.FileItemChunk, telemetry.FileItemFailed, len(textChunks))
+		p.logger.Error("failed to create embeddings for chunks",
+			zap.Error(err),
+			zap.String("file_name", fileName),
+			zap.Int("chunk_count", len(textChunks)),
+			zap.String("file_attachment_id", fileAttachmentID.String()))
+		return fmt.Errorf("embedding %q: %w", fileName, err)
+	}
+	chunkInputs := make([]datastore.FileChunkInput, len(textChunks))
+	for i, tc := range textChunks {
+		chunkInputs[i] = datastore.FileChunkInput{
 			Content:   tc.Content,
-			Embedding: vec,
+			Embedding: vecs[i],
 			Sequence:  tc.Sequence,
 			Metadata:  map[string]string{"fileName": fileName},
-		})
+		}
 	}
-	doneEmbed(nil)
 
 	// 6. Store chunks. The datastore handles setting chunk_status to "chunked" on
 	//    success and "failed" on error.
 	// TODO: Add nil check for p.ds before calling CreateFileChunks. Currently all
 	// callers provide a datastore, but defensive check would prevent nil panic.
 	doneStore := metrics.TimeFileStage(ctx, telemetry.FileOpUpload, telemetry.FileStageStore)
-	err := p.ds.CreateFileChunks(ctx, fileAttachmentID, chunkInputs)
+	err = p.ds.CreateFileChunks(ctx, fileAttachmentID, chunkInputs)
 	alreadyChunked := errors.Is(err, datastore.ErrAlreadyChunked)
 	if alreadyChunked {
 		doneStore(nil)
@@ -218,4 +223,27 @@ func (p *FileChunkPipeline) ProcessAndStore(ctx context.Context, fileAttachmentI
 		zap.String("file_attachment_id", fileAttachmentID.String()))
 
 	return nil
+}
+
+// embedChunks returns one vector per chunk, in order, making one Embeddings request per
+// embedBatchSize chunks. Each request is recorded on the gen_ai metrics by
+// embedding.CreateEmbeddings. It stops at the first failed batch.
+func (p *FileChunkPipeline) embedChunks(ctx context.Context, chunks []TextChunk) ([][]float32, error) {
+	vecs := make([][]float32, 0, len(chunks))
+	for start := 0; start < len(chunks); start += embedBatchSize {
+		batch := chunks[start:min(start+embedBatchSize, len(chunks))]
+		inputs := make([]string, len(batch))
+		for i, c := range batch {
+			inputs[i] = c.Content
+		}
+		batchVecs, err := embedding.CreateEmbeddings(ctx, p.oaiClient, inputs)
+		if err == nil && len(batchVecs) != len(batch) {
+			err = fmt.Errorf("embeddings response has %d vectors for %d chunks", len(batchVecs), len(batch))
+		}
+		if err != nil {
+			return nil, fmt.Errorf("chunks %d-%d: %w", batch[0].Sequence, batch[len(batch)-1].Sequence, err)
+		}
+		vecs = append(vecs, batchVecs...)
+	}
+	return vecs, nil
 }
