@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
+	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -64,4 +65,21 @@ func TestDiscoveryFailureStatus(t *testing.T) {
 
 	disabled := &models.MCPServer{Status: models.MCPServerStatusDisabled}
 	require.Equal(t, models.MCPServerStatusDisabled, discoveryFailureStatus(disabled, `connector status "disabled" not eligible`))
+}
+
+func TestFilterMCPToolSpecsByLoaded_RequiresExplicitLoadedSet(t *testing.T) {
+	specs := []agenttools.FunctionToolSpec{
+		{Name: "mcp__a__search"},
+		{Name: "mcp__a__get"},
+	}
+	// No loaded state => no MCP tool exposure (explicit opt-in semantics).
+	require.Nil(t, filterMCPToolSpecsByLoaded(specs, nil))
+	require.Nil(t, filterMCPToolSpecsByLoaded(specs, map[uuid.UUID][]string{}))
+
+	serverID := uuid.New()
+	out := filterMCPToolSpecsByLoaded(specs, map[uuid.UUID][]string{
+		serverID: {"mcp__a__get"},
+	})
+	require.Len(t, out, 1)
+	require.Equal(t, "mcp__a__get", out[0].Name)
 }

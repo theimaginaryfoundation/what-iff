@@ -61,6 +61,15 @@ func createMCPServerTestSchema(t *testing.T, db *sql.DB) {
 			mcp_server_id uuid NOT NULL,
 			PRIMARY KEY (ritual_id, mcp_server_id)
 		)`,
+		`CREATE TABLE chat_mcp_tool_states (
+			id uuid PRIMARY KEY,
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL,
+			chat_id uuid NOT NULL,
+			mcp_server_id uuid NOT NULL,
+			loaded_tools json,
+			UNIQUE(chat_id, mcp_server_id)
+		)`,
 		`CREATE TABLE mcp_oauth_sessions (
 			id uuid PRIMARY KEY,
 			created_at datetime NOT NULL,
@@ -672,6 +681,60 @@ func TestRemoveMCPServerFromChat_ServerNotFound(t *testing.T) {
 
 	err := ds.RemoveMCPServerFromChat(ctx, userID, chatID, uuid.New())
 	require.ErrorIs(t, err, ErrMCPServerNotFound)
+}
+
+func TestSetAndListChatMCPLoadedTools(t *testing.T) {
+	ds, cleanup := newMCPServerTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMCPServerTestUser(t, ds)
+	modelID := createMCPServerTestModel(t, ds)
+	chatID := createMCPServerTestChat(t, ds, userID, modelID)
+	created, err := ds.CreateMCPServer(ctx, userID, baseMCPServerModel())
+	require.NoError(t, err)
+	require.NoError(t, ds.AddMCPServerToChat(ctx, userID, chatID, created.ID))
+
+	tools := []string{
+		"mcp__server__search",
+		"mcp__server__search", // duplicate ignored
+		"  mcp__server__get  ",
+		"",
+		"not_mcp_tool",
+	}
+	require.NoError(t, ds.SetChatMCPLoadedTools(ctx, userID, chatID, created.ID, tools))
+
+	loaded, err := ds.ListChatMCPLoadedTools(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"mcp__server__get", "mcp__server__search"}, loaded[created.ID])
+
+	require.NoError(t, ds.ClearChatMCPLoadedTools(ctx, userID, chatID, created.ID))
+	loaded, err = ds.ListChatMCPLoadedTools(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Empty(t, loaded[created.ID])
+}
+
+func TestClearAllChatMCPLoadedTools(t *testing.T) {
+	ds, cleanup := newMCPServerTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMCPServerTestUser(t, ds)
+	modelID := createMCPServerTestModel(t, ds)
+	chatID := createMCPServerTestChat(t, ds, userID, modelID)
+	serverA, err := ds.CreateMCPServer(ctx, userID, models.MCPServer{Name: "A", Description: "A", ServerURL: "https://a.example/mcp"})
+	require.NoError(t, err)
+	serverB, err := ds.CreateMCPServer(ctx, userID, models.MCPServer{Name: "B", Description: "B", ServerURL: "https://b.example/mcp"})
+	require.NoError(t, err)
+	require.NoError(t, ds.AddMCPServerToChat(ctx, userID, chatID, serverA.ID))
+	require.NoError(t, ds.AddMCPServerToChat(ctx, userID, chatID, serverB.ID))
+	require.NoError(t, ds.SetChatMCPLoadedTools(ctx, userID, chatID, serverA.ID, []string{"mcp__a__one"}))
+	require.NoError(t, ds.SetChatMCPLoadedTools(ctx, userID, chatID, serverB.ID, []string{"mcp__b__two"}))
+
+	require.NoError(t, ds.ClearAllChatMCPLoadedTools(ctx, userID, chatID))
+	loaded, err := ds.ListChatMCPLoadedTools(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Empty(t, loaded)
 }
 
 func TestSaveMCPServerOAuthTokens_RefreshTokenOnlyPreservesStatus(t *testing.T) {

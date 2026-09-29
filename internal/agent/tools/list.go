@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
@@ -51,7 +52,7 @@ const ListDescription = `List your available resources. Pick a kind:
 - files — your uploaded files, most-recent first. Filter with file_type (e.g. "image", "pdf") and scope ("personality" docs, "conversation" attachments, or "all"). Images dominate most libraries, so pass file_type to cut through them.
 - conversations — your past conversations, including archived imports, that have messages, most-recent first (id, name). Pass an id to find_context (mode="conversation"/"origin") to read one.
 - jobs — your scheduled jobs (id, name, status, next_runtime for still-active ones). Active by default; set include_completed=true to also see finished/failed one-offs.
-- mcp_servers — MCP servers connected to the current conversation.
+- mcp_servers — MCP servers connected to the current conversation, with discoverable MCP tools and currently loaded tools for this chat.
 
 Use filter for a free-text name/content match (files, conversations, jobs). Use limit to cap page size and page (1-based) to walk further results when has_more is true.`
 
@@ -110,17 +111,28 @@ type listStore interface {
 	ListChats(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.ChatFilters) (*models.PaginatedResponse, error)
 	ListAgentJobs(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.AgentJobFilters) (*models.PaginatedResponse, error)
 	ListChatMCPServers(ctx context.Context, userID, chatID uuid.UUID) ([]*models.MCPServer, error)
+	ListChatMCPLoadedTools(ctx context.Context, userID, chatID uuid.UUID) (map[uuid.UUID][]string, error)
+}
+
+type listMCPDiscoverer interface {
+	DiscoverTools(ctx context.Context, userID uuid.UUID, servers []*models.MCPServer) (mcpclient.DiscoveryResult, error)
 }
 
 // ListTool implements the unified `list` agent tool.
 type ListTool struct {
-	store  listStore
-	logger *zap.Logger
+	store         listStore
+	logger        *zap.Logger
+	mcpDiscoverer listMCPDiscoverer
 }
 
 // NewListTool constructs a ListTool backed by the datastore.
 func NewListTool(ds *datastore.Datastore, logger *zap.Logger) *ListTool {
 	return &ListTool{store: ds, logger: logger}
+}
+
+// SetMCPDiscoverer enables MCP tool inventory output for kind="mcp_servers".
+func (t *ListTool) SetMCPDiscoverer(discoverer listMCPDiscoverer) {
+	t.mcpDiscoverer = discoverer
 }
 
 // --- argument + result types ---------------------------------------------
@@ -138,18 +150,20 @@ type listArgs struct {
 // listItem is a single uniform row. Fields are populated per kind and omitted when empty, so every
 // kind reads through one shape while only carrying what's relevant.
 type listItem struct {
-	ID           string `json:"id"`
-	Name         string `json:"name,omitempty"`
-	Description  string `json:"description,omitempty"`
-	Provider     string `json:"provider,omitempty"`      // models
-	ToolSupport  *bool  `json:"tool_support,omitempty"`  // models
-	FileType     string `json:"file_type,omitempty"`     // files
-	Status       string `json:"status,omitempty"`        // jobs, mcp_servers
-	StatusDetail string `json:"status_detail,omitempty"` // mcp_servers
-	NextRuntime  string `json:"next_runtime,omitempty"`  // jobs (omitted when complete/failed)
-	UpdatedAt    string `json:"updated_at,omitempty"`    // personalities, conversations
-	URL          string `json:"url,omitempty"`           // mcp_servers
-	Archived     *bool  `json:"archived,omitempty"`      // conversations
+	ID           string   `json:"id"`
+	Name         string   `json:"name,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	Provider     string   `json:"provider,omitempty"`      // models
+	ToolSupport  *bool    `json:"tool_support,omitempty"`  // models
+	FileType     string   `json:"file_type,omitempty"`     // files
+	Status       string   `json:"status,omitempty"`        // jobs, mcp_servers
+	StatusDetail string   `json:"status_detail,omitempty"` // mcp_servers
+	MCPTools     []string `json:"tools,omitempty"`         // mcp_servers
+	LoadedTools  []string `json:"loaded_tools,omitempty"`  // mcp_servers
+	NextRuntime  string   `json:"next_runtime,omitempty"`  // jobs (omitted when complete/failed)
+	UpdatedAt    string   `json:"updated_at,omitempty"`    // personalities, conversations
+	URL          string   `json:"url,omitempty"`           // mcp_servers
+	Archived     *bool    `json:"archived,omitempty"`      // conversations
 }
 
 type listResult struct {

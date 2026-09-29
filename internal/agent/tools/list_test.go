@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -22,6 +23,7 @@ type fakeListStore struct {
 	chats      []*models.Chat
 	jobs       []*models.AgentJob
 	mcp        []*models.MCPServer
+	loadedMCP  map[uuid.UUID][]string
 
 	// captured inputs
 	lastFileFilters models.FileAttachmentFilters
@@ -76,6 +78,12 @@ func (f *fakeListStore) ListChatMCPServers(_ context.Context, _, chatID uuid.UUI
 	f.lastMCPChatID = chatID
 	return f.mcp, nil
 }
+func (f *fakeListStore) ListChatMCPLoadedTools(_ context.Context, _, _ uuid.UUID) (map[uuid.UUID][]string, error) {
+	if f.loadedMCP == nil {
+		return map[uuid.UUID][]string{}, nil
+	}
+	return f.loadedMCP, nil
+}
 
 func toAny[T any](in []T) []any {
 	out := make([]any, len(in))
@@ -110,6 +118,15 @@ func paginatePage(items []any, pageNum, pageSize int) *models.PaginatedResponse 
 
 func newTestListTool(store listStore) *ListTool {
 	return &ListTool{store: store, logger: zap.NewNop()}
+}
+
+type fakeMCPDiscoverer struct {
+	out mcpclient.DiscoveryResult
+	err error
+}
+
+func (f fakeMCPDiscoverer) DiscoverTools(_ context.Context, _ uuid.UUID, _ []*models.MCPServer) (mcpclient.DiscoveryResult, error) {
+	return f.out, f.err
 }
 
 func listTestChat() *models.Chat {
@@ -382,6 +399,44 @@ func TestListMCPServers_PartialDiscoveryFailureAddsNoteNotError(t *testing.T) {
 	}
 }
 
+func TestListMCPServers_IncludesDiscoverableAndLoadedTools(t *testing.T) {
+	chat := listTestChat()
+	serverID := uuid.New()
+	store := &fakeListStore{
+		mcp: []*models.MCPServer{
+			{ID: serverID, Name: "jira", ServerURL: "https://jira.example/mcp", Status: models.MCPServerStatusActive},
+		},
+		loadedMCP: map[uuid.UUID][]string{
+			serverID: {"mcp__jira__get_issue"},
+		},
+	}
+	tool := newTestListTool(store)
+	tool.SetMCPDiscoverer(fakeMCPDiscoverer{
+		out: mcpclient.DiscoveryResult{
+			Tools: []mcpclient.ConnectorTool{
+				{ConnectorID: serverID, FullName: "mcp__jira__get_issue"},
+				{ConnectorID: serverID, FullName: "mcp__jira__search_issues"},
+			},
+		},
+	})
+	out, err := tool.List(context.Background(), chat, []byte(`{"kind":"mcp_servers"}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	res := decodeList(t, out)
+	requireContains := func(items []string, want string) {
+		t.Helper()
+		for _, item := range items {
+			if item == want {
+				return
+			}
+		}
+		t.Fatalf("expected %q in %+v", want, items)
+	}
+	requireContains(res.Items[0].MCPTools, "mcp__jira__search_issues")
+	requireContains(res.Items[0].LoadedTools, "mcp__jira__get_issue")
+}
+
 func TestListPersonalities(t *testing.T) {
 	now := time.Now()
 	store := &fakeListStore{pers: []*models.Personality{
@@ -452,6 +507,9 @@ func (e *erroringListStore) ListAgentJobs(_ context.Context, _ uuid.UUID, _, _ i
 	return nil, errListStoreBoom
 }
 func (e *erroringListStore) ListChatMCPServers(_ context.Context, _, _ uuid.UUID) ([]*models.MCPServer, error) {
+	return nil, errListStoreBoom
+}
+func (e *erroringListStore) ListChatMCPLoadedTools(_ context.Context, _, _ uuid.UUID) (map[uuid.UUID][]string, error) {
 	return nil, errListStoreBoom
 }
 
