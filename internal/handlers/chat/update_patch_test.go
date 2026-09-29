@@ -22,16 +22,16 @@ import (
 func boolPtr(b bool) *bool { return &b }
 
 type fakeStore struct {
-	getChatFn              func(ctx context.Context, userID, id uuid.UUID) (*models.Chat, error)
-	getChatContextFn       func(ctx context.Context, userID, chatID uuid.UUID) (*models.ChatContext, error)
-	updateScratchpadFn     func(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
-	listChatsFn            func(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.ChatFilters) (*models.PaginatedResponse, error)
-	updateChatFn           func(ctx context.Context, userID uuid.UUID, chat models.Chat) (*models.Chat, error)
-	markChatMessagesReadFn func(ctx context.Context, userID, chatID uuid.UUID) (int, error)
+	getChatFn                 func(ctx context.Context, userID, id uuid.UUID) (*models.Chat, error)
+	getChatContextFn          func(ctx context.Context, userID, chatID uuid.UUID) (*models.ChatContext, error)
+	updateScratchpadFn        func(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
+	listChatsFn               func(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.ChatFilters) (*models.PaginatedResponse, error)
+	updateChatFn              func(ctx context.Context, userID uuid.UUID, chat models.Chat) (*models.Chat, error)
+	markChatMessagesReadFn    func(ctx context.Context, userID, chatID uuid.UUID) (int, error)
 	markAllChatMessagesReadFn func(ctx context.Context, userID uuid.UUID) (int, error)
-	getModelByNameFn       func(ctx context.Context, name string) (*models.Model, error)
-	isFirstChatFn          func(ctx context.Context, userID, chatID uuid.UUID) (bool, error)
-	countAllMessagesFn     func(ctx context.Context, userID uuid.UUID, cap int) (int, error)
+	getModelByNameFn          func(ctx context.Context, name string) (*models.Model, error)
+	isFirstChatFn             func(ctx context.Context, userID, chatID uuid.UUID) (bool, error)
+	countAllMessagesFn        func(ctx context.Context, userID uuid.UUID, cap int) (int, error)
 }
 
 func (f *fakeStore) CreateChat(ctx context.Context, userID uuid.UUID, chat models.Chat) (*models.Chat, error) {
