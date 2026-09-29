@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
+	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
@@ -96,6 +97,79 @@ func TestLoadMCPToolsTool_ServerNotConnected(t *testing.T) {
 	out, err := agent.loadMCPToolsTool(ctx, chatCtx, raw)
 	require.NoError(t, err)
 	require.Contains(t, out, "not connected to this chat")
+}
+
+func TestLoadMCPToolsTool_ResolvesConnectorByNameOrOmittedID(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestMCPRPCServer()
+	defer srv.Close()
+
+	agent, chatCtx, mcpServerID, cleanup := newMCPLifecycleAgentFixture(t, srv.URL)
+	defer cleanup()
+
+	for name, raw := range map[string]string{
+		"by name":             `{"mcp_server_id":"Tracker","tools":"search"}`,
+		"omitted, single one": `{"tools":["get"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, err := agent.loadMCPToolsTool(ctx, chatCtx, []byte(raw))
+			require.NoError(t, err)
+			var res mcpToolLifecycleResult
+			require.NoError(t, json.Unmarshal([]byte(out), &res))
+			require.Empty(t, res.Error)
+			require.Equal(t, mcpServerID.String(), res.ServerID)
+			require.Len(t, res.Loaded, 1)
+		})
+	}
+
+	out, err := agent.loadMCPToolsTool(ctx, chatCtx, []byte(`{"mcp_server_id":"nope","tools":["get"]}`))
+	require.NoError(t, err)
+	require.Contains(t, out, `\"tracker\" (mcp_server_id=`+mcpServerID.String())
+}
+
+func TestLoadMCPToolsTool_SyncsToolsIntoSameTurn(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestMCPRPCServer()
+	defer srv.Close()
+
+	agent, chatCtx, mcpServerID, cleanup := newMCPLifecycleAgentFixture(t, srv.URL)
+	defer cleanup()
+
+	var synced [][]string
+	chatCtx.syncMCPTools = func(specs []agenttools.FunctionToolSpec) {
+		names := make([]string, 0, len(specs))
+		for _, s := range specs {
+			names = append(names, s.Name)
+		}
+		synced = append(synced, names)
+	}
+
+	// No change yet: nothing to sync.
+	agent.syncLoadedMCPTools(ctx, chatCtx)
+	require.Empty(t, synced)
+
+	raw, _ := json.Marshal(map[string]any{"mcp_server_id": mcpServerID.String(), "tools": []string{"search"}})
+	_, err := agent.loadMCPToolsTool(ctx, chatCtx, raw)
+	require.NoError(t, err)
+	require.True(t, chatCtx.mcpToolsChanged)
+	agent.syncLoadedMCPTools(ctx, chatCtx)
+	require.False(t, chatCtx.mcpToolsChanged)
+	require.Len(t, synced, 1)
+	require.Len(t, synced[0], 1)
+	require.Contains(t, synced[0][0], "__search")
+	require.True(t, mcpToolIsLoaded(chatCtx, synced[0][0]), "same-turn dispatch must accept the loaded tool")
+
+	// Loading the same tool again is a no-op and must not re-sync.
+	_, err = agent.loadMCPToolsTool(ctx, chatCtx, raw)
+	require.NoError(t, err)
+	agent.syncLoadedMCPTools(ctx, chatCtx)
+	require.Len(t, synced, 1)
+
+	_, err = agent.unloadMCPToolsTool(ctx, chatCtx, []byte(`{"tools":["*"]}`))
+	require.NoError(t, err)
+	agent.syncLoadedMCPTools(ctx, chatCtx)
+	require.Len(t, synced, 2)
+	require.Empty(t, synced[1])
 }
 
 func newMCPLifecycleAgentFixture(t *testing.T, serverURL string) (*Agent, *chatContext, uuid.UUID, func()) {

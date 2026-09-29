@@ -18,6 +18,63 @@ type mcpToolLifecycleArgs struct {
 	Tools       []string `json:"tools"`
 }
 
+// UnmarshalJSON accepts the argument shapes models actually send, not only the declared schema:
+// tools as a JSON array, a JSON-encoded array string, a comma-separated string or a single name,
+// plus a few common key aliases (server_id, connector_id, tool_names).
+func (args *mcpToolLifecycleArgs) UnmarshalJSON(b []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	for _, key := range []string{"mcp_server_id", "server_id", "connector_id", "mcp_server", "connector"} {
+		v, ok := raw[key]
+		if !ok {
+			continue
+		}
+		var id string
+		if err := json.Unmarshal(v, &id); err != nil {
+			return fmt.Errorf("%s must be a string", key)
+		}
+		if strings.TrimSpace(id) != "" {
+			args.MCPServerID = id
+			break
+		}
+	}
+	for _, key := range []string{"tools", "tool_names", "tool"} {
+		v, ok := raw[key]
+		if !ok {
+			continue
+		}
+		names, err := decodeLenientStringList(v)
+		if err != nil {
+			return fmt.Errorf("%s must be an array of tool names", key)
+		}
+		if len(names) > 0 {
+			args.Tools = names
+			break
+		}
+	}
+	return nil
+}
+
+func decodeLenientStringList(v json.RawMessage) ([]string, error) {
+	var list []string
+	if err := json.Unmarshal(v, &list); err == nil {
+		return list, nil
+	}
+	var single string
+	if err := json.Unmarshal(v, &single); err != nil {
+		return nil, err
+	}
+	single = strings.TrimSpace(single)
+	if strings.HasPrefix(single, "[") {
+		if err := json.Unmarshal([]byte(single), &list); err == nil {
+			return list, nil
+		}
+	}
+	return strings.Split(single, ","), nil
+}
+
 type mcpToolLifecycleResult struct {
 	ServerID      string   `json:"mcp_server_id,omitempty"`
 	Loaded        []string `json:"loaded,omitempty"`
@@ -37,18 +94,14 @@ func (a *Agent) loadMCPToolsTool(ctx context.Context, chatCtx *chatContext, inpu
 	if err := json.Unmarshal(input, &args); err != nil {
 		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{Error: fmt.Sprintf("invalid arguments: %v", err)})
 	}
-	serverID, err := parseMCPServerIDArg(args.MCPServerID)
+	server, err := a.resolveChatMCPServer(ctx, chatCtx, args.MCPServerID)
 	if err != nil {
 		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{Error: err.Error()})
 	}
+	serverID := server.ID
 	requested := normalizeRequestedTools(args.Tools)
 	if len(requested.names) == 0 && !requested.all {
 		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{ServerID: serverID.String(), Error: "tools is required and must include at least one tool name"})
-	}
-
-	server, err := a.findChatMCPServerByID(ctx, chatCtx.userID, chatCtx.chat.ID, serverID)
-	if err != nil {
-		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{ServerID: serverID.String(), Error: err.Error()})
 	}
 	discovery, err := a.mcpClient.DiscoverTools(ctx, chatCtx.userID, []*models.MCPServer{server})
 	if err != nil && len(discovery.Tools) == 0 {
@@ -96,7 +149,15 @@ func (a *Agent) loadMCPToolsTool(ctx context.Context, chatCtx *chatContext, inpu
 		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{ServerID: serverID.String(), Error: err.Error()})
 	}
 
-	chatCtx.setMCPServerCache(chatCtx.mcpServers, loadedByServerWithUpdate(loadedByServer, server.ID, next))
+	// Keep the loaded connector in the turn cache so same-turn dispatch and tool sync can find it.
+	servers := chatCtx.mcpServers
+	if !slices.ContainsFunc(servers, func(s *models.MCPServer) bool { return s != nil && s.ID == server.ID }) {
+		servers = append(slices.Clone(servers), server)
+	}
+	chatCtx.setMCPServerCache(servers, loadedByServerWithUpdate(loadedByServer, server.ID, next))
+	if len(loaded) > 0 {
+		chatCtx.mcpToolsChanged = true
+	}
 	res := mcpToolLifecycleResult{
 		ServerID:      server.ID.String(),
 		Loaded:        loaded,
@@ -126,12 +187,18 @@ func (a *Agent) unloadMCPToolsTool(ctx context.Context, chatCtx *chatContext, in
 			return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{Error: err.Error()})
 		}
 		chatCtx.setMCPServerCache(chatCtx.mcpServers, map[uuid.UUID][]string{})
+		chatCtx.mcpToolsChanged = true
 		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{Note: "Unloaded all MCP tools for this chat."})
 	}
 
-	serverID, err := parseMCPServerIDArg(args.MCPServerID)
+	// A bare UUID is taken as-is so tools of a connector detached since loading can still be unloaded.
+	serverID, err := uuid.Parse(strings.TrimSpace(args.MCPServerID))
 	if err != nil {
-		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{Error: err.Error()})
+		server, resolveErr := a.resolveChatMCPServer(ctx, chatCtx, args.MCPServerID)
+		if resolveErr != nil {
+			return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{Error: resolveErr.Error()})
+		}
+		serverID = server.ID
 	}
 	loadedByServer, err := a.ds.ListChatMCPLoadedTools(ctx, chatCtx.userID, chatCtx.chat.ID)
 	if err != nil {
@@ -151,6 +218,7 @@ func (a *Agent) unloadMCPToolsTool(ctx context.Context, chatCtx *chatContext, in
 		}
 		loadedByServer = loadedByServerWithUpdate(loadedByServer, serverID, nil)
 		chatCtx.setMCPServerCache(chatCtx.mcpServers, loadedByServer)
+		chatCtx.mcpToolsChanged = true
 		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{
 			ServerID:  serverID.String(),
 			Unloaded:  setToSortedSlice(current),
@@ -182,6 +250,9 @@ func (a *Agent) unloadMCPToolsTool(ctx context.Context, chatCtx *chatContext, in
 	}
 	loadedByServer = loadedByServerWithUpdate(loadedByServer, serverID, next)
 	chatCtx.setMCPServerCache(chatCtx.mcpServers, loadedByServer)
+	if len(unloaded) > 0 {
+		chatCtx.mcpToolsChanged = true
+	}
 
 	return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{
 		ServerID:  serverID.String(),
@@ -191,29 +262,77 @@ func (a *Agent) unloadMCPToolsTool(ctx context.Context, chatCtx *chatContext, in
 	})
 }
 
-func parseMCPServerIDArg(raw string) (uuid.UUID, error) {
-	s := strings.TrimSpace(raw)
-	if s == "" {
-		return uuid.Nil, fmt.Errorf("mcp_server_id is required")
-	}
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("invalid mcp_server_id %q", raw)
-	}
-	return id, nil
-}
-
-func (a *Agent) findChatMCPServerByID(ctx context.Context, userID, chatID, serverID uuid.UUID) (*models.MCPServer, error) {
-	servers, err := a.ds.ListChatMCPServers(ctx, userID, chatID)
+// resolveChatMCPServer finds the connector a lifecycle call targets. Models do not always pass
+// the UUID: some pass the connector name or its mcp__<prefix>__ key, and some omit it when the
+// chat has a single connector. Candidates include ritual-attached connectors cached for this
+// turn, not only connectors attached to the chat itself. Errors name the valid connectors so
+// the model can retry with a correct id.
+func (a *Agent) resolveChatMCPServer(ctx context.Context, chatCtx *chatContext, raw string) (*models.MCPServer, error) {
+	servers, err := a.lifecycleCandidateServers(ctx, chatCtx)
 	if err != nil {
 		return nil, err
 	}
-	for _, server := range servers {
-		if server != nil && server.ID == serverID {
-			return server, nil
+	if len(servers) == 0 {
+		return nil, fmt.Errorf("no MCP connectors are connected to this chat")
+	}
+	want := strings.TrimSpace(raw)
+	if want == "" {
+		if len(servers) == 1 {
+			return servers[0], nil
+		}
+		return nil, fmt.Errorf("mcp_server_id is required; connectors in this chat: %s", describeMCPServers(servers))
+	}
+	if id, err := uuid.Parse(want); err == nil {
+		for _, s := range servers {
+			if s.ID == id {
+				return s, nil
+			}
+		}
+		return nil, fmt.Errorf("mcp connector %s is not connected to this chat; connectors in this chat: %s", id.String(), describeMCPServers(servers))
+	}
+	key := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(want, "mcp__"), "__"))
+	var matches []*models.MCPServer
+	for _, s := range servers {
+		compactID := strings.ReplaceAll(s.ID.String(), "-", "")
+		if strings.EqualFold(strings.TrimSpace(s.Name), want) || (len(key) >= 8 && strings.HasPrefix(compactID, key)) {
+			matches = append(matches, s)
 		}
 	}
-	return nil, fmt.Errorf("mcp connector %s is not connected to this chat", serverID.String())
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	return nil, fmt.Errorf("invalid mcp_server_id %q; pass one of: %s", raw, describeMCPServers(servers))
+}
+
+// lifecycleCandidateServers merges the chat's own connectors with this turn's cached connectors
+// (which include ritual/mood-attached ones).
+func (a *Agent) lifecycleCandidateServers(ctx context.Context, chatCtx *chatContext) ([]*models.MCPServer, error) {
+	chatServers, err := a.ds.ListChatMCPServers(ctx, chatCtx.userID, chatCtx.chat.ID)
+	if err != nil {
+		return nil, err
+	}
+	all := append(append([]*models.MCPServer{}, chatServers...), chatCtx.mcpServers...)
+	out := make([]*models.MCPServer, 0, len(all))
+	seen := map[uuid.UUID]struct{}{}
+	for _, s := range all {
+		if s == nil || s.ID == uuid.Nil {
+			continue
+		}
+		if _, dup := seen[s.ID]; dup {
+			continue
+		}
+		seen[s.ID] = struct{}{}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+func describeMCPServers(servers []*models.MCPServer) string {
+	parts := make([]string, 0, len(servers))
+	for _, s := range servers {
+		parts = append(parts, fmt.Sprintf("%q (mcp_server_id=%s)", strings.TrimSpace(s.Name), s.ID.String()))
+	}
+	return strings.Join(parts, ", ")
 }
 
 type requestedTools struct {

@@ -2,11 +2,11 @@ package tools
 
 const LoadMCPToolsDescription = `Load MCP tools from one connector into this chat's active toolset.
 
-Use this after listing connectors/tools. Loaded MCP tools stay available across future turns in this chat until you unload them.
+The connectors in this chat and their tool names are listed in your context (and by list(kind="mcp_servers")). Loaded tools can be called right away in this same turn, and stay available in later turns of this chat until you unload them.
 
 Inputs:
-- mcp_server_id (required): connector UUID from list(kind="mcp_servers")
-- tools (required): array of MCP tool names to load. Use names from list(kind="mcp_servers").
+- mcp_server_id (required): connector UUID (the connector's name also works)
+- tools (required): array of MCP tool names to load.
 
 Notes:
 - You can pass canonical full MCP names (mcp__<connector>__<tool>) or connector-local names.

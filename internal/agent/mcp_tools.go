@@ -67,6 +67,61 @@ func (a *Agent) prepareTurnMCPToolSpecs(ctx context.Context, chatCtx *chatContex
 	return filterMCPToolSpecsByLoaded(specs, loadedByServer)
 }
 
+// bindMCPToolSync lets the agent loop re-declare MCP tools on this turn's adapter, so tools
+// loaded by load_mcp_tools are callable in the same turn rather than only from the next one.
+// Adapters without an MCP tool setter (mock) leave syncMCPTools nil.
+func bindMCPToolSync(chatCtx *chatContext, adapter provider.AgentAdapter) {
+	if chatCtx == nil {
+		return
+	}
+	chatCtx.mcpToolsChanged = false
+	switch ad := adapter.(type) {
+	case *provider.GeminiAdapter:
+		chatCtx.syncMCPTools = func(specs []agenttools.FunctionToolSpec) {
+			ad.SetMCPTools(geminiFunctionTools(specs))
+		}
+	case interface {
+		SetMCPTools([]openai.ChatCompletionToolUnionParam)
+	}:
+		chatCtx.syncMCPTools = func(specs []agenttools.FunctionToolSpec) {
+			ad.SetMCPTools(openAIChatCompletionFunctionTools(specs))
+		}
+	case interface {
+		SetMCPTools([]anthropic.ToolUnionParam)
+	}:
+		chatCtx.syncMCPTools = func(specs []agenttools.FunctionToolSpec) {
+			ad.SetMCPTools(claudeFunctionTools(specs))
+		}
+	case interface {
+		SetMCPTools([]responses.ToolUnionParam)
+	}:
+		chatCtx.syncMCPTools = func(specs []agenttools.FunctionToolSpec) {
+			ad.SetMCPTools(agenttools.OpenAIFunctionTools(specs))
+		}
+	default:
+		chatCtx.syncMCPTools = nil
+	}
+}
+
+// syncLoadedMCPTools re-declares the loaded MCP tools on the adapter after a tool round in
+// which load_mcp_tools/unload_mcp_tools changed the loaded set. Discovery is cached, so this
+// does not re-list tools from the connector on every round.
+func (a *Agent) syncLoadedMCPTools(ctx context.Context, chatCtx *chatContext) {
+	if chatCtx == nil || !chatCtx.mcpToolsChanged {
+		return
+	}
+	chatCtx.mcpToolsChanged = false
+	if chatCtx.syncMCPTools == nil {
+		return
+	}
+	loaded := make(map[uuid.UUID][]string, len(chatCtx.loadedMCPTools))
+	for id, set := range chatCtx.loadedMCPTools {
+		loaded[id] = setToSortedSlice(set)
+	}
+	specs := a.discoverMCPFunctionToolSpecs(ctx, chatCtx.userID, chatCtx.mcpServers)
+	chatCtx.syncMCPTools(filterMCPToolSpecsByLoaded(specs, loaded))
+}
+
 func (a *Agent) getChatMCPServers(ctx context.Context, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) []*models.MCPServer {
 	servers, err := a.ds.ListChatMCPServers(ctx, userID, chatID)
 	if err != nil {
@@ -174,8 +229,14 @@ func openAIChatCompletionFunctionTools(specs []agenttools.FunctionToolSpec) []op
 	return out
 }
 
+// geminiFunctionTools rewrites each schema into the subset Gemini accepts; MCP connector schemas
+// otherwise draw a bare 400 "invalid argument" from Gemini's OpenAI-compatible endpoint.
 func geminiFunctionTools(specs []agenttools.FunctionToolSpec) []openai.ChatCompletionToolUnionParam {
-	return openAIChatCompletionFunctionTools(specs)
+	out := make([]openai.ChatCompletionToolUnionParam, 0, len(specs))
+	for _, spec := range specs {
+		out = append(out, provider.GeminiFunctionTool(spec.Name, spec.Description, spec.Properties, spec.Required))
+	}
+	return out
 }
 
 func filterMCPToolSpecsByLoaded(specs []agenttools.FunctionToolSpec, loadedByServer map[uuid.UUID][]string) []agenttools.FunctionToolSpec {

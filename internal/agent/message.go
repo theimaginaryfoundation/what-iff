@@ -599,7 +599,10 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 	}
 	// Attachment labels are only injected when tools are enabled, matching the
 	// previous behavior for OpenAI chat turns.
-	additionalDevContext := mcpLifecycleDeveloperContext()
+	additionalDevContext := ""
+	if chatCtx.chat.ToolsEnabled {
+		additionalDevContext = a.mcpLifecycleDeveloperContext(ctx, userID, chatCtx.chat.ID, mergedRitualIDsForTools(chatMessage, chatCtx.activeMood))
+	}
 	if additionalDeveloperContextForChat != nil {
 		additionalDevContext = strings.TrimSpace(strings.Join([]string{
 			additionalDevContext,
@@ -624,10 +627,6 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 		AdditionalDeveloperContext: additionalDevContext,
 		LoadHistoryImageBytes:      models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model),
 	})
-}
-
-func mcpLifecycleDeveloperContext() string {
-	return "MCP tool lifecycle: MCP tools are NOT auto-loaded. First call list(kind=\"mcp_servers\") to inspect connectors and discoverable tool names. Then call load_mcp_tools with mcp_server_id + tools to activate only the tools you need. Loaded MCP tools remain active across future turns in this chat until you call unload_mcp_tools. Use unload_mcp_tools with tools [\"all\"] or [\"*\"] (optionally with mcp_server_id) to clear loaded tools."
 }
 
 // loadImageBytesForClaude downloads raw image bytes for each image attachment on the
@@ -837,6 +836,11 @@ type chatContext struct {
 	mcpServers []*models.MCPServer
 	// loadedMCPTools tracks the per-connector set of loaded MCP full tool names for this chat.
 	loadedMCPTools map[uuid.UUID]map[string]struct{}
+	// mcpToolsChanged is set when load_mcp_tools/unload_mcp_tools changes the loaded set
+	// mid-turn; the agent loop then re-declares MCP tools on the adapter via syncMCPTools.
+	mcpToolsChanged bool
+	// syncMCPTools re-declares the given MCP tool specs on this turn's adapter (see bindMCPToolSync).
+	syncMCPTools func(specs []tools.FunctionToolSpec)
 }
 
 func (c *chatContext) setMCPServerCache(servers []*models.MCPServer, loadedByServer map[uuid.UUID][]string) {
@@ -1102,6 +1106,7 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 	draftBuffer := newJobDraftDeltaBuffer(a.lifecycleCtx, a.ds, a.logger, chatJob, jobDraftDeltaFlushMinChars, jobDraftDeltaFlushMaxWait)
 	adapter.SetTextDeltaHandler(draftBuffer.HandleDelta)
 	defer draftBuffer.Flush()
+	bindMCPToolSync(chatCtx, adapter)
 	// Stream reasoning live too, so always-on reasoning models (GLM, MiMo) show
 	// something while they think instead of a bare typing indicator.
 	flushReasoning := func() {}

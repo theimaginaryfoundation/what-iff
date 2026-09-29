@@ -10,17 +10,31 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 )
 
-func TestParseMCPServerIDArg(t *testing.T) {
-	_, err := parseMCPServerIDArg(" ")
-	require.ErrorContains(t, err, "required")
+func TestMCPToolLifecycleArgsLenientDecoding(t *testing.T) {
+	cases := map[string]struct {
+		in       string
+		wantID   string
+		wantList []string
+	}{
+		"declared shape":      {`{"mcp_server_id":"abc","tools":["a","b"]}`, "abc", []string{"a", "b"}},
+		"json-encoded array":  {`{"mcp_server_id":"abc","tools":"[\"a\",\"b\"]"}`, "abc", []string{"a", "b"}},
+		"comma string":        {`{"mcp_server_id":"abc","tools":"a, b"}`, "abc", []string{"a", " b"}},
+		"single string":       {`{"mcp_server_id":"abc","tools":"all"}`, "abc", []string{"all"}},
+		"aliases":             {`{"server_id":"abc","tool_names":["a"]}`, "abc", []string{"a"}},
+		"empty id falls back": {`{"mcp_server_id":"","connector_id":"abc","tools":["a"]}`, "abc", []string{"a"}},
+		"missing everything":  {`{}`, "", nil},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var args mcpToolLifecycleArgs
+			require.NoError(t, json.Unmarshal([]byte(tc.in), &args))
+			require.Equal(t, tc.wantID, args.MCPServerID)
+			require.Equal(t, tc.wantList, args.Tools)
+		})
+	}
 
-	_, err = parseMCPServerIDArg("not-a-uuid")
-	require.ErrorContains(t, err, "invalid mcp_server_id")
-
-	id := uuid.New()
-	got, err := parseMCPServerIDArg(id.String())
-	require.NoError(t, err)
-	require.Equal(t, id, got)
+	var args mcpToolLifecycleArgs
+	require.Error(t, json.Unmarshal([]byte(`{"tools":{"a":1}}`), &args))
 }
 
 func TestNormalizeRequestedTools(t *testing.T) {

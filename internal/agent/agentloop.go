@@ -43,6 +43,7 @@ func (a *Agent) handleAgentLoop(
 		allToolCalls = append(allToolCalls, modelToolCalls...)
 		allGeneratedAttachments = append(allGeneratedAttachments, generatedAttachments...)
 		adapter.AppendToolResults(toolResults)
+		a.syncLoadedMCPTools(ctx, chatCtx)
 
 		if round == maxToolCallRounds-1 {
 			// Max rounds reached — strip tools and force a prose response.

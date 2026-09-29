@@ -134,8 +134,3 @@ func OpenAIChatCompletionFunctionTool(name, description string, properties map[s
 		Parameters:  params,
 	})
 }
-
-// GeminiFunctionTool is an alias for OpenAIChatCompletionFunctionTool kept for Gemini call sites.
-func GeminiFunctionTool(name, description string, properties map[string]interface{}, required []string) openai.ChatCompletionToolUnionParam {
-	return OpenAIChatCompletionFunctionTool(name, description, properties, required)
-}
