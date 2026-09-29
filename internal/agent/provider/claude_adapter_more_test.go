@@ -139,7 +139,7 @@ func TestClaudeAdapter_AppendToolResults_UserTurnWithBlocks(t *testing.T) {
 			anthropic.NewUserMessage(anthropic.NewTextBlock("hello")),
 		},
 	}
-	a := NewClaudeAdapter(nil, base, nil, false, nil)
+	a := NewClaudeAdapter(nil, base, nil, false, nil, nil)
 	a.AppendToolResults([]ToolResult{
 		{ID: "call_a", Output: `{"ok":true}`, IsErr: false},
 		{ID: "call_b", Output: "", IsErr: true},
@@ -158,7 +158,7 @@ func TestClaudeAdapter_AppendToolResults_InjectsGeneratedImagesOnUserTurn(t *tes
 			anthropic.NewUserMessage(anthropic.NewTextBlock("hello")),
 		},
 	}
-	a := NewClaudeAdapter(nil, base, nil, false, nil)
+	a := NewClaudeAdapter(nil, base, nil, false, nil, nil)
 	a.AppendToolResults([]ToolResult{
 		{
 			ID:     "call_img",
@@ -186,7 +186,7 @@ func TestNewClaudeAdapter_IncludeMoodToolsWhenRequested(t *testing.T) {
 		ClaudeFunctionTool("list_modes", "List modes", map[string]interface{}{}, []string{}, false),
 		ClaudeFunctionTool("change_mode", "Change mode", map[string]interface{}{}, []string{}, false),
 	}
-	a := NewClaudeAdapter(nil, base, moodTools, false, nil)
+	a := NewClaudeAdapter(nil, base, moodTools, false, nil, nil)
 
 	var hasListModes, hasChangeMode bool
 	for _, t := range a.params.Tools {

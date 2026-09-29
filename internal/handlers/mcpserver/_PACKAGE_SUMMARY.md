@@ -16,7 +16,8 @@ HTTP API for the MCP connector catalog — list/register user-owned connectors u
 ## Non-obvious decisions
 
 - Chat-level MCP association is under **`handlers/chat`**; this package is the global MCP server resource API.
-- **`PUT/PATCH /mcp-servers/{id}`** accepts optional **`ritual_ids`**: omitted leaves ritual↔MCP edges unchanged; a JSON array (including `[]`) replaces the full set. Invalid or foreign ritual IDs return **400**.
+- **`PUT/PATCH /mcp-servers/{id}`** accepts optional **`ritual_ids`**: omitted leaves ritual↔MCP edges unchanged; a JSON array (including `[]`) replaces the full set.
+  Invalid or foreign ritual IDs return **400**.
 - Runtime health fields (`status`, `status_reason`, `last_checked_at`, `last_healthy_at`, `tool_count`) are read-only from this handler and updated by runtime discovery/execution paths in `internal/agent`.
 
 ## Testing

@@ -31,6 +31,9 @@ func claudeToolName(t anthropic.ToolUnionParam) string {
 // function spec. Tool selection stays in the agent layer; this only handles SDK shape.
 func ClaudeFunctionTool(name, description string, properties map[string]interface{}, required []string, strict bool) anthropic.ToolUnionParam {
 	sanitizedProperties := sanitizeClaudeSchemaProperties(properties)
+	if required == nil {
+		required = []string{}
+	}
 
 	return anthropic.ToolUnionParam{
 		OfTool: &anthropic.ToolParam{
