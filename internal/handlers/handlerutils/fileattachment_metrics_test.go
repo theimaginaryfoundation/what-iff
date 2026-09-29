@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry/telemetrytest"
 	"github.com/theimaginaryfoundation/what-iff/internal/utils"
@@ -157,4 +158,16 @@ func TestDeleteProviderFile(t *testing.T) {
 	}
 
 	require.NotPanics(t, func() { DeleteProviderFile(context.Background(), zap.NewNop(), nil, &fileID) })
+}
+
+// Cleanup is best-effort and runs on failure paths, so a nil logger must not turn a failed
+// provider delete into a panic.
+func TestDeleteProviderFile_NilLoggerIsSafe(t *testing.T) {
+	fileID := "file-123"
+	deleter := &recordingFileAttachmentDeleter{err: errors.New("provider down")}
+	require.NotPanics(t, func() { DeleteProviderFile(context.Background(), nil, deleter, &fileID) })
+	require.Equal(t, []string{fileID}, deleter.deleted)
+
+	attachment := models.FileAttachment{FileID: &fileID, FileType: "text"}
+	require.NotPanics(t, func() { AbandonFileAttachmentUpload(context.Background(), nil, deleter, attachment, "") })
 }

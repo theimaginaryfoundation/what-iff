@@ -88,10 +88,14 @@ const providerFileCleanupTimeout = 30 * time.Second
 // DeleteProviderFile best-effort deletes the provider-side copy of an upload whose attachment
 // record will not be kept (it failed to save, or was rolled back), so the file is not left
 // orphaned in the provider's storage. It detaches from ctx's cancellation, since the failure that
-// triggers it is often the request context ending. Failures are logged, never returned.
+// triggers it is often the request context ending. Failures are logged, never returned; a nil
+// logger logs nothing, so cleanup can't fail on it.
 func DeleteProviderFile(ctx context.Context, logger *zap.Logger, d FileAttachmentDeleter, fileID *string) {
 	if d == nil || fileID == nil || *fileID == "" {
 		return
+	}
+	if logger == nil {
+		logger = zap.NewNop()
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerFileCleanupTimeout)
 	defer cancel()
