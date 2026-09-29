@@ -3,6 +3,7 @@ import { firstValueFrom } from 'rxjs';
 
 import { Chat, PatchChatRequest } from '../models/chat.model';
 import { apiErrorMessage } from '../utils/api-error.helpers';
+import { AgentJobService } from './agent-job.service';
 import { ChatService } from './chat.service';
 import {
   PersonalityOption,
@@ -16,6 +17,10 @@ import {
   uniquePersonalityOptions,
   uniqueTags,
 } from '../../features/chat/helpers/thread-list.helpers';
+import { ThreadJobSummary, loadThreadsWithJobs } from '../../features/chat/helpers/thread-jobs.helpers';
+
+/** Which threads {@link ThreadListService.refresh} loads (Thread Manager tabs). */
+export type ThreadListScope = 'active' | 'archived' | 'jobs';
 
 const QUERY_DEBOUNCE_MS = 220;
 const LIST_PAGE_SIZE = 200;
@@ -23,6 +28,7 @@ const LIST_PAGE_SIZE = 200;
 @Injectable({ providedIn: 'root' })
 export class ThreadListService implements OnDestroy {
   private readonly chatService = inject(ChatService);
+  private readonly agentJobService = inject(AgentJobService);
 
   private readonly allThreads = signal<Chat[]>([]);
   /** Every loaded thread, ignoring the Thread Manager's search/tag filters (used by pickers). */
@@ -46,8 +52,12 @@ export class ThreadListService implements OnDestroy {
   readonly sort = signal<ThreadSort>('recent');
   readonly activeThreadId = signal<string | null>(null);
   readonly recentOpenedIds = signal<string[]>(loadRecentOpenedThreadIds());
-  /** When true, {@link refresh} loads archived threads only (Thread Manager archived tab). */
-  readonly showArchivedOnly = signal(false);
+  /** Which threads {@link refresh} loads: active, archived, or those with a scheduled job (either state). */
+  readonly scope = signal<ThreadListScope>('active');
+  /** True on the Thread Manager archived tab. */
+  readonly showArchivedOnly = computed(() => this.scope() === 'archived');
+  /** Scheduled jobs per thread id; populated only while {@link scope} is `jobs`. */
+  readonly jobsByChatId = signal<ReadonlyMap<string, ThreadJobSummary>>(new Map());
   /** Thread Manager bulk-selection: ids checked in the table. */
   readonly selectedIds = signal<ReadonlySet<string>>(new Set());
   readonly selectedCount = computed(() => this.selectedIds().size);
@@ -82,11 +92,16 @@ export class ThreadListService implements OnDestroy {
 
   /** Switches list API scope between active and archived threads and reloads. */
   setArchivedPanelOnly(archived: boolean): void {
+    this.setScope(archived ? 'archived' : 'active');
+  }
+
+  /** Switches which threads the list loads (Thread Manager tab) and reloads. */
+  setScope(scope: ThreadListScope): void {
     this.clearSelection();
-    if (this.showArchivedOnly() === archived) {
+    if (this.scope() === scope) {
       return;
     }
-    this.showArchivedOnly.set(archived);
+    this.scope.set(scope);
     void this.refresh();
   }
 
@@ -198,11 +213,26 @@ export class ThreadListService implements OnDestroy {
       if (this.selectedTag()) filters.tag = this.selectedTag()!;
       if (this.selectedPersonalityId()) filters.personality_id = this.selectedPersonalityId()!;
       if (this.pinnedOnly()) filters.is_favorite = true;
+      if (this.scope() === 'jobs') {
+        const result = await loadThreadsWithJobs(
+          {
+            listAgentJobs: (page, limit) => this.agentJobService.listAgentJobs(page, limit),
+            listAllChats: (limit, chatFilters) => this.chatService.listAllChats(limit, chatFilters),
+          },
+          filters,
+        );
+        if (generation !== this.refreshGeneration) return;
+        this.jobsByChatId.set(result.jobsByChatId);
+        this.allThreads.set(result.chats);
+        this.listTruncated.set(result.truncated);
+        return;
+      }
       if (this.showArchivedOnly()) filters.archived = true;
       const response = await firstValueFrom(
         this.chatService.listAllChats(LIST_PAGE_SIZE, Object.keys(filters).length ? filters : undefined),
       );
       if (generation !== this.refreshGeneration) return;
+      this.jobsByChatId.set(new Map());
       this.allThreads.set(response.chats);
       this.listTruncated.set(response.truncated);
     } catch (error) {
@@ -231,9 +261,10 @@ export class ThreadListService implements OnDestroy {
   /** @returns whether the server accepted the archive change */
   async setThreadArchived(thread: Chat, archived: boolean): Promise<boolean> {
     const snapshot = this.allThreads();
-    const archivedPanel = this.showArchivedOnly();
+    const scope = this.scope();
+    // The Jobs tab lists threads in either state, so archiving there only flips the flag.
     const removeFromList =
-      (!archivedPanel && archived) || (archivedPanel && !archived);
+      (scope === 'active' && archived) || (scope === 'archived' && !archived);
     if (removeFromList) {
       this.allThreads.set(snapshot.filter(item => item.id !== thread.id));
     } else {

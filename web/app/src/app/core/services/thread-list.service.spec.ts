@@ -4,6 +4,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { signal } from '@angular/core';
 import { of, Subject, throwError } from 'rxjs';
 
+import { AgentJobService } from './agent-job.service';
 import { ChatService } from './chat.service';
 import { ThreadListService } from './thread-list.service';
 import { Chat, PatchChatRequest } from '../models/chat.model';
@@ -24,8 +25,11 @@ describe('ThreadListService', () => {
     let service: ThreadListService;
     let chatService: Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat' | 'markAllChatsRead'>;
 
+    let agentJobService: { listAgentJobs: ReturnType<typeof vi.fn> };
+
     beforeEach(() => {
         clearRecentOpenedThreadIds();
+        agentJobService = { listAgentJobs: vi.fn().mockReturnValue(of({ results: [], total_count: 0, page: 1 })) };
         chatService = {
             listChats: vi.fn().mockName("ChatService.listChats"),
             listAllChats: vi.fn().mockName("ChatService.listAllChats"),
@@ -45,6 +49,7 @@ describe('ThreadListService', () => {
                 provideZonelessChangeDetection(),
                 ThreadListService,
                 { provide: ChatService, useValue: chatService },
+                { provide: AgentJobService, useValue: agentJobService },
             ],
         });
         service = TestBed.inject(ThreadListService);
@@ -224,6 +229,47 @@ describe('ThreadListService', () => {
             await expect(service.markAllRead()).rejects.toThrow('offline');
 
             expect(service.unreadThreadCount()).toBe(2);
+        });
+    });
+
+    describe('jobs scope', () => {
+        beforeEach(() => {
+            agentJobService.listAgentJobs.mockReturnValue(of({
+                results: [{ id: 'j1', chat_id: 'a', status: 'active' }],
+                total_count: 1,
+                page: 1,
+            }));
+            chatService.listAllChats.mockReturnValue(of({
+                chats: [makeChat({ id: 'a', name: 'Alpha', archived: true })],
+                truncated: false,
+            }));
+        });
+
+        it('loads job threads by id and exposes their jobs', async () => {
+            service.setScope('jobs');
+            await vi.waitFor(() => expect(service.loadedThreads().length).toBe(1));
+
+            expect(chatService.listAllChats).toHaveBeenLastCalledWith(200, expect.objectContaining({ ids: 'a' }));
+            expect(service.jobsByChatId().get('a')?.primary.id).toBe('j1');
+            expect(service.showArchivedOnly()).toBe(false);
+        });
+
+        it('keeps a thread in the list when it is restored or archived from the Jobs tab', async () => {
+            service.setScope('jobs');
+            await vi.waitFor(() => expect(service.loadedThreads().length).toBe(1));
+
+            await service.setThreadArchived(service.loadedThreads()[0], false);
+
+            expect(service.loadedThreads().map(t => t.id)).toEqual(['a']);
+        });
+
+        it('clears job summaries when switching back to active', async () => {
+            service.setScope('jobs');
+            await vi.waitFor(() => expect(service.jobsByChatId().size).toBe(1));
+            chatService.listAllChats.mockReturnValue(of({ chats: [], truncated: false }));
+
+            service.setScope('active');
+            await vi.waitFor(() => expect(service.jobsByChatId().size).toBe(0));
         });
     });
 });

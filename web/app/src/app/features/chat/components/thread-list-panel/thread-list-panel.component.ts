@@ -5,7 +5,7 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
 
 import { Chat } from '../../../../core/models/chat.model';
 import { Personality } from '../../../../core/models/personality.model';
-import { ThreadListService } from '../../../../core/services/thread-list.service';
+import { ThreadListScope, ThreadListService } from '../../../../core/services/thread-list.service';
 import { ConfirmationService } from '../../../../core/services/confirmation.service';
 import { apiErrorMessage } from '../../../../core/utils/api-error.helpers';
 import { ModalComponent } from '../../../../shared/ui/modal/modal.component';
@@ -15,7 +15,7 @@ import { ThreadRowComponent } from './thread-row.component';
 const MAX_THREAD_TAGS = 10;
 const MAX_THREAD_TAG_LENGTH = 10;
 
-type ThreadListTab = 'active' | 'archived';
+type ThreadListTab = ThreadListScope;
 
 @Component({
   selector: 'app-thread-list-panel',
@@ -82,6 +82,17 @@ type ThreadListTab = 'active' | 'archived';
               (click)="onThreadListTab('active')"
             >
               Active
+            </button>
+            <button
+              type="button"
+              role="tab"
+              [attr.aria-selected]="threadListTab() === 'jobs'"
+              [class.panel__tab--active]="threadListTab() === 'jobs'"
+              (click)="onThreadListTab('jobs')"
+              uiTooltip="Threads your scheduled jobs post into, active or archived"
+              placement="bottom"
+            >
+              Jobs
             </button>
             <button
               type="button"
@@ -160,9 +171,10 @@ type ThreadListTab = 'active' | 'archived';
             </button>
             @if (bulkActionMenuOpen()) {
               <div class="panel__bulk-action-menu" role="listbox" aria-label="Bulk actions">
-                @if (threadListTab() === 'active') {
+                @if (threadListTab() !== 'archived') {
                   <button type="button" role="option" (mousedown)="runBulkArchive()">Archive</button>
-                } @else {
+                }
+                @if (threadListTab() !== 'active') {
                   <button type="button" role="option" (mousedown)="runBulkRestore()">Restore</button>
                 }
                 <button type="button" role="option" (mousedown)="openBulkPersonalityPicker()">Assign to personality…</button>
@@ -189,9 +201,7 @@ type ThreadListTab = 'active' | 'archived';
           } @else if (threads.loading()) {
             <p class="panel__empty">Loading threads…</p>
           } @else if (visibleThreads().length === 0) {
-            <p class="panel__empty">
-              {{ threadListTab() === 'archived' ? 'No archived threads' : 'No threads found' }}
-            </p>
+            <p class="panel__empty">{{ emptyMessage() }}</p>
           } @else {
             <table>
               <thead>
@@ -237,7 +247,10 @@ type ThreadListTab = 'active' | 'archived';
                       TITLE <span aria-hidden="true">⬍</span>
                     </button>
                   </th>
-                  <th scope="col">
+                  @if (threadListTab() === 'jobs') {
+                    <th scope="col" class="panel__job-col">JOB</th>
+                  }
+                  <th scope="col" class="panel__created-col">
                     <button type="button" uiTooltip="Sort by creation date, newest first" (click)="threads.sort.set('newest')">
                       CREATED <span aria-hidden="true">⬍</span>
                     </button>
@@ -247,8 +260,8 @@ type ThreadListTab = 'active' | 'archived';
                       UPDATED <span aria-hidden="true">▼</span>
                     </button>
                   </th>
-                  <th scope="col">TAGS</th>
-                  <th scope="col">{{ threadListTab() === 'archived' ? 'RESTORE?' : 'ARCHIVE?' }}</th>
+                  <th scope="col" class="panel__tags-col">TAGS</th>
+                  <th scope="col">{{ archiveColumnLabel() }}</th>
                   <th scope="col" class="panel__delete-col"><span class="panel__sr-only">Delete</span></th>
                 </tr>
               </thead>
@@ -258,7 +271,9 @@ type ThreadListTab = 'active' | 'archived';
                     [thread]="thread"
                     [active]="activeThreadId() === thread.id"
                     [personality]="personalityForThread(thread)"
-                    [isArchivedView]="threadListTab() === 'archived'"
+                    [isArchivedView]="threadListTab() === 'archived' || (threadListTab() === 'jobs' && !!thread.archived)"
+                    [showJobColumn]="threadListTab() === 'jobs'"
+                    [jobs]="threads.jobsByChatId().get(thread.id) ?? null"
                     [checked]="threads.selectedIds().has(thread.id)"
                     (select)="selectThread.emit($event)"
                     (toggleSelect)="threads.toggleSelected($event)"
@@ -467,6 +482,10 @@ type ThreadListTab = 'active' | 'archived';
       font-weight: 700;
       margin: 0;
       text-align: center;
+    }
+
+    .panel__job-col {
+      min-width: 11rem;
     }
 
     .panel__select-col {
@@ -840,8 +859,9 @@ type ThreadListTab = 'active' | 'archived';
         overflow-x: auto;
       }
 
-      th:nth-child(4),
-      th:nth-child(6) {
+      /* Matches the cells thread-row hides at this width. */
+      .panel__created-col,
+      .panel__tags-col {
         display: none;
       }
 
@@ -1004,6 +1024,26 @@ export class ThreadListPanelComponent implements OnInit {
       ? 'No unread threads'
       : 'Mark every thread as read, including archived ones. Nothing is deleted.',
   );
+  readonly emptyMessage = computed(() => {
+    switch (this.threadListTab()) {
+      case 'archived':
+        return 'No archived threads';
+      case 'jobs':
+        return 'No threads have a scheduled job yet. A job gets its thread the first time it runs.';
+      default:
+        return 'No threads found';
+    }
+  });
+  readonly archiveColumnLabel = computed(() => {
+    switch (this.threadListTab()) {
+      case 'archived':
+        return 'RESTORE?';
+      case 'jobs':
+        return 'ARCHIVE / RESTORE';
+      default:
+        return 'ARCHIVE?';
+    }
+  });
   readonly bulkActionMenuOpen = signal(false);
   readonly bulkPersonalityPickerOpen = signal(false);
   readonly bulkPersonalityTitleId = `thread-bulk-personality-${Math.random().toString(36).slice(2, 10)}`;
@@ -1065,12 +1105,12 @@ export class ThreadListPanelComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.threads.setArchivedPanelOnly(this.threadListTab() === 'archived');
+    this.threads.setScope(this.threadListTab());
   }
 
   onThreadListTab(tab: ThreadListTab): void {
     this.threadListTab.set(tab);
-    this.threads.setArchivedPanelOnly(tab === 'archived');
+    this.threads.setScope(tab);
   }
 
   async rename(thread: Chat, name: string): Promise<void> {
