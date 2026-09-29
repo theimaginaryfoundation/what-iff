@@ -141,7 +141,8 @@ func (d *Datastore) SaveMCPServerOAuthTokens(ctx context.Context, userID, mcpSer
 
 	upd := tx.MCPServer.Update().
 		Where(entmcp.ID(mcpServerID), entmcp.HasOwnerWith(user.ID(userID)))
-	if strings.TrimSpace(set.AccessToken) != "" {
+	hasAccessToken := strings.TrimSpace(set.AccessToken) != ""
+	if hasAccessToken {
 		cipher, err := d.encryptTokenForWrite(set.AccessToken)
 		if err != nil {
 			_ = tx.Rollback()
@@ -157,9 +158,12 @@ func (d *Datastore) SaveMCPServerOAuthTokens(ctx context.Context, userID, mcpSer
 		}
 		upd = upd.SetOauthRefreshToken(cipher)
 	}
-	upd = upd.SetOauthRefreshFailCount(0).
-		SetStatus(models.MCPServerStatusActive).
-		SetStatusReason("")
+	if hasAccessToken {
+		// A fresh access token indicates recovery from prior OAuth auth/refresh errors.
+		upd = upd.SetOauthRefreshFailCount(0).
+			SetStatus(models.MCPServerStatusActive).
+			SetStatusReason("")
+	}
 	if set.AccessTokenExpiresAt != nil {
 		upd = upd.SetOauthAccessTokenExpiresAt(set.AccessTokenExpiresAt.UTC())
 	}

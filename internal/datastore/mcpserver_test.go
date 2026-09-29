@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -671,4 +672,60 @@ func TestRemoveMCPServerFromChat_ServerNotFound(t *testing.T) {
 
 	err := ds.RemoveMCPServerFromChat(ctx, userID, chatID, uuid.New())
 	require.ErrorIs(t, err, ErrMCPServerNotFound)
+}
+
+func TestSaveMCPServerOAuthTokens_RefreshTokenOnlyPreservesStatus(t *testing.T) {
+	ds, cleanup := newMCPServerTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMCPServerTestUser(t, ds)
+	server := baseMCPServerModel()
+	server.AuthMode = models.MCPServerAuthModeOAuth
+	created, err := ds.CreateMCPServer(ctx, userID, server)
+	require.NoError(t, err)
+
+	require.NoError(t, ds.MarkMCPServerOAuthRefreshFailure(ctx, userID, created.ID, "refresh failed", false))
+
+	now := time.Now().UTC()
+	require.NoError(t, ds.SaveMCPServerOAuthTokens(ctx, userID, created.ID, models.MCPOAuthTokenSet{
+		RefreshToken:  "new-refresh-token",
+		LastRefreshAt: &now,
+	}))
+
+	got, err := ds.GetMCPServer(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.MCPServerStatusRefreshError, got.Status)
+	require.Equal(t, "refresh failed", got.StatusReason)
+	require.Equal(t, 1, got.OAuthRefreshFailCount)
+	require.Equal(t, "new-refresh-token", got.OAuthRefreshToken)
+}
+
+func TestSaveMCPServerOAuthTokens_AccessTokenResetsStatus(t *testing.T) {
+	ds, cleanup := newMCPServerTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMCPServerTestUser(t, ds)
+	server := baseMCPServerModel()
+	server.AuthMode = models.MCPServerAuthModeOAuth
+	created, err := ds.CreateMCPServer(ctx, userID, server)
+	require.NoError(t, err)
+
+	require.NoError(t, ds.MarkMCPServerOAuthRefreshFailure(ctx, userID, created.ID, "refresh failed", false))
+
+	now := time.Now().UTC()
+	require.NoError(t, ds.SaveMCPServerOAuthTokens(ctx, userID, created.ID, models.MCPOAuthTokenSet{
+		AccessToken:   "new-access-token",
+		RefreshToken:  "new-refresh-token",
+		LastRefreshAt: &now,
+	}))
+
+	got, err := ds.GetMCPServer(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.MCPServerStatusActive, got.Status)
+	require.Equal(t, "", got.StatusReason)
+	require.Equal(t, 0, got.OAuthRefreshFailCount)
+	require.Equal(t, "new-access-token", got.OAuthAccessToken)
+	require.Equal(t, "new-refresh-token", got.OAuthRefreshToken)
 }
