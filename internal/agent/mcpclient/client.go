@@ -86,6 +86,9 @@ func (c *Client) Invalidate(connectorID uuid.UUID) {
 
 // SessionState holds per-request-flow MCP session IDs. Callers should scope it
 // to a single conversation turn when using turn-scoped session semantics.
+//
+// It is intentionally a plain map and is mutated in-place by client calls; it is
+// not safe for concurrent use and must not be shared across goroutines.
 type SessionState map[string]string
 
 // ProbeConnection runs initialize + tools/list against a connector configuration
