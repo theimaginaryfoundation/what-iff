@@ -47,6 +47,10 @@ func (a *Agent) getSubagentMCPFunctionToolSpecs(ctx context.Context, userID uuid
 	return a.discoverMCPFunctionToolSpecs(ctx, userID, servers, nil), servers
 }
 
+// prepareTurnMCPToolSpecs returns all discoverable MCP tool definitions for this
+// conversation turn. Execution eligibility is enforced separately in
+// dispatchMCPToolUse via chatCtx.loadedMCPTools, so load_mcp_tools/unload_mcp_tools
+// changes are effective on the next agent-loop iteration without waiting for a new turn.
 func (a *Agent) prepareTurnMCPToolSpecs(ctx context.Context, chatCtx *chatContext, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) []agenttools.FunctionToolSpec {
 	servers := a.getChatMCPServers(ctx, userID, chatID, ritualIDs)
 	loadedByServer := map[uuid.UUID][]string{}
@@ -64,8 +68,11 @@ func (a *Agent) prepareTurnMCPToolSpecs(ctx context.Context, chatCtx *chatContex
 	if chatCtx != nil {
 		chatCtx.setMCPServerCache(servers, loadedByServer)
 	}
+	// Register all discoverable MCP tool definitions for the turn so that
+	// load_mcp_tools/unload_mcp_tools changes take effect on the next loop round.
+	// Execution gating still happens in dispatchMCPToolUse via loadedMCPTools.
 	specs := a.discoverMCPFunctionToolSpecs(ctx, userID, servers, sessionStateFromChatContext(chatCtx))
-	return filterMCPToolSpecsByLoaded(specs, loadedByServer)
+	return specs
 }
 
 func (a *Agent) getChatMCPServers(ctx context.Context, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) []*models.MCPServer {
