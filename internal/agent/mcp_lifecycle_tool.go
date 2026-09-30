@@ -119,7 +119,7 @@ func (a *Agent) loadMCPToolsTool(ctx context.Context, chatCtx *chatContext, inpu
 	if len(requested.names) == 0 && !requested.all {
 		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{ServerID: serverID.String(), Error: "tools is required and must include at least one tool name"})
 	}
-	discovery, err := a.mcpClient.DiscoverTools(ctx, chatCtx.userID, []*models.MCPServer{server})
+	discovery, err := a.mcpClient.DiscoverToolsWithSessionState(ctx, chatCtx.userID, []*models.MCPServer{server}, sessionStateFromChatContext(chatCtx))
 	if err != nil && len(discovery.Tools) == 0 {
 		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{
 			ServerID: serverID.String(),
@@ -171,9 +171,6 @@ func (a *Agent) loadMCPToolsTool(ctx context.Context, chatCtx *chatContext, inpu
 		servers = append(slices.Clone(servers), server)
 	}
 	chatCtx.setMCPServerCache(servers, loadedByServerWithUpdate(loadedByServer, server.ID, next))
-	if len(loaded) > 0 {
-		chatCtx.mcpToolsChanged = true
-	}
 	res := mcpToolLifecycleResult{
 		ServerID:      server.ID.String(),
 		Loaded:        loaded,
@@ -203,7 +200,6 @@ func (a *Agent) unloadMCPToolsTool(ctx context.Context, chatCtx *chatContext, in
 			return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{Error: err.Error()})
 		}
 		chatCtx.setMCPServerCache(chatCtx.mcpServers, map[uuid.UUID][]string{})
-		chatCtx.mcpToolsChanged = true
 		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{Note: "Unloaded all MCP tools for this chat."})
 	}
 
@@ -234,7 +230,6 @@ func (a *Agent) unloadMCPToolsTool(ctx context.Context, chatCtx *chatContext, in
 		}
 		loadedByServer = loadedByServerWithUpdate(loadedByServer, serverID, nil)
 		chatCtx.setMCPServerCache(chatCtx.mcpServers, loadedByServer)
-		chatCtx.mcpToolsChanged = true
 		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{
 			ServerID:  serverID.String(),
 			Unloaded:  setToSortedSlice(current),
@@ -266,9 +261,6 @@ func (a *Agent) unloadMCPToolsTool(ctx context.Context, chatCtx *chatContext, in
 	}
 	loadedByServer = loadedByServerWithUpdate(loadedByServer, serverID, next)
 	chatCtx.setMCPServerCache(chatCtx.mcpServers, loadedByServer)
-	if len(unloaded) > 0 {
-		chatCtx.mcpToolsChanged = true
-	}
 
 	return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{
 		ServerID:  serverID.String(),

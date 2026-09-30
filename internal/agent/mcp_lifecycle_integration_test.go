@@ -17,7 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
-	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
@@ -125,51 +124,6 @@ func TestLoadMCPToolsTool_ResolvesConnectorByNameOrOmittedID(t *testing.T) {
 	out, err := agent.loadMCPToolsTool(ctx, chatCtx, []byte(`{"mcp_server_id":"nope","tools":["get"]}`))
 	require.NoError(t, err)
 	require.Contains(t, out, `\"tracker\" (mcp_server_id=`+mcpServerID.String())
-}
-
-func TestLoadMCPToolsTool_SyncsToolsIntoSameTurn(t *testing.T) {
-	ctx := context.Background()
-	srv := newTestMCPRPCServer()
-	defer srv.Close()
-
-	agent, chatCtx, mcpServerID, cleanup := newMCPLifecycleAgentFixture(t, srv.URL)
-	defer cleanup()
-
-	var synced [][]string
-	chatCtx.syncMCPTools = func(specs []agenttools.FunctionToolSpec) {
-		names := make([]string, 0, len(specs))
-		for _, s := range specs {
-			names = append(names, s.Name)
-		}
-		synced = append(synced, names)
-	}
-
-	// No change yet: nothing to sync.
-	agent.syncLoadedMCPTools(ctx, chatCtx)
-	require.Empty(t, synced)
-
-	raw, _ := json.Marshal(map[string]any{"mcp_server_id": mcpServerID.String(), "tools": []string{"search"}})
-	_, err := agent.loadMCPToolsTool(ctx, chatCtx, raw)
-	require.NoError(t, err)
-	require.True(t, chatCtx.mcpToolsChanged)
-	agent.syncLoadedMCPTools(ctx, chatCtx)
-	require.False(t, chatCtx.mcpToolsChanged)
-	require.Len(t, synced, 1)
-	require.Len(t, synced[0], 1)
-	require.Contains(t, synced[0][0], "__search")
-	require.True(t, mcpToolIsLoaded(chatCtx, synced[0][0]), "same-turn dispatch must accept the loaded tool")
-
-	// Loading the same tool again is a no-op and must not re-sync.
-	_, err = agent.loadMCPToolsTool(ctx, chatCtx, raw)
-	require.NoError(t, err)
-	agent.syncLoadedMCPTools(ctx, chatCtx)
-	require.Len(t, synced, 1)
-
-	_, err = agent.unloadMCPToolsTool(ctx, chatCtx, []byte(`{"tools":["*"]}`))
-	require.NoError(t, err)
-	agent.syncLoadedMCPTools(ctx, chatCtx)
-	require.Len(t, synced, 2)
-	require.Empty(t, synced[1])
 }
 
 func TestLifecycleCandidateServers_IncludesTurnOnlyConnectorsOnce(t *testing.T) {

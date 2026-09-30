@@ -836,11 +836,8 @@ type chatContext struct {
 	mcpServers []*models.MCPServer
 	// loadedMCPTools tracks the per-connector set of loaded MCP full tool names for this chat.
 	loadedMCPTools map[uuid.UUID]map[string]struct{}
-	// mcpToolsChanged is set when load_mcp_tools/unload_mcp_tools changes the loaded set
-	// mid-turn; the agent loop then re-declares MCP tools on the adapter via syncMCPTools.
-	mcpToolsChanged bool
-	// syncMCPTools re-declares the given MCP tool specs on this turn's adapter (see bindMCPToolSync).
-	syncMCPTools func(specs []tools.FunctionToolSpec)
+	// mcpSessions stores MCP session ids for this single conversation turn.
+	mcpSessions map[string]string
 }
 
 func (c *chatContext) setMCPServerCache(servers []*models.MCPServer, loadedByServer map[uuid.UUID][]string) {
@@ -1106,7 +1103,6 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 	draftBuffer := newJobDraftDeltaBuffer(a.lifecycleCtx, a.ds, a.logger, chatJob, jobDraftDeltaFlushMinChars, jobDraftDeltaFlushMaxWait)
 	adapter.SetTextDeltaHandler(draftBuffer.HandleDelta)
 	defer draftBuffer.Flush()
-	bindMCPToolSync(chatCtx, adapter, a.logger)
 	// Stream reasoning live too, so always-on reasoning models (GLM, MiMo) show
 	// something while they think instead of a bare typing indicator.
 	flushReasoning := func() {}
@@ -2076,6 +2072,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 		modelVisionSupport:     resolved.visionSupport,
 		expressionsEnabled:     expressionsEnabled,
 		memoryProgress:         memoryProgress,
+		mcpSessions:            make(map[string]string),
 	}, nil
 }
 
