@@ -373,6 +373,114 @@ func TestCallToolByFullName_PreservesExplicitEmptyStringArguments(t *testing.T) 
 	require.Equal(t, "", seenThreadTS)
 }
 
+func TestCallToolByFullNameDetailed_ParsesTypedContentBlocks(t *testing.T) {
+	const tinyPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+	const tinyWAV = "UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA="
+	const tinyBlob = "aGVsbG8="
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var req map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		method, _ := req["method"].(string)
+		switch method {
+		case "initialize", "notifications/initialized":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{}})
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result": map[string]any{
+					"tools": []map[string]any{{"name": "inspect_graph", "inputSchema": map[string]any{"type": "object"}}},
+				},
+			})
+		case "tools/call":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result": map[string]any{
+					"content": []map[string]any{
+						{"type": "text", "text": "graph summary"},
+						{"type": "image", "data": tinyPNG, "mimeType": "image/png"},
+						{"type": "audio", "data": tinyWAV, "mimeType": "audio/wav"},
+						{"type": "blob", "data": tinyBlob, "mimeType": "application/octet-stream"},
+						{"type": "image", "data": "%%%invalid%%%"},
+					},
+				},
+			})
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(nil, nil)
+	server := &models.MCPServer{
+		ID:        uuid.New(),
+		Name:      "grafana",
+		ServerURL: srv.URL,
+		Status:    models.MCPServerStatusActive,
+	}
+	out, err := client.DiscoverTools(context.Background(), uuid.New(), []*models.MCPServer{server})
+	require.NoError(t, err)
+	require.Len(t, out.Tools, 1)
+
+	result, err := client.CallToolByFullNameDetailed(context.Background(), []*models.MCPServer{server}, out.Tools[0].FullName, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.Equal(t, "graph summary", result.Output)
+	require.Len(t, result.GeneratedAttachments, 3)
+	require.Equal(t, "image/png", result.GeneratedAttachments[0].FileType)
+	require.Equal(t, tinyPNG, result.GeneratedAttachments[0].FileContent)
+	require.Equal(t, "audio/wav", result.GeneratedAttachments[1].FileType)
+	require.Equal(t, "application/octet-stream", result.GeneratedAttachments[2].FileType)
+}
+
+func TestCallToolByFullNameDetailed_FallsBackToRawResultString(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var req map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		method, _ := req["method"].(string)
+		switch method {
+		case "initialize", "notifications/initialized":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{}})
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result": map[string]any{
+					"tools": []map[string]any{{"name": "inspect", "inputSchema": map[string]any{"type": "object"}}},
+				},
+			})
+		case "tools/call":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result":  map[string]any{"status": "ok"},
+			})
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(nil, nil)
+	server := &models.MCPServer{
+		ID:        uuid.New(),
+		Name:      "misc",
+		ServerURL: srv.URL,
+		Status:    models.MCPServerStatusActive,
+	}
+	out, err := client.DiscoverTools(context.Background(), uuid.New(), []*models.MCPServer{server})
+	require.NoError(t, err)
+	require.Len(t, out.Tools, 1)
+
+	result, err := client.CallToolByFullNameDetailed(context.Background(), []*models.MCPServer{server}, out.Tools[0].FullName, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"status":"ok"}`, result.Output)
+	require.Empty(t, result.GeneratedAttachments)
+}
+
 func TestAuthHeaderForServer(t *testing.T) {
 	t.Run("header mode passes through token", func(t *testing.T) {
 		token, err := authHeaderForServer(&models.MCPServer{

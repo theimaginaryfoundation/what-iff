@@ -3,9 +3,11 @@ package mcpclient
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"regexp"
 	"strings"
@@ -40,6 +42,11 @@ type ConnectorTool struct {
 type DiscoveryResult struct {
 	Tools  []ConnectorTool
 	Errors map[uuid.UUID]string
+}
+
+type CallToolResult struct {
+	Output               string
+	GeneratedAttachments []*models.FileAttachment
 }
 
 type Client struct {
@@ -188,24 +195,40 @@ func (c *Client) discoverConnectorTools(ctx context.Context, userID uuid.UUID, s
 }
 
 func (c *Client) CallToolByFullName(ctx context.Context, servers []*models.MCPServer, fullName string, rawArgs json.RawMessage) (string, error) {
-	return c.CallToolByFullNameWithSessionState(ctx, servers, fullName, rawArgs, make(SessionState))
+	result, err := c.CallToolByFullNameDetailed(ctx, servers, fullName, rawArgs)
+	if err != nil {
+		return "", err
+	}
+	return result.Output, nil
 }
 
 func (c *Client) CallToolByFullNameWithSessionState(ctx context.Context, servers []*models.MCPServer, fullName string, rawArgs json.RawMessage, sessions SessionState) (string, error) {
-	connectorKey, toolName, err := parseFullToolName(fullName)
+	result, err := c.CallToolByFullNameWithSessionStateDetailed(ctx, servers, fullName, rawArgs, sessions)
 	if err != nil {
 		return "", err
+	}
+	return result.Output, nil
+}
+
+func (c *Client) CallToolByFullNameDetailed(ctx context.Context, servers []*models.MCPServer, fullName string, rawArgs json.RawMessage) (CallToolResult, error) {
+	return c.CallToolByFullNameWithSessionStateDetailed(ctx, servers, fullName, rawArgs, make(SessionState))
+}
+
+func (c *Client) CallToolByFullNameWithSessionStateDetailed(ctx context.Context, servers []*models.MCPServer, fullName string, rawArgs json.RawMessage, sessions SessionState) (CallToolResult, error) {
+	connectorKey, toolName, err := parseFullToolName(fullName)
+	if err != nil {
+		return CallToolResult{}, err
 	}
 	server := findServerByPrefix(servers, connectorKey)
 	if server == nil {
-		return "", fmt.Errorf("unknown mcp connector prefix %q", connectorKey)
+		return CallToolResult{}, fmt.Errorf("unknown mcp connector prefix %q", connectorKey)
 	}
 	if !connectorEligible(server) {
-		return "", fmt.Errorf("connector %q is not available in status %q", server.Name, server.Status)
+		return CallToolResult{}, fmt.Errorf("connector %q is not available in status %q", server.Name, server.Status)
 	}
 	tools, err := c.discoverConnectorTools(ctx, uuid.Nil, server, sessions)
 	if err != nil {
-		return "", err
+		return CallToolResult{}, err
 	}
 	original := toolName
 	for _, t := range tools {
@@ -359,11 +382,11 @@ func (c *Client) initializeRPC(ctx context.Context, server *models.MCPServer, se
 	return nil
 }
 
-func (c *Client) callToolRPC(ctx context.Context, server *models.MCPServer, toolName string, rawArgs json.RawMessage, sessions SessionState) (string, error) {
+func (c *Client) callToolRPC(ctx context.Context, server *models.MCPServer, toolName string, rawArgs json.RawMessage, sessions SessionState) (CallToolResult, error) {
 	args := json.RawMessage(`{}`)
 	if trimmed := bytes.TrimSpace(rawArgs); len(trimmed) > 0 {
 		if !json.Valid(trimmed) {
-			return "", fmt.Errorf("decode tool input: invalid json arguments")
+			return CallToolResult{}, fmt.Errorf("decode tool input: invalid json arguments")
 		}
 		// Preserve the tool-call argument payload verbatim so explicit zero-values
 		// such as empty strings are not transformed by intermediate map decoding.
@@ -374,23 +397,117 @@ func (c *Client) callToolRPC(ctx context.Context, server *models.MCPServer, tool
 		"arguments": args,
 	}, sessions)
 	if err != nil {
-		return "", err
+		return CallToolResult{}, err
 	}
+	if parsed, ok := c.parseToolCallResult(result); ok {
+		return parsed, nil
+	}
+	return CallToolResult{Output: string(result)}, nil
+}
+
+func (c *Client) parseToolCallResult(result json.RawMessage) (CallToolResult, bool) {
 	var parsed struct {
 		Content []map[string]any `json:"content"`
 	}
-	if err := json.Unmarshal(result, &parsed); err == nil && len(parsed.Content) > 0 {
-		var textParts []string
-		for _, part := range parsed.Content {
-			if text, ok := part["text"].(string); ok && strings.TrimSpace(text) != "" {
+	if err := json.Unmarshal(result, &parsed); err != nil || len(parsed.Content) == 0 {
+		return CallToolResult{}, false
+	}
+
+	callResult := CallToolResult{
+		GeneratedAttachments: make([]*models.FileAttachment, 0),
+	}
+	var textParts []string
+	for _, block := range parsed.Content {
+		blockType := strings.ToLower(strings.TrimSpace(anyString(block["type"])))
+		switch blockType {
+		case "text":
+			if text := strings.TrimSpace(anyString(block["text"])); text != "" {
 				textParts = append(textParts, text)
 			}
-		}
-		if len(textParts) > 0 {
-			return strings.Join(textParts, "\n"), nil
+		case "image", "audio", "blob":
+			if att := c.attachmentFromContentBlock(blockType, block); att != nil {
+				callResult.GeneratedAttachments = append(callResult.GeneratedAttachments, att)
+			}
 		}
 	}
-	return string(result), nil
+	callResult.Output = strings.Join(textParts, "\n")
+	if callResult.Output != "" || len(callResult.GeneratedAttachments) > 0 {
+		return callResult, true
+	}
+	return CallToolResult{}, false
+}
+
+func (c *Client) attachmentFromContentBlock(blockType string, block map[string]any) *models.FileAttachment {
+	data := strings.TrimSpace(anyString(block["data"]))
+	if data == "" {
+		return nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil || len(decoded) == 0 {
+		c.logger.Debug("mcp content block ignored: invalid base64 payload", zap.String("block_type", blockType), zap.Error(err))
+		return nil
+	}
+	if int64(len(decoded)) > maxRPCResponseBytes {
+		c.logger.Debug("mcp content block ignored: payload exceeds size limit",
+			zap.String("block_type", blockType),
+			zap.Int("decoded_bytes", len(decoded)),
+			zap.Int64("limit_bytes", maxRPCResponseBytes),
+		)
+		return nil
+	}
+	contentType := strings.TrimSpace(anyString(block["mimeType"]))
+	if contentType == "" {
+		contentType = strings.TrimSpace(anyString(block["mime_type"]))
+	}
+	if contentType == "" {
+		contentType = defaultMimeTypeForBlock(blockType)
+	}
+	ext := extensionForMIME(contentType, blockType)
+	return &models.FileAttachment{
+		Name:        fmt.Sprintf("mcp_%s_%s%s", blockType, uuid.NewString(), ext),
+		FileType:    contentType,
+		FileContent: data,
+	}
+}
+
+func anyString(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+func defaultMimeTypeForBlock(blockType string) string {
+	switch blockType {
+	case "image":
+		return "image/png"
+	case "audio":
+		return "audio/wav"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+func extensionForMIME(contentType, blockType string) string {
+	mediaType := strings.TrimSpace(contentType)
+	if parsedMediaType, _, err := mime.ParseMediaType(mediaType); err == nil && parsedMediaType != "" {
+		mediaType = parsedMediaType
+	}
+	if mediaType != "" {
+		if exts, err := mime.ExtensionsByType(mediaType); err == nil {
+			for _, ext := range exts {
+				if e := strings.TrimSpace(ext); e != "" {
+					return e
+				}
+			}
+		}
+	}
+	switch blockType {
+	case "image":
+		return ".png"
+	case "audio":
+		return ".wav"
+	default:
+		return ".bin"
+	}
 }
 
 func (c *Client) rpcNotify(ctx context.Context, server *models.MCPServer, method string, params any, sessions SessionState) error {
