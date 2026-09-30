@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -19,7 +20,19 @@ import (
 )
 
 type fakeProvider struct {
-	getFn func(ctx context.Context, userID, id uuid.UUID) (*models.MCPServer, error)
+	getFn          func(ctx context.Context, userID, id uuid.UUID) (*models.MCPServer, error)
+	runtimeUpdates []runtimeUpdateCall
+	runtimeErr     error
+}
+
+type runtimeUpdateCall struct {
+	UserID      uuid.UUID
+	MCPServerID uuid.UUID
+	Status      string
+	Reason      string
+	ToolCount   int
+	CheckedAt   *time.Time
+	HealthyAt   *time.Time
 }
 
 func (f *fakeProvider) CreateMCPServer(context.Context, uuid.UUID, models.MCPServer) (*models.MCPServer, error) {
@@ -36,6 +49,18 @@ func (f *fakeProvider) ListMCPServers(context.Context, uuid.UUID, int, int, mode
 }
 func (f *fakeProvider) UpdateMCPServer(context.Context, uuid.UUID, models.MCPServer, models.MCPServerAuthTokenUpdate, models.MCPOAuthSecretUpdate, *[]uuid.UUID) (*models.MCPServer, error) {
 	return nil, nil
+}
+func (f *fakeProvider) UpdateMCPServerRuntimeState(_ context.Context, userID, mcpServerID uuid.UUID, status, reason string, toolCount int, checkedAt, healthyAt *time.Time) error {
+	f.runtimeUpdates = append(f.runtimeUpdates, runtimeUpdateCall{
+		UserID:      userID,
+		MCPServerID: mcpServerID,
+		Status:      status,
+		Reason:      reason,
+		ToolCount:   toolCount,
+		CheckedAt:   checkedAt,
+		HealthyAt:   healthyAt,
+	})
+	return f.runtimeErr
 }
 func (f *fakeProvider) DeleteMCPServer(context.Context, uuid.UUID, uuid.UUID) error { return nil }
 
@@ -317,6 +342,83 @@ func TestTestMCPServerConnection_ValidationAndFailure(t *testing.T) {
 		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 		require.Equal(t, 1, prober.calls)
 	})
+}
+
+func TestTestMCPServerConnection_SuccessWithConnectorIDUpdatesRuntimeStatus(t *testing.T) {
+	t.Parallel()
+
+	connectorID := uuid.New()
+	provider := &fakeProvider{
+		getFn: func(_ context.Context, _ uuid.UUID, id uuid.UUID) (*models.MCPServer, error) {
+			require.Equal(t, connectorID, id)
+			return &models.MCPServer{
+				ID:        connectorID,
+				ServerURL: "https://example.com/mcp",
+				AuthToken: "stored-token",
+			}, nil
+		},
+	}
+	prober := &fakeProber{toolCount: 4}
+	router := newRouter(provider, prober)
+	req := newAuthedRequest(t, http.MethodPost, "/mcp-servers/test-connection", []byte(`{
+		"server_url":"https://example.com/mcp",
+		"connector_id":"`+connectorID.String()+`",
+		"authentication":"Bearer abc123"
+	}`))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	require.Len(t, provider.runtimeUpdates, 1)
+	update := provider.runtimeUpdates[0]
+	require.Equal(t, connectorID, update.MCPServerID)
+	require.Equal(t, models.MCPServerStatusActive, update.Status)
+	require.Equal(t, "", update.Reason)
+	require.Equal(t, 4, update.ToolCount)
+	require.NotNil(t, update.CheckedAt)
+	require.NotNil(t, update.HealthyAt)
+}
+
+func TestTestMCPServerConnection_NoConnectorIDSkipsRuntimeStatusUpdate(t *testing.T) {
+	t.Parallel()
+
+	provider := &fakeProvider{}
+	prober := &fakeProber{toolCount: 2}
+	router := newRouter(provider, prober)
+	req := newAuthedRequest(t, http.MethodPost, "/mcp-servers/test-connection", []byte(`{
+		"server_url":"https://example.com/mcp",
+		"authentication":"Bearer abc123"
+	}`))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	require.Empty(t, provider.runtimeUpdates)
+}
+
+func TestTestMCPServerConnection_FailureDoesNotMarkConnectorActive(t *testing.T) {
+	t.Parallel()
+
+	connectorID := uuid.New()
+	provider := &fakeProvider{
+		getFn: func(_ context.Context, _ uuid.UUID, id uuid.UUID) (*models.MCPServer, error) {
+			require.Equal(t, connectorID, id)
+			return &models.MCPServer{
+				ID:        connectorID,
+				ServerURL: "https://example.com/mcp",
+				AuthToken: "stored-token",
+			}, nil
+		},
+	}
+	prober := &fakeProber{err: context.DeadlineExceeded}
+	router := newRouter(provider, prober)
+	req := newAuthedRequest(t, http.MethodPost, "/mcp-servers/test-connection", []byte(`{
+		"server_url":"https://example.com/mcp",
+		"connector_id":"`+connectorID.String()+`",
+		"authentication":"Bearer abc123"
+	}`))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	require.Empty(t, provider.runtimeUpdates)
 }
 
 func TestStartMCPServerOAuth(t *testing.T) {

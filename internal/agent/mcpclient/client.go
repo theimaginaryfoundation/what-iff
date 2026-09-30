@@ -3,9 +3,11 @@ package mcpclient
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"regexp"
 	"strings"
@@ -21,6 +23,7 @@ const (
 	defaultDiscoveryTTL = 5 * time.Minute
 	streamableAccept    = "application/json, text/event-stream"
 	maxRPCResponseBytes = 5 * 1024 * 1024 // 5 MiB cap to bound memory on malformed/abusive servers.
+	mcpSessionHeader    = "Mcp-Session-Id"
 )
 
 var toolNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9_]`)
@@ -39,6 +42,11 @@ type ConnectorTool struct {
 type DiscoveryResult struct {
 	Tools  []ConnectorTool
 	Errors map[uuid.UUID]string
+}
+
+type CallToolResult struct {
+	Output               string
+	GeneratedAttachments []*models.FileAttachment
 }
 
 type Client struct {
@@ -76,13 +84,20 @@ func (c *Client) Invalidate(connectorID uuid.UUID) {
 	c.mu.Unlock()
 }
 
+// SessionState holds per-request-flow MCP session IDs. Callers should scope it
+// to a single conversation turn when using turn-scoped session semantics.
+//
+// It is intentionally a plain map and is mutated in-place by client calls; it is
+// not safe for concurrent use and must not be shared across goroutines.
+type SessionState map[string]string
+
 // ProbeConnection runs initialize + tools/list against a connector configuration
 // without mutating cache or persistence state and returns discovered tool count.
 func (c *Client) ProbeConnection(ctx context.Context, server *models.MCPServer) (int, error) {
 	if server == nil {
 		return 0, fmt.Errorf("server is required")
 	}
-	tools, err := c.listToolsRPC(ctx, server)
+	tools, err := c.listToolsRPC(ctx, server, make(SessionState))
 	if err != nil {
 		return 0, err
 	}
@@ -90,6 +105,10 @@ func (c *Client) ProbeConnection(ctx context.Context, server *models.MCPServer) 
 }
 
 func (c *Client) DiscoverTools(ctx context.Context, userID uuid.UUID, servers []*models.MCPServer) (DiscoveryResult, error) {
+	return c.DiscoverToolsWithSessionState(ctx, userID, servers, make(SessionState))
+}
+
+func (c *Client) DiscoverToolsWithSessionState(ctx context.Context, userID uuid.UUID, servers []*models.MCPServer, sessions SessionState) (DiscoveryResult, error) {
 	res := DiscoveryResult{
 		Tools:  make([]ConnectorTool, 0),
 		Errors: make(map[uuid.UUID]string),
@@ -104,7 +123,7 @@ func (c *Client) DiscoverTools(ctx context.Context, userID uuid.UUID, servers []
 			continue
 		}
 		eligibleConnectors++
-		tools, err := c.discoverConnectorTools(ctx, userID, s)
+		tools, err := c.discoverConnectorTools(ctx, userID, s, sessions)
 		if err != nil {
 			res.Errors[s.ID] = err.Error()
 			continue
@@ -130,7 +149,7 @@ func connectorEligible(s *models.MCPServer) bool {
 	}
 }
 
-func (c *Client) discoverConnectorTools(ctx context.Context, userID uuid.UUID, server *models.MCPServer) ([]ConnectorTool, error) {
+func (c *Client) discoverConnectorTools(ctx context.Context, userID uuid.UUID, server *models.MCPServer, sessions SessionState) ([]ConnectorTool, error) {
 	cacheKey := server.ID.String()
 	now := time.Now().UTC()
 	c.mu.RLock()
@@ -142,7 +161,7 @@ func (c *Client) discoverConnectorTools(ctx context.Context, userID uuid.UUID, s
 	}
 	c.mu.RUnlock()
 
-	rawTools, err := c.listToolsRPC(ctx, server)
+	rawTools, err := c.listToolsRPC(ctx, server, sessions)
 	if err != nil {
 		return nil, err
 	}
@@ -179,20 +198,40 @@ func (c *Client) discoverConnectorTools(ctx context.Context, userID uuid.UUID, s
 }
 
 func (c *Client) CallToolByFullName(ctx context.Context, servers []*models.MCPServer, fullName string, rawArgs json.RawMessage) (string, error) {
-	connectorKey, toolName, err := parseFullToolName(fullName)
+	result, err := c.CallToolByFullNameDetailed(ctx, servers, fullName, rawArgs)
 	if err != nil {
 		return "", err
+	}
+	return result.Output, nil
+}
+
+func (c *Client) CallToolByFullNameWithSessionState(ctx context.Context, servers []*models.MCPServer, fullName string, rawArgs json.RawMessage, sessions SessionState) (string, error) {
+	result, err := c.CallToolByFullNameWithSessionStateDetailed(ctx, servers, fullName, rawArgs, sessions)
+	if err != nil {
+		return "", err
+	}
+	return result.Output, nil
+}
+
+func (c *Client) CallToolByFullNameDetailed(ctx context.Context, servers []*models.MCPServer, fullName string, rawArgs json.RawMessage) (CallToolResult, error) {
+	return c.CallToolByFullNameWithSessionStateDetailed(ctx, servers, fullName, rawArgs, make(SessionState))
+}
+
+func (c *Client) CallToolByFullNameWithSessionStateDetailed(ctx context.Context, servers []*models.MCPServer, fullName string, rawArgs json.RawMessage, sessions SessionState) (CallToolResult, error) {
+	connectorKey, toolName, err := parseFullToolName(fullName)
+	if err != nil {
+		return CallToolResult{}, err
 	}
 	server := findServerByPrefix(servers, connectorKey)
 	if server == nil {
-		return "", fmt.Errorf("unknown mcp connector prefix %q", connectorKey)
+		return CallToolResult{}, fmt.Errorf("unknown mcp connector prefix %q", connectorKey)
 	}
 	if !connectorEligible(server) {
-		return "", fmt.Errorf("connector %q is not available in status %q", server.Name, server.Status)
+		return CallToolResult{}, fmt.Errorf("connector %q is not available in status %q", server.Name, server.Status)
 	}
-	tools, err := c.discoverConnectorTools(ctx, uuid.Nil, server)
+	tools, err := c.discoverConnectorTools(ctx, uuid.Nil, server, sessions)
 	if err != nil {
-		return "", err
+		return CallToolResult{}, err
 	}
 	original := toolName
 	for _, t := range tools {
@@ -201,7 +240,7 @@ func (c *Client) CallToolByFullName(ctx context.Context, servers []*models.MCPSe
 			break
 		}
 	}
-	return c.callToolRPC(ctx, server, original, rawArgs)
+	return c.callToolRPC(ctx, server, original, rawArgs, sessions)
 }
 
 func findServerByPrefix(servers []*models.MCPServer, prefix string) *models.MCPServer {
@@ -312,11 +351,11 @@ type mcpToolDefinition struct {
 	InputSchema map[string]any `json:"inputSchema"`
 }
 
-func (c *Client) listToolsRPC(ctx context.Context, server *models.MCPServer) ([]mcpToolDefinition, error) {
-	if err := c.initializeRPC(ctx, server); err != nil {
+func (c *Client) listToolsRPC(ctx context.Context, server *models.MCPServer, sessions SessionState) ([]mcpToolDefinition, error) {
+	if err := c.initializeRPC(ctx, server, sessions); err != nil {
 		c.logger.Debug("mcp initialize failed before tools/list; trying tools/list anyway", zap.String("server_id", server.ID.String()), zap.Error(err))
 	}
-	result, err := c.rpcCall(ctx, server, "tools/list", map[string]any{})
+	result, err := c.rpcCall(ctx, server, "tools/list", map[string]any{}, sessions)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +368,7 @@ func (c *Client) listToolsRPC(ctx context.Context, server *models.MCPServer) ([]
 	return parsed.Tools, nil
 }
 
-func (c *Client) initializeRPC(ctx context.Context, server *models.MCPServer) error {
+func (c *Client) initializeRPC(ctx context.Context, server *models.MCPServer, sessions SessionState) error {
 	_, err := c.rpcCall(ctx, server, "initialize", map[string]any{
 		"protocolVersion": "2024-11-05",
 		"clientInfo": map[string]any{
@@ -337,47 +376,144 @@ func (c *Client) initializeRPC(ctx context.Context, server *models.MCPServer) er
 			"version": "1.0.0",
 		},
 		"capabilities": map[string]any{},
-	})
+	}, sessions)
 	if err != nil {
 		return err
 	}
 	// Best-effort notification: some servers expect this, others ignore it.
-	_ = c.rpcNotify(ctx, server, "notifications/initialized", map[string]any{})
+	_ = c.rpcNotify(ctx, server, "notifications/initialized", map[string]any{}, sessions)
 	return nil
 }
 
-func (c *Client) callToolRPC(ctx context.Context, server *models.MCPServer, toolName string, rawArgs json.RawMessage) (string, error) {
-	args := map[string]any{}
-	if len(bytes.TrimSpace(rawArgs)) > 0 {
-		if err := json.Unmarshal(rawArgs, &args); err != nil {
-			return "", fmt.Errorf("decode tool input: %w", err)
+func (c *Client) callToolRPC(ctx context.Context, server *models.MCPServer, toolName string, rawArgs json.RawMessage, sessions SessionState) (CallToolResult, error) {
+	args := json.RawMessage(`{}`)
+	if trimmed := bytes.TrimSpace(rawArgs); len(trimmed) > 0 {
+		if !json.Valid(trimmed) {
+			return CallToolResult{}, fmt.Errorf("decode tool input: invalid json arguments")
 		}
+		// Preserve the tool-call argument payload verbatim so explicit zero-values
+		// such as empty strings are not transformed by intermediate map decoding.
+		args = json.RawMessage(trimmed)
 	}
 	result, err := c.rpcCall(ctx, server, "tools/call", map[string]any{
 		"name":      toolName,
 		"arguments": args,
-	})
+	}, sessions)
 	if err != nil {
-		return "", err
+		return CallToolResult{}, err
 	}
+	if parsed, ok := c.parseToolCallResult(result); ok {
+		return parsed, nil
+	}
+	return CallToolResult{Output: string(result)}, nil
+}
+
+func (c *Client) parseToolCallResult(result json.RawMessage) (CallToolResult, bool) {
 	var parsed struct {
 		Content []map[string]any `json:"content"`
 	}
-	if err := json.Unmarshal(result, &parsed); err == nil && len(parsed.Content) > 0 {
-		var textParts []string
-		for _, part := range parsed.Content {
-			if text, ok := part["text"].(string); ok && strings.TrimSpace(text) != "" {
+	if err := json.Unmarshal(result, &parsed); err != nil || len(parsed.Content) == 0 {
+		return CallToolResult{}, false
+	}
+
+	callResult := CallToolResult{
+		GeneratedAttachments: make([]*models.FileAttachment, 0),
+	}
+	var textParts []string
+	for _, block := range parsed.Content {
+		blockType := strings.ToLower(strings.TrimSpace(anyString(block["type"])))
+		switch blockType {
+		case "text":
+			if text := strings.TrimSpace(anyString(block["text"])); text != "" {
 				textParts = append(textParts, text)
 			}
-		}
-		if len(textParts) > 0 {
-			return strings.Join(textParts, "\n"), nil
+		case "image", "audio", "blob":
+			if att := c.attachmentFromContentBlock(blockType, block); att != nil {
+				callResult.GeneratedAttachments = append(callResult.GeneratedAttachments, att)
+			}
 		}
 	}
-	return string(result), nil
+	callResult.Output = strings.Join(textParts, "\n")
+	if callResult.Output != "" || len(callResult.GeneratedAttachments) > 0 {
+		return callResult, true
+	}
+	return CallToolResult{}, false
 }
 
-func (c *Client) rpcNotify(ctx context.Context, server *models.MCPServer, method string, params any) error {
+func (c *Client) attachmentFromContentBlock(blockType string, block map[string]any) *models.FileAttachment {
+	data := strings.TrimSpace(anyString(block["data"]))
+	if data == "" {
+		return nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil || len(decoded) == 0 {
+		c.logger.Debug("mcp content block ignored: invalid base64 payload", zap.String("block_type", blockType), zap.Error(err))
+		return nil
+	}
+	if int64(len(decoded)) > maxRPCResponseBytes {
+		c.logger.Debug("mcp content block ignored: payload exceeds size limit",
+			zap.String("block_type", blockType),
+			zap.Int("decoded_bytes", len(decoded)),
+			zap.Int64("limit_bytes", maxRPCResponseBytes),
+		)
+		return nil
+	}
+	contentType := strings.TrimSpace(anyString(block["mimeType"]))
+	if contentType == "" {
+		contentType = strings.TrimSpace(anyString(block["mime_type"]))
+	}
+	if contentType == "" {
+		contentType = defaultMimeTypeForBlock(blockType)
+	}
+	ext := extensionForMIME(contentType, blockType)
+	return &models.FileAttachment{
+		Name:        fmt.Sprintf("mcp_%s_%s%s", blockType, uuid.NewString(), ext),
+		FileType:    contentType,
+		FileContent: data,
+	}
+}
+
+func anyString(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+func defaultMimeTypeForBlock(blockType string) string {
+	switch blockType {
+	case "image":
+		return "image/png"
+	case "audio":
+		return "audio/wav"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+func extensionForMIME(contentType, blockType string) string {
+	mediaType := strings.TrimSpace(contentType)
+	if parsedMediaType, _, err := mime.ParseMediaType(mediaType); err == nil && parsedMediaType != "" {
+		mediaType = parsedMediaType
+	}
+	if mediaType != "" {
+		if exts, err := mime.ExtensionsByType(mediaType); err == nil {
+			for _, ext := range exts {
+				if e := strings.TrimSpace(ext); e != "" {
+					return e
+				}
+			}
+		}
+	}
+	switch blockType {
+	case "image":
+		return ".png"
+	case "audio":
+		return ".wav"
+	default:
+		return ".bin"
+	}
+}
+
+func (c *Client) rpcNotify(ctx context.Context, server *models.MCPServer, method string, params any, sessions SessionState) error {
 	req := rpcRequest{
 		JSONRPC: "2.0",
 		Method:  method,
@@ -393,6 +529,9 @@ func (c *Client) rpcNotify(ctx context.Context, server *models.MCPServer, method
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", streamableAccept)
+	if sessionID := getSessionID(sessions, server); sessionID != "" {
+		httpReq.Header.Set(mcpSessionHeader, sessionID)
+	}
 	token, err := authHeaderForServer(server, time.Now().UTC())
 	if err != nil {
 		return err
@@ -405,10 +544,13 @@ func (c *Client) rpcNotify(ctx context.Context, server *models.MCPServer, method
 		return err
 	}
 	defer resp.Body.Close()
+	if sessionID := strings.TrimSpace(resp.Header.Get(mcpSessionHeader)); sessionID != "" {
+		setSessionID(sessions, server, sessionID)
+	}
 	return nil
 }
 
-func (c *Client) rpcCall(ctx context.Context, server *models.MCPServer, method string, params any) (json.RawMessage, error) {
+func (c *Client) rpcCall(ctx context.Context, server *models.MCPServer, method string, params any, sessions SessionState) (json.RawMessage, error) {
 	req := rpcRequest{
 		JSONRPC: "2.0",
 		ID:      uuid.NewString(),
@@ -425,6 +567,9 @@ func (c *Client) rpcCall(ctx context.Context, server *models.MCPServer, method s
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", streamableAccept)
+	if sessionID := getSessionID(sessions, server); sessionID != "" {
+		httpReq.Header.Set(mcpSessionHeader, sessionID)
+	}
 	token, err := authHeaderForServer(server, time.Now().UTC())
 	if err != nil {
 		return nil, err
@@ -437,6 +582,9 @@ func (c *Client) rpcCall(ctx context.Context, server *models.MCPServer, method s
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if sessionID := strings.TrimSpace(resp.Header.Get(mcpSessionHeader)); sessionID != "" {
+		setSessionID(sessions, server, sessionID)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, err := readBoundedBody(resp.Body, maxRPCResponseBytes)
 		if err != nil {
@@ -535,6 +683,38 @@ func truncateForError(s string, max int) string {
 		return s
 	}
 	return s[:max] + "...(truncated)"
+}
+
+func sessionKeyForServer(server *models.MCPServer) string {
+	if server == nil {
+		return ""
+	}
+	if server.ID != uuid.Nil {
+		return server.ID.String()
+	}
+	return strings.TrimSpace(server.ServerURL)
+}
+
+func getSessionID(sessions SessionState, server *models.MCPServer) string {
+	if sessions == nil {
+		return ""
+	}
+	key := sessionKeyForServer(server)
+	if key == "" {
+		return ""
+	}
+	return sessions[key]
+}
+
+func setSessionID(sessions SessionState, server *models.MCPServer, sessionID string) {
+	if sessions == nil {
+		return
+	}
+	key := sessionKeyForServer(server)
+	if key == "" {
+		return
+	}
+	sessions[key] = sessionID
 }
 
 func readBoundedBody(r io.Reader, max int64) ([]byte, error) {

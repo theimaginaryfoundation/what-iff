@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -28,7 +29,7 @@ func (a *Agent) getSubagentMCPTools(ctx context.Context, userID uuid.UUID, ritua
 			zap.Error(err))
 		return nil
 	}
-	specs := a.discoverMCPFunctionToolSpecs(ctx, userID, servers)
+	specs := a.discoverMCPFunctionToolSpecs(ctx, userID, servers, nil)
 	return agenttools.OpenAIFunctionTools(specs)
 }
 
@@ -43,9 +44,13 @@ func (a *Agent) getSubagentMCPFunctionToolSpecs(ctx context.Context, userID uuid
 			zap.Error(err))
 		return nil, nil
 	}
-	return a.discoverMCPFunctionToolSpecs(ctx, userID, servers), servers
+	return a.discoverMCPFunctionToolSpecs(ctx, userID, servers, nil), servers
 }
 
+// prepareTurnMCPToolSpecs returns all discoverable MCP tool definitions for this
+// conversation turn. Execution eligibility is enforced separately in
+// dispatchMCPToolUse via chatCtx.loadedMCPTools, so load_mcp_tools/unload_mcp_tools
+// changes are effective on the next agent-loop iteration without waiting for a new turn.
 func (a *Agent) prepareTurnMCPToolSpecs(ctx context.Context, chatCtx *chatContext, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) []agenttools.FunctionToolSpec {
 	servers := a.getChatMCPServers(ctx, userID, chatID, ritualIDs)
 	loadedByServer := map[uuid.UUID][]string{}
@@ -63,8 +68,11 @@ func (a *Agent) prepareTurnMCPToolSpecs(ctx context.Context, chatCtx *chatContex
 	if chatCtx != nil {
 		chatCtx.setMCPServerCache(servers, loadedByServer)
 	}
-	specs := a.discoverMCPFunctionToolSpecs(ctx, userID, servers)
-	return filterMCPToolSpecsByLoaded(specs, loadedByServer)
+	// Register all discoverable MCP tool definitions for the turn so that
+	// load_mcp_tools/unload_mcp_tools changes take effect on the next loop round.
+	// Execution gating still happens in dispatchMCPToolUse via loadedMCPTools.
+	specs := a.discoverMCPFunctionToolSpecs(ctx, userID, servers, sessionStateFromChatContext(chatCtx))
+	return specs
 }
 
 func (a *Agent) getChatMCPServers(ctx context.Context, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) []*models.MCPServer {
@@ -107,11 +115,11 @@ func (a *Agent) getChatMCPServers(ctx context.Context, userID, chatID uuid.UUID,
 	return servers
 }
 
-func (a *Agent) discoverMCPFunctionToolSpecs(ctx context.Context, userID uuid.UUID, servers []*models.MCPServer) []agenttools.FunctionToolSpec {
+func (a *Agent) discoverMCPFunctionToolSpecs(ctx context.Context, userID uuid.UUID, servers []*models.MCPServer, sessions mcpclient.SessionState) []agenttools.FunctionToolSpec {
 	if a.mcpClient == nil || len(servers) == 0 {
 		return nil
 	}
-	out, discoverErr := a.mcpClient.DiscoverTools(ctx, userID, servers)
+	out, discoverErr := a.mcpClient.DiscoverToolsWithSessionState(ctx, userID, servers, sessions)
 	if discoverErr != nil {
 		a.logger.Warn("mcp tool discovery encountered only connector failures",
 			zap.String("user_id", userID.String()),
@@ -156,6 +164,16 @@ func (a *Agent) discoverMCPFunctionToolSpecs(ctx context.Context, userID uuid.UU
 	}
 
 	return specs
+}
+
+func sessionStateFromChatContext(chatCtx *chatContext) mcpclient.SessionState {
+	if chatCtx == nil {
+		return nil
+	}
+	if chatCtx.mcpSessions == nil {
+		chatCtx.mcpSessions = make(map[string]string)
+	}
+	return mcpclient.SessionState(chatCtx.mcpSessions)
 }
 
 func claudeFunctionTools(specs []agenttools.FunctionToolSpec) []anthropic.ToolUnionParam {
