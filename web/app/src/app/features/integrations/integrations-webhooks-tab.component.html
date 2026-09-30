@@ -48,12 +48,19 @@
                   <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                     <span class="inline-flex items-center rounded-full px-2 py-0.5 font-medium"
                   tabindex="0"
-                  [uiTooltip]="token.status === 'active' ? 'Can be used to post messages into your threads' : 'Revoked; calls with this token are rejected'"
+                  [uiTooltip]="token.status === 'active' ? activeTokenHint(token) : 'Revoked; calls with this token are rejected'"
                   [ngClass]="token.status === 'active'
                     ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
                     : 'bg-gray-100 text-gray-700 dark:bg-gray-900/40 dark:text-gray-300'">
                       {{ token.status === 'active' ? 'Active' : 'Revoked' }}
                     </span>
+                    @for (scope of token.scopes; track scope) {
+                      <span
+                        class="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 font-medium text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
+                        data-testid="webhook-token-scope">
+                        {{ scopeLabel(scope) }}
+                      </span>
+                    }
                     <span>Created {{ token.created_at | date:'medium' }}</span>
                     @if (token.last_used_at) {
                       <span>Last used {{ token.last_used_at | date:'medium' }}</span>
@@ -81,7 +88,9 @@
     <h2 class="inline-flex items-center gap-1 text-sm font-semibold text-gray-900 dark:text-white mb-3">
       Create webhook API token
       <ui-help-hint label="What is a webhook token?" heading="Webhook tokens" align="end">
-        A webhook token lets another app post a message into one of your threads with <span class="font-mono">POST /chat/&#123;chatId&#125;/messages</span>.
+        A webhook token lets another app act on your account through the webhook API, limited to what you allow here.
+        <span class="font-mono">Post messages</span> lets it post into your threads with <span class="font-mono">POST /webhooks/chat/&#123;chatId&#125;/messages</span>.
+        <span class="font-mono">Read threads</span> lets it read your threads, messages, job status and persona names, and never system prompts or memories.
         The token is shown once, and revoked tokens stop working.
       </ui-help-hint>
     </h2>
@@ -98,6 +107,28 @@
           placeholder="e.g. Slack trigger"
           class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
       </div>
+      <fieldset>
+        <legend class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">What this token can do</legend>
+        <div class="space-y-2">
+          @for (option of scopeOptions; track option.scope) {
+            <label class="flex items-start gap-2 text-sm text-gray-900 dark:text-white">
+              <input
+                type="checkbox"
+                class="mt-0.5 rounded border-gray-300 dark:border-gray-600"
+                [attr.data-testid]="'webhook-scope-' + option.scope"
+                [checked]="isScopeSelected(option.scope)"
+                (change)="toggleScope(option.scope, $any($event.target).checked)" />
+              <span>
+                <span class="font-medium">{{ option.label }}</span>
+                <span class="block text-xs text-gray-600 dark:text-gray-400">{{ option.description }}</span>
+              </span>
+            </label>
+          }
+        </div>
+        @if (selectedScopes().size === 0) {
+          <p class="mt-1 text-xs text-red-600 dark:text-red-400" data-testid="webhook-scope-required">Choose at least one.</p>
+        }
+      </fieldset>
     </div>
 
     <div class="mt-4">

@@ -47,8 +47,28 @@ describe('WebhookTokenService', () => {
                 user_id: 'user-1',
                 name: 'Slack webhook',
                 status: 'active',
+                scopes: ['messages:write'],
                 created_at: '2026-04-06T00:00:00Z',
                 updated_at: '2026-04-06T00:00:00Z'
+            },
+            api_token: 'wht_example'
+        });
+    });
+
+    it('should send the requested scopes when creating a token', () => {
+        service.createWebhookToken({ name: 'Bridge', scopes: ['messages:write', 'chat:read'] }).subscribe();
+
+        const req = httpMock.expectOne(`${environment.apiUrl}/webhook-tokens`);
+        expect(req.request.body).toEqual({ name: 'Bridge', scopes: ['messages:write', 'chat:read'] });
+        req.flush({
+            token: {
+                id: 'tok-2',
+                user_id: 'user-1',
+                name: 'Bridge',
+                status: 'active',
+                scopes: ['messages:write', 'chat:read'],
+                created_at: '2026-09-30T00:00:00Z',
+                updated_at: '2026-09-30T00:00:00Z'
             },
             api_token: 'wht_example'
         });
