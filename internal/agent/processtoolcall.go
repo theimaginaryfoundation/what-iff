@@ -134,7 +134,7 @@ func (a *Agent) dispatchMCPToolUse(ctx context.Context, chatCtx *chatContext, us
 	if !mcpToolIsLoaded(chatCtx, use.Name) {
 		return "", nil, fmt.Errorf("mcp tool %q is not loaded for this chat; call %q first", use.Name, tools.LoadMCPToolsToolSpec.Name)
 	}
-	out, err := a.mcpClient.CallToolByFullName(ctx, servers, use.Name, use.Input)
+	out, err := a.mcpClient.CallToolByFullNameWithSessionState(ctx, servers, use.Name, use.Input, sessionStateFromChatContext(chatCtx))
 	if err != nil {
 		return "", nil, err
 	}

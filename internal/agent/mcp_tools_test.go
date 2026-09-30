@@ -50,7 +50,7 @@ func TestGetSubagentMCPTools_ReturnsFunctionToolsFromDiscovery(t *testing.T) {
 		ServerURL: srv.URL,
 		Status:    models.MCPServerStatusActive,
 	}
-	tools := a.discoverMCPFunctionToolSpecs(context.Background(), uuid.New(), []*models.MCPServer{server})
+	tools := a.discoverMCPFunctionToolSpecs(context.Background(), uuid.New(), []*models.MCPServer{server}, nil)
 	require.Len(t, tools, 1)
 	require.Contains(t, tools[0].Name, "mcp__")
 }

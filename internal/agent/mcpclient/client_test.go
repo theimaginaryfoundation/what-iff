@@ -253,12 +253,65 @@ func TestCallToolByFullName_PropagatesMCPSessionHeader(t *testing.T) {
 		ServerURL: srv.URL,
 		Status:    models.MCPServerStatusActive,
 	}
+	sessions := SessionState{}
+	out, err := client.DiscoverToolsWithSessionState(context.Background(), uuid.New(), []*models.MCPServer{server}, sessions)
+	require.NoError(t, err)
+	require.Len(t, out.Tools, 1)
+	_, err = client.CallToolByFullNameWithSessionState(context.Background(), []*models.MCPServer{server}, out.Tools[0].FullName, json.RawMessage(`{}`), sessions)
+	require.NoError(t, err)
+	require.Equal(t, sessionID, seenToolCallSession)
+}
+
+func TestCallToolByFullName_DefaultFlowDoesNotReuseSessionAcrossCalls(t *testing.T) {
+	sawMissingSessionOnToolCall := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var req map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		method, _ := req["method"].(string)
+		switch method {
+		case "initialize", "notifications/initialized":
+			w.Header().Set(mcpSessionHeader, "sess-once")
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{}})
+		case "tools/list":
+			w.Header().Set(mcpSessionHeader, "sess-once")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result": map[string]any{
+					"tools": []map[string]any{{"name": "echo", "inputSchema": map[string]any{"type": "object"}}},
+				},
+			})
+		case "tools/call":
+			if r.Header.Get(mcpSessionHeader) == "" {
+				sawMissingSessionOnToolCall = true
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result": map[string]any{
+					"content": []map[string]any{{"type": "text", "text": "ok"}},
+				},
+			})
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(nil, nil)
+	server := &models.MCPServer{
+		ID:        uuid.New(),
+		Name:      "fastmcp",
+		ServerURL: srv.URL,
+		Status:    models.MCPServerStatusActive,
+	}
 	out, err := client.DiscoverTools(context.Background(), uuid.New(), []*models.MCPServer{server})
 	require.NoError(t, err)
 	require.Len(t, out.Tools, 1)
 	_, err = client.CallToolByFullName(context.Background(), []*models.MCPServer{server}, out.Tools[0].FullName, json.RawMessage(`{}`))
 	require.NoError(t, err)
-	require.Equal(t, sessionID, seenToolCallSession)
+	require.True(t, sawMissingSessionOnToolCall)
 }
 
 func TestAuthHeaderForServer(t *testing.T) {

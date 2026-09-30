@@ -837,6 +837,8 @@ type chatContext struct {
 	mcpServers []*models.MCPServer
 	// loadedMCPTools tracks the per-connector set of loaded MCP full tool names for this chat.
 	loadedMCPTools map[uuid.UUID]map[string]struct{}
+	// mcpSessions stores MCP session ids for this single conversation turn.
+	mcpSessions map[string]string
 }
 
 func (c *chatContext) setMCPServerCache(servers []*models.MCPServer, loadedByServer map[uuid.UUID][]string) {
@@ -2071,6 +2073,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 		modelVisionSupport:     resolved.visionSupport,
 		expressionsEnabled:     expressionsEnabled,
 		memoryProgress:         memoryProgress,
+		mcpSessions:            make(map[string]string),
 	}, nil
 }
 

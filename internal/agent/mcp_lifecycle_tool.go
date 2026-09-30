@@ -50,7 +50,7 @@ func (a *Agent) loadMCPToolsTool(ctx context.Context, chatCtx *chatContext, inpu
 	if err != nil {
 		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{ServerID: serverID.String(), Error: err.Error()})
 	}
-	discovery, err := a.mcpClient.DiscoverTools(ctx, chatCtx.userID, []*models.MCPServer{server})
+	discovery, err := a.mcpClient.DiscoverToolsWithSessionState(ctx, chatCtx.userID, []*models.MCPServer{server}, sessionStateFromChatContext(chatCtx))
 	if err != nil && len(discovery.Tools) == 0 {
 		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{
 			ServerID: serverID.String(),
