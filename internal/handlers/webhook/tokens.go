@@ -16,6 +16,9 @@ import (
 
 type createWebhookTokenRequest struct {
 	Name string `json:"name"`
+	// Scopes says what the token may do. Omitted means messages:write only, which is what tokens
+	// have always done; reading threads has to be asked for with chat:read.
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 type createWebhookTokenResponse struct {
@@ -36,8 +39,14 @@ func (h *Handler) CreateWebhookToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scopes, err := models.NormalizeWebhookScopes(req.Scopes)
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
+		return
+	}
+
 	tokenName := strings.TrimSpace(req.Name)
-	token, plainToken, err := h.provider.CreateWebhookToken(r.Context(), userID, tokenName)
+	token, plainToken, err := h.provider.CreateWebhookToken(r.Context(), userID, tokenName, scopes)
 	if err != nil {
 		if err == datastore.ErrInvalidRequestBody {
 			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Token name is required", nil)
