@@ -456,7 +456,7 @@ paths:
 
     post:
       summary: Create webhook API token
-      description: Creates a new webhook API token for the authenticated user and returns the raw token once.
+      description: Creates a new webhook API token for the authenticated user and returns the raw token once. Pass `scopes` to choose what it may do; the default is `messages:write` only.
       tags: [Webhook Tokens]
       security:
         - bearerAuth: []
@@ -4695,6 +4695,7 @@ paths:
       summary: Send webhook message to chat
       description: |
         Sends a webhook message to an existing chat using a static webhook API token.
+        Requires the `messages:write` scope.
         The `mode` controls behavior:
         - `user`: persists user message and triggers normal async processing
         - `assistant`: writes assistant message only (no inference)
@@ -4741,8 +4742,448 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '403':
+          description: The token does not have the `messages:write` scope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           description: Chat not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    get:
+      summary: List messages in a thread (webhook)
+      description: |
+        Returns a thread's messages, newest first. Requires the `chat:read` scope.
+
+        Page with `page` and `limit`, or walk back through history with `cursor`: pass the previous
+        response's `next_cursor` to get the messages strictly older than that page. Cursors stay
+        correct while new messages arrive; page numbers do not.
+
+        A thread that does not exist and a thread that belongs to someone else both return 404.
+        Filters are validated: a malformed `origin`, `min_date`, `max_date` or `cursor` is a 400, not ignored.
+
+        Messages use a stable subset of the session API's `ChatMessage`: the same field names, without
+        tool calls, model reasoning, context breakdowns, portrait thumbnails or storage keys.
+        An empty thread returns 200 with an empty `results` list.
+      tags: [Webhooks]
+      security:
+        - webhookAuth: []
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          description: Chat ID
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          description: Page number (default 1). Ignored when `cursor` is given.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Items per page. Default 20; values above 100 are clamped to 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          description: Opaque token from a previous response's `next_cursor`; returns the messages strictly older than that page.
+          schema:
+            type: string
+        - name: origin
+          in: query
+          description: Only messages from this side of the conversation (case-insensitive).
+          schema:
+            type: string
+            enum: [user, assistant]
+        - name: min_date
+          in: query
+          description: Only messages sent at or after this time (RFC 3339).
+          schema:
+            type: string
+            format: date-time
+        - name: max_date
+          in: query
+          description: Only messages sent at or before this time (RFC 3339).
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Messages retrieved successfully
+          headers:
+            Cache-Control:
+              description: Always `no-store`; results are live state.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      results:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/WebhookMessage'
+        '400':
+          description: Invalid chat ID, paging, filter or cursor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid webhook token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: The token does not have the `chat:read` scope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Chat not found (or not yours)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /webhooks/chat:
+    get:
+      summary: List threads (webhook)
+      description: |
+        Returns the token owner's threads, ordered by most recent activity. Requires the `chat:read` scope.
+
+        Filter by persona with `personality_id`; `GET /webhooks/personality` lists the personas to choose from.
+        Archived threads are excluded unless `archived=true`. Filters are validated: a malformed value is a 400, not ignored.
+      tags: [Webhooks]
+      security:
+        - webhookAuth: []
+      parameters:
+        - name: page
+          in: query
+          description: Page number (default 1)
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Items per page. Default 20; values above 100 are clamped to 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: personality_id
+          in: query
+          description: Only threads with this persona (see `GET /webhooks/personality`).
+          schema:
+            type: string
+            format: uuid
+        - name: name
+          in: query
+          description: Filter by thread name
+          schema:
+            type: string
+        - name: search
+          in: query
+          description: Search in thread names and tags
+          schema:
+            type: string
+        - name: tag
+          in: query
+          description: Filter by exact tag
+          schema:
+            type: string
+        - name: is_favorite
+          in: query
+          description: Filter by favorite status
+          schema:
+            type: boolean
+        - name: archived
+          in: query
+          description: When true, return only archived threads. When false or omitted, only active ones.
+          schema:
+            type: boolean
+        - name: min_date
+          in: query
+          description: Only threads created at or after this time (RFC 3339).
+          schema:
+            type: string
+            format: date-time
+        - name: max_date
+          in: query
+          description: Only threads created at or before this time (RFC 3339).
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Threads retrieved successfully
+          headers:
+            Cache-Control:
+              description: Always `no-store`; results are live state.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      results:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Chat'
+        '400':
+          description: Invalid paging or filter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid webhook token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: The token does not have the `chat:read` scope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /webhooks/personality:
+    get:
+      summary: List personas (webhook)
+      description: |
+        Returns the token owner's personas as id, name and cover only: enough to choose a persona and
+        filter threads by it with `GET /webhooks/chat?personality_id=`. Requires the `chat:read` scope.
+
+        A persona's system prompt, scratchpad, memory settings and attachments are private working
+        state and are never returned here.
+      tags: [Webhooks]
+      security:
+        - webhookAuth: []
+      parameters:
+        - name: page
+          in: query
+          description: Page number (default 1)
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Items per page. Default 20; values above 100 are clamped to 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: name
+          in: query
+          description: Filter by persona name
+          schema:
+            type: string
+        - name: search
+          in: query
+          description: Search in persona names
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Personas retrieved successfully
+          headers:
+            Cache-Control:
+              description: Always `no-store`; results are live state.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      results:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/WebhookPersonality'
+        '400':
+          description: Invalid paging
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid webhook token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: The token does not have the `chat:read` scope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /webhooks/chat/chat-message/{id}:
+    get:
+      summary: Get one message (webhook)
+      description: |
+        Returns a single message by id. Use it to read the `sent_at` of a message you just posted, so the
+        reply that follows it can be matched. Requires the `chat:read` scope. A message that does not
+        exist and one that belongs to someone else both return 404.
+      tags: [Webhooks]
+      security:
+        - webhookAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Message ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Message retrieved successfully
+          headers:
+            Cache-Control:
+              description: Always `no-store`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookMessage'
+        '400':
+          description: Invalid message ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid webhook token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: The token does not have the `chat:read` scope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Message not found (or not yours)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /webhooks/job/{id}:
+    get:
+      summary: Get a background job (webhook)
+      description: |
+        Returns a job's state. A message posted with mode `user` or `background` is answered by a job,
+        so poll this until `result_id` is set or `status` is `failed` or `cancelled`. `result_id` is the id of
+        the reply message and is set as soon as `status` reaches `inference_complete`, so the reply can be read
+        (`GET /webhooks/chat/chat-message/{id}`) before `complete`, which means post-processing has finished too.
+        On failure, `error` says why. Requires the `chat:read` scope. A job that does not exist and one that belongs to someone else both return 404.
+      tags: [Webhooks]
+      security:
+        - webhookAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Job ID (the `job_id` from the send response)
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Job retrieved successfully
+          headers:
+            Cache-Control:
+              description: Always `no-store`; job state changes while you poll.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '400':
+          description: Invalid job ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid webhook token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: The token does not have the `chat:read` scope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Job not found (or not yours)
           content:
             application/json:
               schema:
@@ -5842,7 +6283,7 @@ components:
     webhookAuth:
       type: http
       scheme: bearer
-      description: Static webhook API token created via /webhook-tokens. Webhook calls execute with the same effective permissions as the user who created the token.
+      description: Static webhook API token created via /webhook-tokens. Webhook calls act as the user who created the token, limited to the scopes the token was created with (`messages:write`, `chat:read`); a route that needs a scope the token lacks returns 403.
 
   schemas:
 
@@ -7181,6 +7622,11 @@ components:
         status:
           type: string
           enum: [active, revoked]
+        scopes:
+          type: array
+          description: What the token may do. Tokens created before scopes existed report `messages:write`.
+          items:
+            $ref: '#/components/schemas/WebhookScope'
         last_used_at:
           type: string
           format: date-time
@@ -7196,6 +7642,7 @@ components:
         - user_id
         - name
         - status
+        - scopes
         - created_at
         - updated_at
 
@@ -7205,6 +7652,14 @@ components:
         name:
           type: string
           description: Friendly token label.
+        scopes:
+          type: array
+          description: |
+            What the token may do. Omit for `messages:write` only, which is what tokens have always done.
+            Reading threads, messages, job status and persona names has to be asked for with `chat:read`.
+            Unknown scopes are rejected with 400.
+          items:
+            $ref: '#/components/schemas/WebhookScope'
       required:
         - name
 
@@ -7219,6 +7674,115 @@ components:
       required:
         - token
         - api_token
+
+    WebhookScope:
+      type: string
+      enum: [messages:write, chat:read]
+      description: |
+        What a webhook token may do. `messages:write` allows `POST /webhooks/chat/{chatId}/messages`.
+        `chat:read` allows the read routes (threads, messages, job status, persona names) and never exposes
+        system prompts, scratchpads or memories. Tokens created before scopes existed are `messages:write` only.
+
+    WebhookMessage:
+      type: object
+      description: |
+        A message as the webhook read routes return it: a stable subset of `ChatMessage` with the same field
+        names. Tool calls, model reasoning, context breakdowns, portrait thumbnails, rituals, bookmarks and
+        storage keys are not included.
+      properties:
+        id:
+          type: string
+          format: uuid
+        chat_id:
+          type: string
+          format: uuid
+        message:
+          type: string
+        origin:
+          type: string
+          enum: [User, Assistant]
+        read_status:
+          type: string
+          enum: [read, unread]
+        sent_at:
+          type: string
+          format: date-time
+          description: Always present. Messages are ordered by `sent_at` then `id`.
+        generation_model:
+          type: string
+          description: Model that produced an assistant message; `none` for messages posted in `assistant` mode.
+        generation_personality:
+          type: string
+          description: Persona name for an assistant message; `webhook` for messages posted in `assistant` mode.
+        generation_mood_name:
+          type: string
+        generation_expression_key:
+          type: string
+          nullable: true
+        generation_expression_label:
+          type: string
+          nullable: true
+        last_error_message:
+          type: string
+          nullable: true
+          description: Set when generating the reply to this user message failed.
+        attachments:
+          type: array
+          description: Attachment metadata only; file contents are not served on this surface.
+          items:
+            $ref: '#/components/schemas/WebhookAttachment'
+      required:
+        - id
+        - chat_id
+        - message
+        - origin
+        - read_status
+        - sent_at
+
+    WebhookAttachment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        file_type:
+          type: string
+        description:
+          type: string
+          nullable: true
+      required:
+        - id
+        - name
+        - file_type
+
+    WebhookPersonality:
+      type: object
+      description: A persona as listed on the webhook surface, with enough to choose one and filter threads by it.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        accent_color:
+          type: string
+          nullable: true
+        cover_image_url:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - created_at
+        - updated_at
 
     WebhookMessageMode:
       type: string

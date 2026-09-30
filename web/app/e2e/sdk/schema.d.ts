@@ -775,7 +775,7 @@ export interface paths {
         put?: never;
         /**
          * Create webhook API token
-         * @description Creates a new webhook API token for the authenticated user and returns the raw token once.
+         * @description Creates a new webhook API token for the authenticated user and returns the raw token once. Pass `scopes` to choose what it may do; the default is `messages:write` only.
          */
         post: {
             parameters: {
@@ -6876,11 +6876,111 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List messages in a thread (webhook)
+         * @description Returns a thread's messages, newest first. Requires the `chat:read` scope.
+         *
+         *     Page with `page` and `limit`, or walk back through history with `cursor`: pass the previous
+         *     response's `next_cursor` to get the messages strictly older than that page. Cursors stay
+         *     correct while new messages arrive; page numbers do not.
+         *
+         *     A thread that does not exist and a thread that belongs to someone else both return 404.
+         *     Filters are validated: a malformed `origin`, `min_date`, `max_date` or `cursor` is a 400, not ignored.
+         *
+         *     Messages use a stable subset of the session API's `ChatMessage`: the same field names, without
+         *     tool calls, model reasoning, context breakdowns, portrait thumbnails or storage keys.
+         *     An empty thread returns 200 with an empty `results` list.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Page number (default 1). Ignored when `cursor` is given. */
+                    page?: number;
+                    /** @description Items per page. Default 20; values above 100 are clamped to 100. */
+                    limit?: number;
+                    /** @description Opaque token from a previous response's `next_cursor`; returns the messages strictly older than that page. */
+                    cursor?: string;
+                    /** @description Only messages from this side of the conversation (case-insensitive). */
+                    origin?: "user" | "assistant";
+                    /** @description Only messages sent at or after this time (RFC 3339). */
+                    min_date?: string;
+                    /** @description Only messages sent at or before this time (RFC 3339). */
+                    max_date?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Chat ID */
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Messages retrieved successfully */
+                200: {
+                    headers: {
+                        /** @description Always `no-store`; results are live state. */
+                        "Cache-Control"?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PaginatedResponse"] & {
+                            results?: components["schemas"]["WebhookMessage"][];
+                        };
+                    };
+                };
+                /** @description Invalid chat ID, paging, filter or cursor */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Missing or invalid webhook token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The token does not have the `chat:read` scope */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Chat not found (or not yours) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         put?: never;
         /**
          * Send webhook message to chat
          * @description Sends a webhook message to an existing chat using a static webhook API token.
+         *     Requires the `messages:write` scope.
          *     The `mode` controls behavior:
          *     - `user`: persists user message and triggers normal async processing
          *     - `assistant`: writes assistant message only (no inference)
@@ -6938,6 +7038,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description The token does not have the `messages:write` scope */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Chat not found */
                 404: {
                     headers: {
@@ -6958,6 +7067,385 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/chat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List threads (webhook)
+         * @description Returns the token owner's threads, ordered by most recent activity. Requires the `chat:read` scope.
+         *
+         *     Filter by persona with `personality_id`; `GET /webhooks/personality` lists the personas to choose from.
+         *     Archived threads are excluded unless `archived=true`. Filters are validated: a malformed value is a 400, not ignored.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Page number (default 1) */
+                    page?: number;
+                    /** @description Items per page. Default 20; values above 100 are clamped to 100. */
+                    limit?: number;
+                    /** @description Only threads with this persona (see `GET /webhooks/personality`). */
+                    personality_id?: string;
+                    /** @description Filter by thread name */
+                    name?: string;
+                    /** @description Search in thread names and tags */
+                    search?: string;
+                    /** @description Filter by exact tag */
+                    tag?: string;
+                    /** @description Filter by favorite status */
+                    is_favorite?: boolean;
+                    /** @description When true, return only archived threads. When false or omitted, only active ones. */
+                    archived?: boolean;
+                    /** @description Only threads created at or after this time (RFC 3339). */
+                    min_date?: string;
+                    /** @description Only threads created at or before this time (RFC 3339). */
+                    max_date?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Threads retrieved successfully */
+                200: {
+                    headers: {
+                        /** @description Always `no-store`; results are live state. */
+                        "Cache-Control"?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PaginatedResponse"] & {
+                            results?: components["schemas"]["Chat"][];
+                        };
+                    };
+                };
+                /** @description Invalid paging or filter */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Missing or invalid webhook token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The token does not have the `chat:read` scope */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/personality": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List personas (webhook)
+         * @description Returns the token owner's personas as id, name and cover only: enough to choose a persona and
+         *     filter threads by it with `GET /webhooks/chat?personality_id=`. Requires the `chat:read` scope.
+         *
+         *     A persona's system prompt, scratchpad, memory settings and attachments are private working
+         *     state and are never returned here.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Page number (default 1) */
+                    page?: number;
+                    /** @description Items per page. Default 20; values above 100 are clamped to 100. */
+                    limit?: number;
+                    /** @description Filter by persona name */
+                    name?: string;
+                    /** @description Search in persona names */
+                    search?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Personas retrieved successfully */
+                200: {
+                    headers: {
+                        /** @description Always `no-store`; results are live state. */
+                        "Cache-Control"?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PaginatedResponse"] & {
+                            results?: components["schemas"]["WebhookPersonality"][];
+                        };
+                    };
+                };
+                /** @description Invalid paging */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Missing or invalid webhook token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The token does not have the `chat:read` scope */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/chat/chat-message/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one message (webhook)
+         * @description Returns a single message by id. Use it to read the `sent_at` of a message you just posted, so the
+         *     reply that follows it can be matched. Requires the `chat:read` scope. A message that does not
+         *     exist and one that belongs to someone else both return 404.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Message ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Message retrieved successfully */
+                200: {
+                    headers: {
+                        /** @description Always `no-store`. */
+                        "Cache-Control"?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WebhookMessage"];
+                    };
+                };
+                /** @description Invalid message ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Missing or invalid webhook token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The token does not have the `chat:read` scope */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Message not found (or not yours) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/job/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a background job (webhook)
+         * @description Returns a job's state. A message posted with mode `user` or `background` is answered by a job,
+         *     so poll this until `result_id` is set or `status` is `failed` or `cancelled`. `result_id` is the id of
+         *     the reply message and is set as soon as `status` reaches `inference_complete`, so the reply can be read
+         *     (`GET /webhooks/chat/chat-message/{id}`) before `complete`, which means post-processing has finished too.
+         *     On failure, `error` says why. Requires the `chat:read` scope. A job that does not exist and one that belongs to someone else both return 404.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Job ID (the `job_id` from the send response) */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Job retrieved successfully */
+                200: {
+                    headers: {
+                        /** @description Always `no-store`; job state changes while you poll. */
+                        "Cache-Control"?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Job"];
+                    };
+                };
+                /** @description Invalid job ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Missing or invalid webhook token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The token does not have the `chat:read` scope */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Job not found (or not yours) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -9337,6 +9825,8 @@ export interface components {
             name: string;
             /** @enum {string} */
             status: "active" | "revoked";
+            /** @description What the token may do. Tokens created before scopes existed report `messages:write`. */
+            scopes: components["schemas"]["WebhookScope"][];
             /** Format: date-time */
             last_used_at?: string | null;
             /** Format: date-time */
@@ -9347,11 +9837,75 @@ export interface components {
         CreateWebhookTokenRequest: {
             /** @description Friendly token label. */
             name: string;
+            /**
+             * @description What the token may do. Omit for `messages:write` only, which is what tokens have always done.
+             *     Reading threads, messages, job status and persona names has to be asked for with `chat:read`.
+             *     Unknown scopes are rejected with 400.
+             */
+            scopes?: components["schemas"]["WebhookScope"][];
         };
         CreateWebhookTokenResponse: {
             token: components["schemas"]["WebhookToken"];
             /** @description Raw API token value returned once at creation time. */
             api_token: string;
+        };
+        /**
+         * @description What a webhook token may do. `messages:write` allows `POST /webhooks/chat/{chatId}/messages`.
+         *     `chat:read` allows the read routes (threads, messages, job status, persona names) and never exposes
+         *     system prompts, scratchpads or memories. Tokens created before scopes existed are `messages:write` only.
+         * @enum {string}
+         */
+        WebhookScope: "messages:write" | "chat:read";
+        /**
+         * @description A message as the webhook read routes return it: a stable subset of `ChatMessage` with the same field
+         *     names. Tool calls, model reasoning, context breakdowns, portrait thumbnails, rituals, bookmarks and
+         *     storage keys are not included.
+         */
+        WebhookMessage: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            chat_id: string;
+            message: string;
+            /** @enum {string} */
+            origin: "User" | "Assistant";
+            /** @enum {string} */
+            read_status: "read" | "unread";
+            /**
+             * Format: date-time
+             * @description Always present. Messages are ordered by `sent_at` then `id`.
+             */
+            sent_at: string;
+            /** @description Model that produced an assistant message; `none` for messages posted in `assistant` mode. */
+            generation_model?: string;
+            /** @description Persona name for an assistant message; `webhook` for messages posted in `assistant` mode. */
+            generation_personality?: string;
+            generation_mood_name?: string;
+            generation_expression_key?: string | null;
+            generation_expression_label?: string | null;
+            /** @description Set when generating the reply to this user message failed. */
+            last_error_message?: string | null;
+            /** @description Attachment metadata only; file contents are not served on this surface. */
+            attachments?: components["schemas"]["WebhookAttachment"][];
+        };
+        WebhookAttachment: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            file_type: string;
+            description?: string | null;
+        };
+        /** @description A persona as listed on the webhook surface, with enough to choose one and filter threads by it. */
+        WebhookPersonality: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            accent_color?: string | null;
+            cover_image_url?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         /** @enum {string} */
         WebhookMessageMode: "user" | "assistant" | "background";
