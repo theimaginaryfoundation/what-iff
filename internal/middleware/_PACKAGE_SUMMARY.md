@@ -8,6 +8,8 @@ HTTP **middleware** for the API: authentication, optional subscription gates, CO
 
 - **Auth (`auth.go`):** JWT/Cognito claim extraction (including API Gateway v2 context), validation, population of `UserIDKey`, `UserRoleKey`, `ClientTimezoneKey`, `UserPlanIDKey` on the request context.
   Paths for invite/login flows as implemented.
+- **Webhook auth (`webhook_auth.go`):** `WebhookAuthMiddleware` authenticates static `wht_` bearer tokens and puts the owner, role, timezone, token id and the token's scopes (`WebhookScopesKey`) on the context.
+  `RequireWebhookScope` then gates each webhook route on one scope and fails closed if no scopes are present.
 - **Subscriber access (`premium.go` — legacy filename):** `RequireActiveSubscription` / `HasActiveSubscription` gate routes that need an active Stripe subscription (`active`, `trialing`, `past_due`).
   Webhook-token requests are treated as pre-authorized.
 - **CORS / logging:** Used from `internal/server` router setup.
@@ -16,7 +18,8 @@ HTTP **middleware** for the API: authentication, optional subscription gates, CO
 
 | Symbol | Notes |
 |--------|--------|
-| Context keys | `UserIDKey`, `UserRoleKey`, `ClientTimezoneKey`, `UserPlanIDKey`, `UserSubscriptionStatusKey` — consumed by handlers and agent for timezone formatting, quota, and billing/accounting context. |
+| Context keys | `UserIDKey`, `UserRoleKey`, `ClientTimezoneKey`, `UserPlanIDKey`, `UserSubscriptionStatusKey` — consumed by handlers and agent for timezone formatting, quota, and billing/accounting context; webhook requests add `WebhookTokenIDKey` and `WebhookScopesKey`. |
+| `WebhookAuthMiddleware`, `RequireWebhookScope` | Authenticate a webhook token, then require a scope on a route. The 403 names the missing scope and is returned before any resource lookup. |
 | `RequireActiveSubscription` | Middleware for any remaining subscription-gated endpoints. |
 
 ## Dependencies
@@ -40,6 +43,7 @@ HTTP **middleware** for the API: authentication, optional subscription gates, CO
 
 - `auth_timezone_test.go` — timezone propagation behavior.
 - `premium_test.go` — premium middleware behavior.
+- `webhook_auth_test.go`, `webhook_scope_test.go` — webhook token authentication, scopes in the context, and scope enforcement including the fail-closed cases.
 
 ## Related documentation
 
