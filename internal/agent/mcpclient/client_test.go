@@ -314,6 +314,65 @@ func TestCallToolByFullName_DefaultFlowDoesNotReuseSessionAcrossCalls(t *testing
 	require.True(t, sawMissingSessionOnToolCall)
 }
 
+func TestCallToolByFullName_PreservesExplicitEmptyStringArguments(t *testing.T) {
+	seenThreadTS := "__unset__"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var req map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		method, _ := req["method"].(string)
+		switch method {
+		case "initialize", "notifications/initialized":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{}})
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result": map[string]any{
+					"tools": []map[string]any{{"name": "slack_post", "inputSchema": map[string]any{"type": "object"}}},
+				},
+			})
+		case "tools/call":
+			params, _ := req["params"].(map[string]any)
+			args, _ := params["arguments"].(map[string]any)
+			if v, ok := args["thread_ts"]; ok {
+				if s, ok := v.(string); ok {
+					seenThreadTS = s
+				}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result": map[string]any{
+					"content": []map[string]any{{"type": "text", "text": "ok"}},
+				},
+			})
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(nil, nil)
+	server := &models.MCPServer{
+		ID:        uuid.New(),
+		Name:      "slack",
+		ServerURL: srv.URL,
+		Status:    models.MCPServerStatusActive,
+	}
+	out, err := client.DiscoverTools(context.Background(), uuid.New(), []*models.MCPServer{server})
+	require.NoError(t, err)
+	require.Len(t, out.Tools, 1)
+	_, err = client.CallToolByFullName(
+		context.Background(),
+		[]*models.MCPServer{server},
+		out.Tools[0].FullName,
+		json.RawMessage(`{"thread_ts":"","text":"hello"}`),
+	)
+	require.NoError(t, err)
+	require.Equal(t, "", seenThreadTS)
+}
+
 func TestAuthHeaderForServer(t *testing.T) {
 	t.Run("header mode passes through token", func(t *testing.T) {
 		token, err := authHeaderForServer(&models.MCPServer{

@@ -360,11 +360,14 @@ func (c *Client) initializeRPC(ctx context.Context, server *models.MCPServer, se
 }
 
 func (c *Client) callToolRPC(ctx context.Context, server *models.MCPServer, toolName string, rawArgs json.RawMessage, sessions SessionState) (string, error) {
-	args := map[string]any{}
-	if len(bytes.TrimSpace(rawArgs)) > 0 {
-		if err := json.Unmarshal(rawArgs, &args); err != nil {
-			return "", fmt.Errorf("decode tool input: %w", err)
+	args := json.RawMessage(`{}`)
+	if trimmed := bytes.TrimSpace(rawArgs); len(trimmed) > 0 {
+		if !json.Valid(trimmed) {
+			return "", fmt.Errorf("decode tool input: invalid json arguments")
 		}
+		// Preserve the tool-call argument payload verbatim so explicit zero-values
+		// such as empty strings are not transformed by intermediate map decoding.
+		args = json.RawMessage(trimmed)
 	}
 	result, err := c.rpcCall(ctx, server, "tools/call", map[string]any{
 		"name":      toolName,
