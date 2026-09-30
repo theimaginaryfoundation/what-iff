@@ -21,6 +21,7 @@ const (
 	defaultDiscoveryTTL = 5 * time.Minute
 	streamableAccept    = "application/json, text/event-stream"
 	maxRPCResponseBytes = 5 * 1024 * 1024 // 5 MiB cap to bound memory on malformed/abusive servers.
+	mcpSessionHeader    = "Mcp-Session-Id"
 )
 
 var toolNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9_]`)
@@ -46,8 +47,9 @@ type Client struct {
 	logger     *zap.Logger
 	ttl        time.Duration
 
-	mu    sync.RWMutex
-	cache map[string]cacheEntry
+	mu         sync.RWMutex
+	cache      map[string]cacheEntry
+	sessionIDs map[string]string
 }
 
 type cacheEntry struct {
@@ -67,12 +69,14 @@ func New(httpClient *http.Client, logger *zap.Logger) *Client {
 		logger:     logger,
 		ttl:        defaultDiscoveryTTL,
 		cache:      make(map[string]cacheEntry),
+		sessionIDs: make(map[string]string),
 	}
 }
 
 func (c *Client) Invalidate(connectorID uuid.UUID) {
 	c.mu.Lock()
 	delete(c.cache, connectorID.String())
+	delete(c.sessionIDs, connectorID.String())
 	c.mu.Unlock()
 }
 
@@ -393,6 +397,9 @@ func (c *Client) rpcNotify(ctx context.Context, server *models.MCPServer, method
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", streamableAccept)
+	if sessionID := c.getSessionID(server); sessionID != "" {
+		httpReq.Header.Set(mcpSessionHeader, sessionID)
+	}
 	token, err := authHeaderForServer(server, time.Now().UTC())
 	if err != nil {
 		return err
@@ -405,6 +412,9 @@ func (c *Client) rpcNotify(ctx context.Context, server *models.MCPServer, method
 		return err
 	}
 	defer resp.Body.Close()
+	if sessionID := strings.TrimSpace(resp.Header.Get(mcpSessionHeader)); sessionID != "" {
+		c.setSessionID(server, sessionID)
+	}
 	return nil
 }
 
@@ -425,6 +435,9 @@ func (c *Client) rpcCall(ctx context.Context, server *models.MCPServer, method s
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", streamableAccept)
+	if sessionID := c.getSessionID(server); sessionID != "" {
+		httpReq.Header.Set(mcpSessionHeader, sessionID)
+	}
 	token, err := authHeaderForServer(server, time.Now().UTC())
 	if err != nil {
 		return nil, err
@@ -437,6 +450,9 @@ func (c *Client) rpcCall(ctx context.Context, server *models.MCPServer, method s
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if sessionID := strings.TrimSpace(resp.Header.Get(mcpSessionHeader)); sessionID != "" {
+		c.setSessionID(server, sessionID)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, err := readBoundedBody(resp.Body, maxRPCResponseBytes)
 		if err != nil {
@@ -535,6 +551,36 @@ func truncateForError(s string, max int) string {
 		return s
 	}
 	return s[:max] + "...(truncated)"
+}
+
+func sessionKeyForServer(server *models.MCPServer) string {
+	if server == nil {
+		return ""
+	}
+	if server.ID != uuid.Nil {
+		return server.ID.String()
+	}
+	return strings.TrimSpace(server.ServerURL)
+}
+
+func (c *Client) getSessionID(server *models.MCPServer) string {
+	key := sessionKeyForServer(server)
+	if key == "" {
+		return ""
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.sessionIDs[key]
+}
+
+func (c *Client) setSessionID(server *models.MCPServer, sessionID string) {
+	key := sessionKeyForServer(server)
+	if key == "" {
+		return
+	}
+	c.mu.Lock()
+	c.sessionIDs[key] = sessionID
+	c.mu.Unlock()
 }
 
 func readBoundedBody(r io.Reader, max int64) ([]byte, error) {

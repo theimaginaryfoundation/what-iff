@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -258,6 +259,25 @@ func (h *Handler) TestMCPServerConnection(w http.ResponseWriter, r *http.Request
 			Message:   err.Error(),
 		})
 		return
+	}
+	if req.ConnectorID != nil {
+		now := time.Now().UTC()
+		if err := h.provider.UpdateMCPServerRuntimeState(
+			r.Context(),
+			userID,
+			*req.ConnectorID,
+			models.MCPServerStatusActive,
+			"",
+			toolCount,
+			&now,
+			&now,
+		); err != nil {
+			h.logger.Warn("failed to update mcp connector runtime state after successful connection test",
+				zap.String("user_id", userID.String()),
+				zap.String("mcp_server_id", req.ConnectorID.String()),
+				zap.Error(err),
+			)
+		}
 	}
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, testMCPServerConnectionResponse{

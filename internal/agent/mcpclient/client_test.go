@@ -171,6 +171,96 @@ func TestProbeConnection(t *testing.T) {
 	})
 }
 
+func TestProbeConnection_PropagatesMCPSessionHeader(t *testing.T) {
+	sessionID := "sess-123"
+	seenHeaders := map[string]string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var req map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		method, _ := req["method"].(string)
+		seenHeaders[method] = r.Header.Get(mcpSessionHeader)
+		w.Header().Set(mcpSessionHeader, sessionID)
+		switch method {
+		case "initialize", "notifications/initialized":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{}})
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result":  map[string]any{"tools": []map[string]any{{"name": "one"}}},
+			})
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(nil, nil)
+	count, err := client.ProbeConnection(context.Background(), &models.MCPServer{
+		ID:        uuid.New(),
+		ServerURL: srv.URL,
+		Status:    models.MCPServerStatusActive,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Empty(t, seenHeaders["initialize"])
+	require.Equal(t, sessionID, seenHeaders["notifications/initialized"])
+	require.Equal(t, sessionID, seenHeaders["tools/list"])
+}
+
+func TestCallToolByFullName_PropagatesMCPSessionHeader(t *testing.T) {
+	sessionID := "sess-fastmcp"
+	seenToolCallSession := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var req map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		method, _ := req["method"].(string)
+		if method == "tools/call" {
+			seenToolCallSession = r.Header.Get(mcpSessionHeader)
+		}
+		w.Header().Set(mcpSessionHeader, sessionID)
+		switch method {
+		case "initialize", "notifications/initialized":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{}})
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result": map[string]any{
+					"tools": []map[string]any{{"name": "echo", "inputSchema": map[string]any{"type": "object"}}},
+				},
+			})
+		case "tools/call":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result": map[string]any{
+					"content": []map[string]any{{"type": "text", "text": "ok"}},
+				},
+			})
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(nil, nil)
+	server := &models.MCPServer{
+		ID:        uuid.New(),
+		Name:      "fastmcp",
+		ServerURL: srv.URL,
+		Status:    models.MCPServerStatusActive,
+	}
+	out, err := client.DiscoverTools(context.Background(), uuid.New(), []*models.MCPServer{server})
+	require.NoError(t, err)
+	require.Len(t, out.Tools, 1)
+	_, err = client.CallToolByFullName(context.Background(), []*models.MCPServer{server}, out.Tools[0].FullName, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.Equal(t, sessionID, seenToolCallSession)
+}
+
 func TestAuthHeaderForServer(t *testing.T) {
 	t.Run("header mode passes through token", func(t *testing.T) {
 		token, err := authHeaderForServer(&models.MCPServer{
