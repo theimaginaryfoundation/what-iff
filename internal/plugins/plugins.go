@@ -18,8 +18,10 @@ package plugins
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"go.uber.org/zap"
 )
@@ -49,6 +51,37 @@ type Deps struct {
 	// builds this over the deny-network client, and a plugin cannot opt out of
 	// that by constructing its own (ADR 0x018).
 	CreateEmbedding func(ctx context.Context, input string) ([]float32, error)
+	// Lifecycle is cancelled when the server begins shutting down. A plugin that
+	// runs background work (a poller, a long-lived connection) runs it on this
+	// context, so it stops with the server instead of being cut off mid-write.
+	Lifecycle context.Context
+	// Turns starts agent turns on a user's behalf, for plugins that receive
+	// messages from outside the app (another chat service, say). It is nil when
+	// the server was built without an agent; callers must check before use.
+	Turns TurnStarter
+}
+
+// UserTurn is one message to answer as if the user had sent it in the app.
+type UserTurn struct {
+	// UserID owns the chat. The turn runs, and is metered, as this user.
+	UserID uuid.UUID
+	// Timezone is the user's IANA timezone, used for timestamps the agent sees.
+	// Empty means the server default.
+	Timezone string
+	// Message is saved as a user message. ChatID and Message are required; Origin
+	// is always set to user.
+	Message models.ChatMessage
+}
+
+// TurnStarter starts an agent turn the same way the app and the webhook user mode
+// do: the message is saved, a tracking job is created, and the reply is written
+// asynchronously. The returned response carries the saved message id and the job
+// id. The reply's completion is observable through internal/replyhook.
+//
+// Ownership is enforced by the datastore, as it is for every turn: a chat that
+// does not belong to UserID is not found.
+type TurnStarter interface {
+	StartUserTurn(ctx context.Context, turn UserTurn) (*models.ChatMessageResponse, error)
 }
 
 // Registrar wires one plugin's routes/handlers onto the server.

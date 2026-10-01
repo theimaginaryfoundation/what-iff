@@ -9,6 +9,7 @@ HTTP **API server**: Gorilla mux router, OpenTelemetry/metrics middleware, CORS,
 - **`Server`:** Holds config, logger, telemetry, Ent client, `sql.DB`, HTTP server, and optional **agent job scheduler** lifecycle.
 - **`NewServer`:** Builds router, middleware (`setupMiddleware`), routes (`setupRoutes`), timeouts from `Config`.
 - **`setupRoutes`:** Creates `datastore.Datastore`, `storage.FileStore`, a `metering.Meter` (production implementation when linked, otherwise no-op), `agent.Agent`, scheduler (`internal/agentjobs/scheduler` when enabled), then mounts handlers: health, chat, memory, account export/import, personality, ritual, job, file attachment, user, model, agent job, MCP, role, etc. — a linked plugin may register additional routes (see `internal/plugins`).
+  Plugins also get the server's lifecycle context (cancelled on `Shutdown`) and a `plugins.TurnStarter` (`plugin_turns.go`), which starts a turn as a user through `agent.HandleUserMessage`, the same path as the app and the webhook user mode.
   Sub-routers use `/api` prefix; some routes use `/api/v1/...` (see `server.go` comments).
 - **`Config` (`config.go`):** Env-driven environment name (`ENV`, then `ENVIRONMENT`), host/port, CORS, OpenAI/Anthropic keys, S3, Stripe keys, **agent job scheduler** flags (in-process vs distributed lock), free-tier message limit, token encryption secret, and a `RequireBilling` feature flag — consumed by a private billing implementation when one is linked; a no-op otherwise.
 

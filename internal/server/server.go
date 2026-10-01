@@ -414,6 +414,8 @@ func (s *Server) setupRoutes() {
 		V1AuthRouter:    apiV1Router,
 		FileStore:       fileStore,
 		CreateEmbedding: pluginEmbedder(s.config.OpenAIKey, providerHTTPClient),
+		Lifecycle:       s.lifecycleCtx,
+		Turns:           agentTurnStarter{agent: agent},
 	})
 
 	// Register role routes (protected with admin role middleware)

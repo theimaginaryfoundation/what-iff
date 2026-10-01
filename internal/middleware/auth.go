@@ -226,6 +226,19 @@ func GetWebhookTokenIDFromContext(ctx context.Context) (uuid.UUID, bool) {
 	return tokenID, ok
 }
 
+// ContextWithUser returns ctx carrying userID (and timezone, when set) the way the
+// auth middlewares record them, for work that runs as a user without an HTTP
+// request (a plugin starting a turn, say). Role is not set: code reached this
+// way must not depend on one.
+func ContextWithUser(ctx context.Context, userID uuid.UUID, timezone string) context.Context {
+	ctx = apicontext.WithUserID(ctx, userID)
+	ctx = context.WithValue(ctx, UserIDKey, userID)
+	if timezone != "" {
+		ctx = context.WithValue(ctx, ClientTimezoneKey, timezone)
+	}
+	return ctx
+}
+
 // CopyUserIDToContext sets the user ID in a new context from the request context
 func CopyUserToIDContext(srcCtx, newCtx context.Context) (context.Context, bool) {
 	userID, ok := srcCtx.Value(UserIDKey).(uuid.UUID)
