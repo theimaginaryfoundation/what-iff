@@ -1,4 +1,6 @@
 const MAX_FILENAME_LENGTH = 200;
+/** Path separators plus the characters Windows forbids, so a saved file moves cleanly between OSes. */
+const UNSAFE_FILENAME_CHARS = '/\\<>:"|?*';
 
 /**
  * Pulls the file name out of a Content-Disposition header, handling both the plain
@@ -14,7 +16,7 @@ function sanitizeFilename(name: string): string {
   const withoutUnsafe = Array.from(name)
     .filter(ch => {
       const code = ch.codePointAt(0) ?? 0;
-      return code > 0x1f && code !== 0x7f && ch !== '/' && ch !== '\\';
+      return code > 0x1f && code !== 0x7f && !UNSAFE_FILENAME_CHARS.includes(ch);
     })
     .join('')
     .trim();

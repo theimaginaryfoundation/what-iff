@@ -24,6 +24,10 @@ describe('filenameFromContentDisposition', () => {
     expect(filenameFromContentDisposition(header, 'x.json')).toBe('....evil.json');
   });
 
+  it('also drops characters Windows forbids in file names', () => {
+    expect(filenameFromContentDisposition('attachment; filename="Who: Me? <1>*|.json"', 'x.json')).toBe('Who Me 1.json');
+  });
+
   it('caps very long names and falls back when nothing usable is left', () => {
     expect(filenameFromContentDisposition(`attachment; filename="${'a'.repeat(500)}.json"`, 'x.json')).toHaveLength(200);
     expect(filenameFromContentDisposition(`attachment; filename*=utf-8''%2F%0A`, 'x.json')).toBe('x.json');

@@ -45,13 +45,14 @@ func (h *Handler) ImportCharacterCard(w http.ResponseWriter, r *http.Request) {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
 			handlerutils.RespondWithError(w, h.logger, http.StatusRequestEntityTooLarge, handlerutils.CodeNotSet,
-				fmt.Sprintf("Character card exceeds maximum size of %d MB", maxCardBytes>>20), err)
+				fmt.Sprintf("Character card exceeds maximum size of %d MiB", maxCardBytes>>20), err)
 			return
 		}
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid request body", err)
 		return
 	}
 
+	// MaxPromptUnits and TextLimitHardMax are both UTF-16 code units; keep them aligned.
 	imported, err := stcard.Parse(raw, stcard.ImportOptions{MaxPromptUnits: handlerutils.TextLimitHardMax})
 	if err != nil {
 		code := handlerutils.CodeNotSet
@@ -235,7 +236,7 @@ func toPNG(img []byte) ([]byte, error) {
 	}
 	decoded, _, err := image.Decode(bytes.NewReader(img))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode cover image: %w", err)
 	}
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, decoded); err != nil {
