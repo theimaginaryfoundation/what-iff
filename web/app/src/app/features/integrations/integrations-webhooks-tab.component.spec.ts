@@ -1,10 +1,12 @@
 import type { MockedObject } from 'vitest';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
+import { By } from '@angular/platform-browser';
 import { of } from 'rxjs';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { WebhookTokenService } from '../../core/services/webhook-token.service';
 import { WebhookScope, WebhookToken } from '../../core/models/webhook-token.model';
+import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 import { IntegrationsWebhooksTabComponent } from './integrations-webhooks-tab.component';
 
 describe('IntegrationsWebhooksTabComponent', () => {
@@ -143,6 +145,19 @@ describe('IntegrationsWebhooksTabComponent', () => {
 
     expect(chips(rows[0])).toEqual(['Post messages']);
     expect(chips(rows[1])).toEqual(['Read threads']);
+  });
+
+  it('links the token help hint to the webhooks guide', async () => {
+    await render();
+
+    const hint = fixture.debugElement.query(By.directive(HelpHintComponent));
+    expect(hint.componentInstance.guide()).toBe('webhooks');
+
+    (hint.nativeElement.querySelector('button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const link = hint.nativeElement.querySelector('.ui-help-hint__link') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toMatch(/\/guides\/webhooks\.html$/);
+    expect(link.textContent).toContain('Read the webhooks guide');
   });
 
   it('describes an active token by its scopes', async () => {
