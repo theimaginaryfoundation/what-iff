@@ -1,10 +1,28 @@
+const MAX_FILENAME_LENGTH = 200;
+
 /**
  * Pulls the file name out of a Content-Disposition header, handling both the plain
  * `filename="x"` form and the RFC 5987 `filename*=utf-8''x` form the API uses for non-ASCII names.
- * Returns `fallback` when the header is missing or carries no usable name.
+ * The name is sanitized for use as a download name (control characters and path separators removed,
+ * length capped); `fallback` is returned when the header is missing or carries no usable name.
  */
 export function filenameFromContentDisposition(header: string | null | undefined, fallback: string): string {
-  if (!header) return fallback;
+  return sanitizeFilename(rawFilename(header)) || fallback;
+}
+
+function sanitizeFilename(name: string): string {
+  const withoutUnsafe = Array.from(name)
+    .filter(ch => {
+      const code = ch.codePointAt(0) ?? 0;
+      return code > 0x1f && code !== 0x7f && ch !== '/' && ch !== '\\';
+    })
+    .join('')
+    .trim();
+  return withoutUnsafe.slice(0, MAX_FILENAME_LENGTH).trim();
+}
+
+function rawFilename(header: string | null | undefined): string {
+  if (!header) return '';
 
   const encoded = /filename\*\s*=\s*(?:utf-8|UTF-8)''([^;]+)/.exec(header);
   if (encoded?.[1]) {
@@ -17,7 +35,7 @@ export function filenameFromContentDisposition(header: string | null | undefined
   }
 
   const plain = /filename\s*=\s*"([^"]+)"/.exec(header) ?? /filename\s*=\s*([^;]+)/.exec(header);
-  return plain?.[1]?.trim() || fallback;
+  return plain?.[1]?.trim() ?? '';
 }
 
 /** Saves `blob` to the user's machine as `filename` by clicking a temporary link. */

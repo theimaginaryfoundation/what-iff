@@ -19,6 +19,16 @@ describe('filenameFromContentDisposition', () => {
     expect(filenameFromContentDisposition(header, 'x.json')).toBe('ok.json');
   });
 
+  it('strips control characters and path separators from the name', () => {
+    const header = `attachment; filename*=utf-8''..%2F..%2Fevil%0D%0A.json`;
+    expect(filenameFromContentDisposition(header, 'x.json')).toBe('....evil.json');
+  });
+
+  it('caps very long names and falls back when nothing usable is left', () => {
+    expect(filenameFromContentDisposition(`attachment; filename="${'a'.repeat(500)}.json"`, 'x.json')).toHaveLength(200);
+    expect(filenameFromContentDisposition(`attachment; filename*=utf-8''%2F%0A`, 'x.json')).toBe('x.json');
+  });
+
   it('returns the fallback when the header is missing or has no filename', () => {
     expect(filenameFromContentDisposition(null, 'x.json')).toBe('x.json');
     expect(filenameFromContentDisposition(undefined, 'x.json')).toBe('x.json');
