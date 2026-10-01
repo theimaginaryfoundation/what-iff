@@ -14,6 +14,7 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
 import { ContextPanelService } from '../../services/context-panel.service';
 import { RouterLink } from '@angular/router';
 import { ThreadJobSummary, jobDisplayName } from '../../helpers/thread-jobs.helpers';
+import { ThreadAutomation } from '../../../../core/services/thread-automation-source';
 import { statusDescription, statusLabel, statusTone } from '../../../agent-job/helpers/job-status.helpers';
 
 @Component({
@@ -132,6 +133,24 @@ import { statusDescription, statusLabel, statusTone } from '../../../agent-job/h
               }
             </span>
             <span class="thread-row__job-when">{{ jobWhen() }}</span>
+          }
+          @for (item of automations() ?? []; track $index) {
+            <span class="thread-row__job-line">
+              <span
+                class="thread-row__job-status"
+                [attr.data-tone]="item.tone"
+                [uiTooltip]="item.statusHint ?? ''"
+              >{{ item.statusText }}</span>
+              <a
+                class="thread-row__job-name"
+                [routerLink]="item.link"
+                [uiTooltip]="item.name"
+                truncatedOnly
+              >{{ item.name }}</a>
+            </span>
+            @if (item.when) {
+              <span class="thread-row__job-when">{{ item.when }}</span>
+            }
           }
         </td>
       }
@@ -551,6 +570,8 @@ export class ThreadRowComponent {
   /** Thread Manager Jobs tab: render the JOB cell. */
   readonly showJobColumn = input(false);
   readonly jobs = input<ThreadJobSummary | null>(null);
+  /** Thread Manager Jobs tab: non-job automations driving this thread (see ThreadAutomationSource). */
+  readonly automations = input<readonly ThreadAutomation[] | null>(null);
 
   readonly jobName = computed(() => {
     const summary = this.jobs();

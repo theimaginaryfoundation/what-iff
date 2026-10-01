@@ -1,6 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient, withXhr } from '@angular/common/http';
+import { provideRouter } from '@angular/router';
 
 import { Chat } from '../../../../core/models/chat.model';
 import { Personality } from '../../../../core/models/personality.model';
@@ -199,5 +200,30 @@ describe('ThreadRowComponent', () => {
 
         expect(contextPanel.composerThreadReferences()).toEqual([]);
         expect(button.getAttribute('aria-pressed')).toBe('false');
+    });
+});
+
+describe('ThreadRowComponent automations', () => {
+    it('renders each automation in the job cell with its status, link and when-line', async () => {
+        await TestBed.configureTestingModule({
+            imports: [ThreadRowComponent],
+            providers: [provideZonelessChangeDetection(), provideHttpClient(withXhr()), provideRouter([])],
+        }).compileComponents();
+        const fixture = TestBed.createComponent(ThreadRowComponent);
+        fixture.componentRef.setInput('thread', makeChat({ id: 'a', name: 'Alpha' }));
+        fixture.componentRef.setInput('showJobColumn', true);
+        fixture.componentRef.setInput('automations', [
+            { chatId: 'a', name: 'Relay · #general', statusText: 'Live', tone: 'success', link: ['/integrations'], when: 'Last post 5m ago' },
+            { chatId: 'a', name: 'Relay · #ops', statusText: 'Broken', tone: 'danger', link: ['/integrations'] },
+        ]);
+        fixture.detectChanges();
+
+        const cell = fixture.nativeElement.querySelector('.thread-row__job') as HTMLElement;
+        const names = Array.from(cell.querySelectorAll('.thread-row__job-name')).map(a => a.textContent?.trim());
+        expect(names).toEqual(['Relay · #general', 'Relay · #ops']);
+        const tones = Array.from(cell.querySelectorAll('.thread-row__job-status')).map(s => s.getAttribute('data-tone'));
+        expect(tones).toEqual(['success', 'danger']);
+        expect(cell.querySelector('.thread-row__job-name')!.getAttribute('href')).toBe('/integrations');
+        expect(cell.querySelectorAll('.thread-row__job-when').length).toBe(1);
     });
 });

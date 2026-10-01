@@ -10,6 +10,8 @@ import { ExternalAuthProvider } from './core/auth/external-auth.provider';
 import { externalAuthProviders } from './extensions/external-auth.providers';
 import { chatSendGateProviders } from './extensions/chat-send-gate.providers';
 import { accessGateProviders } from './extensions/access-gate.providers';
+import { integrationTabProviders } from './extensions/integration-tabs.providers';
+import { threadAutomationProviders } from './extensions/thread-automations.providers';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -22,6 +24,8 @@ export const appConfig: ApplicationConfig = {
     ...externalAuthProviders,
     ...chatSendGateProviders,
     ...accessGateProviders,
+    ...integrationTabProviders,
+    ...threadAutomationProviders,
     {
       provide: APP_INITIALIZER,
       multi: true,

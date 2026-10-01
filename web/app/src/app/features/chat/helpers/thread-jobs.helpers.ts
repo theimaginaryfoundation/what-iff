@@ -1,8 +1,9 @@
-import { Observable, firstValueFrom } from 'rxjs';
+import { Observable, catchError, firstValueFrom, of } from 'rxjs';
 
 import { AgentJob, AgentJobStatus } from '../../../core/models/agent-job.model';
 import { Chat, ChatFilters } from '../../../core/models/chat.model';
 import { PaginatedResponse } from '../../../core/models/common.model';
+import { ThreadAutomation } from '../../../core/services/thread-automation-source';
 
 /** Page size for the agent-job list (the API's maximum). */
 export const THREAD_JOBS_PAGE_SIZE = 100;
@@ -23,6 +24,8 @@ export interface ThreadJobSummary {
 export interface ThreadsWithJobs {
   chats: Chat[];
   jobsByChatId: ReadonlyMap<string, ThreadJobSummary>;
+  /** Non-job automations (see ThreadAutomationSource) per thread. */
+  automationsByChatId: ReadonlyMap<string, readonly ThreadAutomation[]>;
   /** True when the job or chat lists were cut off by the caps above. */
   truncated: boolean;
 }
@@ -31,6 +34,8 @@ export interface ThreadsWithJobs {
 export interface ThreadJobsSources {
   listAgentJobs(page: number, limit: number): Observable<PaginatedResponse<AgentJob>>;
   listAllChats(limitPerPage: number, filters?: ChatFilters): Observable<{ chats: Chat[]; truncated: boolean }>;
+  /** Automations other than agent jobs; omitted or empty when none are contributed. */
+  listAutomations?(): Observable<ThreadAutomation[]>;
 }
 
 /**
@@ -84,12 +89,26 @@ export function summarizeJobsByChat(jobs: readonly AgentJob[]): Map<string, Thre
   return summaries;
 }
 
+/** Groups automations by the thread they drive, keeping their order. */
+export function groupAutomationsByChat(items: readonly ThreadAutomation[]): Map<string, ThreadAutomation[]> {
+  const grouped = new Map<string, ThreadAutomation[]>();
+  for (const item of items) {
+    if (!item.chatId) continue;
+    const list = grouped.get(item.chatId) ?? [];
+    list.push(item);
+    grouped.set(item.chatId, list);
+  }
+  return grouped;
+}
+
 export function jobDisplayName(job: AgentJob): string {
   return job.title?.trim() || job.schedule_input?.trim() || 'Untitled job';
 }
 
 /**
- * Loads every thread that has a scheduled job, active or archived, with its job summary.
+ * Loads every thread that has a scheduled job or a contributed automation, active or
+ * archived, with its job summary and automations. A failing automation source is
+ * treated as empty, so it never hides the agent-job threads.
  * Uses the existing APIs: the agent-job list gives the chat ids, then `GET /chat?ids=`
  * (which ignores archive state) fetches those threads with the Thread Manager's filters.
  */
@@ -111,7 +130,11 @@ export async function loadThreadsWithJobs(
   }
 
   const jobsByChatId = summarizeJobsByChat(jobs);
-  const ids = [...jobsByChatId.keys()];
+  const automations = sources.listAutomations
+    ? await firstValueFrom(sources.listAutomations().pipe(catchError(() => of([] as ThreadAutomation[]))))
+    : [];
+  const automationsByChatId = groupAutomationsByChat(automations);
+  const ids = [...new Set([...jobsByChatId.keys(), ...automationsByChatId.keys()])];
   const chats: Chat[] = [];
   for (let i = 0; i < ids.length; i += THREAD_JOBS_IDS_PER_REQUEST) {
     const chunk = ids.slice(i, i + THREAD_JOBS_IDS_PER_REQUEST);
@@ -121,5 +144,5 @@ export async function loadThreadsWithJobs(
     chats.push(...result.chats);
     truncated ||= result.truncated;
   }
-  return { chats, jobsByChatId, truncated };
+  return { chats, jobsByChatId, automationsByChatId, truncated };
 }

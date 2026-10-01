@@ -5,6 +5,7 @@ import { Chat, PatchChatRequest } from '../models/chat.model';
 import { apiErrorMessage } from '../utils/api-error.helpers';
 import { AgentJobService } from './agent-job.service';
 import { ChatService } from './chat.service';
+import { ThreadAutomation, ThreadAutomationSource } from './thread-automation-source';
 import {
   PersonalityOption,
   ThreadFilterState,
@@ -29,6 +30,7 @@ const LIST_PAGE_SIZE = 200;
 export class ThreadListService implements OnDestroy {
   private readonly chatService = inject(ChatService);
   private readonly agentJobService = inject(AgentJobService);
+  private readonly automationSource = inject(ThreadAutomationSource);
 
   private readonly allThreads = signal<Chat[]>([]);
   /** Every loaded thread, ignoring the Thread Manager's search/tag filters (used by pickers). */
@@ -58,6 +60,8 @@ export class ThreadListService implements OnDestroy {
   readonly showArchivedOnly = computed(() => this.scope() === 'archived');
   /** Scheduled jobs per thread id; populated only while {@link scope} is `jobs`. */
   readonly jobsByChatId = signal<ReadonlyMap<string, ThreadJobSummary>>(new Map());
+  /** Non-job automations per thread id (see ThreadAutomationSource); populated only while {@link scope} is `jobs`. */
+  readonly automationsByChatId = signal<ReadonlyMap<string, readonly ThreadAutomation[]>>(new Map());
   /** Thread Manager bulk-selection: ids checked in the table. */
   readonly selectedIds = signal<ReadonlySet<string>>(new Set());
   readonly selectedCount = computed(() => this.selectedIds().size);
@@ -218,11 +222,13 @@ export class ThreadListService implements OnDestroy {
           {
             listAgentJobs: (page, limit) => this.agentJobService.listAgentJobs(page, limit),
             listAllChats: (limit, chatFilters) => this.chatService.listAllChats(limit, chatFilters),
+            listAutomations: () => this.automationSource.list(),
           },
           filters,
         );
         if (generation !== this.refreshGeneration) return;
         this.jobsByChatId.set(result.jobsByChatId);
+        this.automationsByChatId.set(result.automationsByChatId);
         this.allThreads.set(result.chats);
         this.listTruncated.set(result.truncated);
         return;
@@ -233,6 +239,7 @@ export class ThreadListService implements OnDestroy {
       );
       if (generation !== this.refreshGeneration) return;
       this.jobsByChatId.set(new Map());
+      this.automationsByChatId.set(new Map());
       this.allThreads.set(response.chats);
       this.listTruncated.set(response.truncated);
     } catch (error) {

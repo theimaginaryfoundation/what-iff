@@ -36,6 +36,18 @@
             : 'border-transparent text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'">
             Webhooks
           </button>
+          @for (tab of extraTabs(); track tab.id) {
+            <button
+              (click)="setActiveTab(tab.id)"
+              [uiTooltip]="tab.tooltip ?? ''"
+              placement="bottom"
+              class="border-b-2 px-1 py-3 text-sm font-medium"
+            [ngClass]="activeTab() === tab.id
+              ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
+              : 'border-transparent text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'">
+              {{ tab.label }}
+            </button>
+          }
         </nav>
       </div>
     }
@@ -45,6 +57,13 @@
     }
     @if (hasAccess() && activeTab() === 'webhooks') {
       <app-integrations-webhooks-tab></app-integrations-webhooks-tab>
+    }
+    @if (hasAccess()) {
+      @for (tab of extraTabs(); track tab.id) {
+        @if (activeTab() === tab.id) {
+          <ng-container *ngComponentOutlet="tab.component"></ng-container>
+        }
+      }
     }
 
     @if (!hasAccess()) {
