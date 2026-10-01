@@ -125,7 +125,8 @@ func newMCPLifecycleAgentFixture(t *testing.T, serverURL string) (*Agent, *chatC
 			last_seen datetime,
 			terms_accepted_at datetime,
 			refresh_token_id text,
-			release_notes_seen_at datetime
+			release_notes_seen_at datetime,
+			early_access bool NOT NULL DEFAULT false
 		)`,
 		`CREATE TABLE chats (
 			id uuid PRIMARY KEY,

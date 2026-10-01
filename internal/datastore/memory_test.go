@@ -966,7 +966,8 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 			-- Private-overlay user fields (user_ext.go): the composed private build
 			-- runs these tests against its own User schema, so its extra columns
 			-- must exist here too, like cognito_sub above.
-			release_notes_seen_at datetime
+			release_notes_seen_at datetime,
+			early_access bool NOT NULL DEFAULT false
 		)`,
 		`CREATE TABLE chats (
 			id uuid PRIMARY KEY,
