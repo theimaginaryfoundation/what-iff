@@ -13,6 +13,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/auth"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -24,6 +25,8 @@ const (
 	UserIDKey         contextKey = "user_id"
 	UserRoleKey       contextKey = "user_role"
 	WebhookTokenIDKey contextKey = "webhook_token_id"
+	// WebhookScopesKey holds the []models.WebhookScope the authenticated webhook token may use.
+	WebhookScopesKey contextKey = "webhook_scopes"
 	// ClientTimezoneKey holds an optional IANA timezone name (e.g. "America/Los_Angeles") passed from the UI.
 	ClientTimezoneKey contextKey = "client_timezone"
 )
@@ -208,6 +211,13 @@ func GetUserRoleFromContext(ctx context.Context) (string, bool) {
 func GetClientTimezoneFromContext(ctx context.Context) (string, bool) {
 	tz, ok := ctx.Value(ClientTimezoneKey).(string)
 	return tz, ok
+}
+
+// GetWebhookScopesFromContext gets the authenticated webhook token's scopes from the request
+// context. The second result is false outside a webhook-authenticated request.
+func GetWebhookScopesFromContext(ctx context.Context) ([]models.WebhookScope, bool) {
+	scopes, ok := ctx.Value(WebhookScopesKey).([]models.WebhookScope)
+	return scopes, ok
 }
 
 // GetWebhookTokenIDFromContext gets the webhook token ID from the request context.

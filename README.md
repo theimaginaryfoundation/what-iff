@@ -54,8 +54,9 @@ Want the story behind it? Read the [Imagination Foundry blog](https://imaginatio
 
 ### 🔗 Integrations
 - **Remote MCP connectors** with per-chat activation controls
-- **Webhook API tokens** (stored as one-way hashes) with static bearer auth isolated from session JWTs
+- **Webhook API tokens** (stored as one-way hashes) with static bearer auth isolated from session JWTs, each limited to the scopes it was created with (`messages:write`, `chat:read`)
 - Webhook trigger modes for existing chats: `user`, `assistant` (write-only), and `background` (async agent trigger)
+- Webhook read routes (scope `chat:read`): threads (filterable by persona), persona names, messages, and job status; see the [integration guide](docs/integrations.md)
 
 ### 🔧 Built for operators
 - OpenAPI specification and structured logging (Zap)

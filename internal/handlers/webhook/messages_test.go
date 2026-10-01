@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -20,9 +21,21 @@ import (
 
 type mockProvider struct {
 	createChatMessageFn func(ctx context.Context, userID uuid.UUID, chatMessage models.ChatMessage) (*models.ChatMessage, error)
+	createTokenFn       func(ctx context.Context, userID uuid.UUID, name string, scopes []models.WebhookScope) (*models.WebhookToken, string, error)
+
+	// Reads (see reads_test.go). Each records what the handler asked for.
+	listChatsFn          func(ctx context.Context, userID uuid.UUID, page, pageSize int, filters models.ChatFilters) (*models.PaginatedResponse, error)
+	listPersonalitiesFn  func(ctx context.Context, userID uuid.UUID, page, pageSize int, filters models.PersonalityFilters) (*models.PaginatedResponse, error)
+	listMessagesFn       func(ctx context.Context, userID, chatID uuid.UUID, page, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
+	listMessagesBeforeFn func(ctx context.Context, userID, chatID uuid.UUID, beforeSentAt time.Time, beforeID uuid.UUID, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
+	getMessageFn         func(ctx context.Context, userID, messageID uuid.UUID) (*models.ChatMessage, error)
+	getJobFn             func(ctx context.Context, userID, jobID uuid.UUID) (*models.Job, error)
 }
 
-func (m *mockProvider) CreateWebhookToken(ctx context.Context, userID uuid.UUID, name string) (*models.WebhookToken, string, error) {
+func (m *mockProvider) CreateWebhookToken(ctx context.Context, userID uuid.UUID, name string, scopes []models.WebhookScope) (*models.WebhookToken, string, error) {
+	if m.createTokenFn != nil {
+		return m.createTokenFn(ctx, userID, name, scopes)
+	}
 	return nil, "", errors.New("not implemented")
 }
 
