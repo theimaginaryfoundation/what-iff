@@ -1,13 +1,14 @@
 import type { MockedObject } from "vitest";
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
-import { provideHttpClient, withXhr } from '@angular/common/http';
+import { HttpErrorResponse, provideHttpClient, withXhr } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ActivatedRoute, convertToParamMap, Router } from '@angular/router';
-import { BehaviorSubject, of } from 'rxjs';
+import { BehaviorSubject, of, throwError } from 'rxjs';
 
 import { PersonalitiesPageComponent } from './personalities-page.component';
 import { PersonalityService } from '../../core/services/personality.service';
+import { PersonalityCardImportOutcome, PersonalityCardService } from '../../core/services/personality-card.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { UserPreferencesService } from '../../core/services/user-preferences.service';
 import { GeneratePersonalityModalService } from '../../core/services/generate-personality-modal.service';
@@ -226,6 +227,94 @@ describe('PersonalitiesPageComponent', () => {
 
         expect(personalityService.createPersonality).not.toHaveBeenCalled();
         expect(component.createErrorMessage()).toContain('cannot exceed');
+    });
+
+    describe('importing a character card', () => {
+        const card = new File(['{}'], 'ada.json', { type: 'application/json' });
+
+        function choose(file: File | null) {
+            const input = document.createElement('input');
+            input.type = 'file';
+            Object.defineProperty(input, 'files', { value: file ? [file] : [] });
+            component.onCardFileChosen({ target: input } as unknown as Event);
+        }
+
+        function outcome(overrides: Partial<PersonalityCardImportOutcome> = {}): PersonalityCardImportOutcome {
+            return { personality: makePersonality({ id: 'new-id', name: 'Ada' }), warnings: [], coverFailed: false, attachedLoreFiles: 0, failedLoreFiles: [], ...overrides };
+        }
+
+        it('imports the chosen file and opens the new personality', async () => {
+            const importCard = vi.spyOn(TestBed.inject(PersonalityCardService), 'importCardFile').mockReturnValue(of(outcome()));
+
+            choose(card);
+
+            expect(importCard).toHaveBeenCalledWith(card);
+            await vi.waitFor(() => expect(router.navigate).toHaveBeenCalledWith(['/personality', 'new-id']));
+            expect(confirmation.alert).not.toHaveBeenCalled();
+            expect(component.isImportingCard()).toBe(false);
+        });
+
+        it('shows server warnings and failed lore files before opening the personality', async () => {
+            vi.spyOn(TestBed.inject(PersonalityCardService), 'importCardFile').mockReturnValue(
+                of(outcome({ warnings: ['Skipped 1 disabled character-book entry.'], failedLoreFiles: ['Dragons'] })),
+            );
+
+            choose(card);
+
+            await vi.waitFor(() => expect(router.navigate).toHaveBeenCalledWith(['/personality', 'new-id']));
+            const message = confirmation.alert.mock.calls[0][0].message;
+            expect(message).toContain('Skipped 1 disabled');
+            expect(message).toContain('Dragons');
+        });
+
+        it('reports a rejected card and stays on the list', async () => {
+            vi.spyOn(console, 'error').mockImplementation(() => undefined);
+            vi.spyOn(TestBed.inject(PersonalityCardService), 'importCardFile').mockReturnValue(
+                throwError(() => ({ status: 400, error: { message: 'unsupported character card spec' } })),
+            );
+
+            choose(card);
+
+            await vi.waitFor(() => expect(confirmation.alert).toHaveBeenCalledWith(expect.objectContaining({ title: 'Import failed', type: 'danger' })));
+            expect(router.navigate).not.toHaveBeenCalled();
+            expect(component.isImportingCard()).toBe(false);
+        });
+
+        it('explains a too-long card with the limit and what to do about it', async () => {
+            vi.spyOn(console, 'error').mockImplementation(() => undefined);
+            vi.spyOn(TestBed.inject(PersonalityCardService), 'importCardFile').mockReturnValue(
+                throwError(() => new HttpErrorResponse({
+                    status: 400,
+                    error: { code: 'system_prompt_too_long', message: 'character card prompt is too long: 31,204 characters against a limit of 25,000' },
+                })),
+            );
+
+            choose(card);
+
+            await vi.waitFor(() => expect(confirmation.alert).toHaveBeenCalled());
+            const { title, message } = confirmation.alert.mock.calls[0][0];
+            expect(title).toBe('Card is too long to import');
+            expect(message).toContain('31,204 characters');
+            expect(message).toContain('limited to 25,000 characters');
+        });
+
+        it('mentions a cover image that could not be attached', async () => {
+            vi.spyOn(TestBed.inject(PersonalityCardService), 'importCardFile').mockReturnValue(of(outcome({ coverFailed: true })));
+
+            choose(card);
+
+            await vi.waitFor(() => expect(router.navigate).toHaveBeenCalled());
+            expect(confirmation.alert.mock.calls[0][0].message).toContain('cover image');
+        });
+
+        it('does nothing when the file dialog is cancelled', () => {
+            const importCard = vi.spyOn(TestBed.inject(PersonalityCardService), 'importCardFile');
+
+            choose(null);
+
+            expect(importCard).not.toHaveBeenCalled();
+            expect(component.isImportingCard()).toBe(false);
+        });
     });
 
     it('shows near-limit warning and creates after confirmation', () => {

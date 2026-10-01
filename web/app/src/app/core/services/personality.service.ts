@@ -1,5 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpParams, HttpResponse } from '@angular/common/http';
 import { Observable, of, tap, map } from 'rxjs';
 import { environment } from '@environments/environment';
 import {
@@ -11,6 +11,7 @@ import {
   UpdatePersonalityRequest,
   PaginatedPersonalityResponse,
   PersonalityExpression,
+  PersonalityCardImportResult,
   UpdatePersonalityExpressionRequest
 } from '../models/personality.model';
 
@@ -91,6 +92,24 @@ export class PersonalityService {
     return this.http.post<Personality>(this.apiUrl, personality).pipe(
       tap(() => this.listPersonalities().subscribe())
     );
+  }
+
+  /** Creates a personality from a SillyTavern character card: its JSON text, or the bytes of a PNG card. */
+  importSillyTavernCard(card: string | ArrayBuffer, contentType: 'application/json' | 'image/png' = 'application/json'): Observable<PersonalityCardImportResult> {
+    return this.http
+      .post<PersonalityCardImportResult>(`${this.apiUrl}/import/sillytavern`, card, {
+        headers: { 'Content-Type': contentType },
+      })
+      .pipe(tap(() => this.listPersonalities().subscribe()));
+  }
+
+  /** Downloads the personality as a SillyTavern card: a chara_card_v2 JSON document, or the cover image with the card embedded. */
+  exportSillyTavernCard(id: string, format: 'json' | 'png' = 'json'): Observable<HttpResponse<Blob>> {
+    return this.http.get(`${this.apiUrl}/${id}/export/sillytavern`, {
+      params: format === 'png' ? new HttpParams().set('format', 'png') : undefined,
+      responseType: 'blob',
+      observe: 'response',
+    });
   }
 
   updatePersonality(id: string, personality: UpdatePersonalityRequest): Observable<Personality> {

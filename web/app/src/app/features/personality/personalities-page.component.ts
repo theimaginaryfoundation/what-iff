@@ -19,6 +19,8 @@ import {
   PaginatedPersonalityResponse,
 } from '../../core/models/personality.model';
 import { PersonalityService } from '../../core/services/personality.service';
+import { PersonalityCardImportOutcome, PersonalityCardService } from '../../core/services/personality-card.service';
+import { apiErrorMessage, hasErrorCode } from '../../core/utils/api-error.helpers';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { UserPreferencesService } from '../../core/services/user-preferences.service';
 import { GeneratePersonalityModalService } from '../../core/services/generate-personality-modal.service';
@@ -45,6 +47,18 @@ import {
 
 const DEFAULT_PAGE_SIZE = 24;
 
+/** The server's warnings plus anything that failed to attach, or null when there is nothing to tell the user. */
+function cardImportNotes(outcome: PersonalityCardImportOutcome): string | null {
+  const notes = [...outcome.warnings];
+  if (outcome.coverFailed) {
+    notes.push("The card's picture could not be set as the cover image. You can add it from the personality's edit screen.");
+  }
+  if (outcome.failedLoreFiles.length > 0) {
+    notes.push(`These character-book entries could not be attached as files: ${outcome.failedLoreFiles.join(', ')}.`);
+  }
+  return notes.length > 0 ? notes.join('\n\n') : null;
+}
+
 @Component({
   selector: 'app-personalities-page',
   standalone: true,
@@ -62,6 +76,7 @@ const DEFAULT_PAGE_SIZE = 24;
 })
 export class PersonalitiesPageComponent implements OnInit {
   private readonly personalityService = inject(PersonalityService);
+  private readonly cardService = inject(PersonalityCardService);
   private readonly userPreferencesService = inject(UserPreferencesService);
   private readonly confirmationService = inject(ConfirmationService);
   private readonly router = inject(Router);
@@ -90,6 +105,8 @@ export class PersonalitiesPageComponent implements OnInit {
   private readonly pendingEditId = signal<string | null>(null);
   readonly createForm = signal({ name: '', system_prompt: '' });
   readonly isCreating = signal(false);
+  readonly isImportingCard = signal(false);
+  private readonly promptLimitLabel = TEXT_LIMIT_HARD_MAX.toLocaleString();
   readonly createErrorMessage = signal<string | null>(null);
   readonly createPromptCharacterCount = computed(() => this.createForm().system_prompt.length);
   readonly createPromptCharacterCountLabel = computed(() =>
@@ -347,6 +364,43 @@ export class PersonalitiesPageComponent implements OnInit {
         this.isCreating.set(false);
         this.createErrorMessage.set(err?.message ?? 'Failed to create personality. Please try again.');
         console.error('Failed to create personality', err);
+      },
+    });
+  }
+
+  /** Imports the SillyTavern character card the user picked, then opens the new personality. */
+  onCardFileChosen(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = ''; // let the same file be chosen again
+    if (!file) return;
+
+    this.isImportingCard.set(true);
+    this.cardService.importCardFile(file).subscribe({
+      next: async outcome => {
+        this.isImportingCard.set(false);
+        this.loadPersonalities();
+        this.loadPreferences();
+        const notes = cardImportNotes(outcome);
+        if (notes) {
+          await this.confirmationService.alert({ title: `Imported ${outcome.personality.name}`, message: notes, type: 'warning' });
+        }
+        this.router.navigate(['/personality', outcome.personality.id]);
+      },
+      error: async err => {
+        this.isImportingCard.set(false);
+        console.error('Failed to import character card', err);
+        const tooLong = hasErrorCode(err, 'system_prompt_too_long');
+        await this.confirmationService.alert({
+          title: tooLong ? 'Card is too long to import' : 'Import failed',
+          message: tooLong
+            ? [
+                apiErrorMessage(err, 'The card is too long.'),
+                `Personality prompts are limited to ${this.promptLimitLabel} characters. Shorten the card's description or system prompt, then import it again.`,
+              ].join('\n\n')
+            : apiErrorMessage(err, 'Could not import that character card. Please try again.'),
+          type: 'danger',
+        });
       },
     });
   }

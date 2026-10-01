@@ -14,6 +14,9 @@ source UUIDs for clone-style restore.
   reverses this for the account-import path.
 - `personalities/{id}/personality.json` — source personality ID, name, system prompt, scratchpad, auto-pin
   (self-contained). Source IDs are relationship references and are remapped on import.
+  An imported SillyTavern card's passthrough blob rides along as `character_card` so account import keeps it.
+- `personalities/{id}/sillytavern.json` — the personality as a `chara_card_v2` document (`WriteSillyTavernCards`, built by `internal/stcard` with the account's username as `creator`).
+  It is a courtesy export for other tools; account import reads `personality.json`, not this file.
 - `files/manifest.json` — inventory of the user's S3 objects (keys/sizes/etags); no bytes.
 - `manifest.json` — schema version, export time, account, per-section counts.
 
