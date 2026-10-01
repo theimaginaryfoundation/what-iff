@@ -2578,7 +2578,7 @@ export interface paths {
                         "application/json": components["schemas"]["PersonalityCardImportResult"];
                     };
                 };
-                /** @description Not a character card, unsupported spec, no prompt content, or the flattened prompt exceeds the system prompt limit (`system_prompt_too_long`) */
+                /** @description Not a character card (including a PNG with no embedded card, or invalid JSON), unsupported spec, no prompt content, or the flattened prompt exceeds the system prompt limit even after dropping `scenario` and `personality` (`system_prompt_too_long`) */
                 400: {
                     headers: {
                         [name: string]: unknown;
