@@ -148,33 +148,44 @@ func TestListMemoriesMissingEmbedding_ActiveNonSummaryWithCursor(t *testing.T) {
 	chatID := uuid.New()
 	createTestChat(t, ds, chatID, userID)
 
-	first, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{Content: "first", Level: models.MemoryLevelGlobal})
-	require.NoError(t, err)
-	time.Sleep(2 * time.Millisecond)
-	second, err := ds.CreateMemoryFromInput(ctx, otherID, models.CreateMemoryInput{Content: "second", Level: models.MemoryLevelGlobal})
-	require.NoError(t, err)
-	time.Sleep(2 * time.Millisecond)
-	embedded, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{Content: "embedded", Level: models.MemoryLevelGlobal})
-	require.NoError(t, err)
-	seedEmbedding(t, ds, embedded.ID, []float32{1})
-	_, err = ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{Content: "summary", Level: models.MemoryLevelSummary, ChatID: &chatID})
-	require.NoError(t, err)
-	inactive, err := ds.CreateMemoryFromInput(ctx, userID, models.CreateMemoryInput{Content: "archived", Level: models.MemoryLevelGlobal})
-	require.NoError(t, err)
-	inactiveStatus := models.MemoryStatusInactive
-	_, err = ds.UpdateMemory(ctx, userID, inactive.ID, models.MemoryPatch{Status: &inactiveStatus})
-	require.NoError(t, err)
+	// SQLite compares timestamps as text, so pin created_at to whole UTC
+	// seconds (as TestMemoryCursorPredicate does) to make the keyset cursor
+	// comparison meaningful here; Postgres compares timestamptz natively.
+	base := time.Now().UTC().Truncate(time.Second)
+	seed := func(i int, owner uuid.UUID, scope entmemory.Scope, status entmemory.Status) uuid.UUID {
+		create := ds.dbClient.Memory.Create().
+			SetContent("memory").
+			SetScope(scope).
+			SetStatus(status).
+			SetOwnerID(owner).
+			SetCreatedAt(base.Add(time.Duration(i) * time.Second))
+		if scope == entmemory.ScopeSummary {
+			create.SetChatID(chatID)
+		}
+		m, err := create.Save(ctx)
+		require.NoError(t, err)
+		return m.ID
+	}
+	first := seed(0, userID, entmemory.ScopeUser, entmemory.StatusActive)
+	second := seed(1, otherID, entmemory.ScopeUser, entmemory.StatusActive)
+	embedded := seed(2, userID, entmemory.ScopeUser, entmemory.StatusActive)
+	seedEmbedding(t, ds, embedded, []float32{1})
+	seed(3, userID, entmemory.ScopeSummary, entmemory.StatusActive)
+	seed(4, userID, entmemory.ScopeUser, entmemory.StatusInactive)
 
 	all, err := ds.ListMemoriesMissingEmbedding(ctx, time.Time{}, uuid.Nil, 10)
 	require.NoError(t, err)
-	require.Equal(t, []uuid.UUID{first.ID, second.ID}, candidateIDs(all), "active, non-Summary, unembedded rows across users, oldest first")
+	require.Equal(t, []uuid.UUID{first, second}, candidateIDs(all), "active, non-Summary, unembedded rows across users, oldest first")
 
 	page1, err := ds.ListMemoriesMissingEmbedding(ctx, time.Time{}, uuid.Nil, 1)
 	require.NoError(t, err)
-	require.Equal(t, []uuid.UUID{first.ID}, candidateIDs(page1))
+	require.Equal(t, []uuid.UUID{first}, candidateIDs(page1))
 	page2, err := ds.ListMemoriesMissingEmbedding(ctx, page1[0].CreatedAt, page1[0].MemoryID, 1)
 	require.NoError(t, err)
-	require.Equal(t, []uuid.UUID{second.ID}, candidateIDs(page2))
+	require.Equal(t, []uuid.UUID{second}, candidateIDs(page2))
+	page3, err := ds.ListMemoriesMissingEmbedding(ctx, page2[0].CreatedAt, page2[0].MemoryID, 1)
+	require.NoError(t, err)
+	require.Empty(t, page3)
 }
 
 func TestSetMemoryEmbedding_ReplacesAndGuardsContent(t *testing.T) {
