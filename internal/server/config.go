@@ -93,9 +93,12 @@ type Config struct {
 	// instance actively runs the scheduler in multi-instance environments.
 	AgentJobsSchedulerDistributed bool
 	// AgentJobsSchedulerLockKey is the Postgres advisory lock key used by scheduler leadership.
-	// Advisory lock keys in use (keep them distinct):
+	// Postgres advisory lock keys in use. They share one namespace, so a new key
+	// must be checked against this list (including the private overlay's keys)
+	// and added to it:
 	//   80920031 AGENTJOBS_SCHEDULER_LOCK_KEY        agent job scheduler leadership
-	//   80920032 MEMORY_EMBEDDING_BACKFILL_LOCK_KEY  memory embedding backfill pass
+	//   80920032 reserved: DISCORD_GATEWAY_LOCK_KEY  Discord relay gateway leader (private overlay; held for the leader's lifetime)
+	//   80920033 MEMORY_EMBEDDING_BACKFILL_LOCK_KEY  memory embedding backfill pass
 	AgentJobsSchedulerLockKey int64
 	// MemoryEmbeddingBackfillLockKey is the Postgres advisory lock key that lets
 	// exactly one instance run each memory embedding backfill pass.
@@ -302,7 +305,7 @@ func NewConfig() *Config {
 		}
 	}
 
-	memoryEmbeddingBackfillLockKey := int64(80920032)
+	memoryEmbeddingBackfillLockKey := int64(80920033)
 	if v := strings.TrimSpace(os.Getenv("MEMORY_EMBEDDING_BACKFILL_LOCK_KEY")); v != "" {
 		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
 			memoryEmbeddingBackfillLockKey = parsed

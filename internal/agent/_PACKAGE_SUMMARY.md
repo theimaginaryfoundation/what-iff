@@ -18,7 +18,8 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
   Persona `archival_model` and custom memory read/write prompts are deprecated and ignored; optional `scratchpad_update_prompt` is still used for checkpoint scratchpad updates.
 - **Background backfills** (started from `internal/server`): `StartSummaryMemoryBackfill` (`message.go`) copies legacy checkpoint summaries into Summary memories once at boot.
   `StartMemoryEmbeddingBackfill` (`memory_embedding_backfill.go`) embeds active non-Summary memories that have no Embedding row, via `datastore.BackfillMemoryEmbeddings` and the memory tool's batch embeddings call.
-  It runs at boot and then hourly on the server lifecycle context, and each pass runs only on the instance that wins the Postgres advisory lock `MemoryEmbeddingBackfillLockKey` (default 80920032); other instances, and databases without advisory locks, skip the pass quietly.
+  It runs at boot and then hourly on the server lifecycle context, and each pass runs only on the instance that wins the Postgres advisory lock `MemoryEmbeddingBackfillLockKey` (default 80920033); other instances, and databases without advisory locks, skip the pass quietly.
+  It does not start at all under mock/local LLM backends (`nonVendorLLM`), where embeddings have no provider.
   Both backfills are idempotent and only log failures; a pass stops early when the provider is unreachable (e.g. the deny-network client under mock/local backends).
 - **Rituals:** User and system rituals, image ritual flow, registry of built-in system rituals.
 - **Jobs:** Running scheduled/async agent work (`agentjob_run.go`, `agentjob_schedule.go`) and tools that create jobs.

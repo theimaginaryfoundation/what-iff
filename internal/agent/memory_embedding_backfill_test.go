@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"go.uber.org/zap"
 )
@@ -47,6 +48,30 @@ func (f *fakeBackfillStore) BackfillMemoryEmbeddings(ctx context.Context, _ int,
 	return datastore.MemoryEmbeddingBackfillStats{Embedded: 1}, nil
 }
 
+func TestMemoryEmbeddingBackfillEnabled_SkipsNonVendorBackends(t *testing.T) {
+	memoryTool := tools.NewVectorStoreMemoryTool(nil, nil, zap.NewNop())
+
+	tests := []struct {
+		name  string
+		agent *Agent
+		want  bool
+	}{
+		{name: "vendor backend", agent: &Agent{memoryTool: memoryTool}, want: true},
+		{name: "mock backend", agent: &Agent{memoryTool: memoryTool, mockLLM: true}, want: false},
+		{name: "local backend", agent: &Agent{memoryTool: memoryTool, localLLM: true}, want: false},
+		{name: "no memory tool", agent: &Agent{}, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, reason := tc.agent.memoryEmbeddingBackfillEnabled()
+			require.Equal(t, tc.want, got)
+			if !tc.want {
+				require.NotEmpty(t, reason)
+			}
+		})
+	}
+}
+
 func noopEmbeddings(context.Context, []string) ([][]float32, error) { return nil, nil }
 
 func TestMemoryEmbeddingBackfillPass_RunsOnlyUnderTheLock(t *testing.T) {
@@ -54,9 +79,9 @@ func TestMemoryEmbeddingBackfillPass_RunsOnlyUnderTheLock(t *testing.T) {
 
 	t.Run("lock acquired: runs and releases", func(t *testing.T) {
 		store := &fakeBackfillStore{lock: &fakeBackfillLock{}, acquired: true}
-		ran := runMemoryEmbeddingBackfillPass(ctx, store, 80920032, noopEmbeddings, zap.NewNop())
+		ran := runMemoryEmbeddingBackfillPass(ctx, store, 80920033, noopEmbeddings, zap.NewNop())
 		require.True(t, ran)
-		require.Equal(t, int64(80920032), store.lockKey)
+		require.Equal(t, int64(80920033), store.lockKey)
 		require.Equal(t, 1, store.backfills)
 		require.True(t, store.lock.released)
 	})

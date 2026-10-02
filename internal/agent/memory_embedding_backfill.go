@@ -35,10 +35,12 @@ type MemoryEmbeddingBackfillConfig struct {
 // were embedded on save (issue #248), and any whose post-save embedding failed.
 // It runs once at start and then every cfg.Interval until ctx is cancelled.
 // Each pass runs only on the instance that wins the advisory lock; the others
-// skip it quietly, as does a database without advisory locks.
+// skip it quietly, as does a database without advisory locks. Under a mock or
+// local LLM backend it never starts: embeddings cannot reach a provider there
+// (deny-network client), so every pass would only make failing calls.
 func (a *Agent) StartMemoryEmbeddingBackfill(ctx context.Context, cfg MemoryEmbeddingBackfillConfig) {
-	if a.memoryTool == nil {
-		a.logger.Warn("memory embedding backfill skipped because memory tool is unavailable")
+	if run, reason := a.memoryEmbeddingBackfillEnabled(); !run {
+		a.logger.Info("memory embedding backfill disabled", zap.String("reason", reason))
 		return
 	}
 	interval := cfg.Interval
@@ -57,6 +59,19 @@ func (a *Agent) StartMemoryEmbeddingBackfill(ctx context.Context, cfg MemoryEmbe
 			}
 		}
 	}()
+}
+
+// memoryEmbeddingBackfillEnabled reports whether the backfill should run, and
+// why not when it should not.
+func (a *Agent) memoryEmbeddingBackfillEnabled() (bool, string) {
+	switch {
+	case a.nonVendorLLM():
+		return false, "non-vendor LLM backend (mock/local): embeddings have no provider"
+	case a.memoryTool == nil:
+		return false, "memory tool is unavailable"
+	default:
+		return true, ""
+	}
 }
 
 // runMemoryEmbeddingBackfillPass runs one backfill pass under the advisory
