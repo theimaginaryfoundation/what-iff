@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"entgo.io/ent/dialect"
+	"entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
 	"github.com/pgvector/pgvector-go"
 	"github.com/stretchr/testify/require"
@@ -330,5 +332,91 @@ func TestBackfillMemoryEmbeddings_StopsWhenProviderUnavailable(t *testing.T) {
 	stats, err := ds.BackfillMemoryEmbeddings(ctx, 2, embed)
 	require.Error(t, err)
 	require.Equal(t, MemoryEmbeddingBackfillStats{Failed: 2}, stats)
-	require.Equal(t, 3, calls, "one batch call plus one retry per item, then stop")
+	require.Equal(t, 4, calls, "one batch call, one retry per item, one provider probe, then stop")
+}
+
+func TestBackfillMemoryEmbeddings_SkipsPageOfBadInputAndKeepsGoing(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+	// Whole-second UTC timestamps keep SQLite's text comparison of the cursor
+	// meaningful (see TestListMemoriesMissingEmbedding_ActiveNonSummaryWithCursor).
+	base := time.Now().UTC().Truncate(time.Second)
+	var ids []uuid.UUID
+	for i, content := range []string{"poison", "poison", "good"} {
+		m, err := ds.dbClient.Memory.Create().
+			SetContent(content).
+			SetScope(entmemory.ScopeUser).
+			SetOwnerID(userID).
+			SetCreatedAt(base.Add(time.Duration(i) * time.Second)).
+			Save(ctx)
+		require.NoError(t, err)
+		ids = append(ids, m.ID)
+	}
+
+	embed := func(_ context.Context, inputs []string) ([][]float32, error) {
+		for _, in := range inputs {
+			if in == "poison" {
+				return nil, errors.New("input rejected")
+			}
+		}
+		out := make([][]float32, len(inputs))
+		for i := range inputs {
+			out[i] = []float32{1}
+		}
+		return out, nil
+	}
+
+	// The first page (batch size 2) is entirely unembeddable; the probe shows
+	// the provider is fine, so the run moves past it to the good row.
+	stats, err := ds.BackfillMemoryEmbeddings(ctx, 2, embed)
+	require.NoError(t, err)
+	require.Equal(t, MemoryEmbeddingBackfillStats{Embedded: 1, Failed: 2}, stats)
+	require.Empty(t, embeddingRowsFor(t, ds, ids[0]))
+	require.Empty(t, embeddingRowsFor(t, ds, ids[1]))
+	require.Len(t, embeddingRowsFor(t, ds, ids[2]), 1)
+}
+
+func TestUpdateMemory_NonContentPatchKeepsEmbeddingOfUntrimmedContent(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+	// A legacy row stored with surrounding whitespace (e.g. by an older import).
+	legacy, err := ds.dbClient.Memory.Create().
+		SetContent("likes tea\n").
+		SetScope(entmemory.ScopeUser).
+		SetOwnerID(userID).
+		SetCreatedAt(time.Now()).
+		Save(ctx)
+	require.NoError(t, err)
+	seedEmbedding(t, ds, legacy.ID, []float32{1, 2})
+
+	starred := true
+	level := models.MemoryLevelGlobal
+	_, err = ds.UpdateMemory(ctx, userID, legacy.ID, models.MemoryPatch{Starred: &starred, Level: &level})
+	require.NoError(t, err)
+	require.Len(t, embeddingRowsFor(t, ds, legacy.ID), 1, "a non-content patch must not drop the embedding")
+
+	// Re-saving the same text (trimmed) keeps it too.
+	same := "likes tea"
+	_, err = ds.UpdateMemory(ctx, userID, legacy.ID, models.MemoryPatch{Content: &same})
+	require.NoError(t, err)
+	require.Len(t, embeddingRowsFor(t, ds, legacy.ID), 1)
+}
+
+func TestLockRowForUpdate_OnlyOnDialectsWithRowLocks(t *testing.T) {
+	render := func(d string) string {
+		s := sql.Dialect(d).Select("*").From(sql.Table("memories"))
+		lockRowForUpdate(s)
+		query, _ := s.Query()
+		return query
+	}
+	require.Contains(t, render(dialect.Postgres), "FOR UPDATE")
+	require.NotContains(t, render(dialect.SQLite), "FOR UPDATE")
 }

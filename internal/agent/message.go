@@ -2944,31 +2944,6 @@ func (a *Agent) BackfillSummaryMemories(ctx context.Context, batchSize int) Summ
 	}
 }
 
-// StartMemoryEmbeddingBackfill embeds, in the background, every active
-// non-Summary memory that has no Embedding row. Memories created or edited
-// through the REST API before they were embedded on write (issue #248), or
-// whose post-save embedding failed, are otherwise invisible to recall. The run
-// is idempotent and cheap when nothing is missing, so it is safe on every boot.
-func (a *Agent) StartMemoryEmbeddingBackfill(ctx context.Context) {
-	if a.memoryTool == nil {
-		a.logger.Warn("memory embedding backfill skipped because memory tool is unavailable")
-		return
-	}
-	go func() {
-		stats, err := a.ds.BackfillMemoryEmbeddings(ctx, datastore.DefaultMemoryEmbeddingBackfillBatchSize, a.memoryTool.CreateEmbeddings)
-		fields := []zap.Field{
-			zap.Int("embedded", stats.Embedded),
-			zap.Int("skipped", stats.Skipped),
-			zap.Int("failed", stats.Failed),
-		}
-		if err != nil {
-			a.logger.Warn("memory embedding backfill stopped early", append(fields, zap.Error(err))...)
-			return
-		}
-		a.logger.Info("memory embedding backfill finished", fields...)
-	}()
-}
-
 // setJobStatusFailedWithPartial preserves already-streamed text before marking a chat turn
 // failed. The user message keeps the failure banner; the partial assistant message remains
 // readable rather than disappearing with the draft buffer.

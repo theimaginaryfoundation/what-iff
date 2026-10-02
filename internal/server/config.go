@@ -93,7 +93,13 @@ type Config struct {
 	// instance actively runs the scheduler in multi-instance environments.
 	AgentJobsSchedulerDistributed bool
 	// AgentJobsSchedulerLockKey is the Postgres advisory lock key used by scheduler leadership.
+	// Advisory lock keys in use (keep them distinct):
+	//   80920031 AGENTJOBS_SCHEDULER_LOCK_KEY        agent job scheduler leadership
+	//   80920032 MEMORY_EMBEDDING_BACKFILL_LOCK_KEY  memory embedding backfill pass
 	AgentJobsSchedulerLockKey int64
+	// MemoryEmbeddingBackfillLockKey is the Postgres advisory lock key that lets
+	// exactly one instance run each memory embedding backfill pass.
+	MemoryEmbeddingBackfillLockKey int64
 	// AgentJobsSchedulerLockRetryInterval controls how often followers retry leadership lock acquisition.
 	AgentJobsSchedulerLockRetryInterval time.Duration
 	// AgentJobsSchedulerLockRetryJitter adds random delay to lock retries to reduce contention spikes.
@@ -296,6 +302,13 @@ func NewConfig() *Config {
 		}
 	}
 
+	memoryEmbeddingBackfillLockKey := int64(80920032)
+	if v := strings.TrimSpace(os.Getenv("MEMORY_EMBEDDING_BACKFILL_LOCK_KEY")); v != "" {
+		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
+			memoryEmbeddingBackfillLockKey = parsed
+		}
+	}
+
 	agentJobsSchedulerLockRetryInterval := 2 * time.Second
 	if v := strings.TrimSpace(os.Getenv("AGENTJOBS_SCHEDULER_LOCK_RETRY_INTERVAL")); v != "" {
 		if parsed, err := time.ParseDuration(v); err == nil && parsed > 0 {
@@ -373,6 +386,7 @@ func NewConfig() *Config {
 		EnableAgentJobsScheduler:            enableAgentJobsScheduler,
 		AgentJobsSchedulerDistributed:       agentJobsSchedulerDistributed,
 		AgentJobsSchedulerLockKey:           agentJobsSchedulerLockKey,
+		MemoryEmbeddingBackfillLockKey:      memoryEmbeddingBackfillLockKey,
 		AgentJobsSchedulerLockRetryInterval: agentJobsSchedulerLockRetryInterval,
 		AgentJobsSchedulerLockRetryJitter:   agentJobsSchedulerLockRetryJitter,
 		StripeSecretKey:                     stripeSecretKey,

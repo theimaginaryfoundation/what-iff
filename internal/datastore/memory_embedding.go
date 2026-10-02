@@ -14,6 +14,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 
+	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
 	"github.com/pgvector/pgvector-go"
@@ -36,6 +37,16 @@ func memoryHasNoEmbedding() predicate.Memory {
 				From(t).
 				Where(sql.ColumnsEQ(t.C(embedding.MemoryColumn), s.C(memory.FieldID))),
 		))
+	}
+}
+
+// lockRowForUpdate adds FOR UPDATE on dialects that support row locks.
+// SQLite (tests) has no FOR UPDATE; it serialises writers with a database-level
+// lock instead, so the clause is simply omitted there.
+func lockRowForUpdate(s *sql.Selector) {
+	switch s.Dialect() {
+	case dialect.Postgres, dialect.MySQL:
+		s.ForUpdate()
 	}
 }
 
@@ -136,7 +147,14 @@ func (d *Datastore) SetMemoryEmbedding(ctx context.Context, memoryID uuid.UUID, 
 		}
 	}()
 
-	current, err := tx.Memory.Query().Where(memory.ID(memoryID)).Only(ctx)
+	// Lock the row so the content check and the write are atomic with respect
+	// to a concurrent content edit: without it, under READ COMMITTED an edit
+	// could commit between the check and the insert and leave the new text
+	// with the old text's vector.
+	current, err := tx.Memory.Query().
+		Where(memory.ID(memoryID)).
+		Modify(lockRowForUpdate).
+		Only(ctx)
 	if err != nil {
 		tx.Rollback()
 		if ent.IsNotFound(err) {
@@ -189,16 +207,24 @@ type MemoryEmbeddingBackfillStats struct {
 	Failed int
 }
 
+// memoryEmbeddingProviderProbe is embedded when every memory in a backfill
+// page failed, to tell "the provider is down" (probe fails too: stop) from
+// "these rows are bad input" (probe succeeds: skip them and keep going).
+const memoryEmbeddingProviderProbe = "memory embedding backfill probe"
+
 // BackfillMemoryEmbeddings embeds every active, non-Summary memory that has no
 // Embedding row, batchSize at a time, using createEmbeddings (one vector per
 // input, in input order). It is idempotent: a memory that gets an embedding
 // drops out of ListMemoriesMissingEmbedding, so re-running only picks up what
 // is still missing.
 //
-// When a batch embedding call fails, each memory in that batch is retried on
-// its own so one bad input cannot block the rest. If every retry in a batch
-// fails too, the provider is assumed unavailable and the run stops early with
-// that error; the remaining rows are left for the next run.
+// The run walks a keyset cursor, so rows that fail are passed over rather than
+// re-read: a block of memories that never embed cannot stall the rows behind
+// them. When a batch embedding call fails, each memory in it is retried on its
+// own so one bad input cannot sink its neighbours, and the IDs that still fail
+// are logged. If every memory in a page fails, a trivial probe input decides
+// whether the provider is unavailable (the run stops with that error, leaving
+// the rest for the next run) or the page is just bad input (skipped).
 func (d *Datastore) BackfillMemoryEmbeddings(ctx context.Context, batchSize int, createEmbeddings MemoryImportBatchEmbeddingFunc) (MemoryEmbeddingBackfillStats, error) {
 	var stats MemoryEmbeddingBackfillStats
 	if createEmbeddings == nil {
@@ -224,35 +250,24 @@ func (d *Datastore) BackfillMemoryEmbeddings(ctx context.Context, batchSize int,
 		last := candidates[len(candidates)-1]
 		afterCreatedAt, afterID = last.CreatedAt, last.MemoryID
 
-		vectors, batchErr := embedMemoryCandidates(ctx, candidates, createEmbeddings)
-		if batchErr != nil {
+		vectors, err := embedMemoryCandidates(ctx, candidates, createEmbeddings)
+		if err != nil {
 			d.logger.Warn("memory embedding backfill: batch embedding failed; retrying one by one",
 				zap.Int("batch_size", len(candidates)),
-				zap.Error(batchErr))
-			vectors = make([][]float32, len(candidates))
-			var lastErr error
-			succeeded := 0
-			for i, c := range candidates {
-				one, err := embedMemoryCandidates(ctx, []models.MemoryEmbeddingCandidate{c}, createEmbeddings)
-				if err != nil {
-					lastErr = err
-					d.logger.Debug("memory embedding backfill: embedding failed",
-						zap.String("memory_id", c.MemoryID.String()),
-						zap.Error(err))
-					continue
-				}
-				vectors[i] = one[0]
-				succeeded++
-			}
-			if succeeded == 0 {
+				zap.Error(err))
+			var providerErr error
+			vectors, providerErr = d.embedMemoryCandidatesOneByOne(ctx, candidates, createEmbeddings)
+			if providerErr != nil {
 				stats.Failed += len(candidates)
-				return stats, fmt.Errorf("memory embedding backfill: embedding provider unavailable: %w", lastErr)
+				return stats, fmt.Errorf("memory embedding backfill: embedding provider unavailable: %w", providerErr)
 			}
 		}
 
+		var failedIDs []string
 		for i, c := range candidates {
 			if len(vectors[i]) == 0 {
 				stats.Failed++
+				failedIDs = append(failedIDs, c.MemoryID.String())
 				continue
 			}
 			wrote, err := d.SetMemoryEmbedding(ctx, c.MemoryID, c.Content, vectors[i])
@@ -268,11 +283,45 @@ func (d *Datastore) BackfillMemoryEmbeddings(ctx context.Context, batchSize int,
 				stats.Skipped++
 			}
 		}
+		if len(failedIDs) > 0 {
+			d.logger.Warn("memory embedding backfill: memories failed to embed; skipped until the next run",
+				zap.Strings("memory_ids", failedIDs))
+		}
 
 		if len(candidates) < batchSize {
 			return stats, nil
 		}
 	}
+}
+
+// embedMemoryCandidatesOneByOne embeds each candidate in its own call. A
+// failed candidate gets a nil vector. It returns an error only when every
+// candidate failed and the provider probe fails too, i.e. the provider itself
+// is unavailable.
+func (d *Datastore) embedMemoryCandidatesOneByOne(ctx context.Context, candidates []models.MemoryEmbeddingCandidate, createEmbeddings MemoryImportBatchEmbeddingFunc) ([][]float32, error) {
+	vectors := make([][]float32, len(candidates))
+	succeeded := 0
+	for i, c := range candidates {
+		one, err := embedMemoryCandidates(ctx, []models.MemoryEmbeddingCandidate{c}, createEmbeddings)
+		if err != nil {
+			d.logger.Debug("memory embedding backfill: embedding failed",
+				zap.String("memory_id", c.MemoryID.String()),
+				zap.Error(err))
+			continue
+		}
+		vectors[i] = one[0]
+		succeeded++
+	}
+	if succeeded == 0 {
+		probe, err := createEmbeddings(ctx, []string{memoryEmbeddingProviderProbe})
+		if err == nil && (len(probe) != 1 || len(probe[0]) == 0) {
+			err = fmt.Errorf("create embeddings: empty probe response")
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return vectors, nil
 }
 
 func embedMemoryCandidates(ctx context.Context, candidates []models.MemoryEmbeddingCandidate, createEmbeddings MemoryImportBatchEmbeddingFunc) ([][]float32, error) {
@@ -295,8 +344,9 @@ func embedMemoryCandidates(ctx context.Context, candidates []models.MemoryEmbedd
 	return vectors, nil
 }
 
-// trimmedMemoryContentChanged reports whether a patch's next content differs
-// from what is stored.
-func trimmedMemoryContentChanged(stored, next string) bool {
-	return strings.TrimSpace(stored) != next
+// memoryContentChanged reports whether two memory contents differ once
+// surrounding whitespace is ignored (API writes store trimmed content; older
+// rows may not be).
+func memoryContentChanged(stored, next string) bool {
+	return strings.TrimSpace(stored) != strings.TrimSpace(next)
 }
