@@ -27,6 +27,7 @@ type toolContextPolicy struct {
 const (
 	webSearchTTLTurns   = 5
 	mcpFileReadTTLTurns = 10
+	fileReadTTLTurns    = 10
 	mcpMessagesTTLTurns = 3
 	noTTL               = 0
 )
@@ -71,6 +72,10 @@ func toolContextPolicyFor(toolName string) toolContextPolicy {
 		// little value and their effect is captured elsewhere (scratchpad, memories,
 		// mood, jobs). Drop from cross-turn context.
 		return toolContextPolicy{persist: false}
+	case tools.ToolNameReadFile, tools.ToolNameGrepFiles:
+		// Exact file text and search hits: useful for a few turns of follow-up questions about the
+		// same section, but re-reading is cheap (host-side, cached), so don't carry them forever.
+		return toolContextPolicy{persist: true, ttlTurns: fileReadTTLTurns}
 	case tools.ToolNameWebSearch, tools.ToolNameFetchPage:
 		// Web search snapshots and fetched pages go stale; keep for a handful of turns. Pages can
 		// be long (up to ~20k chars), so they must not fall through to the no-expiry default.

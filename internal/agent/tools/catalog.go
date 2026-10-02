@@ -32,6 +32,8 @@ var functionToolCatalog = []FunctionToolDefinition{
 	// backend is configured.
 	{Spec: WebSearchFunctionToolSpec, AgentDefault: true},
 	{Spec: FetchPageToolSpec, AgentDefault: true},
+	{Spec: ReadFileToolSpec, HumanDescription: "Read exact line ranges of an uploaded text file, or see its outline.", UserGuide: "Reads the exact text of an uploaded text file (code, logs, transcripts, CSV, JSON, notes) a section at a time, or shows its outline first. Ask for a specific part of a long file, by line or by heading.", AgentDefault: true, UserToggleable: true},
+	{Spec: GrepFilesToolSpec, HumanDescription: "Find an exact phrase or pattern in uploaded text files.", UserGuide: "Finds every line that mentions a word, phrase or pattern in this thread's files and the personality's documents, with line numbers. Ask where something appears, or search specific files by name.", AgentDefault: true, UserToggleable: true},
 	{Spec: RecallToolSpec, HumanDescription: "Search or read your memories, files, thread summaries and past threads.", UserGuide: "Ask a question about past threads, memories or files and get an answer with sources. It can also read a whole thread or file, look back over a time range (\"last week\"), show a thread's bookmarks, or explain where a memory came from.", AgentDefault: true, UserToggleable: true},
 }
 
