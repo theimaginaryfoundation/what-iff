@@ -9,7 +9,7 @@ import { ConfirmationService } from '../../core/services/confirmation.service';
 import { MemoryService } from '../../core/services/memory.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { CompactionEvent } from '../../core/models/memory.model';
-import { Personality, PersonalityPromptChange } from '../../core/models/personality.model';
+import { Personality } from '../../core/models/personality.model';
 import { CompactionLogPageComponent } from './compaction-log-page.component';
 
 describe('CompactionLogPageComponent', () => {
@@ -17,8 +17,6 @@ describe('CompactionLogPageComponent', () => {
     let fixture: ComponentFixture<CompactionLogPageComponent>;
     let personalityService: {
         listPersonalities: ReturnType<typeof vi.fn>;
-        listPromptChanges: ReturnType<typeof vi.fn>;
-        revertPromptChange: ReturnType<typeof vi.fn>;
     };
     let confirmation: { confirm: ReturnType<typeof vi.fn> };
 
@@ -46,16 +44,6 @@ describe('CompactionLogPageComponent', () => {
         stats: { chat_count: 1, last_used_at: null },
     };
 
-    const promptChange: PersonalityPromptChange = {
-        id: 'change-1',
-        user_id: 'user-1',
-        personality_id: 'personality-9',
-        old_prompt: 'Old prompt text',
-        new_prompt: 'New prompt text',
-        action: 'edit',
-        created_at: '2026-08-12T12:00:00Z',
-    };
-
     beforeEach(async () => {
         const memoryService = {
             listCompactionEvents: vi.fn().mockName("MemoryService.listCompactionEvents"),
@@ -70,12 +58,8 @@ describe('CompactionLogPageComponent', () => {
 
         personalityService = {
             listPersonalities: vi.fn().mockName("PersonalityService.listPersonalities"),
-            listPromptChanges: vi.fn().mockName("PersonalityService.listPromptChanges"),
-            revertPromptChange: vi.fn().mockName("PersonalityService.revertPromptChange"),
         };
         personalityService.listPersonalities.mockReturnValue(of({ results: [personality], total_count: 1, page: 1 }));
-        personalityService.listPromptChanges.mockReturnValue(of([promptChange]));
-        personalityService.revertPromptChange.mockReturnValue(of({ ...promptChange, id: 'change-2', action: 'revert' }));
 
         confirmation = { confirm: vi.fn().mockName("ConfirmationService.confirm") };
         confirmation.confirm.mockResolvedValue(true);
@@ -107,36 +91,6 @@ describe('CompactionLogPageComponent', () => {
         expect(text).toContain('Turn limit reached');
         expect(text).toContain('Memory changes');
         expect(text).not.toContain('(20) >= 20');
-    });
-
-    it('keeps personality prompt audit details collapsed by default so the checkpoint feed stays visible', () => {
-        const toggle = fixture.nativeElement.querySelector('[data-testid="prompt-change-toggle"]') as HTMLButtonElement | null;
-        expect(personalityService.listPromptChanges).toHaveBeenCalledWith('personality-9');
-        expect(toggle).not.toBeNull();
-        expect(toggle?.getAttribute('aria-expanded')).toBe('false');
-        expect(fixture.nativeElement.textContent).toContain('Personality prompt changes');
-        expect(fixture.nativeElement.textContent).toContain('A long-running project conversation');
-        expect(fixture.nativeElement.textContent).not.toContain('Old prompt text');
-        expect(fixture.nativeElement.textContent).not.toContain('New prompt text');
-
-        component.togglePromptChanges();
-        fixture.detectChanges();
-
-        expect(toggle?.getAttribute('aria-expanded')).toBe('true');
-        expect(fixture.nativeElement.textContent).toContain('Vera');
-        expect(fixture.nativeElement.textContent).toContain('Old prompt text');
-        expect(fixture.nativeElement.textContent).toContain('New prompt text');
-        expect(fixture.nativeElement.textContent).toContain('Restore previous');
-    });
-
-    it('restores a historical personality prompt through the audit entry', async () => {
-        personalityService.listPromptChanges.mockClear();
-        await component.revertPromptChange({ ...promptChange, personality_name: 'Vera' });
-
-        expect(confirmation.confirm).toHaveBeenCalled();
-        expect(personalityService.revertPromptChange).toHaveBeenCalledWith('personality-9', 'change-1');
-        expect(personalityService.listPromptChanges).toHaveBeenCalledWith('personality-9');
-        expect(component.notice()).toBe('Prompt restored for Vera.');
     });
 
     it('collapses and expands the loaded memories segment', () => {
@@ -182,7 +136,6 @@ describe('CompactionLogPageComponent', () => {
     it('narrows results by thread and personality filters', () => {
         const memoryService = TestBed.inject(MemoryService) as MockedObject<MemoryService>;
         memoryService.listCompactionEvents.mockClear();
-        personalityService.listPromptChanges.mockClear();
 
         component.updateFilters('chat-42', 'personality-9');
 
@@ -192,7 +145,12 @@ describe('CompactionLogPageComponent', () => {
             chat_id: 'chat-42',
             personality_id: 'personality-9',
         });
-        expect(personalityService.listPromptChanges).toHaveBeenCalledWith('personality-9');
+    });
+
+    it('no longer renders personality prompt changes (they live on the personality page)', () => {
+        expect(fixture.nativeElement.querySelector('[data-testid="prompt-change-toggle"]')).toBeNull();
+        expect(fixture.nativeElement.querySelector('[aria-label="Personality prompt changes"]')).toBeNull();
+        expect(fixture.nativeElement.textContent).toContain("Personality prompt changes are on each personality's page.");
     });
 
     it('collapses and expands the summaries section', () => {
