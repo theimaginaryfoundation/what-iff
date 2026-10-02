@@ -13,6 +13,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/auth"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -24,6 +25,8 @@ const (
 	UserIDKey         contextKey = "user_id"
 	UserRoleKey       contextKey = "user_role"
 	WebhookTokenIDKey contextKey = "webhook_token_id"
+	// WebhookScopesKey holds the []models.WebhookScope the authenticated webhook token may use.
+	WebhookScopesKey contextKey = "webhook_scopes"
 	// ClientTimezoneKey holds an optional IANA timezone name (e.g. "America/Los_Angeles") passed from the UI.
 	ClientTimezoneKey contextKey = "client_timezone"
 )
@@ -64,6 +67,18 @@ func AuthMiddleware(client *ent.Client, store *datastore.Datastore, logger *zap.
 						case errors.Is(err, datastore.ErrExternalUsernameInvalid):
 							handlerutils.RespondWithError(w, logger, http.StatusBadRequest, handlerutils.CodeNotSet,
 								"We could not complete sign-in because your account has an invalid username", nil)
+						case errors.Is(err, datastore.ErrEmailExists):
+							// The verified email already belongs to a different account
+							// (its stored identity id differs from this sign-in's). This is
+							// not a server fault, so return a clear 409 rather than a 500.
+							// The datastore logs both identity ids for diagnosis.
+							handlerutils.RespondWithError(w, logger, http.StatusConflict, handlerutils.CodeNotSet,
+								"This email is already linked to a different account. Please sign in using your original method, or contact support if you believe this is an error", nil)
+						case errors.Is(err, datastore.ErrUsernameExists):
+							// A distinct account already holds the username this identity
+							// would use. Also a conflict, not a server fault.
+							handlerutils.RespondWithError(w, logger, http.StatusConflict, handlerutils.CodeNotSet,
+								"We could not complete sign-in because of a username conflict. Please contact support", nil)
 						default:
 							handlerutils.RespondWithError(w, logger, http.StatusInternalServerError, handlerutils.CodeNotSet,
 								"Sign-in failed. Please try again", nil)
@@ -196,6 +211,13 @@ func GetUserRoleFromContext(ctx context.Context) (string, bool) {
 func GetClientTimezoneFromContext(ctx context.Context) (string, bool) {
 	tz, ok := ctx.Value(ClientTimezoneKey).(string)
 	return tz, ok
+}
+
+// GetWebhookScopesFromContext gets the authenticated webhook token's scopes from the request
+// context. The second result is false outside a webhook-authenticated request.
+func GetWebhookScopesFromContext(ctx context.Context) ([]models.WebhookScope, bool) {
+	scopes, ok := ctx.Value(WebhookScopesKey).([]models.WebhookScope)
+	return scopes, ok
 }
 
 // GetWebhookTokenIDFromContext gets the webhook token ID from the request context.

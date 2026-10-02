@@ -698,6 +698,37 @@ export async function deleteMemory(client: ApiClient, id: string): Promise<void>
   }
 }
 
+/** Deletes multiple memories in one call. */
+export async function deleteMemoriesBatch(
+  client: ApiClient,
+  ids: string[],
+  allOrNone = false,
+): Promise<components['schemas']['MemoryBatchDeleteResponse']> {
+  const { data, error, response } = await client.POST('/memory/batch/delete', {
+    body: { ids, all_or_none: allOrNone },
+  });
+  if (error || !data) {
+    fail('delete memories batch', response.status, error);
+  }
+  return data;
+}
+
+/** Applies the same patch to multiple memories. */
+export async function patchMemoriesBatch(
+  client: ApiClient,
+  ids: string[],
+  patch: components['schemas']['MemoryPatchRequest'],
+  allOrNone = false,
+): Promise<components['schemas']['MemoryBatchPatchResponse']> {
+  const { data, error, response } = await client.POST('/memory/batch/patch', {
+    body: { ids, patch, all_or_none: allOrNone },
+  });
+  if (error || !data) {
+    fail('patch memories batch', response.status, error);
+  }
+  return data;
+}
+
 export interface ListMemoriesParams {
   page?: number;
   limit?: number;
@@ -705,6 +736,7 @@ export interface ListMemoriesParams {
   level?: components['schemas']['Memory']['level'];
   starred?: boolean;
   query?: string;
+  status?: components['schemas']['Memory']['status'];
 }
 
 /** Lists the authenticated user's memories, with optional filtering. */
@@ -718,6 +750,7 @@ export async function listMemories(client: ApiClient, params: ListMemoriesParams
         level: params.level,
         starred: params.starred,
         query: params.query,
+        status: params.status,
       },
     },
   });

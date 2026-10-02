@@ -43,7 +43,7 @@ what it covers and why it's a separate suite.
 ### 1. Chat thread lifecycle
 
 Route: `/chat/:id`. Discovered controls (from a live chat header):
-`Rename chat` (button, "Click to rename"), `Change personality (currently
+`Rename thread` (button), `Change personality (currently
 <name>)`, `Export thread`, `Close thread`. Thread Manager (`/chat`, when no
 thread is open, or via `All threads`) has `Active`/`Archived` tabs and a
 search box.
@@ -72,7 +72,7 @@ search box.
 ### 2. Personality detail page
 
 Route: `/personality/:id`. Discovered controls: `Edit` (opens the system
-prompt editor, region `System prompt editor`), `Delete`, `Use in new chat`
+prompt editor, region `System prompt editor`), `Delete`, `Use in new thread`
 (button, top of page — this is the code path `personality-chat.spec.ts`
 already exercises via `onUseInNewChat()`; the persona-picker's "new-thread"
 selection in `chat-page.component.ts` is a **separate, untested** code
@@ -257,6 +257,15 @@ image-generation call, same `LLM_BACKEND=mock/local` disablement as the AI
 personality wizard. Not testable hermetically; would need the same
 real-vendor-key-gated, opt-in pattern as item 11 in "Constraints" above.
 Not scheduling this until that pattern exists for _any_ AI-generation flow.
+
+- [x] The **Generate** modal up to the image call — default names, the name
+      rules (empty / duplicate-after-normalization), the reference-image
+      gallery picker, and the real enqueue → background job → failure round
+      trip surfacing in the modal (the mock backend's image gate fails the
+      job) — `functional/personality/expression-generate.spec.ts`, plus a
+      baseline in `visual/personalities.visual.spec.ts`. The keep/discard
+      review and save need real candidates, so they live in the component's
+      unit specs.
 
 ## Notes for whoever picks up an item
 

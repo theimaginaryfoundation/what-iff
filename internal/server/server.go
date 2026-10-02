@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -14,11 +15,16 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/embedding"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
 	agentjobscheduler "github.com/theimaginaryfoundation/what-iff/internal/agentjobs/scheduler"
 	"github.com/theimaginaryfoundation/what-iff/internal/buildinfo"
+	"github.com/theimaginaryfoundation/what-iff/internal/database"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/email"
 	"github.com/theimaginaryfoundation/what-iff/internal/featuregate"
+	"github.com/theimaginaryfoundation/what-iff/internal/handlers/accountexport"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/agentjob"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/chat"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/fileattachment"
@@ -38,8 +44,10 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/user"
 	versionhandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/version"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/webhook"
+	"github.com/theimaginaryfoundation/what-iff/internal/mcpoauth"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
 	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
@@ -48,8 +56,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/zap"
 )
@@ -110,16 +116,58 @@ func (s *Server) setupMiddleware() {
 }
 
 func (s *Server) setupRoutes() {
+	// Dependency metrics: ent query/mutation durations (registered before the client is shared)
+	// and connection pool gauges.
+	datastore.InstrumentEntClient(s.db, s.telemetry.Metrics)
+	if _, err := database.RegisterPoolMetrics(s.telemetry.Metrics, s.sqlDB); err != nil {
+		s.logger.Warn("failed to register database pool metrics", zap.Error(err))
+	}
+
 	// Create data providers
 	dataStore, err := datastore.NewDatastore(s.db, s.sqlDB, s.logger, s.config.TokenEncryptionSecret, s.telemetry.Metrics)
 	if err != nil {
 		s.logger.Fatal("failed to configure token encryption", zap.Error(err))
 	}
 
+	// Reconcile account import/export jobs orphaned by a previous restart. They run in detached
+	// in-process workers, so any left non-terminal can never finish; mark them failed instead of
+	// leaving them "processing" forever (a client that resumes progress would otherwise poll them
+	// indefinitely). The 1h staleness bound is well past the 30m import timeout, so a live import on
+	// another instance (whose progress writes keep updated_at fresh) is never clobbered.
+	if n, rerr := dataStore.FailInterruptedJobs(context.Background(),
+		[]string{models.JobTypeAccountImport, models.JobTypeAccountExport},
+		time.Now().Add(-time.Hour),
+		"Interrupted by a server restart"); rerr != nil {
+		s.logger.Warn("startup: failed to reconcile interrupted import/export jobs", zap.Error(rerr))
+	} else if n > 0 {
+		s.logger.Info("startup: marked interrupted import/export jobs failed", zap.Int("count", n))
+	}
+
+	// Same for chat turns. A chat_message job whose worker died with the previous process stays
+	// non-terminal forever, and a client returning to its thread resumes it — a permanently stuck
+	// "thinking" reply. No chat turn runs anywhere near 30 minutes, so the bound leaves turns in
+	// flight on another instance alone. They are marked failed (not cancelled) so the thread shows
+	// the turn's failure banner instead of silently dropping it.
+	if n, rerr := dataStore.FailInterruptedJobs(context.Background(),
+		[]string{agent.JobTypeChatMessage},
+		time.Now().Add(-30*time.Minute),
+		"Interrupted by a server restart"); rerr != nil {
+		s.logger.Warn("startup: failed to reconcile interrupted chat jobs", zap.Error(rerr))
+	} else if n > 0 {
+		s.logger.Info("startup: marked interrupted chat jobs failed", zap.Int("count", n))
+	}
+
+	// Job backlog gauges (unfinished jobs by type/status and the oldest one's age), sampled at
+	// each metrics export after the reconcile above so orphans don't show as backlog.
+	if _, gerr := dataStore.RegisterJobBacklogGauges(s.telemetry.Metrics); gerr != nil {
+		s.logger.Warn("startup: failed to register job backlog gauges", zap.Error(gerr))
+	}
+
 	fileStore, err := storage.NewFileStore(context.Background(), s.config.S3FileBucket, s.config.AWSRegion, s.logger)
 	if err != nil {
 		s.logger.Fatal("failed to initialize S3 file store", zap.Error(err))
 	}
+	fileStore = storage.Instrument(fileStore)
 
 	// Under a non-vendor LLM_BACKEND every provider SDK client (agent +
 	// memory/admin handlers) is built on the deny-network transport: "no
@@ -128,10 +176,18 @@ func (s *Server) setupRoutes() {
 	// explicitly-set local/test ENV. Local mode still needs its own real
 	// egress to reach the local server — that client is constructed
 	// separately in agent.NewAgent, not via this shared deny transport.
+	//
+	// Either way the shared client records one http.client.request.duration sample per attempt
+	// (see telemetry.HTTPTransport), labelled by vendor from the request host.
 	var providerHTTPClient *http.Client
 	if s.config.LLMBackend != "vendor" {
 		providerHTTPClient = provider.DenyNetworkHTTPClient()
 	}
+	// Every provider call is bounded per HTTP attempt (issue #193). The timeout transport sits
+	// inside the instrumentation so a timed-out attempt is recorded with error.type=timeout.
+	callTimeouts := s.llmCallTimeouts()
+	providerHTTPClient = provider.WithCallTimeouts(providerHTTPClient, callTimeouts)
+	providerHTTPClient = telemetry.InstrumentHTTPClient(providerHTTPClient, s.dependencyHosts()...)
 
 	agentCfg := agent.AgentConfig{
 		LifecycleContext: s.lifecycleCtx,
@@ -143,6 +199,7 @@ func (s *Server) setupRoutes() {
 		MockLLMStreamDelay: s.config.MockLLMStreamDelay,
 		LocalLLMBaseURL:    s.config.LocalLLMBaseURL,
 		LocalLLMModel:      s.config.LocalLLMModel,
+		LLMCallTimeouts:    callTimeouts,
 		ZAIKey:             s.config.ZAIKey,
 		ZAIBaseURL:         s.config.ZAIBaseURL,
 		GeminiKey:          s.config.GeminiKey,
@@ -155,6 +212,22 @@ func (s *Server) setupRoutes() {
 		QwenBaseURL:        s.config.QwenBaseURL,
 		XiaomiKey:          s.config.XiaomiKey,
 		XiaomiBaseURL:      s.config.XiaomiBaseURL,
+	}
+	if s.config.LLMBackend == "vendor" {
+		// ErrNotConfigured (no PARALLEL_API_KEY) leaves vendor-native search in place; any
+		// other error is a misconfiguration and stops startup rather than silently degrading.
+		webSearch, err := websearch.New(websearch.Config{
+			ParallelAPIKey: s.config.ParallelAPIKey,
+			ParallelMode:   s.config.ParallelSearchMode,
+			HTTPClient:     telemetry.InstrumentHTTPClient(&http.Client{Timeout: websearch.DefaultTimeout}),
+		})
+		switch {
+		case err == nil:
+			agentCfg.WebSearch = webSearch
+			s.logger.Info("first-party web search enabled", zap.String("backend", webSearch.Backend.Name()))
+		case !errors.Is(err, websearch.ErrNotConfigured):
+			s.logger.Fatal("invalid web search configuration", zap.Error(err))
+		}
 	}
 	// The concrete meter is provided by metering.New, which the private metering
 	// implementation registers via a blank import in cmd/api-server; it reads its
@@ -222,7 +295,29 @@ func (s *Server) setupRoutes() {
 	userHandler := user.NewHandler(dataStore, s.logger, s.config.AllowedEmails, s.config.Environment)
 	jobHandler := job.NewHandlerWithCanceller(dataStore, agent, s.logger)
 	memoryHandler := memory.NewHandler(dataStore, s.logger, s.config.OpenAIKey, providerHTTPClient)
-	mcpServerHandler := mcpserver.NewHandler(dataStore, s.logger)
+	// Account export: async export runs in-process here in the main app; the bundle lands in the
+	// file store and its download link is delivered ONLY out-of-band (a deliberate control — app
+	// access alone cannot exfiltrate the account). The concrete email transport is provided by
+	// email.New, which a private implementation registers via a blank import in cmd/api-server and
+	// which reads its own configuration from the environment. When that package is absent (e.g. the
+	// open-source build), email.New is nil and we fall back to email.NoopSender, which logs the link.
+	var exportSender email.Sender = email.NoopSender{Logger: s.logger}
+	if email.New != nil {
+		if snd := email.New(s.logger); snd != nil {
+			// The linked transport is SES in the hosted deployment.
+			exportSender = email.Instrument(snd, telemetry.DependencySES)
+		}
+	}
+	accountExportHandler := accountexport.NewHandler(dataStore, s.logger, fileStore, exportSender, s.config.OpenAIKey, providerHTTPClient, s.lifecycleCtx)
+	oauthService := mcpoauth.New(dataStore, providerHTTPClient, s.logger, mcpoauth.Config{
+		RedirectURL:         s.config.MCPOAuthRedirectURL,
+		PostAuthRedirectURL: s.config.MCPOAuthPostAuthURL,
+		AllowedRedirects:    s.config.MCPOAuthAllowedRedirects,
+	})
+	go mcpoauth.NewSweeper(oauthService, s.config.MCPOAuthSweepInterval, s.config.MCPOAuthRefreshAhead, s.config.MCPOAuthMaxFailures).Run(s.lifecycleCtx)
+	mcpServerHandler := mcpserver.NewHandler(dataStore, mcpclient.New(nil, s.logger), oauthService, s.logger, mcpserver.Config{
+		AllowLocalhostConnections: s.config.MCPAllowLocalhostConnections,
+	})
 	modelHandler := model.NewHandler(dataStore, s.logger)
 	personalityHandler := personality.NewHandler(dataStore, s.logger, agent)
 	chatHandler := chat.NewHandler(dataStore, s.logger, agent, chat.HandlerConfig{
@@ -235,7 +330,7 @@ func (s *Server) setupRoutes() {
 	moodHandler := moodhandler.NewHandler(dataStore, s.logger, agent.FileStore())
 	roleHandler := role.NewHandler(dataStore, s.logger)
 	webhookHandler := webhook.NewHandler(dataStore, agent, s.logger)
-	toolsHandler := toolshandler.NewHandler(s.logger)
+	toolsHandler := toolshandler.NewHandler(s.logger, agent.FirstPartyWebSearch())
 	searchHandler := search.NewHandler(dataStore, s.logger)
 	// Setup API routes
 	apiRouter := s.router.PathPrefix("/api").Subrouter()
@@ -256,6 +351,7 @@ func (s *Server) setupRoutes() {
 	webhookRouter := apiRouter.PathPrefix("/webhooks").Subrouter()
 	webhookRouter.Use(middleware.WebhookAuthMiddleware(dataStore, s.logger))
 	webhookHandler.RegisterWebhookRoutes(webhookRouter)
+	mcpServerHandler.RegisterPublicRoutes(apiRouter)
 
 	// Protected routes
 	authRouter := apiRouter.NewRoute().Subrouter()
@@ -272,7 +368,7 @@ func (s *Server) setupRoutes() {
 
 		s.logger.Info("Test handler: Successfully authenticated", zap.String("user_id", userID.String()))
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fmt.Sprintf(`{"status":"authenticated","user_id":"%s"}`, userID.String())))
+		_, _ = fmt.Fprintf(w, `{"status":"authenticated","user_id":"%s"}`, userID.String())
 	}).Methods("GET")
 
 	// Register protected routes
@@ -282,6 +378,7 @@ func (s *Server) setupRoutes() {
 	chatHandler.RegisterRoutes(authRouter)
 	agentJobHandler.RegisterRoutes(authRouter)
 	memoryHandler.RegisterRoutes(authRouter)
+	accountExportHandler.RegisterRoutes(authRouter)
 	mcpServerHandler.RegisterRoutes(authRouter)
 	modelRouter := apiRouter.PathPrefix("/model").Subrouter()
 	modelRouter.Use(middleware.OptionalAuthMiddleware(s.db, dataStore, s.logger))
@@ -326,6 +423,29 @@ func (s *Server) setupRoutes() {
 	// be registered through the handler's RegisterRoutes method, which applies
 	// RequireRole("admin", "super_admin") middleware.
 	roleHandler.RegisterRoutes(apiV1Router)
+}
+
+// llmCallTimeouts is the configured per-attempt limits for provider calls.
+func (s *Server) llmCallTimeouts() provider.CallTimeouts {
+	return provider.CallTimeouts{
+		Request:    s.config.LLMRequestTimeout,
+		Stream:     s.config.LLMStreamTimeout,
+		StreamIdle: s.config.LLMStreamIdleTimeout,
+	}
+}
+
+// dependencyHosts labels the configured provider base URL overrides, so an LLM provider
+// pointed at a non-default host is still attributed to it on http.client.request.duration.
+// Unset overrides are skipped by WithDependencyHost; default hosts are built in.
+func (s *Server) dependencyHosts() []telemetry.HTTPTransportOption {
+	return []telemetry.HTTPTransportOption{
+		telemetry.WithDependencyHost(s.config.ZAIBaseURL, telemetry.DependencyZAI),
+		telemetry.WithDependencyHost(s.config.GeminiBaseURL, telemetry.DependencyGemini),
+		telemetry.WithDependencyHost(s.config.MistralBaseURL, telemetry.DependencyMistral),
+		telemetry.WithDependencyHost(s.config.DeepSeekBaseURL, telemetry.DependencyDeepSeek),
+		telemetry.WithDependencyHost(s.config.QwenBaseURL, telemetry.DependencyQwen),
+		telemetry.WithDependencyHost(s.config.XiaomiBaseURL, telemetry.DependencyXiaomi),
+	}
 }
 
 // pluginEmbedder builds the embedding function handed to plugins through
@@ -431,6 +551,13 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
+func (r *statusRecorder) Flush() {
+	flusher, ok := r.ResponseWriter.(http.Flusher)
+	if ok {
+		flusher.Flush()
+	}
+}
+
 func (s *Server) metricsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip OPTIONS — preflight has its own handler and skews latency stats
@@ -491,33 +618,14 @@ func normalizeMetricRoutePattern(s string) string {
 	return s
 }
 
-// httpStatusClass maps a numeric status to a coarse bucket (reduces metric cardinality vs per-code labels).
-func httpStatusClass(code int) string {
-	switch {
-	case code >= 100 && code < 200:
-		return "1xx"
-	case code >= 200 && code < 300:
-		return "2xx"
-	case code >= 300 && code < 400:
-		return "3xx"
-	case code >= 400 && code < 500:
-		return "4xx"
-	case code >= 500 && code < 600:
-		return "5xx"
-	default:
-		return "other"
-	}
-}
-
 // recordHTTP records request latency with method, mux route template, and status class (1xx–5xx).
 func (s *Server) recordHTTP(ctx context.Context, method, route string, status int, duration time.Duration) {
 	if s.telemetry == nil || s.telemetry.Metrics == nil {
 		return
 	}
-	attrs := metric.WithAttributes(
-		attribute.String("http.method", method),
-		attribute.String("http.route", route),
-		attribute.String("http.status_class", httpStatusClass(status)),
+	s.telemetry.Metrics.RecordDuration(ctx, telemetry.HTTPServerDuration, duration,
+		telemetry.AttrHTTPMethod.String(method),
+		telemetry.AttrHTTPRoute.String(route),
+		telemetry.AttrHTTPStatusClass.String(telemetry.HTTPStatusClass(status)),
 	)
-	s.telemetry.Metrics.RecordTime(ctx, "http_server_request_duration", duration, attrs)
 }

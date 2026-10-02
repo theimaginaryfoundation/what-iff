@@ -31,6 +31,11 @@ func (WebhookToken) Fields() []ent.Field {
 		field.Time("last_used_at").
 			Optional().
 			Nillable(),
+		// scopes lists what the token may do ("messages:write", "chat:read"). Tokens created
+		// before scopes existed have no value here; the application treats that as write-only,
+		// exactly what those tokens could always do, so they never gain read access implicitly.
+		field.JSON("scopes", []string{}).
+			Optional(),
 	}
 }
 

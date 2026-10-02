@@ -66,7 +66,7 @@ func (h *Handler) CreateWelcomeMessage(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.welcomeAgent.HandleWelcomeMessagePromptAsync(
 		r.Context(),
 		chatID,
-		agent.BuildFirstChatGreetingPrompt(),
+		agent.BuildFirstChatGreetingPrompt(h.welcomeAgent.FirstPartyWebSearch()),
 		modelOverrideID,
 		nil,
 	)

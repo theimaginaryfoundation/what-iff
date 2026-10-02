@@ -1,6 +1,7 @@
 package personality
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -224,7 +225,28 @@ func (h *Handler) GetPersonality(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.attachUsageStats(r.Context(), userID, personality)
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, personality)
+}
+
+// attachUsageStats fills p.Stats (thread count / last used) so single-personality
+// responses match the entries returned by ListPersonalities. The datastore's
+// GetPersonality/UpdatePersonality leave Stats zeroed, which made the
+// stand-alone personality page show "0 threads" (#129). A stats failure is
+// logged but does not fail the request: the personality itself is still valid.
+func (h *Handler) attachUsageStats(ctx context.Context, userID uuid.UUID, p *models.Personality) {
+	if p == nil {
+		return
+	}
+	stats, err := h.ds.GetPersonalityUsageStats(ctx, userID, p.ID)
+	if err != nil {
+		h.logger.Warn("failed to load personality usage stats",
+			zap.String("user_id", userID.String()),
+			zap.String("personality_id", p.ID.String()),
+			zap.Error(err))
+		return
+	}
+	p.Stats = stats
 }
 
 // UpdatePersonality updates an existing personality
@@ -296,6 +318,7 @@ func (h *Handler) UpdatePersonality(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.attachUsageStats(r.Context(), userID, personality)
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, personality)
 }
 

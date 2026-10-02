@@ -8,38 +8,27 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry/telemetrytest"
 )
 
-func TestHTTPStatusClass(t *testing.T) {
+func TestMetricsMiddlewareRecordsRouteTemplateAndStatusClass(t *testing.T) {
 	t.Parallel()
+	tm := telemetrytest.New(t)
+	s := &Server{router: mux.NewRouter(), telemetry: &telemetry.Telemetry{Metrics: tm.Metrics}}
+	s.router.Use(s.metricsMiddleware)
+	s.router.HandleFunc("/chat/{id}", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}).Methods(http.MethodGet)
 
-	tests := []struct {
-		code int
-		want string
-	}{
-		{0, "other"},
-		{99, "other"},
-		{100, "1xx"},
-		{199, "1xx"},
-		{200, "2xx"},
-		{204, "2xx"},
-		{299, "2xx"},
-		{301, "3xx"},
-		{399, "3xx"},
-		{400, "4xx"},
-		{404, "4xx"},
-		{499, "4xx"},
-		{500, "5xx"},
-		{503, "5xx"},
-		{599, "5xx"},
-		{600, "other"},
-	}
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%d", tt.code), func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, httpStatusClass(tt.code))
-		})
-	}
+	s.router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/chat/123", nil))
+
+	require.Equal(t, uint64(1), tm.HistogramCount(t, telemetry.HTTPServerDuration.Name,
+		telemetry.AttrHTTPMethod.String(http.MethodGet),
+		telemetry.AttrHTTPRoute.String("/chat/{id}"),
+		telemetry.AttrHTTPStatusClass.String("4xx"),
+	))
 }
 
 func TestNormalizeMetricRoutePattern(t *testing.T) {

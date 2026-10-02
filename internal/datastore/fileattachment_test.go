@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/ent"
+	entchatmessage "github.com/theimaginaryfoundation/what-iff/ent/chatmessage"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -578,6 +579,131 @@ func TestListFileAttachments_DateRangeFilter(t *testing.T) {
 	require.Equal(t, 1, res.TotalCount)
 	got = res.Results[0].(*models.FileAttachment)
 	require.Equal(t, old.Name, got.Name)
+}
+
+func createFATestChatMessageWithOrigin(t *testing.T, ds *Datastore, chatID uuid.UUID, origin string) uuid.UUID {
+	t.Helper()
+	cm, err := ds.dbClient.ChatMessage.Create().
+		SetChatID(chatID).
+		SetMessage("hello").
+		SetOrigin(entchatmessage.Origin(origin)).
+		SetSentAt(time.Now().UTC()).
+		Save(context.Background())
+	require.NoError(t, err)
+	return cm.ID
+}
+
+// Regression for #141: the gallery Generated/Imported class is derived from the
+// linked chat message's origin, not from mere chat_message_id presence, and
+// unlinked uploads (gallery imports) classify as imported rather than unknown.
+func TestListFileAttachments_ClassifiesSource(t *testing.T) {
+	ds, cleanup := newFileAttachmentTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createFATestUser(t, ds)
+	personalityID := createFATestPersonality(t, ds, userID, "Vix")
+	chatID := createFATestChat(t, ds, userID, createFATestModel(t, ds))
+	assistantMsg := createFATestChatMessageWithOrigin(t, ds, chatID, "Assistant")
+	userMsg := createFATestChatMessageWithOrigin(t, ds, chatID, "User")
+
+	fixtures := []struct {
+		att  models.FileAttachment
+		want models.FileAttachmentSource
+	}{
+		{models.FileAttachment{Name: "tool-output.png", FileType: "image/png", ChatMessageID: &assistantMsg}, models.FileAttachmentSourceGenerated},
+		{models.FileAttachment{Name: "holiday.jpg", FileType: "image/jpeg", ChatMessageID: &userMsg}, models.FileAttachmentSourceImported},
+		{models.FileAttachment{Name: "gallery-import.png", FileType: "image/png"}, models.FileAttachmentSourceImported},
+		{models.FileAttachment{Name: "persona-upload.png", FileType: "image/png", PersonalityID: &personalityID}, models.FileAttachmentSourceImported},
+		{models.FileAttachment{Name: "expression-happy.png", FileType: "image/png", PersonalityID: &personalityID}, models.FileAttachmentSourceGenerated},
+		{models.FileAttachment{Name: "personality-portrait.png", FileType: "image/png"}, models.FileAttachmentSourceGenerated},
+	}
+	want := map[string]models.FileAttachmentSource{}
+	for _, f := range fixtures {
+		_, err := ds.CreateFileAttachment(ctx, userID, f.att)
+		require.NoError(t, err)
+		want[f.att.Name] = f.want
+	}
+
+	res, err := ds.ListFileAttachments(ctx, userID, 1, 20, models.FileAttachmentFilters{})
+	require.NoError(t, err)
+	require.Len(t, res.Results, len(fixtures))
+	for _, row := range res.Results {
+		att := row.(*models.FileAttachment)
+		require.Equal(t, want[att.Name], att.Source, att.Name)
+	}
+}
+
+// Regression for #141: reusing a gallery image in a chat clones its s3_key onto a
+// reference row linked to the user's message. Listing that clone instead of the
+// original flipped the image's class; listing both (across pages) duplicated it.
+func TestListFileAttachments_ExcludeReferenceCopies(t *testing.T) {
+	ds, cleanup := newFileAttachmentTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createFATestUser(t, ds)
+	otherUserID := createFATestUser(t, ds)
+	personalityID := createFATestPersonality(t, ds, userID, "Vix")
+	chatID := createFATestChat(t, ds, userID, createFATestModel(t, ds))
+	userMsg := createFATestChatMessageWithOrigin(t, ds, chatID, "User")
+
+	original, err := ds.CreateFileAttachment(ctx, userID, models.FileAttachment{
+		Name: "persona-upload.png", FileType: "image/png", PersonalityID: &personalityID,
+	})
+	require.NoError(t, err)
+	require.NoError(t, ds.SetFileAttachmentS3Key(ctx, userID, original.ID, "users/u/images/persona-upload.png"))
+	_, err = ds.sqlDB.Exec(`UPDATE file_attachments SET created_at = ? WHERE id = ?`,
+		time.Now().Add(-time.Hour), original.ID.String()) // local, like ent defaults, so sqlite text timestamps compare correctly
+	require.NoError(t, err)
+
+	// Sent reference (linked to a user message) and an unsent one.
+	sentRef, err := ds.CreateFileAttachmentReference(ctx, userID, original.ID)
+	require.NoError(t, err)
+	_, err = ds.dbClient.FileAttachment.UpdateOneID(sentRef.ID).SetChatMessageID(userMsg).Save(ctx)
+	require.NoError(t, err)
+	_, err = ds.CreateFileAttachmentReference(ctx, userID, original.ID)
+	require.NoError(t, err)
+
+	// Another user's row with the same key must not hide anything of ours.
+	_, err = ds.CreateFileAttachment(ctx, otherUserID, models.FileAttachment{
+		Name: "persona-upload.png", FileType: "image/png", S3Key: "users/u/images/persona-upload.png",
+	})
+	require.NoError(t, err)
+	// Rows without an s3_key never collapse into each other.
+	for _, name := range []string{"legacy-a.png", "legacy-b.png"} {
+		_, err = ds.CreateFileAttachment(ctx, userID, models.FileAttachment{Name: name, FileType: "image/png"})
+		require.NoError(t, err)
+	}
+
+	unfiltered, err := ds.ListFileAttachments(ctx, userID, 1, 20, models.FileAttachmentFilters{})
+	require.NoError(t, err)
+	require.Equal(t, 5, unfiltered.TotalCount, "filter is opt-in")
+
+	filters := models.FileAttachmentFilters{ExcludeReferenceCopies: true}
+	res, err := ds.ListFileAttachments(ctx, userID, 1, 20, filters)
+	require.NoError(t, err)
+	require.Equal(t, 3, res.TotalCount)
+	byName := map[string]*models.FileAttachment{}
+	for _, row := range res.Results {
+		att := row.(*models.FileAttachment)
+		byName[att.Name] = att
+	}
+	require.Len(t, byName, 3)
+	require.Equal(t, original.ID, byName["persona-upload.png"].ID)
+	require.Equal(t, models.FileAttachmentSourceImported, byName["persona-upload.png"].Source)
+
+	// Paging one row at a time must visit each canonical row exactly once.
+	seen := map[uuid.UUID]bool{}
+	for page := 1; page <= 3; page++ {
+		pageRes, err := ds.ListFileAttachments(ctx, userID, page, 1, filters)
+		require.NoError(t, err)
+		require.Equal(t, 3, pageRes.TotalCount)
+		require.Len(t, pageRes.Results, 1)
+		id := pageRes.Results[0].(*models.FileAttachment).ID
+		require.False(t, seen[id], "row repeated across pages")
+		seen[id] = true
+	}
 }
 
 func TestUpdateFileAttachment_HappyPath(t *testing.T) {

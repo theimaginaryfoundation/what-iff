@@ -44,4 +44,9 @@ export interface PaginatedResponse<T> {
   results: T[];
   total_count: number;
   page: number;
+  /**
+   * Opaque keyset token for continuing a cursor-paginated view past the last row in this
+   * response (absent when there is nothing more). Only the descending chat-message view sets it.
+   */
+  next_cursor?: string;
 }

@@ -31,6 +31,7 @@ func toWebhookTokenModel(entToken *ent.WebhookToken) *models.WebhookToken {
 		ID:        entToken.ID,
 		Name:      entToken.Name,
 		Status:    models.WebhookTokenStatus(entToken.Status),
+		Scopes:    models.EffectiveWebhookScopes(entToken.Scopes),
 		CreatedAt: entToken.CreatedAt,
 		UpdatedAt: entToken.UpdatedAt,
 	}
@@ -59,10 +60,16 @@ func hashWebhookToken(token string) string {
 }
 
 // CreateWebhookToken creates a new user-scoped webhook token and returns the raw token once.
-func (d *Datastore) CreateWebhookToken(ctx context.Context, userID uuid.UUID, name string) (*models.WebhookToken, string, error) {
+// scopes says what the token may do; callers validate them with models.NormalizeWebhookScopes,
+// and an empty list is stored as the default (write-only) set rather than as "nothing", so a token
+// can never be created that silently holds more than it was asked for.
+func (d *Datastore) CreateWebhookToken(ctx context.Context, userID uuid.UUID, name string, scopes []models.WebhookScope) (*models.WebhookToken, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, "", ErrInvalidRequestBody
+	}
+	if len(scopes) == 0 {
+		scopes = models.DefaultWebhookScopes
 	}
 
 	rawSecret, err := generateWebhookTokenSecret()
@@ -103,6 +110,7 @@ func (d *Datastore) CreateWebhookToken(ctx context.Context, userID uuid.UUID, na
 		SetName(name).
 		SetTokenHash(tokenHash).
 		SetStatus(webhooktoken.StatusActive).
+		SetScopes(models.WebhookScopeStrings(scopes)).
 		SetOwnerID(userID).
 		Save(ctx)
 	if err != nil {
@@ -221,5 +229,6 @@ func (d *Datastore) AuthenticateWebhookToken(ctx context.Context, rawToken strin
 		Role:           roleName,
 		Timezone:       owner.Timezone,
 		WebhookTokenID: entToken.ID,
+		Scopes:         models.EffectiveWebhookScopes(entToken.Scopes),
 	}, nil
 }

@@ -108,34 +108,6 @@ func TestUsesOpenAIChatCompletionsAPI(t *testing.T) {
 	}
 }
 
-func TestChatCompletionsSupportsVision(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		provider string
-		model    string
-		want     bool
-	}{
-		{provider: "google", model: "gemini-3.5-flash", want: true},
-		{provider: "qwen", model: "qwen3.7-plus", want: true},
-		{provider: "qwen", model: "qwen-plus", want: false},
-		{provider: "mistral", model: "mistral-medium-2508", want: true},
-		{provider: "mistral", model: "mistral-medium-3.5", want: true},
-		{provider: "mistral", model: "codestral-latest", want: false},
-		{provider: "deepseek", model: "deepseek-chat", want: false},
-		{provider: "xiaomi", model: "mimo-v2.5-pro", want: false},
-	}
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.provider+"/"+tt.model, func(t *testing.T) {
-			t.Parallel()
-			if got := ChatCompletionsSupportsVision(tt.provider, tt.model); got != tt.want {
-				t.Fatalf("ChatCompletionsSupportsVision(%q, %q) = %v, want %v", tt.provider, tt.model, got, tt.want)
-			}
-		})
-	}
-}
-
 // IsAnthropicModel must remain native-only (not GLM) so Anthropic-only features
 // (web search, beta MCP, prompt caching) are not enabled for z.ai.
 func TestIsAnthropicModel_ExcludesZAI(t *testing.T) {

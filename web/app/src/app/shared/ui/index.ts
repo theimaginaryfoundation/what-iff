@@ -3,6 +3,7 @@ export * from './badge/badge.component';
 export * from './button/button.component';
 export * from './card/card.component';
 export * from './empty-state/empty-state.component';
+export * from './help-hint/help-hint.component';
 export * from './helpers/body-scroll-lock.helpers';
 export * from './helpers/focus-trap.helpers';
 export * from './helpers/initials.helpers';

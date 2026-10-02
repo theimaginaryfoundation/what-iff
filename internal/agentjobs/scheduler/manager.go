@@ -524,6 +524,7 @@ func (m *Manager) logMisfires(ch chan quartz.ScheduledJob) {
 		if sj == nil || sj.JobDetail() == nil || sj.JobDetail().JobKey() == nil {
 			continue
 		}
+		recordRun(context.Background(), runOutcomeMisfire)
 		m.logger.Warn("agent job misfire",
 			zap.String("job_key", sj.JobDetail().JobKey().String()),
 			zap.Int64("next_run_time", sj.NextRunTime()),

@@ -80,6 +80,38 @@ func TestStreamChatCompletion_ForwardsTextDeltasAndAccumulates(t *testing.T) {
 	require.Equal(t, int64(34), outputTokens)
 }
 
+// TestStreamChatCompletion_DoesNotSumRepeatedUsage pins the fix for the Gemini
+// token-inflation bug. Gemini's OpenAI-compatible streaming repeats a full,
+// cumulative usage block on every SSE chunk (unlike OpenAI, which sends it only
+// in the final chunk). The accumulator sums chunk.Usage, so without correction
+// the reported prompt tokens would be multiplied by the number of usage-bearing
+// chunks. streamChatCompletion must instead report the last chunk's usage as the
+// authoritative total.
+func TestStreamChatCompletion_DoesNotSumRepeatedUsage(t *testing.T) {
+	t.Parallel()
+	// Each content chunk carries the same cumulative usage, Gemini-style. Summing
+	// would give prompt_tokens 80000*3 = 240000; the correct answer is 80000.
+	frames := []string{
+		`{"id":"cmpl-9","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":{"role":"assistant","content":"Hel"},"finish_reason":null}],"usage":{"prompt_tokens":80000,"completion_tokens":1,"total_tokens":80001}}`,
+		`{"id":"cmpl-9","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":{"content":"lo"},"finish_reason":null}],"usage":{"prompt_tokens":80000,"completion_tokens":2,"total_tokens":80002}}`,
+		`{"id":"cmpl-9","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":80000,"completion_tokens":3,"total_tokens":80003}}`,
+	}
+	srv := sseServer(t, frames)
+	defer srv.Close()
+
+	resp, err := streamChatCompletion(
+		t.Context(),
+		newTestClient(srv.URL),
+		openai.ChatCompletionNewParams{Model: "test"},
+		nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, "Hello", ExtractChatCompletionText(resp))
+	inputTokens, outputTokens := chatCompletionTokenUsage(resp)
+	require.Equal(t, int64(80000), inputTokens, "prompt tokens must be the final chunk's value, not the per-chunk sum")
+	require.Equal(t, int64(3), outputTokens, "completion tokens must be the final chunk's cumulative value, not the sum")
+}
+
 func TestStreamChatCompletion_AccumulatesToolCallsWithoutDeltas(t *testing.T) {
 	t.Parallel()
 	frames := []string{

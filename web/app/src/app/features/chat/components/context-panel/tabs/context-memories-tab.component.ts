@@ -9,33 +9,43 @@ import { apiErrorMessage } from '../../../../../core/utils/api-error.helpers';
 import { ButtonComponent } from '../../../../../shared/ui/button/button.component';
 import { ModalComponent } from '../../../../../shared/ui/modal/modal.component';
 
+import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../../../../shared/ui/tooltip/tooltip.directive';
+
 type MemoryContextTab = 'thread' | 'global';
 
 @Component({
   selector: 'app-context-memories-tab',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, ModalComponent],
+  imports: [CommonModule, ButtonComponent, ModalComponent, HelpHintComponent, TooltipDirective],
   template: `
     <section class="tab-body">
-      <div class="context-tabs" role="tablist" aria-label="Memory scope">
-        <button
-          type="button"
-          role="tab"
-          [attr.aria-selected]="activeMemoryTab() === 'thread'"
-          [class.context-tabs__button--active]="activeMemoryTab() === 'thread'"
-          (click)="activeMemoryTab.set('thread')"
-        >
-          This Thread
-        </button>
-        <button
-          type="button"
-          role="tab"
-          [attr.aria-selected]="activeMemoryTab() === 'global'"
-          [class.context-tabs__button--active]="activeMemoryTab() === 'global'"
-          (click)="activeMemoryTab.set('global')"
-        >
-          Global
-        </button>
+      <div class="memory-scope-row">
+        <div class="context-tabs" role="tablist" aria-label="Memory scope">
+          <button
+            type="button"
+            role="tab"
+            [attr.aria-selected]="activeMemoryTab() === 'thread'"
+            [class.context-tabs__button--active]="activeMemoryTab() === 'thread'"
+            (click)="activeMemoryTab.set('thread')"
+          >
+            This thread
+          </button>
+          <button
+            type="button"
+            role="tab"
+            [attr.aria-selected]="activeMemoryTab() === 'global'"
+            [class.context-tabs__button--active]="activeMemoryTab() === 'global'"
+            (click)="activeMemoryTab.set('global')"
+          >
+            Global
+          </button>
+        </div>
+        <ui-help-hint label="What are memories?" heading="Memories" guide="continuity" align="end">
+          Things the personality has saved to remember. <strong>This thread</strong> memories are used only in this
+          thread. <strong>Global</strong> lists memories used with every personality, plus ones pinned to this
+          personality. You can edit or remove any of them.
+        </ui-help-hint>
       </div>
 
       <div class="memory-content">
@@ -49,7 +59,9 @@ type MemoryContextTab = 'thread' | 'global';
       </div>
 
       <div class="memory-actions">
-        <button type="button" class="add-memory" (click)="openCreateModal()">Add Memory</button>
+        <button type="button" class="add-memory" uiTooltip="Adds a memory for this thread only" (click)="openCreateModal()">
+          Add memory
+        </button>
         <button type="button" (click)="goToMemoryList()">Manage all memories</button>
       </div>
     </section>
@@ -102,6 +114,16 @@ type MemoryContextTab = 'thread' | 'global';
       display: flex;
       flex: 1;
       min-height: 0;
+    }
+
+    .memory-scope-row {
+      align-items: center;
+      display: flex;
+      gap: 0.25rem;
+    }
+
+    .memory-scope-row .context-tabs {
+      flex: 1;
     }
 
     .context-tabs {

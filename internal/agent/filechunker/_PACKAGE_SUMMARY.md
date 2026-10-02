@@ -18,11 +18,14 @@
 ## Non-obvious decisions
 
 - **`application/octet-stream`** with `.txt`-like extension may still be processed as text (see `pipeline_test.go` cases).
+- **Metrics:** `ProcessAndStore` times its `chunk`, `embed` and `store` stages on `whatiff.file.operation.duration` (operation `upload`) and records the chunk count by outcome on `whatiff.file.operation.items`, through `telemetry.Global()`.
+  Chunks are embedded in batches of `embedBatchSize` (one `embedding.CreateEmbeddings` request per batch), so the `embed` stage grows with the number of batches, not chunks.
+  Each batch request is recorded as its own gen_ai embeddings operation by the embedding package; a failed batch fails the whole file and counts all its chunks as failed.
 
 ## Testing
 
 - `chunker_test.go` — chunk boundaries, Unicode, defaults.
-- `pipeline_test.go` — MIME/extension gating and unsupported types.
+- `pipeline_test.go` — MIME/extension gating and unsupported types, plus stage metrics on an embedding failure and per-batch embedding requests (stub OpenAI server).
 
 ## Related documentation
 

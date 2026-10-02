@@ -57,6 +57,10 @@ func (h *Handler) buildActivePersonalityMediaJob(ctx context.Context, userID uui
 	case agent.JobTypeExpressionGrid:
 		pid := refID.String()
 		out.PersonalityID = &pid
+		out.ExpressionMode = "default"
+		if agent.IsExpressionCandidatesProgress(job.Progress) {
+			out.ExpressionMode = agent.ExpressionCandidatesMode
+		}
 		if person, err := h.ds.GetPersonality(ctx, userID, refID); err == nil && person != nil {
 			name := person.Name
 			out.PersonalityName = &name

@@ -1,0 +1,40 @@
+<section class="welcome" aria-labelledby="welcome-title">
+  <p class="welcome__eyebrow">Welcome to WhatIff</p>
+  <h2 id="welcome-title" class="welcome__title">What if your AI could grow with you?</h2>
+  <p class="welcome__lead">
+    Every chat in WhatIff runs through a personality you create. It keeps its own voice, builds memory with you
+    across conversations, and adapts as you go.
+  </p>
+
+  <ul class="welcome__highlights">
+    @for (item of highlights; track item.title) {
+      <li class="welcome__highlight">
+        <span class="welcome__highlight-title">{{ item.title }}</span>
+        <span class="welcome__highlight-body">{{ item.body }}</span>
+      </li>
+    }
+  </ul>
+
+  <div class="welcome__start">
+    <h3 class="welcome__start-title">Start by creating your first personality</h3>
+    <div class="welcome__actions">
+      <button type="button" class="welcome__primary" (click)="generate.emit()">
+        <ui-sparkle-icon [size]="14" />
+        Generate a personality
+      </button>
+      <button type="button" class="welcome__secondary" (click)="createManually.emit()">Create manually</button>
+    </div>
+    <p class="welcome__hint">Generate asks a few quick questions and builds one for you, in about two minutes.</p>
+    <p class="welcome__import">
+      Already have a WhatIff export, or chats from ChatGPT or Claude?
+      <button type="button" class="welcome__inline-action" (click)="importData.emit()">Import them instead</button>
+    </p>
+  </div>
+
+  @if (gettingStartedHref) {
+    <a class="welcome__guide" [href]="gettingStartedHref" target="_blank" rel="noopener noreferrer">
+      New here? Read the getting started guide
+      <span class="sr-only">(opens in a new tab)</span>
+    </a>
+  }
+</section>

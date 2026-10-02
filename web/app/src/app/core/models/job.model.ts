@@ -28,8 +28,32 @@ export interface Job {
    * Incremental assistant text chunks emitted while inference is still in progress.
    */
   draft_deltas?: string[];
+  /**
+   * Live model reasoning chunks (GLM, MiMo). Unlike draft_deltas this can be reset
+   * (emptied and re-sent) when a truncated call is retried — render the whole array.
+   */
+  draft_reasoning?: string[];
   created_at: string;
   updated_at: string;
+}
+
+/** Decoded shape of {@link Job.progress} for `chat_message` jobs: the live tool-call timeline. */
+export interface ChatTurnProgress {
+  tool_calls: ChatTurnToolCall[];
+}
+
+/** One tool call in {@link ChatTurnProgress}; input/output are truncated previews. */
+export interface ChatTurnToolCall {
+  /** Provider tool-call id, unique within the turn. */
+  id: string;
+  name: string;
+  input?: string;
+  status: 'running' | 'complete' | 'error';
+  /** Result (or error text) preview, set once the call finishes. */
+  output?: string;
+  round: number;
+  started_at: string;
+  finished_at?: string;
 }
 
 /** Decoded shape of {@link Job.progress} for `chat_import` jobs. */
@@ -53,4 +77,6 @@ export interface JobFilters {
 export interface ActiveChatMessageJob {
   job_id: string;
   status: JobStatus;
+  /** The user turn the job answers (set by the thread-level lookup). */
+  message_id?: string;
 }

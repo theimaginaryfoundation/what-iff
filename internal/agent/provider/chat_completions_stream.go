@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
+	"github.com/tidwall/gjson"
 )
 
 // streamChatCompletion drives a streaming Chat Completions request, forwarding
@@ -37,6 +39,34 @@ func streamChatCompletion(
 	params openai.ChatCompletionNewParams,
 	onTextDelta func(delta string),
 ) (*openai.ChatCompletion, error) {
+	return streamChatCompletionCapturing(ctx, client, params, chatCompletionStreamHooks{onTextDelta: onTextDelta})
+}
+
+// chatCompletionStreamHooks are the optional per-chunk callbacks for
+// streamChatCompletionCapturing; nil hooks are skipped.
+type chatCompletionStreamHooks struct {
+	// onTextDelta receives incremental assistant content.
+	onTextDelta func(delta string)
+	// onToolCallDelta receives the raw JSON of each streamed tool-call delta (and its index).
+	onToolCallDelta func(index int64, raw string)
+	// onReasoningDelta receives incremental reasoning_content — the non-standard field
+	// DeepSeek-style reasoning models (Xiaomi MiMo) stream their reasoning in.
+	onReasoningDelta func(delta string)
+	// call, when set, is told about the first streamed output for time to first token.
+	call *genAICall
+}
+
+// streamChatCompletionCapturing is streamChatCompletion with the full hook set.
+// ChatCompletionAccumulator keeps only standard fields, so non-standard ones —
+// Gemini's extra_content.google.thought_signature, which Google requires echoed
+// back on the assistant tool-call turn, and MiMo's reasoning_content — are lost
+// unless captured here from the raw delta.
+func streamChatCompletionCapturing(
+	ctx context.Context,
+	client *openai.Client,
+	params openai.ChatCompletionNewParams,
+	hooks chatCompletionStreamHooks,
+) (*openai.ChatCompletion, error) {
 	// This helper always requests final usage because token accounting drives
 	// usage metering and telemetry. OpenAI-compatible APIs send complete usage
 	// only in the final empty chunk when explicitly requested. Providers that
@@ -46,14 +76,43 @@ func streamChatCompletion(
 	defer stream.Close()
 
 	acc := openai.ChatCompletionAccumulator{}
+	// The accumulator SUMS chunk.Usage across every chunk (see
+	// ChatCompletionAccumulator.accumulateDelta: `cc.Usage.X += chunk.Usage.X`).
+	// That is correct for OpenAI, which reports usage only in the final chunk, but
+	// wrong for providers whose OpenAI-compatible streaming repeats usage on every
+	// chunk. Gemini emits a full, cumulative usage block on each SSE chunk, so the
+	// summed total is inflated by roughly the chunk count (an 80k prompt reported as
+	// 300k once the response is long enough). Capture the usage from the last chunk
+	// that carries it and use that as the authoritative total instead of the sum.
+	var finalUsage openai.CompletionUsage
+	var sawUsage bool
 	for stream.Next() {
 		chunk := stream.Current()
 		acc.AddChunk(chunk)
+		if chunkCarriesUsage(chunk.Usage) {
+			finalUsage = chunk.Usage
+			sawUsage = true
+		}
 		if len(chunk.Choices) > 0 {
-			if d := chunk.Choices[0].Delta.Content; d != "" {
-				if onTextDelta != nil {
-					onTextDelta(d)
+			delta := chunk.Choices[0].Delta
+			if d := delta.Content; d != "" && hooks.onTextDelta != nil {
+				hooks.onTextDelta(d)
+			}
+			if hooks.onToolCallDelta != nil {
+				for _, tc := range delta.ToolCalls {
+					if raw := tc.RawJSON(); raw != "" {
+						hooks.onToolCallDelta(tc.Index, raw)
+					}
 				}
+			}
+			if hooks.onReasoningDelta != nil {
+				if d := gjson.Get(delta.RawJSON(), "reasoning_content").String(); d != "" {
+					hooks.onReasoningDelta(d)
+				}
+			}
+			if hooks.call != nil && !hooks.call.sawToken &&
+				(delta.Content != "" || gjson.Get(delta.RawJSON(), "reasoning_content").String() != "") {
+				hooks.call.firstToken()
 			}
 		}
 	}
@@ -63,7 +122,65 @@ func streamChatCompletion(
 	if acc.ChatCompletion.ID == "" {
 		return nil, fmt.Errorf("chat completion stream finished with no chunks")
 	}
+	if sawUsage {
+		acc.ChatCompletion.Usage = finalUsage
+	}
 	return &acc.ChatCompletion, nil
+}
+
+// chatCompletionsNew is the single non-streaming Chat Completions call for every
+// OpenAI-compatible provider (Gemini, DeepSeek, Mistral, Qwen, Xiaomi, local); it records the
+// call's duration and token usage under providerName (a telemetry.Dependency* name).
+func chatCompletionsNew(ctx context.Context, tel *telemetry.Telemetry, providerName string, client *openai.Client, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
+	call := startGenAICall(ctx, tel, providerName, string(params.Model), genAIOpChat)
+	resp, err := client.Chat.Completions.New(ctx, params)
+	call.endChatCompletion(resp, err)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// chatCompletionsStream is chatCompletionsNew for streaming calls: the duration covers the
+// whole stream, and the time to first token is recorded too.
+func chatCompletionsStream(ctx context.Context, tel *telemetry.Telemetry, providerName string, client *openai.Client, params openai.ChatCompletionNewParams, hooks chatCompletionStreamHooks) (*openai.ChatCompletion, error) {
+	call := startGenAICall(ctx, tel, providerName, string(params.Model), genAIOpChat)
+	hooks.call = call
+	resp, err := streamChatCompletionCapturing(ctx, client, params, hooks)
+	call.endChatCompletion(resp, err)
+	return resp, err
+}
+
+// ChatCompletionReasoning returns the non-standard reasoning_content from the first
+// choice of a non-streamed Chat Completions response ("" when absent). Streamed
+// responses lose it in the accumulator; capture those via onReasoningDelta instead.
+func ChatCompletionReasoning(resp *openai.ChatCompletion) string {
+	if resp == nil || len(resp.Choices) == 0 {
+		return ""
+	}
+	return gjson.Get(resp.Choices[0].Message.RawJSON(), "reasoning_content").String()
+}
+
+// chatCompletionFinishReason returns the first choice's finish_reason ("stop",
+// "length", "tool_calls", …), or "" when there is none.
+func chatCompletionFinishReason(resp *openai.ChatCompletion) string {
+	if resp == nil || len(resp.Choices) == 0 {
+		return ""
+	}
+	return resp.Choices[0].FinishReason
+}
+
+// chatCompletionTruncatedWithoutText reports whether resp was cut off at the length
+// limit before producing any reply text — the whole output cap went to reasoning or a
+// (necessarily partial) tool call. Such a response is unusable as-is.
+func chatCompletionTruncatedWithoutText(resp *openai.ChatCompletion) bool {
+	return chatCompletionFinishReason(resp) == "length" && ExtractChatCompletionText(resp) == ""
+}
+
+// chunkCarriesUsage reports whether a streamed chunk's usage block was populated
+// (as opposed to the zero value the SDK leaves on chunks that omit usage).
+func chunkCarriesUsage(u openai.CompletionUsage) bool {
+	return u.PromptTokens != 0 || u.CompletionTokens != 0 || u.TotalTokens != 0
 }
 
 // chatCompletionTokenUsage safely extracts prompt/completion token counts from a

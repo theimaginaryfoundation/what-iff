@@ -29,7 +29,7 @@ describe('ContextToolsTabComponent', () => {
             listTools: vi.fn().mockName("ToolService.listTools")
         };
         toolService.listTools.mockReturnValue(of([
-            { name: 'web_search', description: 'Search the web for current information.' },
+            { name: 'web_search', description: 'Search the web for current information.', guide: 'Ask for recent results only, or limit it to certain sites.' },
             { name: 'update_scratchpad', description: "Update this personality's working notes, which persist across conversations using the same personality." },
         ]));
         const mcpService = {
@@ -82,13 +82,26 @@ describe('ContextToolsTabComponent', () => {
     });
 
     it('renders available tools with descriptions returned by the tools API', () => {
-        expect(fixture.nativeElement.textContent).toContain('Available Tools');
-        expect(fixture.nativeElement.textContent).toContain('Tool Call History');
+        expect(fixture.nativeElement.textContent).toContain('Available tools');
+        expect(fixture.nativeElement.textContent).toContain('Tool call history');
         const labels = fixture.nativeElement.querySelectorAll('.tool-item');
         expect(labels.length).toBe(2);
         expect(fixture.nativeElement.textContent).toContain('Search the web for current information.');
+        expect(fixture.nativeElement.textContent).toContain('Web Search');
         expect(fixture.nativeElement.textContent).toContain("Update this personality's working notes, which persist across conversations using the same personality.");
         expect(fixture.nativeElement.textContent).not.toContain('Austin vs Seattle cost of living 2026');
+    });
+
+    it('shows what each tool can do as its tooltip', () => {
+        const [webSearch, scratchpad] = Array.from(fixture.nativeElement.querySelectorAll('.tool-item')) as HTMLElement[];
+        webSearch.dispatchEvent(new Event('mouseenter'));
+        const tooltip = document.body.querySelector(`#${webSearch.getAttribute('aria-describedby')}`);
+        expect(tooltip?.textContent).toBe('Ask for recent results only, or limit it to certain sites.');
+        webSearch.dispatchEvent(new Event('mouseleave'));
+
+        // A tool without a guide gets no tooltip.
+        scratchpad.dispatchEvent(new Event('mouseenter'));
+        expect(scratchpad.hasAttribute('aria-describedby')).toBe(false);
     });
 
     it('does not reload the tools list when only disabled_tools changes', async () => {

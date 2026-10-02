@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -37,7 +39,7 @@ func (a *Agent) handleAgentLoop(
 			return result, allToolCalls, allGeneratedAttachments, nil
 		}
 
-		toolResults, modelToolCalls, generatedAttachments := a.executeToolUses(ctx, chatCtx, toolUses)
+		toolResults, modelToolCalls, generatedAttachments := a.executeToolUses(ctx, chatCtx, round, toolUses)
 		allToolCalls = append(allToolCalls, modelToolCalls...)
 		allGeneratedAttachments = append(allGeneratedAttachments, generatedAttachments...)
 		adapter.AppendToolResults(toolResults)
@@ -73,11 +75,19 @@ func (a *Agent) appendPostToolLoopGeneratedAttachments(ctx context.Context, chat
 
 // executeToolUses executes all tool uses and returns provider-agnostic results
 // plus the model-level ToolCall records for DB persistence.
-func (a *Agent) executeToolUses(ctx context.Context, chatCtx *chatContext, uses []provider.ToolUse) ([]provider.ToolResult, []*models.ToolCall, []*models.FileAttachment) {
+func (a *Agent) executeToolUses(ctx context.Context, chatCtx *chatContext, round int, uses []provider.ToolUse) ([]provider.ToolResult, []*models.ToolCall, []*models.FileAttachment) {
+	// progress may be nil (no job to report to); jobToolProgress methods are nil-receiver safe,
+	// so the calls below need no guard.
+	var progress *jobToolProgress
+	if chatCtx != nil {
+		progress = chatCtx.toolProgress
+	}
 	results := make([]provider.ToolResult, len(uses))
 	generatedAttachments := make([][]*models.FileAttachment, len(uses))
 	for i, use := range uses {
+		progress.Started(round, use)
 		results[i], generatedAttachments[i] = a.executeToolUseWithRecovery(ctx, chatCtx, use)
+		progress.Finished(results[i])
 		a.notifyToolUseGeneratedAttachments(chatCtx, use, generatedAttachments[i])
 		results[i].Images = toolResultImagesFromAttachments(generatedAttachments[i])
 	}
@@ -117,13 +127,21 @@ func (a *Agent) notifyToolUseGeneratedAttachments(chatCtx *chatContext, use prov
 	onToolUseGeneratedAttachmentsForChat(a, chatCtx.chat, use, attachments)
 }
 
-// executeToolUseWithRecovery executes a single tool use with panic recovery.
+// errToolPanicked stands in for a tool call that panicked, for its error.type label.
+var errToolPanicked = errors.New("tool panicked")
+
+// executeToolUseWithRecovery executes a single tool use with panic recovery, timing it on
+// telemetry.ToolDuration under a bounded tool label (see toolMetricName).
 func (a *Agent) executeToolUseWithRecovery(ctx context.Context, chatCtx *chatContext, use provider.ToolUse) (result provider.ToolResult, attachments []*models.FileAttachment) {
 	result.ID = use.ID
+	done := a.metrics().Time(ctx, telemetry.ToolDuration, telemetry.AttrTool.String(toolMetricName(use.Name)))
+	var toolErr error
+	defer func() { done(toolErr) }()
 
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
+				toolErr = errToolPanicked
 				result.IsErr = true
 				// Expose only a stable, opaque message to the model — full panic
 				// detail stays in the log to avoid leaking internal stack info.
@@ -137,6 +155,7 @@ func (a *Agent) executeToolUseWithRecovery(ctx context.Context, chatCtx *chatCon
 		}()
 
 		output, generatedAttachments, err := a.dispatchToolUse(ctx, chatCtx, use)
+		toolErr = err
 		if err != nil {
 			result.IsErr = true
 			result.Output = err.Error()

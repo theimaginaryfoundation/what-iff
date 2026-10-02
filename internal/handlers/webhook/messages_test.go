@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -20,9 +21,21 @@ import (
 
 type mockProvider struct {
 	createChatMessageFn func(ctx context.Context, userID uuid.UUID, chatMessage models.ChatMessage) (*models.ChatMessage, error)
+	createTokenFn       func(ctx context.Context, userID uuid.UUID, name string, scopes []models.WebhookScope) (*models.WebhookToken, string, error)
+
+	// Reads (see reads_test.go). Each records what the handler asked for.
+	listChatsFn          func(ctx context.Context, userID uuid.UUID, page, pageSize int, filters models.ChatFilters) (*models.PaginatedResponse, error)
+	listPersonalitiesFn  func(ctx context.Context, userID uuid.UUID, page, pageSize int, filters models.PersonalityFilters) (*models.PaginatedResponse, error)
+	listMessagesFn       func(ctx context.Context, userID, chatID uuid.UUID, page, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
+	listMessagesBeforeFn func(ctx context.Context, userID, chatID uuid.UUID, beforeSentAt time.Time, beforeID uuid.UUID, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
+	getMessageFn         func(ctx context.Context, userID, messageID uuid.UUID) (*models.ChatMessage, error)
+	getJobFn             func(ctx context.Context, userID, jobID uuid.UUID) (*models.Job, error)
 }
 
-func (m *mockProvider) CreateWebhookToken(ctx context.Context, userID uuid.UUID, name string) (*models.WebhookToken, string, error) {
+func (m *mockProvider) CreateWebhookToken(ctx context.Context, userID uuid.UUID, name string, scopes []models.WebhookScope) (*models.WebhookToken, string, error) {
+	if m.createTokenFn != nil {
+		return m.createTokenFn(ctx, userID, name, scopes)
+	}
 	return nil, "", errors.New("not implemented")
 }
 
@@ -157,31 +170,50 @@ func TestSendChatMessage_AssistantMode(t *testing.T) {
 func TestSendChatMessage_BackgroundMode(t *testing.T) {
 	t.Parallel()
 
-	chatID := uuid.New()
-	userID := uuid.New()
-	agent := &mockAgent{
-		handleBackgroundAsyncFn: func(ctx context.Context, gotChatID uuid.UUID, prompt string, modelOverrideID *uuid.UUID, personalityOverrideID *uuid.UUID) (*models.ChatMessageResponse, error) {
-			require.Equal(t, chatID, gotChatID)
-			require.Equal(t, "run now", prompt)
-			jobID := uuid.New()
-			return &models.ChatMessageResponse{
-				ID:    jobID,
-				JobID: jobID.String(),
-				Type:  "agent_job_run",
-			}, nil
-		},
+	modelID := uuid.New()
+	tests := []struct {
+		name    string
+		modelID *uuid.UUID
+	}{
+		{name: "without model override"},
+		{name: "with model override", modelID: &modelID},
 	}
-	h := NewHandler(&mockProvider{}, agent, zap.NewNop())
 
-	req := newWebhookRequest(t, map[string]any{
-		"mode":    "background",
-		"message": "run now",
-	}, chatID)
-	req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, userID))
-	rec := httptest.NewRecorder()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chatID := uuid.New()
+			userID := uuid.New()
+			agent := &mockAgent{
+				handleBackgroundAsyncFn: func(ctx context.Context, gotChatID uuid.UUID, prompt string, modelOverrideID *uuid.UUID, personalityOverrideID *uuid.UUID) (*models.ChatMessageResponse, error) {
+					require.Equal(t, chatID, gotChatID)
+					require.Equal(t, "run now", prompt)
+					require.Equal(t, tt.modelID, modelOverrideID)
+					require.Nil(t, personalityOverrideID)
+					jobID := uuid.New()
+					return &models.ChatMessageResponse{
+						ID:    jobID,
+						JobID: jobID.String(),
+						Type:  "agent_job_run",
+					}, nil
+				},
+			}
+			h := NewHandler(&mockProvider{}, agent, zap.NewNop())
 
-	h.SendChatMessage(rec, req)
-	require.Equal(t, http.StatusAccepted, rec.Code)
+			body := map[string]any{
+				"mode":    "background",
+				"message": "run now",
+			}
+			if tt.modelID != nil {
+				body["model_id"] = tt.modelID
+			}
+			req := newWebhookRequest(t, body, chatID)
+			req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, userID))
+			rec := httptest.NewRecorder()
+
+			h.SendChatMessage(rec, req)
+			require.Equal(t, http.StatusAccepted, rec.Code)
+		})
+	}
 }
 
 func TestSendChatMessage_CrossUserChatNotFound(t *testing.T) {

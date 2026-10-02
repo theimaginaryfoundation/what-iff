@@ -54,12 +54,7 @@ func NewLocalProvider(baseURL string, tel *telemetry.Telemetry, httpClient *http
 }
 
 func (p *LocalProvider) Call(ctx context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
-	resp, err := p.client.Chat.Completions.New(ctx, params)
-	if err != nil {
-		return nil, err
-	}
-	recordChatCompletionUsage(ctx, p.tel, resp)
-	return resp, nil
+	return chatCompletionsNew(ctx, p.tel, telemetry.DependencyLocalLLM, p.client, params)
 }
 
 func NewLocalAdapter(provider *LocalProvider, params openai.ChatCompletionNewParams, functionTools []openai.ChatCompletionToolUnionParam, disabledTools map[string]bool) *LocalAdapter {
@@ -84,7 +79,7 @@ func (a *LocalAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse, 
 	if len(toolUses) == 0 {
 		return a.toGenerateResponse(resp), nil, nil
 	}
-	a.params.Messages = append(a.params.Messages, resp.Choices[0].Message.ToParam())
+	a.params.Messages = append(a.params.Messages, chatCompletionAssistantReplay(resp.Choices[0].Message, ""))
 	return nil, toolUses, nil
 }
 

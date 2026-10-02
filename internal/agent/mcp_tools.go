@@ -2,14 +2,14 @@ package agent
 
 import (
 	"context"
-	"strconv"
 	"strings"
+	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -18,7 +18,7 @@ import (
 
 // getSubagentMCPTools returns MCP tool params for ritual-only contexts (e.g. run_subagent).
 // It loads ritual MCP servers only — no chat-level MCP servers are included.
-func (a *Agent) getSubagentMCPTools(ctx context.Context, userID uuid.UUID, ritualIDs []uuid.UUID, model string) []responses.ToolUnionParam {
+func (a *Agent) getSubagentMCPTools(ctx context.Context, userID uuid.UUID, ritualIDs []uuid.UUID, _ string) []responses.ToolUnionParam {
 	if len(ritualIDs) == 0 {
 		return nil
 	}
@@ -29,56 +29,50 @@ func (a *Agent) getSubagentMCPTools(ctx context.Context, userID uuid.UUID, ritua
 			zap.Error(err))
 		return nil
 	}
-	enableDeferredLoading := modelSupportsMCPDeferLoading(model)
-	tools := buildMCPToolsFromServers(servers, enableDeferredLoading)
-	return appendToolSearchIfNeeded(tools, enableDeferredLoading)
+	specs := a.discoverMCPFunctionToolSpecs(ctx, userID, servers, nil)
+	return agenttools.OpenAIFunctionTools(specs)
 }
 
-// getSubagentClaudeMCPConfig returns a ClaudeMCPConfig for ritual-only contexts.
-func (a *Agent) getSubagentClaudeMCPConfig(ctx context.Context, userID uuid.UUID, ritualIDs []uuid.UUID) *provider.ClaudeMCPConfig {
+func (a *Agent) getSubagentMCPFunctionToolSpecs(ctx context.Context, userID uuid.UUID, ritualIDs []uuid.UUID) ([]agenttools.FunctionToolSpec, []*models.MCPServer) {
 	if len(ritualIDs) == 0 {
-		return nil
+		return nil, nil
 	}
 	servers, err := a.ds.ListRitualMCPServers(ctx, userID, ritualIDs)
 	if err != nil {
-		a.logger.Warn("failed to load ritual mcp servers for claude subagent",
+		a.logger.Warn("failed to load ritual mcp servers for subagent",
 			zap.String("user_id", userID.String()),
 			zap.Error(err))
-		return nil
+		return nil, nil
 	}
-	return buildClaudeMCPConfigFromServers(servers)
+	return a.discoverMCPFunctionToolSpecs(ctx, userID, servers, nil), servers
 }
 
-func (a *Agent) getChatMCPTools(ctx context.Context, userID, chatID uuid.UUID, ritualIDs []uuid.UUID, model string) []responses.ToolUnionParam {
+// prepareTurnMCPToolSpecs returns all discoverable MCP tool definitions for this
+// conversation turn. Execution eligibility is enforced separately in
+// dispatchMCPToolUse via chatCtx.loadedMCPTools, so load_mcp_tools/unload_mcp_tools
+// changes are effective on the next agent-loop iteration without waiting for a new turn.
+func (a *Agent) prepareTurnMCPToolSpecs(ctx context.Context, chatCtx *chatContext, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) []agenttools.FunctionToolSpec {
 	servers := a.getChatMCPServers(ctx, userID, chatID, ritualIDs)
-	enableDeferredLoading := modelSupportsMCPDeferLoading(model)
-	tools := buildMCPToolsFromServers(servers, enableDeferredLoading)
-	return appendToolSearchIfNeeded(tools, enableDeferredLoading)
-}
-
-func (a *Agent) getChatClaudeMCPConfig(ctx context.Context, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) *provider.ClaudeMCPConfig {
-	servers := a.getChatMCPServers(ctx, userID, chatID, ritualIDs)
-	return buildClaudeMCPConfigFromServers(servers)
-}
-
-func claudeFunctionTools(specs []agenttools.FunctionToolSpec) []anthropic.ToolUnionParam {
-	out := make([]anthropic.ToolUnionParam, 0, len(specs))
-	for _, spec := range specs {
-		out = append(out, provider.ClaudeFunctionTool(spec.Name, spec.Description, spec.Properties, spec.Required, agenttools.ClaudeToolStrict(spec)))
+	loadedByServer := map[uuid.UUID][]string{}
+	if a.ds != nil {
+		loaded, err := a.ds.ListChatMCPLoadedTools(ctx, userID, chatID)
+		if err != nil {
+			a.logger.Warn("failed to load chat mcp loaded tool state",
+				zap.String("user_id", userID.String()),
+				zap.String("chat_id", chatID.String()),
+				zap.Error(err))
+		} else if loaded != nil {
+			loadedByServer = loaded
+		}
 	}
-	return out
-}
-
-func openAIChatCompletionFunctionTools(specs []agenttools.FunctionToolSpec) []openai.ChatCompletionToolUnionParam {
-	out := make([]openai.ChatCompletionToolUnionParam, 0, len(specs))
-	for _, spec := range specs {
-		out = append(out, provider.OpenAIChatCompletionFunctionTool(spec.Name, spec.Description, spec.Properties, spec.Required))
+	if chatCtx != nil {
+		chatCtx.setMCPServerCache(servers, loadedByServer)
 	}
-	return out
-}
-
-func geminiFunctionTools(specs []agenttools.FunctionToolSpec) []openai.ChatCompletionToolUnionParam {
-	return openAIChatCompletionFunctionTools(specs)
+	// Register all discoverable MCP tool definitions for the turn so that
+	// load_mcp_tools/unload_mcp_tools changes take effect on the next loop round.
+	// Execution gating still happens in dispatchMCPToolUse via loadedMCPTools.
+	specs := a.discoverMCPFunctionToolSpecs(ctx, userID, servers, sessionStateFromChatContext(chatCtx))
+	return specs
 }
 
 func (a *Agent) getChatMCPServers(ctx context.Context, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) []*models.MCPServer {
@@ -121,130 +115,155 @@ func (a *Agent) getChatMCPServers(ctx context.Context, userID, chatID uuid.UUID,
 	return servers
 }
 
-func buildMCPToolsFromServers(servers []*models.MCPServer, enableDeferredLoading bool) []responses.ToolUnionParam {
-	tools := make([]responses.ToolUnionParam, 0, len(servers))
-	for _, server := range servers {
-		if server == nil {
-			continue
-		}
-		if strings.TrimSpace(server.ErrorMessage) != "" {
-			// Skip unhealthy integrations so agent calls don't use known-bad credentials.
-			continue
-		}
-
-		mcpTool := &responses.ToolMcpParam{
-			ServerLabel:       server.Name,
-			ServerURL:         param.NewOpt(server.ServerURL),
-			ServerDescription: param.NewOpt(server.Description),
-			Type:              "mcp",
-			RequireApproval: responses.ToolMcpRequireApprovalUnionParam{
-				OfMcpToolApprovalSetting: param.NewOpt("never"),
-			},
-		}
-
-		if token := strings.TrimSpace(server.AuthToken); token != "" {
-			mcpTool.Headers = map[string]string{
-				"Authorization": token,
-			}
-		}
-
-		if enableDeferredLoading {
-			mcpTool.DeferLoading = param.NewOpt(true)
-		}
-
-		tools = append(tools, responses.ToolUnionParam{OfMcp: mcpTool})
-	}
-
-	return tools
-}
-
-func appendToolSearchIfNeeded(tools []responses.ToolUnionParam, enableDeferredLoading bool) []responses.ToolUnionParam {
-	// OpenAI requires tool_search to be present whenever deferred loading is enabled.
-	if !enableDeferredLoading || len(tools) == 0 {
-		return tools
-	}
-
-	toolSearch := responses.ToolUnionParam{
-		OfToolSearch: &responses.ToolSearchToolParam{
-			Execution: responses.ToolSearchToolExecutionServer,
-			Type:      "tool_search",
-		},
-	}
-	return append(tools, toolSearch)
-}
-
-func buildClaudeMCPConfigFromServers(servers []*models.MCPServer) *provider.ClaudeMCPConfig {
-	cfg := &provider.ClaudeMCPConfig{
-		Servers:  make([]anthropic.BetaRequestMCPServerURLDefinitionParam, 0, len(servers)),
-		Toolsets: make([]anthropic.BetaToolUnionParam, 0, len(servers)),
-	}
-	for _, server := range servers {
-		if server == nil {
-			continue
-		}
-		if strings.TrimSpace(server.ErrorMessage) != "" {
-			continue
-		}
-		serverName := "mcp-" + server.ID.String()
-		def := anthropic.BetaRequestMCPServerURLDefinitionParam{
-			Name: serverName,
-			URL:  server.ServerURL,
-		}
-		if token := strings.TrimSpace(server.AuthToken); token != "" {
-			def.AuthorizationToken = anthropic.String(token)
-		}
-		cfg.Servers = append(cfg.Servers, def)
-		cfg.Toolsets = append(cfg.Toolsets, anthropic.BetaToolUnionParamOfMCPToolset(serverName))
-	}
-	if len(cfg.Servers) == 0 {
+func (a *Agent) discoverMCPFunctionToolSpecs(ctx context.Context, userID uuid.UUID, servers []*models.MCPServer, sessions mcpclient.SessionState) []agenttools.FunctionToolSpec {
+	if a.mcpClient == nil || len(servers) == 0 {
 		return nil
 	}
-	return cfg
-}
-
-func modelSupportsMCPDeferLoading(model string) bool {
-	m := strings.ToLower(strings.TrimSpace(model))
-	if !strings.HasPrefix(m, "gpt-") {
-		return false
+	out, discoverErr := a.mcpClient.DiscoverToolsWithSessionState(ctx, userID, servers, sessions)
+	if discoverErr != nil {
+		a.logger.Warn("mcp tool discovery encountered only connector failures",
+			zap.String("user_id", userID.String()),
+			zap.Int("connector_count", len(servers)),
+			zap.Error(discoverErr))
 	}
-
-	version := strings.TrimPrefix(m, "gpt-")
-	majorPart := version
-	if idx := strings.Index(version, "."); idx >= 0 {
-		majorPart = version[:idx]
-	}
-	majorPart = trimNumericPrefix(majorPart)
-	major, err := strconv.Atoi(majorPart)
-	if err != nil {
-		return false
-	}
-	if major > 5 {
-		return true
-	}
-	if major < 5 {
-		return false
-	}
-
-	// For major version 5, require minor version >= 4.
-	if !strings.Contains(version, ".") {
-		return false
-	}
-	minorPart := strings.SplitN(version, ".", 2)[1]
-	minorPart = trimNumericPrefix(minorPart)
-	minor, err := strconv.Atoi(minorPart)
-	if err != nil {
-		return false
-	}
-	return minor >= 4
-}
-
-func trimNumericPrefix(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			break
+	now := time.Now().UTC()
+	specs := make([]agenttools.FunctionToolSpec, 0, len(out.Tools))
+	healthy := map[uuid.UUID]bool{}
+	countByConnector := map[uuid.UUID]int{}
+	for _, t := range out.Tools {
+		props := t.Properties
+		if props == nil {
+			props = map[string]any{}
 		}
-		b.WriteRune(r)
+		specs = append(specs, agenttools.FunctionToolSpec{
+			Name:        t.FullName,
+			Description: t.Description,
+			Properties:  props,
+			Required:    t.Required,
+		})
+		healthy[t.ConnectorID] = true
+		countByConnector[t.ConnectorID]++
 	}
-	return b.String()
+
+	for _, s := range servers {
+		if s == nil || s.ID == uuid.Nil {
+			continue
+		}
+		if a.ds == nil {
+			continue
+		}
+		if healthy[s.ID] {
+			_ = a.ds.UpdateMCPServerRuntimeState(ctx, userID, s.ID, models.MCPServerStatusActive, "", countByConnector[s.ID], &now, &now)
+			continue
+		}
+		if errMsg := strings.TrimSpace(out.Errors[s.ID]); errMsg != "" {
+			_ = a.ds.UpdateMCPServerRuntimeState(ctx, userID, s.ID, discoveryFailureStatus(s, errMsg), errMsg, 0, &now, nil)
+			continue
+		}
+		_ = a.ds.UpdateMCPServerRuntimeState(ctx, userID, s.ID, s.Status, s.StatusReason, 0, &now, s.LastHealthyAt)
+	}
+
+	return specs
+}
+
+func sessionStateFromChatContext(chatCtx *chatContext) mcpclient.SessionState {
+	if chatCtx == nil {
+		return nil
+	}
+	if chatCtx.mcpSessions == nil {
+		chatCtx.mcpSessions = make(map[string]string)
+	}
+	return mcpclient.SessionState(chatCtx.mcpSessions)
+}
+
+func claudeFunctionTools(specs []agenttools.FunctionToolSpec) []anthropic.ToolUnionParam {
+	out := make([]anthropic.ToolUnionParam, 0, len(specs))
+	for _, spec := range specs {
+		out = append(out, provider.ClaudeFunctionTool(spec.Name, spec.Description, spec.Properties, spec.Required, agenttools.ClaudeToolStrict(spec)))
+	}
+	return out
+}
+
+func openAIChatCompletionFunctionTools(specs []agenttools.FunctionToolSpec) []openai.ChatCompletionToolUnionParam {
+	out := make([]openai.ChatCompletionToolUnionParam, 0, len(specs))
+	for _, spec := range specs {
+		out = append(out, provider.OpenAIChatCompletionFunctionTool(spec.Name, spec.Description, spec.Properties, spec.Required))
+	}
+	return out
+}
+
+func geminiFunctionTools(specs []agenttools.FunctionToolSpec) []openai.ChatCompletionToolUnionParam {
+	return openAIChatCompletionFunctionTools(specs)
+}
+
+func filterMCPToolSpecsByLoaded(specs []agenttools.FunctionToolSpec, loadedByServer map[uuid.UUID][]string) []agenttools.FunctionToolSpec {
+	// Intentional behavior: MCP tools are opt-in per chat.
+	// If no loaded state exists yet, expose zero MCP tools until load_mcp_tools is called.
+	if len(specs) == 0 || len(loadedByServer) == 0 {
+		return nil
+	}
+	loadedSet := make(map[string]struct{}, len(specs))
+	for _, names := range loadedByServer {
+		for _, name := range names {
+			n := strings.TrimSpace(name)
+			if n == "" {
+				continue
+			}
+			loadedSet[n] = struct{}{}
+		}
+	}
+	if len(loadedSet) == 0 {
+		return nil
+	}
+	out := make([]agenttools.FunctionToolSpec, 0, len(specs))
+	for _, spec := range specs {
+		if _, ok := loadedSet[spec.Name]; ok {
+			out = append(out, spec)
+		}
+	}
+	return out
+}
+
+func discoveryFailureStatus(server *models.MCPServer, errMsg string) string {
+	current := strings.TrimSpace(server.Status)
+	if current == "" {
+		current = models.MCPServerStatusActive
+	}
+	// Discovery reports "connector status ... not eligible" for disabled/invalid
+	// connectors; preserve their state instead of escalating to another status.
+	if !statusEligibleForDiscovery(current) {
+		return current
+	}
+	if isPermanentDiscoveryError(errMsg) {
+		return models.MCPServerStatusInvalid
+	}
+	return models.MCPServerStatusRefreshError
+}
+
+func statusEligibleForDiscovery(status string) bool {
+	switch strings.TrimSpace(status) {
+	case models.MCPServerStatusActive, models.MCPServerStatusExpiring, models.MCPServerStatusRefreshError:
+		return true
+	default:
+		return false
+	}
+}
+
+func isPermanentDiscoveryError(errMsg string) bool {
+	msg := strings.ToLower(strings.TrimSpace(errMsg))
+	switch {
+	case strings.Contains(msg, "returned status 400"),
+		strings.Contains(msg, "returned status 401"),
+		strings.Contains(msg, "returned status 403"),
+		strings.Contains(msg, "returned status 404"),
+		strings.Contains(msg, "oauth connector is not authenticated"),
+		strings.Contains(msg, "oauth access token is expired"),
+		strings.Contains(msg, "server_url host could not be resolved"),
+		strings.Contains(msg, "invalid mcp"),
+		strings.Contains(msg, "invalid oauth"),
+		strings.Contains(msg, "connector status"):
+		return true
+	default:
+		return false
+	}
 }

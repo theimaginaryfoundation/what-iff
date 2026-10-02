@@ -16,6 +16,8 @@ import {
   sortedProviders,
 } from '../../helpers/model-picker.helpers';
 import { ModelFavoritesService } from '../../services/model-favorites.service';
+import { EyeOffIconComponent } from '../../../../shared/ui/icons/icons';
+import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 
 type VendorStep = 'vendor' | 'model';
 type TierStep = 'tier' | 'model';
@@ -26,7 +28,7 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
 @Component({
   selector: 'app-model-picker',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, EyeOffIconComponent, TooltipDirective],
   template: `
     <div class="model-picker">
       <button
@@ -36,9 +38,18 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
         aria-controls="model-picker-options"
         [attr.aria-expanded]="open()"
         [disabled]="disabled()"
+        [uiTooltip]="triggerTooltip()"
+        [truncatedOnly]="!lacksVision(selectedModel())"
+        [truncationTarget]="triggerName"
         (click)="toggle()"
       >
-        <span>{{ selectedModel()?.display_name || 'Model' }}</span>
+        <span #triggerName class="model-picker__trigger-name">{{ selectedModel()?.display_name || 'Model' }}</span>
+        @if (lacksVision(selectedModel())) {
+          <!-- The trigger's own tooltip covers this icon, so it has none of its own. -->
+          <span class="model-picker__no-vision" role="img" [attr.aria-label]="noVisionLabel">
+            <ui-eye-off-icon [size]="12" />
+          </span>
+        }
       </button>
       @if (open()) {
         <div
@@ -154,9 +165,14 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
           [attr.aria-selected]="model.id === selectedId()"
           (click)="choose(model)"
         >
-          <span class="model-picker__option-name">{{ model.display_name }}</span>
+          <span class="model-picker__option-name" [uiTooltip]="model.display_name" truncatedOnly>{{ model.display_name }}</span>
+          @if (lacksVision(model)) {
+            <span class="model-picker__no-vision" role="img" [attr.aria-label]="noVisionLabel" [uiTooltip]="noVisionLabel">
+              <ui-eye-off-icon [size]="14" />
+            </span>
+          }
           @if (tierLabel(model); as tier) {
-            <span class="model-picker__tier">{{ tier }}</span>
+            <span class="model-picker__tier" [uiTooltip]="tierTooltip(model)">{{ tier }}</span>
           }
         </button>
         <button
@@ -165,6 +181,8 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
           [class.model-picker__star--on]="isFavorite(model)"
           [attr.aria-pressed]="isFavorite(model)"
           [attr.aria-label]="(isFavorite(model) ? 'Remove ' : 'Add ') + model.display_name + (isFavorite(model) ? ' from favorites' : ' to favorites')"
+          [uiTooltip]="isFavorite(model) ? 'Remove from favorites' : 'Add to favorites'"
+          placement="left"
           (click)="toggleFavorite(model, $event)"
         >{{ isFavorite(model) ? '★' : '☆' }}</button>
       </div>
@@ -191,6 +209,7 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
       cursor: pointer;
       display: inline-flex;
       font-size: 0.6875rem;
+      gap: 0.25rem;
       height: 2.25rem;
       line-height: 1;
       max-width: 8rem;
@@ -198,7 +217,7 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
       white-space: nowrap;
     }
 
-    .model-picker__trigger span {
+    .model-picker__trigger-name {
       overflow: hidden;
       text-overflow: ellipsis;
     }
@@ -383,7 +402,14 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
       white-space: nowrap;
     }
 
+    .model-picker__no-vision {
+      color: var(--color-text-muted);
+      display: inline-flex;
+      flex-shrink: 0;
+    }
+
     .model-picker__tier {
+      margin-left: auto;
       color: var(--color-text-primary);
       flex-shrink: 0;
       font-size: 0.625rem;
@@ -484,9 +510,27 @@ export class ModelPickerComponent {
     }
   }
 
+  readonly noVisionLabel = "Can't see images";
+
+  lacksVision(model: Model | undefined): boolean {
+    return model?.vision_support === false;
+  }
+
   tierLabel(model: Model): string {
     return modelTierCompactLabel(model.subscription_tier);
   }
+
+  /** Tiers set which plans include a model (internal/models/model.go): low = most plans, ultra = none. */
+  tierTooltip(model: Model): string {
+    const rank = modelTierRank(model.subscription_tier);
+    return rank == null ? '' : `Tier ${rank} of 4: higher tiers are included in fewer plans`;
+  }
+
+  readonly triggerTooltip = computed(() => {
+    const model = this.selectedModel();
+    const name = model?.display_name ?? '';
+    return this.lacksVision(model) ? `${name}: can't see images` : name;
+  });
 
   providerLabel(provider: string): string {
     return formatProviderLabel(provider);

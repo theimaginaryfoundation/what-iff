@@ -7,6 +7,11 @@ export interface Model {
   provider?: string;
   tool_support: boolean;
   /**
+   * Whether the model accepts image input. Optional for rollout safety; absence
+   * is treated as vision-capable so no icon shows until the backend says otherwise.
+   */
+  vision_support?: boolean;
+  /**
    * Credits consumed per billing increment (≈ 15k input tokens for chat).
    * Optional so older backend responses remain safe during a rollout.
    * The backend schema has a non-zero default, so absence means "not yet returned".

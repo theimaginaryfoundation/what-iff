@@ -137,8 +137,11 @@ e2e/
   api-tests/  # browserless suite, straight against the API — see below
   docs/
     what-runs-where.md # which config runs what, against which backend, and why
+  design-review/  # before/after HTML report of the screens a branch changes — see below
   scripts/
     visual-docker.sh   # runs tests/visual inside the Playwright Docker image
+    check-visual-coverage.mjs # every visual spec must name a functional spec
+    lib/playwright-test-analysis.mjs # AST: does a spec declare a runnable test?
     merge-coverage.mjs # E2E_COVERAGE: raw V8 from every shard -> one lcov
     check-coverage.mjs # acceptance checks on that merged lcov
   playwright.config.base.ts   # shared settings + the three browser projects
@@ -598,13 +601,96 @@ npx playwright install chromium webkit
 
 ## Visual regression
 
-`tests/visual/` covers the app's few genuinely stable, deterministic screens
-— login, register, the empty personalities list, a manually-created
-personality's detail page, the Profile & Settings modal, and the chat
-composer before any message is sent. It deliberately does **not** cover
-anything downstream of an assistant reply: the local stack normally runs
-`LLM_BACKEND=local`, and even the mock backend's timing/content isn't the
-kind of thing a pixel baseline should pin. Every visual spec is tagged
+`tests/visual/` covers the app's genuinely stable, deterministic screens —
+login, register, the empty personalities list, a manually-created
+personality's detail page, the Profile & Settings modal, the chat composer
+before any message is sent, the emoji-shortcode autocomplete popup, the empty
+gallery, the integrations connectors tab, one memory card, and one
+personality prompt-change card.
+
+### A screenshot may not be the only coverage of an area
+
+Every file in `tests/visual/` must name the functional spec that covers the
+same area, in a machine-readable header:
+
+```ts
+/**
+ * @functional-coverage tests/functional/chat/emoji-shortcodes.spec.ts
+ */
+```
+
+Paths are relative to `e2e/` and may be comma-separated.
+
+`npm run e2e:check-visual-coverage` enforces it, and runs in
+`frontend-pr-validation`. Precisely what it checks:
+
+1. a declaration exists;
+2. each path resolves to a real, regular `.spec.ts` file — no directories,
+   no symlinks;
+3. each resolved path is genuinely *inside* `tests/functional/` or
+   `tests/journeys/`, compared after normalisation so `../` and lookalike
+   directory names cannot escape;
+4. each declared file declares at least one test that is not disabled in
+   every environment — determined by parsing it, not by matching text.
+
+Point 4 is why `scripts/lib/playwright-test-analysis.mjs` exists and has its
+own `node --test` fixtures, which the npm script runs first. Disabling in
+Playwright is inherited and positional, so it is structural, and a regex
+cannot see it: the first version of this gate let a `test.describe.skip`
+suite through, and let a blanket-skipped test pass whenever it sat inside a
+`describe` (the pattern matching `test(` also matched `test.describe(`, so
+the count came out wrong). Every one of those bypasses is now a fixture.
+
+It exits non-zero if `tests/visual/` holds no specs at all. That is a guard
+against the check silently passing because it found nothing — a
+path-resolution bug would otherwise look identical to a clean run — so an
+intentionally empty visual suite would need this relaxed rather than worked
+around.
+
+Two things it deliberately does **not** check, and should not be described as
+checking:
+
+- whether the named spec covers the *right* behaviour. That is a review
+  question. The value of the rule is that an author must name something and a
+  reviewer must look at what was named.
+- whether the named spec actually *ran* in a given CI job. Config `grep`
+  filters and project selection decide that, and only a real run knows.
+
+The reason is that a `toHaveScreenshot()` baseline answers exactly one
+question — does this still look the way it looked — and passes happily
+against a screen that renders identically while doing nothing. A baseline
+standing on an area with no functional spec behind it is worse than no
+coverage, because the green row reads as though the feature is tested.
+
+This is also why an unconditional `test.skip(true, ...)` fails the check
+rather than merely looking untidy. That is how the rule was broken the first
+time: the Context X-ray's functional test was skipped in *every* environment
+because it was flaky in *one*, which left its visual spec as the only thing
+still running against that screen. The fix is a tag (`@mock-only`) that
+narrows where the test runs, not a skip that removes it everywhere.
+
+If the area you want a baseline for has no functional spec, write the
+functional spec first.
+
+Full-page baselines are only taken where the *whole* screen is stable. Where
+the surrounding page carries per-run counts or timestamps but the component
+does not, the spec screenshots the element instead — see
+`memories.visual.spec.ts` (the list header counts vary, the card does not)
+and `compaction-log.visual.spec.ts`.
+
+Two specs are `@visual` but take no screenshot at all:
+`compaction-log.visual.spec.ts`'s collapsed-history check and
+`context-xray.visual.spec.ts`. Both assert *geometry* — bounding-box
+relationships — because the screens they guard are laid out deterministically
+while every number on them comes from a live turn. That is the intended
+pattern for "the layout has a contract but the content doesn't"; it is not a
+lesser form of a baseline, and it should be preferred over masking a
+screenshot down to nothing.
+
+The suite deliberately does **not** take pixel baselines downstream of an
+assistant reply: the local stack normally runs `LLM_BACKEND=local`, and even
+the mock backend's timing/content isn't the kind of thing a pixel baseline
+should pin. Every visual spec is tagged
 `{ tag: ['@visual', '@mock-only'] }`, uses the shared `testUser`/`authenticatedPage`
 fixtures, and drives the page exclusively through `poms/` — grow a POM
 locator rather than reaching into a spec with a raw selector.
@@ -620,6 +706,34 @@ with fixed test data — see the comments in `chat.visual.spec.ts` and
 `maxDiffPixelRatio` for a masked region whose _size_ (not content) shifts by
 a few pixels depending on async timing — a last resort after masking, not a
 substitute for it.
+
+### Reviewing a change, rather than guarding against one
+
+The suite above answers "did anything change by accident?". It cannot answer
+"what did we change on purpose, and does it look right?" — and for a design
+change the two come apart completely.
+
+The workflow is: edit the screen, regenerate the baseline, commit both. From
+that commit on, `toHaveScreenshot()` compares the new render against the new
+baseline and passes. The visual report is green and empty; the only surviving
+record of the previous design is a PNG blob in git history that no review tool
+renders. A reviewer is left approving a screen change from a Tailwind class
+diff.
+
+`e2e/design-review/` closes that gap. It reads the baseline at the merge base
+as the "before" and the baseline on the branch as the "after", and writes one
+self-contained HTML file with both, a slider/onion/pixel-difference
+comparison, and a summary of what the branch touched:
+
+```bash
+npm run design:review            # or, from the repo root: make design-review
+```
+
+Because it reads git rather than rendering anything, it needs no backend, no
+browser, no Docker and no `npm install`, and it finishes in about a second.
+It also lists the templates and styles a branch changed that *no* screen
+covers, which is the failure mode the suite itself is structurally unable to
+report. See `e2e/design-review/README.md`.
 
 ### Updating snapshots
 
@@ -646,9 +760,23 @@ PR rather than waiting for someone to run the Docker recipe by hand. Because
 both sides resolve the ref through the same script, they can never drift
 apart.
 
-Update the baselines whenever a change intentionally alters one of the six
+Update the baselines whenever a change intentionally alters one of the
 covered screens; the container run is what actually validates the diff, not
 a local eyeball on a macOS-rendered screenshot.
+
+Adding a *new* visual spec is the same command: the first
+`:docker:update` run writes its PNGs for both Chromium projects, and those
+PNGs are the commit. A new spec whose baselines are not committed fails CI —
+Playwright writes a missing snapshot and then reports the test as failed.
+
+CI checks both the desktop and the mobile baselines on every frontend run,
+including a plain unlabelled PR. The mechanism is that the "Run visual specs"
+step in `e2e-mock.yml` passes **no** `--project` filter at all — unlike the
+functional shards, it is deliberately not narrowed by that workflow's
+`PROJECTS` variable. That difference is the point: the functional suite is
+desktop-only on a PR unless it carries `e2e-full`, but the responsive work
+these baselines exist to protect can only regress on a mobile viewport, so
+gating them behind a label would catch a regression only after it had landed.
 
 **Prerequisites** for the `:docker` scripts (see `e2e/scripts/visual-docker.sh`
 for the fully commented version): a backend API reachable on the host at

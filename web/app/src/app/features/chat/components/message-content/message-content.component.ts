@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { MarkdownModule } from 'ngx-markdown';
 
-import { FileAttachment } from '../../../../core/models/file-attachment.model';
+import { FileAttachment, isImageAttachment } from '../../../../core/models/file-attachment.model';
 import { environment } from '../../../../../environments/environment';
 import { buildClipboardPayload } from '../../helpers/html-clipboard.helpers';
 import { extractImages } from '../../helpers/message-content.helpers';
@@ -130,8 +130,4 @@ export class MessageContentComponent {
       URL.revokeObjectURL(url);
     });
   }
-}
-
-function isImageAttachment(attachment: FileAttachment): boolean {
-  return attachment.file_type.toLowerCase().startsWith('image/');
 }

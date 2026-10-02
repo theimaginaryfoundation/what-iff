@@ -83,13 +83,25 @@ test('opens the conversation context panel and types in the scratchpad', async (
   await expect(chatPage.contextPanel).toBeHidden();
 });
 
+/**
+ * This test was disabled in every environment by `test.skip(true, ...)` for a
+ * response-ordering race in `JobService.pollJob()`: the phases of one job each
+ * dispatched their own `getMessage()`, and a late `inference_complete`
+ * response could overwrite the completed row and erase its
+ * `context_breakdown`. It was only ever observed against a real-inference
+ * backend, whose reply latency varies enough to open the window.
+ *
+ * That race is now fixed — `pollJob` applies a row only if no newer phase has
+ * already been applied, covered by an out-of-order regression test in
+ * `job.service.spec.ts` — so the test runs everywhere again rather than
+ * carrying a tag that narrows it for a reason that no longer holds.
+ *
+ * If it does flake, the answer is a fix with a failing test behind it, not a
+ * blanket skip: skipping took the Context X-ray's only behavioural coverage
+ * out of every environment and left `tests/visual/context-xray.visual.spec.ts`
+ * standing on nothing.
+ */
 test('shows a reply’s token breakdown from its Context action', async ({ chatPage, seed, userWithPersonality }) => {
-  // Skipped: flaky against real-inference backends (e.g. local Ollama) due to a
-  // response-ordering race in JobService.pollJob() that can clobber a message's
-  // context_breakdown with a stale, breakdown-less fetch.
-  /* eslint-disable-next-line playwright/no-skipped-test -- tracked flake, not a blanket skip */
-  test.skip(true, 'Flaky on real-inference backends: JobService.pollJob() fetch-ordering race.');
-
   const thread = await seed.thread(undefined, {
     personalityId: userWithPersonality.personality.id,
   });
@@ -109,17 +121,21 @@ test('shows a reply’s token breakdown from its Context action', async ({ chatP
   await expect(chatPage.contextBreakdown).toBeVisible();
   await expect(chatPage.contextBreakdown.getByText('Turn context', { exact: true })).toBeVisible();
   await expect(chatPage.contextBreakdown.getByRole('img', { name: /^Context is \d+% of budget:/ })).toBeVisible();
+
+  // The cost outlet is mounted for every assistant turn, whether or not the
+  // turn's model resolves to a priced estimate — the X-ray passes it the
+  // owning message id regardless. Its presence is the functional contract;
+  // `tests/visual/context-xray.visual.spec.ts` owns where it sits.
+  await expect(chatPage.contextGaugeTotal).toBeVisible();
+  await expect(chatPage.contextCostOutlet).toHaveCount(1);
 });
 
-test('opens the import-conversations modal and cancels', async ({ chatImportModal, threadListPanel, userWithPersonality }) => {
+test('opens the Import & Export screen from Thread Manager', async ({ chatImportModal, threadListPanel, userWithPersonality }) => {
   await threadListPanel.navigateTo();
   await threadListPanel.openImport();
 
   await expect(chatImportModal.heading).toBeVisible();
   await expect(chatImportModal.importButton).toBeDisabled();
-
-  await chatImportModal.cancel();
-  await expect(chatImportModal.heading).toBeHidden();
 });
 
 test('creates, edits and deletes a thread memory from the context panel', async ({ chatPage, page, seed, userWithPersonality }) => {
@@ -134,11 +150,11 @@ test('creates, edits and deletes a thread memory from the context panel', async 
   await chatPage.openContextPanel();
   await chatPage.selectContextTab('Memories');
 
-  const memoryTab = chatPage.contextPanel.getByRole('tab', { name: 'This Thread' });
+  const memoryTab = chatPage.contextPanel.getByRole('tab', { name: 'This thread' });
   await expect(memoryTab).toHaveAttribute('aria-selected', 'true');
   await expect(chatPage.contextPanel).toContainText('No memories yet.');
 
-  await chatPage.contextPanel.getByRole('button', { name: 'Add Memory' }).click();
+  await chatPage.contextPanel.getByRole('button', { name: 'Add memory' }).click();
   const editorDialog = page.getByRole('dialog', { name: 'Create memory' });
   await expect(editorDialog).toBeVisible();
 
@@ -183,7 +199,7 @@ test('enables and disables a tool for the conversation', async ({ chatPage, seed
   await chatPage.openContextPanel();
   await chatPage.selectContextTab('Tools');
 
-  const webSearchToggle = chatPage.contextPanel.getByRole('checkbox', { name: /^web_search/ });
+  const webSearchToggle = chatPage.contextPanel.getByRole('checkbox', { name: /^Web Search/ });
   await expect(webSearchToggle).toBeChecked();
 
   await webSearchToggle.uncheck();
@@ -268,6 +284,10 @@ test('a picked model does not leak into a different thread', async ({ chatPage, 
 // whole job typically completes within a single ~2s poll cycle, so "immediately" is
 // asserted against a 1s bound: comfortably tight enough to catch a regression back to
 // "wait for the job to fully finish" while leaving headroom for CI scheduling jitter.
+//
+// Since #203 the textarea itself stays editable during a reply (the next message can be
+// composed ahead), so the lock is observed on the composer's other controls (the "+" menu)
+// and the typed-ahead draft must survive the unlock.
 test('composer unlocks immediately after clicking stop, not after post-inference phases finish', async ({
   chatPage,
   seed,
@@ -278,12 +298,15 @@ test('composer unlocks immediately after clicking stop, not after post-inference
 
   await chatPage.sendMessage('stop response regression probe');
   await expect(chatPage.stopButton).toBeVisible({ timeout: UI_REACTION_TIMEOUT });
-  await expect(chatPage.composerInput).toBeDisabled();
+  await expect(chatPage.plusMenuButton).toBeDisabled();
+  await expect(chatPage.composerInput).toBeEditable();
+  await chatPage.composerInput.fill('typed while the reply was running');
 
   await chatPage.stopResponse();
 
   await expect(chatPage.stopButton).toBeHidden({ timeout: IMMEDIATE_UI_UPDATE_TIMEOUT });
-  await expect(chatPage.composerInput).toBeEnabled({ timeout: IMMEDIATE_UI_UPDATE_TIMEOUT });
+  await expect(chatPage.plusMenuButton).toBeEnabled({ timeout: IMMEDIATE_UI_UPDATE_TIMEOUT });
+  await expect(chatPage.composerInput).toHaveValue('typed while the reply was running');
 });
 
 // Regression test for PR #322: switching away from a chat tab and back showed no

@@ -197,17 +197,17 @@ describe('CompactionLogPageComponent', () => {
 
     it('collapses and expands the summaries section', () => {
         expect(component.isSectionCollapsed(event, 'summary')).toBe(false);
-        expect(fixture.nativeElement.textContent).toContain('Conversation summary');
+        expect(fixture.nativeElement.textContent).toContain('Thread summary');
 
         component.toggleSection(event, 'summary');
         fixture.detectChanges();
         expect(component.isSectionCollapsed(event, 'summary')).toBe(true);
-        expect(fixture.nativeElement.textContent).not.toContain('Conversation summary');
+        expect(fixture.nativeElement.textContent).not.toContain('Thread summary');
 
         component.toggleSection(event, 'summary');
         fixture.detectChanges();
         expect(component.isSectionCollapsed(event, 'summary')).toBe(false);
-        expect(fixture.nativeElement.textContent).toContain('Conversation summary');
+        expect(fixture.nativeElement.textContent).toContain('Thread summary');
     });
 
     it('opens the originating thread at the checkpoint message', () => {

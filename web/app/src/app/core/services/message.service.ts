@@ -43,8 +43,20 @@ export class MessageService {
     return this.currentChatId;
   }
 
-  listMessages(chatId: string, page: number = 1, limit: number = 50, filters?: ChatMessageFilters): Observable<PaginatedResponse<ChatMessage>> {
-    let params: any = { page: page.toString(), limit: limit.toString() };
+  /**
+   * List a page of a chat's messages (newest-first). Pass `cursor` (a `next_cursor` from a prior
+   * response) to keyset-paginate strictly older messages instead of by page number — this
+   * decouples the batch size from a fixed page size, so scroll-back and jump-to-bookmark can
+   * request large batches without offset math. A cursor request always prepends (it is an older
+   * batch); otherwise `page === 1` replaces the list and later pages prepend.
+   */
+  listMessages(chatId: string, page: number = 1, limit: number = 50, filters?: ChatMessageFilters, cursor?: string): Observable<PaginatedResponse<ChatMessage>> {
+    let params: any = { limit: limit.toString() };
+    if (cursor) {
+      params.cursor = cursor;
+    } else {
+      params.page = page.toString();
+    }
 
     if (filters) {
       if (filters.origin) params.origin = filters.origin;
@@ -53,16 +65,17 @@ export class MessageService {
       if (filters.max_date) params.max_date = filters.max_date;
     }
 
+    const isInitial = !cursor && page === 1;
     return this.http.get<PaginatedResponse<ChatMessage>>(`${this.apiUrl}/${chatId}/chat-message`, { params })
       .pipe(
         tap(response => {
-          if (page === 1) {
-            // Replace message list on first page
+          if (isInitial) {
+            // Replace message list on the initial (newest) page
             this.messagesSubject.next(response.results.reverse()); // Reverse to show newest at bottom
           } else {
-            // Prepend older messages for infinite scroll up. Dedup by id: offset-based pages
-            // can overlap what we already have once newer messages arrive, and duplicate ids
-            // would break `track message.id` rendering.
+            // Prepend older messages for infinite scroll up. Dedup by id: keeps rendering stable
+            // even if a batch overlaps what we already have (legacy offset pages could; keyset
+            // cursor batches don't), since duplicate ids would break `track message.id`.
             const currentMessages = this.messagesSubject.getValue();
             const known = new Set(currentMessages.map(m => m.id));
             const older = response.results.reverse().filter(m => !known.has(m.id));

@@ -18,6 +18,7 @@ type Model struct {
 	Description        string    `json:"description"`
 	Provider           string    `json:"provider"`
 	ToolSupport        bool      `json:"tool_support"`
+	VisionSupport      bool      `json:"vision_support"`
 	BaseCreditsPerSlab int64     `json:"base_credits_per_slab"`
 	SubscriptionTier   string    `json:"subscription_tier"`
 	Deleted            bool      `json:"deleted"`
@@ -32,6 +33,7 @@ type CreateModelRequest struct {
 	Description        string `json:"description"`
 	Provider           string `json:"provider"`
 	ToolSupport        bool   `json:"tool_support"`
+	VisionSupport      bool   `json:"vision_support"`
 	BaseCreditsPerSlab int64  `json:"base_credits_per_slab"`
 	SubscriptionTier   string `json:"subscription_tier"`
 }
@@ -42,6 +44,7 @@ type UpdateModelRequest struct {
 	Description        string  `json:"description,omitempty"`
 	Provider           string  `json:"provider,omitempty"`
 	ToolSupport        *bool   `json:"tool_support,omitempty"`
+	VisionSupport      *bool   `json:"vision_support,omitempty"`
 	BaseCreditsPerSlab *int64  `json:"base_credits_per_slab,omitempty"`
 	SubscriptionTier   *string `json:"subscription_tier,omitempty"`
 }

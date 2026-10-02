@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -21,15 +22,16 @@ import (
 func boolPtr(b bool) *bool { return &b }
 
 type fakeStore struct {
-	getChatFn              func(ctx context.Context, userID, id uuid.UUID) (*models.Chat, error)
-	getChatContextFn       func(ctx context.Context, userID, chatID uuid.UUID) (*models.ChatContext, error)
-	updateScratchpadFn     func(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
-	listChatsFn            func(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.ChatFilters) (*models.PaginatedResponse, error)
-	updateChatFn           func(ctx context.Context, userID uuid.UUID, chat models.Chat) (*models.Chat, error)
-	markChatMessagesReadFn func(ctx context.Context, userID, chatID uuid.UUID) (int, error)
-	getModelByNameFn       func(ctx context.Context, name string) (*models.Model, error)
-	isFirstChatFn          func(ctx context.Context, userID, chatID uuid.UUID) (bool, error)
-	countAllMessagesFn     func(ctx context.Context, userID uuid.UUID, cap int) (int, error)
+	getChatFn                 func(ctx context.Context, userID, id uuid.UUID) (*models.Chat, error)
+	getChatContextFn          func(ctx context.Context, userID, chatID uuid.UUID) (*models.ChatContext, error)
+	updateScratchpadFn        func(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
+	listChatsFn               func(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.ChatFilters) (*models.PaginatedResponse, error)
+	updateChatFn              func(ctx context.Context, userID uuid.UUID, chat models.Chat) (*models.Chat, error)
+	markChatMessagesReadFn    func(ctx context.Context, userID, chatID uuid.UUID) (int, error)
+	markAllChatMessagesReadFn func(ctx context.Context, userID uuid.UUID) (int, error)
+	getModelByNameFn          func(ctx context.Context, name string) (*models.Model, error)
+	isFirstChatFn             func(ctx context.Context, userID, chatID uuid.UUID) (bool, error)
+	countAllMessagesFn        func(ctx context.Context, userID uuid.UUID, cap int) (int, error)
 }
 
 func (f *fakeStore) CreateChat(ctx context.Context, userID uuid.UUID, chat models.Chat) (*models.Chat, error) {
@@ -53,12 +55,21 @@ func (f *fakeStore) DeleteChat(ctx context.Context, userID, id uuid.UUID) error 
 func (f *fakeStore) ListChatMessages(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error) {
 	return nil, errors.New("not implemented")
 }
+func (f *fakeStore) ListChatMessagesBefore(ctx context.Context, userID, chatID uuid.UUID, beforeSentAt time.Time, beforeID uuid.UUID, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error) {
+	return nil, errors.New("not implemented")
+}
 func (f *fakeStore) GetChatMessage(ctx context.Context, userID, messageID uuid.UUID) (*models.ChatMessage, error) {
 	return nil, errors.New("not implemented")
 }
 func (f *fakeStore) MarkChatMessagesRead(ctx context.Context, userID, chatID uuid.UUID) (int, error) {
 	if f.markChatMessagesReadFn != nil {
 		return f.markChatMessagesReadFn(ctx, userID, chatID)
+	}
+	return 0, errors.New("not implemented")
+}
+func (f *fakeStore) MarkAllChatMessagesRead(ctx context.Context, userID uuid.UUID) (int, error) {
+	if f.markAllChatMessagesReadFn != nil {
+		return f.markAllChatMessagesReadFn(ctx, userID)
 	}
 	return 0, errors.New("not implemented")
 }
@@ -138,8 +149,13 @@ func (f *fakeStore) ListChatMessageBookmarks(ctx context.Context, userID, chatID
 func (f *fakeStore) FindLatestActiveChatMessageJob(ctx context.Context, userID, userMessageID uuid.UUID) (*models.Job, error) {
 	return nil, errors.New("not implemented")
 }
+func (f *fakeStore) FindLatestActiveChatJob(ctx context.Context, userID, chatID uuid.UUID) (*models.Job, error) {
+	return nil, errors.New("not implemented")
+}
 func (f *fakeStore) ImportChats(ctx context.Context, userID uuid.UUID, convs []models.ImportConversation, onProgress func(imported, skipped int)) (*models.ImportResult, error) {
 	return nil, errors.New("not implemented")
+}
+func (f *fakeStore) AuditChatImport(ctx context.Context, userID uuid.UUID, message string, metadata map[string]any) {
 }
 func (f *fakeStore) CreateJob(ctx context.Context, userID uuid.UUID, jobModel models.Job) (*models.Job, error) {
 	jobModel.ID = uuid.New()

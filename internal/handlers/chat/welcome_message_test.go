@@ -27,6 +27,8 @@ type fakeWelcomeAgent struct {
 	err               error
 }
 
+func (f *fakeWelcomeAgent) FirstPartyWebSearch() bool { return false }
+
 func (f *fakeWelcomeAgent) HandleWelcomeMessagePromptAsync(ctx context.Context, chatID uuid.UUID, prompt string, modelOverrideID *uuid.UUID, personalityOverrideID *uuid.UUID) (*models.ChatMessageResponse, error) {
 	f.calls++
 	f.lastChatID = chatID

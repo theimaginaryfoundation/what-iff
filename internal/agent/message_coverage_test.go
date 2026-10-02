@@ -135,47 +135,27 @@ func TestDeleteProviderFileAttachment_NoProviderConfigured(t *testing.T) {
 	require.ErrorContains(t, err, "openai provider is not configured")
 }
 
-// --- RecordFileUpload / recordCounter / recordTime / recordCountHistogram no-telemetry guards ---
+// --- agent metrics helpers ---
 
-func TestRecordFileUpload_NoopWithNilTelemetry(t *testing.T) {
+func TestRecordTurnStage_NoopWithNilTelemetry(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
 	require.NotPanics(t, func() {
-		a.RecordFileUpload(context.Background(), "image/png", "success")
+		a.recordTurnStage(context.Background(), turnStageInference, time.Second)
 	})
 }
 
-func TestRecordTime_NoopWithNilTelemetry(t *testing.T) {
+// A Telemetry without Metrics (LoggerOnly, partial test wiring) must not panic: *Metrics methods
+// are no-ops on a nil receiver.
+func TestAgentMetrics_NoopWithNilMetrics(t *testing.T) {
 	t.Parallel()
-	a := &Agent{}
+	a := &Agent{logger: zap.NewNop(), telemetry: telemetry.LoggerOnly(zap.NewNop())}
+	require.Nil(t, a.metrics())
 	require.NotPanics(t, func() {
-		a.recordTime(context.Background(), "some_metric", 0)
-	})
-}
-
-func TestRecordCounter_NoopWithNilTelemetry(t *testing.T) {
-	t.Parallel()
-	a := &Agent{}
-	require.NotPanics(t, func() {
-		a.recordCounter(context.Background(), "some_counter", 1)
-	})
-}
-
-func TestRecordCountHistogram_NoopWithNilTelemetry(t *testing.T) {
-	t.Parallel()
-	a := &Agent{}
-	require.NotPanics(t, func() {
-		a.recordCountHistogram(context.Background(), "some_histogram", 1)
-	})
-}
-
-func TestRecordTime_NoopWithNilMetrics(t *testing.T) {
-	t.Parallel()
-	a := &Agent{telemetry: &telemetry.Telemetry{}}
-	require.NotPanics(t, func() {
-		a.recordTime(context.Background(), "some_metric", 0)
-		a.recordCounter(context.Background(), "some_counter", 1)
-		a.recordCountHistogram(context.Background(), "some_histogram", 1)
+		ctx := context.Background()
+		a.recordTurnStage(ctx, turnStagePostProcess, time.Second)
+		a.recordToolCalls(ctx, nil)
+		a.metrics().Add(ctx, telemetry.ChatCheckpoints, 1)
 	})
 }
 
@@ -650,4 +630,96 @@ func TestRecordCancelledChatUsage_NilArgsAreNoOp(t *testing.T) {
 		a.recordCancelledChatUsage(context.Background(), &models.Job{}, nil, &chatContext{}, nil, metering.Decision{}, errCoverageTestSentinel, nil)
 		a.recordCancelledChatUsage(context.Background(), &models.Job{}, &models.ChatMessage{}, nil, nil, metering.Decision{}, errCoverageTestSentinel, nil)
 	})
+}
+
+func TestParagraphBreakBefore(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name, prior, next, want string
+	}{
+		{"plain sentences", "Let me check.", "Here is what I found.", "\n\n"},
+		{"prior ends with newline", "Checking:\n", "Done.", "\n"},
+		{"next starts with newline", "Checking.", "\nDone.", "\n"},
+		{"already a paragraph apart", "Checking.\n\n", "Done.", ""},
+		{"both sides have one", "Checking.\n", "\nDone.", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, paragraphBreakBefore(tc.prior, tc.next))
+		})
+	}
+}
+
+func TestJobDraftDeltaBuffer_MarkRoundBoundary_AppliesToNextDeltaOnly(t *testing.T) {
+	t.Parallel()
+
+	ds, _, cleanup := newTestDatastore(t)
+	defer cleanup()
+	job := &models.Job{ID: uuid.New(), UserID: uuid.New()}
+	b := newJobDraftDeltaBuffer(context.Background(), ds, zap.NewNop(), job, 1<<20, time.Hour)
+
+	b.MarkRoundBoundary() // no text yet: nothing to separate
+	b.HandleDelta("Let me check.")
+	b.MarkRoundBoundary()
+	b.MarkRoundBoundary() // several tools in one round still add one break
+	b.HandleDelta("Found it")
+	b.HandleDelta(".")
+
+	require.Equal(t, "Let me check.\n\nFound it.", b.allText)
+	require.Equal(t, b.allText, b.pending, "the break is part of the streamed deltas")
+}
+
+func TestJobDraftReasoningBuffer_FlushesToDraftReasoning(t *testing.T) {
+	t.Parallel()
+
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	mock.ExpectExec("UPDATE .*jobs.*draft_reasoning.*").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	job := &models.Job{ID: uuid.New(), UserID: uuid.New()}
+	b := newJobDraftReasoningBuffer(context.Background(), ds, zap.NewNop(), job, 3, time.Hour)
+	b.HandleDelta("hmm!")
+	require.Empty(t, b.pending)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestJobDraftReasoningBuffer_ResetDropsPendingAndClearsColumn(t *testing.T) {
+	t.Parallel()
+
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	mock.ExpectExec("UPDATE .*jobs.*draft_reasoning.*").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	job := &models.Job{ID: uuid.New(), UserID: uuid.New()}
+	b := newJobDraftReasoningBuffer(context.Background(), ds, zap.NewNop(), job, 999, time.Hour)
+	b.HandleDelta("abandoned attempt") // below threshold: buffered, not persisted
+	b.ResetReasoning()
+	require.Empty(t, b.pending)
+	require.Empty(t, b.allText)
+	b.Flush() // nothing left to write
+	require.NoError(t, mock.ExpectationsWereMet())
+
+	var nilBuf *jobDraftDeltaBuffer
+	require.NotPanics(t, func() { nilBuf.ResetReasoning() })
+	require.NotPanics(t, func() { (&jobDraftDeltaBuffer{}).ResetReasoning() })
+}
+
+func TestWatchChatJobCancel_NoDatastoreReturnsImmediately(t *testing.T) {
+	t.Parallel()
+	a := newCancelTestAgent()
+	done := make(chan struct{})
+	go func() {
+		a.watchChatJobCancel(context.Background(), uuid.New(), uuid.New(), func() {})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("watchChatJobCancel must return at once when there is no datastore")
+	}
 }

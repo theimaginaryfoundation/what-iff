@@ -1,6 +1,7 @@
 package datastore
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -80,4 +81,62 @@ func chatWithPersonality(personalityID uuid.UUID, updatedAt time.Time, lastMessa
 			Personality: &ent.Personality{ID: personalityID},
 		},
 	}
+}
+
+// Regression for #129: GetPersonality returns zeroed Stats, so the stand-alone
+// personality page needs a single-personality stats lookup that agrees with
+// what ListPersonalities reports for the same personality.
+func TestGetPersonalityUsageStats_MatchesListPersonalities(t *testing.T) {
+	ds, cleanup := newFileAttachmentTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createFATestUser(t, ds)
+	otherUserID := createFATestUser(t, ds)
+	trickster := createFATestPersonality(t, ds, userID, "Trickster")
+	unused := createFATestPersonality(t, ds, userID, "Unused")
+
+	older := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	newer := older.Add(3 * time.Hour)
+	createChat := func(owner, personalityID uuid.UUID, archived bool, lastMessage time.Time) {
+		t.Helper()
+		_, err := ds.dbClient.Chat.Create().
+			SetName("usage-" + uuid.NewString()[:8]).
+			SetOwnerID(owner).
+			SetPersonalityID(personalityID).
+			SetArchived(archived).
+			SetCreatedAt(older).
+			SetUpdatedAt(older).
+			SetLastMessageTime(lastMessage).
+			Save(ctx)
+		require.NoError(t, err)
+	}
+	createChat(userID, trickster, false, older)
+	createChat(userID, trickster, false, newer)
+	// Archived threads and other users' threads are excluded, as in the list.
+	createChat(userID, trickster, true, newer.Add(time.Hour))
+	createChat(otherUserID, trickster, false, newer.Add(time.Hour))
+
+	stats, err := ds.GetPersonalityUsageStats(ctx, userID, trickster)
+	require.NoError(t, err)
+	require.Equal(t, 2, stats.ChatCount)
+	require.NotNil(t, stats.LastUsedAt)
+	require.True(t, newer.Equal(*stats.LastUsedAt))
+
+	// ListPersonalities fills each entry via the batch personalityUsageStats
+	// helper; the single-personality lookup must agree with it.
+	batch, err := ds.personalityUsageStats(ctx, ds.dbClient.Chat, userID, []uuid.UUID{trickster, unused})
+	require.NoError(t, err)
+	require.Equal(t, batch[trickster], stats)
+
+	unusedStats, err := ds.GetPersonalityUsageStats(ctx, userID, unused)
+	require.NoError(t, err)
+	require.Equal(t, 0, unusedStats.ChatCount)
+	require.Nil(t, unusedStats.LastUsedAt)
+
+	// Stats are scoped to the caller's own threads: the other user's lookup
+	// counts only their single thread, never the owner's two.
+	foreign, err := ds.GetPersonalityUsageStats(ctx, otherUserID, trickster)
+	require.NoError(t, err)
+	require.Equal(t, 1, foreign.ChatCount)
 }

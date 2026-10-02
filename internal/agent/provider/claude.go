@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
 )
 
 // ClaudeProvider wraps the Anthropic Messages API and exposes the same utility
@@ -22,6 +22,9 @@ type ClaudeProvider struct {
 	client       *anthropic.Client
 	tokenCounter *TokenCounter
 	tel          *telemetry.Telemetry
+	// providerName is the gen_ai.provider.name on this provider's metrics: anthropic for
+	// the real API, zai for a custom base URL (the only one in use is z.ai's).
+	providerName string
 }
 
 // DefaultZAIBaseURL is z.ai's Anthropic-compatible Messages API base URL, used for
@@ -45,7 +48,8 @@ func NewClaudeProviderWithBaseURL(apiKey, baseURL string, tel *telemetry.Telemet
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),
 		// 2 retries = 3 total attempts with SDK-managed exponential back-off
-		// for 429/500/529 responses.
+		// for 429/500/529 responses. Streaming calls turn this off per request
+		// and retry in retryLLMCall instead, so there is only one layer.
 		option.WithMaxRetries(2),
 	}
 	if strings.TrimSpace(baseURL) != "" {
@@ -55,10 +59,15 @@ func NewClaudeProviderWithBaseURL(apiKey, baseURL string, tel *telemetry.Telemet
 		opts = append(opts, option.WithHTTPClient(httpClient))
 	}
 	client := anthropic.NewClient(opts...)
+	providerName := telemetry.DependencyAnthropic
+	if strings.TrimSpace(baseURL) != "" {
+		providerName = telemetry.DependencyZAI
+	}
 	return &ClaudeProvider{
 		client:       &client,
 		tokenCounter: NewTokenCounter(),
 		tel:          tel,
+		providerName: providerName,
 	}
 }
 
@@ -209,32 +218,78 @@ func (u anthropicStreamUsage) applyBeta(usage *anthropic.BetaUsage) {
 	}
 }
 
-// messagesNew is the single entry point for Messages API HTTP calls; records token usage metrics.
-func (c *ClaudeProvider) messagesNew(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
-	msg, err := c.client.Messages.New(ctx, params)
+// startCall starts the metrics for one logical Messages API call.
+func (c *ClaudeProvider) startCall(ctx context.Context, model string) *genAICall {
+	name := telemetry.DependencyAnthropic
+	var tel *telemetry.Telemetry
+	if c != nil {
+		tel = c.tel
+		if c.providerName != "" {
+			name = c.providerName
+		}
+	}
+	return startGenAICall(ctx, tel, name, model, genAIOpChat)
+}
+
+// zapLog returns the configured logger, or a no-op logger when telemetry is nil (e.g. tests).
+func (c *ClaudeProvider) zapLog() *zap.Logger {
+	if c != nil && c.tel != nil && c.tel.Logger != nil {
+		return c.tel.Logger
+	}
+	return zap.NewNop()
+}
+
+// recordRetry counts an adapter-level fallback (e.g. the truncation fallback) for model.
+func (c *ClaudeProvider) recordRetry(ctx context.Context, model, reason string) {
+	c.startCall(ctx, model).retry(reason)
+}
+
+// messagesNew is the single entry point for non-streaming Messages API HTTP calls; records
+// the call's duration and token usage metrics.
+func (c *ClaudeProvider) messagesNew(ctx context.Context, params anthropic.MessageNewParams) (msg *anthropic.Message, err error) {
+	call := c.startCall(ctx, string(params.Model))
+	defer func() { call.end(err) }()
+	msg, err = c.client.Messages.New(ctx, params)
 	if err != nil {
 		return nil, err
 	}
-	recordProviderTokenUsage(ctx, c.tel, anthropicUsageInputTokens(msg.Usage), anthropicUsageOutputTokens(msg.Usage))
+	recordClaudeOutcome(call, anthropicUsage(msg.Usage), string(msg.StopReason))
 	return msg, nil
 }
 
-// betaMessagesNew is the single entry point for Beta Messages API HTTP calls; records token usage metrics.
-func (c *ClaudeProvider) betaMessagesNew(ctx context.Context, params anthropic.BetaMessageNewParams) (*anthropic.BetaMessage, error) {
-	msg, err := c.client.Beta.Messages.New(ctx, params)
+// betaMessagesNew is the single entry point for non-streaming Beta Messages API HTTP calls;
+// records the call's duration and token usage metrics.
+func (c *ClaudeProvider) betaMessagesNew(ctx context.Context, params anthropic.BetaMessageNewParams) (msg *anthropic.BetaMessage, err error) {
+	call := c.startCall(ctx, string(params.Model))
+	defer func() { call.end(err) }()
+	msg, err = c.client.Beta.Messages.New(ctx, params)
 	if err != nil {
 		return nil, err
 	}
-	recordProviderTokenUsage(ctx, c.tel, anthropicBetaUsageInputTokens(msg.Usage), anthropicBetaUsageOutputTokens(msg.Usage))
+	recordClaudeOutcome(call, anthropicBetaUsage(msg.Usage), string(msg.StopReason))
 	return msg, nil
 }
 
+// recordClaudeOutcome records a successful response's token usage, and a safety block when
+// the model stopped with a refusal.
+func recordClaudeOutcome(call *genAICall, usage genAIUsage, stopReason string) {
+	call.recordUsage(usage)
+	if stopReason == string(anthropic.StopReasonRefusal) {
+		call.blocked()
+	}
+}
+
+// messagesNewStreaming streams one Messages API attempt. call (may be nil) gets the attempt's
+// time to first token and, on success, its token usage; retryLLMCall ends it.
 func (c *ClaudeProvider) messagesNewStreaming(
 	ctx context.Context,
 	params anthropic.MessageNewParams,
 	onTextDelta func(delta string),
+	onThinkingDelta func(delta string),
+	call *genAICall,
 ) (*anthropic.Message, bool, error) {
-	stream := c.client.Messages.NewStreaming(ctx, params)
+	call.beginAttempt()
+	stream := c.client.Messages.NewStreaming(ctx, params, option.WithMaxRetries(sdkNoRetries))
 	defer stream.Close()
 
 	var (
@@ -251,6 +306,10 @@ func (c *ClaudeProvider) messagesNewStreaming(
 		if handleClaudeTextDeltaEvent(ev, onTextDelta) {
 			deltaEmitted = true
 		}
+		handleClaudeThinkingDeltaEvent(ev, onThinkingDelta)
+		if claudeEventHasOutput(ev) {
+			call.firstToken()
+		}
 	}
 
 	if err := stream.Err(); err != nil {
@@ -263,22 +322,25 @@ func (c *ClaudeProvider) messagesNewStreaming(
 				Source:       "claude_stream_usage",
 			})
 		}
-		return nil, deltaEmitted, err
+		return nil, deltaEmitted, classifyAnthropicStreamError(err)
 	}
 	if finalMsg.ID == "" {
 		return nil, deltaEmitted, fmt.Errorf("stream finished without message_start event")
 	}
 	streamUsage.apply(&finalMsg.Usage)
-	recordProviderTokenUsage(ctx, c.tel, anthropicUsageInputTokens(finalMsg.Usage), anthropicUsageOutputTokens(finalMsg.Usage))
+	recordClaudeOutcome(call, anthropicUsage(finalMsg.Usage), string(finalMsg.StopReason))
 	return &finalMsg, deltaEmitted, nil
 }
 
+// betaMessagesNewStreaming is messagesNewStreaming for the Beta Messages API.
 func (c *ClaudeProvider) betaMessagesNewStreaming(
 	ctx context.Context,
 	params anthropic.BetaMessageNewParams,
 	onTextDelta func(delta string),
+	call *genAICall,
 ) (*anthropic.BetaMessage, bool, error) {
-	stream := c.client.Beta.Messages.NewStreaming(ctx, params)
+	call.beginAttempt()
+	stream := c.client.Beta.Messages.NewStreaming(ctx, params, option.WithMaxRetries(sdkNoRetries))
 	defer stream.Close()
 
 	var (
@@ -295,6 +357,9 @@ func (c *ClaudeProvider) betaMessagesNewStreaming(
 		if handleClaudeBetaTextDeltaEvent(ev, onTextDelta) {
 			deltaEmitted = true
 		}
+		if claudeBetaEventHasOutput(ev) {
+			call.firstToken()
+		}
 	}
 
 	if err := stream.Err(); err != nil {
@@ -307,13 +372,13 @@ func (c *ClaudeProvider) betaMessagesNewStreaming(
 				Source:       "claude_beta_stream_usage",
 			})
 		}
-		return nil, deltaEmitted, err
+		return nil, deltaEmitted, classifyAnthropicStreamError(err)
 	}
 	if finalMsg.ID == "" {
 		return nil, deltaEmitted, fmt.Errorf("beta stream finished without message_start event")
 	}
 	streamUsage.applyBeta(&finalMsg.Usage)
-	recordProviderTokenUsage(ctx, c.tel, anthropicBetaUsageInputTokens(finalMsg.Usage), anthropicBetaUsageOutputTokens(finalMsg.Usage))
+	recordClaudeOutcome(call, anthropicBetaUsage(finalMsg.Usage), string(finalMsg.StopReason))
 	return &finalMsg, deltaEmitted, nil
 }
 
@@ -336,9 +401,49 @@ func (c *ClaudeProvider) CallWithRetryStreaming(
 	params anthropic.MessageNewParams,
 	onTextDelta func(delta string),
 ) (*anthropic.Message, error) {
-	return callClaudeWithRetry(ctx, func(ctx context.Context) (*anthropic.Message, bool, error) {
-		return c.messagesNewStreaming(ctx, params, onTextDelta)
+	return c.CallWithRetryStreamingReasoning(ctx, params, onTextDelta, ReasoningStream{})
+}
+
+// CallWithRetryStreamingReasoning is CallWithRetryStreaming that also forwards
+// thinking deltas to reasoning.OnDelta. The retry loop only refuses to retry once
+// *text* has streamed, so a transient failure mid-thinking is still retried; in that
+// case reasoning.OnReset fires before the next attempt so the consumer drops the
+// abandoned attempt's partial thinking instead of showing it twice.
+func (c *ClaudeProvider) CallWithRetryStreamingReasoning(
+	ctx context.Context,
+	params anthropic.MessageNewParams,
+	onTextDelta func(delta string),
+	reasoning ReasoningStream,
+) (*anthropic.Message, error) {
+	onThinking, beforeAttempt := retryAwareThinking(reasoning)
+	call := c.startCall(ctx, string(params.Model))
+	return retryLLMCall(ctx, call, c.zapLog(), func(ctx context.Context) (*anthropic.Message, bool, error) {
+		beforeAttempt()
+		return c.messagesNewStreaming(ctx, params, onTextDelta, onThinking, call)
 	})
+}
+
+// retryAwareThinking adapts reasoning for a retry loop: onThinking forwards deltas
+// (nil when nobody listens), and beforeAttempt — called at the top of every attempt —
+// fires OnReset if the previous attempt streamed any thinking.
+func retryAwareThinking(reasoning ReasoningStream) (onThinking func(string), beforeAttempt func()) {
+	streamed := false
+	if reasoning.OnDelta != nil {
+		onThinking = func(d string) {
+			streamed = true
+			reasoning.OnDelta(d)
+		}
+	}
+	beforeAttempt = func() {
+		if !streamed {
+			return
+		}
+		streamed = false
+		if reasoning.OnReset != nil {
+			reasoning.OnReset()
+		}
+	}
+	return onThinking, beforeAttempt
 }
 
 // CallBetaWithRetryStreaming calls the beta streaming Messages API and forwards text deltas to onTextDelta.
@@ -349,49 +454,41 @@ func (c *ClaudeProvider) CallBetaWithRetryStreaming(
 	params anthropic.BetaMessageNewParams,
 	onTextDelta func(delta string),
 ) (*anthropic.BetaMessage, error) {
-	return callClaudeWithRetry(ctx, func(ctx context.Context) (*anthropic.BetaMessage, bool, error) {
-		return c.betaMessagesNewStreaming(ctx, params, onTextDelta)
+	call := c.startCall(ctx, string(params.Model))
+	return retryLLMCall(ctx, call, c.zapLog(), func(ctx context.Context) (*anthropic.BetaMessage, bool, error) {
+		return c.betaMessagesNewStreaming(ctx, params, onTextDelta, call)
 	})
 }
 
-func callClaudeWithRetry[T any](
-	ctx context.Context,
-	caller func(context.Context) (*T, bool, error),
-) (*T, error) {
-	const maxRetries = 3
-	rateLimitWaitTimes := []time.Duration{65 * time.Second, 100 * time.Second, 135 * time.Second}
-	serverErrorWaitTimes := []time.Duration{5 * time.Second, 30 * time.Second, 60 * time.Second}
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		resp, streamedAnyDelta, err := caller(ctx)
-		if err != nil {
-			if isRateLimitError(err) {
-				if attempt < maxRetries-1 {
-					if streamedAnyDelta {
-						return nil, err
-					}
-					if waitErr := waitForRetry(ctx, rateLimitWaitTimes[attempt]); waitErr != nil {
-						return nil, waitErr
-					}
-					continue
-				}
-			} else if isServerError(err) {
-				if attempt < maxRetries-1 {
-					if streamedAnyDelta {
-						return nil, err
-					}
-					if waitErr := waitForRetry(ctx, serverErrorWaitTimes[attempt]); waitErr != nil {
-						return nil, waitErr
-					}
-					continue
-				}
-			}
-			return nil, err
-		}
-		return resp, nil
+// claudeEventHasOutput reports whether a stream event carries model output (text or thinking),
+// which marks the time to first token.
+func claudeEventHasOutput(ev anthropic.MessageStreamEventUnion) bool {
+	contentDelta, ok := ev.AsAny().(anthropic.ContentBlockDeltaEvent)
+	if !ok {
+		return false
 	}
+	switch d := contentDelta.Delta.AsAny().(type) {
+	case anthropic.TextDelta:
+		return d.Text != ""
+	case anthropic.ThinkingDelta:
+		return d.Thinking != ""
+	}
+	return false
+}
 
-	return nil, fmt.Errorf("failed after %d attempts due to Anthropic API issues", maxRetries)
+// claudeBetaEventHasOutput is claudeEventHasOutput for Beta stream events.
+func claudeBetaEventHasOutput(ev anthropic.BetaRawMessageStreamEventUnion) bool {
+	contentDelta, ok := ev.AsAny().(anthropic.BetaRawContentBlockDeltaEvent)
+	if !ok {
+		return false
+	}
+	switch d := contentDelta.Delta.AsAny().(type) {
+	case anthropic.BetaTextDelta:
+		return d.Text != ""
+	case anthropic.BetaThinkingDelta:
+		return d.Thinking != ""
+	}
+	return false
 }
 
 func handleClaudeTextDeltaEvent(ev anthropic.MessageStreamEventUnion, onTextDelta func(delta string)) bool {
@@ -408,6 +505,20 @@ func handleClaudeTextDeltaEvent(ev anthropic.MessageStreamEventUnion, onTextDelt
 	}
 	onTextDelta(textDelta.Text)
 	return true
+}
+
+// handleClaudeThinkingDeltaEvent forwards a thinking_delta's text to onThinkingDelta.
+func handleClaudeThinkingDeltaEvent(ev anthropic.MessageStreamEventUnion, onThinkingDelta func(delta string)) {
+	if onThinkingDelta == nil {
+		return
+	}
+	contentDelta, ok := ev.AsAny().(anthropic.ContentBlockDeltaEvent)
+	if !ok {
+		return
+	}
+	if thinking, ok := contentDelta.Delta.AsAny().(anthropic.ThinkingDelta); ok && thinking.Thinking != "" {
+		onThinkingDelta(thinking.Thinking)
+	}
 }
 
 func handleClaudeBetaTextDeltaEvent(ev anthropic.BetaRawMessageStreamEventUnion, onTextDelta func(delta string)) bool {
@@ -461,6 +572,30 @@ func ExtractClaudeText(msg *anthropic.Message) string {
 		}
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// ExtractClaudeThinking concatenates the thinking blocks in the response content.
+// Native Anthropic turns carry none (we never enable thinking there); z.ai GLM always
+// thinks, so this is where its reasoning chain lives. Redacted thinking is skipped —
+// it is encrypted and has nothing to show.
+func ExtractClaudeThinking(msg *anthropic.Message) string {
+	if msg == nil {
+		return ""
+	}
+	var parts []string
+	for _, block := range msg.Content {
+		if tb, ok := block.AsAny().(anthropic.ThinkingBlock); ok && strings.TrimSpace(tb.Thinking) != "" {
+			parts = append(parts, tb.Thinking)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// claudeTruncatedWithoutText reports whether msg was cut off at the output cap before
+// producing any reply text — the whole budget went to thinking or a (likely partial)
+// tool call. Such a response is unusable as-is.
+func claudeTruncatedWithoutText(msg *anthropic.Message) bool {
+	return msg != nil && msg.StopReason == anthropic.StopReasonMaxTokens && strings.TrimSpace(ExtractClaudeText(msg)) == ""
 }
 
 // ExtractClaudeBetaText concatenates all text blocks in a beta response.

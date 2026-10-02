@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
 func TestSlicePNGGrid3x3_NineCells(t *testing.T) {
@@ -151,11 +152,32 @@ func TestInferExpressionGridLikeness_EmptyInputs(t *testing.T) {
 	require.Equal(t, "", out)
 }
 
-func TestUploadPersonalityExpressionCell_EmptyPNG(t *testing.T) {
+func TestUploadExpressionCellAttachment_EmptyPNG(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	uid, pid := uuid.New(), uuid.New()
 	a := &Agent{}
-	err := a.uploadPersonalityExpressionCell(ctx, uid, pid, "happy", nil)
+	id, err := a.uploadExpressionCellAttachment(ctx, uid, pid, "happy", nil)
 	require.ErrorContains(t, err, "empty cell png")
+	require.Equal(t, uuid.Nil, id)
+}
+
+func TestBuildExpressionGridCanvasInstructions_DefaultKeysMatchLegacyLayout(t *testing.T) {
+	t.Parallel()
+	got := buildExpressionGridCanvasInstructions(ExpressionGridKeys)
+	require.Contains(t, got, "(row-major: happy | content | sad; angry | surprised | confused; tired | in love | thinking)")
+}
+
+func TestBuildExpressionGridCanvasInstructions_CustomKeys(t *testing.T) {
+	t.Parallel()
+	keys := []string{"smug", "wry_grin", "sad", "furious", "shocked", "lost", "sleepy", "smitten", "pondering"}
+	got := buildExpressionGridCanvasInstructions(keys)
+	require.Contains(t, got, "(row-major: smug | wry grin | sad; furious | shocked | lost; sleepy | smitten | pondering)")
+}
+
+func TestGenerateExpressionGridCells_RequiresNineKeys(t *testing.T) {
+	t.Parallel()
+	a := &Agent{}
+	_, err := a.generateExpressionGridCells(context.Background(), &models.Personality{}, []string{"happy"}, expressionGridReference{})
+	require.ErrorContains(t, err, "expected 9 keys")
 }

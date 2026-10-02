@@ -1,9 +1,12 @@
 import { DOCUMENT } from '@angular/common';
-import { Directive, ElementRef, HostListener, OnDestroy, Renderer2, computed, inject, input } from '@angular/core';
+import { Directive, booleanAttribute, ElementRef, HostListener, OnDestroy, Renderer2, computed, inject, input } from '@angular/core';
 
 export type TooltipPlacement = 'top' | 'bottom' | 'left' | 'right';
 
 let tooltipId = 0;
+
+/** Minimum space kept between a tooltip and the viewport edge, in px. */
+const viewportGutter = 8;
 
 @Directive({
   selector: '[uiTooltip]',
@@ -13,6 +16,12 @@ export class TooltipDirective implements OnDestroy {
   readonly uiTooltip = input<string>('');
   readonly placement = input<TooltipPlacement>('top');
   readonly disabledOnTouch = input(true);
+  /**
+   * Only show when text is cut off (ellipsis or line clamp), e.g. a long thread name. Checks
+   * `truncationTarget` if given (the text span inside a row), else the host itself.
+   */
+  readonly truncatedOnly = input(false, { transform: booleanAttribute });
+  readonly truncationTarget = input<HTMLElement | null>(null);
 
   private readonly elementRef = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly renderer = inject(Renderer2);
@@ -39,7 +48,7 @@ export class TooltipDirective implements OnDestroy {
   @HostListener('mouseenter')
   @HostListener('focus')
   show(): void {
-    if (!this.uiTooltip() || this.isDisabledForTouch()) {
+    if (!this.uiTooltip() || this.isDisabledForTouch() || (this.truncatedOnly() && !this.isTruncated())) {
       return;
     }
 
@@ -74,6 +83,11 @@ export class TooltipDirective implements OnDestroy {
   @HostListener('keydown.escape')
   onEscape(): void {
     this.hide();
+  }
+
+  private isTruncated(): boolean {
+    const el = this.truncationTarget() ?? this.elementRef.nativeElement;
+    return el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight;
   }
 
   private ensureTooltipElement(): HTMLElement {
@@ -124,6 +138,18 @@ export class TooltipDirective implements OnDestroy {
       default:
         top = hostRect.top - this.tooltipOffset;
         break;
+    }
+
+    // Top/bottom tooltips are centred on the host (translate -50%), so a host near a screen
+    // edge would push half the tooltip off-screen. Keep the whole tooltip inside the gutter.
+    const placement = this.placement();
+    const viewportWidth = this.document.defaultView?.innerWidth ?? 0;
+    const width = tooltip.offsetWidth;
+    if ((placement === 'top' || placement === 'bottom') && viewportWidth > 0 && width > 0) {
+      const half = width / 2;
+      const min = viewportGutter + half;
+      const max = viewportWidth - viewportGutter - half;
+      left = max < min ? viewportWidth / 2 : Math.min(Math.max(left, min), max);
     }
 
     this.renderer.setStyle(tooltip, 'left', `${left}px`);

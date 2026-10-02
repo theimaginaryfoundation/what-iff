@@ -16,6 +16,7 @@ import {
   Personality,
   PersonalityExpression,
   UpdatePersonalityRequest,
+  buildPersonalityUpdateRequest,
 } from '../../../core/models/personality.model';
 import { ConfirmationService } from '../../../core/services/confirmation.service';
 import { PersonalityService } from '../../../core/services/personality.service';
@@ -40,6 +41,8 @@ import {
   PersonalityEditDraft,
   PersonalityEditorSessionService,
 } from '../services/personality-editor-session.service';
+import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 
 @Component({
   selector: 'app-personality-detail-page',
@@ -53,6 +56,8 @@ import {
     PersonalityMediaJobBannerComponent,
     BellIconComponent,
     ContractIconComponent,
+    HelpHintComponent,
+    TooltipDirective,
   ],
   providers: [PersonalityViewService],
   templateUrl: './personality-detail-page.component.html',
@@ -333,22 +338,7 @@ export class PersonalityDetailPageComponent implements OnInit {
     personality: Personality,
     overrides: Partial<UpdatePersonalityRequest>,
   ): UpdatePersonalityRequest {
-    return {
-      name: personality.name,
-      system_prompt: personality.system_prompt,
-      auto_pin_memories: personality.auto_pin_memories,
-      cover_image_id: personality.cover_image_id,
-      accent_color: personality.accent_color,
-      thumbnail_circle: personality.thumbnail_circle,
-      scratchpad: personality.scratchpad,
-      scratchpad_update_prompt: personality.scratchpad_update_prompt,
-      archival_model: personality.archival_model,
-      memory_search_prompt: personality.memory_search_prompt,
-      memory_write_prompt: personality.memory_write_prompt,
-      expressions_enabled: personality.expressions_enabled,
-      image_style: personality.image_style,
-      ...overrides,
-    };
+    return buildPersonalityUpdateRequest(personality, overrides);
   }
 }
 

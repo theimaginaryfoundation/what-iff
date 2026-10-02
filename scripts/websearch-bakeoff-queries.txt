@@ -1,0 +1,40 @@
+# Starter queries for cmd/websearch-bakeoff (ADR 0x021). One per line; # starts a comment.
+# Replace or extend with real searches from What Iff conversations before choosing a default.
+
+# Current events / freshness
+latest Go release notes
+Angular 21 release date and headline features
+this week's top AI model releases
+
+# Factual lookups
+how long do red foxes live in the wild
+what is the boiling point of water at 2000 m altitude
+population of Reykjavik
+
+# Practical / how-to
+how to repot a monstera without damaging roots
+best way to store fresh basil
+sourdough starter not rising after a week
+
+# Technical
+postgres pgvector hnsw vs ivfflat index tradeoffs
+rxjs switchMap vs exhaustMap when to use
+docker compose healthcheck depends_on condition service_healthy
+
+# Recommendations / opinions
+cozy fantasy novels similar to Legends and Lattes
+beginner friendly board games for two players
+quiet mechanical keyboard switches for office
+
+# Local / product
+Nintendo Switch 2 price
+iPhone 17 battery life review
+
+# Niche / long-tail
+Project Hail Mary movie release date
+history of the fox in Japanese folklore kitsune
+what does a kitsune's number of tails mean
+
+# Ambiguous (tests ranking)
+mercury
+python

@@ -16,6 +16,10 @@ type ActivePersonalityMediaJob struct {
 	PersonalityName *string `json:"personality_name,omitempty"`
 	FlowID          *string `json:"flow_id,omitempty"`
 	Error           string  `json:"error,omitempty"`
+
+	// ExpressionMode distinguishes expression_grid runs: "default" (assigns the default grid) or
+	// "candidates" (unassigned candidates for the Generate modal). Empty for other job types.
+	ExpressionMode string `json:"expression_mode,omitempty"`
 }
 
 // PersonalityMediaJobConflict is returned on HTTP 409 when a media job is already running.

@@ -24,7 +24,7 @@ export class ChatPage {
     this.typingIndicator = this.page.getByLabel('Assistant is typing');
     this.stopButton = this.page.getByRole('button', { name: 'Stop response' });
     this.contextPanelToggle = this.page.getByRole('button', {
-      name: 'Open conversation context panel',
+      name: 'Open thread context panel',
     });
     this.contextPanel = this.page.getByLabel('Conversation context', {
       exact: true,
@@ -32,8 +32,13 @@ export class ChatPage {
     this.contextBreakdown = this.page.getByLabel('Context breakdown', {
       exact: true,
     });
+    this.contextGaugeTop = this.contextBreakdown.locator('.gauge__top');
+    this.contextGaugeTotal = this.contextBreakdown.locator('.gauge__total');
+    this.contextGaugeBudget = this.contextBreakdown.locator('.gauge__budget');
+    this.contextCostOutlet = this.contextBreakdown.locator('app-context-cost-outlet');
+    this.contextCostEstimate = this.contextBreakdown.locator('.gauge__cost');
     this.scratchpadTab = this.page.getByLabel('Thread scratchpad');
-    this.scratchpadInput = this.page.getByPlaceholder('Capture thread-specific notes');
+    this.scratchpadInput = this.page.getByPlaceholder('Notes this personality keeps across all of its threads');
     this.composerInput = this.page.locator('#chat-composer-input');
     this.plusMenuButton = this.page.getByRole('button', { name: 'Open chat options' });
     this.plusMenu = this.page.getByRole('menu');
@@ -53,7 +58,8 @@ export class ChatPage {
     });
     this.modelPickerTrigger = this.page.locator('.model-picker__trigger');
     this.modelPickerOptions = this.page.locator('.model-picker__options');
-    this.composerPersonaMenuItem = this.plusMenu.getByRole('menuitem').nth(4);
+    // By name, not position: the menu gains items over time (Thread was added before this one).
+    this.composerPersonaMenuItem = this.plusMenu.getByRole('menuitem', { name: /^(Change personality|Pick a personality)/ });
     this.skillMenuItem = this.plusMenu.getByRole('menuitem', { name: 'Skill', exact: true });
     this.skillPickerDialog = this.page.getByRole('dialog', { name: 'Choose skills' });
     this.skillFilterInput = this.skillPickerDialog.getByLabel('Filter skills');
@@ -121,7 +127,7 @@ export class ChatPage {
 
   /**
    * Both the title button and the inline input it swaps in are labelled
-   * "Rename chat"; `renameButton` is the button form specifically.
+   * "Rename thread"; `renameButton` is the button form specifically.
    */
   readonly renameButton: Locator;
 
@@ -182,7 +188,7 @@ export class ChatPage {
   // --- context panel -------------------------------------------------------
   //
   // Two entry points for the same component. The title-bar toggle
-  // ("Open conversation context panel") is styled mobile-only — on a desktop
+  // ("Open thread context panel") is styled mobile-only — on a desktop
   // viewport it is in the DOM but not visible, and the panel is opened from
   // the vertical rail beside the conversation instead. `openContextPanel()`
   // picks whichever the current viewport offers.
@@ -193,6 +199,35 @@ export class ChatPage {
 
   /** Token meter and segment legend for the Context X-ray tab. */
   readonly contextBreakdown: Locator;
+
+  /**
+   * The gauge's first row: token total, budget, and — since #49 extracted it
+   * into `app-context-cost-outlet` — the cost display. Class-based rather than
+   * role-based because the row is a plain layout container with no accessible
+   * name of its own; it exists only so a spec can assert what shares a line.
+   */
+  readonly contextGaugeTop: Locator;
+
+  /** The token total on the gauge's top row. */
+  readonly contextGaugeTotal: Locator;
+
+  /** The "/ <budget> tokens" span that follows the total on the same row. */
+  readonly contextGaugeBudget: Locator;
+
+  /**
+   * The outlet host element. Mounted for every assistant turn regardless of
+   * which build is running or whether a priced estimate exists, so this — not
+   * the class-based locator below — is what a spec should test presence with.
+   */
+  readonly contextCostOutlet: Locator;
+
+  /**
+   * What the public build's outlet renders inside that host: the estimated
+   * input API cost ("Est. $0.007"). The private overlay replaces the same
+   * element with its credit-cost UI, which is why specs assert placement and
+   * shape rather than an exact string.
+   */
+  readonly contextCostEstimate: Locator;
 
   async openLastAssistantContext(): Promise<void> {
     await this.lastAssistantContextAction.click();
@@ -313,8 +348,18 @@ export class ChatPage {
    * and Enter runs it (`onKeydown`/`runCommand` in chat-composer.component.ts).
    */
   async openModePickerViaSlashCommand(): Promise<void> {
+    await this.waitForComposerControls();
     await this.composerInput.fill('/mode');
     await this.composerInput.press('Enter');
+  }
+
+  /**
+   * Waits until a reply in flight (if any) has cleared. The textarea stays editable while a
+   * reply runs, so `fill` no longer waits for that on its own, but slash commands and Enter
+   * stay locked until it clears; a trial click waits for the "+" button to be enabled.
+   */
+  private async waitForComposerControls(): Promise<void> {
+    await this.plusMenuButton.click({ trial: true });
   }
 
   /** An option row in the open mode picker (`role="option"`), by mode name or "Auto". */
@@ -366,6 +411,7 @@ export class ChatPage {
    * against the composer's `skill` command entry.
    */
   async openSkillPickerViaSlashCommand(): Promise<void> {
+    await this.waitForComposerControls();
     await this.composerInput.fill('/skill');
     await this.composerInput.press('Enter');
   }
@@ -410,11 +456,11 @@ export class ChatPage {
 
   /**
    * The composer's "+" menu persona row (`personaButtonClicked` in
-   * chat-composer.component.ts). Its accessible name is the active
-   * personality's own name (or "Pick personality" when none is set —
-   * `personaButtonLabel()`), so unlike its fixed-label siblings (Emoji,
-   * Skill, Mode, Attach file, Add from Gallery) it has no constant name to
-   * match on; it's the 5th item in that template's fixed row order.
+   * chat-composer.component.ts). Its accessible name is
+   * `personaButtonAriaLabel()` ("Change personality (currently <name>)", or
+   * "Pick a personality" when none is set), so unlike its fixed-label siblings
+   * (Emoji, Skill, Mode, Attach file, Add from gallery) it has no constant name
+   * to match on; it's the 5th item in that template's fixed row order.
    */
   readonly composerPersonaMenuItem: Locator;
 

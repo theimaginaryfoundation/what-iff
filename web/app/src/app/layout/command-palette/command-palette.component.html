@@ -18,7 +18,7 @@
           aria-expanded="true"
           [attr.aria-activedescendant]="activeRowId() || null"
           aria-autocomplete="list"
-          placeholder="Search threads, personalities, skills, memories..."
+          placeholder="Search threads, personalities, skills, memories, images..."
           [value]="service.query()"
           (input)="onInput($event)"
         />
@@ -105,7 +105,7 @@
             @if (service.query()) {
               No results for "{{ service.query() }}"
             } @else {
-              Type to search threads, personalities, skills, memories.
+              Type to search threads, personalities, skills, memories and images.
             }
           </div>
         }

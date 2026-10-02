@@ -8,6 +8,15 @@ function isExpressionGridImageName(name: string): boolean {
 }
 
 export function sourceForImage(image: FileAttachment): GalleryImageSource {
+  // The server classifies from data the client lacks (the linked message's origin),
+  // so prefer it. The heuristics below misfile user chat uploads as generated and
+  // unlinked gallery imports/portraits as unknown; they remain only as a fallback.
+  if (image.source === 'generated') {
+    return 'generated';
+  }
+  if (image.source === 'imported') {
+    return 'uploaded';
+  }
   const key = (image.s3_key ?? '').toLowerCase();
   const name = (image.name ?? '').toLowerCase();
   if (key.includes('/reference/') || key.includes('_ref_') || name.startsWith('reference-')) {

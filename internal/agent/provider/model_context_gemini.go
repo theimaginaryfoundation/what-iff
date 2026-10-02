@@ -16,6 +16,13 @@ import (
 // the Responses API's input-item shapes, so this renderer is intentionally simpler
 // than the OpenAI Responses renderer: system-ish segments become system messages and
 // everything conversational becomes user/assistant turns.
+//
+// History is replayed as plain text: no assistant turn carries tool_calls, and tool
+// results arrive as user text. That is what keeps MiMo's thinking-mode rule out of
+// play across turns (every historical assistant tool-call message must echo its
+// reasoning_content, else a 400). If history ever starts replaying real tool calls
+// here, attach each turn's stored model_reasoning as reasoning_content, as
+// chatCompletionAssistantReplay does within a turn.
 func renderGeminiMessages(ctx *ModelContext) []openai.ChatCompletionMessageParamUnion {
 	if ctx == nil {
 		return nil

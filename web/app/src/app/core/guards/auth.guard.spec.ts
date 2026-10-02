@@ -33,4 +33,33 @@ describe('guestGuard', () => {
         expect(allowed).toBe(false);
         expect(router.navigate).toHaveBeenCalledWith(['/chat']);
     });
+
+    it('allows an authenticated user onto a route that opts in via data.allowAuthenticated', async () => {
+        const authService = {
+            isLoggedIn: vi.fn().mockName("AuthService.isLoggedIn"),
+        };
+        const router = {
+            navigate: vi.fn().mockName("Router.navigate")
+        };
+        // Even though a session exists, the opt-out short-circuits before any
+        // redirect — so isLoggedIn should not even be consulted.
+        authService.isLoggedIn.mockReturnValue(true);
+
+        TestBed.configureTestingModule({
+            providers: [
+                provideZonelessChangeDetection(),
+                { provide: AuthService, useValue: authService },
+                { provide: ExternalAuthProvider, useClass: NoopExternalAuthProvider },
+                { provide: Router, useValue: router },
+            ],
+        });
+
+        // Parent route with the flag living on the activating child (mirrors the
+        // `/auth` -> `callback` shape).
+        const route = { firstChild: { firstChild: null, data: { allowAuthenticated: true } } };
+        const allowed = await TestBed.runInInjectionContext(() => guestGuard(route as any, {} as any));
+
+        expect(allowed).toBe(true);
+        expect(router.navigate).not.toHaveBeenCalled();
+    });
 });

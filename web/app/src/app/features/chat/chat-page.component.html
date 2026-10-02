@@ -56,18 +56,21 @@
               (blur)="commitThreadRename($any($event.target).value)"
               (keydown.enter)="commitThreadRename($any($event.target).value)"
               (keydown.escape)="cancelThreadRename()"
-              aria-label="Rename chat"
+              aria-label="Rename thread"
               autofocus
             />
           } @else {
             <button
               type="button"
               class="chat-page__thread-name-trigger"
-              title="Click to rename"
-              aria-label="Rename chat"
+              aria-label="Rename thread"
+              [uiTooltip]="session.thread()?.name ?? ''"
+              truncatedOnly
+              [truncationTarget]="threadTitle"
+              placement="bottom"
               (click)="startThreadRename()"
             >
-              <h1>{{ session.thread()?.name }}</h1>
+              <h1 #threadTitle>{{ session.thread()?.name }}</h1>
               <span class="chat-page__thread-name-icon" aria-hidden="true">
                 <ui-edit-icon [size]="12" />
               </span>
@@ -86,12 +89,12 @@
           </div>
         </div>
         <div class="chat-page__title-actions">
-          <app-thread-bookmarks [bookmarks]="bookmarks()" (jump)="jumpToBookmark($event)" />
-          <button type="button" class="chat-page__export" (click)="exportActiveChat()" aria-label="Export thread">
+          <app-thread-bookmarks [bookmarks]="bookmarks()" (jump)="jumpToBookmark($event)" (commitRemovals)="commitBookmarkRemovals($event)" />
+          <button type="button" class="chat-page__export" (click)="exportActiveChat()" aria-label="Export thread" uiTooltip="Download this thread as a ZIP" placement="bottom">
             <ui-file-icon [size]="12" />
             <span>Export</span>
           </button>
-          <button type="button" class="chat-page__close" (click)="closeActiveChat()" aria-label="Close thread">
+          <button type="button" class="chat-page__close" (click)="closeActiveChat()" aria-label="Close thread" uiTooltip="Close thread and return to the Thread Manager" placement="bottom">
             <ui-x-icon [size]="14" />
           </button>
           <app-context-panel-toggle class="chat-page__context-toggle" (open)="openContextPanelMobile()" />
@@ -104,15 +107,21 @@
         }
       </header>
       @if (threadSummary(); as summary) {
-        <button type="button" class="chat-page__summary-bar" (click)="openSummaryModal()">
-          <span class="chat-page__summary-label">Summary</span>
-          <span class="chat-page__summary-content">
-            <span class="chat-page__summary-text">{{ summary }}</span>
-            <span class="chat-page__summary-icon" aria-hidden="true">
-              <ui-chev-down-icon [size]="13" />
+        <div class="chat-page__summary-row">
+          <button type="button" class="chat-page__summary-bar" (click)="openSummaryModal()">
+            <span class="chat-page__summary-label">Summary</span>
+            <span class="chat-page__summary-content">
+              <span class="chat-page__summary-text">{{ summary }}</span>
+              <span class="chat-page__summary-icon" aria-hidden="true">
+                <ui-chev-down-icon [size]="13" />
+              </span>
             </span>
-          </span>
-        </button>
+          </button>
+          <ui-help-hint label="What is the thread summary?" heading="Thread summary" guide="context" align="end">
+            As a thread grows, older turns are compressed into this summary at checkpoints. The model gets the summary
+            instead of those turns, so it keeps the thread's history within its budget.
+          </ui-help-hint>
+        </div>
       }
 
       <section class="chat-page__body-row" aria-label="Conversation workspace">
@@ -120,7 +129,8 @@
           <nav class="chat-page__context-rail" aria-label="Conversation context shortcuts">
             <button
               type="button"
-              title="Scratchpad"
+              uiTooltip="Scratchpad: this personality's working notes about you"
+              placement="right"
               aria-label="Open scratchpad"
               [class.chat-page__context-rail-button--active]="contextPanel.visible() && contextPanel.activeTab() === 'scratchpad'"
               [attr.aria-current]="(contextPanel.visible() && contextPanel.activeTab() === 'scratchpad') ? 'true' : null"
@@ -130,7 +140,8 @@
             </button>
             <button
               type="button"
-              title="Memories"
+              uiTooltip="Memories: what the personality remembers here and globally"
+              placement="right"
               aria-label="Open memories"
               [class.chat-page__context-rail-button--active]="contextPanel.visible() && contextPanel.activeTab() === 'memories'"
               [attr.aria-current]="(contextPanel.visible() && contextPanel.activeTab() === 'memories') ? 'true' : null"
@@ -140,7 +151,8 @@
             </button>
             <button
               type="button"
-              title="Tools"
+              uiTooltip="Tools: actions the personality can use in this thread"
+              placement="right"
               aria-label="Open tools"
               [class.chat-page__context-rail-button--active]="contextPanel.visible() && contextPanel.activeTab() === 'tools'"
               [attr.aria-current]="(contextPanel.visible() && contextPanel.activeTab() === 'tools') ? 'true' : null"
@@ -150,7 +162,8 @@
             </button>
             <button
               type="button"
-              title="Context"
+              uiTooltip="Context: what was sent to the model for a reply"
+              placement="right"
               aria-label="Open context breakdown"
               [class.chat-page__context-rail-button--active]="contextPanel.visible() && contextPanel.activeTab() === 'context'"
               [attr.aria-current]="(contextPanel.visible() && contextPanel.activeTab() === 'context') ? 'true' : null"
@@ -159,6 +172,15 @@
               <ui-layers-icon [size]="14" />
             </button>
           </nav>
+
+          @if (bookmarkJumpStatus(); as status) {
+            <div class="chat-page__jump-toast" role="status" aria-live="polite">
+              @if (bookmarkJumpPending()) {
+                <span class="chat-page__jump-spinner" aria-hidden="true"></span>
+              }
+              <span>{{ status }}</span>
+            </div>
+          }
 
           <app-message-list
             [conversationId]="session.thread()?.id ?? null"
@@ -186,6 +208,9 @@
             [attachments]="pendingAttachments()"
             [chatId]="session.thread()?.id ?? null"
             [pendingRituals]="pendingRituals()"
+            [threadReferences]="contextPanel.composerThreadReferences()"
+            [threadOptions]="threadList.loadedThreads()"
+            [personalities]="personalities()"
             [models]="models()"
             [selectedModelId]="session.model()?.id ?? session.thread()?.model_id ?? null"
             [selectedPersonalityName]="selectedPersonalityName()"
@@ -194,7 +219,8 @@
             [isAutoMood]="session.thread()?.is_auto_mood ?? true"
             [threadArchived]="session.thread()?.archived === true"
             [composerPlaceholder]="sendGate.composerPlaceholder(selectedPersonalityName())"
-            [disabled]="session.composerBusy() || session.thread()?.archived === true || sendGate.blocked()"
+            [disabled]="session.thread()?.archived === true || sendGate.blocked()"
+            [busy]="session.composerBusy()"
             [modelPickerDisabled]="session.composerBusy() || session.thread()?.archived === true"
             [isGenerating]="session.isGenerating()"
             [generationRetryTarget]="retryableUserTurn()"
@@ -203,6 +229,10 @@
             (stop)="stopGeneration()"
             (filesSelected)="onFilesSelected($event)"
             (pendingRitualsChange)="onPendingRitualsChange($event)"
+            (threadReferenceToggled)="contextPanel.toggleComposerThreadReference($event)"
+            (threadReferenceRemoved)="contextPanel.removeComposerThreadReference($event)"
+            (threadReferencesCleared)="contextPanel.clearComposerThreadReferences()"
+            (threadReferencesReplaced)="contextPanel.setComposerThreadReferences($event)"
             (galleryAttachment)="onGalleryAttachment($event)"
             (attachmentRemoved)="onAttachmentRemoved($event)"
             (modelSelected)="session.setModel($event)"
@@ -217,7 +247,6 @@
         class="chat-page__thread-manager"
         [activeThreadId]="session.thread()?.id ?? null"
         [personalities]="personalities()"
-        [importTrigger]="importTrigger()"
         (selectThread)="openThread($event)"
         (newThread)="startConversation()"
       />
@@ -248,7 +277,7 @@
       <header class="chat-page__summary-modal-header">
         <div>
           <p class="chat-page__summary-modal-title">Summary: {{ session.thread()?.name }}</p>
-          <p class="chat-page__summary-modal-meta">1 thread summary</p>
+          <p class="chat-page__summary-modal-meta">Older turns are compressed into this summary and sent in their place.</p>
         </div>
         <button type="button" class="chat-page__summary-modal-close" aria-label="Close summary" (click)="closeSummaryModal()">
           <ui-x-icon [size]="14" />

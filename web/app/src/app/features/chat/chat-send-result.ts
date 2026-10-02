@@ -7,6 +7,12 @@ export type ChatSendMessageResult =
   | { status: 'skipped' }
   | { status: 'failed'; error: unknown };
 
+/** Optional extras for {@link ChatSessionService.sendMessage}. */
+export interface ChatSendMessageOptions {
+  /** Text prepended to the posted message only (never to the saved/restored draft). */
+  contextPrefix?: string;
+}
+
 export function isChatSendFailed(
   result: ChatSendMessageResult,
 ): result is { status: 'failed'; error: unknown } {

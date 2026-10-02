@@ -71,8 +71,9 @@ func toolContextPolicyFor(toolName string) toolContextPolicy {
 		// little value and their effect is captured elsewhere (scratchpad, memories,
 		// mood, jobs). Drop from cross-turn context.
 		return toolContextPolicy{persist: false}
-	case tools.ToolNameWebSearch:
-		// Web search snapshots go stale; keep for a handful of turns.
+	case tools.ToolNameWebSearch, tools.ToolNameFetchPage:
+		// Web search snapshots and fetched pages go stale; keep for a handful of turns. Pages can
+		// be long (up to ~20k chars), so they must not fall through to the no-expiry default.
 		return toolContextPolicy{persist: true, ttlTurns: webSearchTTLTurns}
 	}
 

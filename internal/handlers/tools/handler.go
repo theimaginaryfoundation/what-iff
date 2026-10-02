@@ -12,10 +12,12 @@ import (
 // Handler serves tool metadata to the frontend.
 type Handler struct {
 	logger *zap.Logger
+	// firstPartyWebSearch selects the web_search description (ADR 0x021).
+	firstPartyWebSearch bool
 }
 
-func NewHandler(logger *zap.Logger) *Handler {
-	return &Handler{logger: logger}
+func NewHandler(logger *zap.Logger, firstPartyWebSearch bool) *Handler {
+	return &Handler{logger: logger, firstPartyWebSearch: firstPartyWebSearch}
 }
 
 func (h *Handler) RegisterRoutes(router *mux.Router) {
@@ -24,6 +26,6 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 
 // ListTools returns agent tool metadata for the current user.
 func (h *Handler) ListTools(w http.ResponseWriter, r *http.Request) {
-	tools := agent.GetAvailableTools(r.Context())
+	tools := agent.GetAvailableTools(r.Context(), h.firstPartyWebSearch)
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, tools)
 }

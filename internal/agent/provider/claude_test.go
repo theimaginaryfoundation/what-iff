@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -239,13 +240,13 @@ func TestHandleClaudeBetaTextDeltaEvent_EmitsTextDeltaOnly(t *testing.T) {
 	require.Equal(t, []string{"Beta hi"}, got)
 }
 
-func TestCallClaudeWithRetry_StopsRetryAfterDeltaEmission(t *testing.T) {
+func TestRetryLLMCall_StopsRetryAfterDeltaEmission(t *testing.T) {
 	t.Parallel()
 
 	attempts := 0
-	_, err := callClaudeWithRetry(context.Background(), func(context.Context) (*string, bool, error) {
+	_, err := retryLLMCall(context.Background(), nil, nil, func(context.Context) (*string, bool, error) {
 		attempts++
-		return nil, true, errors.New("429 rate limit")
+		return nil, true, withStreamStatus(errors.New("rate limited"), http.StatusTooManyRequests)
 	})
 	require.Error(t, err)
 	require.Equal(t, 1, attempts, "must not retry once any delta has been emitted")

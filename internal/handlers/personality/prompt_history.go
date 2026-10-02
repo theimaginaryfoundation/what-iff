@@ -86,6 +86,7 @@ func (h *Handler) UpdatePersonalityWithPromptHistory(w http.ResponseWriter, r *h
 		return
 	}
 
+	h.attachUsageStats(r.Context(), userID, updated)
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, updated)
 }
 

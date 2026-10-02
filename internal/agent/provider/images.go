@@ -1,11 +1,13 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -32,10 +34,49 @@ func (a *OpenAIProvider) GenerateImagePNGBase64WithOptions(ctx context.Context, 
 		return "", fmt.Errorf("prompt is required")
 	}
 
-	resp, err := a.oaiClient.Images.Generate(ctx, buildImageGenerateParams(prompt, quality, aspectRatio))
+	params := buildImageGenerateParams(prompt, quality, aspectRatio)
+	call := startGenAICall(ctx, a.tel, telemetry.DependencyOpenAI, string(params.Model), genAIOpGenerateImage)
+	resp, err := a.oaiClient.Images.Generate(ctx, params)
+	endImageCall(call, resp, err)
 	if err != nil {
 		return "", err
 	}
+	return a.firstImageB64(resp)
+}
+
+// EditImagePNGBase64WithQuality generates a single square PNG image conditioned on a reference image
+// (the images edit endpoint, no mask) and returns the base64 payload. The reference steers style and
+// character design; the prompt still decides composition.
+//
+// The returned string is the raw base64 data (no data: prefix).
+func (a *OpenAIProvider) EditImagePNGBase64WithQuality(ctx context.Context, prompt string, quality ImageQuality, referenceImage []byte, referenceMIME string) (string, error) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return "", fmt.Errorf("prompt is required")
+	}
+	if len(referenceImage) == 0 {
+		return "", fmt.Errorf("reference image is required")
+	}
+
+	params := buildImageEditParams(prompt, quality, referenceImage, referenceMIME)
+	call := startGenAICall(ctx, a.tel, telemetry.DependencyOpenAI, string(params.Model), genAIOpEditImage)
+	resp, err := a.oaiClient.Images.Edit(ctx, params)
+	endImageCall(call, resp, err)
+	if err != nil {
+		return "", err
+	}
+	return a.firstImageB64(resp)
+}
+
+// endImageCall records an Images API call's duration and, when reported, its token usage.
+func endImageCall(call *genAICall, resp *openai.ImagesResponse, err error) {
+	if err == nil && resp != nil {
+		call.recordUsage(genAIUsage{Input: resp.Usage.InputTokens, Output: resp.Usage.OutputTokens})
+	}
+	call.end(err)
+}
+
+func (a *OpenAIProvider) firstImageB64(resp *openai.ImagesResponse) (string, error) {
 	if resp == nil {
 		return "", fmt.Errorf("nil images response")
 	}
@@ -82,5 +123,40 @@ func buildImageGenerateParams(prompt string, quality ImageQuality, aspectRatio I
 		Moderation:   openai.ImageGenerateParamsModerationLow,
 		Size:         openai.ImageGenerateParamsSize(size),
 		OutputFormat: openai.ImageGenerateParamsOutputFormat("png"),
+	}
+}
+
+// referenceImageFilenames maps accepted reference MIME types to an upload filename; the edit
+// endpoint sniffs the multipart filename/content type, so both must agree.
+var referenceImageFilenames = map[string]string{
+	"image/png":  "reference.png",
+	"image/jpeg": "reference.jpg",
+	"image/webp": "reference.webp",
+}
+
+func buildImageEditParams(prompt string, quality ImageQuality, referenceImage []byte, referenceMIME string) openai.ImageEditParams {
+	oaiQuality := openai.ImageEditParamsQualityLow
+	switch quality {
+	case ImageQualityMedium:
+		oaiQuality = openai.ImageEditParamsQualityMedium
+	case ImageQualityHigh:
+		oaiQuality = openai.ImageEditParamsQualityHigh
+	}
+
+	mime := strings.ToLower(strings.TrimSpace(referenceMIME))
+	filename, ok := referenceImageFilenames[mime]
+	if !ok {
+		mime, filename = "image/png", "reference.png"
+	}
+
+	return openai.ImageEditParams{
+		Prompt: prompt,
+		Image: openai.ImageEditParamsImageUnion{
+			OfFile: openai.File(bytes.NewReader(referenceImage), filename, mime),
+		},
+		Model:        openai.ImageModel(ImageEngine),
+		Quality:      oaiQuality,
+		Size:         openai.ImageEditParamsSize1024x1024,
+		OutputFormat: openai.ImageEditParamsOutputFormatPNG,
 	}
 }

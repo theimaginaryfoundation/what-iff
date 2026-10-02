@@ -136,3 +136,24 @@ export function missingExpressions(merged: readonly MergedExpression[]): MergedE
 export function isValidExpressionKey(key: string): boolean {
   return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(key);
 }
+
+/**
+ * Turns a free-text expression name ("Big Grin!") into a URL-safe key ("big-grin").
+ * Returns '' when nothing usable remains; callers should validate with {@link isValidExpressionKey}.
+ */
+export function expressionKeyFromName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9_-]/g, '')
+    .replace(/-{2,}/g, '-')
+    .replace(/^[-_]+/, '')
+    .replace(/-+$/, '')
+    .slice(0, 64);
+}
+
+/** Humanizes a key for display in an editable name field ("in-love" → "in love"). */
+export function expressionNameFromKey(key: string): string {
+  return key.replace(/[-_]+/g, ' ');
+}

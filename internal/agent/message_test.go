@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -41,6 +42,37 @@ func TestRecoverAsyncMessageJob_NoPanicIsNoop(t *testing.T) {
 		defer a.recoverAsyncMessageJob(context.Background(), uuid.New(), uuid.New(), uuid.New())
 	})
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestRunAsyncChatMessageJob_ContainsPanic covers the goroutine body that both a new send and a
+// retry run their turn in: a panicking turn must be contained (not crash the process), still
+// release the job's cancel registration, and be recorded as a panic job outcome.
+func TestRunAsyncChatMessageJob_ContainsPanic(t *testing.T) {
+	for _, action := range []string{"processing", "retry"} {
+		t.Run(action, func(t *testing.T) {
+			ds, _, cleanup := newTestDatastore(t)
+			defer cleanup()
+			a, tm := newMetricsAgent(t)
+			a.ds = ds
+			a.runningJobCancels = map[uuid.UUID]runningJobCancel{}
+			job := &models.Job{ID: uuid.New(), UserID: uuid.New(), JobType: JobTypeChatMessage}
+			runCtx, cancel := context.WithCancel(context.Background())
+			a.registerRunningJobCancel(job.ID, job.UserID, cancel)
+
+			require.NotPanics(t, func() {
+				a.runAsyncChatMessageJob(runCtx, cancel, job, uuid.New(), action, func() error {
+					panic("boom in retried turn")
+				})
+			})
+			require.ErrorIs(t, runCtx.Err(), context.Canceled, "run context is released")
+			a.runningJobCancelsMu.Lock()
+			_, stillRegistered := a.runningJobCancels[job.ID]
+			a.runningJobCancelsMu.Unlock()
+			require.False(t, stillRegistered, "job's cancel is unregistered")
+			require.Equal(t, uint64(1), tm.HistogramCount(t, telemetry.JobDuration.Name,
+				telemetry.AttrJobType.String(JobTypeChatMessage), telemetry.AttrOutcome.String(telemetry.JobOutcomePanic)))
+		})
+	}
 }
 
 // Test buildAttachmentLabels function
@@ -144,15 +176,47 @@ func TestAssertGenerationProducedOutput(t *testing.T) {
 	a := &Agent{logger: zap.NewNop()}
 	chatCtx := &chatContext{model: "claude-sonnet-4-6", modelProvider: "anthropic"}
 
-	t.Run("empty text with no attachments fails the turn", func(t *testing.T) {
+	// A max-tokens truncation is the common cause and gets its own clearer, actionable
+	// message (see isTruncationStopReason) instead of the generic stop_reason dump.
+	t.Run("max_tokens truncation fails with a clear, actionable message", func(t *testing.T) {
 		err := a.assertGenerationProducedOutput("anthropic", chatCtx,
 			&provider.GenerateResponse{ID: "msg_1", StopReason: "max_tokens", OutputTokens: 4096}, nil)
 
 		require.Error(t, err)
-		// The message has to carry the two fields that separate "generated text we failed
-		// to extract" from "nothing came back", since that is the whole diagnostic value.
-		require.Contains(t, err.Error(), "max_tokens")
-		require.Contains(t, err.Error(), "4096")
+		require.Contains(t, err.Error(), "cut off")
+		require.Contains(t, err.Error(), "please try again")
+		require.Contains(t, err.Error(), "4096", "output_tokens still names the budget that was consumed")
+		require.NotContains(t, err.Error(), "empty response", "truncation must not use the generic message")
+	})
+
+	// OpenAI reports the same condition as "max_output_tokens"; it routes to the same message.
+	t.Run("openai max_output_tokens truncation uses the truncation message", func(t *testing.T) {
+		err := a.assertGenerationProducedOutput("openai", chatCtx,
+			&provider.GenerateResponse{ID: "msg_1b", StopReason: "max_output_tokens", OutputTokens: 8192}, nil)
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cut off")
+	})
+
+	// Chat Completions providers (Xiaomi MiMo) report it as finish_reason "length".
+	t.Run("chat completions length truncation uses the truncation message", func(t *testing.T) {
+		err := a.assertGenerationProducedOutput("xiaomi", chatCtx,
+			&provider.GenerateResponse{ID: "msg_1d", StopReason: "length", OutputTokens: 16384}, nil)
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cut off")
+	})
+
+	// A non-truncation empty turn (extraction dropped the text, or nothing came back) keeps
+	// the diagnostic dump: the two fields that separate those causes are the whole value.
+	t.Run("non-truncation empty turn keeps the diagnostic message", func(t *testing.T) {
+		err := a.assertGenerationProducedOutput("anthropic", chatCtx,
+			&provider.GenerateResponse{ID: "msg_1c", StopReason: "end_turn", OutputTokens: 128}, nil)
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "empty response")
+		require.Contains(t, err.Error(), "end_turn")
+		require.Contains(t, err.Error(), "128")
 	})
 
 	t.Run("unreported stop reason is still named", func(t *testing.T) {

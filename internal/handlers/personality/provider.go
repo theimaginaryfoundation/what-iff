@@ -13,6 +13,9 @@ type Store interface {
 	CreatePersonality(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
 	ListPersonalities(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.PersonalityFilters) (*models.PaginatedResponse, error)
 	GetPersonality(ctx context.Context, userID, id uuid.UUID) (*models.Personality, error)
+	// GetPersonalityUsageStats fills Personality.Stats for single-personality
+	// responses; GetPersonality itself leaves Stats zeroed.
+	GetPersonalityUsageStats(ctx context.Context, userID, personalityID uuid.UUID) (models.PersonalityUsageStats, error)
 	UpdatePersonality(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
 	DeletePersonality(ctx context.Context, userID, id uuid.UUID) error
 	ListPersonalityExpressions(ctx context.Context, userID, personalityID uuid.UUID) ([]models.PersonalityExpression, error)

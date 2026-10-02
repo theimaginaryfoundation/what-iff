@@ -13,6 +13,9 @@ export interface FileAttachment {
   personality_id?: string;
   personalities?: FileAttachmentPersonalityRef[];
   created_at: string;
+  /** Server-derived origin class (see openapi FileAttachment.source). Absent when the
+   *  server could not determine it; the gallery then falls back to heuristics. */
+  source?: 'generated' | 'imported';
 }
 
 export interface FileAttachmentPersonalityRef {
@@ -80,3 +83,15 @@ export interface FileAttachmentFilters {
   max_date?: string;
 }
 
+
+export function isImageAttachment(attachment: Pick<FileAttachment, 'file_type'>): boolean {
+  return attachment.file_type?.toLowerCase().startsWith('image/') ?? false;
+}
+
+/** True when a pending chip is an image, whether still a local File or already uploaded. */
+export function isPendingImageAttachment(item: PendingFileAttachment): boolean {
+  if (item.attachment) {
+    return isImageAttachment(item.attachment);
+  }
+  return item.file?.type.toLowerCase().startsWith('image/') ?? false;
+}

@@ -161,9 +161,7 @@ func init() {
 	if err != nil {
 		logger.Fatal("Failed to initialize telemetry", zap.Error(err))
 	}
-	if err := tel.Metrics.InitStartupMetrics(context.Background()); err != nil {
-		logger.Fatal("Failed to initialize startup metrics", zap.Error(err))
-	}
+	tel.Metrics.Add(context.Background(), telemetry.AppStartups, 1)
 
 	// Initialize database connection
 	client, sqlDB, err = database.NewClient(logger)

@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -43,22 +43,36 @@ func (a *OpenAIProvider) zapLog() *zap.Logger {
 	return zap.NewNop()
 }
 
-// responsesNew is the single entry point for Responses API HTTP calls; records token usage metrics.
-func (c *OpenAIProvider) responsesNew(ctx context.Context, params responses.ResponseNewParams) (*responses.Response, error) {
-	resp, err := c.oaiClient.Responses.New(ctx, params)
+// responsesNew is the single entry point for Responses API HTTP calls; records token usage
+// (and content-filter blocks) on call, which callWithRetry owns and ends.
+func (c *OpenAIProvider) responsesNew(ctx context.Context, params responses.ResponseNewParams, call *genAICall) (*responses.Response, error) {
+	resp, err := c.oaiClient.Responses.New(ctx, params, option.WithMaxRetries(sdkNoRetries))
 	if err != nil {
 		return nil, err
 	}
-	recordProviderTokenUsage(ctx, c.tel, resp.Usage.InputTokens, resp.Usage.OutputTokens)
+	recordResponsesOutcome(call, resp)
 	return resp, nil
 }
 
+// recordResponsesOutcome records a successful Responses API response's token usage, and a
+// safety block when the response was cut off by the content filter.
+func recordResponsesOutcome(call *genAICall, resp *responses.Response) {
+	call.recordUsage(responsesUsage(resp.Usage))
+	if resp.IncompleteDetails.Reason == "content_filter" {
+		call.blocked()
+	}
+}
+
+// responsesNewStreaming streams one Responses API attempt. call (may be nil) gets the
+// attempt's time to first token and, on success, its token usage.
 func (c *OpenAIProvider) responsesNewStreaming(
 	ctx context.Context,
 	params responses.ResponseNewParams,
 	onTextDelta func(delta string),
+	call *genAICall,
 ) (*responses.Response, bool, error) {
-	stream := c.oaiClient.Responses.NewStreaming(ctx, params)
+	call.beginAttempt()
+	stream := c.oaiClient.Responses.NewStreaming(ctx, params, option.WithMaxRetries(sdkNoRetries))
 	defer stream.Close()
 
 	var finalResp *responses.Response
@@ -66,19 +80,49 @@ func (c *OpenAIProvider) responsesNewStreaming(
 
 	for stream.Next() {
 		ev := stream.Current()
-		if ev.Type == "response.output_text.delta" {
+		switch ev.Type {
+		case "response.output_text.delta":
 			if onTextDelta != nil && ev.Delta != "" {
 				onTextDelta(ev.Delta)
 			}
 			if ev.Delta != "" {
 				deltaEmitted = true
+				call.firstToken()
 			}
-			continue
-		}
-		if ev.Type == "response.completed" {
-			completed := ev.AsResponseCompleted()
-			resp := completed.Response
+		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
+			if ev.Delta != "" {
+				call.firstToken()
+			}
+		case "response.completed":
+			resp := ev.AsResponseCompleted().Response
 			finalResp = &resp
+		case "response.incomplete":
+			// A truncated-but-valid terminal response (e.g. max_output_tokens
+			// spent on reasoning by a model like Sol, or a content filter).
+			// This is not a failure: the non-streaming path already treats it as
+			// a real response and surfaces IncompleteDetails.Reason through
+			// GenerateResponse.StopReason. Failing the whole turn here was the
+			// root cause of the opaque "stream finished without response.completed
+			// event" errors (issue #132).
+			resp := ev.AsResponseIncomplete().Response
+			finalResp = &resp
+			c.zapLog().Warn("openai responses stream returned incomplete response",
+				zap.String("response_id", resp.ID),
+				zap.String("status", string(resp.Status)),
+				zap.String("incomplete_reason", resp.IncompleteDetails.Reason),
+				zap.Bool("delta_emitted", deltaEmitted))
+		case "response.failed":
+			resp := ev.AsResponseFailed().Response
+			return nil, deltaEmitted, withStreamStatus(fmt.Errorf(
+				"openai responses stream failed: %s (code %q, response_id %q)",
+				strings.TrimSpace(resp.Error.Message), string(resp.Error.Code), resp.ID),
+				openAIStreamErrorStatus(string(resp.Error.Code)))
+		case "error":
+			errEv := ev.AsError()
+			return nil, deltaEmitted, withStreamStatus(fmt.Errorf(
+				"openai responses stream error: %s (code %q, param %q)",
+				strings.TrimSpace(errEv.Message), errEv.Code, errEv.Param),
+				openAIStreamErrorStatus(errEv.Code))
 		}
 	}
 
@@ -92,16 +136,22 @@ func (c *OpenAIProvider) responsesNewStreaming(
 		return nil, deltaEmitted, err
 	}
 	if finalResp == nil {
-		return nil, deltaEmitted, fmt.Errorf("stream finished without response.completed event")
+		// The stream ended cleanly (stream.Err() is nil) but never delivered a
+		// terminal response event — no completed/incomplete/failed and no error.
+		// That points at a truncated or dropped stream (proxy/LB timeout,
+		// mid-stream disconnect) rather than a provider-signalled outcome.
+		return nil, deltaEmitted, fmt.Errorf(
+			"openai responses stream ended without a terminal event (no response.completed/incomplete/failed/error); likely a truncated or dropped stream (delta_emitted=%t)",
+			deltaEmitted)
 	}
-	recordProviderTokenUsage(ctx, c.tel, finalResp.Usage.InputTokens, finalResp.Usage.OutputTokens)
+	recordResponsesOutcome(call, finalResp)
 	return finalResp, deltaEmitted, nil
 }
 
 // CallWithRetry implements retry logic for API calls using the Responses API
 func (c *OpenAIProvider) CallWithRetry(ctx context.Context, params responses.ResponseNewParams) (*responses.Response, error) {
-	return c.callWithRetry(ctx, func(ctx context.Context, params responses.ResponseNewParams) (*responses.Response, bool, error) {
-		resp, err := c.responsesNew(ctx, params)
+	return c.callWithRetry(ctx, func(ctx context.Context, params responses.ResponseNewParams, call *genAICall) (*responses.Response, bool, error) {
+		resp, err := c.responsesNew(ctx, params, call)
 		return resp, false, err
 	}, params)
 }
@@ -114,73 +164,22 @@ func (c *OpenAIProvider) CallWithRetryStreaming(
 	params responses.ResponseNewParams,
 	onTextDelta func(delta string),
 ) (*responses.Response, error) {
-	return c.callWithRetry(ctx, func(ctx context.Context, params responses.ResponseNewParams) (*responses.Response, bool, error) {
-		return c.responsesNewStreaming(ctx, params, onTextDelta)
+	return c.callWithRetry(ctx, func(ctx context.Context, params responses.ResponseNewParams, call *genAICall) (*responses.Response, bool, error) {
+		return c.responsesNewStreaming(ctx, params, onTextDelta, call)
 	}, params)
 }
 
+// callWithRetry runs caller under retryLLMCall. It is also where the logical call's
+// GenAIOperationDuration is recorded (all attempts and waits included) and retries counted.
 func (c *OpenAIProvider) callWithRetry(
 	ctx context.Context,
-	caller func(context.Context, responses.ResponseNewParams) (*responses.Response, bool, error),
+	caller func(context.Context, responses.ResponseNewParams, *genAICall) (*responses.Response, bool, error),
 	params responses.ResponseNewParams,
 ) (*responses.Response, error) {
-	const maxRetries = 3
-	rateLimitWaitTimes := []time.Duration{65 * time.Second, 100 * time.Second, 135 * time.Second}
-	serverErrorWaitTimes := []time.Duration{5 * time.Second, 30 * time.Second, 60 * time.Second}
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		resp, streamedAnyDelta, err := caller(ctx, params)
-		if err != nil {
-			if isRateLimitError(err) {
-				waitTime := rateLimitWaitTimes[attempt]
-				if attempt < maxRetries-1 {
-					if streamedAnyDelta {
-						return nil, err
-					}
-					c.zapLog().Warn("openai rate limited; retrying",
-						zap.Int("attempt", attempt+1),
-						zap.Int("max_retries", maxRetries),
-						zap.Duration("wait", waitTime),
-						zap.Error(err))
-					if waitErr := waitForRetry(ctx, waitTime); waitErr != nil {
-						return nil, waitErr
-					}
-					continue
-				}
-			} else if isServerError(err) {
-				waitTime := serverErrorWaitTimes[attempt]
-				if attempt < maxRetries-1 {
-					if streamedAnyDelta {
-						return nil, err
-					}
-					c.zapLog().Warn("openai server error; retrying",
-						zap.Int("attempt", attempt+1),
-						zap.Int("max_retries", maxRetries),
-						zap.Duration("wait", waitTime),
-						zap.Error(err))
-					if waitErr := waitForRetry(ctx, waitTime); waitErr != nil {
-						return nil, waitErr
-					}
-					continue
-				}
-			}
-			return nil, err
-		}
-		return resp, nil
-	}
-
-	return nil, fmt.Errorf("failed after %d attempts due to OpenAI API issues", maxRetries)
-}
-
-func waitForRetry(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
+	call := startGenAICall(ctx, c.tel, telemetry.DependencyOpenAI, string(params.Model), genAIOpChat)
+	return retryLLMCall(ctx, call, c.zapLog(), func(ctx context.Context) (*responses.Response, bool, error) {
+		return caller(ctx, params, call)
+	})
 }
 
 func (c *OpenAIProvider) CountTokens(text string) (int, error) {
@@ -238,26 +237,4 @@ func dedupeParagraphs(paragraphs []string) []string {
 		}
 	}
 	return uniqueParagraphs
-}
-
-// isRateLimitError checks if an error is a rate limit error
-func isRateLimitError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := strings.ToLower(err.Error())
-	return strings.Contains(errStr, "429") ||
-		strings.Contains(errStr, "rate limit") ||
-		strings.Contains(errStr, "too many requests")
-}
-
-// isServerError checks if an error is a server error
-func isServerError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := strings.ToLower(err.Error())
-	return strings.Contains(errStr, "500") ||
-		strings.Contains(errStr, "internal server error") ||
-		strings.Contains(errStr, "server_error")
 }

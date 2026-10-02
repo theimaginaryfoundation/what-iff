@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 )
 
 type Config struct {
@@ -42,13 +44,20 @@ type Config struct {
 	LocalLLMBaseURL string
 	// LocalLLMModel is the model name requested from the local server
 	// (LOCAL_LLM_MODEL). Required when LLMBackend == "local".
-	LocalLLMModel  string
-	AllowedOrigins []string
-	ReadTimeout    time.Duration
-	WriteTimeout   time.Duration
-	IdleTimeout    time.Duration
-	OpenAIKey      string
-	AnthropicKey   string
+	LocalLLMModel string
+	// LLMRequestTimeout, LLMStreamTimeout and LLMStreamIdleTimeout bound each HTTP attempt
+	// of a provider SDK call (LLM_REQUEST_TIMEOUT, LLM_STREAM_TIMEOUT,
+	// LLM_STREAM_IDLE_TIMEOUT; Go durations, 0 disables). Defaults and their rationale are
+	// in provider.DefaultCallTimeouts.
+	LLMRequestTimeout    time.Duration
+	LLMStreamTimeout     time.Duration
+	LLMStreamIdleTimeout time.Duration
+	AllowedOrigins       []string
+	ReadTimeout          time.Duration
+	WriteTimeout         time.Duration
+	IdleTimeout          time.Duration
+	OpenAIKey            string
+	AnthropicKey         string
 	// ZAIKey enables z.ai GLM models (Anthropic-compatible endpoint); optional.
 	ZAIKey string
 	// ZAIBaseURL overrides the z.ai Anthropic-compatible base URL; optional.
@@ -56,18 +65,28 @@ type Config struct {
 	// GeminiKey enables Google Gemini models (OpenAI-compatible Chat Completions); optional.
 	GeminiKey string
 	// GeminiBaseURL overrides Google's OpenAI-compatible base URL; optional.
-	GeminiBaseURL         string
-	MistralKey            string
-	MistralBaseURL        string
-	DeepSeekKey           string
-	DeepSeekBaseURL       string
-	QwenKey               string
-	QwenBaseURL           string
-	XiaomiKey             string
-	XiaomiBaseURL         string
-	TokenEncryptionSecret string
-	AllowedEmails         []string
-	RequireBilling        bool // Feature flag to enable/disable billing
+	GeminiBaseURL   string
+	MistralKey      string
+	MistralBaseURL  string
+	DeepSeekKey     string
+	DeepSeekBaseURL string
+	QwenKey         string
+	QwenBaseURL     string
+	XiaomiKey       string
+	XiaomiBaseURL   string
+	// First-party web search (ADR 0x021). An empty key leaves the tools off.
+	ParallelAPIKey               string
+	ParallelSearchMode           string
+	TokenEncryptionSecret        string
+	MCPOAuthRedirectURL          string
+	MCPOAuthPostAuthURL          string
+	MCPOAuthAllowedRedirects     []string
+	MCPAllowLocalhostConnections bool
+	MCPOAuthSweepInterval        time.Duration
+	MCPOAuthRefreshAhead         time.Duration
+	MCPOAuthMaxFailures          int
+	AllowedEmails                []string
+	RequireBilling               bool // Feature flag to enable/disable billing
 	// EnableAgentJobsScheduler starts the in-process AgentJob scheduler (single-server MVP).
 	EnableAgentJobsScheduler bool
 	// AgentJobsSchedulerDistributed enables Postgres-backed leader election so only one
@@ -91,6 +110,20 @@ type Config struct {
 
 	// RunMigrations controls whether startup migrations and data backfills run.
 	RunMigrations bool
+}
+
+// durationEnv reads a Go duration (e.g. "90s", "10m") from name, or returns def when it is
+// unset, invalid or negative. "0" is kept, and means no limit.
+func durationEnv(name string, def time.Duration) time.Duration {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return def
+	}
+	parsed, err := time.ParseDuration(v)
+	if err != nil || parsed < 0 {
+		return def
+	}
+	return parsed
 }
 
 // parseMockLLMConfig reads the LLM_BACKEND/MOCK_LLM_* env vars into the
@@ -167,7 +200,45 @@ func NewConfig() *Config {
 	qwenBaseURL := strings.TrimSpace(os.Getenv("QWEN_BASE_URL"))
 	xiaomiKey := os.Getenv("XIAOMI_API_KEY")
 	xiaomiBaseURL := strings.TrimSpace(os.Getenv("XIAOMI_BASE_URL"))
+	parallelAPIKey := strings.TrimSpace(os.Getenv("PARALLEL_API_KEY"))
+	parallelSearchMode := strings.TrimSpace(os.Getenv("PARALLEL_SEARCH_MODE"))
 	tokenEncryptionSecret := strings.TrimSpace(os.Getenv("TOKEN_ENCRYPTION_SECRET"))
+	mcpOAuthRedirectURL := strings.TrimSpace(os.Getenv("MCP_OAUTH_REDIRECT_URL"))
+	if mcpOAuthRedirectURL == "" {
+		mcpOAuthRedirectURL = "http://localhost:8080/api/mcp-servers/oauth/callback"
+	}
+	mcpOAuthPostAuthURL := strings.TrimSpace(os.Getenv("MCP_OAUTH_POST_AUTH_URL"))
+	if mcpOAuthPostAuthURL == "" {
+		mcpOAuthPostAuthURL = "http://localhost:4200/integrations"
+	}
+	mcpOAuthAllowedRedirects := []string{}
+	if v := strings.TrimSpace(os.Getenv("MCP_OAUTH_ALLOWED_REDIRECTS")); v != "" {
+		for _, raw := range strings.Split(v, ",") {
+			trimmed := strings.TrimSpace(raw)
+			if trimmed != "" {
+				mcpOAuthAllowedRedirects = append(mcpOAuthAllowedRedirects, trimmed)
+			}
+		}
+	}
+	mcpAllowLocalhostConnections := strings.TrimSpace(os.Getenv("MCP_ALLOW_LOCALHOST_CONNECTIONS")) == "true"
+	mcpOAuthSweepInterval := 2 * time.Minute
+	if v := strings.TrimSpace(os.Getenv("MCP_OAUTH_SWEEP_INTERVAL")); v != "" {
+		if parsed, err := time.ParseDuration(v); err == nil && parsed > 0 {
+			mcpOAuthSweepInterval = parsed
+		}
+	}
+	mcpOAuthRefreshAhead := 15 * time.Minute
+	if v := strings.TrimSpace(os.Getenv("MCP_OAUTH_REFRESH_AHEAD")); v != "" {
+		if parsed, err := time.ParseDuration(v); err == nil && parsed > 0 {
+			mcpOAuthRefreshAhead = parsed
+		}
+	}
+	mcpOAuthMaxFailures := 3
+	if v := strings.TrimSpace(os.Getenv("MCP_OAUTH_MAX_FAILURES")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			mcpOAuthMaxFailures = parsed
+		}
+	}
 
 	// Local-development defaults only. Deployed environments must set
 	// ALLOWED_ORIGINS explicitly (comma-separated) — production hostnames are
@@ -239,6 +310,8 @@ func NewConfig() *Config {
 		}
 	}
 
+	callTimeouts := provider.DefaultCallTimeouts()
+
 	// Load Stripe configuration (only needed if billing is required)
 	stripeSecretKey := os.Getenv("STRIPE_SECRET_KEY")
 	stripePublishableKey := os.Getenv("STRIPE_PUBLISHABLE_KEY")
@@ -264,6 +337,9 @@ func NewConfig() *Config {
 		MockLLMStreamDelay:                  mockLLMStreamDelay,
 		LocalLLMBaseURL:                     localLLMBaseURL,
 		LocalLLMModel:                       localLLMModel,
+		LLMRequestTimeout:                   durationEnv("LLM_REQUEST_TIMEOUT", callTimeouts.Request),
+		LLMStreamTimeout:                    durationEnv("LLM_STREAM_TIMEOUT", callTimeouts.Stream),
+		LLMStreamIdleTimeout:                durationEnv("LLM_STREAM_IDLE_TIMEOUT", callTimeouts.StreamIdle),
 		AllowedOrigins:                      allowedOrigins,
 		ReadTimeout:                         15 * time.Second,
 		WriteTimeout:                        15 * time.Second,
@@ -282,7 +358,16 @@ func NewConfig() *Config {
 		QwenBaseURL:                         qwenBaseURL,
 		XiaomiKey:                           xiaomiKey,
 		XiaomiBaseURL:                       xiaomiBaseURL,
+		ParallelAPIKey:                      parallelAPIKey,
+		ParallelSearchMode:                  parallelSearchMode,
 		TokenEncryptionSecret:               tokenEncryptionSecret,
+		MCPOAuthRedirectURL:                 mcpOAuthRedirectURL,
+		MCPOAuthPostAuthURL:                 mcpOAuthPostAuthURL,
+		MCPOAuthAllowedRedirects:            mcpOAuthAllowedRedirects,
+		MCPAllowLocalhostConnections:        mcpAllowLocalhostConnections,
+		MCPOAuthSweepInterval:               mcpOAuthSweepInterval,
+		MCPOAuthRefreshAhead:                mcpOAuthRefreshAhead,
+		MCPOAuthMaxFailures:                 mcpOAuthMaxFailures,
 		AllowedEmails:                       allowedEmails,
 		RequireBilling:                      requireBilling,
 		EnableAgentJobsScheduler:            enableAgentJobsScheduler,

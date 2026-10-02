@@ -23,14 +23,16 @@ import { ConfirmationService } from '../../core/services/confirmation.service';
 import { ModelService } from '../../core/services/model.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { RitualService } from '../../core/services/ritual.service';
-import { isTerminalStatus } from './helpers/job-status.helpers';
+import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
+import { isTerminalStatus, statusDescription, statusLabel } from './helpers/job-status.helpers';
 import { JobFormComponent } from './components/job-form.component';
 import { JobRunHistoryComponent } from './components/job-run-history.component';
 
 @Component({
   selector: 'app-job-detail-page',
   standalone: true,
-  imports: [FormsModule, JobFormComponent, JobRunHistoryComponent],
+  imports: [FormsModule, JobFormComponent, JobRunHistoryComponent, HelpHintComponent, TooltipDirective],
   templateUrl: './job-detail-page.component.html',
   styleUrl: './job-detail-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -65,6 +67,8 @@ export class JobDetailPageComponent implements OnInit, OnDestroy {
   readonly ritualSearch = signal('');
   readonly ritualLoading = signal(false);
   readonly isCreateMode = signal(false);
+  readonly statusLabel = statusLabel;
+  readonly statusDescription = statusDescription;
 
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('id');

@@ -33,6 +33,7 @@ func toModelModel(e *ent.Model) *models.Model {
 		Description:        e.Description,
 		Provider:           string(e.Provider),
 		ToolSupport:        e.ToolSupport,
+		VisionSupport:      e.VisionSupport != nil && *e.VisionSupport,
 		BaseCreditsPerSlab: e.BaseCreditsPerSlab,
 		SubscriptionTier:   string(e.SubscriptionTier),
 		Deleted:            e.Deleted,
@@ -474,6 +475,7 @@ func (d *Datastore) AdminCreateModel(ctx context.Context, req models.CreateModel
 				SetDescription(req.Description).
 				SetProvider(providerValue).
 				SetToolSupport(req.ToolSupport).
+				SetVisionSupport(req.VisionSupport).
 				SetBaseCreditsPerSlab(normalizeBaseCreditsPerSlab(req.BaseCreditsPerSlab)).
 				SetSubscriptionTier(subscriptionTier).
 				Save(ctx)
@@ -520,6 +522,7 @@ func (d *Datastore) AdminCreateModel(ctx context.Context, req models.CreateModel
 		SetDescription(req.Description).
 		SetProvider(providerValue).
 		SetToolSupport(req.ToolSupport).
+		SetVisionSupport(req.VisionSupport).
 		SetBaseCreditsPerSlab(normalizeBaseCreditsPerSlab(req.BaseCreditsPerSlab)).
 		SetSubscriptionTier(subscriptionTier).
 		SetDeleted(false).
@@ -636,6 +639,9 @@ func (d *Datastore) AdminUpdateModel(ctx context.Context, id uuid.UUID, req mode
 
 	if req.ToolSupport != nil {
 		update.SetToolSupport(*req.ToolSupport)
+	}
+	if req.VisionSupport != nil {
+		update.SetVisionSupport(*req.VisionSupport)
 	}
 	if req.BaseCreditsPerSlab != nil {
 		update.SetBaseCreditsPerSlab(normalizeBaseCreditsPerSlab(*req.BaseCreditsPerSlab))

@@ -1,5 +1,4 @@
 import type { Locator, Page, Response } from '@playwright/test';
-import { AppShell } from './app-shell.page';
 import { ConfirmationModal } from './confirmation.modal';
 import { MUTATION_ACK_TIMEOUT } from '../timeouts';
 
@@ -10,11 +9,9 @@ import { MUTATION_ACK_TIMEOUT } from '../timeouts';
  * `aria-label="Threads"` region except the modals, which portal to the body.
  */
 export class ThreadListPanel {
-  private readonly shell: AppShell;
   readonly confirmation: ConfirmationModal;
 
   constructor(private readonly page: Page) {
-    this.shell = new AppShell(page);
     this.confirmation = new ConfirmationModal(page);
     this.panel = this.page.getByRole('complementary', { name: 'Threads' });
     this.heading = this.page.getByRole('heading', { name: 'Thread Manager' });
@@ -41,7 +38,6 @@ export class ThreadListPanel {
    */
   async navigateTo(): Promise<void> {
     await this.page.goto('/chat');
-    await this.shell.dismissAnnouncementIfPresent();
   }
 
   /** The `<aside aria-label="Threads">` wrapper — a `complementary`, not a `region`. */
@@ -310,19 +306,12 @@ export class ThreadListPanel {
     await this.page.getByRole('button', { name: 'Cancel', exact: true }).click();
   }
 
-  /**
-   * Opens the conversation-import modal. The panel's own header button is
-   * `display: none` below 768px, where the sidebar quick action of the same
-   * name is the only way in.
-   */
+  /** Opens the Import & Export screen from the panel header action. */
   async openImport(): Promise<void> {
     const headerButton = this.panel.getByRole('button', {
-      name: 'Import Conversations',
+      name: 'Import threads',
     });
-    if (await headerButton.isVisible().catch(() => false)) {
-      await headerButton.click();
-      return;
-    }
-    await this.shell.quickAction('Import Conversations');
+    await headerButton.click();
+    await this.page.waitForURL(/\/data$/);
   }
 }

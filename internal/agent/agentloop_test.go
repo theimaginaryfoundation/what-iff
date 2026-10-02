@@ -265,7 +265,7 @@ func TestExecuteToolUses_NotifiesPerToolGeneratedAttachments(t *testing.T) {
 	}
 	ctx := &chatContext{chat: chat}
 
-	_, _, attachments := a.executeToolUses(context.Background(), ctx, uses)
+	_, _, attachments := a.executeToolUses(context.Background(), ctx, 0, uses)
 	assert.NotEmpty(t, attachments)
 	assert.Equal(t, []string{"fake_tool"}, seen)
 }

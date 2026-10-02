@@ -5,6 +5,7 @@ import { SANITIZE, provideMarkdown } from 'ngx-markdown';
 
 import { routes } from './app.routes';
 import { authInterceptor } from './core/interceptors/auth.interceptor';
+import { extraHttpInterceptors } from './extensions/http-interceptors';
 import { ExternalAuthProvider } from './core/auth/external-auth.provider';
 import { externalAuthProviders } from './extensions/external-auth.providers';
 import { chatSendGateProviders } from './extensions/chat-send-gate.providers';
@@ -14,7 +15,7 @@ export const appConfig: ApplicationConfig = {
   providers: [
     provideZonelessChangeDetection(),
     provideRouter(routes),
-    provideHttpClient(withXhr(), withInterceptors([authInterceptor])),
+    provideHttpClient(withXhr(), withInterceptors([authInterceptor, ...extraHttpInterceptors])),
     provideMarkdown({
       sanitize: { provide: SANITIZE, useValue: SecurityContext.HTML },
     }),

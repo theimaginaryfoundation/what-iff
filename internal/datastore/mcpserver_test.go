@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -27,7 +28,26 @@ func createMCPServerTestSchema(t *testing.T, db *sql.DB) {
 			name text NOT NULL,
 			description text NOT NULL,
 			server_url text NOT NULL,
+			auth_mode text NOT NULL DEFAULT 'header',
 			auth_token text,
+			oauth_auth_url text,
+			oauth_token_url text,
+			oauth_client_id text,
+			oauth_client_secret text,
+			oauth_scopes json,
+			oauth_pkce_policy text NOT NULL DEFAULT 'supported',
+			oauth_access_token text,
+			oauth_refresh_token text,
+			oauth_access_token_expires_at datetime,
+			oauth_refresh_token_expires_at datetime,
+			oauth_authenticated_at datetime,
+			oauth_last_refresh_at datetime,
+			oauth_refresh_fail_count integer NOT NULL DEFAULT 0,
+			status text NOT NULL DEFAULT 'active',
+			status_reason text NOT NULL DEFAULT '',
+			last_checked_at datetime,
+			last_healthy_at datetime,
+			tool_count integer NOT NULL DEFAULT 0,
 			default_enabled bool NOT NULL DEFAULT false,
 			user_mcp_servers uuid NOT NULL
 		)`,
@@ -40,6 +60,27 @@ func createMCPServerTestSchema(t *testing.T, db *sql.DB) {
 			ritual_id uuid NOT NULL,
 			mcp_server_id uuid NOT NULL,
 			PRIMARY KEY (ritual_id, mcp_server_id)
+		)`,
+		`CREATE TABLE chat_mcp_tool_states (
+			id uuid PRIMARY KEY,
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL,
+			chat_id uuid NOT NULL,
+			mcp_server_id uuid NOT NULL,
+			loaded_tools json,
+			UNIQUE(chat_id, mcp_server_id)
+		)`,
+		`CREATE TABLE mcp_oauth_sessions (
+			id uuid PRIMARY KEY,
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL,
+			state text NOT NULL UNIQUE,
+			code_verifier text,
+			expires_at datetime NOT NULL,
+			consumed_at datetime,
+			redirect_after text,
+			user_mcp_oauth_sessions uuid NOT NULL,
+			mcp_server_oauth_sessions uuid NOT NULL
 		)`,
 	}
 	for _, stmt := range statements {
@@ -242,7 +283,7 @@ func TestUpdateMCPServer_Success(t *testing.T) {
 	updated.Name = "Renamed Server"
 	updated.DefaultEnabled = true
 
-	got, err := ds.UpdateMCPServer(ctx, userID, updated, models.MCPServerAuthTokenUpdate{}, nil)
+	got, err := ds.UpdateMCPServer(ctx, userID, updated, models.MCPServerAuthTokenUpdate{}, models.MCPOAuthSecretUpdate{}, nil)
 	require.NoError(t, err)
 	require.Equal(t, "Renamed Server", got.Name)
 	require.True(t, got.DefaultEnabled)
@@ -257,7 +298,7 @@ func TestUpdateMCPServer_NotFound(t *testing.T) {
 	server := baseMCPServerModel()
 	server.ID = uuid.New()
 
-	_, err := ds.UpdateMCPServer(ctx, userID, server, models.MCPServerAuthTokenUpdate{}, nil)
+	_, err := ds.UpdateMCPServer(ctx, userID, server, models.MCPServerAuthTokenUpdate{}, models.MCPOAuthSecretUpdate{}, nil)
 	require.ErrorIs(t, err, ErrMCPServerNotFound)
 }
 
@@ -271,7 +312,7 @@ func TestUpdateMCPServer_WrongOwner(t *testing.T) {
 	created, err := ds.CreateMCPServer(ctx, ownerID, baseMCPServerModel())
 	require.NoError(t, err)
 
-	_, err = ds.UpdateMCPServer(ctx, otherID, *created, models.MCPServerAuthTokenUpdate{}, nil)
+	_, err = ds.UpdateMCPServer(ctx, otherID, *created, models.MCPServerAuthTokenUpdate{}, models.MCPOAuthSecretUpdate{}, nil)
 	require.ErrorIs(t, err, ErrMCPServerNotFound)
 }
 
@@ -288,14 +329,14 @@ func TestUpdateMCPServer_AuthTokenSetAndClear(t *testing.T) {
 	got, err := ds.UpdateMCPServer(ctx, userID, *created, models.MCPServerAuthTokenUpdate{
 		Provided: true,
 		Value:    "new-token",
-	}, nil)
+	}, models.MCPOAuthSecretUpdate{}, nil)
 	require.NoError(t, err)
 	require.Equal(t, "new-token", got.AuthToken)
 
 	got, err = ds.UpdateMCPServer(ctx, userID, *created, models.MCPServerAuthTokenUpdate{
 		Provided: true,
 		Clear:    true,
-	}, nil)
+	}, models.MCPOAuthSecretUpdate{}, nil)
 	require.NoError(t, err)
 	require.Empty(t, got.AuthToken)
 }
@@ -313,13 +354,13 @@ func TestUpdateMCPServer_RitualIDsUpdate(t *testing.T) {
 	ritual2 := createMCPServerTestRitual(t, ds, userID)
 
 	ritualIDs := []uuid.UUID{ritual1, ritual2}
-	got, err := ds.UpdateMCPServer(ctx, userID, *created, models.MCPServerAuthTokenUpdate{}, &ritualIDs)
+	got, err := ds.UpdateMCPServer(ctx, userID, *created, models.MCPServerAuthTokenUpdate{}, models.MCPOAuthSecretUpdate{}, &ritualIDs)
 	require.NoError(t, err)
 	require.Len(t, got.RitualIDs, 2)
 
 	// Replacing with an empty slice clears the links.
 	empty := []uuid.UUID{}
-	got, err = ds.UpdateMCPServer(ctx, userID, *created, models.MCPServerAuthTokenUpdate{}, &empty)
+	got, err = ds.UpdateMCPServer(ctx, userID, *created, models.MCPServerAuthTokenUpdate{}, models.MCPOAuthSecretUpdate{}, &empty)
 	require.NoError(t, err)
 	require.Empty(t, got.RitualIDs)
 
@@ -327,16 +368,16 @@ func TestUpdateMCPServer_RitualIDsUpdate(t *testing.T) {
 	otherUserID := createMCPServerTestUser(t, ds)
 	otherRitual := createMCPServerTestRitual(t, ds, otherUserID)
 	badIDs := []uuid.UUID{otherRitual}
-	_, err = ds.UpdateMCPServer(ctx, userID, *created, models.MCPServerAuthTokenUpdate{}, &badIDs)
+	_, err = ds.UpdateMCPServer(ctx, userID, *created, models.MCPServerAuthTokenUpdate{}, models.MCPOAuthSecretUpdate{}, &badIDs)
 	require.ErrorIs(t, err, ErrInvalidRequestBody)
 
 	// Nil means don't touch ritual links: re-link, then confirm a nil update preserves them.
 	ritualIDs = []uuid.UUID{ritual1}
-	got, err = ds.UpdateMCPServer(ctx, userID, *created, models.MCPServerAuthTokenUpdate{}, &ritualIDs)
+	got, err = ds.UpdateMCPServer(ctx, userID, *created, models.MCPServerAuthTokenUpdate{}, models.MCPOAuthSecretUpdate{}, &ritualIDs)
 	require.NoError(t, err)
 	require.Len(t, got.RitualIDs, 1)
 
-	got, err = ds.UpdateMCPServer(ctx, userID, *created, models.MCPServerAuthTokenUpdate{}, nil)
+	got, err = ds.UpdateMCPServer(ctx, userID, *created, models.MCPServerAuthTokenUpdate{}, models.MCPOAuthSecretUpdate{}, nil)
 	require.NoError(t, err)
 	require.Len(t, got.RitualIDs, 1)
 }
@@ -490,7 +531,7 @@ func TestListRitualMCPServers(t *testing.T) {
 	require.NoError(t, err)
 
 	ritualIDs := []uuid.UUID{ritual1}
-	_, err = ds.UpdateMCPServer(ctx, userID, *created, models.MCPServerAuthTokenUpdate{}, &ritualIDs)
+	_, err = ds.UpdateMCPServer(ctx, userID, *created, models.MCPServerAuthTokenUpdate{}, models.MCPOAuthSecretUpdate{}, &ritualIDs)
 	require.NoError(t, err)
 
 	servers, err := ds.ListRitualMCPServers(ctx, userID, []uuid.UUID{ritual1, ritual2})
@@ -640,4 +681,215 @@ func TestRemoveMCPServerFromChat_ServerNotFound(t *testing.T) {
 
 	err := ds.RemoveMCPServerFromChat(ctx, userID, chatID, uuid.New())
 	require.ErrorIs(t, err, ErrMCPServerNotFound)
+}
+
+func TestSetAndListChatMCPLoadedTools(t *testing.T) {
+	ds, cleanup := newMCPServerTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMCPServerTestUser(t, ds)
+	modelID := createMCPServerTestModel(t, ds)
+	chatID := createMCPServerTestChat(t, ds, userID, modelID)
+	created, err := ds.CreateMCPServer(ctx, userID, baseMCPServerModel())
+	require.NoError(t, err)
+	require.NoError(t, ds.AddMCPServerToChat(ctx, userID, chatID, created.ID))
+
+	tools := []string{
+		"mcp__server__search",
+		"mcp__server__search", // duplicate ignored
+		"  mcp__server__get  ",
+		"",
+		"not_mcp_tool",
+	}
+	require.NoError(t, ds.SetChatMCPLoadedTools(ctx, userID, chatID, created.ID, tools))
+
+	loaded, err := ds.ListChatMCPLoadedTools(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"mcp__server__get", "mcp__server__search"}, loaded[created.ID])
+
+	require.NoError(t, ds.ClearChatMCPLoadedTools(ctx, userID, chatID, created.ID))
+	loaded, err = ds.ListChatMCPLoadedTools(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Empty(t, loaded[created.ID])
+}
+
+func TestClearAllChatMCPLoadedTools(t *testing.T) {
+	ds, cleanup := newMCPServerTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMCPServerTestUser(t, ds)
+	modelID := createMCPServerTestModel(t, ds)
+	chatID := createMCPServerTestChat(t, ds, userID, modelID)
+	serverA, err := ds.CreateMCPServer(ctx, userID, models.MCPServer{Name: "A", Description: "A", ServerURL: "https://a.example/mcp"})
+	require.NoError(t, err)
+	serverB, err := ds.CreateMCPServer(ctx, userID, models.MCPServer{Name: "B", Description: "B", ServerURL: "https://b.example/mcp"})
+	require.NoError(t, err)
+	require.NoError(t, ds.AddMCPServerToChat(ctx, userID, chatID, serverA.ID))
+	require.NoError(t, ds.AddMCPServerToChat(ctx, userID, chatID, serverB.ID))
+	require.NoError(t, ds.SetChatMCPLoadedTools(ctx, userID, chatID, serverA.ID, []string{"mcp__a__one"}))
+	require.NoError(t, ds.SetChatMCPLoadedTools(ctx, userID, chatID, serverB.ID, []string{"mcp__b__two"}))
+
+	require.NoError(t, ds.ClearAllChatMCPLoadedTools(ctx, userID, chatID))
+	loaded, err := ds.ListChatMCPLoadedTools(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Empty(t, loaded)
+}
+
+func TestRemoveMCPServerFromChat_ClearsLoadedToolState(t *testing.T) {
+	ds, cleanup := newMCPServerTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMCPServerTestUser(t, ds)
+	modelID := createMCPServerTestModel(t, ds)
+	chatID := createMCPServerTestChat(t, ds, userID, modelID)
+	server, err := ds.CreateMCPServer(ctx, userID, baseMCPServerModel())
+	require.NoError(t, err)
+	require.NoError(t, ds.AddMCPServerToChat(ctx, userID, chatID, server.ID))
+	require.NoError(t, ds.SetChatMCPLoadedTools(ctx, userID, chatID, server.ID, []string{"mcp__x__y"}))
+
+	require.NoError(t, ds.RemoveMCPServerFromChat(ctx, userID, chatID, server.ID))
+	loaded, err := ds.ListChatMCPLoadedTools(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Empty(t, loaded[server.ID])
+}
+
+func TestSetChatMCPLoadedTools_NormalizesAndClearsInvalidValues(t *testing.T) {
+	ds, cleanup := newMCPServerTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMCPServerTestUser(t, ds)
+	modelID := createMCPServerTestModel(t, ds)
+	chatID := createMCPServerTestChat(t, ds, userID, modelID)
+	server, err := ds.CreateMCPServer(ctx, userID, baseMCPServerModel())
+	require.NoError(t, err)
+	require.NoError(t, ds.AddMCPServerToChat(ctx, userID, chatID, server.ID))
+
+	require.NoError(t, ds.SetChatMCPLoadedTools(ctx, userID, chatID, server.ID, []string{" mcp__x__a ", "mcp__x__a", "bad", ""}))
+	loaded, err := ds.ListChatMCPLoadedTools(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"mcp__x__a"}, loaded[server.ID])
+
+	// invalid-only list should clear stored state
+	require.NoError(t, ds.SetChatMCPLoadedTools(ctx, userID, chatID, server.ID, []string{"bad", "  "}))
+	loaded, err = ds.ListChatMCPLoadedTools(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Empty(t, loaded[server.ID])
+}
+
+func TestSaveMCPServerOAuthTokens_RefreshTokenOnlyPreservesStatus(t *testing.T) {
+	ds, cleanup := newMCPServerTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMCPServerTestUser(t, ds)
+	server := baseMCPServerModel()
+	server.AuthMode = models.MCPServerAuthModeOAuth
+	created, err := ds.CreateMCPServer(ctx, userID, server)
+	require.NoError(t, err)
+
+	require.NoError(t, ds.MarkMCPServerOAuthRefreshFailure(ctx, userID, created.ID, "refresh failed", false))
+
+	now := time.Now().UTC()
+	require.NoError(t, ds.SaveMCPServerOAuthTokens(ctx, userID, created.ID, models.MCPOAuthTokenSet{
+		RefreshToken:  "new-refresh-token",
+		LastRefreshAt: &now,
+	}))
+
+	got, err := ds.GetMCPServer(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.MCPServerStatusRefreshError, got.Status)
+	require.Equal(t, "refresh failed", got.StatusReason)
+	require.Equal(t, 1, got.OAuthRefreshFailCount)
+	require.Equal(t, "new-refresh-token", got.OAuthRefreshToken)
+}
+
+func TestSaveMCPServerOAuthTokens_AccessTokenResetsStatus(t *testing.T) {
+	ds, cleanup := newMCPServerTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMCPServerTestUser(t, ds)
+	server := baseMCPServerModel()
+	server.AuthMode = models.MCPServerAuthModeOAuth
+	created, err := ds.CreateMCPServer(ctx, userID, server)
+	require.NoError(t, err)
+
+	require.NoError(t, ds.MarkMCPServerOAuthRefreshFailure(ctx, userID, created.ID, "refresh failed", false))
+
+	now := time.Now().UTC()
+	require.NoError(t, ds.SaveMCPServerOAuthTokens(ctx, userID, created.ID, models.MCPOAuthTokenSet{
+		AccessToken:   "new-access-token",
+		RefreshToken:  "new-refresh-token",
+		LastRefreshAt: &now,
+	}))
+
+	got, err := ds.GetMCPServer(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.MCPServerStatusActive, got.Status)
+	require.Equal(t, "", got.StatusReason)
+	require.Equal(t, 0, got.OAuthRefreshFailCount)
+	require.Equal(t, "new-access-token", got.OAuthAccessToken)
+	require.Equal(t, "new-refresh-token", got.OAuthRefreshToken)
+}
+
+func TestUpdateMCPServer_DoesNotOverwriteRuntimeState(t *testing.T) {
+	ds, cleanup := newMCPServerTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMCPServerTestUser(t, ds)
+	server := baseMCPServerModel()
+	server.AuthMode = models.MCPServerAuthModeOAuth
+	created, err := ds.CreateMCPServer(ctx, userID, server)
+	require.NoError(t, err)
+
+	checked := time.Now().UTC().Add(-2 * time.Minute)
+	healthy := checked.Add(-time.Minute)
+	require.NoError(t, ds.UpdateMCPServerRuntimeState(ctx, userID, created.ID, models.MCPServerStatusRefreshError, "runtime-failure", 7, &checked, &healthy))
+
+	now := time.Now().UTC()
+	accessExpiry := now.Add(30 * time.Minute)
+	refreshExpiry := now.Add(24 * time.Hour)
+	require.NoError(t, ds.SaveMCPServerOAuthTokens(ctx, userID, created.ID, models.MCPOAuthTokenSet{
+		AccessToken:           "access-token",
+		RefreshToken:          "refresh-token",
+		AccessTokenExpiresAt:  &accessExpiry,
+		RefreshTokenExpiresAt: &refreshExpiry,
+		AuthenticatedAt:       &now,
+		LastRefreshAt:         &now,
+	}))
+
+	updated := *created
+	updated.Name = "Renamed"
+	updated.Status = models.MCPServerStatusInvalid
+	updated.StatusReason = "should-not-apply"
+	updated.ToolCount = 0
+	updated.LastCheckedAt = nil
+	updated.LastHealthyAt = nil
+	updated.OAuthAccessToken = "should-not-apply"
+	updated.OAuthRefreshToken = "should-not-apply"
+	updated.OAuthAccessTokenExpiresAt = nil
+	updated.OAuthRefreshTokenExpiresAt = nil
+	updated.OAuthAuthenticatedAt = nil
+	updated.OAuthLastRefreshAt = nil
+	updated.OAuthRefreshFailCount = 0
+
+	got, err := ds.UpdateMCPServer(ctx, userID, updated, models.MCPServerAuthTokenUpdate{}, models.MCPOAuthSecretUpdate{}, nil)
+	require.NoError(t, err)
+	require.Equal(t, "Renamed", got.Name)
+	require.Equal(t, models.MCPServerStatusActive, got.Status)
+	require.Equal(t, "", got.StatusReason)
+	require.Equal(t, 7, got.ToolCount)
+	require.NotNil(t, got.LastCheckedAt)
+	require.NotNil(t, got.LastHealthyAt)
+	require.Equal(t, "access-token", got.OAuthAccessToken)
+	require.Equal(t, "refresh-token", got.OAuthRefreshToken)
+	require.NotNil(t, got.OAuthAccessTokenExpiresAt)
+	require.NotNil(t, got.OAuthRefreshTokenExpiresAt)
+	require.NotNil(t, got.OAuthAuthenticatedAt)
+	require.NotNil(t, got.OAuthLastRefreshAt)
 }

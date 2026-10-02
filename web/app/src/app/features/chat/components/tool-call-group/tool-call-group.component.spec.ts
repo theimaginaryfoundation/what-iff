@@ -30,6 +30,21 @@ describe('ToolCallGroupComponent', () => {
         expect(fixture.nativeElement.querySelectorAll('app-tool-call').length).toBe(2);
     });
 
+    it('shows a live group open with a working title while a call runs', () => {
+        fixture.componentRef.setInput('toolCalls', [{ ...toolCall('1'), status: 'complete' }, { ...toolCall('2'), status: 'running' }]);
+        fixture.componentRef.setInput('live', true);
+        fixture.detectChanges();
+        const host = fixture.nativeElement as HTMLElement;
+
+        expect(host.querySelector('.tool-call-group__toggle')?.textContent).toContain('working · 2 tool calls');
+        expect(host.querySelectorAll('app-tool-call').length).toBe(2);
+        expect(host.querySelector('.tool-call__status-dot--running')).not.toBeNull();
+
+        (host.querySelector('.tool-call-group__toggle') as HTMLButtonElement).click();
+        fixture.detectChanges();
+        expect(host.querySelectorAll('app-tool-call').length).toBe(0);
+    });
+
     it('renders a single tool call without the grouped wrapper', () => {
         fixture.componentRef.setInput('toolCalls', [toolCall('1')]);
         fixture.detectChanges();

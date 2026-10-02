@@ -68,7 +68,7 @@ describe('ModeGridComponent', () => {
       title: name,
       description: `${name} description`,
       toolsSilencedLabel: '0 silenced',
-      skillsLabel: 'All skills on',
+      skillsLabel: 'No skills attached',
       jobsLabel: 'Jobs on',
       personalities: [],
     };

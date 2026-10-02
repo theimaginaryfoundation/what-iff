@@ -852,7 +852,7 @@ func toRecallLifecycleEvent(ev *models.MemoryMergeEvent) recallLifecycleEvent {
 		out.RevertedAt = ev.RevertedAt.UTC().Format(time.RFC3339)
 	}
 	for _, m := range ev.SourceMembers {
-		out.SourceMembers = append(out.SourceMembers, truncateRunes(m.Content, recallLifecyclePreviewLen))
+		out.SourceMembers = append(out.SourceMembers, TruncateRunes(m.Content, recallLifecyclePreviewLen))
 	}
 	return out
 }
@@ -897,7 +897,7 @@ func buildDistillMaterial(r retrieval) (material string, sources []string) {
 		if text == "" {
 			return
 		}
-		text = truncateRunes(text, recallDistillMaxSourceLen)
+		text = TruncateRunes(text, recallDistillMaxSourceLen)
 		n++
 		fmt.Fprintf(&b, "[%d] (%s) %s\n\n", n, label, text)
 		sources = append(sources, label)
@@ -916,10 +916,10 @@ func buildDistillMaterial(r retrieval) (material string, sources []string) {
 	return strings.TrimSpace(b.String()), sources
 }
 
-// truncateRunes caps s to at most maxRunes runes, appending an ellipsis when it trims. It counts by
+// TruncateRunes caps s to at most maxRunes runes, appending an ellipsis when it trims. It counts by
 // rune (not byte) so a multibyte character is never split into invalid UTF-8 — which would otherwise
 // be handed to the distillation model.
-func truncateRunes(s string, maxRunes int) string {
+func TruncateRunes(s string, maxRunes int) string {
 	if maxRunes <= 0 {
 		return ""
 	}

@@ -12,6 +12,7 @@ import {
   WrenchIconComponent,
   XIconComponent,
 } from '../../../../shared/ui/icons/icons';
+import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 
 @Component({
   selector: 'app-context-panel',
@@ -26,6 +27,7 @@ import {
     BrainIconComponent,
     WrenchIconComponent,
     LayersIconComponent,
+    TooltipDirective,
   ],
   template: `
     <section class="context-panel" aria-label="Conversation context">
@@ -35,6 +37,8 @@ import {
           type="button"
           class="context-panel__close"
           aria-label="Close context panel"
+          uiTooltip="Close context panel"
+          placement="left"
           (click)="closePanel()"
         >
           <ui-x-icon [size]="14" />

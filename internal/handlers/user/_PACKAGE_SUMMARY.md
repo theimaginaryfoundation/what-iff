@@ -17,7 +17,8 @@ HTTP API for **users** — profile, preferences, registration/login-adjacent flo
 ## Non-obvious decisions
 
 - Cognito vs legacy JWT flows — follow comments in middleware and this handler when changing auth.
-- Production's plus-alias restriction is driven by `server.Config.Environment` (`ENV`, then `ENVIRONMENT`); the email allowlist is configured via `ALLOWED_EMAILS`. Both checks run before datastore/Stripe side effects.
+- Production's plus-alias restriction is driven by `server.Config.Environment` (`ENV`, then `ENVIRONMENT`); the email allowlist is configured via `ALLOWED_EMAILS`.
+  Both checks run before datastore/Stripe side effects.
 
 ## Testing
 

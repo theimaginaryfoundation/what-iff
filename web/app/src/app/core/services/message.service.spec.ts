@@ -130,4 +130,49 @@ describe('MessageService', () => {
         const messages = service.getMessages();
         expect(messages[0].read_status).toBe('read');
     });
+
+    it('initial page sends page (not cursor) and replaces the list newest-at-bottom', () => {
+        // API returns newest-first; the service reverses so newest sits at the bottom.
+        const newer = makeMessage({ id: 'msg-2', sent_at: '2026-06-23T00:00:02Z' });
+        const older = makeMessage({ id: 'msg-1', sent_at: '2026-06-23T00:00:01Z' });
+
+        service.listMessages('chat-1', 1, 50).subscribe();
+
+        const req = httpMock.expectOne(r => r.url.endsWith('/chat-1/chat-message'));
+        expect(req.request.params.get('page')).toBe('1');
+        expect(req.request.params.get('cursor')).toBeNull();
+        req.flush({ results: [newer, older], page: 1, total_count: 2, next_cursor: 'cursor-older' });
+
+        expect(service.getMessages().map(m => m.id)).toEqual(['msg-1', 'msg-2']);
+    });
+
+    it('a cursor request sends cursor (not page) and prepends older messages', () => {
+        service.listMessages('chat-1', 1, 50).subscribe();
+        const initial = httpMock.expectOne(r => r.url.endsWith('/chat-1/chat-message'));
+        initial.flush({
+            results: [makeMessage({ id: 'msg-3', sent_at: '2026-06-23T00:00:03Z' })],
+            page: 1,
+            total_count: 3,
+            next_cursor: 'cursor-older',
+        });
+        expect(service.getMessages().map(m => m.id)).toEqual(['msg-3']);
+
+        // Older batch via the cursor: prepends ahead of what's already loaded.
+        service.listMessages('chat-1', 1, 200, undefined, 'cursor-older').subscribe();
+        const older = httpMock.expectOne(r => r.url.endsWith('/chat-1/chat-message'));
+        expect(older.request.params.get('cursor')).toBe('cursor-older');
+        expect(older.request.params.get('page')).toBeNull();
+        expect(older.request.params.get('limit')).toBe('200');
+        older.flush({
+            results: [
+                makeMessage({ id: 'msg-2', sent_at: '2026-06-23T00:00:02Z' }),
+                makeMessage({ id: 'msg-1', sent_at: '2026-06-23T00:00:01Z' }),
+            ],
+            page: 1,
+            total_count: 3,
+            next_cursor: 'cursor-oldest',
+        });
+
+        expect(service.getMessages().map(m => m.id)).toEqual(['msg-1', 'msg-2', 'msg-3']);
+    });
 });

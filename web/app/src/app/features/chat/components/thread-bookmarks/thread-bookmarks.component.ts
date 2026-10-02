@@ -2,7 +2,9 @@ import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, ElementRef, input, output, signal, viewChild, viewChildren } from '@angular/core';
 
 import { MessageBookmark } from '../../../../core/models/message.model';
+import { HelpHintComponent } from '../../../../shared/ui/help-hint/help-hint.component';
 import { StarIconComponent } from '../../../../shared/ui/icons/icons';
+import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 
 /**
  * Thread bookmark navigator: a small toolbar button (shown only when the thread has bookmarks)
@@ -12,7 +14,7 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
 @Component({
   selector: 'app-thread-bookmarks',
   standalone: true,
-  imports: [DatePipe, StarIconComponent],
+  imports: [DatePipe, HelpHintComponent, StarIconComponent, TooltipDirective],
   template: `
     @if (bookmarks().length) {
       <div class="tb">
@@ -25,7 +27,8 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
           aria-haspopup="menu"
           aria-controls="thread-bookmarks-menu"
           (click)="toggle()"
-          title="Jump to a bookmark"
+          uiTooltip="Jump to a bookmarked message"
+          placement="bottom"
           #trigger
         >
           <ui-star-icon [size]="12" [filled]="true" />
@@ -35,13 +38,20 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
         @if (open()) {
           <div class="tb__backdrop" (click)="close(true)"></div>
           <div id="thread-bookmarks-menu" class="tb__panel" role="menu" aria-label="Bookmarks">
-            <div class="tb__head">Bookmarks · {{ bookmarks().length }}</div>
+            <div class="tb__head">
+              <span>Bookmarks · {{ bookmarks().length }}</span>
+              <ui-help-hint label="What are bookmarks?" heading="Bookmarks" align="end">
+                Messages you've bookmarked in this thread. Pick one to jump to it. The personality can also look up
+                your bookmarks when you ask about them.
+              </ui-help-hint>
+            </div>
             <ul class="tb__list">
               @for (b of bookmarks(); track b.id; let index = $index) {
-                <li>
+                <li class="tb__row">
                   <button
                     type="button"
                     class="tb__item"
+                    [class.tb__item--pending]="isPending(b.id)"
                     role="menuitem"
                     [attr.tabindex]="activeIndex() === index ? 0 : -1"
                     (click)="select(b)"
@@ -54,9 +64,25 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
                     <span class="tb__snippet">{{ b.snippet || '(no text)' }}</span>
                     <time class="tb__time" [attr.datetime]="b.sent_at">{{ b.sent_at | date: 'MMM d' }}</time>
                   </button>
+                  <button
+                    type="button"
+                    class="tb__remove"
+                    [class.tb__remove--pending]="isPending(b.id)"
+                    tabindex="-1"
+                    [attr.aria-pressed]="isPending(b.id)"
+                    [attr.aria-label]="(isPending(b.id) ? 'Restore bookmark: ' : 'Remove bookmark: ') + (b.snippet || 'this message')"
+                    [uiTooltip]="isPending(b.id) ? 'Keep this bookmark' : 'Remove this bookmark when the menu closes'"
+                    placement="left"
+                    (click)="toggleRemoval(b, $event)"
+                  >
+                    <ui-star-icon [size]="13" [filled]="!isPending(b.id)" />
+                  </button>
                 </li>
               }
             </ul>
+            @if (pendingRemovals().size) {
+              <p class="tb__hint">Removed bookmarks are deleted when you close this menu.</p>
+            }
           </div>
         }
       </div>
@@ -99,7 +125,10 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
     }
 
     .tb__head {
+      align-items: center;
       color: var(--color-text-muted);
+      display: flex;
+      justify-content: space-between;
       font-size: 0.625rem;
       font-weight: 700;
       letter-spacing: 0.06em;
@@ -109,6 +138,8 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
 
     .tb__list { display: grid; list-style: none; margin: 0; padding: 0 0.35rem 0.35rem; }
 
+    .tb__row { align-items: center; display: flex; gap: 0.15rem; }
+
     .tb__item {
       align-items: center;
       background: transparent;
@@ -116,13 +147,45 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
       border-radius: 0.45rem;
       cursor: pointer;
       display: grid;
+      flex: 1 1 auto;
       gap: 0.5rem;
       grid-template-columns: auto minmax(0, 1fr) auto;
+      min-width: 0;
       padding: 0.4rem 0.4rem;
       text-align: left;
-      width: 100%;
     }
     .tb__item:hover { background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+    .tb__item--pending .tb__snippet { color: var(--color-text-muted); text-decoration: line-through; }
+    .tb__item--pending { opacity: 0.6; }
+
+    .tb__remove {
+      align-items: center;
+      background: transparent;
+      border: 0;
+      border-radius: 0.45rem;
+      color: var(--bookmark-gold);
+      cursor: pointer;
+      display: inline-flex;
+      flex: 0 0 auto;
+      justify-content: center;
+      opacity: 0.7;
+      padding: 0.35rem;
+    }
+    .tb__remove:hover,
+    .tb__remove:focus-visible {
+      background: color-mix(in srgb, var(--bookmark-gold) 16%, transparent);
+      opacity: 1;
+    }
+    /* Marked for removal: hollow star, muted, so it reads as "will be removed" but is still here. */
+    .tb__remove--pending { color: var(--color-text-muted); opacity: 1; }
+
+    .tb__hint {
+      color: var(--color-text-muted);
+      font-size: 0.625rem;
+      line-height: 1.3;
+      margin: 0;
+      padding: 0.35rem 0.75rem 0.15rem;
+    }
 
     .tb__badge {
       background: color-mix(in srgb, var(--color-accent) 55%, var(--color-surface-base));
@@ -150,9 +213,13 @@ import { StarIconComponent } from '../../../../shared/ui/icons/icons';
 export class ThreadBookmarksComponent {
   readonly bookmarks = input<MessageBookmark[]>([]);
   readonly jump = output<MessageBookmark>();
+  /** Emitted once, on menu close, with the ids the user left un-starred (empty emits are skipped). */
+  readonly commitRemovals = output<string[]>();
 
   readonly open = signal(false);
   readonly activeIndex = signal(0);
+  /** Ids the user has un-starred but not yet committed — removed only when the menu closes. */
+  readonly pendingRemovals = signal<Set<string>>(new Set());
 
   private readonly trigger = viewChild<ElementRef<HTMLButtonElement>>('trigger');
   private readonly menuItems = viewChildren<ElementRef<HTMLButtonElement>>('menuItem');
@@ -166,6 +233,9 @@ export class ThreadBookmarksComponent {
   }
 
   close(returnFocus = false): void {
+    if (this.open()) {
+      this.flushPendingRemovals();
+    }
     this.open.set(false);
     if (returnFocus) {
       queueMicrotask(() => this.trigger()?.nativeElement.focus());
@@ -175,6 +245,42 @@ export class ThreadBookmarksComponent {
   select(bookmark: MessageBookmark): void {
     this.jump.emit(bookmark);
     this.close(true);
+  }
+
+  isPending(id: string): boolean {
+    return this.pendingRemovals().has(id);
+  }
+
+  /**
+   * Toggle a bookmark's "remove" state without saving yet — the star hollows and the row dims but
+   * stays in the list. Nothing is persisted until the menu closes, so a mis-click 100s of messages
+   * back is freely undoable (click again to restore) instead of an instant, obnoxious auto-save.
+   * `stopPropagation` keeps the row's jump handler from also firing.
+   */
+  toggleRemoval(bookmark: MessageBookmark, event: Event): void {
+    event.stopPropagation();
+    this.pendingRemovals.update(current => {
+      const next = new Set(current);
+      if (next.has(bookmark.id)) {
+        next.delete(bookmark.id);
+      } else {
+        next.add(bookmark.id);
+      }
+      return next;
+    });
+  }
+
+  /** Commit queued removals to the parent (once) and reset, e.g. when the menu closes. */
+  private flushPendingRemovals(): void {
+    const pending = this.pendingRemovals();
+    if (pending.size === 0) return;
+    // Only commit ids still present in the current list, in case it changed underneath us.
+    const present = new Set(this.bookmarks().map(b => b.id));
+    const ids = [...pending].filter(id => present.has(id));
+    this.pendingRemovals.set(new Set());
+    if (ids.length > 0) {
+      this.commitRemovals.emit(ids);
+    }
   }
 
   onMenuKeydown(event: KeyboardEvent, currentIndex: number): void {

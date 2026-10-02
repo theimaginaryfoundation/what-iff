@@ -92,14 +92,14 @@ func TestParseTimeScope(t *testing.T) {
 
 func TestTruncateRunes(t *testing.T) {
 	// Short strings pass through untouched.
-	if got := truncateRunes("hello", 10); got != "hello" {
+	if got := TruncateRunes("hello", 10); got != "hello" {
 		t.Fatalf("expected passthrough, got %q", got)
 	}
 	// A string of multibyte runes truncated mid-way must stay valid UTF-8 and not split a rune.
 	emoji := strings.Repeat("🙂", 20) // each is 4 bytes, 1 rune
-	got := truncateRunes(emoji, 5)
+	got := TruncateRunes(emoji, 5)
 	if !utf8.ValidString(got) {
-		t.Fatalf("truncateRunes produced invalid UTF-8: %q", got)
+		t.Fatalf("TruncateRunes produced invalid UTF-8: %q", got)
 	}
 	// 5 kept runes + the ellipsis rune.
 	if n := utf8.RuneCountInString(got); n != 6 {

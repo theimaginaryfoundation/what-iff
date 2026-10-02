@@ -11,14 +11,23 @@
     No memories found.
   </p>
 } @else {
-  <section class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3" role="list" aria-label="Memories">
+  <section class="memory-card-list" role="list" aria-label="Memories">
     @for (memory of memories(); track memory.id) {
       <app-memory-card
         [memory]="memory"
         [personalities]="personalities()"
+        [selected]="isSelected(memory.id)"
+        [focused]="focusedId() === memory.id"
+        [isArchivedView]="isArchivedView()"
+        [readOnly]="readOnly() || memory.level === 'summary'"
         [pinUpdating]="pinUpdatingId() === memory.id"
+        (toggleSelect)="toggleSelect.emit($event)"
+        (focus)="focus.emit($event)"
         (save)="save.emit($event)"
         (pinChange)="pinChange.emit($event)"
+        (starChange)="starChange.emit($event)"
+        (move)="move.emit($event)"
+        (archive)="archive.emit($event)"
         (delete)="delete.emit($event)" />
     }
   </section>

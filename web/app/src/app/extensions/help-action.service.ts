@@ -6,8 +6,9 @@ import { environment } from '@environments/environment';
  * feature. The open-source build opens the public docs (URL configurable via
  * `environment.docsUrl`); a private build replaces this file (via the
  * overlay) to open the in-app help/feedback modal instead. Nothing else
- * references the docs URL or the modal directly, so swapping this one file
- * changes the button's behavior wholesale.
+ * references the modal directly, so swapping this one file changes the
+ * button's behavior wholesale. (Individual guide links elsewhere resolve
+ * against the same docsUrl via core/constants/guides.constants.ts.)
  */
 @Injectable({ providedIn: 'root' })
 export class HelpActionService {

@@ -236,3 +236,16 @@ func (m *ModelContext) BuildClaudeParamsWithMaxTokens(model string, maxTokens in
 		Messages:  messages,
 	}
 }
+
+// ApplyZAIReasoningEffort bounds GLM/z.ai reasoning on params: it raises the output
+// cap to ReasoningMaxOutputTokens and sets output_config.effort (see the reasoning
+// constants for why effort, not a thinking budget). Callers apply this only on the zai
+// path; native Anthropic sets neither, so reasoning stays off there. Mutates params in
+// place; a nil params is a no-op.
+func ApplyZAIReasoningEffort(params *anthropic.MessageNewParams, effort anthropic.OutputConfigEffort) {
+	if params == nil {
+		return
+	}
+	params.MaxTokens = ReasoningMaxOutputTokens
+	params.OutputConfig.Effort = effort
+}

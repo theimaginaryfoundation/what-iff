@@ -50,7 +50,7 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: pre-commit
-pre-commit: fmt vet tidy test build check-no-local-models check-compose-defaults check-public-hygiene ## Run all pre-commit checks (matches CI/CD)
+pre-commit: fmt vet tidy test build check-no-local-models check-compose-defaults check-public-hygiene check-package-summaries ## Run all pre-commit checks (matches CI/CD)
 	@echo "✅ All pre-commit checks passed!"
 
 .PHONY: fmt
@@ -241,6 +241,18 @@ web: $(WEB_DIR)/node_modules/.stamp ## Run the Angular dev server (:4200)
 web-e2e: $(WEB_DIR)/node_modules/.stamp ## Run Playwright frontend E2E tests (requires the API already running on :8080 — see web/app/e2e/README.md)
 	@cd $(WEB_DIR) && npm run e2e
 
+# Deliberately NOT dependent on node_modules/.stamp. The report reads
+# committed baselines out of git and has no npm dependencies at all, so it
+# runs in a fresh clone in about a second — which is the difference between
+# a tool a designer uses mid-iteration and one they run once and forget.
+.PHONY: design-review
+design-review: ## Before/after HTML of every screen this branch changes (ARGS="--base v1.2.0 --open")
+	@cd $(WEB_DIR) && node e2e/design-review/cli.mjs $(ARGS)
+
+.PHONY: design-review-test
+design-review-test: ## Test the design review report tooling (node --test, no deps, no browser)
+	@cd $(WEB_DIR) && npm run design:review:test
+
 # npm ci runs only when the manifests change, keyed via a stamp file.
 $(WEB_DIR)/node_modules/.stamp: $(WEB_DIR)/package.json $(WEB_DIR)/package-lock.json
 	@cd $(WEB_DIR) && npm ci
@@ -393,6 +405,14 @@ check-compose-defaults: ## Fail if docker-compose.yml or its Go config re-ships 
 .PHONY: check-public-hygiene
 check-public-hygiene: ## Fail if secrets, AI attribution, or absolute home paths appear in tracked files
 	@./scripts/check-public-hygiene.sh
+
+.PHONY: check-package-summaries
+check-package-summaries: ## Fail if a _PACKAGE_SUMMARY.md has long multi-sentence lines (one sentence per line)
+	@python3 scripts/reflow-package-summaries.py --check
+
+.PHONY: reflow-package-summaries
+reflow-package-summaries: ## Rewrite _PACKAGE_SUMMARY.md files to one sentence per line (rendering unchanged)
+	@python3 scripts/reflow-package-summaries.py
 
 .PHONY: check-skill-symlinks
 check-skill-symlinks: ## Verify .claude/skills/ symlinks match .agents/skills/ and CLAUDE.md/GEMINI.md exist

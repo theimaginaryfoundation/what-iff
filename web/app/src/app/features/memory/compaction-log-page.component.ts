@@ -1,27 +1,25 @@
 import { CommonModule, DatePipe, UpperCasePipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, input, OnInit, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { forkJoin, map, of } from 'rxjs';
 
-import {
-  CheckpointSnapshot,
-  CompactionEvent,
-  CompactionLoadedMemory,
-  MemoryMergeEvent,
-} from '../../core/models/memory.model';
+import { CheckpointSnapshot, CompactionEvent, CompactionLoadedMemory, MemoryMergeEvent } from '../../core/models/memory.model';
 import { Chat } from '../../core/models/chat.model';
 import { Personality, PersonalityPromptChange } from '../../core/models/personality.model';
 import { ChatService } from '../../core/services/chat.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { MemoryService } from '../../core/services/memory.service';
 import { PersonalityService } from '../../core/services/personality.service';
+import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
+import { memoryScopeLabel, mergeTypeDescription, mergeTypeLabel } from './helpers/memory-vm.helpers';
 
 type PromptAuditEntry = PersonalityPromptChange & { personality_name: string };
 
 @Component({
   selector: 'app-compaction-log-page',
   standalone: true,
-  imports: [CommonModule, DatePipe, RouterLink, UpperCasePipe],
+  imports: [CommonModule, DatePipe, RouterLink, UpperCasePipe, HelpHintComponent, TooltipDirective],
   templateUrl: './compaction-log-page.component.html',
   styleUrl: './compaction-log-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -32,6 +30,9 @@ export class CompactionLogPageComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly chatService = inject(ChatService);
   private readonly personalityService = inject(PersonalityService);
+
+  /** When true, hide the standalone page chrome (used as a Memories tab). */
+  readonly embedded = input(false);
 
   readonly events = signal<CompactionEvent[]>([]);
   readonly promptChanges = signal<PromptAuditEntry[]>([]);
@@ -72,22 +73,24 @@ export class CompactionLogPageComponent implements OnInit {
   load(page: number): void {
     this.loading.set(true);
     this.error.set(null);
-    this.memoryService.listCompactionEvents(page, CompactionLogPageComponent.PAGE_SIZE, {
-      chat_id: this.selectedChatID() || undefined,
-      personality_id: this.selectedPersonalityID() || undefined,
-    }).subscribe({
-      next: response => {
-        this.events.set(response.results ?? []);
-        this.page.set(response.page ?? page);
-        this.totalCount.set(response.total_count ?? 0);
-        this.totalPages.set(Math.max(1, Math.ceil((response.total_count ?? 0) / CompactionLogPageComponent.PAGE_SIZE)));
-        this.loading.set(false);
-      },
-      error: err => {
-        this.error.set(err instanceof Error ? err.message : 'Failed to load compaction log');
-        this.loading.set(false);
-      },
-    });
+    this.memoryService
+      .listCompactionEvents(page, CompactionLogPageComponent.PAGE_SIZE, {
+        chat_id: this.selectedChatID() || undefined,
+        personality_id: this.selectedPersonalityID() || undefined,
+      })
+      .subscribe({
+        next: response => {
+          this.events.set(response.results ?? []);
+          this.page.set(response.page ?? page);
+          this.totalCount.set(response.total_count ?? 0);
+          this.totalPages.set(Math.max(1, Math.ceil((response.total_count ?? 0) / CompactionLogPageComponent.PAGE_SIZE)));
+          this.loading.set(false);
+        },
+        error: err => {
+          this.error.set(err instanceof Error ? err.message : 'Failed to load compaction log');
+          this.loading.set(false);
+        },
+      });
   }
 
   private loadPromptChanges(): void {
@@ -104,9 +107,9 @@ export class CompactionLogPageComponent implements OnInit {
     this.promptChangesLoading.set(true);
     this.promptChangesError.set(null);
     const requests = targets.map(personality =>
-      this.personalityService.listPromptChanges(personality.id).pipe(
-        map(changes => changes.map(change => ({ ...change, personality_name: personality.name }))),
-      ),
+      this.personalityService
+        .listPromptChanges(personality.id)
+        .pipe(map(changes => changes.map(change => ({ ...change, personality_name: personality.name })))),
     );
 
     (requests.length ? forkJoin(requests) : of([] as PromptAuditEntry[][])).subscribe({
@@ -221,13 +224,9 @@ export class CompactionLogPageComponent implements OnInit {
     return parts.join(' · ');
   }
 
-  mergeTypeLabel(event: MemoryMergeEvent): string {
-    switch (event.merge_type) {
-      case 'link': return 'Linked';
-      case 'fold_live': return 'Memories Merged';
-      default: return 'Updated';
-    }
-  }
+  readonly mergeTypeLabel = mergeTypeLabel;
+  readonly mergeTypeDescription = mergeTypeDescription;
+  readonly scopeLabel = memoryScopeLabel;
 
   mergedSourceCount(event: MemoryMergeEvent): number {
     const fromMembers = event.source_members?.length ?? 0;
@@ -252,10 +251,10 @@ export class CompactionLogPageComponent implements OnInit {
 
     const isScratchpad = snapshot.kind === 'scratchpad';
     const confirmed = await this.confirmation.confirm({
-      title: isScratchpad ? 'Restore personality scratchpad?' : 'Restore conversation summary?',
+      title: isScratchpad ? 'Restore personality scratchpad?' : 'Restore thread summary?',
       message: isScratchpad
-        ? 'This restores the scratchpad for every chat using this personality. Continue?'
-        : 'This restores this conversation to the selected checkpoint summary. Continue?',
+        ? 'This restores the scratchpad for every thread using this personality. Continue?'
+        : 'This restores this thread to the selected checkpoint summary. Continue?',
       type: 'warning',
       confirmText: 'Restore',
       cancelText: 'Cancel',
@@ -273,8 +272,8 @@ export class CompactionLogPageComponent implements OnInit {
         this.revertedIds.set(next);
         this.notice.set(
           snapshot.kind === 'scratchpad'
-            ? 'Scratchpad restored for this personality (shared across its chats).'
-            : 'Conversation summary restored for this thread.',
+            ? 'Scratchpad restored for this personality (shared across its threads).'
+            : 'Thread summary restored.',
         );
       },
       error: err => {
@@ -285,7 +284,7 @@ export class CompactionLogPageComponent implements OnInit {
   }
 
   openMemory(memoryId: string | null | undefined): void {
-    if (memoryId) void this.router.navigate(['/memories', memoryId]);
+    if (memoryId) void this.router.navigate(['/memories', memoryId], { queryParamsHandling: 'preserve' });
   }
 
   openThread(event: CompactionEvent): void {

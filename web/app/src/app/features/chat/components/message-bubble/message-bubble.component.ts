@@ -1,16 +1,18 @@
 
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, afterRenderEffect, computed, inject, input, output, viewChild } from '@angular/core';
+import { Router } from '@angular/router';
 
 import { ChatMessage } from '../../../../core/models/message.model';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../../chat.constants';
+import { parseThreadReferenceBlock } from '../../helpers/thread-reference.helpers';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
-import { StarIconComponent } from '../../../../shared/ui/icons/icons';
+import { BrainIconComponent, ChevRightIconComponent, StarIconComponent } from '../../../../shared/ui/icons/icons';
 import { MessageContentComponent } from '../message-content/message-content.component';
 
 @Component({
   selector: 'app-message-bubble',
   standalone: true,
-  imports: [MessageContentComponent, TooltipDirective, StarIconComponent],
+  imports: [MessageContentComponent, TooltipDirective, StarIconComponent, BrainIconComponent, ChevRightIconComponent],
   template: `
     <article
       class="bubble"
@@ -19,6 +21,38 @@ import { MessageContentComponent } from '../message-content/message-content.comp
       [class.bubble--bookmarked]="message().bookmarked && !isPendingPlaceholder()"
       [attr.aria-label]="ariaLabel()"
     >
+      @if (reasoning(); as reasoningText) {
+        <!-- Live while the model is still thinking (open, auto-following); settles to a
+             collapsed "Thought process" once reply text starts or the saved message lands.
+             [open] only flips on that transition, so a manual toggle otherwise sticks. -->
+        <details
+          class="bubble__reasoning"
+          [class.bubble__reasoning--live]="reasoningLive()"
+          [open]="reasoningLive()"
+        >
+          <summary class="bubble__reasoning-summary" uiTooltip="Show or hide the model's reasoning for this reply">
+            <ui-chev-right-icon class="bubble__reasoning-chevron" [size]="12" />
+            <ui-brain-icon [size]="12" />
+            <span>{{ reasoningLive() ? 'Thinking…' : 'Thought process' }}</span>
+          </summary>
+          <div #reasoningBox class="bubble__reasoning-text" [attr.aria-live]="reasoningLive() ? 'polite' : null">{{ reasoningText }}</div>
+        </details>
+      }
+      @if (userThreadBlock().references.length) {
+        <div class="bubble__thread-refs" role="group" aria-label="Threads attached to this message">
+          @for (ref of userThreadBlock().references; track ref.id) {
+            <a
+              class="bubble__thread-ref"
+              [href]="'/chat/' + ref.id"
+              [attr.aria-label]="'Open attached thread ' + ref.name"
+              (click)="openReferencedThread($event, ref.id)"
+            >
+              <span aria-hidden="true">#</span>
+              <span class="bubble__thread-ref-name">{{ ref.name }}</span>
+            </a>
+          }
+        </div>
+      }
       <div class="bubble__body">
         @if (showPendingDots()) {
           <span class="bubble__pending-dots" aria-hidden="true">
@@ -26,7 +60,7 @@ import { MessageContentComponent } from '../message-content/message-content.comp
           </span>
         } @else {
           <app-message-content
-            [content]="displayContent()"
+            [content]="bodyContent()"
             [attachments]="message().attachments ?? []"
             [preserveLineBreaks]="message().origin === 'User'"
           />
@@ -54,10 +88,10 @@ import { MessageContentComponent } from '../message-content/message-content.comp
               [attr.aria-pressed]="!!message().bookmarked"
               [attr.aria-label]="message().bookmarked ? 'Remove bookmark' : 'Bookmark this message'"
               (click)="toggleBookmark.emit(message())"
-              [title]="message().bookmarked ? 'Remove bookmark' : 'Bookmark this message'"
+              [uiTooltip]="message().bookmarked ? 'Remove bookmark' : 'Bookmark to jump back to this message later'"
             >
               <ui-star-icon [size]="12" [filled]="!!message().bookmarked" />
-              <span>{{ message().bookmarked ? 'Saved' : 'Save' }}</span>
+              <span>{{ message().bookmarked ? 'Bookmarked' : 'Bookmark' }}</span>
             </button>
           </div>
           <div class="bubble__meta-end">
@@ -66,11 +100,11 @@ import { MessageContentComponent } from '../message-content/message-content.comp
                 type="button"
                 class="bubble__context"
                 (click)="showContext.emit(message())"
-                title="Show what filled the model's context window for this reply"
+                uiTooltip="See what was sent to the model for this reply"
               >Context</button>
             }
             @if (modelMoodHint(); as hint) {
-              <span class="bubble__hint" [attr.title]="hint">{{ hint }}</span>
+              <span class="bubble__hint" uiTooltip="Model and mode used for this reply">{{ hint }}</span>
             }
           </div>
         </div>
@@ -134,6 +168,112 @@ import { MessageContentComponent } from '../message-content/message-content.comp
 
     .bubble--user .bubble__body :where(code, pre) {
       background: color-mix(in srgb, currentColor 14%, transparent);
+    }
+
+    /* Collapsed-by-default model reasoning, sitting above the reply like a quiet aside. */
+    .bubble__reasoning {
+      margin-bottom: 0.25rem;
+      max-width: 100%;
+      min-width: 0;
+    }
+
+    .bubble__reasoning-summary {
+      align-items: center;
+      border-radius: 999px;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      display: inline-flex;
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.6875rem;
+      gap: 0.3rem;
+      list-style: none;
+      padding: 0.125rem 0.375rem 0.125rem 0.25rem;
+      transition: background 150ms ease, color 150ms ease;
+      user-select: none;
+    }
+
+    .bubble__reasoning-summary::-webkit-details-marker { display: none; }
+
+    .bubble__reasoning-summary:hover,
+    .bubble__reasoning-summary:focus-visible {
+      background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+      color: var(--color-text-secondary);
+    }
+
+    .bubble__reasoning-chevron {
+      display: inline-flex;
+      transition: transform 150ms ease;
+    }
+
+    .bubble__reasoning[open] .bubble__reasoning-chevron {
+      transform: rotate(90deg);
+    }
+
+    .bubble__reasoning-text {
+      border-left: 2px solid color-mix(in srgb, var(--color-accent) 30%, var(--color-border-base));
+      color: var(--color-text-secondary);
+      font-size: 0.75rem;
+      line-height: 1.55;
+      margin: 0.25rem 0 0.375rem 0.5rem;
+      max-height: 20rem;
+      overflow-wrap: anywhere;
+      overflow-y: auto;
+      padding: 0.125rem 0 0.125rem 0.625rem;
+      white-space: pre-wrap;
+    }
+
+    .bubble__reasoning--live .bubble__reasoning-summary span {
+      animation: bubble-reasoning-pulse 1.6s ease-in-out infinite;
+    }
+
+    .bubble__reasoning--live .bubble__reasoning-text {
+      max-height: 12rem;
+    }
+
+    @keyframes bubble-reasoning-pulse {
+      0%, 100% { opacity: 0.55; }
+      50% { opacity: 1; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .bubble__reasoning-chevron { transition: none; }
+      .bubble__reasoning--live .bubble__reasoning-summary span { animation: none; }
+    }
+
+    .bubble__thread-refs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+      justify-content: flex-end;
+      margin-bottom: 0.25rem;
+      max-width: 100%;
+    }
+
+    .bubble__thread-ref {
+      align-items: center;
+      background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border-base));
+      border-radius: 999px;
+      color: var(--color-text-secondary);
+      display: inline-flex;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      gap: 0.25rem;
+      max-width: 14rem;
+      padding: 0.0625rem 0.5rem;
+      text-decoration: none;
+    }
+
+    .bubble__thread-ref:hover,
+    .bubble__thread-ref:focus-visible {
+      border-color: var(--color-accent);
+      color: var(--color-accent);
+    }
+
+    .bubble__thread-ref-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .bubble__skills {
@@ -323,8 +463,21 @@ import { MessageContentComponent } from '../message-content/message-content.comp
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class MessageBubbleComponent {
+  private readonly router = inject(Router);
   readonly message = input.required<ChatMessage>();
   readonly displayContent = input('');
+
+  /**
+   * A user message's leading attached-thread lines (see thread-reference.helpers), split from
+   * the text the user typed so the bubble shows chips instead of the raw block.
+   */
+  readonly userThreadBlock = computed(() =>
+    this.message().origin === 'User'
+      ? parseThreadReferenceBlock(this.displayContent())
+      : { references: [], body: this.displayContent() },
+  );
+  /** What the markdown renders: the message without its attached-thread block. */
+  readonly bodyContent = computed(() => this.userThreadBlock().body);
   readonly copy = output<ChatMessage>();
   readonly toggleBookmark = output<ChatMessage>();
   readonly showContext = output<ChatMessage>();
@@ -334,6 +487,34 @@ export class MessageBubbleComponent {
     const m = this.message();
     return m.origin === 'Assistant' && (m.context_breakdown?.segments?.length ?? 0) > 0;
   });
+
+  /** Model-reported reasoning for assistant replies; null hides the disclosure. */
+  readonly reasoning = computed((): string | null => {
+    const m = this.message();
+    if (m.origin !== 'Assistant') {
+      return null;
+    }
+    return m.model_reasoning?.trim() || null;
+  });
+
+  /** Reasoning is still streaming: pending placeholder with no reply text yet. */
+  readonly reasoningLive = computed(
+    () => this.isPendingPlaceholder() && !!this.reasoning() && !this.displayContent().trim(),
+  );
+
+  private readonly reasoningBox = viewChild<ElementRef<HTMLElement>>('reasoningBox');
+
+  constructor() {
+    // While live, keep the newest reasoning in view inside its scroll box. Runs after
+    // render so scrollHeight already includes the chunk that just arrived.
+    afterRenderEffect(() => {
+      this.reasoning();
+      const box = this.reasoningBox()?.nativeElement;
+      if (box && this.reasoningLive()) {
+        box.scrollTop = box.scrollHeight;
+      }
+    });
+  }
 
   readonly isPendingPlaceholder = computed(() => this.message().id === CHAT_PENDING_ASSISTANT_MESSAGE_ID);
   readonly showPendingDots = computed(
@@ -365,6 +546,15 @@ export class MessageBubbleComponent {
   readonly ariaLabel = computed(() =>
     this.showPendingDots() ? 'Assistant is composing a reply' : `${this.message().origin} message`,
   );
+
+  /** Plain click navigates in-app; modified clicks keep the browser's new-tab behaviour. */
+  openReferencedThread(event: MouseEvent, threadId: string): void {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return;
+    }
+    event.preventDefault();
+    void this.router.navigate(['/chat', threadId]);
+  }
 
   shortTime(value: string): string {
     return new Date(value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });

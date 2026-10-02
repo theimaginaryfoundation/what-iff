@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -20,6 +21,8 @@ type MessageAgent interface {
 // WelcomeMessageAgent is the minimal async prompt surface used for welcome generation.
 type WelcomeMessageAgent interface {
 	HandleWelcomeMessagePromptAsync(ctx context.Context, chatID uuid.UUID, prompt string, modelOverrideID *uuid.UUID, personalityOverrideID *uuid.UUID) (*models.ChatMessageResponse, error)
+	// FirstPartyWebSearch selects how the greeting describes web search (ADR 0x021).
+	FirstPartyWebSearch() bool
 }
 
 // HandlerConfig configures chat handler behavior.
@@ -36,6 +39,8 @@ type Handler struct {
 	messageAgent MessageAgent
 	welcomeAgent WelcomeMessageAgent
 	cfg          HandlerConfig
+	// importTimeout bounds one background chat import (chatImportJobTimeout; tests shorten it).
+	importTimeout time.Duration
 }
 
 // NewHandler creates a new assistant handler instance
@@ -47,6 +52,8 @@ func NewHandler(ds Store, logger *zap.Logger, agent *agent.Agent, cfg HandlerCon
 		messageAgent: agent,
 		welcomeAgent: agent,
 		cfg:          cfg,
+
+		importTimeout: chatImportJobTimeout,
 	}
 }
 
@@ -56,11 +63,13 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 
 	// Specific routes first (before routes with path variables)
 	chatRouter.HandleFunc("/import", h.ImportChats).Methods("POST")
+	chatRouter.HandleFunc("/mark-all-read", h.MarkAllChatsRead).Methods("POST")
 
 	chatRouter.HandleFunc("/{chatId}/chat-message/{messageId}/retry", h.RetryChatMessage).Methods("POST")
 	chatRouter.HandleFunc("/{chatId}/chat-message/{messageId}/active-job", h.GetActiveChatMessageJob).Methods("GET")
 	chatRouter.HandleFunc("/{chatId}/chat-message/{messageId}/bookmark", h.SetChatMessageBookmark).Methods("PATCH")
 	chatRouter.HandleFunc("/{chatId}/bookmarks", h.GetChatMessageBookmarks).Methods("GET")
+	chatRouter.HandleFunc("/{chatId}/active-job", h.GetActiveChatJob).Methods("GET")
 	chatRouter.HandleFunc("/{chatId}/chat-message", h.GetChatMessages).Methods("GET")
 	chatRouter.HandleFunc("/{chatId}/chat-message", h.CreateChatMessage).Methods("POST")
 	chatRouter.HandleFunc("/{chatId}/welcome-message", h.CreateWelcomeMessage).Methods("POST")

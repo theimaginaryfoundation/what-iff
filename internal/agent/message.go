@@ -9,13 +9,16 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/filechunker"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/websearch"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
@@ -26,8 +29,8 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -70,13 +73,6 @@ const (
 	// Allow a short detached write window when the generation context is cancelled
 	// but we still need to persist terminal job state.
 	jobTerminalPersistTimeout = 5 * time.Second
-	// metrics
-	generateResponseJobDurationKey = "generate_response_job_duration"
-	generateResponseDurationKey    = "generate_response_duration"
-	postProcessMessageDurationKey  = "post_process_message_duration"
-	postProcessMessageCountKey     = "post_process_message_count"
-	toolCallCountKey               = "tool_call_count"
-	totalToolCallsHistogramKey     = "total_tool_calls"
 
 	safetyViolationAssistantMessage = "⚠️ This message has triggered a safety/ethics violation and cannot be processed"
 )
@@ -133,6 +129,8 @@ type Agent struct {
 	// is chosen at construction and swapped via server wiring, so no push detail
 	// reaches this package.
 	pushNotifier pushnotify.Notifier
+	// webSearch backs the first-party web search tools; nil when not configured (ADR 0x021).
+	webSearch *websearch.Service
 	// pushEnabled is true when a real push implementation was wired (a non-nil
 	// PushNotifier). It lets the completion hook skip spawning a detached
 	// goroutine when push is off (the open-source default).
@@ -154,6 +152,7 @@ type Agent struct {
 	mockStreamDelay    time.Duration
 	localLLM           bool
 	localLLMModel      string
+	mcpClient          *mcpclient.Client
 
 	// testHooks holds optional test-only seams (memory/history overrides, image ritual fakes).
 	// Must be zero in production; see assertNoTestHooksInProduction.
@@ -190,6 +189,9 @@ type AgentConfig struct {
 	// nil, NewAgent falls back to pushnotify.NoopNotifier (sends nothing) — the
 	// open-source default.
 	PushNotifier pushnotify.Notifier
+	// WebSearch backs the first-party web_search / fetch_page tools (ADR 0x021). Nil leaves them
+	// off and vendor-native web search in place. NewAgent ignores it under non-vendor backends.
+	WebSearch *websearch.Service
 	// LifecycleContext is cancelled on app shutdown and used for detached work.
 	// Nil defaults to context.Background().
 	LifecycleContext context.Context
@@ -217,6 +219,10 @@ type AgentConfig struct {
 	// LocalLLMModel is the model requested from the local server. Required
 	// when LLMBackend == "local".
 	LocalLLMModel string
+	// LLMCallTimeouts bounds each HTTP attempt of the local LLM client, which is built here
+	// rather than from HTTPClient (the server applies the same limits to HTTPClient). The
+	// zero value sets no limits.
+	LLMCallTimeouts provider.CallTimeouts
 
 	// ZAIKey enables z.ai GLM models (Anthropic-compatible endpoint) when set.
 	ZAIKey string
@@ -267,10 +273,12 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		memoryTool:                   tools.NewVectorStoreMemoryTool(ds, &oaiClient, logger),
 		scratchpadTool:               tools.NewScratchpadTool(ds, logger),
 		listTool:                     tools.NewListTool(ds, logger),
+		mcpClient:                    mcpclient.New(nil, logger),
 		chunkPipeline:                newChunkPipelineForMode(cfg.LLMBackend != "vendor", &oaiClient, ds, logger),
 		fileStore:                    fileStore,
 		meter:                        cfg.Meter,
 		pushNotifier:                 cfg.PushNotifier,
+		webSearch:                    vendorOnlyWebSearch(cfg),
 		pushEnabled:                  cfg.PushNotifier != nil,
 		runningJobCancels:            make(map[uuid.UUID]runningJobCancel),
 		lifecycleCtx:                 cfg.LifecycleContext,
@@ -281,6 +289,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		localLLM:                     cfg.LLMBackend == "local",
 		localLLMModel:                cfg.LocalLLMModel,
 	}
+	a.listTool.SetMCPDiscoverer(a.mcpClient)
 	if a.lifecycleCtx == nil {
 		a.lifecycleCtx = context.Background()
 	}
@@ -350,7 +359,9 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		// LLMBackend=local, cfg.HTTPClient is the deny-network transport (every
 		// other consumer stays egress-denied), but the local adapter itself
 		// must reach the local server over a real client.
-		a.LocalProvider = provider.NewLocalProvider(cfg.LocalLLMBaseURL, tel, nil)
+		a.LocalProvider = provider.NewLocalProvider(cfg.LocalLLMBaseURL, tel,
+			telemetry.InstrumentHTTPClient(provider.WithCallTimeouts(nil, cfg.LLMCallTimeouts),
+				telemetry.WithDependencyHost(cfg.LocalLLMBaseURL, telemetry.DependencyLocalLLM)))
 	}
 
 	if a.mockLLM {
@@ -404,11 +415,80 @@ func (a *Agent) unregisterRunningJobCancel(jobID uuid.UUID) {
 	a.runningJobCancelsMu.Unlock()
 }
 
-// CancelJob cancels an in-flight job owned by userID. Missing entries are treated as no-op.
-func (a *Agent) CancelJob(_ context.Context, userID, jobID uuid.UUID) error {
+// CancelJob stops an in-flight job owned by userID.
+//
+// For a chat_message job this is the thread's Stop button, so it stops every non-terminal chat
+// job in the same thread, not just jobID: a thread should never be left showing a reply in
+// progress after Stop. Each job running in this process is cancelled directly (its worker saves
+// any partial reply as it winds down). Any other job is marked cancelled in the database — the
+// API runs more than one instance, so the job may be running on another one (whose worker polls
+// its status via watchChatJobCancel and stops), or its worker may have died in a restart and left
+// it orphaned, which nothing else would ever finish.
+//
+// Other job types (scheduled agent jobs, media jobs) keep the in-process-only behaviour: a
+// missing entry is a no-op.
+func (a *Agent) CancelJob(ctx context.Context, userID, jobID uuid.UUID) error {
 	if userID == uuid.Nil || jobID == uuid.Nil {
 		return datastore.ErrUnauthorized
 	}
+	if a.ds == nil {
+		return a.cancelRunningJob(userID, jobID)
+	}
+	chatID, err := a.ds.ChatIDForChatJob(ctx, userID, jobID)
+	if errors.Is(err, datastore.ErrJobNotFound) {
+		return a.cancelRunningJob(userID, jobID)
+	}
+	if err != nil {
+		// The thread-wide lookup failed (a DB hiccup); still stop what this process is running,
+		// as Stop did before it reached across the thread.
+		return errors.Join(err, a.cancelRunningJob(userID, jobID))
+	}
+	ids, err := a.ds.ListActiveChatJobIDsForChat(ctx, userID, chatID)
+	if err != nil {
+		return errors.Join(err, a.cancelRunningJob(userID, jobID))
+	}
+	if !slices.Contains(ids, jobID) {
+		ids = append(ids, jobID)
+	}
+	// Best effort: one job failing to cancel (a DB hiccup) must not leave the rest of the
+	// thread running, so every job is attempted and the failures are returned together.
+	var errs []error
+	for _, id := range ids {
+		if err := a.cancelChatJob(ctx, userID, id); err != nil {
+			a.logger.Warn("failed to cancel chat job during thread stop",
+				zap.String("job_id", id.String()), zap.Error(err))
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// cancelChatJob cancels one chat job: directly when its worker is in this process, otherwise by
+// marking it cancelled in the database.
+func (a *Agent) cancelChatJob(ctx context.Context, userID, jobID uuid.UUID) error {
+	if a.hasRunningJob(jobID) {
+		return a.cancelRunningJob(userID, jobID)
+	}
+	changed, err := a.ds.MarkChatJobCancelled(ctx, userID, jobID)
+	if err != nil {
+		return err
+	}
+	if changed {
+		a.logger.Info("chat job cancelled with no local worker (orphaned, or running on another instance)",
+			zap.String("job_id", jobID.String()))
+	}
+	return nil
+}
+
+func (a *Agent) hasRunningJob(jobID uuid.UUID) bool {
+	a.runningJobCancelsMu.Lock()
+	defer a.runningJobCancelsMu.Unlock()
+	_, ok := a.runningJobCancels[jobID]
+	return ok
+}
+
+// cancelRunningJob cancels a job whose worker runs in this process. A missing entry is a no-op.
+func (a *Agent) cancelRunningJob(userID, jobID uuid.UUID) error {
 	a.runningJobCancelsMu.Lock()
 	entry, ok := a.runningJobCancels[jobID]
 	a.runningJobCancelsMu.Unlock()
@@ -421,6 +501,62 @@ func (a *Agent) CancelJob(_ context.Context, userID, jobID uuid.UUID) error {
 	entry.cancel()
 	return nil
 }
+
+// chatJobCancelPollInterval is how often a running chat job checks the database for a cancel
+// requested on another API instance. It bounds how long Stop can take to reach such a job.
+var chatJobCancelPollInterval = 2 * time.Second
+
+// watchChatJobCancel cancels a running chat job when its status turns cancelled in the database,
+// which is how a Stop handled by another API instance reaches this worker (see CancelJob). It
+// returns when runCtx ends, or when the job row is gone (nothing left to watch; the worker is left
+// to finish on its own). Other read errors are tolerated — the next tick retries — but logged on
+// the first failure and then every chatJobCancelErrLogEvery consecutive ones, so a datastore
+// problem is visible without flooding the log. Without a datastore there is nothing to watch
+// (CancelJob is then in-process only), so it returns immediately.
+func (a *Agent) watchChatJobCancel(runCtx context.Context, userID, jobID uuid.UUID, cancel context.CancelFunc) {
+	if a.ds == nil {
+		return
+	}
+	ticker := time.NewTicker(chatJobCancelPollInterval)
+	defer ticker.Stop()
+	consecutiveErrs := 0
+	for {
+		select {
+		case <-runCtx.Done():
+			return
+		case <-ticker.C:
+			status, err := a.ds.JobStatus(runCtx, userID, jobID)
+			switch {
+			case errors.Is(err, datastore.ErrJobNotFound):
+				a.logger.Warn("chat job row vanished while running; no longer watching for cancel",
+					zap.String("job_id", jobID.String()))
+				return
+			case err != nil:
+				if runCtx.Err() != nil {
+					return
+				}
+				if consecutiveErrs%chatJobCancelErrLogEvery == 0 {
+					a.logger.Warn("failed to read chat job status while watching for cancel",
+						zap.String("job_id", jobID.String()),
+						zap.Int("consecutive_failures", consecutiveErrs+1),
+						zap.Error(err))
+				}
+				consecutiveErrs++
+			case status == models.JobStatusCancelled:
+				a.logger.Info("chat job cancelled from another instance; stopping",
+					zap.String("job_id", jobID.String()))
+				cancel()
+				return
+			default:
+				consecutiveErrs = 0
+			}
+		}
+	}
+}
+
+// chatJobCancelErrLogEvery throttles watchChatJobCancel's read-error log: the first failure and
+// then one per this many consecutive failures (~1/minute at the 2s poll interval).
+const chatJobCancelErrLogEvery = 30
 
 // ChunkPipeline returns the file chunk pipeline for asynchronous file processing.
 func (a *Agent) ChunkPipeline() *filechunker.FileChunkPipeline { return a.chunkPipeline }
@@ -440,16 +576,6 @@ func (a *Agent) DeleteProviderFileAttachment(ctx context.Context, fileID string)
 		return fmt.Errorf("openai provider is not configured")
 	}
 	return a.OpenAIProvider.DeleteFileAttachment(ctx, fileID)
-}
-
-// RecordFileUpload emits a counter for a file-attachment upload attempt.
-// status should be "success" or "failure".
-func (a *Agent) RecordFileUpload(ctx context.Context, fileType, status string) {
-	a.recordCounter(ctx, telemetry.FileAttachmentUploadTotal, 1,
-		metric.WithAttributes(
-			attribute.String("file_type", fileType),
-			attribute.String("status", status),
-		))
 }
 
 // messageContextBuilder returns a context builder wired to this agent's datastore,
@@ -473,9 +599,12 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 	}
 	// Attachment labels are only injected when tools are enabled, matching the
 	// previous behavior for OpenAI chat turns.
-	additionalDevContext := ""
+	additionalDevContext := mcpLifecycleDeveloperContext()
 	if additionalDeveloperContextForChat != nil {
-		additionalDevContext = additionalDeveloperContextForChat(a, chatCtx.chat)
+		additionalDevContext = strings.TrimSpace(strings.Join([]string{
+			additionalDevContext,
+			additionalDeveloperContextForChat(a, chatCtx.chat),
+		}, "\n\n"))
 	}
 	return b.build(ctx, messageContextBuildRequest{
 		UserID:                     userID,
@@ -495,6 +624,10 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 		AdditionalDeveloperContext: additionalDevContext,
 		LoadHistoryImageBytes:      models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model),
 	})
+}
+
+func mcpLifecycleDeveloperContext() string {
+	return "MCP tool lifecycle: MCP tools are NOT auto-loaded. First call list(kind=\"mcp_servers\") to inspect connectors and discoverable tool names. Then call load_mcp_tools with mcp_server_id + tools to activate only the tools you need. Loaded MCP tools remain active across future turns in this chat until you call unload_mcp_tools. Use unload_mcp_tools with tools [\"all\"] or [\"*\"] (optionally with mcp_server_id) to clear loaded tools."
 }
 
 // loadImageBytesForClaude downloads raw image bytes for each image attachment on the
@@ -541,31 +674,11 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 	// Start the background processing with a cancellable runtime context.
 	runCtx, cancel := context.WithCancel(ctx)
 	a.registerRunningJobCancel(newJob.ID, userID, cancel)
-	go func() {
-		defer cancel()
-		defer a.unregisterRunningJobCancel(newJob.ID)
-		// An unrecovered panic in any goroutine takes down the whole process (and so the
-		// pod). Recover here so a failure while processing one message fails just that job
-		// instead — e.g. a post-inference checkpoint summary that a provider rejects must
-		// not crash every other in-flight chat. Registered after cancel/unregister so it
-		// runs first (LIFO) and UpdateJobStatus still sees a live runCtx.
-		defer a.recoverAsyncMessageJob(runCtx, userID, newJob.ID, chatMessage.ID)
+	go a.watchChatJobCancel(runCtx, userID, newJob.ID, cancel)
+	go a.runAsyncChatMessageJob(runCtx, cancel, newJob, chatMessage.ID, "processing", func() error {
 		_, err := a.handleUserMessage(runCtx, newJob, chatMessage)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				a.logger.Info("async agent message processing cancelled",
-					zap.String("job_id", newJob.ID.String()),
-					zap.String("chat_message_id", chatMessage.ID.String()),
-				)
-				return
-			}
-			a.logger.Error("async agent message processing failed",
-				zap.String("job_id", newJob.ID.String()),
-				zap.String("chat_message_id", chatMessage.ID.String()),
-				zap.Error(err),
-			)
-		}
-	}()
+		return err
+	})
 
 	// Return response with job details
 	return &models.ChatMessageResponse{
@@ -573,6 +686,35 @@ func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessag
 		JobID: newJob.ID.String(),
 		Type:  JobTypeChatMessage,
 	}, nil
+}
+
+// runAsyncChatMessageJob is the background goroutine body shared by a new send
+// (HandleUserMessage) and a retry (RetryUserChatMessage): it runs turn under job telemetry and
+// logs how it ended, where action ("processing", "retry") names the path in the log messages.
+// An unrecovered panic in any goroutine takes down the whole process (and so the pod), so it
+// recovers here and fails just that job instead — e.g. a post-inference checkpoint summary that
+// a provider rejects must not crash every other in-flight chat. The recover is registered after
+// cancel/unregister so it runs first (LIFO) and UpdateJobStatus still sees a live runCtx.
+func (a *Agent) runAsyncChatMessageJob(runCtx context.Context, cancel context.CancelFunc, job *models.Job, chatMessageID uuid.UUID, action string, turn func() error) {
+	defer cancel()
+	defer a.unregisterRunningJobCancel(job.ID)
+	defer a.recoverAsyncMessageJob(runCtx, job.UserID, job.ID, chatMessageID)
+	err := a.runTrackedJob(runCtx, job, turn)
+	if err == nil {
+		return
+	}
+	if errors.Is(err, context.Canceled) {
+		a.logger.Info("async agent message "+action+" cancelled",
+			zap.String("job_id", job.ID.String()),
+			zap.String("chat_message_id", chatMessageID.String()),
+		)
+		return
+	}
+	a.logger.Error("async agent message "+action+" failed",
+		zap.String("job_id", job.ID.String()),
+		zap.String("chat_message_id", chatMessageID.String()),
+		zap.Error(err),
+	)
 }
 
 // recoverAsyncMessageJob is the deferred panic guard for async chat-message processing.
@@ -650,24 +792,10 @@ func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid
 
 	runCtx, cancel := context.WithCancel(detachedCtx)
 	a.registerRunningJobCancel(newJob.ID, userID, cancel)
-	go func(runCtx context.Context, job *models.Job, chat *models.ChatMessage) {
-		defer cancel()
-		defer a.unregisterRunningJobCancel(job.ID)
-		if _, err := a.handleUserMessage(runCtx, job, chat); err != nil {
-			if errors.Is(err, context.Canceled) {
-				a.logger.Info("async agent message retry cancelled",
-					zap.String("job_id", job.ID.String()),
-					zap.String("chat_message_id", chat.ID.String()),
-				)
-				return
-			}
-			a.logger.Error("async agent message retry failed",
-				zap.String("job_id", job.ID.String()),
-				zap.String("chat_message_id", chat.ID.String()),
-				zap.Error(err),
-			)
-		}
-	}(runCtx, newJob, msg)
+	go a.runAsyncChatMessageJob(runCtx, cancel, newJob, msg.ID, "retry", func() error {
+		_, err := a.handleUserMessage(runCtx, newJob, msg)
+		return err
+	})
 
 	return &models.ChatMessageResponse{
 		ID:    messageID,
@@ -678,6 +806,7 @@ func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid
 
 // chatContext holds the context needed for processing a chat message
 type chatContext struct {
+	userID                 uuid.UUID
 	chat                   *models.Chat
 	memories               []string
 	liveMemories           []*models.Memory
@@ -688,19 +817,60 @@ type chatContext struct {
 	// ("low"/"medium"/"high"/"ultra"), passed to the meter which classifies it for
 	// free-chat gating. Empty means unknown; the meter treats that conservatively.
 	modelSubscriptionTier string
-	activeMood            *models.Mood
-	activeMoodRituals     []*models.Ritual
+	// modelVisionSupport is the model's vision_support flag; when false, images are
+	// stripped from the context before any provider sees it.
+	modelVisionSupport bool
+	activeMood         *models.Mood
+	activeMoodRituals  []*models.Ritual
 	// expressionsEnabled mirrors personality.ExpressionsEnabled; when false,
 	// expression picking is skipped for this turn.
 	expressionsEnabled bool
-	// webSearchCount is set after the provider turn for native web search metering.
+	// webSearchCount is the turn's billable web searches (see turnWebSearchCount).
 	webSearchCount int
+	// toolProgress records the live tool timeline into the chat job's Progress. Nil when the
+	// turn has no job to report to; its methods are nil-safe.
+	toolProgress *jobToolProgress
+	// memoryProgress is the memory-load row already shown in that timeline; the tool recorder
+	// starts from it so its snapshots keep the row. Nil when retrieval showed nothing.
+	memoryProgress *memoryLoadProgress
+	// mcpServers caches chat/ritual connectors for this turn's dynamic mcp__ tool dispatch.
+	mcpServers []*models.MCPServer
+	// loadedMCPTools tracks the per-connector set of loaded MCP full tool names for this chat.
+	loadedMCPTools map[uuid.UUID]map[string]struct{}
+	// mcpSessions stores MCP session ids for this single conversation turn.
+	mcpSessions map[string]string
+}
+
+func (c *chatContext) setMCPServerCache(servers []*models.MCPServer, loadedByServer map[uuid.UUID][]string) {
+	c.mcpServers = servers
+	c.loadedMCPTools = make(map[uuid.UUID]map[string]struct{}, len(loadedByServer))
+	for serverID, names := range loadedByServer {
+		if serverID == uuid.Nil || len(names) == 0 {
+			continue
+		}
+		set := make(map[string]struct{}, len(names))
+		for _, name := range names {
+			n := strings.TrimSpace(name)
+			if n == "" {
+				continue
+			}
+			set[n] = struct{}{}
+		}
+		if len(set) > 0 {
+			c.loadedMCPTools[serverID] = set
+		}
+	}
 }
 
 // handleUserMessage handles the agent processing flow for a user message
 func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chatMessage *models.ChatMessage) (*models.ChatMessage, error) {
 	assertNoTestHooksInProduction(a)
-	ctx = a.withCallPath(ctx, telemetry.CallPathUserChat)
+	// The sync webhook path runs agent_job_run jobs through here too; label those as jobs.
+	callPath := telemetry.CallPathUserChat
+	if chatJob != nil && chatJob.JobType == JobTypeAgentJobRun {
+		callPath = telemetry.CallPathAgentJob
+	}
+	ctx = a.withCallPath(ctx, callPath)
 
 	// Update job status to processing
 	if err := a.updateJobStatus(ctx, chatJob, models.JobStatusProcessing); err != nil {
@@ -726,7 +896,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 	a.WaitForThreadRehydration(ctx, chatJob.UserID, chatMessage.ChatID)
 
 	// Prepare chat context (chat, memories, model)
-	chatCtx, err := a.prepareChatContext(ctx, chatJob.UserID, chatMessage)
+	chatCtx, err := a.prepareChatContext(ctx, chatJob.UserID, chatMessage, a.newMemoryLoadProgress(chatJob))
 	if err != nil {
 		a.logger.Error("failed to prepare chat context", zap.Error(err))
 		a.setJobStatusFailed(ctx, chatJob, err)
@@ -735,9 +905,11 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 	// Resolve active mood and load mood-driven rituals before determining action type
 	// (a mood may inject image-generation rituals). Mode skills are injected into the
 	// mode context segment, not the user message.
+	doneMood := a.timeTurnStage(ctx, turnStageMood)
 	chatCtx.activeMood = a.resolveActiveMood(ctx, chatJob.UserID, chatCtx, chatMessage.Message, chatMessage.ID)
 	moodRituals := a.loadMoodRituals(ctx, chatJob.UserID, chatCtx.activeMood)
 	chatCtx.activeMoodRituals = moodRituals
+	doneMood()
 
 	// Determine action type: image generation rituals override the base chat type.
 	turnActionType := models.ActionTypeChatMessage
@@ -752,16 +924,21 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 	if !qd.Allowed {
 		quotaErr := fmt.Errorf("%w for user %s", ErrQuotaExceeded, chatJob.UserID)
 		a.logger.Warn("quota check failed, rejecting message", zap.String("user_id", chatJob.UserID.String()))
+		a.recordQuotaRejection(ctx)
 		a.setJobStatusFailed(ctx, chatJob, quotaErr)
 		return nil, quotaErr
 	}
+	doneBuildContext := a.timeTurnStage(ctx, turnStageBuildContext)
 	var imageBytes map[uuid.UUID][]byte
-	if models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model) ||
-		models.ChatCompletionsSupportsVision(chatCtx.modelProvider, chatCtx.model) ||
-		hasImageAttachmentsWithoutFileID(chatMessage.Attachments) {
+	// Anthropic and Chat Completions wire formats take inline image bytes; OpenAI
+	// Responses references uploaded file IDs and only needs bytes as a fallback.
+	if chatCtx.modelVisionSupport && (models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model) ||
+		models.UsesOpenAIChatCompletionsAPI(chatCtx.modelProvider, chatCtx.model) ||
+		hasImageAttachmentsWithoutFileID(chatMessage.Attachments)) {
 		imageBytes = a.loadImageBytesForClaude(ctx, chatJob.UserID, chatMessage)
 	}
 	modelContext, err := a.buildModelContextForChatMessage(ctx, chatJob.UserID, chatMessage, chatCtx, imageBytes)
+	doneBuildContext()
 	if err != nil {
 		a.logger.Error("failed to build model context", zap.Error(err))
 		a.setJobStatusFailed(ctx, chatJob, err)
@@ -839,8 +1016,6 @@ func (a *Agent) runUserChatPostInferencePhases(
 		return
 	}
 
-	a.recordTime(ctx, generateResponseJobDurationKey, time.Since(chatJob.CreatedAt))
-
 	if err := a.applyExpressionPhase(ctx, chatJob.UserID, chatJob, chatCtx, modelContext, chatMessage.Message, agentMessage); err != nil {
 		a.logger.Error("expression phase failed", zap.Error(err))
 	}
@@ -862,7 +1037,7 @@ func (a *Agent) runUserChatPostInferencePhases(
 func (a *Agent) generateAssistantForMessage(ctx context.Context, userID uuid.UUID, chatJob *models.Job, chatMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext) (*models.ChatMessage, *provider.GenerateResponse, error) {
 	start := time.Now()
 	defer func() {
-		a.recordTime(ctx, generateResponseDurationKey, time.Since(start))
+		a.recordTurnStage(ctx, turnStageInference, time.Since(start))
 	}()
 
 	a.recordModelContextSegmentEstimates(ctx, modelContext)
@@ -909,8 +1084,8 @@ func (a *Agent) dispatchAssistantGeneration(ctx context.Context, userID uuid.UUI
 
 // generationOptions parameterizes runGeneration over the small ways the five
 // generateAssistantForMessage* paths differ: the label used in error/save
-// messages, an optional provider-specific tool-call merge (native web search
-// results), and an optional post-save step (OpenAI's attachment persistence).
+// messages, an optional provider-specific tool-call merge (vendor-native web search
+// results; unset when first-party web search is configured), and an optional post-save step (OpenAI's attachment persistence).
 type generationOptions struct {
 	provider       string
 	mergeToolCalls func(toolCalls []*models.ToolCall) []*models.ToolCall
@@ -929,6 +1104,36 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 	draftBuffer := newJobDraftDeltaBuffer(a.lifecycleCtx, a.ds, a.logger, chatJob, jobDraftDeltaFlushMinChars, jobDraftDeltaFlushMaxWait)
 	adapter.SetTextDeltaHandler(draftBuffer.HandleDelta)
 	defer draftBuffer.Flush()
+	// Stream reasoning live too, so always-on reasoning models (GLM, MiMo) show
+	// something while they think instead of a bare typing indicator.
+	flushReasoning := func() {}
+	if streamer, ok := adapter.(provider.ReasoningStreamer); ok {
+		reasoningBuffer := newJobDraftReasoningBuffer(a.lifecycleCtx, a.ds, a.logger, chatJob, jobDraftDeltaFlushMinChars, jobDraftDeltaFlushMaxWait)
+		streamer.SetReasoningStream(provider.ReasoningStream{
+			OnDelta: reasoningBuffer.HandleDelta,
+			OnReset: reasoningBuffer.ResetReasoning,
+		})
+		defer reasoningBuffer.Flush()
+		flushReasoning = reasoningBuffer.Flush
+		// Buffers flush on the next delta, not on a timer, so the reasoning tail would
+		// otherwise sit unpersisted once the model switches to its reply. Flushing it on
+		// each text delta is free when nothing is pending.
+		adapter.SetTextDeltaHandler(func(delta string) {
+			reasoningBuffer.Flush()
+			draftBuffer.HandleDelta(delta)
+		})
+	}
+	// Before each tool runs, persist whatever reasoning and reply text is still buffered so it
+	// reaches the client ahead of the tool row, and start the next round's text on a new paragraph.
+	chatCtx.toolProgress = a.newChatToolProgress(chatJob, func() {
+		flushReasoning()
+		draftBuffer.Flush()
+		draftBuffer.MarkRoundBoundary()
+	})
+	chatCtx.toolProgress.Seed(chatCtx.memoryProgress.Entries())
+	if progress := chatCtx.toolProgress; progress != nil {
+		defer progress.Close()
+	}
 
 	result, toolCalls, generatedAttachments, err := a.handleAgentLoop(ctx, chatCtx, adapter)
 	if err != nil {
@@ -940,12 +1145,12 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 	if streamed := strings.TrimSpace(draftBuffer.allText); streamed != "" {
 		result.Text = streamed
 	}
-	chatCtx.webSearchCount = adapter.WebSearchCompletedCount()
+	chatCtx.webSearchCount = a.turnWebSearchCount(adapter, toolCalls)
 
 	if opts.mergeToolCalls != nil {
 		toolCalls = opts.mergeToolCalls(toolCalls)
 	}
-	toolCalls = append(toolCalls, memoryToolCallsForChatContext(chatCtx)...)
+	toolCalls = append(memoryToolCallsForChatContext(chatCtx), toolCalls...)
 	a.recordToolCalls(ctx, toolCalls)
 
 	// Checked after tool-call metrics and the web-search count: the work in this turn
@@ -1074,21 +1279,23 @@ func (a *Agent) openAIResponseParamsForChat(ctx context.Context, chatCtx *chatCo
 	if policy.toolsEnabled {
 		parallel = true
 		chatTools := getChatTools(ToolConfig{
-			DisabledTools: policy.disabledTools,
+			DisabledTools:   policy.disabledTools,
+			NativeWebSearch: policy.nativeWebSearch,
 		})
 		agentTools := getAgentToolsList(policy.disabledTools, policy.showMoodTools)
-		mcpTools := a.getChatMCPTools(ctx, userID, chatMessage.ChatID, policy.ritualIDs, chatCtx.model)
+		mcpSpecs := a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)
+		mcpTools := tools.OpenAIFunctionTools(mcpSpecs)
 		toolParams = provider.BuildOpenAITools(chatCtx.model, chatTools, agentTools, mcpTools)
 	}
 	a.recordToolDefinitionEstimate(modelCtx, toolParams)
 	var include []responses.ResponseIncludable
-	if policy.toolsEnabled && !policy.disabledTools[tools.ToolNameWebSearch] {
+	if policy.nativeWebSearch {
 		include = []responses.ResponseIncludable{
 			responses.ResponseIncludableWebSearchCallResults,
 			responses.ResponseIncludableWebSearchCallActionSources,
 		}
 	}
-	return modelCtx.BuildOpenAIResponseParams(provider.OpenAIResponseParamsOptions{
+	return visionRenderContext(chatCtx, modelCtx).BuildOpenAIResponseParams(provider.OpenAIResponseParamsOptions{
 		Model:             chatCtx.model,
 		SafetyUserID:      userID.String(),
 		MaxOutputTokens:   provider.DefaultMaxContentLength,
@@ -1103,11 +1310,8 @@ func (a *Agent) generateAssistantForMessageOpenAI(ctx context.Context, userID uu
 	params := a.openAIResponseParamsForChat(ctx, chatCtx, userID, chatMessage, modelContext)
 	adapter := provider.NewOpenAIAdapter(a.OpenAIProvider, params)
 
-	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, generationOptions{
+	opts := generationOptions{
 		provider: "OpenAI",
-		mergeToolCalls: func(toolCalls []*models.ToolCall) []*models.ToolCall {
-			return mergeWebSearchToolCalls(toolCalls, webSearchToolCallsFromOpenAIResponses(adapter.AllRawResponses()...))
-		},
 		// Persist any image/code-interpreter attachments (OpenAI-specific). The
 		// unified loop returns a provider-agnostic GenerateResponse, so we
 		// retrieve the raw response from the adapter to pass provider-specific
@@ -1117,7 +1321,13 @@ func (a *Agent) generateAssistantForMessageOpenAI(ctx context.Context, userID uu
 				a.OpenAIProvider.SaveMessageAttachments(ctx, userID, agentMessage.ID, rawResp)
 			}
 		},
-	})
+	}
+	if !a.FirstPartyWebSearch() {
+		opts.mergeToolCalls = func(toolCalls []*models.ToolCall) []*models.ToolCall {
+			return mergeWebSearchToolCalls(toolCalls, webSearchToolCallsFromOpenAIResponses(adapter.AllRawResponses()...))
+		}
+	}
+	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, opts)
 }
 
 // claudeProviderForModel selects the Anthropic-Messages-API provider for the model
@@ -1147,28 +1357,44 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 	// Build the full message list from DB history + context injections.
 	// User images use base64 blocks when `UserMessageImage.RawBytes` is populated
 	// (see `loadImageBytesForClaude`); otherwise the user turn falls back to text-only.
-	claudeParams := modelContext.BuildClaudeParams(chatCtx.model)
+	claudeParams := visionRenderContext(chatCtx, modelContext).BuildClaudeParams(chatCtx.model)
 
-	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
-	// Anthropic-native features (beta MCP, native web search) are not available on
-	// z.ai's compatible endpoint — gate them to native Anthropic only.
-	var mcpConfig *provider.ClaudeMCPConfig
-	if policy.toolsEnabled && nativeAnthropic {
-		mcpConfig = a.getChatClaudeMCPConfig(ctx, userID, chatMessage.ChatID, policy.ritualIDs)
+	// GLM/z.ai models always think and ignore a thinking budget; left alone, reasoning
+	// can eat the whole output cap and the turn truncates before any answer. Bound it
+	// with output_config.effort and a raised cap (see provider.ZAIReasoningEffort).
+	zai := models.IsZAIModel(chatCtx.modelProvider, chatCtx.model)
+	if zai {
+		provider.ApplyZAIReasoningEffort(&claudeParams, provider.ZAIReasoningEffort)
 	}
 
-	claudeFunctionTools := claudeFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
+	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
+	specs := tools.AgentFunctionToolSpecs(policy.showMoodTools)
+	if policy.toolsEnabled {
+		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
+	}
+	claudeFunctionTools := claudeFunctionTools(specs)
 	a.recordToolDefinitionEstimate(modelContext, claudeFunctionTools)
-	webSearchEnabled := policy.toolsEnabled && nativeAnthropic && !policy.disabledTools[tools.ToolNameWebSearch]
-	adapter := provider.NewClaudeAdapter(claudeProvider, claudeParams, claudeFunctionTools, webSearchEnabled, mcpConfig, policy.disabledTools)
+	webSearchEnabled := nativeAnthropic && policy.nativeWebSearch
+	adapter := provider.NewClaudeAdapter(claudeProvider, claudeParams, claudeFunctionTools, webSearchEnabled, nil, policy.disabledTools)
+	if zai {
+		adapter.SetTruncationFallback(func(params *anthropic.MessageNewParams) {
+			a.logger.Warn("z.ai response truncated before any reply text; retrying at lower reasoning effort",
+				zap.String("model", chatCtx.model),
+				zap.String("chat_id", chatMessage.ChatID.String()),
+				zap.String("effort", provider.ZAIFallbackReasoningEffort),
+			)
+			provider.ApplyZAIReasoningEffort(params, provider.ZAIFallbackReasoningEffort)
+		})
+	}
 
-	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, generationOptions{
-		provider: "Claude",
-		mergeToolCalls: func(toolCalls []*models.ToolCall) []*models.ToolCall {
+	opts := generationOptions{provider: "Claude"}
+	if !a.FirstPartyWebSearch() {
+		opts.mergeToolCalls = func(toolCalls []*models.ToolCall) []*models.ToolCall {
 			toolCalls = mergeWebSearchToolCalls(toolCalls, webSearchToolCallsFromClaudeMessages(adapter.AllRawMessages()...))
 			return mergeWebSearchToolCalls(toolCalls, webSearchToolCallsFromClaudeBetaMessages(adapter.AllRawBetaMessages()...))
-		},
-	})
+		}
+	}
+	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, opts)
 }
 
 // generateAssistantForMessageGemini drives a chat turn through Google's
@@ -1179,10 +1405,14 @@ func (a *Agent) generateAssistantForMessageGemini(ctx context.Context, userID uu
 		return nil, nil, fmt.Errorf("Gemini model %q requested but GEMINI_API_KEY is not configured", chatCtx.model)
 	}
 
-	geminiParams := modelContext.BuildGeminiParams(chatCtx.model)
+	geminiParams := visionRenderContext(chatCtx, modelContext).BuildGeminiParams(chatCtx.model)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
-	geminiFunctionTools := geminiFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
+	specs := tools.AgentFunctionToolSpecs(policy.showMoodTools)
+	if policy.toolsEnabled {
+		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
+	}
+	geminiFunctionTools := geminiFunctionTools(specs)
 	a.recordToolDefinitionEstimate(modelContext, geminiFunctionTools)
 	toolNames := make([]string, 0, len(geminiFunctionTools))
 	for _, t := range geminiFunctionTools {
@@ -1217,17 +1447,29 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	}
 
 	renderCtx := modelContext.Clone()
-	renderCtx.PrepareForTextOnlyChatCompletions()
+	renderCtx.PrepareForTextOnly()
 	params := renderCtx.BuildOpenAIChatCompletionParams(a.localLLMModel)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
-	functionTools := openAIChatCompletionFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
+	specs := tools.AgentFunctionToolSpecs(policy.showMoodTools)
+	if policy.toolsEnabled {
+		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
+	}
+	functionTools := openAIChatCompletionFunctionTools(specs)
 	a.recordToolDefinitionEstimate(modelContext, functionTools)
 
 	adapter := provider.NewLocalAdapter(a.LocalProvider, params, functionTools, policy.disabledTools)
 	draftBuffer := newJobDraftDeltaBuffer(a.lifecycleCtx, a.ds, a.logger, chatJob, jobDraftDeltaFlushMinChars, jobDraftDeltaFlushMaxWait)
 	adapter.SetTextDeltaHandler(draftBuffer.HandleDelta)
 	defer draftBuffer.Flush()
+	chatCtx.toolProgress = a.newChatToolProgress(chatJob, func() {
+		draftBuffer.Flush()
+		draftBuffer.MarkRoundBoundary()
+	})
+	chatCtx.toolProgress.Seed(chatCtx.memoryProgress.Entries())
+	if progress := chatCtx.toolProgress; progress != nil {
+		defer progress.Close()
+	}
 
 	result, toolCalls, generatedAttachments, err := a.handleAgentLoop(ctx, chatCtx, adapter)
 	if err != nil {
@@ -1239,9 +1481,9 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	if streamed := strings.TrimSpace(draftBuffer.allText); streamed != "" {
 		result.Text = streamed
 	}
-	chatCtx.webSearchCount = adapter.WebSearchCompletedCount()
+	chatCtx.webSearchCount = a.turnWebSearchCount(adapter, toolCalls)
 
-	toolCalls = append(toolCalls, memoryToolCallsForChatContext(chatCtx)...)
+	toolCalls = append(memoryToolCallsForChatContext(chatCtx), toolCalls...)
 	a.recordToolCalls(ctx, toolCalls)
 
 	// See runGeneration: guard after metrics so a failed turn still counts its work.
@@ -1261,18 +1503,16 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 
 // generateAssistantForMessageOpenAIChatCompletions drives a chat turn through an
 // OpenAI-compatible Chat Completions API (Mistral, DeepSeek, Qwen, Xiaomi MiMo).
-// Text-only models strip multimodal segments via PrepareForTextOnlyChatCompletions;
-// vision-capable models (Gemini on its own path; Qwen 3.7+/Mistral medium+ heuristics
-// here) keep images. Gemini uses a separate path for tool-call compatibility.
+// Gemini uses a separate path for tool-call compatibility.
 func (a *Agent) generateAssistantForMessageOpenAIChatCompletions(ctx context.Context, userID uuid.UUID, chatJob *models.Job, chatMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext) (*models.ChatMessage, *provider.GenerateResponse, error) {
-	renderCtx := modelContext.Clone()
-	if !models.ChatCompletionsSupportsVision(chatCtx.modelProvider, chatCtx.model) {
-		renderCtx.PrepareForTextOnlyChatCompletions()
-	}
-	params := renderCtx.BuildOpenAIChatCompletionParams(chatCtx.model)
+	params := buildOpenAIChatCompletionsParams(chatCtx, modelContext)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
-	functionTools := openAIChatCompletionFunctionTools(tools.AgentFunctionToolSpecs(policy.showMoodTools))
+	specs := tools.AgentFunctionToolSpecs(policy.showMoodTools)
+	if policy.toolsEnabled {
+		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
+	}
+	functionTools := openAIChatCompletionFunctionTools(specs)
 	a.recordToolDefinitionEstimate(modelContext, functionTools)
 
 	adapter, err := a.openAIChatCompletionsAdapter(chatCtx, params, functionTools, policy.disabledTools)
@@ -1281,6 +1521,23 @@ func (a *Agent) generateAssistantForMessageOpenAIChatCompletions(ctx context.Con
 	}
 
 	return a.runGeneration(ctx, userID, chatJob, chatMessage, chatCtx, adapter, generationOptions{provider: string(chatCtx.modelProvider)})
+}
+
+func buildOpenAIChatCompletionsParams(chatCtx *chatContext, modelContext *provider.ModelContext) openai.ChatCompletionNewParams {
+	return visionRenderContext(chatCtx, modelContext).BuildOpenAIChatCompletionParams(chatCtx.model)
+}
+
+// visionRenderContext returns the context to render a provider request from: the
+// context itself for vision models, or a text-only clone so a model without
+// vision_support never receives image parts. The source is never mutated because
+// post-turn phases and the context breakdown still read it.
+func visionRenderContext(chatCtx *chatContext, modelContext *provider.ModelContext) *provider.ModelContext {
+	if chatCtx.modelVisionSupport {
+		return modelContext
+	}
+	renderCtx := modelContext.Clone()
+	renderCtx.PrepareForTextOnly()
+	return renderCtx
 }
 
 func (a *Agent) openAIChatCompletionsAdapter(chatCtx *chatContext, params openai.ChatCompletionNewParams, functionTools []openai.ChatCompletionToolUnionParam, disabledTools map[string]bool) (provider.AgentAdapter, error) {
@@ -1311,36 +1568,48 @@ func (a *Agent) openAIChatCompletionsAdapter(chatCtx *chatContext, params openai
 }
 
 func (a *Agent) recordToolCalls(ctx context.Context, toolCalls []*models.ToolCall) {
-	a.recordCountHistogram(ctx, totalToolCallsHistogramKey, int64(len(toolCalls)))
-	for _, toolCall := range toolCalls {
-		attrs := metric.WithAttributes(attribute.String("type", toolCall.ToolName), attribute.Bool("error", toolCall.ToolError != ""))
-		a.recordCounter(ctx, toolCallCountKey, 1, attrs)
-	}
+	a.metrics().Record(ctx, telemetry.ToolCallsPerTurn, float64(len(toolCalls)), a.callPathAttr(ctx))
 }
 
-func (a *Agent) recordTime(ctx context.Context, name string, duration time.Duration, attributes ...metric.RecordOption) {
-	if a.telemetry == nil || a.telemetry.Metrics == nil {
-		return
+// metrics returns the agent's metrics recorder. It may be nil (no telemetry, or a Telemetry
+// without Metrics); every *telemetry.Metrics method is a no-op on a nil receiver, so callers
+// don't check.
+func (a *Agent) metrics() *telemetry.Metrics {
+	if a.telemetry == nil {
+		return nil
 	}
-	a.telemetry.Metrics.RecordTime(ctx, name, duration, attributes...)
+	return a.telemetry.Metrics
 }
 
-func (a *Agent) recordCounter(ctx context.Context, name string, count int64, attributes ...metric.AddOption) {
-	if a.telemetry == nil || a.telemetry.Metrics == nil {
-		return
-	}
-	a.telemetry.Metrics.RecordCounter(ctx, name, count, attributes...)
+func (a *Agent) callPathAttr(ctx context.Context) attribute.KeyValue {
+	return telemetry.AttrCallPath.String(string(telemetry.CallPathFromContext(ctx)))
 }
 
-func (a *Agent) recordCountHistogram(ctx context.Context, name string, count int64, attributes ...metric.RecordOption) {
-	if a.telemetry == nil || a.telemetry.Metrics == nil {
-		return
-	}
-	a.telemetry.Metrics.RecordCountHistogram(ctx, name, count, attributes...)
+// Chat turn stages for telemetry.ChatTurnStageDuration: a fixed set, in turn order. Stages
+// can nest: prepare_context includes memory_enrichment, and post_process includes chat_name
+// and the checkpoint_* stages.
+const (
+	turnStageRehydrationWait      = "rehydration_wait"
+	turnStagePrepareContext       = "prepare_context"
+	turnStageMemoryEnrichment     = "memory_enrichment"
+	turnStageMood                 = "mood"
+	turnStageBuildContext         = "build_context"
+	turnStageInference            = "inference"
+	turnStageExpression           = "expression"
+	turnStagePostProcess          = "post_process"
+	turnStageChatName             = "chat_name"
+	turnStageCheckpointScratchpad = "checkpoint_scratchpad"
+	turnStageCheckpointMemory     = "checkpoint_memory"
+	turnStageCheckpointSummary    = "checkpoint_summary"
+	turnStageCheckpointPersist    = "checkpoint_persist"
+)
+
+func (a *Agent) recordTurnStage(ctx context.Context, stage string, d time.Duration) {
+	a.metrics().RecordDuration(ctx, telemetry.ChatTurnStageDuration, d, telemetry.AttrStage.String(stage), a.callPathAttr(ctx))
 }
 
 func (a *Agent) recordModelContextSegmentEstimates(ctx context.Context, modelContext *provider.ModelContext) {
-	if a.telemetry == nil || a.telemetry.Metrics == nil || modelContext == nil {
+	if a.metrics() == nil || modelContext == nil {
 		return
 	}
 	counter := a.tokenCounter
@@ -1351,13 +1620,12 @@ func (a *Agent) recordModelContextSegmentEstimates(ctx context.Context, modelCon
 	if len(estimates) == 0 {
 		return
 	}
-	m := make(map[string]int64, len(estimates))
-	for k, v := range estimates {
-		if v > 0 {
-			m[string(k)] = int64(v)
+	callPath := a.callPathAttr(ctx)
+	for segment, n := range estimates {
+		if n > 0 {
+			a.metrics().Record(ctx, telemetry.GenAIContextTokens, float64(n), telemetry.AttrSegment.String(string(segment)), callPath)
 		}
 	}
-	a.telemetry.Metrics.RecordSegmentTokenEstimates(ctx, m, telemetry.CallPathFromContext(ctx))
 }
 
 // recordToolDefinitionEstimate records the cl100k estimate for schemas passed out-of-band
@@ -1536,11 +1804,18 @@ type jobDraftDeltaBuffer struct {
 	jobID         uuid.UUID
 	minChunkChars int
 	maxWait       time.Duration
+	// appendChunks persists a flushed chunk; defaults to AppendJobDraftDeltas (reply
+	// text). The reasoning buffer targets AppendJobDraftReasoning instead.
+	appendChunks func(ctx context.Context, userID, jobID uuid.UUID, chunks []string) error
+	field        string
 
 	mu        sync.Mutex
 	pending   string
 	allText   string
 	lastFlush time.Time
+	// breakBeforeNext is set at a tool-round boundary so the next round's text starts a new
+	// paragraph instead of running on from the previous round's ("…anything.Tool report").
+	breakBeforeNext bool
 }
 
 func newJobDraftDeltaBuffer(
@@ -1571,7 +1846,49 @@ func newJobDraftDeltaBuffer(
 		jobID:         job.ID,
 		minChunkChars: minChunkChars,
 		maxWait:       maxWait,
+		appendChunks:  ds.AppendJobDraftDeltas,
+		field:         "draft_deltas",
 		lastFlush:     time.Now(),
+	}
+}
+
+// newJobDraftReasoningBuffer is newJobDraftDeltaBuffer targeting the job's
+// draft_reasoning, so live model reasoning reaches the polling client the same way
+// reply text does.
+func newJobDraftReasoningBuffer(
+	persistParent context.Context,
+	ds *datastore.Datastore,
+	logger *zap.Logger,
+	job *models.Job,
+	minChunkChars int,
+	maxWait time.Duration,
+) *jobDraftDeltaBuffer {
+	b := newJobDraftDeltaBuffer(persistParent, ds, logger, job, minChunkChars, maxWait)
+	if b.ds != nil {
+		b.appendChunks = ds.AppendJobDraftReasoning
+		b.field = "draft_reasoning"
+	}
+	return b
+}
+
+// ResetReasoning discards everything buffered and persisted so far and empties the
+// job's draft_reasoning. Only meaningful on a reasoning buffer: it is the
+// ReasoningStream.OnReset hook, fired when a streamed attempt is discarded.
+func (b *jobDraftDeltaBuffer) ResetReasoning() {
+	if b == nil || b.ds == nil {
+		return
+	}
+	b.mu.Lock()
+	b.pending = ""
+	b.allText = ""
+	b.lastFlush = time.Now()
+	b.mu.Unlock()
+	writeCtx, cancel := context.WithTimeout(b.persistParent, jobDraftDeltaPersistTimeout)
+	defer cancel()
+	if err := b.ds.ResetJobDraftReasoning(writeCtx, b.userID, b.jobID); err != nil && b.logger != nil {
+		b.logger.Warn("failed to reset job draft reasoning",
+			zap.String("job_id", b.jobID.String()),
+			zap.Error(err))
 	}
 }
 
@@ -1582,6 +1899,10 @@ func (b *jobDraftDeltaBuffer) HandleDelta(delta string) {
 	var flushChunk string
 	now := time.Now()
 	b.mu.Lock()
+	if b.breakBeforeNext {
+		b.breakBeforeNext = false
+		delta = paragraphBreakBefore(b.allText, delta) + delta
+	}
 	b.pending += delta
 	b.allText += delta
 	shouldFlush := len(b.pending) >= b.minChunkChars || now.Sub(b.lastFlush) >= b.maxWait
@@ -1611,14 +1932,38 @@ func (b *jobDraftDeltaBuffer) Flush() {
 	}
 }
 
+// MarkRoundBoundary records that a tool round ran; the next text delta is prefixed with a
+// paragraph break when earlier text exists. The break goes through HandleDelta like any other
+// text, so persisted deltas and the final message still match exactly.
+func (b *jobDraftDeltaBuffer) MarkRoundBoundary() {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	b.breakBeforeNext = b.allText != ""
+	b.mu.Unlock()
+}
+
+// paragraphBreakBefore is the separator needed between prior text and next so they read as
+// separate paragraphs, reusing any newlines either side already has.
+func paragraphBreakBefore(prior, next string) string {
+	trailing := len(prior) - len(strings.TrimRight(prior, "\n"))
+	leading := len(next) - len(strings.TrimLeft(next, "\n"))
+	if missing := 2 - trailing - leading; missing > 0 {
+		return strings.Repeat("\n", missing)
+	}
+	return ""
+}
+
 func (b *jobDraftDeltaBuffer) persist(chunk string) {
 	if chunk == "" || b.ds == nil {
 		return
 	}
 	writeCtx, cancel := context.WithTimeout(b.persistParent, jobDraftDeltaPersistTimeout)
 	defer cancel()
-	if err := b.ds.AppendJobDraftDeltas(writeCtx, b.userID, b.jobID, []string{chunk}); err != nil && b.logger != nil {
-		b.logger.Warn("failed to append job draft delta",
+	if err := b.appendChunks(writeCtx, b.userID, b.jobID, []string{chunk}); err != nil && b.logger != nil {
+		b.logger.Warn("failed to append job draft chunk",
+			zap.String("field", b.field),
 			zap.String("job_id", b.jobID.String()),
 			zap.Int("chunk_chars", len(chunk)),
 			zap.Error(err))
@@ -1693,7 +2038,10 @@ func memoryToolCallsForChatContext(chatCtx *chatContext) []*models.ToolCall {
 }
 
 // prepareChatContext prepares the chat context including chat, memories, and model selection
-func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage) (*chatContext, error) {
+// memoryProgress (nil-safe) shows memory retrieval in the chat job's live tool timeline; pass nil
+// when the turn has no job to report to.
+func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage, memoryProgress *memoryLoadProgress) (*chatContext, error) {
+	defer a.timeTurnStage(ctx, turnStagePrepareContext)()
 	// Get parent chat
 	parentChat, err := a.ds.GetChat(ctx, userID, chatMessage.ChatID)
 	if err != nil {
@@ -1701,12 +2049,12 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 	}
 
 	// Get relevant memories.
-	memories, liveMemories, memoryEnrichmentFailed := a.getMemoriesBestEffort(ctx, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message)
+	memories, liveMemories, memoryEnrichmentFailed := a.loadTurnMemories(ctx, memoryProgress, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message)
 	// Resolve model from the chat's model_id (authoritative). Do not trust model_name
 	// alone — it can be stale, and a missing edge used to fall through to defaultModel
 	// (gpt-5.1) even when the user selected a different provider.
-	model, modelProvider, modelSubscriptionTier := a.resolveModelForChat(ctx, parentChat)
-	if err := a.assertUserCanRunChatModel(ctx, userID, parentChat, modelProvider); err != nil {
+	resolved := a.resolveModelForChat(ctx, parentChat)
+	if err := a.assertUserCanRunChatModel(ctx, userID, parentChat, resolved.provider); err != nil {
 		return nil, err
 	}
 
@@ -1714,27 +2062,47 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 	expressionsEnabled := parentChat.PersonalityExpressionsEnabled
 
 	return &chatContext{
+		userID:                 userID,
 		chat:                   parentChat,
 		memories:               memories,
 		liveMemories:           liveMemories,
 		memoryEnrichmentFailed: memoryEnrichmentFailed,
-		model:                  model,
-		modelProvider:          modelProvider,
-		modelSubscriptionTier:  modelSubscriptionTier,
+		model:                  resolved.name,
+		modelProvider:          resolved.provider,
+		modelSubscriptionTier:  resolved.subscriptionTier,
+		modelVisionSupport:     resolved.visionSupport,
 		expressionsEnabled:     expressionsEnabled,
+		memoryProgress:         memoryProgress,
+		mcpSessions:            make(map[string]string),
 	}, nil
 }
 
-// resolveModelForChat loads the effective model name, provider, and tier
-// for a chat turn. model_id on the chat row is authoritative; model_name is a fallback
-// only when the ID lookup fails. The returned tier is the model's raw
-// SubscriptionTier string ("" when unknown); the meter classifies it for gating.
-func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat) (modelName, modelProvider, subscriptionTier string) {
-	modelName = defaultModel
-	modelProvider = string(models.ModelProviderOpenAI)
+// resolvedChatModel is the effective model for a chat turn.
+type resolvedChatModel struct {
+	name     string
+	provider string
+	// subscriptionTier is the model's raw SubscriptionTier string ("" when unknown);
+	// the meter classifies it for gating.
+	subscriptionTier string
+	visionSupport    bool
+}
+
+// resolveModelForChat loads the effective model for a chat turn. model_id on the
+// chat row is authoritative; model_name is a fallback only when the ID lookup fails.
+func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat) resolvedChatModel {
+	fallback := func(name string) resolvedChatModel {
+		// No DB row: default provider/tier. Do not infer provider from the name —
+		// stale or orphan names must not route to experimental providers without a
+		// catalog row. Vision comes from the seed catalog so the default model keeps images.
+		r := resolvedChatModel{name: name, provider: string(models.ModelProviderOpenAI)}
+		if cfg := models.CatalogModel(name); cfg != nil {
+			r.visionSupport = cfg.VisionSupport
+		}
+		return r
+	}
 
 	if parentChat == nil {
-		return modelName, modelProvider, subscriptionTier
+		return fallback(defaultModel)
 	}
 
 	var dbModel *models.Model
@@ -1763,16 +2131,16 @@ func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat
 		}
 	}
 	if dbModel != nil {
-		provider := string(models.ProviderForModel(dbModel.Provider, dbModel.Name))
-		return dbModel.Name, provider, dbModel.SubscriptionTier
+		return resolvedChatModel{
+			name:             dbModel.Name,
+			provider:         string(models.ProviderForModel(dbModel.Provider, dbModel.Name)),
+			subscriptionTier: dbModel.SubscriptionTier,
+			visionSupport:    dbModel.VisionSupport,
+		}
 	}
 
 	if name := strings.TrimSpace(parentChat.ModelName); name != "" {
-		// No DB row: keep the chat's model name but default provider/tier. Do not
-		// infer provider from the name here — stale or orphan names must not route
-		// to experimental providers without a catalog row.
-		modelName = name
-		return modelName, modelProvider, subscriptionTier
+		return fallback(name)
 	}
 
 	if parentChat.ModelID != uuid.Nil {
@@ -1782,7 +2150,7 @@ func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat
 			zap.String("default_model", defaultModel),
 		)
 	}
-	return modelName, modelProvider, subscriptionTier
+	return fallback(defaultModel)
 }
 
 func (a *Agent) assertUserCanRunChatModel(ctx context.Context, userID uuid.UUID, parentChat *models.Chat, modelProvider string) error {
@@ -1812,19 +2180,40 @@ func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, 
 		formatted, err := a.testHooks.GetMemoriesOverride(ctx, userID, chatID, personalityID, userMessage)
 		return formatted, nil, err
 	}
-	// Mock/local mode: memory enrichment needs a provider call (query inference +
-	// embeddings), so it is a deliberate no-op rather than a surprise
-	// deny-transport failure mid-flow.
-	if a.nonVendorLLM() {
+	if !a.memoryEnrichmentRuns() {
 		a.logger.Debug("mock/local mode: skipping memory enrichment", zap.String("chat_id", chatID.String()))
 		return nil, nil, nil
 	}
 	return a.getMemories(ctx, userID, chatID, personalityID, userMessage)
 }
 
+// memoryEnrichmentRuns reports whether getMemoriesForEnrichment will actually retrieve memories.
+// Mock/local mode: memory enrichment needs a provider call (query inference + embeddings), so it
+// is a deliberate no-op rather than a surprise deny-transport failure mid-flow. A test override
+// always counts as running.
+func (a *Agent) memoryEnrichmentRuns() bool {
+	return a.testHooks.GetMemoriesOverride != nil || !a.nonVendorLLM()
+}
+
+// loadTurnMemories runs best-effort memory enrichment for a turn, shown in the job's live tool
+// timeline as a "Load Memory" row: running during retrieval, then complete with the memories (or
+// an error). The row is only added when retrieval really runs, so mock/local turns (which skip
+// it) never show one.
+func (a *Agent) loadTurnMemories(ctx context.Context, progress *memoryLoadProgress, userID, chatID, personalityID uuid.UUID, userMessage string) ([]string, []*models.Memory, bool) {
+	if progress != nil && a.memoryEnrichmentRuns() {
+		progress.Started(ctx)
+	}
+	memories, liveMemories, failed := a.getMemoriesBestEffort(ctx, userID, chatID, personalityID, userMessage)
+	if progress != nil {
+		progress.Finished(ctx, memories, failed)
+	}
+	return memories, liveMemories, failed
+}
+
 // getMemoriesBestEffort attempts memory enrichment and degrades gracefully on any failure.
 // When it fails, it logs the error and returns an empty memory list along with a failure flag.
 func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string) ([]string, []*models.Memory, bool) {
+	defer a.timeTurnStage(ctx, turnStageMemoryEnrichment)()
 	memories, liveMemories, err := a.getMemoriesForEnrichment(ctx, userID, chatID, personalityID, userMessage)
 	if err != nil {
 		// Note: the underlying memory retrieval path logs errors at the failure site(s).
@@ -1870,8 +2259,9 @@ func buildAttachmentLabels(attachments []*models.FileAttachment) []string {
 }
 
 // prepareUserMessage prepares the user message, enriching it with rituals if applicable.
-// The message is prefixed with a [sys:RFC3339] timestamp derived from chatMessage.SentAt.
-// Falls back to time.Now() only when SentAt is zero (e.g. ephemeral/job-constructed messages).
+// The message is prefixed with a [sys:…] timestamp derived from chatMessage.SentAt
+// (see agentMessageTimestampLayout). Falls back to time.Now() only when SentAt is
+// zero (e.g. ephemeral/job-constructed messages).
 func (a *Agent) prepareUserMessage(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage) (string, error) {
 	tz, _ := middleware.GetClientTimezoneFromContext(ctx)
 	normalizedTZ := normalizeTimezoneName(tz)
@@ -1896,14 +2286,23 @@ func (a *Agent) prepareUserMessage(ctx context.Context, userID uuid.UUID, chatMe
 
 var tzLocationCache sync.Map // map[string]*time.Location
 
-// formatUserMessageWithTime prefixes body with a [sys:RFC3339] timestamp tag.
+// agentMessageTimestampLayout is the stable human-readable stamp injected on
+// user messages as [sys:…]. Weekday short name + local date/time + numeric
+// offset so agents can reason about day-of-week without parsing ISO-8601.
+// Example: "Sun 2026-09-13 08:46:51 -04:00". This is intentionally not
+// RFC3339; treat layout changes as a prompt/protocol change (update
+// baseSystemPrompt + docs together).
+const agentMessageTimestampLayout = "Mon 2006-01-02 15:04:05 -07:00"
+
+// formatUserMessageWithTime prefixes body with a [sys:…] timestamp tag using
+// agentMessageTimestampLayout in the client's timezone.
 // If t is zero the body is returned unchanged (no prefix injected for unknown times).
 func formatUserMessageWithTime(t time.Time, tz string, body string) string {
 	if t.IsZero() {
 		return body
 	}
 	loc := resolveTimezoneLocation(tz)
-	return fmt.Sprintf("[sys:%s] %s", t.In(loc).Format(time.RFC3339), body)
+	return fmt.Sprintf("[sys:%s] %s", t.In(loc).Format(agentMessageTimestampLayout), body)
 }
 
 func normalizeTimezoneName(tz string) string {
@@ -1998,8 +2397,38 @@ func (a *Agent) assertGenerationProducedOutput(providerName string, chatCtx *cha
 	// generated text that extraction dropped; zero means nothing came back at all.
 	a.logger.Error("model returned an empty response; failing the turn instead of persisting a blank assistant message", fields...)
 
+	// A max-tokens truncation is a distinct, common cause with a distinct remedy, so it
+	// gets its own user-facing message instead of the generic "empty response" dump. It
+	// happens when the whole output budget is spent on non-text content — extended
+	// reasoning or a long/partial tool call — and generation is cut off before any reply
+	// text is emitted. There is nothing to clip (no text block was produced), and the
+	// budget is a fixed cap, not a setting that can "truncate instead of fail". The
+	// always-on reasoning providers (z.ai GLM, MiMo) have already retried the call once
+	// with reasoning cut back before reaching here; a manual retry usually succeeds
+	// because the tool-use path shortens.
+	if isTruncationStopReason(stopReason) {
+		return fmt.Errorf("%s response was cut off at the length limit before any reply text was produced "+
+			"(the turn used its entire %d-token output budget on tool use or reasoning); please try again",
+			providerName, result.OutputTokens)
+	}
+
 	return fmt.Errorf("%s model returned an empty response (stop_reason=%s, output_tokens=%d)",
 		providerName, stopReason, result.OutputTokens)
+}
+
+// isTruncationStopReason reports whether a provider's verbatim stop reason indicates
+// the response was cut off at the output-token limit. Anthropic (and z.ai GLM, which
+// rides the Anthropic path) report "max_tokens"; the OpenAI Responses API reports
+// "max_output_tokens" via IncompleteDetails.Reason; Chat Completions providers (Xiaomi
+// MiMo) report finish_reason "length". Kept provider-neutral so every empty-turn path
+// surfaces the same clearer message.
+func isTruncationStopReason(stopReason string) bool {
+	switch strings.TrimSpace(stopReason) {
+	case "max_tokens", "max_output_tokens", "length":
+		return true
+	default:
+		return false
+	}
 }
 
 // saveAgentResponse saves the agent's response message and tool calls using the
@@ -2012,6 +2441,7 @@ func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID,
 		Origin:                models.MessageOriginAssistant,
 		ResponseID:            &result.ID,
 		Tokens:                result.OutputTokens,
+		ModelReasoning:        nonEmptyStringPtr(result.Reasoning),
 		GenerationModel:       generationModel,
 		GenerationPersonality: generationPersonality,
 		GenerationMoodID:      generationMoodID,
@@ -2134,11 +2564,13 @@ func (a *Agent) resolvePersonalityName(ctx context.Context, userID, personalityI
 func (a *Agent) finalizeChat(ctx context.Context, userID uuid.UUID, chatMessage, agentMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext, qd metering.Decision) {
 	start := time.Now()
 	defer func() {
-		a.recordTime(ctx, postProcessMessageDurationKey, time.Since(start))
+		a.recordTurnStage(ctx, turnStagePostProcess, time.Since(start))
 	}()
 	// Generate chat name if it's still the default
 	if chatCtx.chat.Name == defaultChatName {
+		doneChatName := a.timeTurnStage(ctx, turnStageChatName)
 		chatName, err := a.generateChatName(ctx, chatMessage.Message)
+		doneChatName()
 		if err != nil {
 			a.logger.Error("failed to generate chat name", zap.Error(err))
 		} else {
@@ -2197,15 +2629,8 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 			MessageID:  messageID,
 		})
 
-		if actionType == models.ActionTypeChatMessage && chatCtx != nil && chatCtx.webSearchCount > 0 {
-			// The meter prices web search by count and skips a zero charge.
-			a.meter.Record(ctx, qd, metering.Usage{
-				UserID:         userID,
-				ActionType:     models.ActionTypeWebSearch,
-				Model:          chatCtx.model,
-				ChatID:         chatMessage.ChatID.String(),
-				WebSearchCount: chatCtx.webSearchCount,
-			})
+		if usage, ok := a.webSearchUsage(userID, chatMessage.ChatID, chatCtx, actionType); ok {
+			a.meter.Record(ctx, qd, usage)
 		}
 	}
 
@@ -2248,11 +2673,9 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	if !decision.ShouldCheckpoint {
 		return
 	}
-	attrs := metric.WithAttributes(
-		telemetry.InputTokenAttr(),
-	)
-	a.recordCountHistogram(ctx, telemetry.Tokens, int64(estimatedContextTokens), attrs)
-	a.recordCountHistogram(ctx, postProcessMessageCountKey, int64(chatCtx.chat.CheckpointUserMessageCount))
+	a.metrics().Add(ctx, telemetry.ChatCheckpoints, 1, telemetry.AttrReason.String(decision.Trigger))
+	a.metrics().Record(ctx, telemetry.ChatCheckpointContextTokens, float64(estimatedContextTokens))
+	a.metrics().Record(ctx, telemetry.ChatCheckpointMessages, float64(chatCtx.chat.CheckpointUserMessageCount))
 	a.logger.Debug("checkpointing chat",
 		zap.String("chat_id", chatMessage.ChatID.String()),
 		zap.String("reason", decision.Reason),
@@ -2289,7 +2712,9 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 	var newScratchpadResponseID *string
 	hasScratchpad := false
 	if chatCtx.chat.PersonalityID != uuid.Nil {
+		doneScratchpad := a.timeTurnStage(ctx, turnStageCheckpointScratchpad)
 		newScratchpad, err := a.updateScratchpad(ctx, userID, agentMessage.ResponseID, chatCtx)
+		doneScratchpad()
 		if err != nil {
 			a.logger.Error("failed to update scratchpad during checkpoint", zap.Error(err))
 		} else {
@@ -2308,21 +2733,27 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 	// failed, intentionally defer both extraction and roll-forward dedupe to the next checkpoint:
 	// compaction requires that delta, and a later checkpoint safely retries it.
 	if hasScratchpad {
+		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
 		a.extractMemoriesWithScratchpadDelta(ctx, userID, chatMessage.ChatID, newScratchpadResponseID, inferenceModelContext, chatCtx, compactionEventID)
+		doneMemory()
 	}
 
 	// 3) Conversation summarization
+	doneSummary := a.timeTurnStage(ctx, turnStageCheckpointSummary)
 	summary, err := a.summarizeConversationForCheckpoint(ctx, userID, chatCtx, checkpointSummarySource{
 		PreviousResponseID: agentMessage.ResponseID,
 	})
+	doneSummary()
 	if err != nil {
 		a.logger.Error("failed to summarize conversation for checkpoint", zap.Error(err))
 		return
 	}
 
+	donePersist := a.timeTurnStage(ctx, turnStageCheckpointPersist)
 	if a.persistCheckpointSummary(ctx, userID, chatMessage.ChatID, summary, assistantMessageCount, "OpenAI", agentMessage.ID) {
 		a.finishCompactionEvent(ctx, userID, compactionEventID, summary)
 	}
+	donePersist()
 }
 
 // runCheckpointClaude performs the scratchpad → memory → summary checkpoint sequence for
@@ -2354,7 +2785,9 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	var scratchpadCtx *provider.ModelContext
 	if chatCtx.chat.PersonalityID != uuid.Nil {
 		scratchpadCtx = archivalCtx.Clone()
+		doneScratchpad := a.timeTurnStage(ctx, turnStageCheckpointScratchpad)
 		newScratchpad, err := a.updateScratchpadClaude(ctx, userID, chatCtx, scratchpadCtx)
+		doneScratchpad()
 		if err != nil {
 			a.logger.Error("failed to update scratchpad during Claude checkpoint", zap.Error(err))
 		} else {
@@ -2372,25 +2805,31 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	// defer both extraction and roll-forward dedupe to the next checkpoint: compaction requires
 	// that delta, and a later checkpoint safely retries it.
 	if hasScratchpad {
+		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
 		if err := a.extractMemoriesWithScratchpadDeltaClaude(ctx, userID, chatMessage.ChatID, scratchpadCtx, modelContext, chatCtx, compactionEventID); err != nil {
 			a.logger.Error("failed to extract memories during Claude checkpoint", zap.Error(err))
 		}
+		doneMemory()
 	}
 
 	// 3) Conversation summarization — uses pristine inference modelContext plus the
 	// assistant reply (explicit OpenAI input items; same prompt as the threaded path).
+	doneSummary := a.timeTurnStage(ctx, turnStageCheckpointSummary)
 	summary, err := a.summarizeConversationForCheckpoint(ctx, userID, chatCtx, checkpointSummarySource{
 		ModelContext:   modelContext,
 		AssistantReply: agentMessage.Message,
 	})
+	doneSummary()
 	if err != nil {
 		a.logger.Error("failed to summarize conversation for Claude checkpoint", zap.Error(err))
 		return
 	}
 
+	donePersist := a.timeTurnStage(ctx, turnStageCheckpointPersist)
 	if a.persistCheckpointSummary(ctx, userID, chatMessage.ChatID, summary, assistantMessageCount, "Claude", agentMessage.ID) {
 		a.finishCompactionEvent(ctx, userID, compactionEventID, summary)
 	}
+	donePersist()
 }
 
 // persistCheckpointSummary writes the live checkpoint state. It returns false only when that
@@ -2741,4 +3180,12 @@ func (a *Agent) recordCancelledChatUsage(
 			zap.String("message_id", partialMsg.ID.String()),
 			zap.Error(err))
 	}
+}
+
+// nonEmptyStringPtr returns a pointer to s, or nil when s is blank.
+func nonEmptyStringPtr(s string) *string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return &s
 }

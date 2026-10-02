@@ -1,0 +1,35 @@
+<span class="ui-help-hint">
+  <button
+    #trigger
+    type="button"
+    class="ui-help-hint__trigger"
+    [attr.aria-label]="label()"
+    [attr.aria-expanded]="open()"
+    [attr.aria-controls]="panelId"
+    (click)="toggle()"
+  >
+    <ui-circle-help-icon [size]="16" />
+  </button>
+  @if (open()) {
+    <span
+      class="ui-help-hint__panel"
+      [style.top.px]="panelPosition()?.top"
+      [style.left.px]="panelPosition()?.left"
+      [style.width.px]="panelPosition()?.width"
+      [id]="panelId"
+      role="region"
+      [attr.aria-label]="label()"
+    >
+      @if (heading()) {
+        <span class="ui-help-hint__heading">{{ heading() }}</span>
+      }
+      <span class="ui-help-hint__body"><ng-content /></span>
+      @if (guideHref(); as href) {
+        <a class="ui-help-hint__link" [href]="href" target="_blank" rel="noopener noreferrer">
+          {{ guideLabel() }}
+          <span class="sr-only">(opens in a new tab)</span>
+        </a>
+      }
+    </span>
+  }
+</span>

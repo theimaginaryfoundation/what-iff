@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
 import { AbstractControl, FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
 import { ExternalAuthProvider } from '../../core/auth/external-auth.provider';
@@ -14,13 +15,14 @@ import { ThemeMode, ThemeService } from '../../core/services/theme.service';
 import { UserPreferencesService } from '../../core/services/user-preferences.service';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { UserIconComponent } from '../../shared/ui/icons/icons';
+import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { ProfileSettingsModalService, ProfileSettingsTab } from './profile-settings-modal.service';
 
 /** Profile & Settings modal: account identity, appearance, defaults, and password. */
 @Component({
   selector: 'app-profile-settings-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ReactiveFormsModule, UserIconComponent],
+  imports: [CommonModule, ModalComponent, ReactiveFormsModule, UserIconComponent, TooltipDirective],
   templateUrl: './profile-settings-modal.component.html',
   styleUrl: './profile-settings-modal.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -34,6 +36,7 @@ export class ProfileSettingsModalComponent {
   private readonly preferencesService = inject(UserPreferencesService);
   private readonly modelService = inject(ModelService);
   private readonly personalityService = inject(PersonalityService);
+  private readonly router = inject(Router);
 
   readonly tabs: Array<{ id: ProfileSettingsTab; label: string; icon: 'profile' }> = [
     { id: 'profile', label: 'Profile', icon: 'profile' },
@@ -92,6 +95,12 @@ export class ProfileSettingsModalComponent {
 
   close(): void { this.modal.close(); }
   setTab(tab: ProfileSettingsTab): void { this.modal.setTab(tab); }
+
+  /** Closes the modal and opens the Import & Export screen. */
+  goToData(): void {
+    this.close();
+    this.router.navigate(['/data']);
+  }
 
   async onThemeModeChange(mode: ThemeMode): Promise<void> {
     if (this.themeMode() === mode) return;

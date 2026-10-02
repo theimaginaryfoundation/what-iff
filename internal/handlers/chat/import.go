@@ -19,6 +19,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -36,6 +37,11 @@ const (
 	multipartMemory = 32 << 10 // 32 KiB
 	// importProgressInterval throttles progress DB writes during a large import.
 	importProgressInterval = 750 * time.Millisecond
+	// chatImportJobTimeout bounds one background chat import, like account import's timeout.
+	chatImportJobTimeout = 30 * time.Minute
+	// importTerminalWriteTimeout bounds recording a failed import's status once its own context
+	// has ended (it timed out), so the job still reaches a terminal state.
+	importTerminalWriteTimeout = 15 * time.Second
 )
 
 // ImportChats handles POST /chat/import — accepts an OpenAI (ChatGPT) or Anthropic (Claude)
@@ -104,6 +110,7 @@ func (h *Handler) ImportChats(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to stage import", err)
 		return
 	}
+	telemetry.Global().RecordFileSize(r.Context(), telemetry.FileOpChatImport, telemetry.FileKind("application/json"), written)
 
 	// Sniff the format from the staged file so we can route to the right parser in the background.
 	detectFile, err := os.Open(tmpPath)
@@ -151,14 +158,29 @@ func (h *Handler) ImportChats(w http.ResponseWriter, r *http.Request) {
 
 // runChatImport parses the staged export and persists it, updating the job's progress and status.
 // It always removes the temp file and never leaves the job in a non-terminal state on panic.
+// The run is tracked as a chat_import job, with parse/insert stage timings and per-run
+// conversation counts on the file metrics.
 func (h *Handler) runChatImport(ctx context.Context, userID, jobID uuid.UUID, tmpPath, format string) {
 	defer func() {
 		if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
 			h.logger.Warn("chat import: failed to remove temp file", zap.String("path", tmpPath), zap.Error(err))
 		}
 	}()
+	timeout := h.importTimeout
+	if timeout <= 0 {
+		timeout = chatImportJobTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	metrics := telemetry.Global()
+	finishJob := metrics.TrackJob(ctx, JobTypeChatImport)
+	// Every early return below is a failure. finishJob is deferred before the recover below so it
+	// runs after it and sees a panic outcome.
+	outcome := telemetry.JobOutcomeFailed
+	defer func() { finishJob(outcome) }()
 	defer func() {
 		if v := recover(); v != nil {
+			outcome = telemetry.JobOutcomePanic
 			h.logger.Error("chat import: panic in background job",
 				zap.String("job_id", jobID.String()),
 				zap.Any("panic", v),
@@ -183,6 +205,7 @@ func (h *Handler) runChatImport(ctx context.Context, userID, jobID uuid.UUID, tm
 		convs       []models.ImportConversation
 		parseErrors []string
 	)
+	doneParse := metrics.TimeFileStage(ctx, telemetry.FileOpChatImport, telemetry.FileStageParse)
 	switch format {
 	case importFormatAnthropic:
 		convs, parseErrors, err = parseAnthropicArchive(ctx, f, now)
@@ -193,10 +216,12 @@ func (h *Handler) runChatImport(ctx context.Context, userID, jobID uuid.UUID, tm
 			convs, parseErrors = prepareConversations(raw, now)
 		}
 	}
+	doneParse(err)
 	if err != nil {
+		outcome = telemetry.JobOutcomeFromError(err)
 		h.logger.Error("chat import: parse failed",
 			zap.String("job_id", jobID.String()), zap.String("format", format), zap.Error(err))
-		h.failImportJob(ctx, userID, jobID, "Failed to parse conversations.json")
+		h.failImportJob(ctx, userID, jobID, importFailureMessage(err, "Failed to parse conversations.json"))
 		return
 	}
 
@@ -213,12 +238,18 @@ func (h *Handler) runChatImport(ctx context.Context, userID, jobID uuid.UUID, tm
 		}
 	}
 
+	doneInsert := metrics.TimeFileStage(ctx, telemetry.FileOpChatImport, telemetry.FileStageInsert)
 	result, err := h.ds.ImportChats(ctx, userID, convs, onProgress)
+	doneInsert(err)
+	if result != nil {
+		recordChatImportItems(ctx, metrics, result)
+	}
 	if err != nil {
+		outcome = telemetry.JobOutcomeFromError(err)
 		// result may be partial (e.g. context cancellation); record what we have, then fail.
 		h.logger.Error("chat import: datastore error",
 			zap.String("job_id", jobID.String()), zap.Error(err))
-		h.failImportJob(ctx, userID, jobID, "Failed to import some conversations")
+		h.failImportJob(ctx, userID, jobID, importFailureMessage(err, "Failed to import some conversations"))
 		return
 	}
 
@@ -251,6 +282,7 @@ func (h *Handler) runChatImport(ctx context.Context, userID, jobID uuid.UUID, tm
 		return
 	}
 
+	outcome = telemetry.JobOutcomeSuccess
 	h.writeImportProgress(ctx, userID, jobID, models.ImportProgress{
 		Phase: "complete", Source: format, Total: total,
 		Imported: result.Imported, Skipped: result.Skipped, ImportedIDs: result.ImportedIDs,
@@ -258,6 +290,13 @@ func (h *Handler) runChatImport(ctx context.Context, userID, jobID uuid.UUID, tm
 	if _, err := h.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusComplete, ""); err != nil {
 		h.logger.Error("chat import: failed to mark job complete", zap.String("job_id", jobID.String()), zap.Error(err))
 	}
+	h.ds.AuditChatImport(ctx, userID, "imported "+format+" conversation history", map[string]any{
+		"source":   format,
+		"imported": result.Imported,
+		"skipped":  result.Skipped,
+		"total":    total,
+		"errors":   totalErrors,
+	})
 
 	if total > 0 && result.Imported == 0 && result.Skipped == total {
 		h.logger.Info("chat import completed: all conversations already imported (dedup)",
@@ -276,11 +315,36 @@ func (h *Handler) runChatImport(ctx context.Context, userID, jobID uuid.UUID, tm
 		zap.Int("total_errors", totalErrors))
 }
 
+// recordChatImportItems records how many conversations one import run imported, skipped as
+// duplicates, and failed to persist.
+func recordChatImportItems(ctx context.Context, metrics *telemetry.Metrics, result *models.ImportResult) {
+	metrics.RecordFileItems(ctx, telemetry.FileOpChatImport, telemetry.FileItemConversation, telemetry.FileItemImported, result.Imported)
+	metrics.RecordFileItems(ctx, telemetry.FileOpChatImport, telemetry.FileItemConversation, telemetry.FileItemSkipped, result.Skipped)
+	metrics.RecordFileItems(ctx, telemetry.FileOpChatImport, telemetry.FileItemConversation, telemetry.FileItemFailed, len(result.Errors))
+}
+
+// importFailureMessage is the user-safe job error for err: a timeout says so (anything already
+// imported stays imported), anything else gets fallback.
+func importFailureMessage(err error, fallback string) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "Import timed out before completing; some conversations may have been imported"
+	}
+	return fallback
+}
+
 // failImportJob marks the import job failed with a user-safe message, preserving last-known progress.
+// When the run's context has already ended (it timed out), the status is written on a fresh
+// short-lived one so the job doesn't stay "processing".
 func (h *Handler) failImportJob(ctx context.Context, userID, jobID uuid.UUID, msg string) {
+	if ctx.Err() != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), importTerminalWriteTimeout)
+		defer cancel()
+	}
 	if _, err := h.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusFailed, msg); err != nil {
 		h.logger.Error("chat import: failed to mark job failed", zap.String("job_id", jobID.String()), zap.Error(err))
 	}
+	h.ds.AuditChatImport(ctx, userID, "conversation import failed: "+msg, map[string]any{"success": false})
 }
 
 // writeImportProgress persists a progress snapshot, logging (but not failing) on error.

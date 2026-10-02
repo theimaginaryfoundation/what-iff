@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpErrorResponse, HttpResponse } from '@angular/common/http';
-import { Observable, BehaviorSubject, EMPTY, throwError, timer, switchMap, takeWhile, finalize, distinctUntilChanged } from 'rxjs';
+import { Observable, BehaviorSubject, EMPTY, throwError, timer, exhaustMap, takeWhile, finalize, distinctUntilChanged } from 'rxjs';
 import { catchError, tap, map } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { Job, JobFilters, JobStatus, ActiveChatMessageJob } from '../models/job.model';
@@ -76,9 +76,37 @@ export class JobService {
     let lastFetchedMessageKey = '';
     let lastUserSyncKey = '';
 
+    /**
+     * Ordering guard for the assistant-row fetches below.
+     *
+     * A single job produces several phases that each carry a result_id --
+     * inference_complete, then compaction_complete, then complete -- and each
+     * one dispatches its own independent getMessage(). Those are separate HTTP
+     * requests with no ordering guarantee between them, so the earlier one can
+     * resolve last. That matters because the row genuinely changes between
+     * phases: context_breakdown is written after the inference phase has
+     * already been observed, so a late inference_complete response carries no
+     * breakdown and, applied on top of the complete response, erases it.
+     *
+     * This is what made the Context X-ray e2e test flaky against a
+     * real-inference backend, where reply latency varies enough to open the
+     * window. `lastFetchedMessageKey` does not help: it suppresses a repeat of
+     * the *same* result_id and phase, and these are different phases.
+     *
+     * Each dispatch takes the next sequence number; a response is applied only
+     * if no newer one has already been applied. Dropping the stale response is
+     * enough for correctness and, unlike cancelling in flight, needs no
+     * restructuring of the surrounding pipeline.
+     */
+    let messageFetchSeq = 0;
+    let appliedMessageSeq = 0;
+
     return timer(0, pollingInterval)
       .pipe(
-        switchMap(() =>
+        // exhaustMap, not switchMap: a tick that fires while the previous GET is still in flight
+        // is skipped. switchMap cancelled that request, so when every response took longer than
+        // the interval (slow link, large job row) no snapshot ever arrived.
+        exhaustMap(() =>
           this.getJob(jobId).pipe(
             catchError(error => {
               // A failed poll request says nothing authoritative about the server-side job.
@@ -96,7 +124,9 @@ export class JobService {
               a.status === b.status &&
               (a.result_id ?? '') === (b.result_id ?? '') &&
               (a.error ?? '') === (b.error ?? '') &&
-              serializeDraftDeltas(a.draft_deltas) === serializeDraftDeltas(b.draft_deltas)
+              (a.progress ?? '') === (b.progress ?? '') &&
+              serializeDraftDeltas(a.draft_deltas) === serializeDraftDeltas(b.draft_deltas) &&
+              serializeDraftDeltas(a.draft_reasoning) === serializeDraftDeltas(b.draft_reasoning)
             );
           },
         ),
@@ -116,8 +146,15 @@ export class JobService {
               return;
             }
             lastFetchedMessageKey = fetchKey;
+            const seq = ++messageFetchSeq;
             this.messageService.getMessage(job.result_id).subscribe({
               next: (message: ChatMessage) => {
+                // Out of order: a newer phase's row has already been applied,
+                // and this older one would overwrite it with staler data.
+                if (seq < appliedMessageSeq) {
+                  return;
+                }
+                appliedMessageSeq = seq;
                 this.messageService.addAssistantMessage(message);
               },
               error: error => {
@@ -178,11 +215,11 @@ export class JobService {
   }
 
   /**
-   * Latest non-terminal chat_message job for a user turn, if any (e.g. resume after refresh).
+   * Latest non-terminal chat_message job for any user turn in the chat, if any. Used to pick a
+   * running turn back up when the user returns to a thread (switch back, refresh, tab focus).
    */
-  getActiveChatMessageJob(chatId: string, messageId: string): Observable<ActiveChatMessageJob | null> {
-    const url = `${this.chatApiUrl}/${chatId}/chat-message/${messageId}/active-job`;
-    return this.http.get<ActiveChatMessageJob>(url, { observe: 'response' }).pipe(
+  getActiveChatJob(chatId: string): Observable<ActiveChatMessageJob | null> {
+    return this.http.get<ActiveChatMessageJob>(`${this.chatApiUrl}/${chatId}/active-job`, { observe: 'response' }).pipe(
       map((res: HttpResponse<ActiveChatMessageJob>) => (res.status === 204 ? null : res.body)),
       catchError(this.handleError),
     );

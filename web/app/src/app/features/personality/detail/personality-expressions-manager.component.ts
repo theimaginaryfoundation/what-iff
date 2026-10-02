@@ -8,6 +8,7 @@ import {
   OnInit,
   output,
   signal,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass } from '@angular/common';
@@ -22,7 +23,6 @@ import {
   OptimisticContext,
 } from '../../../core/services/expression-assignment.service';
 import {
-  isDefaultExpressionGridComplete,
   isValidExpressionKey,
   MergedExpression,
   slotsFromPersistedExpressions,
@@ -30,23 +30,38 @@ import {
 import { ImageGalleryService } from '../../../core/services/image-gallery.service';
 import { PersonalityService } from '../../../core/services/personality.service';
 import { PersonalityMediaJobService } from '../../../core/services/personality-media-job.service';
+import { JobService } from '../../../core/services/job.service';
+import { parseExpressionCandidatesProgress } from '../../../core/models/personality-media-job.model';
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { ModalComponent } from '../../../shared/ui/modal/modal.component';
 import { AuthImagePipe } from '../../../core/pipes/auth-image.pipe';
 import { AsyncPipe } from '@angular/common';
+import { ExpressionGenerateModalComponent } from './expression-generate-modal.component';
+import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.component';
+import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 
 /**
  * Renders persisted expression slots only (no client-side default placeholders).
- * Users add keys manually or run **Generate default expressions** to create the 3×3 grid.
+ * Users add keys manually or open **Generate** (`ExpressionGenerateModalComponent`) to name nine
+ * expressions, pick a reference image, and keep/discard generated candidates.
  * Optimistic UI is delegated to `ExpressionAssignmentService`.
  *
- * Default-grid POST uses nano likeness plus one medium-quality image (~$0.01), not
- * quota-metered; the server skips when the grid is already complete unless force=true.
+ * A server-started default-grid job (e.g. after personality creation) still shows as
+ * "Generating…" here and refreshes the list when it completes.
  */
 @Component({
   selector: 'app-personality-expressions-manager',
   standalone: true,
-  imports: [AsyncPipe, AuthImagePipe, NgClass, FormsModule, ModalComponent],
+  imports: [
+    AsyncPipe,
+    AuthImagePipe,
+    NgClass,
+    FormsModule,
+    ModalComponent,
+    ExpressionGenerateModalComponent,
+    HelpHintComponent,
+    TooltipDirective,
+  ],
   template: `
     <section
       class="expressions-manager flex flex-col gap-3 rounded-xl border bg-(--color-surface-card) p-4"
@@ -59,7 +74,13 @@ import { AsyncPipe } from '@angular/common';
           @if (personalityName()?.trim()) {
             <h2 class="truncate text-[0.9375rem] font-bold" [style.color]="accent()">{{ personalityName() }}</h2>
           } @else {
-            <h2 class="text-base font-semibold text-(--color-text-primary)">Expressions</h2>
+            <h2 class="inline-flex items-center gap-1 text-base font-semibold text-(--color-text-primary)">
+              Expressions
+              <ui-help-hint label="What are expressions?" heading="Expressions" guide="expressions">
+                Portraits shown next to this personality's replies. After each reply the personality picks the one that
+                fits, using the labels to know when each applies.
+              </ui-help-hint>
+            </h2>
           }
           <p class="text-xs text-(--color-text-secondary)">
             {{ slots().length }} slot{{ slots().length === 1 ? '' : 's' }} ·
@@ -70,15 +91,16 @@ import { AsyncPipe } from '@angular/common';
           <button
             type="button"
             class="inline-flex items-center rounded-lg border border-border-base bg-(--color-surface-base) px-3 py-1.5 text-sm font-semibold text-(--color-text-primary) disabled:opacity-50"
-            [disabled]="gridGenerating()"
-            [title]="defaultGridComplete() ? 'Re-run image generation for all nine default slots (recreates any deleted defaults)' : 'Create the nine default expression slots and generate their images'"
-            (click)="onGenerateDefaultGrid(defaultGridComplete())"
-          >{{ gridButtonLabel() }}</button>
+            [disabled]="defaultGridRunning()"
+            uiTooltip="Generate a set of portraits and choose which ones to keep"
+            (click)="openGenerate()"
+          >{{ generateButtonLabel() }}</button>
           <button
             type="button"
             class="inline-flex items-center rounded-lg px-3 py-1.5 text-sm font-semibold"
             style="background: color-mix(in srgb, var(--expressions-accent) 16%, transparent); color: var(--expressions-accent);"
             [disabled]="gridGenerating()"
+            uiTooltip="Add your own expression key, then give it an image"
             (click)="onCreateCustomKey()"
           >+ Add expression</button>
 
@@ -92,7 +114,7 @@ import { AsyncPipe } from '@angular/common';
             [class.bg-(--color-surface-input)]="!expressionsEnabled()"
             [attr.aria-checked]="expressionsEnabled()"
             [attr.aria-label]="'Expression images in chat'"
-            [title]="expressionsEnabled() ? 'Hide expression images in chat' : 'Show expression images in chat'"
+            [uiTooltip]="expressionsEnabled() ? 'Stop showing portraits next to replies' : 'Show portraits next to replies again'"
             [disabled]="expressionsToggleUpdating()"
             (click)="onToggleExpressionsEnabled()"
           >
@@ -123,7 +145,7 @@ import { AsyncPipe } from '@angular/common';
       <div [ngClass]="{'opacity-40 pointer-events-none select-none': !expressionsEnabled()}">
         @if (slots().length === 0) {
           <p class="rounded-md border border-border-base bg-(--color-surface-input) px-3 py-3 text-sm text-(--color-text-secondary)" role="status">
-            No expression slots yet. Use <strong class="font-semibold text-(--color-text-primary)">Generate default expressions</strong> for a starter 3×3 grid, or <strong class="font-semibold text-(--color-text-primary)">Add expression</strong> to define your own keys.
+            No expression slots yet. Use <strong class="font-semibold text-(--color-text-primary)">Generate</strong> for a starter 3×3 grid, or <strong class="font-semibold text-(--color-text-primary)">Add expression</strong> to define your own keys.
           </p>
         }
 
@@ -135,8 +157,11 @@ import { AsyncPipe } from '@angular/common';
               [attr.aria-label]="slotAriaLabel(slot)"
             >
               <div
+                #slotKey
                 class="w-full border-b border-border-base bg-(--color-surface-input) px-2 py-1 text-center text-[0.8125rem] font-medium text-(--color-text-primary) truncate"
-                [title]="slot.expressionKey"
+                [uiTooltip]="slot.expressionKey"
+                truncatedOnly
+                [truncationTarget]="slotKey"
               >{{ slot.expressionKey }}</div>
               <div class="relative aspect-square bg-(--color-surface-elevated)">
                 @if (slotImageUrl(slot); as imageUrl) {
@@ -156,12 +181,14 @@ import { AsyncPipe } from '@angular/common';
                   <button
                     type="button"
                     class="rounded-md border border-border-base bg-(--color-surface-base) px-2 py-1 text-[0.6875rem] font-semibold tracking-wide text-(--color-text-primary)"
+                    uiTooltip="Pick a different image for this expression"
                     (click)="onAssign(slot)"
                   >REPLACE</button>
                   @if (slot.imageId) {
                     <button
                       type="button"
                       class="rounded-md border border-white/25 bg-black/25 px-2 py-1 text-[0.625rem] text-white"
+                      uiTooltip="Remove the image but keep the expression"
                       (click)="onClear(slot)"
                     >CLEAR</button>
                   }
@@ -171,6 +198,8 @@ import { AsyncPipe } from '@angular/common';
                 type="text"
                 class="w-full rounded-none border-x-0 border-b-0 border-t border-border-base bg-(--color-surface-input) px-2 py-1.5 text-[0.6875rem] text-(--color-text-primary) outline-none focus:border-(--color-accent) focus:ring-1 focus:ring-(--color-accent)"
                 [placeholder]="'Label / when to use (optional)'"
+                [attr.aria-label]="'When to use ' + slot.expressionKey"
+                uiTooltip="Tells the app when to pick this expression"
                 [ngModel]="slot.label ?? ''"
                 (ngModelChange)="onLabelChange(slot, $event)"
                 (blur)="onLabelCommit(slot)"
@@ -180,6 +209,7 @@ import { AsyncPipe } from '@angular/common';
                   type="button"
                   class="absolute right-1 top-1 rounded bg-black/45 px-1 text-[0.625rem] text-white opacity-0 transition-opacity group-hover:opacity-100"
                   [attr.aria-label]="'Remove ' + slot.expressionKey"
+                  uiTooltip="Delete this expression"
                   (click)="onRemove(slot)"
                 >✕</button>
               }
@@ -201,6 +231,16 @@ import { AsyncPipe } from '@angular/common';
         }
       </div>
     </section>
+
+    <app-expression-generate-modal
+      [personalityId]="personalityId()"
+      [open]="isGenerateOpen()"
+      [coverImageId]="coverImageId()"
+      [existingExpressions]="expressions()"
+      (dismiss)="isGenerateOpen.set(false)"
+      (busyChange)="generateBusy.set($event)"
+      (saved)="onGenerateSaved($event)"
+    />
 
     <ui-modal [open]="isCustomKeyOpen()" [labelledBy]="customKeyLabelId" size="sm" (dismiss)="closeCustomKey()">
       <div modal-header>
@@ -264,7 +304,7 @@ import { AsyncPipe } from '@angular/common';
             <button
               type="button"
               class="inline-flex items-center gap-2 rounded-md border border-border-base bg-transparent px-2.5 py-1.5 text-xs font-medium text-(--color-text-secondary)"
-              title="Only show images pinned to this personality or from threads that include them"
+              uiTooltip="Only images pinned to this personality or from its threads"
               (click)="toggleGalleryPersonalityOnly()"
             >
               <span class="relative inline-flex h-3.5 w-6 shrink-0 rounded-full border border-border-base"
@@ -345,6 +385,8 @@ export class PersonalityExpressionsManagerComponent implements OnInit {
   readonly expressions = input.required<readonly PersonalityExpression[]>();
   readonly personalityName = input<string | null>(null);
   readonly personalityAvatarUrl = input<string | null>(null);
+  /** Cover image preselected as the Generate modal's reference. */
+  readonly coverImageId = input<string | null>(null);
   readonly accentColor = input<string | null>(null);
   readonly collapsedLimit = input(18);
   /** Whether expression picking is enabled. Defaults to true. */
@@ -360,39 +402,63 @@ export class PersonalityExpressionsManagerComponent implements OnInit {
   private readonly imageGallery = inject(ImageGalleryService);
   private readonly personalityApi = inject(PersonalityService);
   private readonly mediaJobs = inject(PersonalityMediaJobService);
+  private readonly jobs = inject(JobService);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly customKeyLabelId = `expressions-add-key-${randomId()}`;
   readonly galleryLabelId = `expressions-pick-image-${randomId()}`;
 
   readonly errorMessage = signal<string | null>(null);
-  readonly gridGenerating = signal(false);
+  /** A default-grid job (server-started) is running for this personality. */
+  readonly defaultGridRunning = signal(false);
+  /** The Generate modal has a job or save in flight. */
+  readonly generateBusy = signal(false);
+  readonly gridGenerating = computed(() => this.defaultGridRunning() || this.generateBusy());
+  readonly isGenerateOpen = signal(false);
+  private readonly generateModal = viewChild(ExpressionGenerateModalComponent);
   readonly showAll = signal(false);
 
   readonly slots = computed<MergedExpression[]>(() => slotsFromPersistedExpressions(this.expressions()));
 
   readonly missingCount = computed(() => this.slots().filter(s => !s.imageId).length);
 
-  /** True when every canonical grid key has a row with an image (matches server skip logic). */
-  readonly defaultGridComplete = computed(() => isDefaultExpressionGridComplete(this.expressions()));
-
-  readonly gridButtonLabel = computed(() => {
-    if (this.gridGenerating()) return 'Generating…';
-    return this.defaultGridComplete() ? 'Regenerate default expressions' : 'Generate default expressions';
-  });
+  readonly generateButtonLabel = computed(() => (this.gridGenerating() ? 'Generating…' : 'Generate'));
 
   ngOnInit(): void {
     this.mediaJobs
       .refreshActiveJob()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(job => {
-        if (job?.job_type === 'expression_grid' && job.personality_id === this.personalityId()) {
-          if (job.status !== 'complete' && job.status !== 'failed') {
-            this.gridGenerating.set(true);
-            this.resumeGridPoll(job.job_id);
-          }
+        if (job?.job_type !== 'expression_grid' || job.personality_id !== this.personalityId()) return;
+        if (job.status === 'complete' || job.status === 'failed') return;
+        if (job.expression_mode !== 'candidates') {
+          this.defaultGridRunning.set(true);
+          this.resumeGridPoll(job.job_id);
+          return;
         }
+        // A Generate-modal run: fetch the job for its names/reference and reopen the modal.
+        this.jobs
+          .getJob(job.job_id)
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: full => {
+              const candidates = parseExpressionCandidatesProgress(full.progress);
+              if (!candidates) return;
+              this.generateModal()?.resume(job.job_id, candidates);
+              this.isGenerateOpen.set(true);
+            },
+          });
       });
+  }
+
+  openGenerate(): void {
+    if (this.defaultGridRunning()) return;
+    this.isGenerateOpen.set(true);
+  }
+
+  onGenerateSaved(rows: readonly PersonalityExpression[]): void {
+    this.isGenerateOpen.set(false);
+    this.expressionsChanged.emit(rows);
   }
   readonly visibleSlots = computed<MergedExpression[]>(() => {
     if (this.showAll()) return this.slots();
@@ -478,26 +544,6 @@ export class PersonalityExpressionsManagerComponent implements OnInit {
     });
   }
 
-  onGenerateDefaultGrid(force = false): void {
-    if (this.gridGenerating()) return;
-    this.gridGenerating.set(true);
-    this.errorMessage.set(null);
-    this.mediaJobs
-      .startExpressionGrid(this.personalityId(), { force })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-      next: enqueued => this.resumeGridPoll(enqueued.job_id),
-      error: err => {
-        this.gridGenerating.set(false);
-        const msg =
-          err?.status === 409
-            ? err?.error?.message ?? 'Another image job is already running.'
-            : err?.error?.message ?? err?.message ?? 'Generation failed.';
-        this.flashError(msg);
-      },
-    });
-  }
-
   private resumeGridPoll(jobId: string): void {
     this.mediaJobs
       .pollUntilTerminal(jobId)
@@ -505,7 +551,7 @@ export class PersonalityExpressionsManagerComponent implements OnInit {
       .subscribe({
       next: job => {
         if (job.status === 'failed') {
-          this.gridGenerating.set(false);
+          this.defaultGridRunning.set(false);
           this.flashError(job.error ?? 'Expression grid generation failed.');
           return;
         }
@@ -517,17 +563,17 @@ export class PersonalityExpressionsManagerComponent implements OnInit {
           .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             next: rows => {
-              this.gridGenerating.set(false);
+              this.defaultGridRunning.set(false);
               this.expressionsChanged.emit(rows);
             },
             error: err => {
-              this.gridGenerating.set(false);
+              this.defaultGridRunning.set(false);
               this.flashError(err?.message ?? 'Failed to reload expressions.');
             },
           });
       },
       error: err => {
-        this.gridGenerating.set(false);
+        this.defaultGridRunning.set(false);
         this.flashError(err?.message ?? 'Generation failed.');
       },
     });

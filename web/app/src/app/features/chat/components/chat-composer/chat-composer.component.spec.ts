@@ -228,6 +228,50 @@ describe('ChatComposerComponent', () => {
         expect(spy).not.toHaveBeenCalled();
     });
 
+    describe('no-vision warning', () => {
+        const textOnly = { id: 'm-text', name: 'deepseek-chat', display_name: 'DeepSeek', description: '', tool_support: true, vision_support: false };
+        const vision = { id: 'm-vision', name: 'gpt-5.1', display_name: 'GPT-5.1', description: '', tool_support: true, vision_support: true };
+        const image = { file: new File(['x'], 'cat.png', { type: 'image/png' }), isUploading: false };
+        const text = { file: new File(['x'], 'notes.txt', { type: 'text/plain' }), isUploading: false };
+
+        const chips = (modelId: string, attachments: unknown[]): HTMLElement[] => {
+            fixture.componentRef.setInput('models', [textOnly, vision]);
+            fixture.componentRef.setInput('selectedModelId', modelId);
+            fixture.componentRef.setInput('attachments', attachments);
+            fixture.detectChanges();
+            return Array.from(fixture.nativeElement.querySelectorAll('.composer__attachment'));
+        };
+        const isNoVision = (chip: HTMLElement) => chip.classList.contains('composer__attachment--no-vision');
+
+        it('marks the image chip itself on a text-only model, with no separate warning chip', () => {
+            const [imageChip, textChip] = chips('m-text', [image, text]);
+
+            expect(isNoVision(imageChip)).toBe(true);
+            expect(imageChip.querySelector('ui-eye-off-icon')).toBeTruthy();
+            expect(imageChip.firstElementChild?.tagName.toLowerCase()).toBe('ui-eye-off-icon');
+            expect(imageChip.getAttribute('tabindex')).toBe('0');
+            expect(isNoVision(textChip)).toBe(false);
+            expect(textChip.querySelector('ui-eye-off-icon')).toBeNull();
+            expect(fixture.nativeElement.textContent).not.toContain('Images not supported');
+        });
+
+        it('explains itself in a tooltip on hover or focus', () => {
+            const [imageChip] = chips('m-text', [image]);
+
+            imageChip.dispatchEvent(new Event('focus'));
+            const describedBy = imageChip.getAttribute('aria-describedby');
+            expect(describedBy).toBeTruthy();
+            expect(document.getElementById(describedBy!)?.textContent).toContain("This model can't see images.");
+        });
+
+        it('leaves chips plain for vision models', () => {
+            const [imageChip] = chips('m-vision', [image]);
+            expect(isNoVision(imageChip)).toBe(false);
+            expect(imageChip.hasAttribute('tabindex')).toBe(false);
+            expect(imageChip.querySelector('ui-eye-off-icon')).toBeNull();
+        });
+    });
+
     it('shows stop button while generating', () => {
         fixture.componentRef.setInput('isGenerating', true);
         fixture.detectChanges();
@@ -246,6 +290,96 @@ describe('ChatComposerComponent', () => {
         button.click();
 
         expect(stopSpy).toHaveBeenCalled();
+    });
+
+    describe('composing while a reply is in flight', () => {
+        const textarea = (): HTMLTextAreaElement => fixture.nativeElement.querySelector('#chat-composer-input');
+        const type = (value: string): void => {
+            textarea().value = value;
+            textarea().dispatchEvent(new Event('input'));
+            fixture.detectChanges();
+        };
+
+        beforeEach(() => {
+            fixture.componentRef.setInput('draft', '');
+            fixture.componentRef.setInput('busy', true);
+            fixture.componentRef.setInput('isGenerating', true);
+            fixture.detectChanges();
+        });
+
+        it('keeps the textarea focusable and editable', () => {
+            expect(textarea().disabled).toBe(false);
+            textarea().focus();
+            expect(document.activeElement).toBe(textarea());
+
+            type('next question');
+            expect(fixture.componentInstance.draft()).toBe('next question');
+            type('');
+            expect(fixture.componentInstance.draft()).toBe('');
+        });
+
+        it('lets text be pasted without treating it as an attachment', () => {
+            const files = vi.fn().mockName('filesSelected');
+            fixture.componentInstance.filesSelected.subscribe(files);
+            const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+            Object.defineProperty(event, 'clipboardData', {
+                value: { items: [{ kind: 'string', type: 'text/plain', getAsFile: () => null }] },
+            });
+
+            textarea().dispatchEvent(event);
+
+            expect(event.defaultPrevented).toBe(false);
+            expect(files).not.toHaveBeenCalled();
+        });
+
+        it('does not send on Enter, submit or slash-only drafts until the reply finishes', () => {
+            const send = vi.fn().mockName('send');
+            fixture.componentInstance.send.subscribe(send);
+            type('next question');
+
+            const enter = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true });
+            textarea().dispatchEvent(enter);
+            fixture.nativeElement.querySelector('form.composer').dispatchEvent(new Event('submit', { cancelable: true }));
+
+            expect(enter.defaultPrevented).toBe(true);
+            expect(send).not.toHaveBeenCalled();
+            expect(fixture.componentInstance.draft()).toBe('next question');
+
+            type('/mode');
+            expect(fixture.componentInstance.slashOpen()).toBe(false);
+            textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
+            expect(fixture.componentInstance.modePickerOpen()).toBe(false);
+            expect(fixture.componentInstance.draft()).toBe('/mode');
+        });
+
+        it('keeps the other composer controls locked', () => {
+            const plus = fixture.nativeElement.querySelector('button[aria-label="Open chat options"]') as HTMLButtonElement;
+            expect(plus.disabled).toBe(true);
+        });
+
+        it('sends the kept draft once the reply finishes', () => {
+            const send = vi.fn().mockName('send');
+            fixture.componentInstance.send.subscribe(send);
+            type('next question');
+
+            fixture.componentRef.setInput('busy', false);
+            fixture.componentRef.setInput('isGenerating', false);
+            fixture.detectChanges();
+
+            const button = fixture.nativeElement.querySelector('.composer__send') as HTMLButtonElement;
+            expect(button.disabled).toBe(false);
+            expect(textarea().value).toBe('next question');
+            textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
+            expect(send).toHaveBeenCalledExactlyOnceWith('next question');
+        });
+
+        it('keeps the send button disabled while busy even when the stop button is not shown', () => {
+            fixture.componentRef.setInput('isGenerating', false);
+            type('next question');
+
+            const button = fixture.nativeElement.querySelector('.composer__send') as HTMLButtonElement;
+            expect(button.disabled).toBe(true);
+        });
     });
 
     it('blocks send when draft exceeds hard limit', () => {
@@ -371,12 +505,12 @@ describe('ChatComposerComponent', () => {
         expect(removed).toHaveBeenCalledWith('pending-1');
     });
 
-    it('loads gallery images when Add from Gallery is chosen', () => {
+    it('loads gallery images when Add from gallery is chosen', () => {
         const plus = fixture.nativeElement.querySelector('.composer__plus') as HTMLButtonElement;
         plus.click();
         fixture.detectChanges();
 
-        const galleryBtn = Array.from(fixture.nativeElement.querySelectorAll('.composer__plus-menu button')).find((b): b is HTMLButtonElement => b instanceof HTMLButtonElement && !!b.textContent?.includes('Add from Gallery'));
+        const galleryBtn = Array.from(fixture.nativeElement.querySelectorAll('.composer__plus-menu button')).find((b): b is HTMLButtonElement => b instanceof HTMLButtonElement && !!b.textContent?.includes('Add from gallery'));
         expect(galleryBtn).toBeTruthy();
         galleryBtn!.click();
         fixture.detectChanges();
@@ -468,7 +602,7 @@ describe('ChatComposerComponent', () => {
 
         expect(autoRow?.classList.contains('composer__skill-row--selected')).toBe(true);
         expect(autoRow?.getAttribute('aria-selected')).toBe('true');
-        expect(autoRow?.textContent).toContain('Currently: Writing');
+        expect(autoRow?.textContent).toContain('now Writing');
         expect(writingRow?.classList.contains('composer__skill-row--selected')).toBe(false);
         expect(writingRow?.textContent).toContain('Current');
     });
@@ -492,5 +626,250 @@ describe('ChatComposerComponent', () => {
         expect(autoRow?.getAttribute('aria-selected')).toBe('false');
         expect(reviewRow?.classList.contains('composer__skill-row--selected')).toBe(true);
         expect(reviewRow?.getAttribute('aria-selected')).toBe('true');
+    });
+    it('renders attached threads as chips and forwards remove/clear', () => {
+        fixture.componentRef.setInput('threadReferences', [
+            { id: 't-A', user_id: 'u-1', name: 'Thread A', created_at: '', updated_at: '' },
+        ]);
+        fixture.detectChanges();
+        const root: HTMLElement = fixture.nativeElement;
+        const removed = vi.fn().mockName('threadReferenceRemoved');
+        const cleared = vi.fn().mockName('threadReferencesCleared');
+        fixture.componentInstance.threadReferenceRemoved.subscribe(removed);
+        fixture.componentInstance.threadReferencesCleared.subscribe(cleared);
+
+        expect(root.querySelector('app-thread-ref-chips .composer__thread-refs-label')?.textContent).toContain('1 thread added');
+        (root.querySelector('.composer__thread-chip-remove') as HTMLButtonElement).click();
+        (root.querySelector('.composer__thread-refs-clear') as HTMLButtonElement).click();
+
+        expect(removed).toHaveBeenCalledWith('t-A');
+        expect(cleared).toHaveBeenCalled();
+    });
+
+    describe('thread picker', () => {
+        const options = [
+            { id: 'active', user_id: 'u', name: 'Active chat', created_at: '', updated_at: '' },
+            { id: 't-1', user_id: 'u', name: 'Travel Planning', is_favorite: true, created_at: '', updated_at: '' },
+            { id: 't-2', user_id: 'u', name: 'Cooking', created_at: '', updated_at: '' },
+        ];
+        const popover = () => fixture.nativeElement.querySelector('.composer__thread-popover') as HTMLElement | null;
+
+        beforeEach(() => {
+            fixture.componentRef.setInput('chatId', 'active');
+            fixture.componentRef.setInput('threadOptions', options);
+            fixture.detectChanges();
+        });
+
+        it('renders inside the composer body so it matches the composer width', () => {
+            fixture.componentInstance.openThreadPicker();
+            fixture.detectChanges();
+
+            const host = fixture.nativeElement.querySelector('app-thread-picker-popover') as HTMLElement;
+            expect(host.parentElement?.classList.contains('composer__body')).toBe(true);
+            expect(popover()).not.toBeNull();
+        });
+
+        it('passes the active chat and options through and forwards toggles', () => {
+            const toggled = vi.fn().mockName('threadReferenceToggled');
+            fixture.componentInstance.threadReferenceToggled.subscribe(toggled);
+            fixture.componentInstance.openThreadPicker();
+            fixture.detectChanges();
+            const rows = fixture.nativeElement.querySelectorAll('.composer__thread-row') as NodeListOf<HTMLButtonElement>;
+
+            expect([...rows].map(r => r.querySelector('.composer__thread-name')?.textContent?.trim())).toEqual(['Travel Planning', 'Cooking']);
+            rows[0].click();
+
+            expect(toggled).toHaveBeenCalledWith(options[1]);
+        });
+
+        it('Done closes the picker, keeps the selection and focuses the textarea', () => {
+            const replaced = vi.fn().mockName('threadReferencesReplaced');
+            fixture.componentInstance.threadReferencesReplaced.subscribe(replaced);
+            fixture.componentInstance.openThreadPicker();
+            fixture.detectChanges();
+
+            (fixture.nativeElement.querySelector('.composer__thread-done') as HTMLButtonElement).click();
+            fixture.detectChanges();
+
+            expect(popover()).toBeNull();
+            expect(replaced).not.toHaveBeenCalled();
+            expect(document.activeElement).toBe(fixture.componentInstance.textareaRef()?.nativeElement);
+        });
+
+        it('Cancel and Escape restore the selection from when the picker opened', () => {
+            const replaced = vi.fn().mockName('threadReferencesReplaced');
+            fixture.componentInstance.threadReferencesReplaced.subscribe(replaced);
+            fixture.componentRef.setInput('threadReferences', [options[2]]);
+            fixture.componentInstance.openThreadPicker();
+            fixture.detectChanges();
+
+            fixture.componentRef.setInput('threadReferences', [options[2], options[1]]);
+            fixture.detectChanges();
+            (fixture.nativeElement.querySelector('.composer__thread-cancel') as HTMLButtonElement).click();
+            fixture.detectChanges();
+
+            expect(replaced).toHaveBeenLastCalledWith([options[2]]);
+            expect(popover()).toBeNull();
+            expect(document.activeElement).toBe(fixture.componentInstance.textareaRef()?.nativeElement);
+
+            fixture.componentInstance.openThreadPicker();
+            fixture.detectChanges();
+            (fixture.nativeElement.querySelector('.composer__thread-search') as HTMLInputElement)
+                .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            fixture.detectChanges();
+
+            expect(replaced).toHaveBeenCalledTimes(2);
+            expect(popover()).toBeNull();
+        });
+
+        it('opens from the /thread slash command', () => {
+            fixture.componentInstance.runCommand({ id: 'thread', label: 'Thread' });
+            fixture.detectChanges();
+
+            expect(popover()).not.toBeNull();
+        });
+    });
+
+    describe('thread drag and drop', () => {
+        const dragEvent = (type: string, types: string[], data: Record<string, string> = {}): DragEvent => {
+            const event = new Event(type, { bubbles: true, cancelable: true }) as DragEvent;
+            Object.defineProperty(event, 'dataTransfer', {
+                value: { types, getData: (key: string) => data[key] ?? '', files: [], dropEffect: 'none' },
+            });
+            return event;
+        };
+
+        beforeEach(() => {
+            fixture.componentRef.setInput('chatId', 'active');
+            fixture.componentRef.setInput('threadOptions', [
+                { id: 't-1', user_id: 'u', name: 'Travel Planning', created_at: '', updated_at: '' },
+                { id: 'active', user_id: 'u', name: 'Active chat', created_at: '', updated_at: '' },
+            ]);
+            fixture.detectChanges();
+        });
+
+        it('highlights the composer while a thread is dragged over it', () => {
+            const form: HTMLElement = fixture.nativeElement.querySelector('form.composer');
+            form.dispatchEvent(dragEvent('dragover', ['text/thread-id']));
+            fixture.detectChanges();
+
+            expect(form.classList.contains('composer--thread-drop')).toBe(true);
+            expect(fixture.nativeElement.textContent).toContain('Drop to add thread');
+            expect(fixture.componentInstance.isDragOver()).toBe(false);
+
+            form.dispatchEvent(dragEvent('dragleave', ['text/thread-id']));
+            fixture.detectChanges();
+            expect(form.classList.contains('composer--thread-drop')).toBe(false);
+        });
+
+        it('emits a toggle when a thread is dropped, ignoring the active thread and unknown ids', () => {
+            const toggled = vi.fn().mockName('threadReferenceToggled');
+            fixture.componentInstance.threadReferenceToggled.subscribe(toggled);
+            const form: HTMLElement = fixture.nativeElement.querySelector('form.composer');
+
+            form.dispatchEvent(dragEvent('drop', ['text/thread-id'], { 'text/thread-id': 't-1' }));
+            form.dispatchEvent(dragEvent('drop', ['text/thread-id'], { 'text/thread-id': 'active' }));
+            form.dispatchEvent(dragEvent('drop', ['text/thread-id'], { 'text/thread-id': 'missing' }));
+
+            expect(toggled).toHaveBeenCalledTimes(1);
+            expect(toggled.mock.calls[0][0].id).toBe('t-1');
+        });
+
+        it('does not remove an already-attached thread on drop and shows a timed notice', () => {
+            vi.useFakeTimers();
+            try {
+                const toggled = vi.fn().mockName('threadReferenceToggled');
+                fixture.componentInstance.threadReferenceToggled.subscribe(toggled);
+                fixture.componentRef.setInput('threadReferences', [
+                    { id: 't-1', user_id: 'u', name: 'Travel Planning', created_at: '', updated_at: '' },
+                ]);
+                fixture.detectChanges();
+                const form: HTMLElement = fixture.nativeElement.querySelector('form.composer');
+
+                form.dispatchEvent(dragEvent('drop', ['text/thread-id'], { 'text/thread-id': 't-1' }));
+                fixture.detectChanges();
+
+                expect(toggled).not.toHaveBeenCalled();
+                expect(fixture.nativeElement.querySelector('.composer__thread-notice')?.textContent).toContain('Thread already added.');
+
+                vi.advanceTimersByTime(2000);
+                fixture.detectChanges();
+                expect(fixture.nativeElement.querySelector('.composer__thread-notice')).toBeNull();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it('keeps the file drop path for non-thread drags', () => {
+            const form: HTMLElement = fixture.nativeElement.querySelector('form.composer');
+            form.dispatchEvent(dragEvent('dragover', ['Files']));
+
+            expect(fixture.componentInstance.isDragOver()).toBe(true);
+            expect(fixture.componentInstance.isThreadDragOver()).toBe(false);
+        });
+    });
+
+    describe('file drag and drop', () => {
+        const fileDrag = (type: string, opts: { files?: File[]; relatedTarget?: EventTarget | null } = {}): DragEvent => {
+            const event = new Event(type, { bubbles: true, cancelable: true }) as DragEvent;
+            Object.defineProperty(event, 'dataTransfer', {
+                value: { types: ['Files'], getData: () => '', files: opts.files ?? [], dropEffect: 'none' },
+            });
+            Object.defineProperty(event, 'relatedTarget', { value: opts.relatedTarget ?? null });
+            return event;
+        };
+        const form = (): HTMLElement => fixture.nativeElement.querySelector('form.composer');
+        const textarea = (): HTMLTextAreaElement => fixture.nativeElement.querySelector('textarea');
+
+        it('keeps the drop overlay while the pointer moves between the composer\'s own children', () => {
+            textarea().dispatchEvent(fileDrag('dragover'));
+            fixture.detectChanges();
+            const overlay: HTMLElement = fixture.nativeElement.querySelector('.composer__drag');
+            expect(overlay).not.toBeNull();
+
+            // Leaving the textarea for the overlay (or any other child) is not leaving the composer.
+            textarea().dispatchEvent(fileDrag('dragleave', { relatedTarget: overlay }));
+            fixture.detectChanges();
+            expect(fixture.componentInstance.isDragOver()).toBe(true);
+            expect(fixture.nativeElement.querySelector('.composer__drag')).toBe(overlay);
+
+            // Leaving to somewhere outside the composer ends the highlight.
+            form().dispatchEvent(fileDrag('dragleave', { relatedTarget: document.body }));
+            fixture.detectChanges();
+            expect(fixture.componentInstance.isDragOver()).toBe(false);
+            expect(fixture.nativeElement.querySelector('.composer__drag')).toBeNull();
+        });
+
+        it('clears the overlay when the drag leaves the window (no related target)', () => {
+            form().dispatchEvent(fileDrag('dragover'));
+            form().dispatchEvent(fileDrag('dragleave'));
+            expect(fixture.componentInstance.isDragOver()).toBe(false);
+        });
+
+        it('never lets the overlay become the drag target itself', () => {
+            form().dispatchEvent(fileDrag('dragover'));
+            fixture.detectChanges();
+            const overlay: HTMLElement = fixture.nativeElement.querySelector('.composer__drag');
+            expect(getComputedStyle(overlay).pointerEvents).toBe('none');
+        });
+
+        it('attaches a file dropped on the focused textarea instead of letting the browser open it', () => {
+            const emitted = vi.fn().mockName('filesSelected');
+            fixture.componentInstance.filesSelected.subscribe(emitted);
+            textarea().focus();
+            const file = new File(['%PDF'], 'notes.pdf', { type: 'application/pdf' });
+
+            textarea().dispatchEvent(fileDrag('dragover'));
+            const over = fileDrag('dragover');
+            textarea().dispatchEvent(over);
+            const drop = fileDrag('drop', { files: [file] });
+            textarea().dispatchEvent(drop);
+            fixture.detectChanges();
+
+            expect(over.defaultPrevented).toBe(true);
+            expect(drop.defaultPrevented).toBe(true);
+            expect(emitted).toHaveBeenCalledWith([file]);
+            expect(fixture.nativeElement.querySelector('.composer__drag')).toBeNull();
+        });
     });
 });

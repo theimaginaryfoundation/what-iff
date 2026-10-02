@@ -37,6 +37,20 @@ export const guestGuard: CanActivateFn = async (route, state) => {
   const externalAuth = inject(ExternalAuthProvider);
   const router = inject(Router);
 
+  // A guest route may opt out of the "signed-in users get bounced" redirect by
+  // setting `data.allowAuthenticated` on the route being activated. This exists
+  // for an in-progress sign-in return page that must be allowed to render even
+  // though a session already exists (otherwise the guard would redirect it away
+  // before its own logic — e.g. a post-sign-in setup step — could run). Walk to
+  // the deepest activating child so the flag can live on the child route.
+  let target = route;
+  while (target.firstChild) {
+    target = target.firstChild;
+  }
+  if (target.data?.['allowAuthenticated'] === true) {
+    return true;
+  }
+
   let isAuthenticated = authService.isLoggedIn();
 
   // Also check for an external provider session.

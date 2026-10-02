@@ -40,6 +40,9 @@ func (Job) Fields() []ent.Field {
 		field.JSON("draft_deltas", []string{}).
 			Optional().
 			Comment("Incremental assistant text chunks persisted while inference is still running"),
+		field.JSON("draft_reasoning", []string{}).
+			Optional().
+			Comment("Incremental model reasoning chunks persisted while inference is still running (GLM/MiMo); display-only, cleared with draft_deltas and reset when a truncated call is retried"),
 		field.Text("progress").
 			Optional().
 			Comment("Optional JSON-encoded progress payload for long-running jobs (e.g. chat import imported/skipped/total counts)"),

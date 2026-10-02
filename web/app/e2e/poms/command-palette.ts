@@ -12,7 +12,7 @@ export class CommandPalette {
   constructor(private readonly page: Page) {
     this.shell = new AppShell(page);
     this.dialog = this.page.getByRole('dialog', { name: 'Command palette' });
-    this.input = this.page.getByPlaceholder('Search threads, personalities, skills, memories...');
+    this.input = this.page.getByPlaceholder('Search threads, personalities, skills, memories, images...');
     this.results = this.page.getByRole('listbox', { name: 'Search results' });
     this.emptyMessage = this.page.locator('.cmd-palette__empty');
     this.options = this.results.getByRole('option');

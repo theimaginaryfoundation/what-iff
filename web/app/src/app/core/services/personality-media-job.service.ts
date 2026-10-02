@@ -74,6 +74,31 @@ export class PersonalityMediaJobService {
       );
   }
 
+  /**
+   * Enqueues a candidate run: nine portraits for caller-chosen keys (row-major), uploaded to the
+   * gallery but not assigned. Poll the job; on completion its progress lists the candidates.
+   */
+  startExpressionCandidates(
+    personalityId: string,
+    expressions: readonly string[],
+    referenceImageId: string | null,
+  ): Observable<PersonalityMediaJobResponse> {
+    return this.http
+      .post<PersonalityMediaJobResponse>(
+        `${this.personalityApi}/${personalityId}/expressions/generate-candidates`,
+        { expressions, reference_image_id: referenceImageId },
+      )
+      .pipe(
+        switchMap(res =>
+          this.refreshActiveJob().pipe(
+            map(() => res),
+            catchError(() => of(res)),
+          ),
+        ),
+        catchError(err => this.handleConflict(err)),
+      );
+  }
+
   startFlowPortrait(flowId: string): Observable<PersonalityMediaJobResponse> {
     return this.http
       .post<PersonalityMediaJobResponse>(

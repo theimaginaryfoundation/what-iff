@@ -7,7 +7,7 @@ import {
   OnInit,
   signal,
 } from '@angular/core';
-import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
 import { filter, map } from 'rxjs/operators';
 import { FormsModule } from '@angular/forms';
@@ -34,6 +34,8 @@ import {
 } from './components/personality-filter-bar.component';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { SparkleIconComponent } from '../../shared/ui/icons/icons';
+import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
+import { PersonalityWelcomeComponent } from './personality-welcome/personality-welcome.component';
 import { PersonalityEditModalComponent } from './detail/personality-edit-modal.component';
 import { PersonalityEditorSessionService } from './services/personality-editor-session.service';
 import {
@@ -52,6 +54,8 @@ const DEFAULT_PAGE_SIZE = 24;
     ModalComponent,
     SparkleIconComponent,
     PersonalityEditModalComponent,
+    HelpHintComponent,
+    PersonalityWelcomeComponent,
   ],
   templateUrl: './personalities-page.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -103,7 +107,6 @@ export class PersonalitiesPageComponent implements OnInit {
   readonly createPromptHardLimitLabel = TEXT_LIMIT_HARD_MAX.toLocaleString();
   readonly createPromptWarningLimitLabel = TEXT_LIMIT_WARNING_THRESHOLD.toLocaleString();
   private readonly createLimitWarningAcknowledged = signal(false);
-
   readonly defaultPersonalityId = computed<string | null>(() => {
     const id = this.preferences()?.default_personality_id;
     if (!id || id === NULL_PERSONALITY_ID) return null;
@@ -124,10 +127,8 @@ export class PersonalitiesPageComponent implements OnInit {
   });
 
   readonly hasResults = computed(() => this.visiblePersonalities().length > 0);
-  readonly needsSetup = toSignal(
-    this.route.queryParamMap.pipe(map(params => params.get('setup') === '1')),
-    { initialValue: this.route.snapshot.queryParamMap.get('setup') === '1' },
-  );
+  /** First run: no personalities at all (not merely none matching the filters). */
+  readonly showWelcome = computed(() => !this.isLoading() && this.personalities().length === 0);
 
   ngOnInit(): void {
     this.loadPreferences();
@@ -275,6 +276,11 @@ export class PersonalitiesPageComponent implements OnInit {
 
   navigateGenerate(): void {
     this.generatePersonalityModal.show();
+  }
+
+  /** Fresh users with an existing export/history can jump straight to Import & Export. */
+  goToImport(): void {
+    this.router.navigate(['/data']);
   }
 
   openCreate(): void {

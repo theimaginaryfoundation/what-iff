@@ -2,8 +2,8 @@ package telemetry
 
 import (
 	"context"
-	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -12,190 +12,196 @@ import (
 	"go.uber.org/zap"
 )
 
-// TODO: this is a bit 'free for all' on metric names at the moment, we should consider a more structured approach.
-const (
-	AppName = "chat-api"
-	// standard token metric name
-	Tokens         = "token_count"
-	StartupCounter = "app_startup_total"
-	// ChatMessageContextItemsPersistFailures counts failed bulk inserts of chat_message_context_items (create/update).
-	ChatMessageContextItemsPersistFailures = "chat_message_context_items_persist_failures_total"
-	// FileAttachmentUploadTotal counts file attachment upload attempts.
-	// Attributes: file_type (MIME type), status ("success" | "failure").
-	FileAttachmentUploadTotal = "file_attachment_upload_total"
-)
+const AppName = "chat-api"
 
+// Metrics records the metrics declared in catalog.go. Every method is safe on a nil *Metrics
+// (it does nothing), so code holding an optional *Metrics needs no nil checks.
+//
+// Components that don't have a *Metrics handed to them use Global(), which records through the
+// process-wide meter provider set up by Init.
 type Metrics struct {
-	logger          *zap.Logger
-	meter           metric.Meter
-	msHistograms    sync.Map
-	countHistograms sync.Map
-	counters        sync.Map
+	logger      *zap.Logger
+	meter       metric.Meter
+	instruments sync.Map // name -> instrument
 }
 
+// NewMetrics returns a Metrics on the global meter provider. Instruments created before Init
+// installs the real provider are forwarded to it once it does.
 func NewMetrics(logger *zap.Logger) *Metrics {
+	return NewMetricsWithMeter(logger, otel.Meter(AppName))
+}
+
+// NewMetricsWithMeter returns a Metrics on a specific meter (tests use a manual reader).
+func NewMetricsWithMeter(logger *zap.Logger, meter metric.Meter) *Metrics {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Metrics{
-		logger: logger,
-		meter:  otel.Meter(AppName),
-	}
+	return &Metrics{logger: logger, meter: meter}
 }
 
-func (m *Metrics) RecordTime(ctx context.Context, name string, duration time.Duration, attributes ...metric.RecordOption) {
-	h, err := m.getOrCreateHistogramMs(name)
-	if err != nil {
-		m.logger.Warn("failed to get/create duration histogram", zap.String("metric_name", name), zap.Error(err))
+var global atomic.Pointer[Metrics]
+
+// Global returns the process-wide Metrics. Init replaces it with one that has the real logger;
+// before that (and in tests that don't set one) it records to the global meter provider.
+func Global() *Metrics {
+	if m := global.Load(); m != nil {
+		return m
+	}
+	global.CompareAndSwap(nil, NewMetrics(nil))
+	return global.Load()
+}
+
+// SetGlobal replaces the process-wide Metrics and returns the previous one. Tests use
+// telemetrytest.UseGlobal, which restores it afterwards.
+func SetGlobal(m *Metrics) *Metrics {
+	return global.Swap(m)
+}
+
+// Record adds one value to a histogram.
+func (m *Metrics) Record(ctx context.Context, h Histogram, value float64, attrs ...attribute.KeyValue) {
+	if m == nil {
 		return
 	}
-	h.Record(ctx, duration.Milliseconds(), attributes...)
-}
-
-func (m *Metrics) RecordCounter(ctx context.Context, name string, count int64, attributes ...metric.AddOption) {
-	c, err := m.getOrCreateCounter(name)
-	if err != nil {
-		m.logger.Warn("failed to get/create counter", zap.String("metric_name", name), zap.Error(err))
+	inst, ok := m.histogram(h)
+	if !ok {
 		return
 	}
-	c.Add(ctx, count, attributes...)
+	inst.Record(ctx, value, metric.WithAttributes(attrs...))
 }
 
-func (m *Metrics) RecordCountHistogram(ctx context.Context, name string, count int64, attributes ...metric.RecordOption) {
-	h, err := m.getOrCreateHistogramCount(name)
-	if err != nil {
-		m.logger.Warn("failed to get/create count histogram", zap.String("metric_name", name), zap.Error(err))
+// RecordDuration adds a duration, in seconds, to a histogram.
+func (m *Metrics) RecordDuration(ctx context.Context, h Histogram, d time.Duration, attrs ...attribute.KeyValue) {
+	m.Record(ctx, h, d.Seconds(), attrs...)
+}
+
+// Time starts timing and returns a function that records the elapsed time on h, adding
+// error.type when the error passed to it is non-nil:
+//
+//	done := metrics.Time(ctx, telemetry.DependencyDuration, attrs...)
+//	err := call()
+//	done(err)
+func (m *Metrics) Time(ctx context.Context, h Histogram, attrs ...attribute.KeyValue) func(err error) {
+	if m == nil {
+		return func(error) {}
+	}
+	start := time.Now()
+	return func(err error) {
+		all := append(append(make([]attribute.KeyValue, 0, len(attrs)+1), attrs...), ErrorAttrs(err)...)
+		m.RecordDuration(ctx, h, time.Since(start), all...)
+	}
+}
+
+// TimeDependency times one logical call to an external dependency on DependencyDuration.
+func (m *Metrics) TimeDependency(ctx context.Context, dependency, operation string) func(err error) {
+	return m.Time(ctx, DependencyDuration, AttrDependency.String(dependency), AttrOperation.String(operation))
+}
+
+// Add increments a counter.
+func (m *Metrics) Add(ctx context.Context, c Counter, n int64, attrs ...attribute.KeyValue) {
+	if m == nil || n == 0 {
 		return
 	}
-	h.Record(ctx, count, attributes...)
-}
-
-// InitStartupMetrics eagerly initializes startup telemetry and records a boot event.
-// Call this once during application startup and fail fast if it returns an error.
-func (m *Metrics) InitStartupMetrics(ctx context.Context) error {
-	counter, err := m.getOrCreateCounter(StartupCounter)
-	if err != nil {
-		return err
-	}
-	counter.Add(ctx, 1, metric.WithAttributes(attribute.String("phase", "init")))
-	return nil
-}
-
-func InputTokenAttr() attribute.KeyValue {
-	return attribute.String("token_io", "input")
-
-}
-
-func OutputTokenAttr() attribute.KeyValue {
-	return attribute.String("token_io", "output")
-}
-
-// RecordSegmentTokenEstimates records estimated input tokens per ModelContext segment kind
-// (token_basis=segment_estimate, token_io=input).
-func (m *Metrics) RecordSegmentTokenEstimates(ctx context.Context, estimates map[string]int64, callPath CallPath) {
-	if m == nil || len(estimates) == 0 {
+	inst, ok := m.counter(c)
+	if !ok {
 		return
 	}
-	cp := string(callPath)
-	if cp == "" {
-		cp = string(CallPathUnknown)
+	inst.Add(ctx, n, metric.WithAttributes(attrs...))
+}
+
+// AddUpDown moves an up-down counter (use +1/-1 around work in flight).
+func (m *Metrics) AddUpDown(ctx context.Context, u UpDownCounter, n int64, attrs ...attribute.KeyValue) {
+	if m == nil || n == 0 {
+		return
 	}
-	for segment, n := range estimates {
-		if n <= 0 {
-			continue
+	inst, ok := m.upDownCounter(u)
+	if !ok {
+		return
+	}
+	inst.Add(ctx, n, metric.WithAttributes(attrs...))
+}
+
+// GaugeObserver reports one gauge value from inside a RegisterGauges callback.
+type GaugeObserver func(g Gauge, value float64, attrs ...attribute.KeyValue)
+
+// RegisterGauges samples gauges at each export by calling observe. Keep the callback cheap: it
+// runs once per export interval. Returns a function that unregisters the callback.
+func (m *Metrics) RegisterGauges(gauges []Gauge, observe func(ctx context.Context, report GaugeObserver) error) (func() error, error) {
+	if m == nil || len(gauges) == 0 {
+		return func() error { return nil }, nil
+	}
+	byName := make(map[string]metric.Float64ObservableGauge, len(gauges))
+	observables := make([]metric.Observable, 0, len(gauges))
+	for _, g := range gauges {
+		inst, err := m.meter.Float64ObservableGauge(g.Name, metric.WithUnit(g.Unit), metric.WithDescription(g.Description))
+		if err != nil {
+			return nil, err
 		}
-		m.RecordCountHistogram(ctx, Tokens, n, metric.WithAttributes(
-			InputTokenAttr(),
-			attribute.String("token_basis", "segment_estimate"),
-			attribute.String("segment", segment),
-			attribute.String("call_path", cp),
-		))
+		byName[g.Name] = inst
+		observables = append(observables, inst)
 	}
-}
-
-func (m *Metrics) newHistogramMs(name string, description string) (metric.Int64Histogram, error) {
-	return m.meter.Int64Histogram(name, metric.WithDescription(description), metric.WithUnit("ms"))
-}
-
-func (m *Metrics) newHistogramCount(name string, description string) (metric.Int64Histogram, error) {
-	return m.meter.Int64Histogram(name, metric.WithDescription(description), metric.WithUnit("count"))
-}
-
-func (m *Metrics) newCounter(name string, description string) (metric.Int64Counter, error) {
-	return m.meter.Int64Counter(name, metric.WithDescription(description), metric.WithUnit("count"))
-}
-
-func (m *Metrics) getOrCreateHistogramMs(name string) (metric.Int64Histogram, error) {
-	if existing, ok := m.msHistograms.Load(name); ok {
-		h, ok := existing.(metric.Int64Histogram)
-		if !ok {
-			return nil, fmt.Errorf("metric %q has unexpected histogram type", name)
-		}
-		return h, nil
-	}
-
-	created, err := m.newHistogramMs(name, "Duration of "+name)
+	reg, err := m.meter.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
+		return observe(ctx, func(g Gauge, value float64, attrs ...attribute.KeyValue) {
+			if inst, ok := byName[g.Name]; ok {
+				o.ObserveFloat64(inst, value, metric.WithAttributes(attrs...))
+			}
+		})
+	}, observables...)
 	if err != nil {
 		return nil, err
 	}
-
-	actual, loaded := m.msHistograms.LoadOrStore(name, created)
-	if !loaded {
-		return created, nil
-	}
-	h, ok := actual.(metric.Int64Histogram)
-	if !ok {
-		return nil, fmt.Errorf("metric %q has unexpected histogram type", name)
-	}
-	return h, nil
+	return reg.Unregister, nil
 }
 
-func (m *Metrics) getOrCreateHistogramCount(name string) (metric.Int64Histogram, error) {
-	if existing, ok := m.countHistograms.Load(name); ok {
-		h, ok := existing.(metric.Int64Histogram)
-		if !ok {
-			return nil, fmt.Errorf("metric %q has unexpected count histogram type", name)
-		}
-		return h, nil
+func (m *Metrics) histogram(h Histogram) (metric.Float64Histogram, bool) {
+	if v, ok := m.instruments.Load(h.Name); ok {
+		inst, ok := v.(metric.Float64Histogram)
+		m.warnIfMismatched(h.Name, ok)
+		return inst, ok
 	}
-
-	created, err := m.newHistogramCount(name, "Count of "+name)
-	if err != nil {
-		return nil, err
+	opts := []metric.Float64HistogramOption{metric.WithUnit(h.Unit), metric.WithDescription(h.Description)}
+	if len(h.Buckets) > 0 {
+		opts = append(opts, metric.WithExplicitBucketBoundaries(h.Buckets...))
 	}
-
-	actual, loaded := m.countHistograms.LoadOrStore(name, created)
-	if !loaded {
-		return created, nil
-	}
-	h, ok := actual.(metric.Int64Histogram)
-	if !ok {
-		return nil, fmt.Errorf("metric %q has unexpected count histogram type", name)
-	}
-	return h, nil
+	inst, err := m.meter.Float64Histogram(h.Name, opts...)
+	return storeInstrument(m, h.Name, inst, err)
 }
 
-func (m *Metrics) getOrCreateCounter(name string) (metric.Int64Counter, error) {
-	if existing, ok := m.counters.Load(name); ok {
-		c, ok := existing.(metric.Int64Counter)
-		if !ok {
-			return nil, fmt.Errorf("metric %q has unexpected counter type", name)
-		}
-		return c, nil
+func (m *Metrics) counter(c Counter) (metric.Int64Counter, bool) {
+	if v, ok := m.instruments.Load(c.Name); ok {
+		inst, ok := v.(metric.Int64Counter)
+		m.warnIfMismatched(c.Name, ok)
+		return inst, ok
 	}
+	inst, err := m.meter.Int64Counter(c.Name, metric.WithUnit(c.Unit), metric.WithDescription(c.Description))
+	return storeInstrument(m, c.Name, inst, err)
+}
 
-	created, err := m.newCounter(name, "Count of "+name)
+func (m *Metrics) upDownCounter(u UpDownCounter) (metric.Int64UpDownCounter, bool) {
+	if v, ok := m.instruments.Load(u.Name); ok {
+		inst, ok := v.(metric.Int64UpDownCounter)
+		m.warnIfMismatched(u.Name, ok)
+		return inst, ok
+	}
+	inst, err := m.meter.Int64UpDownCounter(u.Name, metric.WithUnit(u.Unit), metric.WithDescription(u.Description))
+	return storeInstrument(m, u.Name, inst, err)
+}
+
+// storeInstrument caches a newly created instrument; if another goroutine won the race, its
+// instrument is used instead.
+func storeInstrument[T any](m *Metrics, name string, inst T, err error) (T, bool) {
+	var zero T
 	if err != nil {
-		return nil, err
+		m.logger.Warn("failed to create metric instrument", zap.String("metric_name", name), zap.Error(err))
+		return zero, false
 	}
+	actual, _ := m.instruments.LoadOrStore(name, inst)
+	typed, ok := actual.(T)
+	m.warnIfMismatched(name, ok)
+	return typed, ok
+}
 
-	actual, loaded := m.counters.LoadOrStore(name, created)
-	if !loaded {
-		return created, nil
-	}
-	c, ok := actual.(metric.Int64Counter)
+func (m *Metrics) warnIfMismatched(name string, ok bool) {
 	if !ok {
-		return nil, fmt.Errorf("metric %q has unexpected counter type", name)
+		m.logger.Warn("metric name reused with a different instrument kind", zap.String("metric_name", name))
 	}
-	return c, nil
 }

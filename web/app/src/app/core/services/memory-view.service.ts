@@ -1,24 +1,22 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { finalize, forkJoin, map, of } from 'rxjs';
+import { finalize, map, of } from 'rxjs';
 
-import { Memory } from '../models/memory.model';
+import { Memory, MemoryPatch } from '../models/memory.model';
 import { MemoryService } from './memory.service';
-import {
-  DEFAULT_MEMORY_VIEW_FILTERS,
-  MemoryViewFilters,
-  toApiFilters,
-} from '../../features/memory/helpers/memory-filter.helpers';
+import { DEFAULT_MEMORY_VIEW_FILTERS, MemoryViewFilters, toApiFilters } from '../../features/memory/helpers/memory-filter.helpers';
 
 @Injectable({ providedIn: 'root' })
 export class MemoryViewService {
   private readonly memoryService = inject(MemoryService);
+  private loadRequestID = 0;
 
-  readonly pageSize = 24;
+  readonly pageSize = 100;
   readonly memories = signal<Memory[]>([]);
   readonly totalCount = signal(0);
   readonly currentPage = signal(1);
   readonly loading = signal(false);
   readonly deleting = signal(false);
+  readonly mutating = signal(false);
   readonly error = signal<string | null>(null);
   readonly filters = signal<MemoryViewFilters>({ ...DEFAULT_MEMORY_VIEW_FILTERS });
   readonly selectedIds = signal<string[]>([]);
@@ -28,21 +26,31 @@ export class MemoryViewService {
   readonly hasMemories = computed(() => this.memories().length > 0);
   readonly totalPages = computed(() => Math.max(1, Math.ceil(this.totalCount() / this.pageSize)));
   readonly allSelected = computed(() => this.memories().length > 0 && this.selectedIds().length === this.memories().length);
+  readonly selectedCount = computed(() => this.selectedIds().length);
 
   load(page: number = 1): void {
+    const requestID = ++this.loadRequestID;
     this.loading.set(true);
     this.error.set(null);
     this.currentPage.set(page);
     this.memoryService
       .getMemories(page, this.pageSize, this.toRequestFilters())
-      .pipe(finalize(() => this.loading.set(false)))
+      .pipe(
+        finalize(() => {
+          if (requestID === this.loadRequestID) {
+            this.loading.set(false);
+          }
+        }),
+      )
       .subscribe({
         next: response => {
+          if (requestID !== this.loadRequestID) return;
           this.memories.set(response.results ?? []);
           this.totalCount.set(response.total_count ?? 0);
           this.selectedIds.set([]);
         },
         error: error => {
+          if (requestID !== this.loadRequestID) return;
           this.memories.set([]);
           this.totalCount.set(0);
           this.error.set(error instanceof Error ? error.message : 'Failed to load memories');
@@ -55,9 +63,9 @@ export class MemoryViewService {
     this.load(1);
   }
 
-  applyFilters(filters: MemoryViewFilters): void {
+  applyFilters(filters: MemoryViewFilters, page = 1): void {
     this.filters.set({ ...filters });
-    this.load(1);
+    this.load(page);
   }
 
   clearFilters(): void {
@@ -66,13 +74,19 @@ export class MemoryViewService {
   }
 
   toggleSelection(memoryId: string): void {
-    this.selectedIds.update(current =>
-      current.includes(memoryId) ? current.filter(id => id !== memoryId) : [...current, memoryId],
-    );
+    this.selectedIds.update(current => (current.includes(memoryId) ? current.filter(id => id !== memoryId) : [...current, memoryId]));
   }
 
   setAllSelected(selected: boolean): void {
     this.selectedIds.set(selected ? this.memories().map(memory => memory.id) : []);
+  }
+
+  setSelectedIds(ids: readonly string[]): void {
+    this.selectedIds.set([...ids]);
+  }
+
+  clearSelection(): void {
+    this.selectedIds.set([]);
   }
 
   deleteSelected() {
@@ -81,7 +95,7 @@ export class MemoryViewService {
       return of(void 0);
     }
     this.deleting.set(true);
-    return forkJoin(ids.map(id => this.memoryService.deleteMemory(id))).pipe(
+    return this.memoryService.deleteMemoriesBatch({ ids, all_or_none: true }).pipe(
       map(() => void 0),
       finalize(() => this.deleting.set(false)),
     );
@@ -90,6 +104,26 @@ export class MemoryViewService {
   deleteOne(memoryId: string) {
     this.deleting.set(true);
     return this.memoryService.deleteMemory(memoryId).pipe(finalize(() => this.deleting.set(false)));
+  }
+
+  patchSelected(patch: MemoryPatch) {
+    const ids = this.selectedIds();
+    if (ids.length === 0) {
+      return of(void 0);
+    }
+    this.mutating.set(true);
+    return this.memoryService.patchMemoriesBatch({ ids, patch, all_or_none: true }).pipe(
+      map(() => void 0),
+      finalize(() => this.mutating.set(false)),
+    );
+  }
+
+  patchOne(memoryId: string, patch: MemoryPatch) {
+    this.mutating.set(true);
+    return this.memoryService.patchMemory(memoryId, patch).pipe(
+      map(() => void 0),
+      finalize(() => this.mutating.set(false)),
+    );
   }
 
   setSelectedPersonalityIds(ids: readonly string[]): void {

@@ -110,7 +110,7 @@ jobs:
           echo "✅ Code generation complete"
 
       # These mirror `make pre-commit` (fmt vet tidy build check-no-local-models
-      # check-compose-defaults check-public-hygiene) by calling the same
+      # check-compose-defaults check-public-hygiene check-package-summaries) by calling the same
       # targets, so the Makefile stays the single source of truth for what
       # each check actually runs.
       - name: Check formatting
@@ -133,6 +133,11 @@ jobs:
 
       - name: Check for insecure compose defaults
         run: make check-compose-defaults
+
+      # One sentence per line in _PACKAGE_SUMMARY.md, so concurrent PRs editing the
+      # same bullet only conflict when they change the same sentence.
+      - name: Check package summary line breaks
+        run: make check-package-summaries
 
       # Hermetic gate: mock LLM, dummy keys, race detector. No provider secret
       # is available to this job by design — the default suite must pass with

@@ -80,3 +80,22 @@ type AgentAdapter interface {
 	// assistant text deltas when the provider supports streaming output.
 	SetTextDeltaHandler(handler func(delta string))
 }
+
+// ReasoningStream receives a turn's reasoning live, while calls are in flight.
+// OnDelta gets incremental text (rounds separated by a blank line, matching
+// GenerateResponse.Reasoning). OnReset means "discard everything streamed so far";
+// it is immediately followed by an OnDelta re-sending whatever reasoning is still kept
+// (earlier rounds), so the consumer can simply clear its draft and keep appending.
+// Either hook may be nil.
+type ReasoningStream struct {
+	OnDelta func(delta string)
+	OnReset func()
+}
+
+// ReasoningStreamer is implemented by adapters that can stream reasoning live
+// (z.ai GLM on the Claude path, Xiaomi MiMo). It is optional: callers type-assert,
+// and adapters without it simply report reasoning on the final GenerateResponse.
+// Live reasoning is only produced on streaming calls (a text-delta handler is set).
+type ReasoningStreamer interface {
+	SetReasoningStream(stream ReasoningStream)
+}

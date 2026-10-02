@@ -8,12 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/filechunker"
 	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"github.com/theimaginaryfoundation/what-iff/internal/utils"
 	"go.uber.org/zap"
 )
@@ -21,10 +23,16 @@ import (
 // UploadToS3 synchronously archives the temp file to S3 under s3Key.
 // Returns nil if fileStore is nil or s3Key is empty (no-op / S3 disabled).
 // The caller is responsible for rolling back any DB state on non-nil error.
-func UploadToS3(ctx context.Context, fileStore storage.FileStore, s3Key, tempFilePath, contentType string) error {
+// A failure is counted on FileUploads, because every caller abandons the upload when it fails.
+func UploadToS3(ctx context.Context, fileStore storage.FileStore, s3Key, tempFilePath, contentType string) (err error) {
 	if fileStore == nil || s3Key == "" {
 		return nil
 	}
+	defer func() {
+		if err != nil {
+			telemetry.Global().RecordFileUpload(ctx, contentType, telemetry.FileUploadFailure)
+		}
+	}()
 	content, err := os.ReadFile(tempFilePath)
 	if err != nil {
 		return fmt.Errorf("reading temp file for S3 upload: %w", err)
@@ -66,10 +74,66 @@ type FileAttachmentUploader interface {
 	) (string, error)
 }
 
+// FileAttachmentDeleter deletes a file from the provider's Files API by the FileID that
+// FileAttachmentUploader returned. Like FileAttachmentUploader it is declared here to keep this
+// package leaf-level; *provider.OpenAIProvider satisfies it, pinned by an assertion next to the
+// implementation in internal/agent/provider/fileattachment.go.
+type FileAttachmentDeleter interface {
+	DeleteFileAttachment(ctx context.Context, fileID string) error
+}
+
+// providerFileCleanupTimeout bounds the best-effort provider delete in DeleteProviderFile.
+const providerFileCleanupTimeout = 30 * time.Second
+
+// DeleteProviderFile best-effort deletes the provider-side copy of an upload whose attachment
+// record will not be kept (it failed to save, or was rolled back), so the file is not left
+// orphaned in the provider's storage. It detaches from ctx's cancellation, since the failure that
+// triggers it is often the request context ending. Failures are logged, never returned; a nil
+// logger logs nothing, so cleanup can't fail on it.
+func DeleteProviderFile(ctx context.Context, logger *zap.Logger, d FileAttachmentDeleter, fileID *string) {
+	if d == nil || fileID == nil || *fileID == "" {
+		return
+	}
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerFileCleanupTimeout)
+	defer cancel()
+	if err := d.DeleteFileAttachment(ctx, *fileID); err != nil {
+		logger.Warn("failed to delete orphaned provider file",
+			zap.Error(err),
+			zap.String("file_id", *fileID))
+	}
+}
+
+// AbandonFileAttachmentUpload cleans up after UploadFileAttachment succeeded but the attachment
+// record could not be saved: it deletes the provider-side file (best effort) and the temp file,
+// and counts the upload as failed on FileUploads, since TriggerAsyncFileChunking will not run.
+func AbandonFileAttachmentUpload(ctx context.Context, logger *zap.Logger, d FileAttachmentDeleter, attachment models.FileAttachment, tempFilePath string) {
+	DeleteProviderFile(ctx, logger, d, attachment.FileID)
+	if tempFilePath != "" {
+		_ = os.Remove(tempFilePath)
+	}
+	telemetry.Global().RecordFileUpload(ctx, attachment.FileType, telemetry.FileUploadFailure)
+}
+
 // UploadFileAttachment parses a multipart file upload, validates the file type,
 // streams it to a temp file, normalizes image uploads, uploads from disk, and
 // returns the attachment model plus temp file path for optional async chunking.
-func UploadFileAttachment(w http.ResponseWriter, r *http.Request, logger *zap.Logger, a FileAttachmentUploader, userID uuid.UUID, attrs map[string]string) (models.FileAttachment, string, error) {
+//
+// Upload metrics: any failure here counts as a failed upload on FileUploads; success is counted
+// later by TriggerAsyncFileChunking, which every upload path calls once the attachment is stored,
+// so each upload is counted exactly once. A caller that fails to store the attachment calls
+// AbandonFileAttachmentUpload instead, which counts the failure and deletes the provider file.
+func UploadFileAttachment(w http.ResponseWriter, r *http.Request, logger *zap.Logger, a FileAttachmentUploader, userID uuid.UUID, attrs map[string]string) (_ models.FileAttachment, _ string, err error) {
+	metrics := telemetry.Global()
+	var uploadContentType string // set once the extension is recognised
+	defer func() {
+		if err != nil {
+			metrics.RecordFileUpload(r.Context(), uploadContentType, telemetry.FileUploadFailure)
+		}
+	}()
+
 	// Validate file size
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
@@ -92,6 +156,7 @@ func UploadFileAttachment(w http.ResponseWriter, r *http.Request, logger *zap.Lo
 		RespondWithError(w, logger, http.StatusBadRequest, CodeNotSet, "Unsupported file type", err)
 		return models.FileAttachment{}, "", err
 	}
+	uploadContentType = fileTypeInfo.ContentType
 
 	tempFile, err := os.CreateTemp("", "chat-app-upload-*")
 	if err != nil {
@@ -100,12 +165,14 @@ func UploadFileAttachment(w http.ResponseWriter, r *http.Request, logger *zap.Lo
 	}
 	tempFilePath := tempFile.Name()
 
-	if _, err := io.Copy(tempFile, file); err != nil {
+	written, err := io.Copy(tempFile, file)
+	if err != nil {
 		_ = tempFile.Close()
 		_ = os.Remove(tempFilePath)
 		RespondWithError(w, logger, http.StatusInternalServerError, CodeNotSet, "Error buffering file", err)
 		return models.FileAttachment{}, "", err
 	}
+	metrics.RecordFileSize(r.Context(), telemetry.FileOpUpload, telemetry.FileKind(fileTypeInfo.ContentType), written)
 	if err := tempFile.Close(); err != nil {
 		_ = os.Remove(tempFilePath)
 		RespondWithError(w, logger, http.StatusInternalServerError, CodeNotSet, "Error closing temp file", err)
@@ -132,7 +199,9 @@ func UploadFileAttachment(w http.ResponseWriter, r *http.Request, logger *zap.Lo
 
 		// The upload cap bounds disk usage; stream image data between temp files
 		// so the raw upload is not also buffered in application memory.
+		doneNormalize := metrics.TimeFileStage(r.Context(), telemetry.FileOpUpload, telemetry.FileStageNormalize)
 		fileName, err = imageutil.NormalizeForUpload(imageFile, normalizedTempFile, fileName, imageutil.DefaultUploadImageMaxPx)
+		doneNormalize(err)
 		if closeErr := imageFile.Close(); closeErr != nil && err == nil {
 			err = closeErr
 		}
@@ -185,6 +254,10 @@ func UploadFileAttachment(w http.ResponseWriter, r *http.Request, logger *zap.Lo
 // Skips silently for non-text / non-vector-support file types. Caller owns tempFilePath cleanup
 // on early return; the goroutine removes it on completion or error.
 // S3 archival must be completed synchronously by the caller before invoking this.
+//
+// Every upload path calls this exactly once, after the attachment is stored, so it is also where
+// a successful upload is counted on FileUploads (failures are counted by UploadFileAttachment and
+// UploadToS3).
 func TriggerAsyncFileChunking(
 	logger *zap.Logger,
 	pipeline *filechunker.FileChunkPipeline,
@@ -192,6 +265,7 @@ func TriggerAsyncFileChunking(
 	tempFilePath string,
 	fileName string,
 ) {
+	recordUploadSuccess(fileName)
 	if tempFilePath == "" {
 		return
 	}
@@ -284,4 +358,14 @@ func TriggerAsyncFileChunking(
 				zap.String("file_attachment_id", attachmentID.String()))
 		}
 	}()
+}
+
+// recordUploadSuccess counts a completed upload on FileUploads, deriving its kind from the stored
+// file name (images are renamed to .png by normalization, which still maps to image).
+func recordUploadSuccess(fileName string) {
+	contentType := ""
+	if info, err := utils.GetFileType(fileName); err == nil {
+		contentType = info.ContentType
+	}
+	telemetry.Global().RecordFileUpload(context.Background(), contentType, telemetry.FileUploadSuccess)
 }

@@ -149,3 +149,24 @@ func TestListImages_InvalidGlobalOnlyFilterReturnsBadRequest(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
 	require.Nil(t, fake.gotFilters.GlobalOnly)
 }
+
+// Regression for #141: the gallery must list each stored image via its original
+// row, not a reference copy created by chat reuse, or its Generated/Imported
+// class flips after the image is reused.
+func TestListImages_ExcludesReferenceCopies(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeListStore{}
+	h := NewHandler(fake, zap.NewNop(), nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/image-gallery", nil)
+	req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, uuid.New()))
+
+	rr := httptest.NewRecorder()
+	r := mux.NewRouter()
+	h.RegisterRoutes(r)
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	require.True(t, fake.gotFilters.ExcludeReferenceCopies)
+}

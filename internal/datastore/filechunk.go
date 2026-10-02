@@ -212,8 +212,13 @@ func (d *Datastore) GetRelatedFileChunks(ctx context.Context, userID uuid.UUID, 
 	query := baseQuery + filterClause + distanceClause + orderClause
 
 	// Execute raw SQL directly — no transaction needed for a read-only query.
+	// Timed through the last row, like ent queries, since scanning is part of the cost.
+	done := timeRawSQL(ctx, d.metrics, "file_chunks", dbOpVectorSearch)
+	var queryErr error
+	defer func() { done(queryErr) }()
 	rows, err := d.sqlDB.QueryContext(ctx, query, args...)
 	if err != nil {
+		queryErr = err
 		d.logger.Error(i18n.T1("query.failed", "Entity", "related file chunks"), zap.Error(err))
 		return nil, err
 	}
@@ -223,6 +228,7 @@ func (d *Datastore) GetRelatedFileChunks(ctx context.Context, userID uuid.UUID, 
 	for rows.Next() {
 		var r FileChunkResult
 		if err := rows.Scan(&r.Content, &r.FileName, &r.FileAttachmentID, &r.Sequence, &r.Score, &r.CreatedAt); err != nil {
+			queryErr = err
 			d.logger.Error(i18n.T("filechunk.scan_failed"), zap.Error(err))
 			return nil, err
 		}
@@ -230,6 +236,7 @@ func (d *Datastore) GetRelatedFileChunks(ctx context.Context, userID uuid.UUID, 
 	}
 
 	if err := rows.Err(); err != nil {
+		queryErr = err
 		d.logger.Error(i18n.T("filechunk.iterate_failed"), zap.Error(err))
 		return nil, err
 	}

@@ -13,29 +13,27 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestGetChatToolsAddsWebSearch(t *testing.T) {
-	tools := getChatTools(ToolConfig{})
+func TestGetChatToolsAddsNativeWebSearchWhenPolicyAllows(t *testing.T) {
+	tools := getChatTools(ToolConfig{NativeWebSearch: true})
 
 	require.Len(t, tools, 1)
 	assert.NotNil(t, tools[0].OfWebSearch)
 }
 
-func TestGetChatToolsRespectsWebSearchToggle(t *testing.T) {
-	tools := getChatTools(ToolConfig{
-		DisabledTools: map[string]bool{"web_search": true},
-	})
-
-	require.Empty(t, tools)
+func TestGetChatToolsOmitsNativeWebSearchOtherwise(t *testing.T) {
+	// The web_search toggle and first-party web search both reach getChatTools as
+	// NativeWebSearch=false (see applyWebSearchPolicy).
+	require.Empty(t, getChatTools(ToolConfig{}))
 }
 
 func TestGetAvailableToolsUsesHumanDescriptions(t *testing.T) {
-	available := GetAvailableTools(context.Background())
+	available := GetAvailableTools(context.Background(), false)
 	byName := make(map[string]string, len(available))
 	for _, tool := range available {
 		byName[tool.Name] = tool.Description
 	}
 
-	require.Equal(t, agenttools.AvailableToolDescriptionWebSearch, byName[agenttools.ToolNameWebSearch])
+	require.Equal(t, agenttools.WebSearchDescriptionNative, byName[agenttools.ToolNameWebSearch])
 	for _, def := range agenttools.FunctionToolCatalog() {
 		if !def.UserToggleable || strings.TrimSpace(def.HumanDescription) == "" {
 			continue
@@ -62,7 +60,7 @@ func TestGetAvailableToolsFallsBackForExternalToolWithoutHumanDescription(t *tes
 		}}
 	}
 
-	available := GetAvailableTools(context.Background())
+	available := GetAvailableTools(context.Background(), false)
 	byName := make(map[string]string, len(available))
 	for _, tool := range available {
 		byName[tool.Name] = tool.Description
@@ -101,4 +99,37 @@ func TestBuildTurnToolPolicy_StripsMoodToolsAndMergesAdditionalDisabled(t *testi
 	assert.False(t, policy.disabledTools[agenttools.ListMoodsToolSpec.Name], "system mood tools should never be user-disabled")
 	assert.False(t, policy.disabledTools[agenttools.ChangeMoodToolSpec.Name], "system mood tools should never be user-disabled")
 	assert.True(t, policy.disabledTools["run_subagent"], "runtime disabled tools should be merged")
+}
+
+// The web_search toggle copy follows the active web search (ADR 0x021): only first-party
+// search can read pages, so only it promises that.
+func TestGetAvailableToolsWebSearchCopyFollowsMode(t *testing.T) {
+	describe := func(firstParty bool) string {
+		for _, tool := range GetAvailableTools(context.Background(), firstParty) {
+			if tool.Name == agenttools.ToolNameWebSearch {
+				return tool.Description
+			}
+		}
+		t.Fatal("web_search missing from available tools")
+		return ""
+	}
+	assert.Contains(t, describe(true), "read web pages")
+	assert.NotContains(t, describe(false), "read web pages")
+	assert.Contains(t, describe(false), "built-in search")
+}
+
+// Only first-party search takes recency and site options, so only its tooltip offers them.
+func TestGetAvailableToolsGuidesFollowWebSearchMode(t *testing.T) {
+	guides := func(firstParty bool) map[string]string {
+		out := map[string]string{}
+		for _, tool := range GetAvailableTools(context.Background(), firstParty) {
+			out[tool.Name] = tool.Guide
+		}
+		return out
+	}
+	assert.Contains(t, guides(true)[agenttools.ToolNameWebSearch], "certain sites")
+	assert.NotContains(t, guides(false)[agenttools.ToolNameWebSearch], "certain sites")
+	for name, guide := range guides(true) {
+		assert.NotEmpty(t, guide, "%s should have a tooltip guide", name)
+	}
 }

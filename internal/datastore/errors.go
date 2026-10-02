@@ -61,7 +61,11 @@ var (
 	ErrRitualNotFound = errors.New("ritual not found")
 
 	// MCP server-related errors
-	ErrMCPServerNotFound = errors.New("mcp server not found")
+	ErrMCPServerNotFound         = errors.New("mcp server not found")
+	ErrMCPOAuthSessionNotFound   = errors.New("mcp oauth session not found")
+	ErrMCPOAuthSessionExpired    = errors.New("mcp oauth session expired")
+	ErrMCPOAuthSessionConsumed   = errors.New("mcp oauth session already consumed")
+	ErrMCPOAuthConnectorNotReady = errors.New("mcp oauth connector is not configured")
 
 	// Webhook token-related errors
 	ErrWebhookTokenNotFound = errors.New("webhook token not found")

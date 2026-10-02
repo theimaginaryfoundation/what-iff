@@ -42,7 +42,12 @@ func (a *Agent) HandleUserMessageSync(ctx context.Context, request models.ChatMe
 		return nil, fmt.Errorf("failed to create job: %w", err)
 	}
 
-	agentMessage, err := a.handleUserMessage(ctx, runJob, chatMessage)
+	var agentMessage *models.ChatMessage
+	err = a.runTrackedJob(ctx, runJob, func() error {
+		var runErr error
+		agentMessage, runErr = a.handleUserMessage(ctx, runJob, chatMessage)
+		return runErr
+	})
 	if err != nil {
 		// `handleUserMessage` is responsible for setting job status.
 		return agentMessage, err
