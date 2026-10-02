@@ -866,10 +866,7 @@ func (c *chatContext) setMCPServerCache(servers []*models.MCPServer, loadedBySer
 func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chatMessage *models.ChatMessage) (*models.ChatMessage, error) {
 	assertNoTestHooksInProduction(a)
 	// The sync webhook path runs agent_job_run jobs through here too; label those as jobs.
-	callPath := telemetry.CallPathUserChat
-	if chatJob != nil && chatJob.JobType == JobTypeAgentJobRun {
-		callPath = telemetry.CallPathAgentJob
-	}
+	callPath := userTurnCallPath(chatJob)
 	ctx = a.withCallPath(ctx, callPath)
 
 	// Update job status to processing
@@ -1028,6 +1025,8 @@ func (a *Agent) runUserChatPostInferencePhases(
 	if err := a.advanceChatJobStatus(ctx, chatJob, models.JobStatusComplete); err != nil {
 		a.logger.Error("failed to finalize job", zap.Error(err))
 	}
+
+	a.fireReplyHook(chatJob.UserID, agentMessage, chatMessage, chatJob, userTurnCallPath(chatJob))
 }
 
 // generateAssistantForMessage runs the provider dispatch and, on success, captures the

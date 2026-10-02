@@ -358,6 +358,9 @@ func (a *Agent) handleEphemeralPrompt(
 		return nil, fmt.Errorf("finalize agent job: %w", err)
 	}
 
+	// The prompt was ephemeral, so there is no saved user message to point at.
+	a.fireReplyHook(userID, agentMessage, nil, trackingJob, callPath)
+
 	// Notify the user of this completed reply. Gated to the agent-job path
 	// (callPath) — scheduled/autonomous jobs and webhook background-mode
 	// invocations, the replies that land after the app is closed; interactive

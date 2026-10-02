@@ -274,6 +274,7 @@ type ThreadListTab = ThreadListScope;
                     [isArchivedView]="threadListTab() === 'archived' || (threadListTab() === 'jobs' && !!thread.archived)"
                     [showJobColumn]="threadListTab() === 'jobs'"
                     [jobs]="threads.jobsByChatId().get(thread.id) ?? null"
+                    [automations]="threads.automationsByChatId().get(thread.id) ?? null"
                     [checked]="threads.selectedIds().has(thread.id)"
                     (select)="selectThread.emit($event)"
                     (toggleSelect)="threads.toggleSelected($event)"
