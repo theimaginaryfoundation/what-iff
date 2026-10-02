@@ -20,6 +20,8 @@ The core registers nothing; with no hook linked, firing is a no-op that starts n
 
 ## Non-obvious decisions
 
+- **Safe for concurrent use.**
+  The hook list is behind an RWMutex and `Fire` iterates a snapshot, so registering (normally at init, but tests do it at runtime) never races a firing reply.
 - **Fired on success only.** A failed or cancelled turn fires nothing; a hook that cares about failures can watch the job it was given.
 - **`TriggerMessageID` is nil for ephemeral prompts** (agent jobs, webhook background mode), which save no user message; `JobID` is nil for scheduled runs, which create no tracking job.
 - **`pushnotify` is separate and older.** It keeps its own call site, limited to agent-job replies, and can move onto this hook later.

@@ -17,9 +17,15 @@ import (
 // it afterwards so registrations do not leak between tests.
 func withCleanHooks(t *testing.T) {
 	t.Helper()
+	mu.Lock()
 	orig := hooks
 	hooks = nil
-	t.Cleanup(func() { hooks = orig })
+	mu.Unlock()
+	t.Cleanup(func() {
+		mu.Lock()
+		hooks = orig
+		mu.Unlock()
+	})
 }
 
 func TestFireWithNoHooksIsANoop(t *testing.T) {
@@ -128,4 +134,29 @@ func TestUnregisterRemovesOnlyThatHook(t *testing.T) {
 	Fire(context.Background(), zap.NewNop(), Event{})
 	waitOrFail(t, &wg)
 	assert.Equal(t, []string{"b"}, calls)
+}
+
+func TestRegisterAndFireAreSafeConcurrently(t *testing.T) {
+	withCleanHooks(t)
+
+	var fired sync.WaitGroup
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			fired.Add(1)
+			unregister := Register(func(context.Context, Event) {})
+			fired.Done()
+			unregister()
+		}()
+		go func() {
+			defer wg.Done()
+			_ = Enabled()
+			Fire(context.Background(), zap.NewNop(), Event{})
+		}()
+	}
+	wg.Wait()
+	fired.Wait()
+	assert.False(t, Enabled(), "every hook was unregistered")
 }

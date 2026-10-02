@@ -18,6 +18,7 @@ package replyhook
 import (
 	"context"
 	"runtime/debug"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
@@ -54,20 +55,30 @@ type Hook func(ctx context.Context, ev Event)
 // registered wraps a hook so it can be found again by identity on removal.
 type registered struct{ fn Hook }
 
-var hooks []*registered
+// mu guards hooks. Registration normally happens during package init, but the
+// list is locked anyway so Register, Enabled and Fire are safe whenever they
+// run (tests register at runtime, and nothing stops a later caller doing so).
+var (
+	mu    sync.RWMutex
+	hooks []*registered
+)
 
 // Register adds a hook. Call it from an init() in the feature's package; linking
-// that package (a blank import in cmd/api-server) is what activates it. Not safe
-// for concurrent use: registration happens during package init, before any turn
-// runs.
+// that package (a blank import in cmd/api-server) is what activates it. It is safe
+// for concurrent use; a hook registered while a reply is firing is called from
+// the next reply on.
 //
 // The returned function removes the hook again. Production code has no reason to
 // call it; it lets tests in other packages register a hook without leaking it
 // into the rest of the suite.
 func Register(h Hook) (unregister func()) {
 	r := &registered{fn: h}
+	mu.Lock()
 	hooks = append(hooks, r)
+	mu.Unlock()
 	return func() {
+		mu.Lock()
+		defer mu.Unlock()
 		for i, x := range hooks {
 			if x == r {
 				hooks = append(hooks[:i:i], hooks[i+1:]...)
@@ -78,13 +89,20 @@ func Register(h Hook) (unregister func()) {
 }
 
 // Enabled reports whether any hook is registered.
-func Enabled() bool { return len(hooks) > 0 }
+func Enabled() bool {
+	mu.RLock()
+	defer mu.RUnlock()
+	return len(hooks) > 0
+}
 
 // Fire hands ev to every registered hook on detached goroutines. ctx should
 // outlive the request (the server's lifecycle context), since hooks run after
 // the turn has returned.
 func Fire(ctx context.Context, logger *zap.Logger, ev Event) {
-	for _, reg := range hooks {
+	mu.RLock()
+	snapshot := append([]*registered(nil), hooks...)
+	mu.RUnlock()
+	for _, reg := range snapshot {
 		go func(h Hook) {
 			defer func() {
 				if r := recover(); r != nil {
