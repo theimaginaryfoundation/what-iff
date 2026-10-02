@@ -1,7 +1,8 @@
 // Command sweep-orphan-files deletes stored attachment objects that no file attachment row
 // references any more (issue #252): objects under users/{id}/ left behind by deletes that predate
 // object cleanup, or by a cleanup that failed. See storage.SweepUserOrphans for what counts as
-// referenced; exports/ and workspace/ objects have their own lifecycle and are never touched.
+// referenced. Only known attachment layouts (images/, images/thumbs/, chats/, personalities/ and
+// top-level {id}[_name] keys) are candidates; anything else under users/{id}/ is left alone.
 //
 // Safe by default: it prints what it would delete unless -yes is passed, keeps anything modified
 // within -grace (so in-flight uploads are never swept), and refuses to run against a
@@ -150,8 +151,8 @@ func main() {
 			failed++
 			continue
 		}
-		fmt.Printf("%s: scanned %d, referenced %d, excluded %d, within grace %d, orphans %d, deleted %d, failed %d\n",
-			id, res.Scanned, res.Referenced, res.Excluded, res.TooRecent, len(res.Orphans), res.Deleted, len(res.Failed))
+		fmt.Printf("%s: scanned %d, referenced %d, skipped (unknown prefix) %d, within grace %d, orphans %d, deleted %d, failed %d\n",
+			id, res.Scanned, res.Referenced, res.SkippedUnknown, res.TooRecent, len(res.Orphans), res.Deleted, len(res.Failed))
 		for _, o := range res.Orphans {
 			fmt.Printf("  %s  %d bytes  %s\n", o.LastModified.UTC().Format(time.RFC3339), o.Size, o.Key)
 		}

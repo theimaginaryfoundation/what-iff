@@ -60,6 +60,17 @@ func TestDeleteChat_ReleasesAttachmentObjects(t *testing.T) {
 			rows = kept
 			return nil
 		},
+		existingIDsFn: func(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
+			out := map[uuid.UUID]bool{}
+			for _, id := range ids {
+				for _, r := range rows {
+					if r.ID == id {
+						out[id] = true
+					}
+				}
+			}
+			return out, nil
+		},
 		referencedKeysFn: func(_ context.Context, ks []string) (map[string]bool, error) {
 			out := map[string]bool{}
 			for _, k := range ks {

@@ -95,6 +95,26 @@ func (d *Datastore) listFileAttachmentObjectRefs(ctx context.Context, userID uui
 	return out, nil
 }
 
+// ExistingFileAttachmentIDs returns the subset of ids whose rows still exist. Object cleanup
+// checks it after a cascade so a row the cascade did not remove never loses its objects.
+// Implements storage.AttachmentKeyRefs.
+func (d *Datastore) ExistingFileAttachmentIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
+	out := map[uuid.UUID]bool{}
+	for start := 0; start < len(ids); start += referencedKeysChunk {
+		end := min(start+referencedKeysChunk, len(ids))
+		found, err := d.dbClient.FileAttachment.Query().
+			Where(entfileattachment.IDIn(ids[start:end]...)).
+			IDs(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range found {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
 // FileAttachmentProviderFileShared reports whether a row other than id carries the same provider
 // FileID. Reference copies clone the source's FileID, so deleting the provider file for one row
 // would break the others.

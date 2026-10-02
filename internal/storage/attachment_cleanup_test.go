@@ -41,6 +41,21 @@ func (f *fakeRefs) ReferencedFileAttachmentKeys(_ context.Context, keys []string
 	return out, nil
 }
 
+func (f *fakeRefs) ExistingFileAttachmentIDs(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := map[uuid.UUID]bool{}
+	for _, id := range ids {
+		for _, r := range f.rows {
+			if r.ID == id {
+				out[id] = true
+			}
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeRefs) ListUserFileAttachmentObjectRefs(context.Context, uuid.UUID) ([]models.FileAttachment, error) {
 	return f.rows, nil
 }
@@ -121,30 +136,53 @@ func TestReleaseAttachmentObjects(t *testing.T) {
 		require.Equal(t, 1, res.Kept)
 	})
 
+	t.Run("a row that survived the delete keeps its objects", func(t *testing.T) {
+		s := newLocalTestStore(t)
+		img := models.FileAttachment{ID: uuid.New(), Name: "d.png", FileType: "image/png", ChatID: &chatID}
+		thumb := FileKeyForImageThumbnail(userID, img.ID)
+		legacy := FileKeyForImage(userID, img.ID, img.Name) // no s3_key: derived keys only
+		s.put(t, thumb, 0)
+		s.put(t, legacy, 0)
+
+		// The cascade did not fire, so the row is still there.
+		res := ReleaseAttachmentObjects(ctx, zap.NewNop(), s.FileStore, &fakeRefs{rows: []models.FileAttachment{img}}, userID, []models.FileAttachment{img})
+		require.True(t, s.has(t, thumb))
+		require.True(t, s.has(t, legacy))
+		require.Equal(t, ReleaseResult{Kept: 1}, res)
+	})
+
 	t.Run("nil store is a no-op", func(t *testing.T) {
 		require.Equal(t, ReleaseResult{}, ReleaseAttachmentObjects(ctx, nil, nil, &fakeRefs{}, userID, []models.FileAttachment{{ID: uuid.New()}}))
 	})
 }
 
-func TestPurgeUserObjects_RemovesWholeUserPrefix(t *testing.T) {
+func TestPurgeUserObjects_RemovesUserPrefixAndExportBundles(t *testing.T) {
 	s := newLocalTestStore(t)
 	userID, other := uuid.New(), uuid.New()
 	mine := []string{
 		FileKeyForImage(userID, uuid.New(), "a.png"),
 		FileKeyForChat(userID, uuid.New(), uuid.New(), "b.txt"),
+		"users/" + userID.String() + "/workspace/" + uuid.NewString() + "/rev-1.md",
 		"users/" + userID.String() + "/stray-object-no-row-points-at",
+		// Export bundles live outside users/{id}/, at exports/{id}/ (accountexport.bundlePrefix).
+		UserExportPrefix(userID) + "account-export-20260101-000000.zip",
 	}
-	theirs := FileKeyForImage(other, uuid.New(), "c.png")
-	for _, k := range append(mine, theirs) {
+	theirs := []string{
+		FileKeyForImage(other, uuid.New(), "c.png"),
+		UserExportPrefix(other) + "account-export-20260101-000000.zip",
+	}
+	for _, k := range append(append([]string{}, mine...), theirs...) {
 		s.put(t, k, 0)
 	}
 
 	res := PurgeUserObjects(context.Background(), zap.NewNop(), s.FileStore, &fakeRefs{}, userID, nil)
-	require.Equal(t, 3, res.Deleted)
+	require.Equal(t, len(mine), res.Deleted)
 	for _, k := range mine {
 		require.False(t, s.has(t, k), k)
 	}
-	require.True(t, s.has(t, theirs), "other users' objects are untouched")
+	for _, k := range theirs {
+		require.True(t, s.has(t, k), "other users' objects are untouched: "+k)
+	}
 }
 
 func TestSweepUserOrphans(t *testing.T) {
@@ -159,15 +197,21 @@ func TestSweepUserOrphans(t *testing.T) {
 		img.S3Key = FileKeyForImage(userID, img.ID, img.Name)
 		legacy := models.FileAttachment{ID: uuid.New(), Name: "legacy.txt", FileType: "text/plain", ChatID: &chatID}
 		keys := map[string]string{
-			"referenced":      img.S3Key,
-			"thumb":           FileKeyForImageThumbnail(userID, img.ID),
-			"legacy":          FileKeyForChat(userID, chatID, legacy.ID, legacy.Name),
-			"otherOwnerRef":   FileKeyForImage(userID, uuid.New(), "shared-elsewhere.png"),
-			"orphan":          FileKeyForImage(userID, uuid.New(), "deleted.png"),
-			"orphanThumb":     FileKeyForImageThumbnail(userID, uuid.New()),
-			"recentOrphan":    FileKeyForChat(userID, chatID, uuid.New(), "uploading.txt"),
-			"export":          "users/" + userID.String() + "/exports/account-export.zip",
-			"workspace":       "users/" + userID.String() + "/workspace/" + uuid.NewString() + "/rev-1.md",
+			"referenced":     img.S3Key,
+			"thumb":          FileKeyForImageThumbnail(userID, img.ID),
+			"legacy":         FileKeyForChat(userID, chatID, legacy.ID, legacy.Name),
+			"otherOwnerRef":  FileKeyForImage(userID, uuid.New(), "shared-elsewhere.png"),
+			"orphan":         FileKeyForImage(userID, uuid.New(), "deleted.png"),
+			"orphanThumb":    FileKeyForImageThumbnail(userID, uuid.New()),
+			"recentOrphan":   FileKeyForChat(userID, chatID, uuid.New(), "uploading.txt"),
+			"fallbackOrphan": FileKeyFallback(userID, uuid.New(), "f.txt"),
+			// Not an attachment layout: referenced from elsewhere, never swept.
+			"workspace":     "users/" + userID.String() + "/workspace/" + uuid.NewString() + "/rev-1.md",
+			"futureFeature": "users/" + userID.String() + "/voice-notes/" + uuid.NewString() + ".ogg",
+			"topLevelNoID":  "users/" + userID.String() + "/notes.txt",
+			"imagesNoID":    "users/" + userID.String() + "/images/banner.png",
+			// Outside users/{id}/ entirely.
+			"export":          UserExportPrefix(userID) + "account-export-20260101-000000.zip",
 			"otherUserOrphan": FileKeyForImage(uuid.New(), uuid.New(), "not-mine.png"),
 		}
 		for name, k := range keys {
@@ -186,12 +230,12 @@ func TestSweepUserOrphans(t *testing.T) {
 		res, err := SweepUserOrphans(ctx, zap.NewNop(), s.FileStore, refs, userID, SweepOptions{DryRun: true, GracePeriod: 24 * time.Hour})
 		require.NoError(t, err)
 		require.True(t, res.DryRun)
-		require.ElementsMatch(t, []string{keys["orphan"], keys["orphanThumb"]}, orphanKeys(res))
+		require.ElementsMatch(t, []string{keys["orphan"], keys["orphanThumb"], keys["fallbackOrphan"]}, orphanKeys(res))
 		require.Equal(t, 0, res.Deleted)
 		require.Equal(t, 1, res.TooRecent)
-		require.Equal(t, 2, res.Excluded, "exports/ and workspace/ have their own lifecycle")
+		require.Equal(t, 4, res.SkippedUnknown, "workspace/, an unknown feature, and non-id keys are left alone")
 		require.Equal(t, 4, res.Referenced)
-		require.Equal(t, 9, res.Scanned)
+		require.Equal(t, 12, res.Scanned, "only users/{id}/ is listed")
 		for _, k := range keys {
 			require.True(t, s.has(t, k), k)
 		}
@@ -201,10 +245,10 @@ func TestSweepUserOrphans(t *testing.T) {
 		s, refs, keys := setup(t)
 		res, err := SweepUserOrphans(ctx, zap.NewNop(), s.FileStore, refs, userID, SweepOptions{GracePeriod: 24 * time.Hour})
 		require.NoError(t, err)
-		require.Equal(t, 2, res.Deleted)
+		require.Equal(t, 3, res.Deleted)
 		require.Empty(t, res.Failed)
 		for name, k := range keys {
-			want := name != "orphan" && name != "orphanThumb"
+			want := name != "orphan" && name != "orphanThumb" && name != "fallbackOrphan"
 			require.Equal(t, want, s.has(t, k), name)
 		}
 
@@ -220,14 +264,14 @@ func TestSweepUserOrphans(t *testing.T) {
 		res, err := SweepUserOrphans(ctx, zap.NewNop(), s.FileStore, refs, userID, SweepOptions{GracePeriod: 72 * time.Hour})
 		require.NoError(t, err)
 		require.Empty(t, res.Orphans)
-		// The three unreferenced objects, plus the one only another owner's row references (the
-		// grace check runs before that cross-owner lookup).
-		require.Equal(t, 4, res.TooRecent)
+		// The four unreferenced attachment objects, plus the one only another owner's row
+		// references (the grace check runs before that cross-owner lookup).
+		require.Equal(t, 5, res.TooRecent)
 
 		// Moving "now" forward ages the recent upload past the grace period too.
 		res, err = SweepUserOrphans(ctx, zap.NewNop(), s.FileStore, refs, userID, SweepOptions{DryRun: true, GracePeriod: 24 * time.Hour, Now: time.Now().Add(25 * time.Hour)})
 		require.NoError(t, err)
-		require.ElementsMatch(t, []string{keys["orphan"], keys["orphanThumb"], keys["recentOrphan"]}, orphanKeys(res))
+		require.ElementsMatch(t, []string{keys["orphan"], keys["orphanThumb"], keys["fallbackOrphan"], keys["recentOrphan"]}, orphanKeys(res))
 	})
 
 	t.Run("store without listing is reported", func(t *testing.T) {
@@ -240,6 +284,30 @@ func TestSweepUserOrphans(t *testing.T) {
 		_, err := SweepUserOrphans(ctx, zap.NewNop(), s.FileStore, refs, userID, SweepOptions{GracePeriod: -time.Hour})
 		require.Error(t, err)
 	})
+}
+
+func TestIsAttachmentObjectKey(t *testing.T) {
+	id, other := uuid.NewString(), uuid.NewString()
+	for rel, want := range map[string]bool{
+		id:                                      true,
+		id + "_notes.txt":                       true,
+		"images/" + id + "_cat.png":             true,
+		"images/thumbs/" + id + ".jpg":          true,
+		"chats/" + other + "/" + id + "_a.txt":  true,
+		"personalities/" + other + "/" + id:     true,
+		"notes.txt":                             false,
+		id + "notes.txt":                        false, // id must be followed by "_" or end
+		"images/banner.png":                     false,
+		"images/thumbs/" + id + ".png":          false,
+		"images/thumbs/banner.jpg":              false,
+		"chats/not-a-uuid/" + id:                false,
+		"chats/" + other + "/nested/" + id:      false,
+		"workspace/" + other + "/" + id:         false,
+		"exports/" + id + "_account-export.zip": false,
+		"voice-notes/" + id + ".ogg":            false,
+	} {
+		require.Equal(t, want, isAttachmentObjectKey(rel), rel)
+	}
 }
 
 func orphanKeys(res *SweepResult) []string {

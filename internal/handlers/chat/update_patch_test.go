@@ -35,6 +35,7 @@ type fakeStore struct {
 	deleteChatFn              func(ctx context.Context, userID, id uuid.UUID) error
 	listChatAttachmentRefsFn  func(ctx context.Context, userID, chatID uuid.UUID) ([]models.FileAttachment, error)
 	referencedKeysFn          func(ctx context.Context, keys []string) (map[string]bool, error)
+	existingIDsFn             func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error)
 }
 
 func (f *fakeStore) CreateChat(ctx context.Context, userID uuid.UUID, chat models.Chat) (*models.Chat, error) {
@@ -63,6 +64,12 @@ func (f *fakeStore) ListChatFileAttachmentObjectRefs(ctx context.Context, userID
 		return f.listChatAttachmentRefsFn(ctx, userID, chatID)
 	}
 	return nil, nil
+}
+func (f *fakeStore) ExistingFileAttachmentIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
+	if f.existingIDsFn != nil {
+		return f.existingIDsFn(ctx, ids)
+	}
+	return map[uuid.UUID]bool{}, nil
 }
 func (f *fakeStore) ReferencedFileAttachmentKeys(ctx context.Context, keys []string) (map[string]bool, error) {
 	if f.referencedKeysFn != nil {

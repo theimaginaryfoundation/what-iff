@@ -66,6 +66,11 @@ func (m *mockUserStore) ListUserFileAttachmentObjectRefs(context.Context, uuid.U
 	return m.attachmentRefs, nil
 }
 
+// ExistingFileAttachmentIDs: after the account is deleted none of its rows exist.
+func (m *mockUserStore) ExistingFileAttachmentIDs(context.Context, []uuid.UUID) (map[uuid.UUID]bool, error) {
+	return map[uuid.UUID]bool{}, nil
+}
+
 // ReferencedFileAttachmentKeys: after the account is deleted no row references anything.
 func (m *mockUserStore) ReferencedFileAttachmentKeys(context.Context, []string) (map[string]bool, error) {
 	return map[string]bool{}, nil

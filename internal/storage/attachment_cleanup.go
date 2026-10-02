@@ -14,19 +14,21 @@ import (
 	"go.uber.org/zap"
 )
 
-// AttachmentKeyRefs reports which object keys file attachment rows still point at. The datastore
-// implements it; it is an interface so object cleanup can live here without importing the
-// datastore (which imports this package).
+// AttachmentKeyRefs answers what object cleanup needs to know about the attachment rows that
+// remain. The datastore implements it; it is an interface so object cleanup can live here without
+// importing the datastore (which imports this package).
 type AttachmentKeyRefs interface {
 	// ReferencedFileAttachmentKeys returns the subset of keys that at least one remaining
 	// FileAttachment row (of any owner) stores as its s3_key.
 	ReferencedFileAttachmentKeys(ctx context.Context, keys []string) (map[string]bool, error)
+	// ExistingFileAttachmentIDs returns the subset of ids whose rows still exist.
+	ExistingFileAttachmentIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error)
 }
 
 // ReleaseResult counts what ReleaseAttachmentObjects did.
 type ReleaseResult struct {
 	Deleted int // object deletes that succeeded (missing objects count as deleted)
-	Kept    int // keys skipped because another row still references them
+	Kept    int // keys still referenced, plus rows (or, on a failed check, keys) left alone
 	Failed  int // object deletes that returned an error
 }
 
@@ -34,10 +36,11 @@ type ReleaseResult struct {
 // been deleted from the datastore (directly, or by a chat/personality/user cascade). Call it with
 // the rows as they were read before the delete.
 //
-// Reference copies (datastore.CreateFileAttachmentReference) share an s3_key with the row they
-// were copied from, so a key is only deleted when no remaining row references it. Thumbnails
-// are keyed by the attachment's own id and are never shared, so an image row's thumbnail is
-// always deleted.
+// It first confirms the rows are gone: a row that still exists (say, an FK cascade that did not
+// fire) keeps all its objects. Reference copies (datastore.CreateFileAttachmentReference) share
+// an s3_key with the row they were copied from, so a key is only deleted when no remaining row
+// references it. Thumbnails are keyed by the attachment's own id and are never shared, so a
+// deleted image row's thumbnail always goes.
 //
 // Best effort: failures are logged and counted, never returned, because the user-facing delete
 // has already happened and must not fail on storage. The orphan sweep (SweepUserOrphans) is the
@@ -51,9 +54,27 @@ func ReleaseAttachmentObjects(ctx context.Context, logger *zap.Logger, store Fil
 		logger = zap.NewNop()
 	}
 
+	ids := make([]uuid.UUID, len(atts))
+	for i := range atts {
+		ids[i] = atts[i].ID
+	}
+	surviving, err := refs.ExistingFileAttachmentIDs(ctx, ids)
+	if err != nil {
+		logger.Warn("attachment cleanup: could not confirm rows were deleted, keeping objects for the orphan sweep",
+			zap.String("user_id", userID.String()), zap.Int("rows", len(atts)), zap.Error(err))
+		res.Kept += len(atts)
+		return res
+	}
+
 	var shared, thumbs []string
 	seen := map[string]bool{}
 	for i := range atts {
+		if surviving[atts[i].ID] {
+			logger.Warn("attachment cleanup: row still exists after delete, keeping its objects",
+				zap.String("user_id", userID.String()), zap.String("file_attachment_id", atts[i].ID.String()))
+			res.Kept++
+			continue
+		}
 		for _, k := range attachmentReleaseKeys(userID, &atts[i]) {
 			if !seen[k] {
 				seen[k] = true
@@ -97,15 +118,20 @@ func ReleaseAttachmentObjects(ctx context.Context, logger *zap.Logger, store Fil
 	if res.Failed > 0 || res.Deleted > 0 {
 		logger.Info("attachment cleanup: released objects",
 			zap.String("user_id", userID.String()),
-			zap.Int("deleted", res.Deleted), zap.Int("kept_referenced", res.Kept), zap.Int("failed", res.Failed))
+			zap.Int("deleted", res.Deleted), zap.Int("kept", res.Kept), zap.Int("failed", res.Failed))
 	}
 	return res
 }
 
-// PurgeUserObjects deletes everything stored under users/{userID}/ after the account has been
-// deleted. With an ObjectLister it removes the whole prefix, which also catches objects no row
-// pointed at any more. Without one it falls back to releasing fallback, the user's attachment rows
-// as read before the delete. Best effort, like ReleaseAttachmentObjects.
+// PurgeUserObjects deletes everything stored for an account after it has been deleted: the
+// whole users/{userID}/ prefix (attachments, thumbnails, and anything else a feature keeps there)
+// and the account's export bundles under exports/{userID}/. Without an ObjectLister, or when
+// listing users/{userID}/ fails, it falls back to releasing fallback, the user's attachment rows as
+// read before the delete; export bundles then stay until the bucket lifecycle rule expires them.
+// Best effort, like ReleaseAttachmentObjects.
+//
+// ListObjects stops at maxAccountExportFileObjects per prefix, so a larger account errors and
+// takes the fallback; the orphan sweep can finish the rest.
 func PurgeUserObjects(ctx context.Context, logger *zap.Logger, store FileStore, refs AttachmentKeyRefs, userID uuid.UUID, fallback []models.FileAttachment) ReleaseResult {
 	var res ReleaseResult
 	if store == nil {
@@ -118,12 +144,30 @@ func PurgeUserObjects(ctx context.Context, logger *zap.Logger, store FileStore, 
 	if !ok {
 		return ReleaseAttachmentObjects(ctx, logger, store, refs, userID, fallback)
 	}
-	prefix := UserObjectPrefix(userID)
-	objs, err := lister.ListObjects(ctx, prefix)
-	if err != nil {
+
+	if err := purgePrefix(ctx, logger, store, lister, UserObjectPrefix(userID), &res); err != nil {
 		logger.Warn("account cleanup: listing user objects failed, releasing known attachments only",
 			zap.String("user_id", userID.String()), zap.Error(err))
-		return ReleaseAttachmentObjects(ctx, logger, store, refs, userID, fallback)
+		r := ReleaseAttachmentObjects(ctx, logger, store, refs, userID, fallback)
+		res.Deleted += r.Deleted
+		res.Kept += r.Kept
+		res.Failed += r.Failed
+	}
+	if err := purgePrefix(ctx, logger, store, lister, UserExportPrefix(userID), &res); err != nil {
+		logger.Warn("account cleanup: listing export bundles failed, leaving them to the bucket lifecycle rule",
+			zap.String("user_id", userID.String()), zap.Error(err))
+	}
+	logger.Info("account cleanup: purged user objects",
+		zap.String("user_id", userID.String()), zap.Int("deleted", res.Deleted), zap.Int("failed", res.Failed))
+	return res
+}
+
+// purgePrefix deletes every object under prefix, counting into res. It returns an error only when
+// the prefix cannot be listed.
+func purgePrefix(ctx context.Context, logger *zap.Logger, store FileStore, lister ObjectLister, prefix string, res *ReleaseResult) error {
+	objs, err := lister.ListObjects(ctx, prefix)
+	if err != nil {
+		return err
 	}
 	for _, o := range objs {
 		if !strings.HasPrefix(o.Key, prefix) {
@@ -131,20 +175,27 @@ func PurgeUserObjects(ctx context.Context, logger *zap.Logger, store FileStore, 
 		}
 		if err := store.DeleteFile(ctx, o.Key); err != nil {
 			res.Failed++
-			logger.Warn("account cleanup: object delete failed",
-				zap.String("user_id", userID.String()), zap.String("key", o.Key), zap.Error(err))
+			logger.Warn("account cleanup: object delete failed", zap.String("key", o.Key), zap.Error(err))
 			continue
 		}
 		res.Deleted++
 	}
-	logger.Info("account cleanup: purged user objects",
-		zap.String("user_id", userID.String()), zap.Int("deleted", res.Deleted), zap.Int("failed", res.Failed))
-	return res
+	return nil
 }
 
-// UserObjectPrefix is the key prefix every object owned by userID lives under.
+// UserObjectPrefix is the key prefix the user's uploaded and generated files live under.
 func UserObjectPrefix(userID uuid.UUID) string {
 	return path.Join("users", userID.String()) + "/"
+}
+
+// ExportBundleRoot is the top-level prefix account export bundles are written under, as
+// exports/{userID}/account-export-*.zip. It sits outside users/{userID}/ and is expired by a bucket
+// lifecycle rule.
+const ExportBundleRoot = "exports"
+
+// UserExportPrefix is the key prefix of userID's account export bundles.
+func UserExportPrefix(userID uuid.UUID) string {
+	return path.Join(ExportBundleRoot, userID.String()) + "/"
 }
 
 // attachmentReleaseKeys is where an attachment's bytes live: its s3_key, or for legacy rows
@@ -203,25 +254,29 @@ type SweepOptions struct {
 
 // SweepResult is what one SweepUserOrphans run found and did.
 type SweepResult struct {
-	UserID     uuid.UUID    `json:"user_id"`
-	DryRun     bool         `json:"dry_run"`
-	Scanned    int          `json:"scanned"`
-	Referenced int          `json:"referenced"`
-	Excluded   int          `json:"excluded"`   // other lifecycles (SweepExcludedSubprefixes)
-	TooRecent  int          `json:"too_recent"` // unreferenced but inside the grace period
-	Orphans    []ObjectInfo `json:"orphans"`    // unreferenced and past the grace period
-	Deleted    int          `json:"deleted"`
-	Failed     []string     `json:"failed,omitempty"`
+	UserID         uuid.UUID    `json:"user_id"`
+	DryRun         bool         `json:"dry_run"`
+	Scanned        int          `json:"scanned"`
+	Referenced     int          `json:"referenced"`
+	SkippedUnknown int          `json:"skipped_unknown_prefix"` // not an attachment layout; never touched
+	TooRecent      int          `json:"too_recent"`             // unreferenced but inside the grace period
+	Orphans        []ObjectInfo `json:"orphans"`                // unreferenced and past the grace period
+	Deleted        int          `json:"deleted"`
+	Failed         []string     `json:"failed,omitempty"`
 }
 
-// SweepUserOrphans deletes objects under users/{userID}/ that no FileAttachment row references
-// and that are older than the grace period. It is idempotent: a second run finds nothing new.
-// userID need not exist any more, so it also clears what a deleted account left behind.
+// SweepUserOrphans deletes attachment objects under users/{userID}/ that no FileAttachment row
+// references and that are older than the grace period. It is idempotent: a second run finds
+// nothing new. userID need not exist any more, so it also clears what a deleted account left
+// behind.
 //
-// An object counts as referenced when it is a row's s3_key, any legacy key a reader falls back
+// It is an allow-list: only keys in a known attachment layout (see isAttachmentObjectKey) are
+// candidates. Anything else under users/{userID}/ (agent workspace files, or whatever a future
+// feature stores there) is counted as SkippedUnknown and left alone, because it is referenced
+// from tables this sweep does not read.
+//
+// A candidate counts as referenced when it is a row's s3_key, any legacy key a reader falls back
 // to for that row, or a row's thumbnail, or when any row (of any owner) stores it as s3_key.
-// Keys under SweepExcludedSubprefixes (exports/, workspace/) are skipped: they are not
-// attachments and have their own lifecycle.
 func SweepUserOrphans(ctx context.Context, logger *zap.Logger, store FileStore, refs SweepRefs, userID uuid.UUID, opts SweepOptions) (*SweepResult, error) {
 	if store == nil || refs == nil {
 		return nil, fmt.Errorf("orphan sweep: file store and datastore are required")
@@ -270,8 +325,8 @@ func SweepUserOrphans(ctx context.Context, logger *zap.Logger, store FileStore, 
 	for _, o := range objs {
 		res.Scanned++
 		switch {
-		case !strings.HasPrefix(o.Key, prefix) || isSweepExcluded(o.Key, prefix):
-			res.Excluded++
+		case !strings.HasPrefix(o.Key, prefix) || !isAttachmentObjectKey(strings.TrimPrefix(o.Key, prefix)):
+			res.SkippedUnknown++
 		case known[o.Key]:
 			res.Referenced++
 		case o.LastModified.After(cutoff):
@@ -316,7 +371,7 @@ func SweepUserOrphans(ctx context.Context, logger *zap.Logger, store FileStore, 
 		zap.Bool("dry_run", opts.DryRun),
 		zap.Int("scanned", res.Scanned),
 		zap.Int("referenced", res.Referenced),
-		zap.Int("excluded", res.Excluded),
+		zap.Int("skipped_unknown_prefix", res.SkippedUnknown),
 		zap.Int("too_recent", res.TooRecent),
 		zap.Int("orphans", len(res.Orphans)),
 		zap.Int("deleted", res.Deleted),
@@ -324,24 +379,43 @@ func SweepUserOrphans(ctx context.Context, logger *zap.Logger, store FileStore, 
 	return res, nil
 }
 
-// SweepExcludedSubprefixes are the parts of users/{uid}/ that do not hold attachment objects.
-// They are referenced from elsewhere and cleaned up by their own lifecycle, so the attachment
-// orphan sweep never touches them. Account deletion (PurgeUserObjects) still removes them.
-var SweepExcludedSubprefixes = []string{
-	// Account export bundles; expired by the bucket lifecycle rule.
-	"exports/",
-	// Agent workspace file revisions; referenced from workspace_file_revisions.storage_key, not
-	// from FileAttachment, and swept by the workspace's own lifecycle.
-	"workspace/",
-}
-
-// isSweepExcluded reports whether key, under userPrefix, belongs to another lifecycle.
-func isSweepExcluded(key, userPrefix string) bool {
-	rel := strings.TrimPrefix(key, userPrefix)
-	for _, p := range SweepExcludedSubprefixes {
-		if strings.HasPrefix(rel, p) {
-			return true
-		}
+// isAttachmentObjectKey reports whether rel, a key relative to users/{userID}/, has one of the
+// layouts the FileKeyFor* builders produce. Every leaf starts with the attachment id:
+//
+//	images/{id}[_name]                 FileKeyForImage
+//	images/thumbs/{id}.jpg             FileKeyForImageThumbnail
+//	chats/{chatID}/{id}[_name]         FileKeyForChat
+//	personalities/{pID}/{id}[_name]    FileKeyForPersonality
+//	{id}[_name]                        FileKeyFallback
+func isAttachmentObjectKey(rel string) bool {
+	parts := strings.Split(rel, "/")
+	switch {
+	case len(parts) == 1:
+		return startsWithAttachmentID(parts[0])
+	case len(parts) == 2 && parts[0] == "images":
+		return startsWithAttachmentID(parts[1])
+	case len(parts) == 3 && parts[0] == "images" && parts[1] == "thumbs":
+		id, ok := strings.CutSuffix(parts[2], ".jpg")
+		return ok && isUUID(id)
+	case len(parts) == 3 && (parts[0] == "chats" || parts[0] == "personalities"):
+		return isUUID(parts[1]) && startsWithAttachmentID(parts[2])
 	}
 	return false
+}
+
+// startsWithAttachmentID matches filenameWithFallback's output: "{id}" or "{id}_{name}".
+func startsWithAttachmentID(leaf string) bool {
+	const n = 36 // canonical uuid length
+	if len(leaf) < n || !isUUID(leaf[:n]) {
+		return false
+	}
+	return len(leaf) == n || leaf[n] == '_'
+}
+
+func isUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	_, err := uuid.Parse(s)
+	return err == nil
 }

@@ -20,7 +20,7 @@ HTTP API for **users** — profile, preferences, registration/login-adjacent flo
 - Production's plus-alias restriction is driven by `server.Config.Environment` (`ENV`, then `ENVIRONMENT`); the email allowlist is configured via `ALLOWED_EMAILS`.
   Both checks run before datastore/Stripe side effects.
 - **Account deletion purges stored files.**
-  With a store from `WithFileStore`, `DeleteUser` removes everything under `users/{id}/` after the row delete (`storage.PurgeUserObjects`), best effort.
+  With a store from `WithFileStore`, `DeleteUser` removes everything under `users/{id}/` and the account's `exports/{id}/` bundles after the row delete (`storage.PurgeUserObjects`), best effort.
 
 ## Testing
 

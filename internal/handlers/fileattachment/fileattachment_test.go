@@ -53,6 +53,10 @@ func (s stubStore) DeleteFileAttachment(ctx context.Context, userID, id uuid.UUI
 	return s.deleteFn(ctx, userID, id)
 }
 
+func (s stubStore) ExistingFileAttachmentIDs(context.Context, []uuid.UUID) (map[uuid.UUID]bool, error) {
+	return map[uuid.UUID]bool{}, nil
+}
+
 type stubAgent struct {
 	store         storage.FileStore
 	deleteErr     error

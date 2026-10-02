@@ -42,7 +42,7 @@ type Handler struct {
 	logger        *zap.Logger
 	allowedEmails []string
 	environment   string
-	// fileStore holds the user's uploads; account deletion removes users/{id}/ from it. Nil
+	// fileStore holds the user's uploads; account deletion removes users/{id}/ and exports/{id}/. Nil
 	// (no store configured) skips that cleanup.
 	fileStore storage.FileStore
 }
@@ -284,7 +284,7 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The cascade deletes every attachment row but none of the stored objects. PurgeUserObjects
-	// removes the whole users/{id}/ prefix and only falls back to these rows when the store cannot
+	// removes users/{id}/ and exports/{id}/ and only falls back to these rows when the store cannot
 	// list it. A failed read must not block the account deletion.
 	var attachments []models.FileAttachment
 	if h.fileStore != nil {

@@ -69,6 +69,16 @@ func (m *memRows) ReferencedFileAttachmentKeys(_ context.Context, keys []string)
 	return out, nil
 }
 
+func (m *memRows) ExistingFileAttachmentIDs(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
+	out := map[uuid.UUID]bool{}
+	for _, id := range ids {
+		if _, ok := m.rows[id]; ok {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
 func newLocalStore(t *testing.T) storage.FileStore {
 	t.Helper()
 	t.Setenv("LOCAL_FILE_STORE_DIR", t.TempDir())

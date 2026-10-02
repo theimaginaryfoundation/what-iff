@@ -39,6 +39,7 @@ type fakeStore struct {
 	deletePersonalityFn                  func(ctx context.Context, userID, id uuid.UUID) error
 	listPersonalityAttachmentRefsFn      func(ctx context.Context, userID, personalityID uuid.UUID) ([]models.FileAttachment, error)
 	referencedKeysFn                     func(ctx context.Context, keys []string) (map[string]bool, error)
+	existingIDsFn                        func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error)
 }
 
 func (f *fakeStore) CreatePersonality(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error) {
@@ -76,6 +77,12 @@ func (f *fakeStore) ListPersonalityFileAttachmentObjectRefs(ctx context.Context,
 		return f.listPersonalityAttachmentRefsFn(ctx, userID, personalityID)
 	}
 	return nil, nil
+}
+func (f *fakeStore) ExistingFileAttachmentIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
+	if f.existingIDsFn != nil {
+		return f.existingIDsFn(ctx, ids)
+	}
+	return map[uuid.UUID]bool{}, nil
 }
 func (f *fakeStore) ReferencedFileAttachmentKeys(ctx context.Context, keys []string) (map[string]bool, error) {
 	if f.referencedKeysFn != nil {

@@ -165,3 +165,52 @@ func TestChatCascade_ReleasesUnreferencedObjects(t *testing.T) {
 	require.False(t, has(storage.FileKeyForImageThumbnail(userID, img.ID)))
 	require.True(t, has(imgKey), "the reference copy in the other chat still uses it")
 }
+
+func TestExistingFileAttachmentIDs(t *testing.T) {
+	ds, cleanup := newFileAttachmentTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createFATestUser(t, ds)
+	kept := createFAObjectRow(t, ds, userID, models.FileAttachment{Name: "a.txt", FileType: "text/plain"})
+	gone := createFAObjectRow(t, ds, userID, models.FileAttachment{Name: "b.txt", FileType: "text/plain"})
+	require.NoError(t, ds.DeleteFileAttachment(ctx, userID, gone.ID))
+
+	got, err := ds.ExistingFileAttachmentIDs(ctx, []uuid.UUID{kept.ID, gone.ID, uuid.New()})
+	require.NoError(t, err)
+	require.Equal(t, map[uuid.UUID]bool{kept.ID: true}, got)
+}
+
+// TestRelease_CascadeThatDidNotFireKeepsObjects: if the listed rows are still there after the
+// "delete" (an FK cascade that did not fire), nothing of theirs is released.
+func TestRelease_CascadeThatDidNotFireKeepsObjects(t *testing.T) {
+	ds, cleanup := newFileAttachmentTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	t.Setenv("LOCAL_FILE_STORE_DIR", t.TempDir())
+	fs, err := storage.NewFileStore(ctx, "", "", zap.NewNop())
+	require.NoError(t, err)
+
+	userID := createFATestUser(t, ds)
+	chatID := createFATestChat(t, ds, userID, createFATestModel(t, ds))
+	msgID := createFATestChatMessage(t, ds, chatID)
+	img := createFAObjectRow(t, ds, userID, models.FileAttachment{Name: "i.png", FileType: "image/png", ChatMessageID: &msgID})
+	thumb := storage.FileKeyForImageThumbnail(userID, img.ID)
+	legacy := storage.FileKeyForImage(userID, img.ID, img.Name) // no s3_key: a derived key
+	for _, k := range []string{thumb, legacy} {
+		require.NoError(t, fs.UploadFile(ctx, k, []byte(k), "image/png"))
+	}
+
+	refs, err := ds.ListChatFileAttachmentObjectRefs(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Len(t, refs, 1)
+
+	// No delete happens: the row survives.
+	res := storage.ReleaseAttachmentObjects(ctx, zap.NewNop(), fs, ds, userID, refs)
+	require.Equal(t, storage.ReleaseResult{Kept: 1}, res)
+	for _, k := range []string{thumb, legacy} {
+		b, err := fs.DownloadFile(ctx, k)
+		require.NoError(t, err)
+		require.NotNil(t, b, k)
+	}
+}

@@ -13,8 +13,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// TestDeleteUser_PurgesUserObjects: account deletion removes everything under users/{id}/,
-// including objects no attachment row pointed at, and leaves other users' objects alone.
+// TestDeleteUser_PurgesUserObjects: account deletion removes everything under users/{id}/ and
+// the account's export bundles under exports/{id}/, and leaves other users' objects alone.
 func TestDeleteUser_PurgesUserObjects(t *testing.T) {
 	t.Setenv("LOCAL_FILE_STORE_DIR", t.TempDir())
 	fs, err := storage.NewFileStore(context.Background(), "", "", zap.NewNop())
@@ -25,6 +25,7 @@ func TestDeleteUser_PurgesUserObjects(t *testing.T) {
 		storage.FileKeyForImage(userID, uuid.New(), "a.png"),
 		storage.FileKeyForImageThumbnail(userID, uuid.New()),
 		storage.FileKeyForChat(userID, uuid.New(), uuid.New(), "b.txt"),
+		storage.UserExportPrefix(userID) + "account-export-20260101-000000.zip",
 	}
 	theirs := storage.FileKeyForImage(otherID, uuid.New(), "c.png")
 	for _, k := range append(mine, theirs) {
