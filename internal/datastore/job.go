@@ -1054,6 +1054,67 @@ func (d *Datastore) activeChatJobsForChat(ctx context.Context, userID, chatID uu
 	return out, nil
 }
 
+// activeTurnJobScanLimit bounds how many of a user's in-flight turn jobs ListActiveTurnJobsForChat
+// inspects. Only a turn's own predecessors matter to it, and those are among the user's newest.
+const activeTurnJobScanLimit = 100
+
+// ListActiveTurnJobsForChat returns every non-terminal job that runs a turn in chatID, oldest first
+// (created_at, then id): chat_message jobs and agent_job_run jobs. A turn job's Reference is either
+// the chat id (webhook background, scheduled runs) or the triggering user message id (chat_message,
+// sync runs), so both forms are matched. The per-chat turn gate uses it to find older turns that
+// must finish first; it reads only, and takes no lock.
+func (d *Datastore) ListActiveTurnJobsForChat(ctx context.Context, userID, chatID uuid.UUID) ([]*models.Job, error) {
+	jobs, err := d.dbClient.Job.Query().
+		Where(
+			job.HasOwnerWith(user.ID(userID)),
+			job.JobTypeIn("chat_message", "agent_job_run"),
+			job.StatusNotIn(job.StatusComplete, job.StatusCancelled, job.StatusFailed),
+		).
+		Order(job.ByCreatedAt(sql.OrderDesc()), job.ByID(sql.OrderDesc())).
+		Limit(activeTurnJobScanLimit).
+		WithOwner().
+		All(ctx)
+	if err != nil || len(jobs) == 0 {
+		return nil, err
+	}
+
+	chatRef := chatID.String()
+	var msgRefs []uuid.UUID
+	for _, j := range jobs {
+		if j.Reference == chatRef {
+			continue
+		}
+		if id, perr := uuid.Parse(j.Reference); perr == nil {
+			msgRefs = append(msgRefs, id)
+		}
+	}
+	inChat := make(map[string]struct{})
+	if len(msgRefs) > 0 {
+		ids, qerr := d.dbClient.ChatMessage.Query().
+			Where(
+				entchatmessage.IDIn(msgRefs...),
+				entchatmessage.HasChatWith(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))),
+			).
+			IDs(ctx)
+		if qerr != nil {
+			return nil, qerr
+		}
+		for _, id := range ids {
+			inChat[id.String()] = struct{}{}
+		}
+	}
+
+	out := make([]*models.Job, 0, len(jobs))
+	// Reverse the newest-first scan so callers get the turn order directly.
+	for i := len(jobs) - 1; i >= 0; i-- {
+		j := jobs[i]
+		if _, ok := inChat[j.Reference]; ok || j.Reference == chatRef {
+			out = append(out, toJobModel(j))
+		}
+	}
+	return out, nil
+}
+
 // ChatIDForChatJob resolves the chat a chat_message job belongs to, via its Reference (the user
 // message id). Returns ErrJobNotFound when the job is not the user's or is not a chat job.
 func (d *Datastore) ChatIDForChatJob(ctx context.Context, userID, jobID uuid.UUID) (uuid.UUID, error) {

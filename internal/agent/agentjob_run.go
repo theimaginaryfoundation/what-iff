@@ -221,7 +221,7 @@ func (a *Agent) handleEphemeralPrompt(
 	actionType string,
 	callPath telemetry.CallPath,
 	opts ephemeralPromptOptions,
-) (*models.ChatMessage, error) {
+) (_ *models.ChatMessage, retErr error) {
 	userID, _ := middleware.GetUserIDFromContext(ctx)
 	if userID == uuid.Nil {
 		return nil, errors.New("user ID not found in context")
@@ -263,6 +263,13 @@ func (a *Agent) handleEphemeralPrompt(
 		Rituals: jobRituals,
 	}
 
+	// Turn gate: queue behind earlier turns in this chat (#254); see beginEphemeralChatTurn.
+	endTurn, err := a.beginEphemeralChatTurn(ctx, userID, chatID, trackingJob)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { endTurn(retErr) }()
+
 	// Rehydration gate: stall if this thread's import summary is still in flight (no-op otherwise).
 	a.WaitForThreadRehydration(ctx, userID, chatID)
 
@@ -295,6 +302,7 @@ func (a *Agent) handleEphemeralPrompt(
 			chatCtx.chat.PersonalityID = personality.ID
 			chatCtx.chat.SystemPrompt = personality.SystemPrompt
 			chatCtx.chat.Scratchpad = personality.Scratchpad
+			chatCtx.chat.ScratchpadRevision = personality.ScratchpadRevision
 		}
 	}
 

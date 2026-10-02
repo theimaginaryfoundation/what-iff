@@ -90,6 +90,10 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Stopping a thread:** `ListActiveChatJobIDsForChat` (shares `activeChatJobsForChat` with `FindLatestActiveChatJob`), `ChatIDForChatJob`, `MarkChatJobCancelled`, and `JobStatus` back the agent's thread-wide Stop.
   `MarkChatJobCancelled` only moves a non-terminal chat job to cancelled (clearing both drafts); a terminal job is left alone.
   `FailInterruptedJobs` also runs for `chat_message` at startup (30m staleness bound), so a turn orphaned by a restart is failed instead of resumed forever.
+- **Per-chat turn order:** `ListActiveTurnJobsForChat` lists a chat's non-terminal `chat_message` and `agent_job_run` jobs oldest first, matching a reference that is either the chat id or a user message in the chat; the agent's turn gate polls it (read-only, no lock).
+- **Scratchpad revision:** `personalities.scratchpad_revision` is bumped by every scratchpad write (`UpdatePersonalityScratchpad`, a changed scratchpad in `UpdatePersonality`/prompt-change updates, snapshot revert).
+  `UpdatePersonalityScratchpadIfRevision` writes only at the expected revision (checked in the transaction and in the UPDATE's WHERE) and otherwise returns `ErrScratchpadConflict`.
+  `GetChat` carries the revision on `Chat.ScratchpadRevision` with the scratchpad.
 - **`SetAgentJobOverrides`:** `personality_id` must belong to the job owner; `model_id` must exist in the global model catalog.
   Partial updates use `models.SetAgentJobOverridesPatch` so omitted JSON fields are not overwritten.
   Invalid IDs return `ErrInvalidRequestBody`.
