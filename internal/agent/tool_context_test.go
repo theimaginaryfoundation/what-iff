@@ -27,6 +27,7 @@ func TestToolContextPolicyFor(t *testing.T) {
 		{"fetched page shares the web search TTL", tools.ToolNameFetchPage, true, webSearchTTLTurns, false},
 		{"read_file results expire", tools.ToolNameReadFile, true, fileReadTTLTurns, false},
 		{"grep_files results expire", tools.ToolNameGrepFiles, true, fileReadTTLTurns, false},
+		{"write_file acknowledgements are not carried over", tools.ToolNameWriteFile, false, 0, false},
 		{"create_memory dropped", tools.CreateMemoryToolSpec.Name, false, 0, false},
 		{"update_scratchpad dropped", tools.UpdateScratchpadToolSpec.Name, false, 0, false},
 		{"auto memory enrichment dropped", memoryEnrichmentToolCallName, false, 0, false},

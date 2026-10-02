@@ -66,6 +66,7 @@ func toolContextPolicyFor(toolName string) toolContextPolicy {
 		return toolContextPolicy{persist: true, ttlTurns: noTTL}
 	case tools.CreateMemoryToolSpec.Name,
 		tools.UpdateScratchpadToolSpec.Name,
+		tools.ToolNameWriteFile,
 		tools.ChangeMoodToolSpec.Name,
 		tools.CreateAgentJobToolSpec.Name:
 		// Write/side-effect confirmations: small acknowledgements. Persisting them adds

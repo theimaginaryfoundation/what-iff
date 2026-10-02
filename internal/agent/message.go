@@ -112,6 +112,7 @@ type Agent struct {
 	scratchpadTool *tools.ScratchpadTool
 	recallTool     *tools.RecallTool
 	fileReadTool   *tools.FileReadTool
+	workspaceTool  *tools.WorkspaceTool
 	listTool       *tools.ListTool
 	chunkPipeline  *filechunker.FileChunkPipeline
 	fileStore      storage.FileStore
@@ -309,6 +310,9 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 	// OpenAIProvider (set in the struct literal above).
 	a.recallTool = tools.NewRecallTool(ds, &oaiClient, newRecallDistiller(a), a.fileStore, logger)
 	a.fileReadTool = tools.NewFileReadTool(ds, a.fileStore, logger)
+	a.workspaceTool = tools.NewWorkspaceTool(ds, a.fileStore, logger)
+	a.fileReadTool.SetWorkspace(a.workspaceTool)
+	a.listTool.SetWorkspace(a.workspaceTool)
 
 	if anthropicKey != "" {
 		a.ClaudeProvider = provider.NewClaudeProvider(anthropicKey, tel, cfg.HTTPClient)

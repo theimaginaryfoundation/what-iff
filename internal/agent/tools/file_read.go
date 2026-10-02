@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -137,6 +138,13 @@ type FileReadTool struct {
 	// loadText returns a file's text. It defaults to the object store via
 	// storage.ResolveAttachmentTextContent; tests swap it out.
 	loadText func(ctx context.Context, userID uuid.UUID, fa *models.FileAttachment) (string, bool)
+	// workspace, when set, lets both tools read agent/ and chat/ workspace paths too.
+	workspace *WorkspaceTool
+}
+
+// SetWorkspace lets read_file and grep_files read workspace files as well as uploads.
+func (t *FileReadTool) SetWorkspace(w *WorkspaceTool) {
+	t.workspace = w
 }
 
 // NewFileReadTool constructs the file tools. fileStore may be nil, in which case every read
@@ -159,10 +167,59 @@ type fileRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Type string `json:"type,omitempty"`
+	// Revision is set for workspace files: pass it as base_revision to change the file.
+	Revision int `json:"revision,omitempty"`
 }
 
-func toFileRef(fa *models.FileAttachment) *fileRef {
-	return &fileRef{ID: fa.ID.String(), Name: fa.Name, Type: fa.FileType}
+// textSource is one readable file, an upload or a workspace file, behind a common shape so
+// read_file and grep_files treat both the same way.
+type textSource struct {
+	ref      *fileRef
+	name     string // file name or workspace path; drives the outline format
+	fileType string
+	// notText, when set, is why this file can't be read as text.
+	notText  string
+	cacheKey string
+	load     func(ctx context.Context) (string, bool)
+	// afterRead records a successful read (workspace read bookkeeping); may be nil.
+	afterRead func(ctx context.Context)
+}
+
+func (t *FileReadTool) attachmentSource(userID uuid.UUID, fa *models.FileAttachment) *textSource {
+	src := &textSource{
+		ref:      &fileRef{ID: fa.ID.String(), Name: fa.Name, Type: fa.FileType},
+		name:     fa.Name,
+		fileType: fa.FileType,
+		cacheKey: "att|" + fa.ID.String() + "|" + fa.S3Key,
+		load: func(ctx context.Context) (string, bool) {
+			return t.loadText(ctx, userID, fa)
+		},
+	}
+	if !isTextAttachment(fa) {
+		src.notText = fmt.Sprintf("%s is not a text file (type %s); use find_context to read it", fa.Name, fa.FileType)
+	}
+	return src
+}
+
+func (t *FileReadTool) workspaceSource(userID uuid.UUID, f *models.WorkspaceFile) *textSource {
+	display := f.Root + "/" + f.Path
+	return &textSource{
+		ref:      &fileRef{ID: f.ID.String(), Name: display, Type: f.ContentType, Revision: f.CurrentRevision},
+		name:     display,
+		fileType: f.ContentType,
+		cacheKey: fmt.Sprintf("ws|%s|%d", f.ID, f.CurrentRevision),
+		load: func(ctx context.Context) (string, bool) {
+			text, err := t.workspace.loadText(ctx, f)
+			if err != nil {
+				t.logger.Debug("workspace read failed", zap.String("path", display), zap.Error(err))
+				return "", false
+			}
+			return text, true
+		},
+		afterRead: func(ctx context.Context) {
+			t.workspace.touch(ctx, userID, f)
+		},
+	}
 }
 
 // --- read_file -----------------------------------------------------------------
@@ -208,24 +265,27 @@ func (t *FileReadTool) ReadFile(ctx context.Context, chat *models.Chat, input []
 		return t.readFail("file cannot be empty: pass a file ID or exact file name")
 	}
 
-	fa, note, err := t.resolveFile(ctx, chat, ref)
+	src, note, err := t.resolveSource(ctx, chat, ref)
 	if err != nil {
 		return t.readFail(err.Error())
 	}
-	if fa == nil {
+	if src == nil {
 		return t.readFail(note)
 	}
 
-	lines, err := t.fileLines(ctx, chat.UserID, fa)
+	lines, err := t.fileLines(ctx, src)
 	if err != nil {
-		return marshalToolResult(readFileResult{Success: false, Error: err.Error(), File: toFileRef(fa)}, ToolNameReadFile)
+		return marshalToolResult(readFileResult{Success: false, Error: err.Error(), File: src.ref}, ToolNameReadFile)
+	}
+	if src.afterRead != nil {
+		src.afterRead(ctx)
 	}
 
 	if a.Outline {
-		entries, outlineNote := buildOutline(fa, lines)
+		entries, outlineNote := buildOutline(src.name, src.fileType, lines)
 		return marshalToolResult(readFileResult{
 			Success:    true,
-			File:       toFileRef(fa),
+			File:       src.ref,
 			TotalLines: len(lines),
 			Outline:    entries,
 			Note:       outlineNote,
@@ -246,7 +306,7 @@ func (t *FileReadTool) ReadFile(ctx context.Context, chat *models.Chat, input []
 	if start > len(lines) {
 		return marshalToolResult(readFileResult{
 			Success:    true,
-			File:       toFileRef(fa),
+			File:       src.ref,
 			TotalLines: len(lines),
 			Note:       fmt.Sprintf("start_line %d is past the end of the file (%d lines).", start, len(lines)),
 		}, ToolNameReadFile)
@@ -276,7 +336,7 @@ func (t *FileReadTool) ReadFile(ctx context.Context, chat *models.Chat, input []
 
 	res := readFileResult{
 		Success:    true,
-		File:       toFileRef(fa),
+		File:       src.ref,
 		TotalLines: len(lines),
 		StartLine:  start,
 		EndLine:    last,
@@ -392,19 +452,19 @@ func (t *FileReadTool) GrepFiles(ctx context.Context, chat *models.Chat, input [
 	budget := fileToolMaxChars
 	scanned := 0
 	full := false // once set, no further matches are added, so results stay a contiguous prefix
-	for _, fa := range files {
+	for _, src := range files {
 		if full {
 			break
 		}
 		if err := ctx.Err(); err != nil {
 			return t.grepFail("search cancelled")
 		}
-		lines, err := t.fileLines(ctx, chat.UserID, fa)
+		lines, err := t.fileLines(ctx, src)
 		if err != nil {
-			res.Skipped = append(res.Skipped, grepSkipped{File: fa.Name, Reason: err.Error()})
+			res.Skipped = append(res.Skipped, grepSkipped{File: src.name, Reason: err.Error()})
 			continue
 		}
-		summary := grepFileSummary{ID: fa.ID.String(), Name: fa.Name}
+		summary := grepFileSummary{ID: src.ref.ID, Name: src.name}
 		for i, line := range lines {
 			if i%4096 == 0 && ctx.Err() != nil {
 				return t.grepFail("search cancelled")
@@ -427,8 +487,8 @@ func (t *FileReadTool) GrepFiles(ctx context.Context, chat *models.Chat, input [
 				continue
 			}
 			m := grepMatch{
-				FileID: fa.ID.String(),
-				File:   fa.Name,
+				FileID: src.ref.ID,
+				File:   src.name,
 				Line:   i + 1,
 				Text:   clipLine(line),
 				Before: clipLines(lines[max(0, i-contextLines):i]),
@@ -467,36 +527,57 @@ func (t *FileReadTool) grepFail(msg string) (string, error) {
 	return marshalToolResult(grepFilesResult{Success: false, Error: msg}, ToolNameGrepFiles)
 }
 
-// grepTargets resolves the files to search: the named ones, or the conversation's default scope.
-// Files that cannot be resolved or are not text are reported in res.Skipped rather than failing
-// the whole call.
-func (t *FileReadTool) grepTargets(ctx context.Context, chat *models.Chat, refs []string, res *grepFilesResult) ([]*models.FileAttachment, error) {
+// grepTargets resolves the files to search: the named ones, or the conversation's default scope
+// (workspace files first, since they are few and the agent wrote them, then uploads). Files that
+// cannot be resolved or are not text are reported in res.Skipped rather than failing the call.
+func (t *FileReadTool) grepTargets(ctx context.Context, chat *models.Chat, refs []string, res *grepFilesResult) ([]*textSource, error) {
 	if len(refs) > 0 {
 		if len(refs) > grepMaxFiles {
 			return nil, fmt.Errorf("too many files (max %d per call)", grepMaxFiles)
 		}
-		out := make([]*models.FileAttachment, 0, len(refs))
-		seen := make(map[uuid.UUID]struct{}, len(refs))
+		out := make([]*textSource, 0, len(refs))
+		seen := make(map[string]struct{}, len(refs))
 		for _, ref := range refs {
 			ref = strings.TrimSpace(ref)
 			if ref == "" {
 				continue
 			}
-			fa, note, err := t.resolveFile(ctx, chat, ref)
+			src, note, err := t.resolveSource(ctx, chat, ref)
 			if err != nil {
 				return nil, err
 			}
-			if fa == nil {
+			if src == nil {
 				res.Skipped = append(res.Skipped, grepSkipped{File: ref, Reason: note})
 				continue
 			}
-			if _, dup := seen[fa.ID]; dup {
+			if _, dup := seen[src.cacheKey]; dup {
 				continue
 			}
-			seen[fa.ID] = struct{}{}
-			out = append(out, fa)
+			seen[src.cacheKey] = struct{}{}
+			out = append(out, src)
 		}
 		return out, nil
+	}
+
+	var out []*textSource
+	full := func() bool {
+		if len(out) < grepMaxFiles {
+			return false
+		}
+		res.addNote(fmt.Sprintf("Only the %d most recent text files were searched; name files explicitly to search others.", grepMaxFiles))
+		return true
+	}
+	if t.workspace != nil {
+		files, err := t.workspace.listForChat(ctx, chat, "", grepMaxFiles)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list workspace files: %v", err)
+		}
+		for _, f := range files {
+			if full() {
+				return out, nil
+			}
+			out = append(out, t.workspaceSource(chat.UserID, f))
+		}
 	}
 
 	var personalityID *uuid.UUID
@@ -508,16 +589,14 @@ func (t *FileReadTool) grepTargets(ctx context.Context, chat *models.Chat, refs 
 	if err != nil {
 		return nil, fmt.Errorf("failed to list this conversation's files: %v", err)
 	}
-	out := make([]*models.FileAttachment, 0, len(scoped))
 	for _, fa := range scoped {
 		if fa == nil || !isTextAttachment(fa) {
 			continue // images and unsupported types are simply not part of the default scope
 		}
-		if len(out) == grepMaxFiles {
-			res.addNote(fmt.Sprintf("Only the %d most recent text files were searched; name files explicitly to search others.", grepMaxFiles))
+		if full() {
 			break
 		}
-		out = append(out, fa)
+		out = append(out, t.attachmentSource(chat.UserID, fa))
 	}
 	return out, nil
 }
@@ -585,6 +664,23 @@ func clampInt(v, lo, hi int) int {
 }
 
 // --- shared: resolution and loading ----------------------------------------------
+
+// resolveSource turns a file reference into something readable: a workspace path (agent/…,
+// chat/…) when the workspace is enabled, otherwise an uploaded file by ID or exact name.
+func (t *FileReadTool) resolveSource(ctx context.Context, chat *models.Chat, ref string) (*textSource, string, error) {
+	if t.workspace != nil && isWorkspaceRef(ref) {
+		f, note, err := t.workspace.resolve(ctx, chat, ref)
+		if err != nil || f == nil {
+			return nil, note, err
+		}
+		return t.workspaceSource(chat.UserID, f), "", nil
+	}
+	fa, note, err := t.resolveFile(ctx, chat, ref)
+	if err != nil || fa == nil {
+		return nil, note, err
+	}
+	return t.attachmentSource(chat.UserID, fa), "", nil
+}
 
 // resolveFile turns a file ID or exact name into an attachment the user owns. Names are matched
 // exactly (case-insensitive), preferring this conversation's files, so a common name like
@@ -664,30 +760,29 @@ func isTextAttachment(fa *models.FileAttachment) bool {
 	return strings.HasSuffix(ct, "+json") || strings.HasSuffix(ct, "+xml") || ct == "application/xml" || ct == "application/x-ndjson"
 }
 
-// fileLines loads a text attachment and splits it into lines (CRLF-tolerant). Results are cached
-// by attachment ID and storage key, which are immutable for a given upload.
-func (t *FileReadTool) fileLines(ctx context.Context, userID uuid.UUID, fa *models.FileAttachment) ([]string, error) {
-	if !isTextAttachment(fa) {
-		return nil, fmt.Errorf("%s is not a text file (type %s); use find_context to read it", fa.Name, fa.FileType)
+// fileLines loads a source's text and splits it into lines (CRLF-tolerant). Results are cached by
+// the source's immutable key (attachment id + storage key, or workspace file id + revision).
+func (t *FileReadTool) fileLines(ctx context.Context, src *textSource) ([]string, error) {
+	if src.notText != "" {
+		return nil, errors.New(src.notText)
 	}
-	key := fa.ID.String() + "|" + fa.S3Key
-	if lines, ok := t.cache.get(key); ok {
+	if lines, ok := t.cache.get(src.cacheKey); ok {
 		return lines, nil
 	}
-	text, ok := t.loadText(ctx, userID, fa)
+	text, ok := src.load(ctx)
 	if !ok {
-		return nil, fmt.Errorf("the text of %s is not available", fa.Name)
+		return nil, fmt.Errorf("the text of %s is not available", src.name)
 	}
 	if len(text) > fileToolMaxBytes {
-		return nil, fmt.Errorf("%s is too large to read here (%d MB); use find_context to search it", fa.Name, len(text)>>20)
+		return nil, fmt.Errorf("%s is too large to read here (%d MB); use find_context to search it", src.name, len(text)>>20)
 	}
 	if !utf8.ValidString(text) {
-		return nil, fmt.Errorf("%s does not contain valid UTF-8 text", fa.Name)
+		return nil, fmt.Errorf("%s does not contain valid UTF-8 text", src.name)
 	}
 	if n := strings.Count(text, "\n"); n >= fileToolMaxLines {
-		return nil, fmt.Errorf("%s has too many lines to read here (%d); use find_context to search it", fa.Name, n+1)
+		return nil, fmt.Errorf("%s has too many lines to read here (%d); use find_context to search it", src.name, n+1)
 	}
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	t.cache.put(key, lines, len(text)+lineHeaderBytes*len(lines))
+	t.cache.put(src.cacheKey, lines, len(text)+lineHeaderBytes*len(lines))
 	return lines, nil
 }

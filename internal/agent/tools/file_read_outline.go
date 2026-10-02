@@ -7,16 +7,14 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-
-	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
 // buildOutline returns a file's structure with 1-based line numbers so the agent can plan a
 // ranged read instead of paging through the whole file. It is deterministic and cheap: Markdown
 // headings, top-level JSON or YAML keys, CSV/TSV columns, or (for anything else) the first
 // non-empty lines.
-func buildOutline(fa *models.FileAttachment, lines []string) ([]outlineEntry, string) {
-	switch outlineKind(fa) {
+func buildOutline(name, fileType string, lines []string) ([]outlineEntry, string) {
+	switch outlineKind(name, fileType) {
 	case "markdown":
 		if entries := markdownOutline(lines); len(entries) > 0 {
 			return capOutline(entries)
@@ -41,9 +39,9 @@ func buildOutline(fa *models.FileAttachment, lines []string) ([]outlineEntry, st
 	return firstLinesOutline(lines)
 }
 
-func outlineKind(fa *models.FileAttachment) string {
-	ext := strings.ToLower(filepath.Ext(fa.Name))
-	ct := strings.ToLower(fa.FileType)
+func outlineKind(name, fileType string) string {
+	ext := strings.ToLower(filepath.Ext(name))
+	ct := strings.ToLower(fileType)
 	switch {
 	case ext == ".md" || ext == ".markdown" || strings.Contains(ct, "markdown"):
 		return "markdown"

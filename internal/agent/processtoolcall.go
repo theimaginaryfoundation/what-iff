@@ -96,6 +96,10 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 			out, err := a.fileReadTool.ReadFile(ctx, chatCtx.chat, input)
 			return out, nil, err
 		},
+		tools.WriteFileToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.workspaceTool.WriteFile(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
 		tools.GrepFilesToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
 			out, err := a.fileReadTool.GrepFiles(ctx, chatCtx.chat, input)
 			return out, nil, err

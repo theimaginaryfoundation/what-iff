@@ -40,7 +40,10 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
 ## Non-obvious decisions
 
 - **Find context:** `RecallTool` implements the agent-facing `find_context` surface, consolidating memory and attachment retrieval.
-- **File reads:** `FileReadTool` implements `read_file` (line ranges, cursor, outline) and `grep_files` (host-side literal/RE2 search) over uploaded text files; `file_read_outline.go` builds outlines and `file_text_cache.go` is the shared byte-bounded LRU.
+- **File reads:** `FileReadTool` implements `read_file` (line ranges, cursor, outline) and `grep_files` (host-side literal/RE2 search) over uploaded text files and workspace files; `file_read_outline.go` builds outlines and `file_text_cache.go` is the shared byte-bounded LRU.
+- **Workspace:** `WorkspaceTool` (`workspace.go`) implements `write_file` (write / append / edit / delete) over revisioned text files under `agent/` (the personality's notebook) and `chat/` (this conversation), and backs `list kind=workspace`.
+  Overwrites, edits and deletes must pass the `base_revision` the agent read, so a stale write is refused with a typed conflict instead of replacing newer content.
+  Each revision is an immutable object under `users/{uid}/workspace/` (`WorkspaceObjectPrefix`), which attachment sweeps must skip.
   `conversation` pages from the start of a thread toward its end with a conversation-scoped `(sent_at, message_id)` keyset cursor; relative time scopes are frozen in that cursor so later pages cannot drift.
 - **`list` conversations:** Empty shells (no messages / nil `last_message_time`) are excluded via `ChatFilters.HasMessages` so they do not crowd out real conversations under Postgres `DESC NULLS FIRST` sort.
   Unlike the HTTP sidebar list, agent discovery includes archived threads so imported history can be read with `find_context` without rehydrating it.
