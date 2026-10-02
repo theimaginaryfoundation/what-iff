@@ -95,7 +95,7 @@ First-party clients use the session API instead.
 | Audit | Partly | Each read logs the operation and token id (never content). No per-token audit trail in the product UI; `last_used_at` is shown per token. |
 | Retries | Guidance | `GET` is safe to retry. `POST` is not idempotent. |
 | Idempotency | Tracked | No idempotency key on `POST`; a retried `POST` can create a duplicate message. |
-| Rate limits | Tracked | None in the application layer. The page-size cap bounds the cost of one request, not the request rate. Poll job status at a sensible interval (a second or more). |
+| Rate limits | Tracked | None on the webhook routes yet ([#247](https://github.com/theimaginaryfoundation/what-iff/issues/247)). The page-size cap bounds the cost of one request, not the request rate. Poll job status at a sensible interval (a second or more). |
 | Push / callbacks | Not available | What Iff does not call out to integrations. Poll. |
 
 ## Follow-ups
