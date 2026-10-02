@@ -416,3 +416,42 @@ func TestFileTextCache_EvictsLeastRecentlyUsed(t *testing.T) {
 	_, okHuge := c.get("huge")
 	assert.False(t, okHuge, "entries larger than the cache are never stored")
 }
+
+func TestGrepFiles_ScopeNoteSurvivesNoMatches(t *testing.T) {
+	f := newFileFixture()
+	for i := 0; i < grepMaxFiles+3; i++ {
+		f.addFile(fmt.Sprintf("f%02d.txt", i), "text/plain", "nothing here", true)
+	}
+	res := callGrep(t, f, map[string]interface{}{"pattern": "absent"})
+	assert.Contains(t, res.Note, "Only the 25 most recent text files were searched")
+	assert.Contains(t, res.Note, "No matches.", "a later note is appended, not substituted")
+}
+
+func TestGrepFiles_OverBudgetStopsAddingMatches(t *testing.T) {
+	f := newFileFixture()
+	// Each long line costs ~2k after clipping, so the budget runs out partway through; the short
+	// match at the end would still fit, but adding it would leave a gap in the results.
+	var lines []string
+	for i := 0; i < 20; i++ {
+		lines = append(lines, strings.Repeat("needle ", 400))
+	}
+	lines = append(lines, "needle small")
+	f.addFile("mixed.txt", "text/plain", strings.Join(lines, "\n"), true)
+
+	res := callGrep(t, f, map[string]interface{}{"pattern": "needle", "context_lines": 0})
+	require.True(t, res.Truncated)
+	for i, m := range res.Matches {
+		assert.Equal(t, i+1, m.Line, "returned matches are a contiguous prefix of all matches")
+	}
+	require.Len(t, res.Searched, 1)
+	assert.Equal(t, 21, res.Searched[0].Matches, "the file's total still counts every match")
+	assert.Less(t, len(res.Matches), 21)
+}
+
+func TestReadFile_RejectsAbsurdLineCounts(t *testing.T) {
+	f := newFileFixture()
+	fa := f.addFile("newlines.txt", "text/plain", "x"+strings.Repeat("\n", fileToolMaxLines), true)
+	res := callRead(t, f, map[string]interface{}{"file": fa.ID.String()})
+	assert.False(t, res.Success)
+	assert.Contains(t, res.Error, "too many lines")
+}

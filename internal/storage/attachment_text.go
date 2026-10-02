@@ -22,6 +22,18 @@ import (
 // When it is empty (legacy rows), derived keys embed attachment ID; an empty filename
 // resolves to an ID-only path via filenameWithFallback.
 func ResolveAttachmentTextContent(ctx context.Context, logger *zap.Logger, store FileStore, userID uuid.UUID, att *models.FileAttachment) (string, bool) {
+	raw, ok := ResolveAttachmentRawText(ctx, logger, store, userID, att)
+	if !ok {
+		return "", false
+	}
+	return strings.TrimSpace(raw), true
+}
+
+// ResolveAttachmentRawText is ResolveAttachmentTextContent without the whitespace trim: the text
+// exactly as stored, so tools that address it by line number see the real line numbers and the
+// first line's indentation. Returns ("", false) under the same conditions (not text, missing, or
+// blank).
+func ResolveAttachmentRawText(ctx context.Context, logger *zap.Logger, store FileStore, userID uuid.UUID, att *models.FileAttachment) (string, bool) {
 	if att == nil || strings.HasPrefix(att.FileType, models.ImageMIMEPrefix) {
 		return "", false
 	}
@@ -61,8 +73,8 @@ func ResolveAttachmentTextContent(ctx context.Context, logger *zap.Logger, store
 			tryDownload(FileKeyForAttachment(userID, att.ID, att.Name, att.FileType, att.ChatID, att.PersonalityID))
 		}
 	}
-	text := strings.TrimSpace(string(raw))
-	if text == "" {
+	text := string(raw)
+	if strings.TrimSpace(text) == "" {
 		return "", false
 	}
 	return text, true

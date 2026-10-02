@@ -33,6 +33,13 @@ const (
 	fileToolMaxLineChars = 2000
 	// fileToolMaxBytes is the largest file these tools will load; uploads are capped at 30MB.
 	fileToolMaxBytes = 32 << 20
+	// fileToolMaxLines bounds the split: every line costs a string header, so a file of nothing
+	// but newlines would otherwise turn 30MB into ~0.5GB of headers.
+	fileToolMaxLines = 1_000_000
+	// lineHeaderBytes is the cache's per-line overhead estimate (a string header).
+	lineHeaderBytes = 16
+	// grepMaxScanBytes bounds the text one grep_files call scans across all files.
+	grepMaxScanBytes = 64 << 20
 
 	outlineMaxEntries      = 200
 	outlineFallbackEntries = 20
@@ -143,7 +150,7 @@ func NewFileReadTool(store fileReadStore, fileStore storage.FileStore, logger *z
 		logger: logger,
 		cache:  newFileTextCache(fileTextCacheMaxBytes),
 		loadText: func(ctx context.Context, userID uuid.UUID, fa *models.FileAttachment) (string, bool) {
-			return storage.ResolveAttachmentTextContent(ctx, logger, fileStore, userID, fa)
+			return storage.ResolveAttachmentRawText(ctx, logger, fileStore, userID, fa)
 		},
 	}
 }
@@ -378,14 +385,19 @@ func (t *FileReadTool) GrepFiles(ctx context.Context, chat *models.Chat, input [
 		return t.grepFail(err.Error())
 	}
 	if len(files) == 0 && len(res.Skipped) == 0 {
-		res.Note = "No files to search: this conversation has no uploaded files and the personality has no documents. Name files explicitly to search others."
+		res.addNote("No files to search: this conversation has no uploaded files and the personality has no documents. Name files explicitly to search others.")
 		return marshalToolResult(res, ToolNameGrepFiles)
 	}
 
 	budget := fileToolMaxChars
+	scanned := 0
+	full := false // once set, no further matches are added, so results stay a contiguous prefix
 	for _, fa := range files {
-		if res.Truncated {
+		if full {
 			break
+		}
+		if err := ctx.Err(); err != nil {
+			return t.grepFail("search cancelled")
 		}
 		lines, err := t.fileLines(ctx, chat.UserID, fa)
 		if err != nil {
@@ -394,13 +406,25 @@ func (t *FileReadTool) GrepFiles(ctx context.Context, chat *models.Chat, input [
 		}
 		summary := grepFileSummary{ID: fa.ID.String(), Name: fa.Name}
 		for i, line := range lines {
+			if i%4096 == 0 && ctx.Err() != nil {
+				return t.grepFail("search cancelled")
+			}
+			scanned += len(line) + 1
+			if scanned > grepMaxScanBytes {
+				res.addNote(fmt.Sprintf("Stopped after scanning %d MB of text; search fewer or smaller files.", grepMaxScanBytes>>20))
+				res.Truncated, full = true, true
+				break
+			}
 			if !match(line) {
 				continue
 			}
 			summary.Matches++
+			if full {
+				continue // keep counting this file's matches for its summary row
+			}
 			if len(res.Matches) >= maxMatches {
-				res.Truncated = true
-				continue // keep counting this file's matches for the summary
+				res.Truncated, full = true, true
+				continue
 			}
 			m := grepMatch{
 				FileID: fa.ID.String(),
@@ -412,7 +436,7 @@ func (t *FileReadTool) GrepFiles(ctx context.Context, chat *models.Chat, input [
 			}
 			cost := matchCost(m)
 			if cost > budget {
-				res.Truncated = true
+				res.Truncated, full = true, true
 				continue
 			}
 			budget -= cost
@@ -422,11 +446,21 @@ func (t *FileReadTool) GrepFiles(ctx context.Context, chat *models.Chat, input [
 	}
 
 	if res.Truncated {
-		res.Note = "More matches exist than were returned. Narrow the pattern, lower context_lines, or search fewer files; per-file totals are in searched."
+		res.addNote("More matches exist than were returned. Narrow the pattern, lower context_lines, or search fewer files; searched shows match totals for each file that was searched.")
 	} else if len(res.Matches) == 0 {
-		res.Note = "No matches."
+		res.addNote("No matches.")
 	}
 	return marshalToolResult(res, ToolNameGrepFiles)
+}
+
+// addNote appends to the result note rather than replacing it, so an earlier caveat (for example
+// that only some files were searched) is never lost behind a later one.
+func (r *grepFilesResult) addNote(note string) {
+	if r.Note == "" {
+		r.Note = note
+		return
+	}
+	r.Note += " " + note
 }
 
 func (t *FileReadTool) grepFail(msg string) (string, error) {
@@ -480,7 +514,7 @@ func (t *FileReadTool) grepTargets(ctx context.Context, chat *models.Chat, refs 
 			continue // images and unsupported types are simply not part of the default scope
 		}
 		if len(out) == grepMaxFiles {
-			res.Note = fmt.Sprintf("Searched the %d most recent text files; name files explicitly to search others.", grepMaxFiles)
+			res.addNote(fmt.Sprintf("Only the %d most recent text files were searched; name files explicitly to search others.", grepMaxFiles))
 			break
 		}
 		out = append(out, fa)
@@ -650,7 +684,10 @@ func (t *FileReadTool) fileLines(ctx context.Context, userID uuid.UUID, fa *mode
 	if !utf8.ValidString(text) {
 		return nil, fmt.Errorf("%s does not contain valid UTF-8 text", fa.Name)
 	}
+	if n := strings.Count(text, "\n"); n >= fileToolMaxLines {
+		return nil, fmt.Errorf("%s has too many lines to read here (%d); use find_context to search it", fa.Name, n+1)
+	}
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	t.cache.put(key, lines, len(text))
+	t.cache.put(key, lines, len(text)+lineHeaderBytes*len(lines))
 	return lines, nil
 }
