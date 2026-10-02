@@ -50,7 +50,7 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
           type="button"
           [class.context-panel__primary-tab--active]="context.activeTab() === 'scratchpad'"
           [attr.aria-current]="context.activeTab() === 'scratchpad' ? 'page' : null"
-          title="Scratchpad"
+          uiTooltip="Scratchpad"
           (click)="context.setActiveTab('scratchpad')"
         >
           <ui-note-icon class="context-panel__primary-tab-icon" [size]="20" />
@@ -60,7 +60,7 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
           type="button"
           [class.context-panel__primary-tab--active]="context.activeTab() === 'memories'"
           [attr.aria-current]="context.activeTab() === 'memories' ? 'page' : null"
-          title="Memories"
+          uiTooltip="Memories"
           (click)="context.setActiveTab('memories')"
         >
           <ui-brain-icon class="context-panel__primary-tab-icon" [size]="20" />
@@ -70,7 +70,7 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
           type="button"
           [class.context-panel__primary-tab--active]="context.activeTab() === 'tools'"
           [attr.aria-current]="context.activeTab() === 'tools' ? 'page' : null"
-          title="Tools"
+          uiTooltip="Tools"
           (click)="context.setActiveTab('tools')"
         >
           <ui-wrench-icon class="context-panel__primary-tab-icon" [size]="20" />
@@ -80,7 +80,7 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
           type="button"
           [class.context-panel__primary-tab--active]="context.activeTab() === 'context'"
           [attr.aria-current]="context.activeTab() === 'context' ? 'page' : null"
-          title="Context"
+          uiTooltip="Context"
           (click)="context.setActiveTab('context')"
         >
           <ui-layers-icon class="context-panel__primary-tab-icon" [size]="20" />
