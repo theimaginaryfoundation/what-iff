@@ -43,6 +43,9 @@
     [open]="rightPanelContext.mobileOpen()"
     [labelledBy]="'conversation-context-panel-title'"
     [dismissible]="true"
+    [showHeader]="false"
+    [showHandle]="false"
+    panelClass="app-layout__context-sheet"
     (dismiss)="rightPanelContext.closeMobile()"
   >
     <app-context-panel />

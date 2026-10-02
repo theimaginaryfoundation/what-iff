@@ -83,3 +83,33 @@
     z-index: 44;
   }
 }
+
+// Mobile context sheet: fixed at 85% of the visible viewport (dvh tracks the
+// browser chrome/keyboard; vh is the fallback) so switching tabs doesn't
+// resize it. The tab content scrolls inside the context panel's own body.
+@media (max-width: 1023px) {
+  :host ::ng-deep .app-layout__context-sheet {
+    display: flex;
+    flex-direction: column;
+    height: 85vh;
+    height: 85dvh;
+    overflow: hidden;
+    padding-top: 0.5rem;
+
+    // The context panel pads itself; dropping the sheet's padding lets its
+    // dividers run edge to edge.
+    > .ui-sheet__body {
+      display: flex;
+      flex: 1 1 auto;
+      flex-direction: column;
+      min-height: 0;
+      padding: 0;
+    }
+
+    app-context-panel {
+      display: block;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+  }
+}
