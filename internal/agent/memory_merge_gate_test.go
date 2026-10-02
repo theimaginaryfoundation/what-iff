@@ -76,7 +76,7 @@ func TestLoadedOnlyDuplicatesPlanAFold(t *testing.T) {
 	require.NotNil(t, plan.Folds[0].SurvivorID)
 	require.Equal(t, survivorID, *plan.Folds[0].SurvivorID)
 	require.ElementsMatch(t, []uuid.UUID{absorbedID}, plan.Folds[0].AbsorbIDs)
-	require.False(t, plan.Folds[0].NeedsEmbedding, "survivor already has an embedding; reuse it")
+	require.False(t, plan.Folds[0].NeedsEmbedding, "canonical matches the survivor; reuse its embedding")
 }
 
 // TestExistingDuplicateClusterSurvivesCandidateDedup pins the defensive dedup rule: distinct

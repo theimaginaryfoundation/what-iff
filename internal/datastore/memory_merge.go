@@ -27,6 +27,11 @@ import (
 // PersistMemoryMergeGroup writes one merge grouping using only known memory IDs from
 // thread context (no duplicate scans). When survivorMemoryID is set, that row is
 // updated in place; absorbMemoryIDs are soft-retired when consolidating duplicates.
+//
+// embeddingVector is an embedding of group.CanonicalContent. With no survivor it embeds the new
+// row. With a survivor it lets the fold adopt the canonical phrasing (see decideSurvivorRewrite);
+// pass nil when the caller did not embed, and the survivor keeps its wording. The datastore never
+// calls the embedding API itself.
 func (d *Datastore) PersistMemoryMergeGroup(
 	ctx context.Context,
 	userID uuid.UUID,
@@ -96,26 +101,20 @@ func (d *Datastore) PersistMemoryMergeGroup(
 			Confidence:          confidence,
 			BatchDuplicateCount: foldedIn,
 		}
-		mem, foldErr := d.foldIntoLiveMemory(ctx, tx, userID, existing, extract, now, sourceMembers, compactionEventID)
+		absorbed, err := retireAbsorbedMemoriesTx(ctx, tx, userID, existing.ID, absorbMemoryIDs, now)
+		if err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+		mem, foldErr := d.foldIntoLiveMemory(ctx, tx, userID, existing, extract, now, foldLiveOptions{
+			sourceMembers:      sourceMembers,
+			compactionEventID:  compactionEventID,
+			canonicalEmbedding: embeddingVector,
+			absorbed:           absorbed,
+		})
 		if foldErr != nil {
 			_ = tx.Rollback()
 			return nil, foldErr
-		}
-		if len(absorbMemoryIDs) > 0 {
-			if _, err := tx.Embedding.Delete().
-				Where(embedding.HasMemoryWith(memory.IDIn(absorbMemoryIDs...))).
-				Exec(ctx); err != nil {
-				_ = tx.Rollback()
-				return nil, err
-			}
-			if _, err := tx.Memory.Update().
-				Where(memory.IDIn(absorbMemoryIDs...)).
-				SetStatus(memory.StatusInactive).
-				SetUpdatedAt(now).
-				Save(ctx); err != nil {
-				_ = tx.Rollback()
-				return nil, err
-			}
 		}
 		if err := tx.Commit(); err != nil {
 			return nil, err
@@ -350,7 +349,9 @@ func (d *Datastore) MergeLiveExtractedMemory(
 
 	if liveMatch != nil {
 		sourceMembers := sourceMembersForLiveFold(liveMatch, extract)
-		mem, mergeErr := d.foldIntoLiveMemory(ctx, tx, userID, liveMatch, extract, now, sourceMembers, nil)
+		// liveMatch already equals extract.Content after normalization, so this fold never rewrites
+		// the survivor and needs no embedding.
+		mem, mergeErr := d.foldIntoLiveMemory(ctx, tx, userID, liveMatch, extract, now, foldLiveOptions{sourceMembers: sourceMembers})
 		if mergeErr != nil {
 			_ = tx.Rollback()
 			return nil, mergeErr
@@ -409,6 +410,51 @@ func findLiveMemoryMatch(
 	return nil, nil
 }
 
+// foldLiveOptions carries the optional inputs of a fold_live write.
+type foldLiveOptions struct {
+	sourceMembers     []models.MemoryMergeSourceMember
+	compactionEventID *uuid.UUID
+	// canonicalEmbedding embeds extract.Content; without it the survivor is never rewritten.
+	canonicalEmbedding []float32
+	// absorbed are the memories this fold retired (retireAbsorbedMemoriesTx), recorded for undo.
+	absorbed []entschema.MemoryMergeAbsorbedMember
+}
+
+// survivorRewriteDecision is the outcome of decideSurvivorRewrite; non-rewrite values double as
+// log reasons.
+type survivorRewriteDecision string
+
+const (
+	survivorRewrite            survivorRewriteDecision = "rewrite"
+	survivorKeepSameContent    survivorRewriteDecision = "same_content"
+	survivorKeepStarred        survivorRewriteDecision = "starred"
+	survivorKeepNoNewEmbedding survivorRewriteDecision = "no_embedding"
+)
+
+// decideSurvivorRewrite is the fold rewrite rule (#249). A fold replaces the survivor's content
+// with the merger's canonical phrasing only when ALL of these hold:
+//  1. The canonical content differs from the survivor's after NormalizeContentForDedupe. A
+//     difference in case or whitespace alone keeps the stored wording.
+//  2. The survivor is not starred. Starring is the user's explicit "keep this" signal, so an
+//     automatic merge never rewords a starred memory; the fold still bumps its tally and retires
+//     the absorbed duplicates. There is no author field yet; when one exists, user-authored
+//     memories should get the same protection here.
+//  3. The caller supplied an embedding of the canonical content. Content and embedding change
+//     together or not at all, otherwise recall would match the old wording to the new text.
+func decideSurvivorRewrite(existing *ent.Memory, canonical string, canonicalEmbedding []float32) survivorRewriteDecision {
+	normalized := memoryutil.NormalizeContentForDedupe(canonical)
+	if normalized == "" || normalized == memoryutil.NormalizeContentForDedupe(existing.Content) {
+		return survivorKeepSameContent
+	}
+	if existing.Starred {
+		return survivorKeepStarred
+	}
+	if len(canonicalEmbedding) == 0 {
+		return survivorKeepNoNewEmbedding
+	}
+	return survivorRewrite
+}
+
 func (d *Datastore) foldIntoLiveMemory(
 	ctx context.Context,
 	tx *ent.Tx,
@@ -416,8 +462,7 @@ func (d *Datastore) foldIntoLiveMemory(
 	existing *ent.Memory,
 	extract memoryutil.CollapsedExtractedMemory,
 	now time.Time,
-	sourceMembers []models.MemoryMergeSourceMember,
-	compactionEventID *uuid.UUID,
+	opts foldLiveOptions,
 ) (*models.Memory, error) {
 	priorConfidence := models.ClampConfidence(existing.Confidence)
 	var priorChain *entschema.MemoryChainMetadata
@@ -469,7 +514,16 @@ func (d *Datastore) foldIntoLiveMemory(
 		}
 	}
 
-	updated, err := tx.Memory.UpdateOneID(existing.ID).
+	snapshot := &entschema.MemoryMergeUndoSnapshot{
+		PriorConfidence:          priorConfidence,
+		PriorChainMetadata:       priorChain,
+		PriorChainMetadataWasNil: priorChainWasNil,
+		Version:                  entschema.MemoryMergeUndoSnapshotVersion,
+		CanonicalContent:         strings.TrimSpace(extract.Content),
+		AbsorbedMembers:          opts.absorbed,
+	}
+
+	update := tx.Memory.UpdateOneID(existing.ID).
 		SetUpdatedAt(now).
 		SetConfidence(mergedConfidence).
 		SetChainMetadata(&entschema.MemoryChainMetadata{
@@ -477,26 +531,42 @@ func (d *Datastore) foldIntoLiveMemory(
 			VerifiedTimestampsFirst: first,
 			VerifiedTimestampsLast:  last,
 			MergedFromMemoryIDs:     existingChainSourceIDs(existing),
-		}).
-		Save(ctx)
+		})
+	switch decision := decideSurvivorRewrite(existing, extract.Content, opts.canonicalEmbedding); decision {
+	case survivorRewrite:
+		priorVector, hadEmbedding, err := replaceMemoryEmbeddingTx(ctx, tx, existing.ID, opts.canonicalEmbedding)
+		if err != nil {
+			return nil, err
+		}
+		snapshot.ContentRewritten = true
+		snapshot.PriorContent = existing.Content
+		snapshot.PriorEmbedding = priorVector
+		snapshot.PriorEmbeddingMissing = !hadEmbedding
+		update = update.SetContent(snapshot.CanonicalContent)
+	case survivorKeepStarred, survivorKeepNoNewEmbedding:
+		d.logger.Info("memory fold kept the survivor's wording instead of the canonical content",
+			zap.String("reason", string(decision)),
+			zap.String("memory_id", existing.ID.String()),
+			zap.String("user_id", userID.String()),
+		)
+	}
+
+	updated, err := update.Save(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	snapshot := &entschema.MemoryMergeUndoSnapshot{
-		PriorConfidence:          priorConfidence,
-		PriorChainMetadata:       priorChain,
-		PriorChainMetadataWasNil: priorChainWasNil,
-	}
+	// content is the survivor's text AFTER the fold, i.e. the canonical phrasing when rewritten;
+	// the snapshot keeps the proposal even when the survivor declined it.
 	if _, err := tx.MemoryMergeEvent.Create().
 		SetUserID(userID).
 		SetSurvivorMemoryID(existing.ID).
 		SetMergeType(entmerge.MergeTypeFoldLive).
 		SetContent(updated.Content).
 		SetDuplicatesFolded(extract.BatchDuplicateCount).
-		SetSourceMembers(toEntSourceMembers(sourceMembers)).
+		SetSourceMembers(toEntSourceMembers(opts.sourceMembers)).
 		SetSnapshot(snapshot).
-		SetNillableCompactionEventID(compactionEventID).
+		SetNillableCompactionEventID(opts.compactionEventID).
 		SetCreatedAt(now).
 		SetUpdatedAt(now).
 		Save(ctx); err != nil {
@@ -504,6 +574,85 @@ func (d *Datastore) foldIntoLiveMemory(
 	}
 
 	return toMemoryModel(updated), nil
+}
+
+// replaceMemoryEmbeddingTx points memoryID's embedding at vector, creating the row when the memory
+// had none. It returns the previous vector (nil when there was none) and whether a row existed, so
+// a fold can snapshot it for undo.
+func replaceMemoryEmbeddingTx(ctx context.Context, tx *ent.Tx, memoryID uuid.UUID, vector []float32) ([]float32, bool, error) {
+	rows, err := tx.Embedding.Query().
+		Where(embedding.HasMemoryWith(memory.ID(memoryID))).
+		All(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(rows) == 0 {
+		if _, err := tx.Embedding.Create().
+			SetEmbedding(pgvector.NewVector(vector)).
+			SetMemoryID(memoryID).
+			Save(ctx); err != nil {
+			return nil, false, err
+		}
+		return nil, false, nil
+	}
+	prior := append([]float32(nil), rows[0].Embedding.Slice()...)
+	if _, err := tx.Embedding.Update().
+		Where(embedding.HasMemoryWith(memory.ID(memoryID))).
+		SetEmbedding(pgvector.NewVector(vector)).
+		Save(ctx); err != nil {
+		return nil, false, err
+	}
+	return prior, true, nil
+}
+
+// retireAbsorbedMemoriesTx sets the memories a fold absorbs to inactive and returns each one's
+// prior status for the undo snapshot. Only rows the user owns are touched, and never the survivor.
+//
+// Embeddings are deliberately KEPT (#250). Recall only searches active memories
+// (GetRelatedMemories and GetRelatedSummaryMemories both filter status=active), so an inactive row
+// with an embedding is already invisible, and undo can make it visible again exactly, without
+// re-embedding.
+func retireAbsorbedMemoriesTx(ctx context.Context, tx *ent.Tx, userID, survivorID uuid.UUID, ids []uuid.UUID, now time.Time) ([]entschema.MemoryMergeAbsorbedMember, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := tx.Memory.Query().
+		Where(
+			memory.IDIn(ids...),
+			memory.IDNEQ(survivorID),
+			memory.HasOwnerWith(user.ID(userID)),
+		).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	priorStatus := make(map[uuid.UUID]memory.Status, len(rows))
+	for _, row := range rows {
+		priorStatus[row.ID] = row.Status
+	}
+	// Keep the caller's order (stable audit rows) and drop repeats.
+	absorbed := make([]entschema.MemoryMergeAbsorbedMember, 0, len(rows))
+	retiredIDs := make([]uuid.UUID, 0, len(rows))
+	for _, id := range ids {
+		status, ok := priorStatus[id]
+		if !ok {
+			continue
+		}
+		delete(priorStatus, id)
+		absorbed = append(absorbed, entschema.MemoryMergeAbsorbedMember{MemoryID: id, PriorStatus: string(status)})
+		retiredIDs = append(retiredIDs, id)
+	}
+	if _, err := tx.Memory.Update().
+		Where(memory.IDIn(retiredIDs...)).
+		SetStatus(memory.StatusInactive).
+		SetUpdatedAt(now).
+		Save(ctx); err != nil {
+		return nil, err
+	}
+	return absorbed, nil
 }
 
 func existingChainSourceIDs(existing *ent.Memory) []uuid.UUID {
@@ -738,7 +887,7 @@ func (d *Datastore) UndoMemoryMergeEvent(ctx context.Context, userID, eventID uu
 			return nil, err
 		}
 	case entmerge.MergeTypeFoldLive:
-		if err := undoFoldLiveMerge(ctx, tx, userID, event); err != nil {
+		if err := d.undoFoldLiveMerge(ctx, tx, userID, event); err != nil {
 			_ = tx.Rollback()
 			return nil, err
 		}
@@ -807,8 +956,18 @@ func undoCreateMerge(ctx context.Context, tx *ent.Tx, userID, survivorID uuid.UU
 	return tx.Memory.DeleteOneID(survivorID).Exec(ctx)
 }
 
-func undoFoldLiveMerge(ctx context.Context, tx *ent.Tx, userID uuid.UUID, event *ent.MemoryMergeEvent) error {
-	if event.Snapshot == nil {
+// undoFoldLiveMerge reverts a fold_live event: the survivor gets back its confidence, chain
+// metadata and, when the fold rewrote it, its content and embedding; every absorbed memory gets
+// back its prior status.
+//
+// Events written before the snapshot was versioned (Version 0) carry no absorbed-member list, so
+// the absorbed set is read from source_members (stored rows other than the survivor) and only rows
+// still inactive are reactivated. Those older folds hard-deleted the absorbed embeddings, so a
+// reactivated row may have none; it is logged so a backfill can re-embed it, rather than failing
+// the undo or calling the embedding API from the datastore.
+func (d *Datastore) undoFoldLiveMerge(ctx context.Context, tx *ent.Tx, userID uuid.UUID, event *ent.MemoryMergeEvent) error {
+	snap := event.Snapshot
+	if snap == nil {
 		return fmt.Errorf("merge event missing undo snapshot")
 	}
 
@@ -825,20 +984,146 @@ func undoFoldLiveMerge(ctx context.Context, tx *ent.Tx, userID uuid.UUID, event 
 		return err
 	}
 
+	now := time.Now().UTC()
 	update := tx.Memory.UpdateOneID(entMemory.ID).
-		SetUpdatedAt(time.Now().UTC()).
-		SetConfidence(event.Snapshot.PriorConfidence)
+		SetUpdatedAt(now).
+		SetConfidence(snap.PriorConfidence)
 
-	if event.Snapshot.PriorChainMetadataWasNil {
+	if snap.PriorChainMetadataWasNil {
 		update = update.ClearChainMetadata()
-	} else if event.Snapshot.PriorChainMetadata != nil {
-		update = update.SetChainMetadata(event.Snapshot.PriorChainMetadata)
+	} else if snap.PriorChainMetadata != nil {
+		update = update.SetChainMetadata(snap.PriorChainMetadata)
 	} else {
 		update = update.ClearChainMetadata()
 	}
 
-	_, err = update.Save(ctx)
+	if snap.ContentRewritten {
+		update = update.SetContent(snap.PriorContent)
+		if err := restoreSurvivorEmbeddingTx(ctx, tx, entMemory.ID, snap); err != nil {
+			return err
+		}
+	}
+
+	if _, err := update.Save(ctx); err != nil {
+		return err
+	}
+
+	return d.restoreAbsorbedMemoriesTx(ctx, tx, userID, event, now)
+}
+
+// restoreSurvivorEmbeddingTx puts back the survivor's pre-rewrite embedding from the snapshot, or
+// removes the rewrite's embedding when the survivor had none before.
+func restoreSurvivorEmbeddingTx(ctx context.Context, tx *ent.Tx, memoryID uuid.UUID, snap *entschema.MemoryMergeUndoSnapshot) error {
+	if snap.PriorEmbeddingMissing || len(snap.PriorEmbedding) == 0 {
+		_, err := tx.Embedding.Delete().
+			Where(embedding.HasMemoryWith(memory.ID(memoryID))).
+			Exec(ctx)
+		return err
+	}
+	_, _, err := replaceMemoryEmbeddingTx(ctx, tx, memoryID, snap.PriorEmbedding)
 	return err
+}
+
+// restoreAbsorbedMemoriesTx returns each memory the fold retired to its prior status.
+func (d *Datastore) restoreAbsorbedMemoriesTx(ctx context.Context, tx *ent.Tx, userID uuid.UUID, event *ent.MemoryMergeEvent, now time.Time) error {
+	byStatus := make(map[memory.Status][]uuid.UUID)
+	legacy := event.Snapshot.Version < entschema.MemoryMergeUndoSnapshotVersion
+	if legacy {
+		// Pre-versioned events: absorbed rows were active candidates when folded.
+		for _, id := range legacyAbsorbedMemoryIDs(event) {
+			byStatus[memory.StatusActive] = append(byStatus[memory.StatusActive], id)
+		}
+	} else {
+		for _, member := range event.Snapshot.AbsorbedMembers {
+			status := memory.Status(member.PriorStatus)
+			if memory.StatusValidator(status) != nil {
+				status = memory.StatusActive
+			}
+			byStatus[status] = append(byStatus[status], member.MemoryID)
+		}
+	}
+
+	var reactivated []uuid.UUID
+	for status, ids := range byStatus {
+		q := tx.Memory.Update().
+			Where(
+				memory.IDIn(ids...),
+				memory.HasOwnerWith(user.ID(userID)),
+			)
+		if legacy {
+			// Without a recorded prior status, only undo the fold's own effect.
+			q = q.Where(memory.StatusEQ(memory.StatusInactive))
+		}
+		if _, err := q.SetStatus(status).SetUpdatedAt(now).Save(ctx); err != nil {
+			return err
+		}
+		if status == memory.StatusActive {
+			reactivated = append(reactivated, ids...)
+		}
+	}
+	if len(reactivated) == 0 {
+		return nil
+	}
+
+	// Folds before #250 hard-deleted absorbed embeddings. A reactivated row without one is active but
+	// invisible to recall until something re-embeds it.
+	active, err := tx.Memory.Query().
+		Where(
+			memory.IDIn(reactivated...),
+			memory.HasOwnerWith(user.ID(userID)),
+			memory.StatusEQ(memory.StatusActive),
+		).
+		IDs(ctx)
+	if err != nil || len(active) == 0 {
+		return err
+	}
+	embedded, err := tx.Embedding.Query().
+		Where(embedding.HasMemoryWith(memory.IDIn(active...))).
+		QueryMemory().
+		IDs(ctx)
+	if err != nil {
+		return err
+	}
+	hasEmbedding := make(map[uuid.UUID]struct{}, len(embedded))
+	for _, id := range embedded {
+		hasEmbedding[id] = struct{}{}
+	}
+	var unembedded []uuid.UUID
+	for _, id := range active {
+		if _, ok := hasEmbedding[id]; !ok {
+			unembedded = append(unembedded, id)
+		}
+	}
+	if len(unembedded) > 0 {
+		ids := make([]string, len(unembedded))
+		for i, id := range unembedded {
+			ids[i] = id.String()
+		}
+		d.logger.Warn("fold undo reactivated memories that have no embedding; they need a backfill re-embed before recall can find them",
+			zap.String("merge_event_id", event.ID.String()),
+			zap.String("user_id", userID.String()),
+			zap.Strings("memory_ids", ids),
+		)
+	}
+	return nil
+}
+
+// legacyAbsorbedMemoryIDs derives the absorbed set of a pre-versioned fold_live event from its
+// source_members: every stored (non-new) member other than the survivor.
+func legacyAbsorbedMemoryIDs(event *ent.MemoryMergeEvent) []uuid.UUID {
+	seen := map[uuid.UUID]struct{}{event.SurvivorMemoryID: {}}
+	var ids []uuid.UUID
+	for _, member := range event.SourceMembers {
+		if member.IsNew || member.MemoryID == nil || *member.MemoryID == uuid.Nil {
+			continue
+		}
+		if _, dup := seen[*member.MemoryID]; dup {
+			continue
+		}
+		seen[*member.MemoryID] = struct{}{}
+		ids = append(ids, *member.MemoryID)
+	}
+	return ids
 }
 
 func toEntSourceMembers(members []models.MemoryMergeSourceMember) []entschema.MemoryMergeSourceMember {

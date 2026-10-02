@@ -110,6 +110,9 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   **`checkpointArchivalContext`** appends the just-completed assistant reply before cloning (inference `ModelContext` predates that turn; OpenAI gets it via `PreviousResponseID`).
   The summarizer uses the **pristine** original `ModelContext` plus explicit `AssistantReply` through unified `summarizeConversationForCheckpoint` (gpt-5-mini, same prompt as OpenAI); it must not reuse the scratchpad clone.
   OpenAI summarizer threads off assistant `ResponseID`; Claude has no OpenAI thread ID.
+- **Checkpoint memory merge embeddings:** `planFoldGroup` (`memory_merge_infer.go`) sets `NeedsEmbedding` when there is no survivor or when the canonical content differs from the survivor's, and `applyMemoryCompactionPlan` (`memory.go`) embeds the canonical content before `PersistMemoryMergeGroup`.
+  The datastore then decides whether the survivor is rewritten (never when starred).
+  If that embedding fails, a survivor fold still runs and keeps the survivor's wording; only a new-row fold is skipped.
 - **Compaction throttle:** `decideCheckpoint` (`postprocessing_policy.go`) gates the **token-based** triggers behind `MinTurnsBetweenCheckpoints` (`checkpointMinTurnsBetweenCheckpoints` = 5) so a burst of tool-heavy turns (agent job runs with large web-search/tool results) cannot force compaction every turn.
   The scheduled turn-count trigger (`MinAssistantMessagesSinceCheckpoint`) is exempt.
 - **Inference `call_path`:** New top-level flows that call the model should use **`Agent.withCallPath(ctx, path)`** (or ensure nested calls set `telemetry.WithCallPath`) so provider token metrics are labeled; see architecture doc.

@@ -558,6 +558,11 @@ type memoryCompactionPlan struct {
 }
 
 // memoryFoldPlan is one consolidate/create action ready for PersistMemoryMergeGroup.
+//
+// NeedsEmbedding means Group.CanonicalContent must be embedded before persisting: either there is
+// no survivor (a new row is created), or the canonical phrasing differs from the survivor's
+// content, so the fold may rewrite and re-embed the survivor. The datastore makes the final rewrite
+// call (it also declines for starred survivors; see decideSurvivorRewrite in datastore).
 type memoryFoldPlan struct {
 	Group            models.MemoryMergeGroupProposal
 	SurvivorID       *uuid.UUID
@@ -620,9 +625,29 @@ func planFoldGroup(group models.MemoryMergeGroupProposal, candidates []memoryMer
 		SurvivorID:       survivorID,
 		AbsorbIDs:        absorbIDs,
 		DuplicatesFolded: duplicatesFolded,
-		NeedsEmbedding:   survivorID == nil,
+		NeedsEmbedding:   survivorID == nil || canonicalDiffersFromSurvivor(group, candidates, *survivorID),
 		SourceMembers:    sourceMembersForGroup(group, candidates),
 	}, true
+}
+
+// canonicalDiffersFromSurvivor reports whether the group's canonical content differs (after
+// NormalizeContentForDedupe) from the content of the survivor candidate, i.e. whether the fold
+// would reword the survivor and so needs an embedding of the canonical content.
+func canonicalDiffersFromSurvivor(group models.MemoryMergeGroupProposal, candidates []memoryMergeCandidate, survivorID uuid.UUID) bool {
+	canonical := memoryutil.NormalizeContentForDedupe(group.CanonicalContent)
+	if canonical == "" {
+		return false
+	}
+	for _, idx := range group.MemberIndices {
+		if idx < 0 || idx >= len(candidates) {
+			continue
+		}
+		c := candidates[idx]
+		if c.MemoryID != nil && *c.MemoryID == survivorID {
+			return memoryutil.NormalizeContentForDedupe(c.Content) != canonical
+		}
+	}
+	return false
 }
 
 // planLinkGroup returns ok=false (drop / no-op) when the group has fewer than two valid,

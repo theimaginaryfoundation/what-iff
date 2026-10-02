@@ -107,6 +107,11 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   A new User-scoped memory is pinned to the active personality when that personality has `auto_pin_memories` on.
   Chat-scoped memories, no active personality (e.g. rehydration passes `uuid.Nil`), auto-pin off, or a failed personality lookup leave it unpinned.
   An explicit `PinnedPersonalityID` on `CreateMemory` wins; folds and links never repin existing memories, and toggling the setting never repins old ones.
+- **Memory folds (`memory_merge.go`):** a `fold_live` into an existing survivor adopts the merger's canonical content and re-embeds the survivor in the same transaction, using the embedding the caller passes to `PersistMemoryMergeGroup` (the datastore never calls the embedding API).
+  `decideSurvivorRewrite` is the rule: no rewrite when the content only differs in case/whitespace, when the survivor is **starred** (the user's "keep this" signal), or when no embedding was supplied.
+  Absorbed memories are set inactive but keep their embeddings; recall only searches `status=active`, so they are invisible until an undo reactivates them.
+  The undo snapshot records the survivor's prior content and embedding plus each absorbed memory's prior status, so `UndoMemoryMergeEvent` restores every row exactly.
+  Legacy events (snapshot `Version` 0) take the absorbed set from `source_members`; their embeddings were hard-deleted by the old fold, so undo reactivates them and logs that they need a re-embed backfill.
 - **Memory scope versus source chat:** `Memory.Scope` controls retrieval scope (`User`, `Chat`, or `Summary`); the optional `chat` edge records a memory's source conversation and is valid for User-scoped Global and Personality memories too.
   Moves preserve that provenance edge.
   `PatchMemoriesBatch` rejects changes to actual Chat-scoped Thread memories before individual updates begin, preventing a mixed bulk Move from partially moving User memories.
@@ -133,7 +138,8 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - `chat_checkpoint_test.go`, `chatmessage_test.go`, `chatmessage_mark_read_test.go` — message and checkpoint behavior.
 - `memory_test.go`, `memory2_test.go`, `filechunk_test.go` — retrieval (including **`ListMemories`** excluding Summary unless `level=summary`), ZIP export/import helpers, full import count/persist coverage, and chunks.
 - `memory_import_metrics_test.go` — memory import stage timings and item counts, including a failed embed stage.
-- `compaction_event_test.go`, `memory_merge_test.go` — SQLite harness mirrors ent FK semantics (`memory_merge_events.compaction_event_id` → `compaction_events` ON DELETE SET NULL); compaction tests cover content-addressed snapshots, merge grouping, page-size cap, and FK null-on-delete.
+- `compaction_event_test.go`, `memory_merge_test.go`, `memory_merge_fold_test.go` — SQLite harness mirrors ent FK semantics (`memory_merge_events.compaction_event_id` → `compaction_events` ON DELETE SET NULL); compaction tests cover content-addressed snapshots, merge grouping, page-size cap, and FK null-on-delete.
+  `memory_merge_fold_test.go` covers the fold rewrite rule (same content, rewrite, starred) and exact fold undo, including legacy events.
   `TestAutoPin_AppliesToEveryMemoryCreationPath` covers the auto-pin rule on each creation path.
 - `accountbackup_test.go` — backup JSONL parsing edge cases such as large records and optional sections.
 - `accountexport_test.go` — conversation export’s timestamp/ID cursor covers a batch boundary where all messages share a timestamp.
