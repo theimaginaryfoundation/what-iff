@@ -25,6 +25,8 @@ func TestToolContextPolicyFor(t *testing.T) {
 		{"find_context persists forever", tools.RecallToolSpec.Name, true, noTTL, false},
 		{"web search has TTL", tools.ToolNameWebSearch, true, webSearchTTLTurns, false},
 		{"fetched page shares the web search TTL", tools.ToolNameFetchPage, true, webSearchTTLTurns, false},
+		{"read_file results expire", tools.ToolNameReadFile, true, fileReadTTLTurns, false},
+		{"grep_files results expire", tools.ToolNameGrepFiles, true, fileReadTTLTurns, false},
 		{"create_memory dropped", tools.CreateMemoryToolSpec.Name, false, 0, false},
 		{"update_scratchpad dropped", tools.UpdateScratchpadToolSpec.Name, false, 0, false},
 		{"auto memory enrichment dropped", memoryEnrichmentToolCallName, false, 0, false},
