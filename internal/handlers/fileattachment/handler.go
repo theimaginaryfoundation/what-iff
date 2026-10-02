@@ -17,6 +17,11 @@ type attachmentStore interface {
 	ListFileAttachments(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.FileAttachmentFilters) (*models.PaginatedResponse, error)
 	GetFileAttachment(ctx context.Context, userID, id uuid.UUID) (*models.FileAttachment, error)
 	DeleteFileAttachment(ctx context.Context, userID, id uuid.UUID) error
+	// FileAttachmentProviderFileShared reports whether another row (a reference copy) shares the
+	// provider file, so deleting this row must not delete it.
+	FileAttachmentProviderFileShared(ctx context.Context, id uuid.UUID, fileID string) (bool, error)
+	// Answers which object keys remaining rows still reference (storage.AttachmentKeyRefs).
+	storage.AttachmentKeyRefs
 }
 
 type attachmentAgent interface {

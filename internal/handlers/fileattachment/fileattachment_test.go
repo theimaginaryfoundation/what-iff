@@ -20,9 +20,25 @@ import (
 )
 
 type stubStore struct {
-	listFn   func(context.Context, uuid.UUID, int, int, models.FileAttachmentFilters) (*models.PaginatedResponse, error)
-	getFn    func(context.Context, uuid.UUID, uuid.UUID) (*models.FileAttachment, error)
-	deleteFn func(context.Context, uuid.UUID, uuid.UUID) error
+	listFn           func(context.Context, uuid.UUID, int, int, models.FileAttachmentFilters) (*models.PaginatedResponse, error)
+	getFn            func(context.Context, uuid.UUID, uuid.UUID) (*models.FileAttachment, error)
+	deleteFn         func(context.Context, uuid.UUID, uuid.UUID) error
+	fileIDSharedFn   func(context.Context, uuid.UUID, string) (bool, error)
+	referencedKeysFn func(context.Context, []string) (map[string]bool, error)
+}
+
+func (s stubStore) FileAttachmentProviderFileShared(ctx context.Context, id uuid.UUID, fileID string) (bool, error) {
+	if s.fileIDSharedFn != nil {
+		return s.fileIDSharedFn(ctx, id, fileID)
+	}
+	return false, nil
+}
+
+func (s stubStore) ReferencedFileAttachmentKeys(ctx context.Context, keys []string) (map[string]bool, error) {
+	if s.referencedKeysFn != nil {
+		return s.referencedKeysFn(ctx, keys)
+	}
+	return map[string]bool{}, nil
 }
 
 func (s stubStore) ListFileAttachments(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.FileAttachmentFilters) (*models.PaginatedResponse, error) {
@@ -35,6 +51,10 @@ func (s stubStore) GetFileAttachment(ctx context.Context, userID, id uuid.UUID) 
 
 func (s stubStore) DeleteFileAttachment(ctx context.Context, userID, id uuid.UUID) error {
 	return s.deleteFn(ctx, userID, id)
+}
+
+func (s stubStore) ExistingFileAttachmentIDs(context.Context, []uuid.UUID) (map[uuid.UUID]bool, error) {
+	return map[uuid.UUID]bool{}, nil
 }
 
 type stubAgent struct {
@@ -54,10 +74,19 @@ type stubFileStore struct {
 	contentByKey map[string][]byte
 	errByKey     map[string]error
 	seenKeys     []string
+	deletedKeys  []string
+	deleteErr    error
 }
 
 func (s *stubFileStore) UploadFile(context.Context, string, []byte, string) error { return nil }
-func (s *stubFileStore) DeleteFile(context.Context, string) error                 { return nil }
+func (s *stubFileStore) DeleteFile(_ context.Context, key string) error {
+	s.deletedKeys = append(s.deletedKeys, key)
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
+	delete(s.contentByKey, key)
+	return nil
+}
 func (s *stubFileStore) DownloadFile(_ context.Context, key string) ([]byte, error) {
 	s.seenKeys = append(s.seenKeys, key)
 	if err := s.errByKey[key]; err != nil {
@@ -220,14 +249,16 @@ func TestGetFileAttachmentContent_DownloadsFallbackKey(t *testing.T) {
 	attachmentID := uuid.New()
 	userID := uuid.New()
 	chatID := uuid.New()
+	messageID := uuid.New()
 	attachment := &models.FileAttachment{
 		ID:            attachmentID,
 		Name:          "notes.txt",
 		FileType:      "text/plain",
-		ChatMessageID: &chatID,
+		ChatMessageID: &messageID,
+		ChatID:        &chatID,
 		S3Key:         "legacy/key",
 	}
-	expectedFallback := storage.FileKeyForAttachment(userID, attachmentID, attachment.Name, attachment.FileType, attachment.ChatMessageID, attachment.PersonalityID)
+	expectedFallback := storage.FileKeyForChat(userID, chatID, attachmentID, attachment.Name)
 
 	fs := &stubFileStore{
 		contentByKey: map[string][]byte{

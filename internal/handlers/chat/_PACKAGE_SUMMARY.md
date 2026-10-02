@@ -50,6 +50,9 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
   Our S3 bucket is never read by the OpenAI vision path.
   Therefore image uploads go exclusively to `storage.FileKeyForImage` (used by Claude and the gallery); non-image files go to `storage.FileKeyForChat` (used by the pgvector chunk pipeline).
   No dual-write to both paths is needed for images.
+- **Deleting a chat releases its attachment objects.**
+  The ent cascade removes the attachment rows on the chat's messages without touching the object store, so `DeleteChat` reads them first (`ListChatFileAttachmentObjectRefs`) and calls `storage.ReleaseAttachmentObjects` after the delete.
+  Keys a reference copy in another chat still uses are kept; failures are logged, never returned.
 
 ## Testing
 

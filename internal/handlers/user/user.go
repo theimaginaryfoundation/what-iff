@@ -11,6 +11,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"github.com/theimaginaryfoundation/what-iff/internal/userhooks"
 
 	"github.com/google/uuid"
@@ -29,6 +30,10 @@ type userStore interface {
 	GetUserPreferences(ctx context.Context, userID uuid.UUID) (*models.UserPreferences, error)
 	UpdateUserPreferences(ctx context.Context, userID uuid.UUID, prefs models.UserPreferences) (*models.UserPreferences, error)
 	GetUsageStats(ctx context.Context, startDate, endDate time.Time, userID uuid.UUID) (*models.UsageStats, error)
+	// ListUserFileAttachmentObjectRefs and ReferencedFileAttachmentKeys back the stored-object
+	// cleanup after account deletion when the file store cannot list a prefix.
+	ListUserFileAttachmentObjectRefs(ctx context.Context, userID uuid.UUID) ([]models.FileAttachment, error)
+	storage.AttachmentKeyRefs
 }
 
 // Handler handles user-related API requests
@@ -37,6 +42,9 @@ type Handler struct {
 	logger        *zap.Logger
 	allowedEmails []string
 	environment   string
+	// fileStore holds the user's uploads; account deletion removes users/{id}/ and exports/{id}/. Nil
+	// (no store configured) skips that cleanup.
+	fileStore storage.FileStore
 }
 
 // NewHandler creates a new Handler instance.
@@ -47,6 +55,12 @@ func NewHandler(store userStore, logger *zap.Logger, allowedEmails []string, env
 		allowedEmails: allowedEmails,
 		environment:   strings.ToLower(strings.TrimSpace(environment)),
 	}
+}
+
+// WithFileStore sets the store DeleteUser purges the account's uploaded files from.
+func (h *Handler) WithFileStore(fs storage.FileStore) *Handler {
+	h.fileStore = fs
+	return h
 }
 
 // RegisterRoutes registers all profile-related routes
@@ -269,6 +283,18 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The cascade deletes every attachment row but none of the stored objects. PurgeUserObjects
+	// removes users/{id}/ and exports/{id}/ and only falls back to these rows when the store cannot
+	// list it. A failed read must not block the account deletion.
+	var attachments []models.FileAttachment
+	if h.fileStore != nil {
+		var err error
+		if attachments, err = h.store.ListUserFileAttachmentObjectRefs(r.Context(), userID); err != nil {
+			h.logger.Warn("failed to list attachments for account object cleanup",
+				zap.String("user_id", userID.String()), zap.Error(err))
+		}
+	}
+
 	// Delete user using datastore
 	err := h.store.DeleteUser(r.Context(), userID)
 	if err != nil {
@@ -279,6 +305,9 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
+	// Best effort: the account is gone either way, and the orphan sweep can be pointed at the id.
+	storage.PurgeUserObjects(context.WithoutCancel(r.Context()), h.logger, h.fileStore, h.store, userID, attachments)
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, map[string]string{"message": "User account deleted successfully"})
 }

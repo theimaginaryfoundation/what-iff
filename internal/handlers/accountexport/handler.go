@@ -37,7 +37,9 @@ const (
 	// so back-to-back imports (or many concurrent slow uploads) are refused.
 	importCooldown = 10 * time.Minute
 	// bundlePrefix is the S3 key prefix for generated export archives (never served by other flows).
-	bundlePrefix = "exports"
+	// Bundles land at exports/{userID}/…; account deletion purges that prefix
+	// (storage.PurgeUserObjects), so the layout is owned by the storage package.
+	bundlePrefix = storage.ExportBundleRoot
 	// presignTTL is how long the emailed download link stays valid.
 	presignTTL = 24 * time.Hour
 	// exportJobTimeout bounds a single in-process export build.
