@@ -7,6 +7,14 @@
 ## Responsibilities
 
 - **`FileStore`** (`filestore.go`): constructor from bucket name, region, logger; methods used by `internal/agent` and handlers for attachment pipelines.
+- **Attachment object cleanup** (`attachment_cleanup.go`):
+  ent cascades delete attachment rows without touching the store, so callers read the affected rows first and release them after the delete.
+  - `ReleaseAttachmentObjects` deletes a deleted row's object (its `s3_key`, or the legacy derived keys when empty) only when `AttachmentKeyRefs` reports no remaining row references it, plus the row's own thumbnail.
+    Best effort: failures are logged and counted, never returned.
+  - `PurgeUserObjects` removes the whole `users/{id}/` prefix after account deletion (falls back to releasing the known rows when the store cannot list).
+  - `SweepUserOrphans` is the idempotent backstop: it lists `users/{id}/`, treats each remaining row's `s3_key`, legacy keys and thumbnail as referenced, double-checks the rest with `ReferencedFileAttachmentKeys`, and deletes unreferenced objects older than a grace period (or only reports them in dry-run mode).
+    `SweepExcludedSubprefixes` (`exports/`, `workspace/`) are never touched; they have their own lifecycle.
+    Run it with `cmd/sweep-orphan-files` (dry run unless `-yes`).
 - **`Instrument`** (`instrumented.go`): decorator recording `whatiff.dependency.duration` (dependency `s3` or `local_fs`, operation `put_object`/`get_object`/`delete_object`/`list_objects`) through `telemetry.Global()`; `internal/server` wraps the store at construction.
 
 ## Dependencies
@@ -31,6 +39,7 @@
 
 - `filestore_test.go` — behavior with mocks or localstack-style setups (see file).
 - `instrumented_test.go` — dependency metrics, the not-found contract, and optional-interface preservation.
+- `attachment_cleanup_test.go` — release reference counting and legacy keys, account purge, and the sweep's dry run, grace period, exclusions and idempotence against the local store.
 
 ## Related documentation
 

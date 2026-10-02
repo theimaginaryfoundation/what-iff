@@ -21,6 +21,9 @@ type mockUserStore struct {
 	updatePasswordErr error
 	createUserCalled  bool
 	createUserReq     models.UserRegisterRequest
+	deleteUserErr     error
+	deletedUserID     uuid.UUID
+	attachmentRefs    []models.FileAttachment
 }
 
 func (m *mockUserStore) CreateUser(_ context.Context, req models.UserRegisterRequest) (*models.UserResponse, *models.TokenPair, error) {
@@ -54,8 +57,18 @@ func (m *mockUserStore) UpdateUserPassword(context.Context, uuid.UUID, models.Up
 	return m.updatePasswordErr
 }
 
-func (m *mockUserStore) DeleteUser(context.Context, uuid.UUID) error {
-	panic("not implemented")
+func (m *mockUserStore) DeleteUser(_ context.Context, id uuid.UUID) error {
+	m.deletedUserID = id
+	return m.deleteUserErr
+}
+
+func (m *mockUserStore) ListUserFileAttachmentObjectRefs(context.Context, uuid.UUID) ([]models.FileAttachment, error) {
+	return m.attachmentRefs, nil
+}
+
+// ReferencedFileAttachmentKeys: after the account is deleted no row references anything.
+func (m *mockUserStore) ReferencedFileAttachmentKeys(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
 }
 
 func (m *mockUserStore) RefreshUserToken(context.Context, string) (*models.TokenPair, error) {
