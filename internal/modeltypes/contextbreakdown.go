@@ -41,4 +41,42 @@ type ContextBreakdown struct {
 	Model        string               `json:"model,omitempty"`
 	Provider     string               `json:"provider,omitempty"`
 	CapturedAt   time.Time            `json:"captured_at"`
+	// Inputs lists, by reference, what this context was built from. Absent on snapshots
+	// captured before it existed.
+	Inputs *ContextInputs `json:"inputs,omitempty"`
+}
+
+// Memory input stages: how a memory reached this turn's context.
+const (
+	// ContextMemoryStagePrefetch: loaded automatically for this turn by memory enrichment.
+	ContextMemoryStagePrefetch = "prefetch"
+	// ContextMemoryStageTool: pulled in by the agent during the turn (find_context).
+	ContextMemoryStageTool = "tool"
+)
+
+// ContextInputs is the turn's input manifest: references (IDs and short content hashes, never
+// content) to what the model saw, so "why was this loaded?" can be answered after the fact and
+// retrieval can be evaluated offline. It is the first version of the invocation manifest.
+type ContextInputs struct {
+	// Memories are the memories retrieved for this turn, in load order.
+	Memories []ContextMemoryInput `json:"memories,omitempty"`
+	// ReplayedMemoryIDs are memories carried into this turn from earlier turns' context.
+	ReplayedMemoryIDs []string `json:"replayed_memory_ids,omitempty"`
+	// MemoryEnrichmentFailed is true when automatic memory loading failed for this turn.
+	MemoryEnrichmentFailed bool `json:"memory_enrichment_failed,omitempty"`
+	// MoodID is the active mode (mood) when one shaped the turn.
+	MoodID string `json:"mood_id,omitempty"`
+	// ScratchpadSHA and SummarySHA identify the scratchpad and checkpoint summary versions that
+	// were in context (first 12 hex characters of their SHA-256).
+	ScratchpadSHA string `json:"scratchpad_sha,omitempty"`
+	SummarySHA    string `json:"summary_sha,omitempty"`
+}
+
+// ContextMemoryInput is one retrieved memory: which one, how it got here, and how relevant the
+// retrieval scored it.
+type ContextMemoryInput struct {
+	ID        string   `json:"id"`
+	Scope     string   `json:"scope,omitempty"`
+	Stage     string   `json:"stage"`
+	Relevance *float64 `json:"relevance,omitempty"`
 }

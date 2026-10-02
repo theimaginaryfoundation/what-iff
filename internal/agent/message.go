@@ -810,6 +810,7 @@ type chatContext struct {
 	chat                   *models.Chat
 	memories               []string
 	liveMemories           []*models.Memory
+	prefetchedMemoryCount  int // leading liveMemories from enrichment; the rest came from tools
 	memoryEnrichmentFailed bool
 	model                  string
 	modelProvider          string
@@ -1723,6 +1724,7 @@ func (a *Agent) buildContextBreakdown(chatCtx *chatContext, modelContext *provid
 		// continues to reflect compaction behavior as the window evolves.
 		BudgetTokens: checkpointMaxLastInputTokens,
 		CapturedAt:   time.Now().UTC(),
+		Inputs:       contextInputs(chatCtx, modelContext),
 	}
 	if chatCtx != nil {
 		breakdown.Model = chatCtx.model
@@ -2065,6 +2067,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 		chat:                   parentChat,
 		memories:               memories,
 		liveMemories:           liveMemories,
+		prefetchedMemoryCount:  len(liveMemories),
 		memoryEnrichmentFailed: memoryEnrichmentFailed,
 		model:                  resolved.name,
 		modelProvider:          resolved.provider,
