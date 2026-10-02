@@ -18,6 +18,8 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     **`GetMemory`** permits an owner to inspect inactive (archived/merge-retired) rows for Memory Manager detail/history, while `GetMemoryByIDPrefix` resolves only active rows by an 8–32 digit hex UUID prefix (used by `find_context` `related`/`origin` short `memory:df3e519d` hops), translating it into an indexed UUID range rather than formatting every row.
     `GetRelatedMemories` excludes `Scope=Summary` rows (checkpoint state, not facts); `GetRelatedSummaryMemories` is the Summary-only counterpart used by `find_context`'s `source_type=summaries`.
     **`ListMemories`** also excludes `Scope=Summary` unless `level=summary` is requested (Memory Manager Summaries tab).
+    `memory_embedding.go` keeps API-written memories recallable: `UpdateMemory` drops a non-Summary memory's embedding in the same transaction when its content changes, `OwnedMemoriesMissingEmbedding` finds what a save left unembedded, and `SetMemoryEmbedding` writes one row keyed by the memory ID (upsert, so racing writers cannot duplicate it) only while the memory still holds the embedded text.
+      `BackfillMemoryEmbeddings` walks `ListMemoriesMissingEmbedding` (active, non-Summary, no Embedding row; keyset-paged) and is idempotent; Summary embeddings stay owned by `UpsertChatSummaryMemory`.
     `memory_merge.go`'s `ListMemoryMergeEvents` takes a `models.MemoryMergeEventFilters` (query/survivor-memory/date-range/exclude-reverted) for both the merge-audit HTTP endpoint and `find_context`'s `mode=lifecycle_events`.
   - Files: `fileattachment.go`, `filechunk.go` (chunk storage + search).
     `toFileAttachmentModel` derives **`Source`** (`generated`/`imported`, empty when the chat-message edge was not loaded): linked message origin decides (Assistant ⇒ generated, User ⇒ imported); unlinked rows are generated only for the pipelines' fixed names (`expression-*.png`, `personality-portrait.png`).
@@ -132,6 +134,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 
 - `chat_checkpoint_test.go`, `chatmessage_test.go`, `chatmessage_mark_read_test.go` — message and checkpoint behavior.
 - `memory_test.go`, `memory2_test.go`, `filechunk_test.go` — retrieval (including **`ListMemories`** excluding Summary unless `level=summary`), ZIP export/import helpers, full import count/persist coverage, and chunks.
+- `memory_embedding_test.go` — stale-embedding drop on content edits (not for Summary), missing-embedding queries, the `SetMemoryEmbedding` content guard and replace, and backfill batching, per-item retry and early stop.
 - `memory_import_metrics_test.go` — memory import stage timings and item counts, including a failed embed stage.
 - `compaction_event_test.go`, `memory_merge_test.go` — SQLite harness mirrors ent FK semantics (`memory_merge_events.compaction_event_id` → `compaction_events` ON DELETE SET NULL); compaction tests cover content-addressed snapshots, merge grouping, page-size cap, and FK null-on-delete.
   `TestAutoPin_AppliesToEveryMemoryCreationPath` covers the auto-pin rule on each creation path.

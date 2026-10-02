@@ -258,6 +258,7 @@ func (s *Server) setupRoutes() {
 	}
 	agent := agent.NewAgent(dataStore, s.logger, s.telemetry, s.config.OpenAIKey, fileStore, s.config.AnthropicKey, agentCfg)
 	agent.StartSummaryMemoryBackfill(context.Background())
+	agent.StartMemoryEmbeddingBackfill(context.Background())
 	if s.config.EnableAgentJobsScheduler {
 		instanceID := "unknown"
 		if host, hostErr := os.Hostname(); hostErr == nil && host != "" {

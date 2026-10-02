@@ -644,6 +644,19 @@ func (d *Datastore) UpdateMemory(ctx context.Context, userID, memoryID uuid.UUID
 		return nil, err
 	}
 
+	// A content edit invalidates the embedding. Drop it in the same transaction
+	// so recall can never match the edited memory on its old text; the caller
+	// re-embeds the new text (SetMemoryEmbedding), and if that fails the memory
+	// is left for BackfillMemoryEmbeddings. Summary memories keep theirs:
+	// UpsertChatSummaryMemory owns that row and expects exactly one.
+	if scope != memory.ScopeSummary && trimmedMemoryContentChanged(existing.Content, nextContent) {
+		if _, err := tx.Embedding.Delete().Where(embedding.HasMemoryWith(memory.ID(memoryID))).Exec(ctx); err != nil {
+			d.logger.Error(i18n.T1("delete.failed", "Entity", "embedding"), zap.Error(err))
+			tx.Rollback()
+			return nil, err
+		}
+	}
+
 	reloaded, err := tx.Memory.Query().
 		Where(memory.ID(memoryID)).
 		WithChat().

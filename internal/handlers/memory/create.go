@@ -110,13 +110,14 @@ func (h *Handler) CreateMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mem, err := h.ds.CreateMemoryFromInput(r.Context(), userID, input)
+	mem, err := h.store.CreateMemoryFromInput(r.Context(), userID, input)
 	if err != nil {
 		h.logger.Error("failed to create memory", zap.String("user_id", userID.String()), zap.Error(err))
 		status, msg := classifyMemoryWriteError(err)
 		handlerutils.RespondWithError(w, h.logger, status, handlerutils.CodeNotSet, msg, err)
 		return
 	}
+	h.embedMemories(r.Context(), userID, []uuid.UUID{mem.ID})
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusCreated, mem)
 }
@@ -147,13 +148,14 @@ func (h *Handler) CreateMemoriesBatch(w http.ResponseWriter, r *http.Request) {
 		input.Items = append(input.Items, createInput)
 	}
 
-	memories, err := h.ds.CreateMemoriesBatch(r.Context(), userID, input)
+	memories, err := h.store.CreateMemoriesBatch(r.Context(), userID, input)
 	if err != nil {
 		h.logger.Error("failed to create memory batch", zap.String("user_id", userID.String()), zap.Error(err))
 		status, msg := classifyMemoryWriteError(err)
 		handlerutils.RespondWithError(w, h.logger, status, handlerutils.CodeNotSet, msg, err)
 		return
 	}
+	h.embedMemories(r.Context(), userID, memoryIDs(memories))
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusCreated, createMemoriesBatchResponse{
 		Results:      memories,

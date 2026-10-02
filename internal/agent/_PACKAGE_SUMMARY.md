@@ -16,6 +16,8 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
 - **Maintenance prompts:** Chat naming, personality generation, conversation summaries, memory extraction, scratchpad summarize/update (often **manual** `ResponseNewParams` — see architecture doc).
   **Archival** checkpoint scratchpad update and memory extraction use fixed small models (`archivalOpenAIModel` / `archivalClaudeModel` in `archival_models.go`); **checkpoint conversation summary always uses `archivalOpenAIModel` (`gpt-5-mini`)** for both OpenAI and Claude chats via unified `summarizeConversationForCheckpoint` (OpenAI threads `PreviousResponseID`; Claude renders explicit input items from inference `ModelContext`).
   Persona `archival_model` and custom memory read/write prompts are deprecated and ignored; optional `scratchpad_update_prompt` is still used for checkpoint scratchpad updates.
+- **Startup backfills** (`message.go`, started from `internal/server`): `StartSummaryMemoryBackfill` copies legacy checkpoint summaries into Summary memories, and `StartMemoryEmbeddingBackfill` embeds active non-Summary memories that have no Embedding row (via `datastore.BackfillMemoryEmbeddings` and the memory tool's batch embeddings call).
+  Both run in the background, are idempotent, and only log failures; the embedding backfill stops early when the provider is unreachable (e.g. the deny-network client under mock/local backends).
 - **Rituals:** User and system rituals, image ritual flow, registry of built-in system rituals.
 - **Jobs:** Running scheduled/async agent work (`agentjob_run.go`, `agentjob_schedule.go`) and tools that create jobs.
 - **Thread rehydration (`thread_rehydration.go`):** Lazy summarization of **imported** threads.
