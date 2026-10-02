@@ -18,6 +18,7 @@
   Source constants (`ChatSourceOpenAI`/`ChatSourceAnthropic`) and rehydration-state constants (`RehydrationState*`) also live here; `Chat.RehydrationState` and `Job.Progress` surface them.
   Two title helpers sit alongside them and are easy to confuse: `TruncateImportTitle` shortens a title to `MaxImportTitleLen` **runes** purely so it can be quoted inside a warning string, while `NormalizeImportedTitle` prepares a title for **persistence** — trimming blank and zero-width characters, substituting a caller-supplied fallback, and fitting `MaxChatTitleBytes`, which mirrors the byte-counted `MaxLen(200)` validator on `Chat.name`.
 - **`model_defaults_test.go`** — documents expected defaults for model DTOs.
+- **Workspace (`workspace.go`):** `WorkspaceFile`, `WorkspaceRevisionInput` and the root, state, op and author-class constants for agent-written files.
 - **Context X-ray (`contextbreakdown.go`):** `ContextBreakdown` + `ContextSegmentStat` describe the per-turn model-context composition surfaced on `ChatMessage.ContextBreakdown` (assistant rows).
   `ContextBudgetTokens` (30k) is the display denominator, mirroring the agent's `checkpointMaxLastInputTokens` compaction ceiling.
   The total uses vendor-reported input usage when available; named context/tool estimates are cl100k and `vendor_prompt_other` reconciles vendor framing, image input, and other un-attributable usage.

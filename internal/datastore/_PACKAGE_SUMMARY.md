@@ -19,7 +19,9 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     `GetRelatedMemories` excludes `Scope=Summary` rows (checkpoint state, not facts); `GetRelatedSummaryMemories` is the Summary-only counterpart used by `find_context`'s `source_type=summaries`.
     **`ListMemories`** also excludes `Scope=Summary` unless `level=summary` is requested (Memory Manager Summaries tab).
     `memory_merge.go`'s `ListMemoryMergeEvents` takes a `models.MemoryMergeEventFilters` (query/survivor-memory/date-range/exclude-reverted) for both the merge-audit HTTP endpoint and `find_context`'s `mode=lifecycle_events`.
-  - Files: `fileattachment.go`, `filechunk.go` (chunk storage + search).
+  - Files: `fileattachment.go`, `filechunk.go` (chunk storage + search), `fileattachment_scope.go` (`ListFileAttachmentsInChatScope`: a conversation's files plus its personality's documents).
+  - Workspace: `workspace.go` stores agent-written files (`WorkspaceFile`) and their immutable revisions (`WorkspaceFileRevision`).
+    `CommitWorkspaceRevision` advances a file with a conditional update on its current revision and returns `WorkspaceConflictError` for a stale base revision or a create over a live file.
     `toFileAttachmentModel` derives **`Source`** (`generated`/`imported`, empty when the chat-message edge was not loaded): linked message origin decides (Assistant ⇒ generated, User ⇒ imported); unlinked rows are generated only for the pipelines' fixed names (`expression-*.png`, `personality-portrait.png`).
     **`FileAttachmentFilters.ExcludeReferenceCopies`** (image gallery) drops `CreateFileAttachmentReference` clones in SQL — keeps the earliest row per `(owner, s3_key)`, backed by an `(s3_key, owner)` index — so counts/pagination and classification follow the original row.
   - Personalities & rituals: `personality.go`, `personality_gen_flow.go`, `ritual.go`, `system_ritual_binding.go`.

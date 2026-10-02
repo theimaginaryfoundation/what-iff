@@ -23,6 +23,7 @@ const (
 	listKindConversations = "conversations"
 	listKindJobs          = "jobs"
 	listKindMCPServers    = "mcp_servers"
+	listKindWorkspace     = "workspace"
 )
 
 // File scope values (files kind).
@@ -53,6 +54,7 @@ const ListDescription = `List your available resources. Pick a kind:
 - conversations — your past conversations, including archived imports, that have messages, most-recent first (id, name). Pass an id to find_context (mode="conversation"/"origin") to read one.
 - jobs — your scheduled jobs (id, name, status, next_runtime for still-active ones). Active by default; set include_completed=true to also see finished/failed one-offs.
 - mcp_servers — MCP servers connected to the current conversation, with discoverable MCP tools and currently loaded tools for this chat.
+- workspace — files you wrote with write_file: chat/ (this conversation) and agent/ (your notebook as this personality), with size and revision. Pass filter as a path prefix, e.g. "agent/notes".
 
 Use filter for a free-text name/content match (files, conversations, jobs). Use limit to cap page size and page (1-based) to walk further results when has_more is true.`
 
@@ -64,7 +66,7 @@ var ListToolSpec = FunctionToolSpec{
 	Properties: map[string]interface{}{
 		"kind": map[string]interface{}{
 			"type":        "string",
-			"enum":        []string{listKindModels, listKindPersonalities, listKindSkills, listKindFiles, listKindConversations, listKindJobs, listKindMCPServers},
+			"enum":        []string{listKindModels, listKindPersonalities, listKindSkills, listKindFiles, listKindConversations, listKindJobs, listKindMCPServers, listKindWorkspace},
 			"description": "Which resource to list. Required.",
 		},
 		"filter": map[string]interface{}{
@@ -123,11 +125,17 @@ type ListTool struct {
 	store         listStore
 	logger        *zap.Logger
 	mcpDiscoverer listMCPDiscoverer
+	workspace     *WorkspaceTool
 }
 
 // NewListTool constructs a ListTool backed by the datastore.
 func NewListTool(ds *datastore.Datastore, logger *zap.Logger) *ListTool {
 	return &ListTool{store: ds, logger: logger}
+}
+
+// SetWorkspace enables kind="workspace".
+func (t *ListTool) SetWorkspace(w *WorkspaceTool) {
+	t.workspace = w
 }
 
 // SetMCPDiscoverer enables MCP tool inventory output for kind="mcp_servers".
@@ -164,6 +172,8 @@ type listItem struct {
 	UpdatedAt    string   `json:"updated_at,omitempty"`    // personalities, conversations
 	URL          string   `json:"url,omitempty"`           // mcp_servers
 	Archived     *bool    `json:"archived,omitempty"`      // conversations
+	Revision     int      `json:"revision,omitempty"`      // workspace
+	Size         int64    `json:"size,omitempty"`          // workspace (bytes)
 }
 
 type listResult struct {
@@ -209,10 +219,12 @@ func (t *ListTool) List(ctx context.Context, chat *models.Chat, args []byte) (st
 		return t.listJobs(ctx, chat, a)
 	case listKindMCPServers:
 		return t.listMCPServers(ctx, chat)
+	case listKindWorkspace:
+		return t.listWorkspace(ctx, chat, a)
 	case "":
-		return t.fail("", "kind is required; one of: models, personalities, skills, files, conversations, jobs, mcp_servers")
+		return t.fail("", "kind is required; one of: models, personalities, skills, files, conversations, jobs, mcp_servers, workspace")
 	default:
-		return t.fail(kind, fmt.Sprintf("unknown kind %q; expected one of: models, personalities, skills, files, conversations, jobs, mcp_servers", a.Kind))
+		return t.fail(kind, fmt.Sprintf("unknown kind %q; expected one of: models, personalities, skills, files, conversations, jobs, mcp_servers, workspace", a.Kind))
 	}
 }
 
