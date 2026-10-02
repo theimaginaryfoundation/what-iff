@@ -53,5 +53,6 @@ HTTP handlers for the **webhook surface**: static-token management for the signe
 ## Related documentation
 
 - [ADR 0x023: Webhook read access and token scopes](../../../docs/adr/0x023-webhook-read-access.md)
-- [Integration guide](../../../docs/integrations.md) — capability inventory and recommended patterns.
+- [Webhooks guide](https://whatiff.chat/guides/webhooks.html) — how to use the API, with examples; published on the docs site (`whatiffchat-web`) and linked from the token help hint in the app.
+- [Integration reference](../../../docs/integrations.md) — capability inventory and recommended patterns.
 - [Architecture summary](../../../docs/ARCHITECTURE_SUMMARY.md) — HTTP Layer.

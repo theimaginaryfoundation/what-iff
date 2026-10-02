@@ -87,11 +87,9 @@
   <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 h-fit">
     <h2 class="inline-flex items-center gap-1 text-sm font-semibold text-gray-900 dark:text-white mb-3">
       Create webhook API token
-      <ui-help-hint label="What is a webhook token?" heading="Webhook tokens" align="end">
-        A webhook token lets another app act on your account through the webhook API, limited to what you allow here.
-        <span class="font-mono">Post messages</span> lets it post into your threads with <span class="font-mono">POST /webhooks/chat/&#123;chatId&#125;/messages</span>.
-        <span class="font-mono">Read threads</span> lets it read your threads, messages, job status and persona names, and never system prompts or memories.
-        The token is shown once, and revoked tokens stop working.
+      <ui-help-hint label="What is a webhook token?" heading="Webhook tokens" guide="webhooks" guideLabel="Read the webhooks guide" align="end">
+        A webhook token lets another app post into your threads and read them back, limited to what you allow here.
+        The token is shown once, and you can revoke it at any time.
       </ui-help-hint>
     </h2>
     <p class="text-xs text-gray-600 dark:text-gray-400 mb-4">

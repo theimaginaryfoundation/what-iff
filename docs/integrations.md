@@ -1,7 +1,8 @@
 # Integrating with What Iff
 
 How an outside program (a bridge, an automation, another project) talks to a What Iff account, which API to use, and what to expect from it.
-The rationale for the webhook surface is in [ADR 0x023](adr/0x023-webhook-read-access.md); the contract is in [`openapi.yaml`](../openapi.yaml).
+For how to *use* the webhook API, with examples, see the [webhooks guide](https://whatiff.chat/guides/webhooks.html).
+This page is the maintainers' reference: the rationale for the webhook surface is in [ADR 0x023](adr/0x023-webhook-read-access.md); the contract is in [`openapi.yaml`](../openapi.yaml).
 
 ## Two surfaces
 
@@ -67,25 +68,12 @@ Everything that manages the account (creating or editing personas, memories, con
 
 ## Recommended integration paths
 
-**Send, then poll, then read.**
-A send that runs the agent (`user` or `background` mode) is asynchronous; there is no synchronous reply.
+The step-by-step recipes, with copy-and-paste examples, are in the [webhooks guide](https://whatiff.chat/guides/webhooks.html): sending a message, following the job to the reply, walking a thread's history, and finding threads by persona.
+The principles behind them, for anyone designing an integration or extending the API:
 
-1. `POST /webhooks/chat/{chatId}/messages` with `{"mode":"user","message":"..."}`. The response (202) has the message `id` and a `job_id`.
-2. `GET /webhooks/job/{job_id}` until `result_id` is set, or `status` is `failed` or `cancelled`. `result_id` is the id of the reply and appears as soon as `status` reaches `inference_complete`; `complete` means post-processing has finished as well. On failure, `error` says why.
-3. `GET /webhooks/chat/chat-message/{result_id}` for the reply.
-
-To match a reply to its prompt by time instead, read `sent_at` from `GET /webhooks/chat/chat-message/{id}` for the id the POST returned.
-`mode: "background"` triggers a run without saving a user message; `mode: "assistant"` writes an assistant message and runs nothing (`generation_model` is `none`, `generation_personality` is `webhook`).
-
-**Walk a thread's history.**
-`GET /webhooks/chat/{chatId}/messages?limit=100` returns the newest page and a `next_cursor`.
-Pass it back as `cursor` for the messages strictly older than that page.
-Prefer the cursor to `page`: it stays correct while new messages arrive, which page numbers do not.
-An empty page has no `next_cursor`.
-
-**Find the threads of a persona.**
-`GET /webhooks/personality` to choose one, then `GET /webhooks/chat?personality_id=<id>`.
-Threads are created and archived over time, so look them up by persona when needed instead of hard-coding thread ids.
+- **Sends that run the agent are asynchronous.** Follow the job until `result_id` is set (it appears at `inference_complete`); waiting for `complete` is unnecessary.
+- **Walk history with `cursor`, not `page`.** A cursor stays correct while new messages arrive; offsets do not.
+- **Look threads up by persona** instead of hard-coding thread ids, because threads are created and archived over time.
 
 **Bridges (Slack, Discord and similar).**
 The bridge holds one token with only the scopes it needs, keeps its own mapping from an external channel to a What Iff chat id, posts inbound messages, and polls for replies.
@@ -107,7 +95,7 @@ First-party clients use the session API instead.
 | Audit | Partly | Each read logs the operation and token id (never content). No per-token audit trail in the product UI; `last_used_at` is shown per token. |
 | Retries | Guidance | `GET` is safe to retry. `POST` is not idempotent. |
 | Idempotency | Tracked | No idempotency key on `POST`; a retried `POST` can create a duplicate message. |
-| Rate limits | Tracked | None in the application layer. The page-size cap bounds the cost of one request, not the request rate. Poll job status at a sensible interval (a second or more). |
+| Rate limits | Tracked | None on the webhook routes yet ([#247](https://github.com/theimaginaryfoundation/what-iff/issues/247)). The page-size cap bounds the cost of one request, not the request rate. Poll job status at a sensible interval (a second or more). |
 | Push / callbacks | Not available | What Iff does not call out to integrations. Poll. |
 
 ## Follow-ups

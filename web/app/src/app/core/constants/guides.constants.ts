@@ -5,7 +5,7 @@ import { environment } from '@environments/environment';
  * new-user welcome. Paths resolve against `environment.docsUrl`, so a deployment that points
  * docsUrl elsewhere (or blanks it) moves or hides every guide link at once.
  */
-export type GuideKey = 'docs' | 'gettingStarted' | 'context' | 'continuity' | 'expressions' | 'advanced';
+export type GuideKey = 'docs' | 'gettingStarted' | 'context' | 'continuity' | 'expressions' | 'advanced' | 'webhooks';
 
 const GUIDE_PATHS: Record<Exclude<GuideKey, 'docs'>, string> = {
   gettingStarted: 'guides/getting-started.html',
@@ -13,6 +13,7 @@ const GUIDE_PATHS: Record<Exclude<GuideKey, 'docs'>, string> = {
   continuity: 'guides/building-continuity.html',
   expressions: 'guides/expressions.html',
   advanced: 'guides/advanced-features.html',
+  webhooks: 'guides/webhooks.html',
 };
 
 /**
