@@ -33,22 +33,23 @@ func toWorkspaceFileModel(e *ent.WorkspaceFile, userID uuid.UUID) *models.Worksp
 		return nil
 	}
 	return &models.WorkspaceFile{
-		ID:              e.ID,
-		UserID:          userID,
-		Root:            string(e.Root),
-		RootRef:         e.RootRef,
-		Path:            e.Path,
-		ContentType:     e.ContentType,
-		CurrentRevision: e.CurrentRevision,
-		Size:            e.Size,
-		SHA256:          e.Sha256,
-		State:           string(e.State),
-		AuthorClass:     string(e.AuthorClass),
-		StorageKey:      e.StorageKey,
-		ReadCount:       e.ReadCount,
-		LastReadAt:      e.LastReadAt,
-		CreatedAt:       e.CreatedAt,
-		UpdatedAt:       e.UpdatedAt,
+		ID:               e.ID,
+		UserID:           userID,
+		Root:             string(e.Root),
+		RootRef:          e.RootRef,
+		Path:             e.Path,
+		ContentType:      e.ContentType,
+		CurrentRevision:  e.CurrentRevision,
+		Size:             e.Size,
+		SHA256:           e.Sha256,
+		State:            string(e.State),
+		AuthorClass:      string(e.AuthorClass),
+		StorageKey:       e.StorageKey,
+		ContentUpdatedAt: e.ContentUpdatedAt,
+		ReadCount:        e.ReadCount,
+		LastReadAt:       e.LastReadAt,
+		CreatedAt:        e.CreatedAt,
+		UpdatedAt:        e.UpdatedAt,
 	}
 }
 
@@ -214,6 +215,7 @@ func (d *Datastore) CommitWorkspaceRevision(ctx context.Context, userID uuid.UUI
 			SetStorageKey(in.StorageKey).
 			SetState(state).
 			SetAuthorClass(workspacefile.AuthorClass(in.AuthorClass)).
+			SetContentUpdatedAt(time.Now().UTC()).
 			Save(ctx)
 		if err != nil {
 			return rollback(err)
@@ -270,4 +272,56 @@ func (d *Datastore) TouchWorkspaceFileRead(ctx context.Context, userID, fileID u
 		SetLastReadAt(time.Now().UTC()).
 		AddReadCount(1).
 		Exec(ctx)
+}
+
+// PurgeWorkspaceRoot deletes every file in one root, with all revisions, and returns the storage
+// keys of the deleted revisions so the caller can remove the objects. Used when the conversation
+// (chat root) or personality (agent root) that owns the root is deleted.
+func (d *Datastore) PurgeWorkspaceRoot(ctx context.Context, userID uuid.UUID, root string, rootRef uuid.UUID) ([]string, error) {
+	tx, err := d.dbClient.Tx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	files, err := tx.WorkspaceFile.Query().
+		Where(
+			workspacefile.HasOwnerWith(user.ID(userID)),
+			workspacefile.RootEQ(workspacefile.Root(root)),
+			workspacefile.RootRef(rootRef),
+		).
+		IDs(ctx)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	if len(files) == 0 {
+		_ = tx.Rollback()
+		return nil, nil
+	}
+	revisions, err := tx.WorkspaceFileRevision.Query().
+		Where(workspacefilerevision.HasFileWith(workspacefile.IDIn(files...))).
+		All(ctx)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	var keys []string
+	for _, r := range revisions {
+		if r.StorageKey != "" {
+			keys = append(keys, r.StorageKey)
+		}
+	}
+	if _, err := tx.WorkspaceFileRevision.Delete().
+		Where(workspacefilerevision.HasFileWith(workspacefile.IDIn(files...))).
+		Exec(ctx); err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	if _, err := tx.WorkspaceFile.Delete().Where(workspacefile.IDIn(files...)).Exec(ctx); err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return keys, nil
 }

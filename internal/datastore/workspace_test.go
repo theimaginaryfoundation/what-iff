@@ -30,6 +30,7 @@ func createWorkspaceTestSchema(t *testing.T, db *sql.DB) {
 			storage_key text NOT NULL DEFAULT '',
 			state text NOT NULL DEFAULT 'live',
 			author_class text NOT NULL DEFAULT 'agent',
+			content_updated_at datetime NOT NULL,
 			last_read_at datetime,
 			read_count integer NOT NULL DEFAULT 0,
 			user_workspace_files uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE
@@ -204,4 +205,37 @@ func TestWorkspace_OwnerAndRootIsolation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, f.ReadCount)
 	assert.NotNil(t, f.LastReadAt)
+}
+
+func TestPurgeWorkspaceRoot_RemovesOnlyThatRoot(t *testing.T) {
+	ds, cleanup := newWorkspaceTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := createFATestUser(t, ds)
+	doomed, kept := uuid.New(), uuid.New()
+
+	_, err := ds.CommitWorkspaceRevision(ctx, userID, wsInput(doomed, "a.md", models.WorkspaceOpCreate, models.WorkspaceAnyRevision, "k1", 1))
+	require.NoError(t, err)
+	_, err = ds.CommitWorkspaceRevision(ctx, userID, wsInput(doomed, "a.md", models.WorkspaceOpWrite, 1, "k2", 1))
+	require.NoError(t, err)
+	_, err = ds.CommitWorkspaceRevision(ctx, userID, wsInput(doomed, "a.md", models.WorkspaceOpDelete, 2, "", 0))
+	require.NoError(t, err)
+	_, err = ds.CommitWorkspaceRevision(ctx, userID, wsInput(kept, "b.md", models.WorkspaceOpCreate, models.WorkspaceAnyRevision, "k3", 1))
+	require.NoError(t, err)
+
+	keys, err := ds.PurgeWorkspaceRoot(ctx, userID, models.WorkspaceRootAgent, doomed)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"k1", "k2"}, keys, "every stored revision object is returned, including a deleted file's history")
+
+	_, err = ds.GetWorkspaceFile(ctx, userID, models.WorkspaceRootAgent, doomed, "a.md")
+	assert.ErrorIs(t, err, ErrWorkspaceFileNotFound)
+	_, err = ds.GetWorkspaceFile(ctx, userID, models.WorkspaceRootAgent, kept, "b.md")
+	assert.NoError(t, err)
+	revs, err := ds.dbClient.WorkspaceFileRevision.Query().All(ctx)
+	require.NoError(t, err)
+	assert.Len(t, revs, 1)
+
+	none, err := ds.PurgeWorkspaceRoot(ctx, userID, models.WorkspaceRootAgent, doomed)
+	require.NoError(t, err)
+	assert.Empty(t, none, "purging again is a no-op")
 }

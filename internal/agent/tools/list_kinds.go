@@ -325,12 +325,12 @@ func (t *ListTool) listWorkspace(ctx context.Context, chat *models.Chat, a listA
 	items := make([]listItem, 0, len(files))
 	for _, f := range files {
 		items = append(items, listItem{
-			ID:        f.ID.String(),
+			ID:        f.Root + "/" + f.Path,
 			Name:      f.Root + "/" + f.Path,
 			FileType:  f.ContentType,
 			Revision:  f.CurrentRevision,
 			Size:      f.Size,
-			UpdatedAt: f.UpdatedAt.UTC().Format(time.RFC3339),
+			UpdatedAt: f.ContentUpdatedAt.UTC().Format(time.RFC3339),
 		})
 	}
 	if len(items) == 0 && note == "" {

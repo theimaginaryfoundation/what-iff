@@ -56,15 +56,15 @@ const (
 // ReadFileToolSpec reads an uploaded text file by line range, or returns its outline.
 var ReadFileToolSpec = FunctionToolSpec{
 	Name: ToolNameReadFile,
-	Description: "Read the exact text of an uploaded text file, by file ID or exact file name, as numbered lines. " +
+	Description: "Read the exact text of a file as numbered lines: an uploaded text file (by file ID or exact file name) or one of your workspace files (by path, e.g. agent/notes.md or chat/plan.md). " +
 		"Use it for code, logs, transcripts, CSV, JSON and long documents when you need exact wording or one section. " +
-		"Results are paged: pass next_cursor back as cursor to continue. " +
+		"Results are paged: pass next_cursor back as cursor to continue. Workspace results include the file's revision, which write_file needs to change it. " +
 		"On a large file, call it with outline=true first to see its structure (Markdown headings, top-level JSON or YAML keys, CSV columns) with line numbers, then read only the range you need. " +
 		"To find where something is mentioned, use grep_files. For questions about meaning across many files, use find_context. PDFs and images are not supported.",
 	Properties: map[string]interface{}{
 		"file": map[string]interface{}{
 			"type":        "string",
-			"description": "The file's ID, or its exact file name.",
+			"description": "An uploaded file's ID or exact file name, or a workspace path starting with agent/ or chat/.",
 		},
 		"start_line": map[string]interface{}{
 			"type":        "integer",
@@ -89,8 +89,8 @@ var ReadFileToolSpec = FunctionToolSpec{
 // GrepFilesToolSpec searches uploaded text files for a phrase or pattern.
 var GrepFilesToolSpec = FunctionToolSpec{
 	Name: ToolNameGrepFiles,
-	Description: "Search uploaded text files for an exact phrase or a regular expression, and get the matching lines with line numbers and surrounding context. " +
-		"Searches this conversation's files and the active personality's documents unless you name specific files. " +
+	Description: "Search text files for an exact phrase or a regular expression, and get the matching lines with line numbers and surrounding context. " +
+		"Searches your workspace files (agent/ and chat/), this conversation's uploaded files and the active personality's documents unless you name specific files. " +
 		"Use it to locate something, then read around it with read_file. " +
 		"Matching is literal and case-insensitive by default; set regex=true for RE2 regular expressions.",
 	Properties: map[string]interface{}{
@@ -101,7 +101,7 @@ var GrepFilesToolSpec = FunctionToolSpec{
 		"files": map[string]interface{}{
 			"type":        "array",
 			"items":       map[string]interface{}{"type": "string"},
-			"description": fmt.Sprintf("Optional: file IDs or exact file names to search (at most %d). Defaults to this conversation's files and the personality's documents.", grepMaxFiles),
+			"description": fmt.Sprintf("Optional: uploaded file IDs or exact names, or workspace paths, to search (at most %d). Defaults to your workspace files, this conversation's files and the personality's documents.", grepMaxFiles),
 		},
 		"regex": map[string]interface{}{
 			"type":        "boolean",
@@ -204,7 +204,7 @@ func (t *FileReadTool) attachmentSource(userID uuid.UUID, fa *models.FileAttachm
 func (t *FileReadTool) workspaceSource(userID uuid.UUID, f *models.WorkspaceFile) *textSource {
 	display := f.Root + "/" + f.Path
 	return &textSource{
-		ref:      &fileRef{ID: f.ID.String(), Name: display, Type: f.ContentType, Revision: f.CurrentRevision},
+		ref:      &fileRef{ID: display, Name: display, Type: f.ContentType, Revision: f.CurrentRevision},
 		name:     display,
 		fileType: f.ContentType,
 		cacheKey: fmt.Sprintf("ws|%s|%d", f.ID, f.CurrentRevision),

@@ -146,6 +146,24 @@ func (s *memWorkspaceStore) CommitWorkspaceRevision(_ context.Context, userID uu
 	return &cp, nil
 }
 
+func (s *memWorkspaceStore) PurgeWorkspaceRoot(_ context.Context, userID uuid.UUID, root string, rootRef uuid.UUID) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var keys []string
+	for k, f := range s.files {
+		if f.UserID == userID && f.Root == root && f.RootRef == rootRef {
+			for _, rev := range s.revisions[f.ID] {
+				if rev.StorageKey != "" {
+					keys = append(keys, rev.StorageKey)
+				}
+			}
+			delete(s.revisions, f.ID)
+			delete(s.files, k)
+		}
+	}
+	return keys, nil
+}
+
 func (s *memWorkspaceStore) TouchWorkspaceFileRead(_ context.Context, _, _ uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -486,4 +504,49 @@ func TestWriteFile_ConcurrentCreateDoesNotReplaceTheFirst(t *testing.T) {
 	got, err := f.store.GetWorkspaceFile(context.Background(), f.chat.UserID, "chat", f.chat.ID, "new.md")
 	require.NoError(t, err)
 	assert.Equal(t, "first", got.StorageKey)
+}
+
+func TestWriteFile_RejectsNonPositiveBaseRevision(t *testing.T) {
+	f := newWSFixture()
+	require.True(t, f.write(t, map[string]interface{}{"path": "agent/a.md", "content": "v1"}).Success)
+	for _, base := range []int{-1, 0} {
+		res := f.write(t, map[string]interface{}{"path": "agent/a.md", "content": "v2", "base_revision": base})
+		assert.False(t, res.Success, "base_revision %d must not bypass the stale-write check", base)
+		assert.Contains(t, res.Error, "1 or higher")
+		del := f.write(t, map[string]interface{}{"path": "agent/a.md", "mode": "delete", "base_revision": base})
+		assert.False(t, del.Success)
+	}
+	assert.Equal(t, "1\tv1\n", f.read(t, map[string]interface{}{"file": "agent/a.md"}).Content)
+}
+
+func TestWorkspace_IDsArePathsThatRoundTrip(t *testing.T) {
+	f := newWSFixture()
+	require.True(t, f.write(t, map[string]interface{}{"path": "chat/plan.md", "content": "step one"}).Success)
+
+	read := f.read(t, map[string]interface{}{"file": "chat/plan.md"})
+	require.True(t, read.Success)
+	assert.Equal(t, "chat/plan.md", read.File.ID)
+	again := f.read(t, map[string]interface{}{"file": read.File.ID})
+	assert.True(t, again.Success, "the id a result shows can be passed straight back")
+
+	listIn, _ := json.Marshal(map[string]interface{}{"kind": "workspace"})
+	out, err := f.list.List(context.Background(), f.chat, listIn)
+	require.NoError(t, err)
+	var listed listResult
+	require.NoError(t, json.Unmarshal([]byte(out), &listed))
+	require.Len(t, listed.Items, 1)
+	assert.Equal(t, "chat/plan.md", listed.Items[0].ID)
+}
+
+func TestWorkspace_PurgeRootRemovesFilesAndObjects(t *testing.T) {
+	f := newWSFixture()
+	require.True(t, f.write(t, map[string]interface{}{"path": "chat/a.md", "content": "one"}).Success)
+	require.True(t, f.write(t, map[string]interface{}{"path": "chat/a.md", "mode": "append", "content": "two"}).Success)
+	require.True(t, f.write(t, map[string]interface{}{"path": "agent/keep.md", "content": "notebook"}).Success)
+	require.Len(t, f.objects.objects, 3)
+
+	require.NoError(t, f.ws.PurgeRoot(context.Background(), f.chat.UserID, models.WorkspaceRootChat, f.chat.ID))
+	assert.False(t, f.read(t, map[string]interface{}{"file": "chat/a.md"}).Success)
+	assert.True(t, f.read(t, map[string]interface{}{"file": "agent/keep.md"}).Success, "other roots are untouched")
+	assert.Len(t, f.objects.objects, 1, "every revision object of the purged root is deleted")
 }

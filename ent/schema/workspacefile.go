@@ -1,6 +1,8 @@
 package schema
 
 import (
+	"time"
+
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/schema/edge"
@@ -56,6 +58,10 @@ func (WorkspaceFile) Fields() []ent.Field {
 		field.Enum("author_class").
 			Values("user", "agent", "system").
 			Default("agent"),
+		// content_updated_at is when the content last changed. updated_at also moves on read
+		// bookkeeping, so listings and staleness checks use this instead.
+		field.Time("content_updated_at").
+			Default(time.Now),
 		field.Time("last_read_at").
 			Optional().
 			Nillable(),

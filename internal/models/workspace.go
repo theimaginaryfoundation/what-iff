@@ -38,22 +38,23 @@ const (
 
 // WorkspaceFile is an agent-writable text file and the metadata of its current revision.
 type WorkspaceFile struct {
-	ID              uuid.UUID  `json:"id"`
-	UserID          uuid.UUID  `json:"user_id"`
-	Root            string     `json:"root"`
-	RootRef         uuid.UUID  `json:"root_ref"`
-	Path            string     `json:"path"`
-	ContentType     string     `json:"content_type"`
-	CurrentRevision int        `json:"current_revision"`
-	Size            int64      `json:"size"`
-	SHA256          string     `json:"sha256"`
-	State           string     `json:"state"`
-	AuthorClass     string     `json:"author_class"`
-	StorageKey      string     `json:"-"`
-	ReadCount       int        `json:"read_count"`
-	LastReadAt      *time.Time `json:"last_read_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	ID               uuid.UUID  `json:"id"`
+	UserID           uuid.UUID  `json:"user_id"`
+	Root             string     `json:"root"`
+	RootRef          uuid.UUID  `json:"root_ref"`
+	Path             string     `json:"path"`
+	ContentType      string     `json:"content_type"`
+	CurrentRevision  int        `json:"current_revision"`
+	Size             int64      `json:"size"`
+	SHA256           string     `json:"sha256"`
+	State            string     `json:"state"`
+	AuthorClass      string     `json:"author_class"`
+	StorageKey       string     `json:"-"`
+	ContentUpdatedAt time.Time  `json:"content_updated_at"`
+	ReadCount        int        `json:"read_count"`
+	LastReadAt       *time.Time `json:"last_read_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // WorkspaceRevisionInput describes one write to commit. The content object must already be in
