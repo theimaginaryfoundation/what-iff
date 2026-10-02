@@ -73,6 +73,9 @@ type memoryMergeCandidate struct {
 	Confidence models.MemoryConfidence
 	MemoryID   *uuid.UUID
 	IsNew      bool
+	// Starred is known only for stored memories loaded this turn (liveMemories); it lets the
+	// planner skip embedding a canonical rewrite the datastore would decline anyway.
+	Starred bool
 }
 
 func dedupeContextMemoryRefs(refs []provider.ContextMemoryRef) []models.ContextMemoryRef {
@@ -200,6 +203,8 @@ func buildMemoryMergeCandidates(modelContext *provider.ModelContext, liveMemorie
 		})
 		markSeen(idPtr, content, scope)
 	}
+
+	markStarredCandidates(candidates, liveMemories)
 
 	for _, item := range extracted {
 		scope := normalizeMemoryScope(item.Scope)
@@ -493,6 +498,28 @@ func groupHasNewMember(group models.MemoryMergeGroupProposal, candidates []memor
 	return false
 }
 
+// markStarredCandidates flags id-bearing candidates whose loaded memory is starred. Done as a pass
+// after building because a memory first reached through the MemoryRefs snapshot (which carries no
+// starred flag) is deduped against its liveMemories copy.
+func markStarredCandidates(candidates []memoryMergeCandidate, liveMemories []*models.Memory) {
+	starred := make(map[uuid.UUID]struct{})
+	for _, mem := range liveMemories {
+		if mem != nil && mem.Starred && mem.ID != uuid.Nil {
+			starred[mem.ID] = struct{}{}
+		}
+	}
+	if len(starred) == 0 {
+		return
+	}
+	for i := range candidates {
+		if id := candidates[i].MemoryID; id != nil {
+			if _, ok := starred[*id]; ok {
+				candidates[i].Starred = true
+			}
+		}
+	}
+}
+
 func survivorMemoryIDForGroup(group models.MemoryMergeGroupProposal, candidates []memoryMergeCandidate) (*uuid.UUID, []uuid.UUID) {
 	var survivor *uuid.UUID
 	absorb := make([]uuid.UUID, 0)
@@ -560,9 +587,10 @@ type memoryCompactionPlan struct {
 // memoryFoldPlan is one consolidate/create action ready for PersistMemoryMergeGroup.
 //
 // NeedsEmbedding means Group.CanonicalContent must be embedded before persisting: either there is
-// no survivor (a new row is created), or the canonical phrasing differs from the survivor's
-// content, so the fold may rewrite and re-embed the survivor. The datastore makes the final rewrite
-// call (it also declines for starred survivors; see decideSurvivorRewrite in datastore).
+// no survivor (a new row is created), or the canonical phrasing differs from the content of a
+// survivor not known to be starred, so the fold may rewrite and re-embed it. The datastore makes the
+// final rewrite call (decideSurvivorRewrite), so a starred flag the planner could not see is still
+// honoured there.
 type memoryFoldPlan struct {
 	Group            models.MemoryMergeGroupProposal
 	SurvivorID       *uuid.UUID
@@ -625,15 +653,15 @@ func planFoldGroup(group models.MemoryMergeGroupProposal, candidates []memoryMer
 		SurvivorID:       survivorID,
 		AbsorbIDs:        absorbIDs,
 		DuplicatesFolded: duplicatesFolded,
-		NeedsEmbedding:   survivorID == nil || canonicalDiffersFromSurvivor(group, candidates, *survivorID),
+		NeedsEmbedding:   survivorID == nil || survivorMayBeRewritten(group, candidates, *survivorID),
 		SourceMembers:    sourceMembersForGroup(group, candidates),
 	}, true
 }
 
-// canonicalDiffersFromSurvivor reports whether the group's canonical content differs (after
-// NormalizeContentForDedupe) from the content of the survivor candidate, i.e. whether the fold
-// would reword the survivor and so needs an embedding of the canonical content.
-func canonicalDiffersFromSurvivor(group models.MemoryMergeGroupProposal, candidates []memoryMergeCandidate, survivorID uuid.UUID) bool {
+// survivorMayBeRewritten reports whether the fold may reword the survivor and so needs an
+// embedding of the canonical content: the canonical content differs (after
+// NormalizeContentForDedupe) from the survivor candidate's, and the survivor is not starred.
+func survivorMayBeRewritten(group models.MemoryMergeGroupProposal, candidates []memoryMergeCandidate, survivorID uuid.UUID) bool {
 	canonical := memoryutil.NormalizeContentForDedupe(group.CanonicalContent)
 	if canonical == "" {
 		return false
@@ -644,7 +672,7 @@ func canonicalDiffersFromSurvivor(group models.MemoryMergeGroupProposal, candida
 		}
 		c := candidates[idx]
 		if c.MemoryID != nil && *c.MemoryID == survivorID {
-			return memoryutil.NormalizeContentForDedupe(c.Content) != canonical
+			return !c.Starred && memoryutil.NormalizeContentForDedupe(c.Content) != canonical
 		}
 	}
 	return false

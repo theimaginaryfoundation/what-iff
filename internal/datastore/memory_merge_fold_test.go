@@ -3,9 +3,12 @@ package datastore
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/ent"
@@ -21,6 +24,7 @@ import (
 // Fold rewrite (#249) and exact fold undo (#250) for PersistMemoryMergeGroup / UndoMemoryMergeEvent.
 
 type foldTestMemory struct {
+	scope      entmemory.Scope // default User
 	content    string
 	confidence float64
 	chain      *entschema.MemoryChainMetadata
@@ -41,9 +45,13 @@ func insertFoldTestMemory(t *testing.T, ds *Datastore, userID uuid.UUID, m foldT
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC()
+	scope := m.scope
+	if scope == "" {
+		scope = entmemory.ScopeUser
+	}
 	create := ds.dbClient.Memory.Create().
 		SetContent(m.content).
-		SetScope(entmemory.ScopeUser).
+		SetScope(scope).
 		SetType(entmemory.TypeContext).
 		SetStatus(entmemory.StatusActive).
 		SetConfidence(m.confidence).
@@ -177,6 +185,14 @@ func TestPersistMemoryMergeGroup_FoldRewritesSurvivorAndUndoRestores(t *testing.
 			got := foldTestState(t, ds, survivorID)
 			require.Equal(t, canonical, got.Content)
 			require.Equal(t, foldTestVector(9), got.Embedding, "survivor re-embedded with the canonical vector")
+			if tc.survivorEmbedding == nil {
+				// A newly created row is keyed by the memory ID so concurrent writers upsert one row.
+				row, err := ds.dbClient.Embedding.Query().
+					Where(entembedding.HasMemoryWith(entmemory.ID(survivorID))).
+					Only(ctx)
+				require.NoError(t, err)
+				require.Equal(t, survivorID, row.ID)
+			}
 
 			event := foldTestEvent(t, ds, userID, survivorID)
 			require.Equal(t, canonical, event.Content, "event records the canonical content")
@@ -266,6 +282,48 @@ func TestUndoFoldLive_RestoresSurvivorAndAllAbsorbedMemories(t *testing.T) {
 	}
 }
 
+// If the survivor's content changed after the fold (a user edit, or a later fold), undo keeps that
+// newer text and its embedding but still undoes the rest: absorbed memories come back and the
+// survivor's confidence and chain metadata are restored.
+func TestUndoFoldLive_KeepsSurvivorEditMadeAfterTheFold(t *testing.T) {
+	ds, userID, chatID := newFoldTestDatastore(t)
+	ctx := context.Background()
+
+	survivorID := insertFoldTestMemory(t, ds, userID, foldTestMemory{content: "Likes tea", confidence: 0.75, embedding: foldTestVector(1)})
+	absorbedA := insertFoldTestMemory(t, ds, userID, foldTestMemory{content: "Drinks oolong most mornings", confidence: 0.6, embedding: foldTestVector(2)})
+	absorbedB := insertFoldTestMemory(t, ds, userID, foldTestMemory{content: "Prefers green tea", confidence: 0.6, embedding: foldTestVector(3)})
+	beforeSurvivor := foldTestState(t, ds, survivorID)
+	beforeA := foldTestState(t, ds, absorbedA)
+	beforeB := foldTestState(t, ds, absorbedB)
+
+	_, err := ds.PersistMemoryMergeGroup(ctx, userID, chatID, foldTestGroup("Likes tea, especially oolong and green tea"), 3,
+		&survivorID, []uuid.UUID{absorbedA, absorbedB}, foldTestVector(9), uuid.Nil, nil, nil)
+	require.NoError(t, err)
+	event := foldTestEvent(t, ds, userID, survivorID)
+	require.True(t, event.Snapshot.ContentRewritten)
+
+	// The user rewords the survivor after the fold (and it is re-embedded for the new text).
+	edited := "Loves tea of every kind"
+	_, err = ds.dbClient.Memory.UpdateOneID(survivorID).SetContent(edited).Save(ctx)
+	require.NoError(t, err)
+	_, err = ds.dbClient.Embedding.Update().
+		Where(entembedding.HasMemoryWith(entmemory.ID(survivorID))).
+		SetEmbedding(pgvector.NewVector(foldTestVector(7))).
+		Save(ctx)
+	require.NoError(t, err)
+
+	_, err = ds.UndoMemoryMergeEvent(ctx, userID, event.ID)
+	require.NoError(t, err)
+
+	survivor := foldTestState(t, ds, survivorID)
+	require.Equal(t, edited, survivor.Content, "the user's newer text survives undo")
+	require.Equal(t, foldTestVector(7), survivor.Embedding, "and so does its embedding")
+	require.Equal(t, beforeSurvivor.Confidence, survivor.Confidence)
+	require.Equal(t, beforeSurvivor.Chain, survivor.Chain)
+	require.Equal(t, beforeA, foldTestState(t, ds, absorbedA))
+	require.Equal(t, beforeB, foldTestState(t, ds, absorbedB))
+}
+
 // Events written before the snapshot carried absorbed members / prior content (Version 0) still
 // undo: the survivor's confidence and chain metadata come back, and the absorbed rows listed in
 // source_members are reactivated even though their embeddings were hard-deleted by the old fold.
@@ -283,6 +341,12 @@ func TestUndoFoldLive_LegacyEventWithoutNewSnapshotFields(t *testing.T) {
 	_, err = ds.dbClient.Memory.UpdateOneID(otherID).SetStatus(entmemory.StatusInactive).Save(ctx)
 	require.NoError(t, err)
 
+	// A stored member in another scope was listed in source_members but never absorbed by the old
+	// fold (survivorMemoryIDForGroup skips cross-scope members); the user deactivated it separately.
+	crossScopeID := insertFoldTestMemory(t, ds, userID, foldTestMemory{scope: entmemory.ScopeChat, content: "Dark mode in this project", confidence: 0.6})
+	_, err = ds.dbClient.Memory.UpdateOneID(crossScopeID).SetStatus(entmemory.StatusInactive).Save(ctx)
+	require.NoError(t, err)
+
 	now := time.Now().UTC()
 	legacy, err := ds.dbClient.MemoryMergeEvent.Create().
 		SetUserID(userID).
@@ -293,6 +357,7 @@ func TestUndoFoldLive_LegacyEventWithoutNewSnapshotFields(t *testing.T) {
 		SetSourceMembers([]entschema.MemoryMergeSourceMember{
 			{Content: "Prefers dark mode", Scope: "User", MemoryID: &survivorID},
 			{Content: "Likes dark themes", Scope: "User", MemoryID: &absorbedID},
+			{Content: "Dark mode in this project", Scope: "Chat", MemoryID: &crossScopeID},
 			{Content: "dark mode", Scope: "User", IsNew: true},
 		}).
 		SetSnapshot(&entschema.MemoryMergeUndoSnapshot{PriorConfidence: 0.6, PriorChainMetadataWasNil: true}).
@@ -315,4 +380,22 @@ func TestUndoFoldLive_LegacyEventWithoutNewSnapshotFields(t *testing.T) {
 	require.Nil(t, absorbed.Embedding, "the deleted embedding needs a backfill re-embed (logged)")
 
 	require.Equal(t, entmemory.StatusInactive, foldTestState(t, ds, otherID).Status)
+	require.Equal(t, entmemory.StatusInactive, foldTestState(t, ds, crossScopeID).Status,
+		"a cross-scope source member was never absorbed, so undo leaves it inactive")
+}
+
+// The survivor lock is Postgres-only: SQLite rejects FOR UPDATE.
+func TestLockRowsForUpdate_PostgresOnly(t *testing.T) {
+	for _, tc := range []struct {
+		dialect string
+		want    bool
+	}{
+		{dialect: dialect.Postgres, want: true},
+		{dialect: dialect.SQLite, want: false},
+	} {
+		sel := entsql.Dialect(tc.dialect).Select("*").From(entsql.Table(entmemory.Table))
+		lockRowsForUpdate(sel)
+		query, _ := sel.Query()
+		require.Equal(t, tc.want, strings.Contains(query, "FOR UPDATE"), "%s: %s", tc.dialect, query)
+	}
 }

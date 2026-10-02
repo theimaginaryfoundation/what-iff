@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"entgo.io/ent/dialect"
+	"entgo.io/ent/dialect/sql"
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
 	"github.com/theimaginaryfoundation/what-iff/ent/embedding"
@@ -74,13 +76,16 @@ func (d *Datastore) PersistMemoryMergeGroup(
 	}
 
 	if survivorMemoryID != nil && *survivorMemoryID != uuid.Nil {
-		existing, err := tx.Memory.Query().
+		// Lock the survivor for the rest of the transaction so a concurrent user edit or star
+		// cannot land between this read and the fold's write (and be overwritten by it).
+		survivorQuery := tx.Memory.Query().
 			Where(
 				memory.ID(*survivorMemoryID),
 				memory.HasOwnerWith(user.ID(userID)),
 				memory.StatusEQ(memory.StatusActive),
-			).
-			Only(ctx)
+			)
+		survivorQuery.Modify(lockRowsForUpdate)
+		existing, err := survivorQuery.Only(ctx)
 		if err != nil {
 			_ = tx.Rollback()
 			if ent.IsNotFound(err) {
@@ -410,6 +415,15 @@ func findLiveMemoryMatch(
 	return nil, nil
 }
 
+// lockRowsForUpdate is a query modifier that locks the selected rows until the transaction ends
+// (SELECT ... FOR UPDATE). Only Postgres gets the clause: SQLite, which the datastore tests run
+// on, has no row locks and rejects FOR UPDATE, and it serializes writers per database anyway.
+func lockRowsForUpdate(s *sql.Selector) {
+	if s.Dialect() == dialect.Postgres {
+		s.ForUpdate()
+	}
+}
+
 // foldLiveOptions carries the optional inputs of a fold_live write.
 type foldLiveOptions struct {
 	sourceMembers     []models.MemoryMergeSourceMember
@@ -587,10 +601,16 @@ func replaceMemoryEmbeddingTx(ctx context.Context, tx *ent.Tx, memoryID uuid.UUI
 		return nil, false, err
 	}
 	if len(rows) == 0 {
-		if _, err := tx.Embedding.Create().
+		// Key the new row by the memory ID (as account import and SetMemoryEmbedding do), so a
+		// concurrent writer for the same memory conflicts on the primary key and upserts instead of
+		// leaving a second embedding row.
+		if err := tx.Embedding.Create().
+			SetID(memoryID).
 			SetEmbedding(pgvector.NewVector(vector)).
 			SetMemoryID(memoryID).
-			Save(ctx); err != nil {
+			OnConflictColumns(embedding.FieldID).
+			UpdateNewValues().
+			Exec(ctx); err != nil {
 			return nil, false, err
 		}
 		return nil, false, nil
@@ -971,12 +991,13 @@ func (d *Datastore) undoFoldLiveMerge(ctx context.Context, tx *ent.Tx, userID uu
 		return fmt.Errorf("merge event missing undo snapshot")
 	}
 
-	entMemory, err := tx.Memory.Query().
+	survivorQuery := tx.Memory.Query().
 		Where(
 			memory.ID(event.SurvivorMemoryID),
 			memory.HasOwnerWith(user.ID(userID)),
-		).
-		Only(ctx)
+		)
+	survivorQuery.Modify(lockRowsForUpdate)
+	entMemory, err := survivorQuery.Only(ctx)
 	if err != nil {
 		if ent.IsNotFound(err) {
 			return ErrMemoryNotFound
@@ -998,9 +1019,20 @@ func (d *Datastore) undoFoldLiveMerge(ctx context.Context, tx *ent.Tx, userID uu
 	}
 
 	if snap.ContentRewritten {
-		update = update.SetContent(snap.PriorContent)
-		if err := restoreSurvivorEmbeddingTx(ctx, tx, entMemory.ID, snap); err != nil {
-			return err
+		// Only put the prior wording back while the survivor still holds the fold's text
+		// (event.Content). If the user edited it, or a later fold rewrote it, that newer text wins:
+		// the rest of the fold is still undone, but the content and its embedding are left alone.
+		if entMemory.Content == event.Content {
+			update = update.SetContent(snap.PriorContent)
+			if err := restoreSurvivorEmbeddingTx(ctx, tx, entMemory.ID, snap); err != nil {
+				return err
+			}
+		} else {
+			d.logger.Warn("fold undo kept the survivor's content: it changed after the fold",
+				zap.String("merge_event_id", event.ID.String()),
+				zap.String("memory_id", entMemory.ID.String()),
+				zap.String("user_id", userID.String()),
+			)
 		}
 	}
 
@@ -1008,7 +1040,7 @@ func (d *Datastore) undoFoldLiveMerge(ctx context.Context, tx *ent.Tx, userID uu
 		return err
 	}
 
-	return d.restoreAbsorbedMemoriesTx(ctx, tx, userID, event, now)
+	return d.restoreAbsorbedMemoriesTx(ctx, tx, userID, event, string(entMemory.Scope), now)
 }
 
 // restoreSurvivorEmbeddingTx puts back the survivor's pre-rewrite embedding from the snapshot, or
@@ -1025,12 +1057,13 @@ func restoreSurvivorEmbeddingTx(ctx context.Context, tx *ent.Tx, memoryID uuid.U
 }
 
 // restoreAbsorbedMemoriesTx returns each memory the fold retired to its prior status.
-func (d *Datastore) restoreAbsorbedMemoriesTx(ctx context.Context, tx *ent.Tx, userID uuid.UUID, event *ent.MemoryMergeEvent, now time.Time) error {
+// survivorScope is the survivor's current scope, used only to pick a legacy event's absorbed set.
+func (d *Datastore) restoreAbsorbedMemoriesTx(ctx context.Context, tx *ent.Tx, userID uuid.UUID, event *ent.MemoryMergeEvent, survivorScope string, now time.Time) error {
 	byStatus := make(map[memory.Status][]uuid.UUID)
 	legacy := event.Snapshot.Version < entschema.MemoryMergeUndoSnapshotVersion
 	if legacy {
 		// Pre-versioned events: absorbed rows were active candidates when folded.
-		for _, id := range legacyAbsorbedMemoryIDs(event) {
+		for _, id := range legacyAbsorbedMemoryIDs(event, survivorScope) {
 			byStatus[memory.StatusActive] = append(byStatus[memory.StatusActive], id)
 		}
 	} else {
@@ -1109,12 +1142,25 @@ func (d *Datastore) restoreAbsorbedMemoriesTx(ctx context.Context, tx *ent.Tx, u
 }
 
 // legacyAbsorbedMemoryIDs derives the absorbed set of a pre-versioned fold_live event from its
-// source_members: every stored (non-new) member other than the survivor.
-func legacyAbsorbedMemoryIDs(event *ent.MemoryMergeEvent) []uuid.UUID {
+// source_members. It mirrors the old fold's rule (survivorMemoryIDForGroup in the agent): only
+// stored members in the group's scope were absorbed, and the survivor's scope is the group's scope.
+// That scope is read from the survivor's own source member, falling back to fallbackScope (the
+// survivor row's current scope) when the event did not list it.
+func legacyAbsorbedMemoryIDs(event *ent.MemoryMergeEvent, fallbackScope string) []uuid.UUID {
+	groupScope := fallbackScope
+	for _, member := range event.SourceMembers {
+		if member.MemoryID != nil && *member.MemoryID == event.SurvivorMemoryID && member.Scope != "" {
+			groupScope = member.Scope
+			break
+		}
+	}
 	seen := map[uuid.UUID]struct{}{event.SurvivorMemoryID: {}}
 	var ids []uuid.UUID
 	for _, member := range event.SourceMembers {
 		if member.IsNew || member.MemoryID == nil || *member.MemoryID == uuid.Nil {
+			continue
+		}
+		if !strings.EqualFold(member.Scope, groupScope) {
 			continue
 		}
 		if _, dup := seen[*member.MemoryID]; dup {
