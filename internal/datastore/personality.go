@@ -202,6 +202,20 @@ func (d *Datastore) CreatePersonality(ctx context.Context, userID uuid.UUID, per
 		return nil, err
 	}
 
+	if card := personalityModel.CharacterCard; card != nil {
+		if _, err := tx.PersonalityCard.Create().
+			SetData(card.Data).
+			SetOmittedFields(card.OmittedFields).
+			SetPersonalityID(entPersonality.ID).
+			Save(ctx); err != nil {
+			d.logger.Error(i18n.T1("create.failed", "Entity", "personality card"), zap.Error(err))
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, err
+		}
+	}
+
 	if personalityModel.CoverImageID != nil {
 		entPersonality, err = tx.Personality.Query().
 			Where(personality.ID(entPersonality.ID)).

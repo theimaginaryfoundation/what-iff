@@ -2532,6 +2532,87 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/personality/import/sillytavern": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a SillyTavern character card
+         * @description Creates a personality from a SillyTavern `chara_card_v2` (or `chara_card_v3`) JSON document sent as the request body.
+         *     The card's `system_prompt`, `description`, `personality` and `scenario` are flattened into the personality's system prompt under
+         *     `### [Description]` / `### [Personality]` / `### [Scenario]` headers (a card with only a `system_prompt` gets no headers).
+         *     A character book of 5 or fewer enabled entries is flattened under `### [Lore]`; a larger one is returned in `lore_files` for the
+         *     client to upload as file attachments to the new personality.
+         *     Greetings, `mes_example`, `post_history_instructions`, tags, extensions and any unknown fields are not applied to behavior; the
+         *     card's whole `data` object is stored verbatim so exporting the personality returns it intact.
+         *     The personality name is made unique (`Name (2)`) if the user already has one with that name.
+         *     If the flattened prompt would exceed the system prompt limit, the card's `scenario` and then `personality` fields are left out of the prompt (they stay with the card and come back on export) and a warning says so; if it is still too long the import is refused with `system_prompt_too_long`.
+         *     The body may also be a SillyTavern PNG card (`image/png` with the card embedded as a `chara`/`ccv3` text chunk).
+         *     The server does not store the picture; the client attaches it as the personality's cover image.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SillyTavernCard"];
+                    "image/png": string;
+                };
+            };
+            responses: {
+                /** @description Personality created from the card */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PersonalityCardImportResult"];
+                    };
+                };
+                /** @description Not a character card (including a PNG with no embedded card, or invalid JSON), unsupported spec, no prompt content, or the flattened prompt exceeds the system prompt limit even after dropping `scenario` and `personality` (`system_prompt_too_long`) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Card exceeds the 8 MB size limit */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/personality/generate": {
         parameters: {
             query?: never;
@@ -2981,6 +3062,87 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/personality/{id}/export/sillytavern": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export a personality as a SillyTavern character card
+         * @description Downloads the personality as a `chara_card_v2` JSON document.
+         *     When the personality was imported from a card, the stored `data` object is the base (so creator, tags, greetings and extensions
+         *     survive) and the current name and system prompt are laid over it.
+         *     A system prompt containing the structural `### [Description]` / `### [Personality]` / `### [Scenario]` headers is split back into
+         *     those card fields; if the headers are absent or were edited the whole prompt exports as `system_prompt`.
+         *     `creator` is the owner's username unless the imported card already named an author.
+         *     With `format=png` the card is embedded in the personality's cover image instead (the SillyTavern PNG card format); a personality with no cover image gets a 400.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description `json` (default) returns the card document; `png` returns the cover image with the card embedded. */
+                    format?: "json" | "png";
+                };
+                header?: never;
+                path: {
+                    /** @description Personality ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Character card */
+                200: {
+                    headers: {
+                        /** @description Attachment header with the sanitized personality name as filename */
+                        "Content-Disposition"?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SillyTavernCard"];
+                        "image/png": string;
+                    };
+                };
+                /** @description Invalid personality ID, or `format=png` for a personality with no cover image */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Personality not found */
+                404: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -10085,6 +10247,38 @@ export interface components {
              * @description Latest chat activity timestamp for this personality, or null when unused.
              */
             last_used_at: string | null;
+        };
+        /** @description A SillyTavern character card envelope (`chara_card_v2`; `chara_card_v3` is also accepted on import). */
+        SillyTavernCard: {
+            /** @enum {string} */
+            spec: "chara_card_v2" | "chara_card_v3";
+            /** @example 2.0 */
+            spec_version: string;
+            /**
+             * @description The card data. Fields we do not model (greetings, tags, extensions, character_book, ...) are preserved verbatim.
+             *     Typical keys: name, description, personality, scenario, first_mes, mes_example, creator_notes, system_prompt,
+             *     post_history_instructions, alternate_greetings, tags, creator, character_version, extensions, character_book.
+             */
+            data: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description A character-book entry to upload as a file attachment to the imported personality. */
+        PersonalityCardLoreFile: {
+            /** @description Entry display name (its comment, else its keywords). */
+            name: string;
+            /** @description Safe, unique file name (`.md`) to upload the entry under. */
+            file_name: string;
+            /** @description The entry's trigger keywords; useful as the attachment description. */
+            keys: string[];
+            content: string;
+        };
+        PersonalityCardImportResult: {
+            personality: components["schemas"]["Personality"];
+            /** @description Character-book entries too numerous to flatten into the prompt; the client uploads each via `POST /personality/{id}/file-attachment`. */
+            lore_files: components["schemas"]["PersonalityCardLoreFile"][];
+            /** @description Non-fatal notes about the import (disabled entries skipped, fields dropped to fit the prompt limit, unexpected spec_version, ...). */
+            warnings: string[];
         };
         /**
          * @example {

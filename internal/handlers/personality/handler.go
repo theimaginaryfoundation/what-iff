@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
@@ -24,16 +25,22 @@ type Handler struct {
 	logger           *zap.Logger
 	agent            *agent.Agent
 	personalityAgent PersonalityAgent
+	// fileStore reads cover images for PNG card export; nil when there is no agent (tests).
+	fileStore storage.FileStore
 }
 
 // NewHandler creates a new Handler instance
 func NewHandler(ds Store, logger *zap.Logger, agent *agent.Agent) *Handler {
-	return &Handler{
+	h := &Handler{
 		ds:               ds,
 		logger:           logger,
 		agent:            agent,
 		personalityAgent: agent,
 	}
+	if agent != nil {
+		h.fileStore = agent.FileStore()
+	}
+	return h
 }
 
 // RegisterRoutes registers all personality-related routes
@@ -43,6 +50,7 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	personalityRouter.HandleFunc("", h.ListPersonalities).Methods("GET")
 	personalityRouter.HandleFunc("", h.CreatePersonality).Methods("POST")
 	personalityRouter.HandleFunc("/prompt-defaults", h.GetPromptDefaults).Methods("GET")
+	personalityRouter.HandleFunc("/import/sillytavern", h.ImportCharacterCard).Methods("POST")
 
 	// Personality generation flow — registered before /{id} to avoid catch-all collision.
 	personalityRouter.HandleFunc("/generate", h.GetOrCreateFlow).Methods("GET")
@@ -63,6 +71,7 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	personalityRouter.HandleFunc("/{id}/expressions/generate-candidates", h.GenerateExpressionCandidates).Methods("POST")
 	personalityRouter.HandleFunc("/{id}/expressions/{expression_key}", h.UpsertExpression).Methods("PUT")
 	personalityRouter.HandleFunc("/{id}/expressions/{expression_key}", h.DeleteExpression).Methods("DELETE")
+	personalityRouter.HandleFunc("/{id}/export/sillytavern", h.ExportCharacterCard).Methods("GET")
 	personalityRouter.HandleFunc("/{id}/prompt-changes", h.ListPersonalityPromptChanges).Methods("GET")
 	personalityRouter.HandleFunc("/{id}/prompt-changes/{change_id}/revert", h.RevertPersonalityPromptChange).Methods("POST")
 	personalityRouter.HandleFunc("/{id}", h.GetPersonality).Methods("GET")

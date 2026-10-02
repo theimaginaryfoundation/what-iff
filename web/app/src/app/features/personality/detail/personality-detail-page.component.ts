@@ -20,6 +20,8 @@ import {
 } from '../../../core/models/personality.model';
 import { ConfirmationService } from '../../../core/services/confirmation.service';
 import { PersonalityService } from '../../../core/services/personality.service';
+import { PersonalityCardService } from '../../../core/services/personality-card.service';
+import { apiErrorMessage } from '../../../core/utils/api-error.helpers';
 import { PersonalityViewService } from '../../../core/services/personality-view.service';
 import { ImageGalleryService } from '../../../core/services/image-gallery.service';
 import { UserPreferencesService } from '../../../core/services/user-preferences.service';
@@ -68,6 +70,7 @@ export class PersonalityDetailPageComponent implements OnInit {
   private readonly chatService = inject(ChatService);
   private readonly imageGallery = inject(ImageGalleryService);
   private readonly personalityService = inject(PersonalityService);
+  private readonly cardService = inject(PersonalityCardService);
   private readonly userPreferencesService = inject(UserPreferencesService);
   private readonly confirmation = inject(ConfirmationService);
   private readonly route = inject(ActivatedRoute);
@@ -77,6 +80,7 @@ export class PersonalityDetailPageComponent implements OnInit {
   readonly personality = this.view.personality;
   readonly expressions = this.view.expressions;
   readonly isLoading = this.view.loading;
+  readonly isExportingCard = signal(false);
   readonly errorMessage = this.view.error;
 
   readonly preferences = toSignal<UserPreferences | null>(this.userPreferencesService.preferences$, {
@@ -301,6 +305,27 @@ export class PersonalityDetailPageComponent implements OnInit {
         console.error('Failed to make default', err);
         await this.confirmation.alert({
           message: 'Failed to update default personality. Please try again.',
+          type: 'danger',
+        });
+      },
+    });
+  }
+
+  /**
+   * Downloads the saved personality as a SillyTavern character card: JSON, or the cover image with
+   * the card embedded (unsaved editor changes are not included).
+   */
+  onExportCard(format: 'json' | 'png' = 'json'): void {
+    const personality = this.personality();
+    if (!personality || this.isExportingCard()) return;
+    this.isExportingCard.set(true);
+    this.cardService.exportCard(personality, format).subscribe({
+      next: () => this.isExportingCard.set(false),
+      error: async err => {
+        this.isExportingCard.set(false);
+        console.error('Failed to export character card', err);
+        await this.confirmation.alert({
+          message: apiErrorMessage(err, 'Failed to export this personality. Please try again.'),
           type: 'danger',
         });
       },

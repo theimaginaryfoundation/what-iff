@@ -675,6 +675,7 @@ func (h *Handler) importPersonalities(ctx context.Context, userID uuid.UUID, zr 
 			SystemPrompt:    pf.SystemPrompt,
 			Scratchpad:      pf.Scratchpad,
 			AutoPinMemories: pf.AutoPinMemories,
+			CharacterCard:   restoredCard(pf),
 		})
 		if err != nil {
 			h.logger.Warn("account import: create personality failed", zap.String("name", name), zap.Error(err))
@@ -688,6 +689,15 @@ func (h *Handler) importPersonalities(ctx context.Context, userID uuid.UUID, zr 
 		counts.Created++
 	}
 	return counts, ids
+}
+
+// restoredCard rebuilds the character-card passthrough from an exported personality.json, or nil
+// when the personality did not come from a card.
+func restoredCard(pf exporter.PersonalityFile) *models.PersonalityCard {
+	if pf.CharacterCard == nil {
+		return nil
+	}
+	return &models.PersonalityCard{Data: pf.CharacterCard, OmittedFields: pf.OmittedCardFields}
 }
 
 // filterSelectedConversations keeps only the parsed conversations whose source uuid is listed in
