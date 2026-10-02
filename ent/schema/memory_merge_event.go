@@ -21,19 +21,50 @@ type MemoryMergeSourceMember struct {
 	IsNew      bool       `json:"is_new"`
 }
 
-// MemoryMergeUndoSnapshot captures enough state to revert an in-place fold.
+// MemoryMergeUndoSnapshotVersion is the current MemoryMergeUndoSnapshot.Version. Rows written
+// before the field existed decode as 0 ("legacy"): they carry no prior content/embedding and no
+// explicit absorbed-member list, so undo falls back to source_members for the absorbed set.
+const MemoryMergeUndoSnapshotVersion = 1
+
+// MemoryMergeAbsorbedMember is one memory a fold retired (set inactive) into the survivor.
+type MemoryMergeAbsorbedMember struct {
+	MemoryID    uuid.UUID `json:"memory_id"`
+	PriorStatus string    `json:"prior_status"`
+}
+
+// MemoryMergeUndoSnapshot captures enough state to revert an in-place fold. Every field added
+// after the original three is optional, so legacy rows still decode (see Version).
 type MemoryMergeUndoSnapshot struct {
 	PriorConfidence          float64              `json:"prior_confidence,omitempty"`
 	PriorChainMetadata       *MemoryChainMetadata `json:"prior_chain_metadata,omitempty"`
 	PriorChainMetadataWasNil bool                 `json:"prior_chain_metadata_was_nil"`
+
+	// Version is MemoryMergeUndoSnapshotVersion for rows written by current code, 0 for legacy rows.
+	Version int `json:"version,omitempty"`
+	// CanonicalContent is the merger's proposed phrasing for the group, recorded even when the
+	// survivor was not rewritten (e.g. it is starred) so the audit row keeps the proposal.
+	CanonicalContent string `json:"canonical_content,omitempty"`
+	// ContentRewritten is true when the fold replaced the survivor's content with CanonicalContent
+	// and re-embedded it. PriorContent and PriorEmbedding/PriorEmbeddingMissing are then set.
+	ContentRewritten bool   `json:"content_rewritten,omitempty"`
+	PriorContent     string `json:"prior_content,omitempty"`
+	// PriorEmbedding is the survivor's embedding vector before the rewrite, so undo can restore it
+	// without calling the embedding API. PriorEmbeddingMissing is true when the survivor had no
+	// embedding row at all (undo then removes the one the rewrite created).
+	PriorEmbedding        []float32 `json:"prior_embedding,omitempty"`
+	PriorEmbeddingMissing bool      `json:"prior_embedding_missing,omitempty"`
+	// AbsorbedMembers lists every memory the fold set inactive, with its status beforehand.
+	AbsorbedMembers []MemoryMergeAbsorbedMember `json:"absorbed_members,omitempty"`
 }
 
 // UnmarshalJSON accepts confidence buckets written before confidence became numeric.
 func (s *MemoryMergeUndoSnapshot) UnmarshalJSON(data []byte) error {
+	// alias drops the UnmarshalJSON method so the plain fields decode normally; prior_confidence
+	// is shadowed by the outer RawMessage and decoded separately for its legacy bucket strings.
+	type alias MemoryMergeUndoSnapshot
 	var raw struct {
-		PriorConfidence          json.RawMessage      `json:"prior_confidence"`
-		PriorChainMetadata       *MemoryChainMetadata `json:"prior_chain_metadata,omitempty"`
-		PriorChainMetadataWasNil bool                 `json:"prior_chain_metadata_was_nil"`
+		alias
+		PriorConfidence json.RawMessage `json:"prior_confidence"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -43,11 +74,8 @@ func (s *MemoryMergeUndoSnapshot) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("decode prior_confidence: %w", err)
 	}
-	*s = MemoryMergeUndoSnapshot{
-		PriorConfidence:          confidence,
-		PriorChainMetadata:       raw.PriorChainMetadata,
-		PriorChainMetadataWasNil: raw.PriorChainMetadataWasNil,
-	}
+	*s = MemoryMergeUndoSnapshot(raw.alias)
+	s.PriorConfidence = confidence
 	return nil
 }
 
@@ -103,7 +131,7 @@ func (MemoryMergeEvent) Fields() []ent.Field {
 			Nillable().
 			Comment("For link events: the link_group_id assigned to the member memories, so the link can be reverted"),
 		field.Text("content").
-			Comment("Survivor content at merge time"),
+			Comment("Survivor content after the merge (the canonical content when a fold rewrote the survivor)"),
 		field.Int("duplicates_folded").
 			Default(1).
 			Comment("How many extracted duplicates were folded into this event"),
@@ -112,7 +140,7 @@ func (MemoryMergeEvent) Fields() []ent.Field {
 			Comment("Pre-merge candidate snapshot for audit/review"),
 		field.JSON("snapshot", &MemoryMergeUndoSnapshot{}).
 			Optional().
-			Comment("Prior survivor state for fold_live undo"),
+			Comment("Prior survivor state (content, embedding, confidence, chain metadata) and absorbed members for fold_live undo"),
 		field.Time("reverted_at").
 			Optional().
 			Nillable().
