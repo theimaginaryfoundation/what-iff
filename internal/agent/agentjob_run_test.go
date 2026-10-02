@@ -103,6 +103,7 @@ func TestHandleEphemeralPromptSync_PrepareChatContextErrorIsReturned(t *testing.
 	mock.ExpectRollback()
 
 	a := newTestAgent(ds)
+	a.testHooks.ChatTurnStore = newFakeChatTurnStore() // the turn ticket stays out of sqlmock
 	ctx := context.WithValue(context.Background(), middleware.UserIDKey, uuid.New())
 	msg, err := a.HandleEphemeralPromptSync(ctx, uuid.New(), "hi", nil, nil)
 	require.Nil(t, msg)
@@ -151,6 +152,7 @@ func TestHandleEphemeralPromptSync_DetachesFromCallerCancellation(t *testing.T) 
 			mock.ExpectRollback()
 
 			a := newTestAgent(ds)
+			a.testHooks.ChatTurnStore = newFakeChatTurnStore() // the turn ticket stays out of sqlmock
 			ctx, cancel := context.WithCancel(context.WithValue(context.Background(), middleware.UserIDKey, uuid.New()))
 			cancel()
 			msg, err := run(a, ctx)

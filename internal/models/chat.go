@@ -40,6 +40,8 @@ type Chat struct {
 	PersonalityExpressionsEnabled bool   `json:"-"`
 	SystemPrompt                  string `json:"-"`
 	Scratchpad                    string `json:"-"`
+	// ScratchpadRevision is the personality's scratchpad revision read alongside Scratchpad.
+	ScratchpadRevision int `json:"-"`
 	// ActiveMoodID is the effective mood currently used for response generation.
 	ActiveMoodID *uuid.UUID `json:"active_mood_id,omitempty"`
 	// IsAutoMood controls mood selection policy (true = auto, false = manually pinned mood).

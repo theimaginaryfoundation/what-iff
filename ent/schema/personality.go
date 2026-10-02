@@ -40,6 +40,9 @@ func (Personality) Fields() []ent.Field {
 			Default([]string{}).
 			Comment("History of previous scratchpad states with the most recent entry first.").
 			Annotations(entsql.Default("[]")),
+		field.Int("scratchpad_revision").
+			Default(0).
+			Comment("Optimistic-concurrency counter for scratchpad; bumped on every scratchpad write so a checkpoint can detect a concurrent update (issue #254)."),
 		field.String("archival_model").
 			Default("").
 			Comment("Deprecated: retained for schema compatibility; ignored by the server."),

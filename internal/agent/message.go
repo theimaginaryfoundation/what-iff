@@ -161,6 +161,9 @@ type Agent struct {
 
 	runningJobCancelsMu sync.Mutex
 	runningJobCancels   map[uuid.UUID]runningJobCancel
+
+	// turnEnded wakes turns queued behind another turn in this process (chat_turn_gate.go).
+	turnEnded turnSignal
 }
 
 // nonVendorLLM reports whether assistant generation is served by anything
@@ -889,6 +892,15 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 	a.logger.Info("starting job for user message",
 		zap.String("user_id", chatJob.UserID.String()),
 		zap.String("chat_message_id", chatMessage.ID.String()))
+
+	// Turn gate: wait until earlier turns in this chat have finished, so this one builds its context
+	// on their replies and never races their writes to shared chat/personality state (#254).
+	releaseTurn, err := a.awaitUserChatTurn(ctx, chatJob, chatMessage.ChatID)
+	if err != nil {
+		a.failChatTurnWait(ctx, chatJob, err)
+		return nil, err
+	}
+	defer releaseTurn()
 
 	// Rehydration gate: if this thread was just restored from import and its summary is still being
 	// generated, stall here until it settles so the turn runs against the checkpoint summary + recent

@@ -997,6 +997,7 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 			system_prompt text NOT NULL,
 			scratchpad text NOT NULL DEFAULT '',
 			scratchpad_history json NOT NULL DEFAULT '[]',
+			scratchpad_revision integer NOT NULL DEFAULT 0,
 			archival_model text NOT NULL DEFAULT '',
 			scratchpad_update_prompt text NOT NULL DEFAULT '',
 			memory_search_prompt text NOT NULL DEFAULT '',

@@ -24,6 +24,9 @@ type agentTestHooks struct {
 	ImageRitualCreateChatMessage    func(ctx context.Context, userID uuid.UUID, chatMessage models.ChatMessage) (*models.ChatMessage, error)
 	ImageRitualCreateFileAttachment func(ctx context.Context, userID uuid.UUID, fileAttachment models.FileAttachment) (*models.FileAttachment, error)
 	ImageRitualPersistImage         func(ctx context.Context, userID uuid.UUID, attachment *models.FileAttachment, imageBase64 string) error
+
+	// ChatTurnStore replaces the datastore behind the per-chat turn gate.
+	ChatTurnStore chatTurnStore
 }
 
 func (h agentTestHooks) anySet() bool {
@@ -34,7 +37,8 @@ func (h agentTestHooks) anySet() bool {
 		h.ImageRitualGenerateImagePNG != nil ||
 		h.ImageRitualCreateChatMessage != nil ||
 		h.ImageRitualCreateFileAttachment != nil ||
-		h.ImageRitualPersistImage != nil
+		h.ImageRitualPersistImage != nil ||
+		h.ChatTurnStore != nil
 }
 
 // assertNoTestHooksInProduction panics if any test hook is set outside of `go test`.
