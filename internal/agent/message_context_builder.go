@@ -21,6 +21,10 @@ import (
 const (
 	carryOverMaxTurns  = 3
 	carryOverMaxTokens = 500
+	// defaultHistoryPageSize is the number of post-checkpoint history messages
+	// replayed per turn under the fixed default budget. Routed through
+	// resolveContextBudget so the overlay can vary it per conversation.
+	defaultHistoryPageSize = 50
 )
 
 // messageContextBuilder is the single owner of request-context construction for chat turns.
@@ -273,13 +277,14 @@ func (b *messageContextBuilder) buildHistoryContext(ctx context.Context, userID 
 		modelCtx.Append(provider.SegmentKindScratchpad, provider.RoleDeveloper, chat.Scratchpad, true)
 	}
 
+	budget := resolveContextBudget(chat)
 	if chat.LastCheckpointAt != nil {
-		carryOver, err = b.selectCarryOverTurns(ctx, userID, chat.ID, excludeMessageID, carryOverMaxTurns, carryOverMaxTokens, chat.LastCheckpointAt, "checkpoint carry-over")
+		carryOver, err = b.selectCarryOverTurns(ctx, userID, chat.ID, excludeMessageID, budget.CarryOverMaxTurns, budget.CarryOverMaxTokens, chat.LastCheckpointAt, "checkpoint carry-over")
 		if err != nil {
 			return nil, nil, nil, err
 		}
 	}
-	history = b.loadHistoryMessages(ctx, userID, chat.ID, excludeMessageID, 50, chat.LastCheckpointAt, "history")
+	history = b.loadHistoryMessages(ctx, userID, chat.ID, excludeMessageID, budget.HistoryPageSize, chat.LastCheckpointAt, "history")
 
 	tz, _ := middleware.GetClientTimezoneFromContext(ctx)
 	normalizedTZ := normalizeTimezoneName(tz)
