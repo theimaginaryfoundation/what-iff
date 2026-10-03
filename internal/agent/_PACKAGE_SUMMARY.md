@@ -24,6 +24,23 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
   After the state is `ready` (so the inference gate is already released), it also **seeds long-term memories** via `extractAndStoreImportedMemories`: mines up to `importMemoryMaxPerThread` (20) durable memories from the full transcript using the live memory-extraction prompt **minus** the scratchpad delta (`importMemoryExtractionInstructions` + `memoryExtractionSchema`), chunked for long threads, and stores each as an embedded `Memory` tied to the chat (best-effort; never fails the job).
   This runs for both the summarized and short-thread paths so an import leaves the user with ~10-20 memories per rehydrated thread.
   **`WaitForThreadRehydration`** is the inference gate: `handleUserMessage`/`handleEphemeralPrompt` call it to stall a turn (bounded by `rehydrationWaitTimeout`, graceful degrade on timeout) until an in-flight summary settles.
+- **Per-chat turn serialization (`chat_turn_gate.go`, #254):** turns in one chat run one at a time, in job order, across API instances.
+  `handleUserMessage` and `handleEphemeralPrompt` call the gate (`awaitUserChatTurn` / `beginEphemeralChatTurn`) after the job is marked processing and before the rehydration gate and `prepareChatContext`, so a queued turn builds its context on the earlier turn's reply.
+  It is job-ordered single-flight: a turn waits until no older `chat_message`/`agent_job_run` job in its chat is still pending or processing (`ListPendingTurnJobsForChat`, ordered by `created_at` then id at microsecond precision).
+  The gate opens at `inference_complete`, when the reply and response chain are saved (`persistInferencePhase` writes the chat before the job) and when the web client unlocks its composer; the earlier turn's expression and checkpoint overlap the next turn, whose scratchpad write is conditional.
+  Waiting polls with backoff (250ms to 2s); a turn in this process reaching `inference_complete` (`noteTurnJobStatus`, from the job phase helpers) wakes that chat's waiters at once (`chatTurnTracker`, keyed per chat).
+  Nothing is held while a turn runs: no advisory lock or pinned connection.
+  Every queued or running turn heartbeats its job (`TouchJob`, every 30s), and a pending/processing job without a write for `chatTurnStaleAfter` (2m) is treated as dead and does not block.
+  A turn that queues longer than `chatTurnWaitTimeout` (10m; queued turns heartbeat too, so it need not stay below the stale bound) fails with `ErrChatTurnWaitTimeout` instead of running concurrently.
+  A queued turn whose job was cancelled meanwhile (Stop on another instance) does not run (`errQueuedTurnCancelled`), and a cancelled queued chat turn is marked cancelled.
+  A scheduled run has no job row, so `beginEphemeralChatTurn` creates an `agent_job_run` ticket job (reference = chat id) to hold its place and finishes it with the run's outcome.
+  `handleUserMessage` owns its job's status, so its release also finishes a job the turn left non-terminal (a lost final status write): complete if it saved a reply, else failed.
+  On shutdown, `FailInFlightTurns` (called by `server.Shutdown`) finishes this process's in-flight turn jobs: complete if past their reply, else failed.
+  `finalizeChat` renames a new chat without writing `response_id`, which the next turn may already have moved on.
+- **Scratchpad optimistic concurrency (`scratchpad_commit.go`, #254):** a checkpoint's scratchpad write is conditional on the revision its turn read (`Chat.ScratchpadRevision`).
+  On `datastore.ErrScratchpadConflict`, `commitScratchpadUpdate` reloads the personality and regenerates the update once against the latest scratchpad, writing conditionally on that revision; a second conflict skips the update (logged) rather than overwrite it.
+  On that retry the latest scratchpad becomes the turn's previous scratchpad (`adoptScratchpadUpdate`; on the Claude path the context's scratchpad segment is swapped, on the OpenAI path `concurrentScratchpadNote` says it replaces the earlier one), so the memory delta holds only this conversation's changes.
+  The `update_scratchpad` tool and user edits write unconditionally but bump the revision; the tool also records the new scratchpad and revision on the turn's chat, so the turn's own checkpoint does not conflict with it.
 - **Post-processing:** Checkpoint policy, message sync helpers.
 
 ## Key types and entry points
@@ -119,6 +136,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   A new send and a retry share one goroutine body, `runAsyncChatMessageJob` (`message.go`), so both get the same panic guard (`recoverAsyncMessageJob` marks the job failed instead of crashing the process), cancel cleanup and outcome recording.
   Chat turns record `whatiff.chat.turn.stage.duration` for a fixed stage set (`rehydration_wait`, `prepare_context` including `memory_enrichment`, `mood`, `build_context`, `inference`, `expression`, `post_process` including `chat_name` and `checkpoint_scratchpad`/`memory`/`summary`/`persist`), labeled by the turn's `call_path` (`user_chat` or `agent_job`).
   `rehydration_wait` and `expression` are recorded only when the turn actually waits or runs the picker, so skipped turns don't add zero samples.
+  `turn_queue_wait` (per-chat turn gate) is likewise recorded only when a turn queued behind an earlier one.
   Quota-gate rejections count `whatiff.quota.rejections` by `call_path`.
   Each tool call is timed on `whatiff.agent.tool.duration`; `toolMetricName` keeps the `tool` label bounded (catalog function tools by name, `mcp__*` as `mcp`, anything else, including made-up names, as `other`).
 - **Delegated subagent path:** `run_subagent` uses a minimal context builder (`base+personality system prompt`, optional scratchpad, provided message only), explicitly excludes history/checkpoint/memory segments, and calls providers directly to avoid post-turn side effects.
@@ -143,6 +161,8 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 - `message_context_builder_expression_test.go` — prior-turn expression snapshot selection for continuity text.
 - `conversation_summary_test.go`, `scratchpad_test.go`, `memory_test.go`, `postprocessing_policy_test.go` — maintenance prompts and checkpoints.
 - `thread_rehydration_test.go` — imported-thread split at n-5 turns, assistant counting, char-budget chunking, and transcript rendering.
+- `chat_turn_gate_test.go` — turn gate on an in-memory `chatTurnStore` (`agentTestHooks.ChatTurnStore`): waits until the older turn reaches `inference_complete`, replied/terminal/stale/newer/other-chat jobs don't block, heartbeats, timeout, cancel (context and job cancelled while queued), per-chat wake, job-order serialization, shutdown finishing, scheduled-run tickets.
+- `scratchpad_commit_test.go` — conditional scratchpad write: stale revision regenerates against the latest, a second conflict skips, and a forced interleave of two checkpoints keeps both updates.
 - `message_test.go`, `message_timezone_test.go` — attachment labels, memories, tool-call context, human-readable `[sys:…]` timezone stamps (weekday + local offset).
 - `mcp_tools_test.go` — MCP tool wiring (OpenAI + Claude MCP config mapping).
 - `processtoolcall_test.go` — catalog-derived tool list and dispatch handler registration (including `list_models`, `list_personalities`, `run_subagent`).

@@ -25,6 +25,12 @@ const scratchpadMaxTokens = 3072
 type ScratchpadUpdate struct {
 	Content    string
 	ResponseID *string
+
+	// revision is the scratchpad revision the update was saved at.
+	revision int
+	// rebasedOn is the newer personality state the update was regenerated on after a conflict;
+	// nil when it was written on the turn's own scratchpad.
+	rebasedOn *models.Personality
 }
 
 var scratchpadUpdateDeveloperMessage = `The current scratchpad is provided at the start of the conversation, in a developer message. Please use it as a reference while generating an updated scratchpad.
@@ -50,65 +56,67 @@ func (a *Agent) updateScratchpad(ctx context.Context, userID uuid.UUID, response
 		a.logger.Error("failed to get personality by ID", zap.Error(err))
 		return ScratchpadUpdate{}, fmt.Errorf("failed to get personality by ID: %w", err)
 	}
-	prompt := buildUpdateScratchpadPrompt(personalityModel)
-
-	params := responses.ResponseNewParams{
-		Model:              archivalOpenAIModel,
-		SafetyIdentifier:   openai.String(userID.String()),
-		PreviousResponseID: openai.String(*responseID),
-		MaxOutputTokens:    openai.Int(scratchpadMaxTokens),
-		ServiceTier:        responses.ResponseNewParamsServiceTierFlex,
-		Instructions:       openai.String(chatCtx.chat.SystemPrompt),
-
-		Input: responses.ResponseNewParamsInputUnion{
-			OfInputItemList: []responses.ResponseInputItemUnionParam{
-				responses.ResponseInputItemParamOfMessage(scratchpadUpdateDeveloperMessage, provider.RoleDeveloper),
-				responses.ResponseInputItemParamOfMessage(prompt, provider.RoleUser),
-			},
-		},
-	}
-
-	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathScratchpad), params)
-	if err != nil {
-		a.logger.Error("failed to update scratchpad", zap.Error(err))
-		return ScratchpadUpdate{}, fmt.Errorf("failed to update scratchpad: %w", err)
-	}
-
-	updatedScratchpad := strings.TrimSpace(resp.OutputText())
-	if updatedScratchpad == "" {
-		a.logger.Warn("scratchpad update returned empty content")
-		return ScratchpadUpdate{}, fmt.Errorf("scratchpad update returned empty content")
-	}
-
-	// We let OpenAI return more than our max_tokens, for cases where the scratchpad gets clipped. Then summarize it to get it under our token limit.
-	if a.shouldSummarizeScratchpad(updatedScratchpad) {
-		summarized, err := a.summarizeScratchpad(ctx, userID, responseID, chatCtx, updatedScratchpad)
-		if err != nil {
-			a.logger.Error("failed to summarize scratchpad; keeping unsummarized version", zap.Error(err))
-		} else {
-			updatedScratchpad = summarized
+	// generate runs the update model call; on a conflict retry (latest != nil) it is told about
+	// the newer scratchpad and builds on that instead (see commitScratchpadUpdate).
+	generate := func(ctx context.Context, latest *models.Personality) (ScratchpadUpdate, error) {
+		base := personalityModel
+		input := []responses.ResponseInputItemUnionParam{
+			responses.ResponseInputItemParamOfMessage(scratchpadUpdateDeveloperMessage, provider.RoleDeveloper),
 		}
+		if latest != nil {
+			base = latest
+			input = append(input, responses.ResponseInputItemParamOfMessage(concurrentScratchpadNote(latest.Scratchpad), provider.RoleDeveloper))
+		}
+		input = append(input, responses.ResponseInputItemParamOfMessage(buildUpdateScratchpadPrompt(base), provider.RoleUser))
+
+		params := responses.ResponseNewParams{
+			Model:              archivalOpenAIModel,
+			SafetyIdentifier:   openai.String(userID.String()),
+			PreviousResponseID: openai.String(*responseID),
+			MaxOutputTokens:    openai.Int(scratchpadMaxTokens),
+			ServiceTier:        responses.ResponseNewParamsServiceTierFlex,
+			Instructions:       openai.String(chatCtx.chat.SystemPrompt),
+
+			Input: responses.ResponseNewParamsInputUnion{OfInputItemList: input},
+		}
+
+		resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathScratchpad), params)
+		if err != nil {
+			a.logger.Error("failed to update scratchpad", zap.Error(err))
+			return ScratchpadUpdate{}, fmt.Errorf("failed to update scratchpad: %w", err)
+		}
+
+		updatedScratchpad := strings.TrimSpace(resp.OutputText())
+		if updatedScratchpad == "" {
+			a.logger.Warn("scratchpad update returned empty content")
+			return ScratchpadUpdate{}, fmt.Errorf("scratchpad update returned empty content")
+		}
+
+		// We let OpenAI return more than our max_tokens, for cases where the scratchpad gets clipped. Then summarize it to get it under our token limit.
+		if a.shouldSummarizeScratchpad(updatedScratchpad) {
+			summarized, err := a.summarizeScratchpad(ctx, userID, responseID, chatCtx, updatedScratchpad)
+			if err != nil {
+				a.logger.Error("failed to summarize scratchpad; keeping unsummarized version", zap.Error(err))
+			} else {
+				updatedScratchpad = summarized
+			}
+		}
+		return ScratchpadUpdate{Content: updatedScratchpad, ResponseID: &resp.ID}, nil
 	}
 
-	// Update the personality scratchpad in the database
-	personality := models.Personality{
-		ID:         chatCtx.chat.PersonalityID,
-		Scratchpad: updatedScratchpad,
-	}
-
-	_, err = a.ds.UpdatePersonalityScratchpad(ctx, userID, personality)
+	// Persist conditionally on the revision this turn's scratchpad was read at.
+	update, err := commitScratchpadUpdate(ctx, a.ds, a.logger, userID, chatCtx.chat.PersonalityID, chatCtx.chat.ScratchpadRevision, generate)
 	if err != nil {
 		a.logger.Error("failed to save updated scratchpad", zap.Error(err))
-		return ScratchpadUpdate{}, fmt.Errorf("failed to save updated scratchpad: %w", err)
+		return ScratchpadUpdate{}, err
 	}
+
+	adoptScratchpadUpdate(chatCtx.chat, update)
 
 	a.logger.Info("successfully updated personality scratchpad",
 		zap.String("personality_id", chatCtx.chat.PersonalityID.String()),
-		zap.Int("scratchpad_length", len(updatedScratchpad)))
-	return ScratchpadUpdate{
-		Content:    updatedScratchpad,
-		ResponseID: &resp.ID,
-	}, nil
+		zap.Int("scratchpad_length", len(update.Content)))
+	return update, nil
 }
 
 func buildScratchpadSummarizationInput(scratchpad string) string {
@@ -161,41 +169,56 @@ func (a *Agent) updateScratchpadClaude(ctx context.Context, userID uuid.UUID, ch
 		a.logger.Error("failed to get personality by ID", zap.Error(err))
 		return ScratchpadUpdate{}, fmt.Errorf("failed to get personality by ID: %w", err)
 	}
-	prompt := buildUpdateScratchpadPrompt(personalityModel)
 	if a.ClaudeProvider == nil {
 		return ScratchpadUpdate{}, fmt.Errorf("ClaudeProvider is nil")
 	}
-	modelContext.Append(provider.SegmentKindUserMessage, provider.RoleUser, prompt, false)
 
-	params := modelContext.BuildClaudeParams(archivalClaudeModel)
-	params.MaxTokens = int64(scratchpadMaxTokens)
-
-	msg, err := a.ClaudeProvider.Call(telemetry.WithCallPath(ctx, telemetry.CallPathScratchpad), params)
-	if err != nil {
-		return ScratchpadUpdate{}, fmt.Errorf("Claude scratchpad update failed: %w", err)
-	}
-	updatedScratchpad := strings.TrimSpace(provider.ExtractClaudeText(msg))
-
-	if updatedScratchpad == "" {
-		return ScratchpadUpdate{}, fmt.Errorf("scratchpad update returned empty content")
-	}
-	if a.shouldSummarizeScratchpad(updatedScratchpad) {
-
-		summarized, err := a.summarizeScratchpadClaude(ctx, userID, updatedScratchpad)
-		if err != nil {
-			a.logger.Error("failed to summarize Claude scratchpad; keeping unsummarized version", zap.Error(err))
-		} else {
-			updatedScratchpad = summarized
+	// Each attempt runs on its own clone, so a conflict retry does not see the first attempt's
+	// prompt; the winning attempt's turn is replayed onto modelContext below.
+	var usedLatest *models.Personality
+	var usedPrompt string
+	generate := func(ctx context.Context, latest *models.Personality) (ScratchpadUpdate, error) {
+		base := personalityModel
+		if latest != nil {
+			base = latest
 		}
+		usedLatest, usedPrompt = latest, buildUpdateScratchpadPrompt(base)
+		attemptCtx := modelContext.Clone()
+		appendScratchpadUpdateTurn(attemptCtx, usedLatest, usedPrompt)
+
+		params := attemptCtx.BuildClaudeParams(archivalClaudeModel)
+		params.MaxTokens = int64(scratchpadMaxTokens)
+
+		msg, err := a.ClaudeProvider.Call(telemetry.WithCallPath(ctx, telemetry.CallPathScratchpad), params)
+		if err != nil {
+			return ScratchpadUpdate{}, fmt.Errorf("Claude scratchpad update failed: %w", err)
+		}
+		updatedScratchpad := strings.TrimSpace(provider.ExtractClaudeText(msg))
+
+		if updatedScratchpad == "" {
+			return ScratchpadUpdate{}, fmt.Errorf("scratchpad update returned empty content")
+		}
+		if a.shouldSummarizeScratchpad(updatedScratchpad) {
+
+			summarized, err := a.summarizeScratchpadClaude(ctx, userID, updatedScratchpad)
+			if err != nil {
+				a.logger.Error("failed to summarize Claude scratchpad; keeping unsummarized version", zap.Error(err))
+			} else {
+				updatedScratchpad = summarized
+			}
+		}
+		return ScratchpadUpdate{Content: updatedScratchpad}, nil
 	}
 
-	_, err = a.ds.UpdatePersonalityScratchpad(ctx, userID, models.Personality{
-		ID:         chatCtx.chat.PersonalityID,
-		Scratchpad: updatedScratchpad,
-	})
+	// Persist conditionally on the revision this turn's scratchpad was read at.
+	update, err := commitScratchpadUpdate(ctx, a.ds, a.logger, userID, chatCtx.chat.PersonalityID, chatCtx.chat.ScratchpadRevision, generate)
 	if err != nil {
-		return ScratchpadUpdate{}, fmt.Errorf("failed to save updated scratchpad: %w", err)
+		return ScratchpadUpdate{}, err
 	}
+	// The caller continues on modelContext (memory extraction), which must hold the update turn.
+	appendScratchpadUpdateTurn(modelContext, usedLatest, usedPrompt)
+	adoptScratchpadUpdate(chatCtx.chat, update)
+	updatedScratchpad := update.Content
 
 	a.logger.Info("successfully updated personality scratchpad (Claude)",
 		zap.String("personality_id", chatCtx.chat.PersonalityID.String()),

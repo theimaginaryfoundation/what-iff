@@ -119,11 +119,16 @@ func deriveStatusAndErrorText(job *models.AgentJob, runErr error, scheduleErrTex
 	return statusUpdate, errText
 }
 
+// Execute hands the run off to its own goroutine and returns at once. A run can queue behind a
+// busy turn in its chat (the agent's per-chat turn gate) for minutes, and holding one of the
+// scheduler's schedulerWorkerLimit workers for that would stall every user's scheduled jobs.
+// Overlap is still prevented per agent job (inFlight) and volume per user (the execution-window
+// limit), as for RunAgentJobNow, which runs detached the same way.
 func (j *agentJobQuartzJob) Execute(ctx context.Context) error {
 	if j.manager == nil {
 		return nil
 	}
-	j.manager.executeAgentJobWithOptions(ctx, j.userID, j.agentJobID, executionOptions{
+	go j.manager.executeAgentJobWithOptions(context.WithoutCancel(ctx), j.userID, j.agentJobID, executionOptions{
 		allowPaused:        false,
 		deferredRetryCount: j.deferredRetryCount,
 		recurrenceHint:     j.recurrenceBucket,

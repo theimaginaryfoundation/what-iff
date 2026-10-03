@@ -20,7 +20,8 @@ import (
 const (
 	// schedulerMisfireBufferSize keeps a small burst buffer for delayed jobs.
 	schedulerMisfireBufferSize = 64
-	// schedulerWorkerLimit keeps concurrent executions conservative for the in-process MVP.
+	// schedulerWorkerLimit bounds quartz workers. They only dispatch: each run then executes on its
+	// own goroutine (agentJobQuartzJob.Execute), since a run may queue behind a busy chat turn.
 	schedulerWorkerLimit = 2
 	// schedulerOutdatedThreshold treats jobs older than this as misfires.
 	schedulerOutdatedThreshold = 30 * time.Minute

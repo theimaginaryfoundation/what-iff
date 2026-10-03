@@ -8,6 +8,7 @@ import (
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
 	"github.com/theimaginaryfoundation/what-iff/ent/mood"
 	"github.com/theimaginaryfoundation/what-iff/ent/personality"
+	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
 	"github.com/theimaginaryfoundation/what-iff/ent/schema"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
@@ -88,6 +89,7 @@ func toPersonalityModel(e *ent.Personality) *models.Personality {
 		SystemPrompt:           e.SystemPrompt,
 		Scratchpad:             e.Scratchpad,
 		ScratchpadHistory:      history,
+		ScratchpadRevision:     e.ScratchpadRevision,
 		ArchivalModel:          e.ArchivalModel,
 		ScratchpadUpdatePrompt: e.ScratchpadUpdatePrompt,
 		MemorySearchPrompt:     e.MemorySearchPrompt,
@@ -550,6 +552,11 @@ func (d *Datastore) UpdatePersonality(ctx context.Context, userID uuid.UUID, per
 		SetScratchpadHistory(history).
 		SetExpressionsEnabled(personalityModel.ExpressionsEnabled).
 		SetImageStyle(personalityModel.ImageStyle)
+	// A changed scratchpad bumps its revision so an in-flight checkpoint that read the old one
+	// does not overwrite this edit (see UpdatePersonalityScratchpadIfRevision).
+	if personalityModel.Scratchpad != currentPersonality.Scratchpad {
+		update = update.AddScratchpadRevision(1)
+	}
 	if personalityModel.AccentColor != nil {
 		update = update.SetAccentColor(*personalityModel.AccentColor)
 	} else {
@@ -604,8 +611,25 @@ func (d *Datastore) UpdatePersonality(ctx context.Context, userID uuid.UUID, per
 	return toPersonalityModel(entPersonality), nil
 }
 
-// UpdatePersonalityScratchpad updates the scratchpad of a personality
+// UpdatePersonalityScratchpad unconditionally replaces the scratchpad of a personality (a user
+// edit or the agent's update_scratchpad tool), pushing the previous content onto its history and
+// bumping its revision so any checkpoint that read the old content sees a conflict rather than
+// overwriting this write.
 func (d *Datastore) UpdatePersonalityScratchpad(ctx context.Context, userID uuid.UUID, personalityModel models.Personality) (*models.Personality, error) {
+	return d.updatePersonalityScratchpad(ctx, userID, personalityModel.ID, personalityModel.Scratchpad, nil)
+}
+
+// UpdatePersonalityScratchpadIfRevision replaces the scratchpad only while its revision still
+// equals expectedRevision (the revision the caller based the new content on), bumping it. When
+// another write landed in between it changes nothing and returns ErrScratchpadConflict; the
+// caller should reload the latest scratchpad and rebuild its content on top of it.
+func (d *Datastore) UpdatePersonalityScratchpadIfRevision(ctx context.Context, userID, personalityID uuid.UUID, content string, expectedRevision int) (*models.Personality, error) {
+	return d.updatePersonalityScratchpad(ctx, userID, personalityID, content, &expectedRevision)
+}
+
+// updatePersonalityScratchpad backs both scratchpad writers; a nil expectedRevision writes
+// unconditionally.
+func (d *Datastore) updatePersonalityScratchpad(ctx context.Context, userID, personalityID uuid.UUID, content string, expectedRevision *int) (*models.Personality, error) {
 	// Start transaction
 	tx, err := d.dbClient.Tx(ctx)
 	if err != nil {
@@ -623,7 +647,7 @@ func (d *Datastore) UpdatePersonalityScratchpad(ctx context.Context, userID uuid
 
 	personalityQuery := tx.Personality.Query().
 		Where(
-			personality.ID(personalityModel.ID),
+			personality.ID(personalityID),
 			personality.HasUserWith(
 				user.ID(userID),
 			),
@@ -632,7 +656,7 @@ func (d *Datastore) UpdatePersonalityScratchpad(ctx context.Context, userID uuid
 	currentPersonality, err := personalityQuery.Only(ctx)
 	if err != nil {
 		if ent.IsNotFound(err) {
-			d.logger.Error(i18n.T2("personality.not_found_or_unauthorized", "PersonalityID", personalityModel.ID.String(), "UserID", userID.String()))
+			d.logger.Error(i18n.T2("personality.not_found_or_unauthorized", "PersonalityID", personalityID.String(), "UserID", userID.String()))
 			if rerr := tx.Rollback(); rerr != nil {
 				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 			}
@@ -646,12 +670,37 @@ func (d *Datastore) UpdatePersonalityScratchpad(ctx context.Context, userID uuid
 		return nil, err
 	}
 
+	if expectedRevision != nil && currentPersonality.ScratchpadRevision != *expectedRevision {
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+		return nil, ErrScratchpadConflict
+	}
+
 	history := buildScratchpadHistory(currentPersonality.Scratchpad, currentPersonality.ScratchpadHistory)
 
-	entPersonality, err := tx.Personality.UpdateOneID(personalityModel.ID).
-		SetScratchpad(personalityModel.Scratchpad).
+	// A conditional write also guards the row itself, so a concurrent writer that commits between
+	// the read above and this UPDATE leaves zero rows matched instead of being overwritten.
+	where := []predicate.Personality{personality.ID(personalityID)}
+	if expectedRevision != nil {
+		where = append(where, personality.ScratchpadRevision(*expectedRevision))
+	}
+	updated, err := tx.Personality.Update().
+		Where(where...).
+		SetScratchpad(content).
 		SetScratchpadHistory(history).
+		AddScratchpadRevision(1).
 		Save(ctx)
+	if err == nil && updated == 0 {
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+		return nil, ErrScratchpadConflict
+	}
+	var entPersonality *ent.Personality
+	if err == nil {
+		entPersonality, err = tx.Personality.Get(ctx, personalityID)
+	}
 
 	if err != nil {
 		d.logger.Error(i18n.T1("update.failed", "Entity", "personality"), zap.Error(err))
