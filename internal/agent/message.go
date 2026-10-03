@@ -111,6 +111,9 @@ type Agent struct {
 	memoryTool     *tools.VectorStoreMemoryTool
 	scratchpadTool *tools.ScratchpadTool
 	recallTool     *tools.RecallTool
+	fileReadTool   *tools.FileReadTool
+	workspaceTool  *tools.WorkspaceTool
+	entityTool     *tools.EntityTool
 	listTool       *tools.ListTool
 	chunkPipeline  *filechunker.FileChunkPipeline
 	fileStore      storage.FileStore
@@ -307,6 +310,12 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 	// recallTool is constructed after `a` so its investigate distiller can reuse the agent's
 	// OpenAIProvider (set in the struct literal above).
 	a.recallTool = tools.NewRecallTool(ds, &oaiClient, newRecallDistiller(a), a.fileStore, logger)
+	a.fileReadTool = tools.NewFileReadTool(ds, a.fileStore, logger)
+	a.workspaceTool = tools.NewWorkspaceTool(ds, a.fileStore, logger)
+	a.fileReadTool.SetWorkspace(a.workspaceTool)
+	a.listTool.SetWorkspace(a.workspaceTool)
+	a.entityTool = tools.NewEntityTool(ds, logger)
+	a.listTool.SetEntities(a.entityTool)
 
 	if anthropicKey != "" {
 		a.ClaudeProvider = provider.NewClaudeProvider(anthropicKey, tel, cfg.HTTPClient)
@@ -613,6 +622,7 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 		CurrentMessage:             chatMessage,
 		Memories:                   chatCtx.memories,
 		LiveMemories:               chatCtx.liveMemories,
+		EntityCards:                chatCtx.entityCards,
 		ActiveMood:                 chatCtx.activeMood,
 		ActiveMoodRituals:          chatCtx.activeMoodRituals,
 		IsAutoMood:                 chatCtx.chat.IsAutoMood,
@@ -811,6 +821,7 @@ type chatContext struct {
 	memories               []string
 	liveMemories           []*models.Memory
 	memoryEnrichmentFailed bool
+	entityCards            string // cards of entities mentioned in the user's message (see spotEntityCards)
 	model                  string
 	modelProvider          string
 	// modelSubscriptionTier is the model's raw SubscriptionTier string
@@ -2049,6 +2060,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 
 	// Get relevant memories.
 	memories, liveMemories, memoryEnrichmentFailed := a.loadTurnMemories(ctx, memoryProgress, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message)
+	entityCards := a.spotEntityCards(ctx, userID, parentChat.PersonalityID, chatMessage.Message)
 	// Resolve model from the chat's model_id (authoritative). Do not trust model_name
 	// alone — it can be stale, and a missing edge used to fall through to defaultModel
 	// (gpt-5.1) even when the user selected a different provider.
@@ -2066,6 +2078,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 		memories:               memories,
 		liveMemories:           liveMemories,
 		memoryEnrichmentFailed: memoryEnrichmentFailed,
+		entityCards:            entityCards,
 		model:                  resolved.name,
 		modelProvider:          resolved.provider,
 		modelSubscriptionTier:  resolved.subscriptionTier,
