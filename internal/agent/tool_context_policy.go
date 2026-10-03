@@ -67,12 +67,17 @@ func toolContextPolicyFor(toolName string) toolContextPolicy {
 	case tools.CreateMemoryToolSpec.Name,
 		tools.UpdateScratchpadToolSpec.Name,
 		tools.ToolNameWriteFile,
+		tools.ToolNameRememberEntity,
 		tools.ChangeMoodToolSpec.Name,
 		tools.CreateAgentJobToolSpec.Name:
 		// Write/side-effect confirmations: small acknowledgements. Persisting them adds
 		// little value and their effect is captured elsewhere (scratchpad, memories,
 		// mood, jobs). Drop from cross-turn context.
 		return toolContextPolicy{persist: false}
+	case tools.ToolNameRecallEntity:
+		// Cards of mentioned entities are injected fresh every turn; a looked-up card only needs to
+		// survive a few follow-up turns.
+		return toolContextPolicy{persist: true, ttlTurns: fileReadTTLTurns}
 	case tools.ToolNameReadFile, tools.ToolNameGrepFiles:
 		// Exact file text and search hits: useful for a few turns of follow-up questions about the
 		// same section, but re-reading is cheap (host-side, cached), so don't carry them forever.

@@ -24,6 +24,7 @@ const (
 	listKindJobs          = "jobs"
 	listKindMCPServers    = "mcp_servers"
 	listKindWorkspace     = "workspace"
+	listKindEntities      = "entities"
 )
 
 // File scope values (files kind).
@@ -54,6 +55,7 @@ const ListDescription = `List your available resources. Pick a kind:
 - conversations — your past conversations, including archived imports, that have messages, most-recent first (id, name). Pass an id to find_context (mode="conversation"/"origin") to read one.
 - jobs — your scheduled jobs (id, name, status, next_runtime for still-active ones). Active by default; set include_completed=true to also see finished/failed one-offs.
 - mcp_servers — MCP servers connected to the current conversation, with discoverable MCP tools and currently loaded tools for this chat.
+- entities — people, places, projects and other things you keep cards about (name, type, aliases, revision). Filter matches names.
 - workspace — files you wrote with write_file: chat/ (this conversation) and agent/ (your notebook as this personality), with size and revision. Pass filter as a path prefix, e.g. "agent/notes".
 
 Use filter for a free-text name/content match (files, conversations, jobs). Use limit to cap page size and page (1-based) to walk further results when has_more is true.`
@@ -66,7 +68,7 @@ var ListToolSpec = FunctionToolSpec{
 	Properties: map[string]interface{}{
 		"kind": map[string]interface{}{
 			"type":        "string",
-			"enum":        []string{listKindModels, listKindPersonalities, listKindSkills, listKindFiles, listKindConversations, listKindJobs, listKindMCPServers, listKindWorkspace},
+			"enum":        []string{listKindModels, listKindPersonalities, listKindSkills, listKindFiles, listKindConversations, listKindJobs, listKindMCPServers, listKindWorkspace, listKindEntities},
 			"description": "Which resource to list. Required.",
 		},
 		"filter": map[string]interface{}{
@@ -126,11 +128,17 @@ type ListTool struct {
 	logger        *zap.Logger
 	mcpDiscoverer listMCPDiscoverer
 	workspace     *WorkspaceTool
+	entities      *EntityTool
 }
 
 // NewListTool constructs a ListTool backed by the datastore.
 func NewListTool(ds *datastore.Datastore, logger *zap.Logger) *ListTool {
 	return &ListTool{store: ds, logger: logger}
+}
+
+// SetEntities enables kind="entities".
+func (t *ListTool) SetEntities(e *EntityTool) {
+	t.entities = e
 }
 
 // SetWorkspace enables kind="workspace".
@@ -221,10 +229,12 @@ func (t *ListTool) List(ctx context.Context, chat *models.Chat, args []byte) (st
 		return t.listMCPServers(ctx, chat)
 	case listKindWorkspace:
 		return t.listWorkspace(ctx, chat, a)
+	case listKindEntities:
+		return t.listEntities(ctx, chat, a)
 	case "":
-		return t.fail("", "kind is required; one of: models, personalities, skills, files, conversations, jobs, mcp_servers, workspace")
+		return t.fail("", "kind is required; one of: models, personalities, skills, files, conversations, jobs, mcp_servers, workspace, entities")
 	default:
-		return t.fail(kind, fmt.Sprintf("unknown kind %q; expected one of: models, personalities, skills, files, conversations, jobs, mcp_servers, workspace", a.Kind))
+		return t.fail(kind, fmt.Sprintf("unknown kind %q; expected one of: models, personalities, skills, files, conversations, jobs, mcp_servers, workspace, entities", a.Kind))
 	}
 }
 

@@ -100,6 +100,14 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 			out, err := a.workspaceTool.WriteFile(ctx, chatCtx.chat, input)
 			return out, nil, err
 		},
+		tools.RecallEntityToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.entityTool.RecallEntity(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
+		tools.RememberEntityToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.entityTool.RememberEntity(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
 		tools.GrepFilesToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
 			out, err := a.fileReadTool.GrepFiles(ctx, chatCtx.chat, input)
 			return out, nil, err

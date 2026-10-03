@@ -56,6 +56,7 @@ type messageContextBuildRequest struct {
 	CurrentMessage     *models.ChatMessage
 	Memories           []string
 	LiveMemories       []*models.Memory
+	EntityCards        string // rendered cards of entities mentioned in the user's message
 	ActiveMood         *models.Mood
 	ActiveMoodRituals  []*models.Ritual
 	IsAutoMood         bool
@@ -83,6 +84,9 @@ func (b *messageContextBuilder) build(ctx context.Context, req messageContextBui
 		return nil, err
 	}
 	appendMergedAdditionalContext(modelCtx, mergeAdditionalContextItems(carryOver, history, req.CurrentMessage, req.Memories, req.LiveMemories))
+	if cards := strings.TrimSpace(req.EntityCards); cards != "" {
+		modelCtx.Append(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, cards, false)
+	}
 	if req.IncludeAttachmentContext && len(req.Attachments) > 0 {
 		if hint := b.buildFullAttachmentContext(ctx, req.UserID, req.Chat.ID, req.Attachments); hint != "" {
 			modelCtx.Append(provider.SegmentKindAttachmentContext, provider.RoleDeveloper, hint, false)

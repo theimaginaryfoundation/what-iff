@@ -28,6 +28,8 @@ func TestToolContextPolicyFor(t *testing.T) {
 		{"read_file results expire", tools.ToolNameReadFile, true, fileReadTTLTurns, false},
 		{"grep_files results expire", tools.ToolNameGrepFiles, true, fileReadTTLTurns, false},
 		{"write_file acknowledgements are not carried over", tools.ToolNameWriteFile, false, 0, false},
+		{"recall_entity results expire", tools.ToolNameRecallEntity, true, fileReadTTLTurns, false},
+		{"remember_entity acknowledgements are not carried over", tools.ToolNameRememberEntity, false, 0, false},
 		{"create_memory dropped", tools.CreateMemoryToolSpec.Name, false, 0, false},
 		{"update_scratchpad dropped", tools.UpdateScratchpadToolSpec.Name, false, 0, false},
 		{"auto memory enrichment dropped", memoryEnrichmentToolCallName, false, 0, false},
