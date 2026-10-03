@@ -11,6 +11,7 @@ import (
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
 	entchatmessage "github.com/theimaginaryfoundation/what-iff/ent/chatmessage"
 	"github.com/theimaginaryfoundation/what-iff/ent/job"
+	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -988,11 +989,24 @@ func (d *Datastore) FindLatestActiveChatJob(ctx context.Context, userID, chatID 
 	return toJobModel(jobs[0]), nil
 }
 
-// ListActiveChatJobIDsForChat returns the ids of every non-terminal chat_message job whose user
-// turn belongs to chatID, newest first. Stop uses it to clear a whole thread, including jobs left
-// non-terminal by a worker that died (a restart) or that run on another API instance.
+// ListActiveChatJobIDsForChat returns the ids of every non-terminal turn job in chatID (chat_message
+// and agent_job_run, see turnJobTypes), newest first. Stop uses it to clear a whole thread,
+// including jobs left non-terminal by a worker that died (a restart) or that run on another API
+// instance.
 func (d *Datastore) ListActiveChatJobIDsForChat(ctx context.Context, userID, chatID uuid.UUID) ([]uuid.UUID, error) {
-	jobs, err := d.activeChatJobsForChat(ctx, userID, chatID)
+	candidates, err := d.dbClient.Job.Query().
+		Where(
+			job.HasOwnerWith(user.ID(userID)),
+			job.JobTypeIn(turnJobTypes...),
+			job.StatusNotIn(job.StatusComplete, job.StatusCancelled, job.StatusFailed),
+		).
+		Order(job.ByCreatedAt(sql.OrderDesc())).
+		Limit(turnJobScanLimit).
+		All(ctx)
+	if err != nil || len(candidates) == 0 {
+		return nil, err
+	}
+	jobs, err := d.turnJobsInChat(ctx, userID, chatID, candidates)
 	if err != nil {
 		return nil, err
 	}
@@ -1054,30 +1068,67 @@ func (d *Datastore) activeChatJobsForChat(ctx context.Context, userID, chatID uu
 	return out, nil
 }
 
-// activeTurnJobScanLimit bounds how many of a user's in-flight turn jobs ListActiveTurnJobsForChat
-// inspects. Only a turn's own predecessors matter to it, and those are among the user's newest.
-const activeTurnJobScanLimit = 100
+// Turn jobs are the jobs that run a chat turn: chat_message (Reference = the user message id) and
+// agent_job_run (Reference = the chat id for webhook background and scheduled runs, or the user
+// message id for the sync path).
+var turnJobTypes = []string{"chat_message", "agent_job_run"}
 
-// ListActiveTurnJobsForChat returns every non-terminal job that runs a turn in chatID, oldest first
-// (created_at, then id): chat_message jobs and agent_job_run jobs. A turn job's Reference is either
-// the chat id (webhook background, scheduled runs) or the triggering user message id (chat_message,
-// sync runs), so both forms are matched. The per-chat turn gate uses it to find older turns that
-// must finish first; it reads only, and takes no lock.
-func (d *Datastore) ListActiveTurnJobsForChat(ctx context.Context, userID, chatID uuid.UUID) ([]*models.Job, error) {
+// turnJobScanLimit bounds how many of a user's turn jobs one turn-job query inspects.
+const turnJobScanLimit = 100
+
+// ownedByUser filters jobs on the owner foreign key column directly, rather than through the
+// users-table subquery HasOwnerWith builds.
+func ownedByUser(userID uuid.UUID) predicate.Job {
+	return predicate.Job(func(s *sql.Selector) {
+		s.Where(sql.EQ(s.C(job.OwnerColumn), userID))
+	})
+}
+
+// ListPendingTurnJobsForChat returns the turn jobs in chatID that have not reached
+// inference_complete yet (pending or processing), oldest first (created_at, then id), leaving out
+// excludeJobID. These are the turns a new turn in the chat queues behind (the agent's turn gate
+// polls this; it reads only and takes no lock). The status filter keeps the read on the status
+// index, since few jobs are ever pending or processing, and in the common case (no other live
+// turn for the user) it is a single query. Only the fields the gate needs are populated:
+// ID, UserID, JobType, Reference, Status, CreatedAt and UpdatedAt.
+func (d *Datastore) ListPendingTurnJobsForChat(ctx context.Context, userID, chatID, excludeJobID uuid.UUID) ([]*models.Job, error) {
 	jobs, err := d.dbClient.Job.Query().
 		Where(
-			job.HasOwnerWith(user.ID(userID)),
-			job.JobTypeIn("chat_message", "agent_job_run"),
-			job.StatusNotIn(job.StatusComplete, job.StatusCancelled, job.StatusFailed),
+			job.StatusIn(job.StatusPending, job.StatusProcessing),
+			job.JobTypeIn(turnJobTypes...),
+			ownedByUser(userID),
+			job.IDNEQ(excludeJobID),
 		).
-		Order(job.ByCreatedAt(sql.OrderDesc()), job.ByID(sql.OrderDesc())).
-		Limit(activeTurnJobScanLimit).
-		WithOwner().
+		Order(job.ByCreatedAt(), job.ByID()).
+		Limit(turnJobScanLimit).
+		Select(job.FieldID, job.FieldCreatedAt, job.FieldUpdatedAt, job.FieldJobType, job.FieldReference, job.FieldStatus).
 		All(ctx)
 	if err != nil || len(jobs) == 0 {
 		return nil, err
 	}
+	inChat, err := d.turnJobsInChat(ctx, userID, chatID, jobs)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*models.Job, 0, len(inChat))
+	for _, j := range inChat {
+		out = append(out, &models.Job{
+			ID:        j.ID,
+			UserID:    userID,
+			JobType:   j.JobType,
+			Reference: j.Reference,
+			Status:    models.JobStatus(j.Status),
+			CreatedAt: j.CreatedAt,
+			UpdatedAt: j.UpdatedAt,
+		})
+	}
+	return out, nil
+}
 
+// turnJobsInChat keeps the jobs (of userID) whose turn is in chatID, preserving their order: a
+// Reference equal to the chat id, or naming a user message in the chat. The message lookup runs
+// only when some job is keyed by a message.
+func (d *Datastore) turnJobsInChat(ctx context.Context, userID, chatID uuid.UUID, jobs []*ent.Job) ([]*ent.Job, error) {
 	chatRef := chatID.String()
 	var msgRefs []uuid.UUID
 	for _, j := range jobs {
@@ -1090,42 +1141,61 @@ func (d *Datastore) ListActiveTurnJobsForChat(ctx context.Context, userID, chatI
 	}
 	inChat := make(map[string]struct{})
 	if len(msgRefs) > 0 {
-		ids, qerr := d.dbClient.ChatMessage.Query().
+		ids, err := d.dbClient.ChatMessage.Query().
 			Where(
 				entchatmessage.IDIn(msgRefs...),
 				entchatmessage.HasChatWith(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))),
 			).
 			IDs(ctx)
-		if qerr != nil {
-			return nil, qerr
+		if err != nil {
+			return nil, err
 		}
 		for _, id := range ids {
 			inChat[id.String()] = struct{}{}
 		}
 	}
-
-	out := make([]*models.Job, 0, len(jobs))
-	// Reverse the newest-first scan so callers get the turn order directly.
-	for i := len(jobs) - 1; i >= 0; i-- {
-		j := jobs[i]
+	out := make([]*ent.Job, 0, len(jobs))
+	for _, j := range jobs {
 		if _, ok := inChat[j.Reference]; ok || j.Reference == chatRef {
-			out = append(out, toJobModel(j))
+			out = append(out, j)
 		}
 	}
 	return out, nil
+}
+
+// TouchJob refreshes a job's updated_at: the heartbeat a live turn sends so the turn gate on any
+// instance can tell it from one whose worker died. A job of another user updates zero rows.
+func (d *Datastore) TouchJob(ctx context.Context, userID, id uuid.UUID) error {
+	_, err := d.dbClient.Job.Update().
+		Where(job.ID(id), ownedByUser(userID)).
+		SetUpdatedAt(time.Now()).
+		Save(ctx)
+	return err
 }
 
 // ChatIDForChatJob resolves the chat a chat_message job belongs to, via its Reference (the user
 // message id). Returns ErrJobNotFound when the job is not the user's or is not a chat job.
 func (d *Datastore) ChatIDForChatJob(ctx context.Context, userID, jobID uuid.UUID) (uuid.UUID, error) {
 	j, err := d.dbClient.Job.Query().
-		Where(job.ID(jobID), job.HasOwnerWith(user.ID(userID)), job.JobTypeEQ("chat_message")).
+		Where(job.ID(jobID), job.HasOwnerWith(user.ID(userID)), job.JobTypeIn(turnJobTypes...)).
 		Only(ctx)
 	if ent.IsNotFound(err) {
 		return uuid.Nil, ErrJobNotFound
 	}
 	if err != nil {
 		return uuid.Nil, err
+	}
+	// An agent_job_run job may be keyed by its chat directly.
+	if refID, perr := uuid.Parse(j.Reference); perr == nil && j.JobType == "agent_job_run" {
+		owned, cerr := d.dbClient.Chat.Query().
+			Where(entchat.ID(refID), entchat.HasOwnerWith(user.ID(userID))).
+			Exist(ctx)
+		if cerr != nil {
+			return uuid.Nil, cerr
+		}
+		if owned {
+			return refID, nil
+		}
 	}
 	msgID, err := uuid.Parse(j.Reference)
 	if err != nil {
@@ -1152,7 +1222,7 @@ func (d *Datastore) MarkChatJobCancelled(ctx context.Context, userID, jobID uuid
 		Where(
 			job.ID(jobID),
 			job.HasOwnerWith(user.ID(userID)),
-			job.JobTypeEQ("chat_message"),
+			job.JobTypeIn(turnJobTypes...),
 			job.StatusNotIn(job.StatusComplete, job.StatusCancelled, job.StatusFailed),
 		).
 		SetStatus(job.StatusCancelled).

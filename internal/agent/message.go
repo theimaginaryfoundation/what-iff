@@ -161,8 +161,8 @@ type Agent struct {
 	runningJobCancelsMu sync.Mutex
 	runningJobCancels   map[uuid.UUID]runningJobCancel
 
-	// turnEnded wakes turns queued behind another turn in this process (chat_turn_gate.go).
-	turnEnded turnSignal
+	// turns tracks this process's live chat turns for the per-chat turn gate (chat_turn_gate.go).
+	turns chatTurnTracker
 }
 
 // nonVendorLLM reports whether assistant generation is served by anything
@@ -2586,7 +2586,11 @@ func (a *Agent) finalizeChat(ctx context.Context, userID uuid.UUID, chatMessage,
 			a.logger.Error("failed to generate chat name", zap.Error(err))
 		} else {
 			chatCtx.chat.Name = chatName
-			_, err = a.ds.UpdateChat(ctx, userID, *chatCtx.chat)
+			// Leave the response chain alone: the chat's next turn may already have moved it on
+			// (the turn gate opens at inference_complete), and UpdateChat skips nil fields.
+			named := *chatCtx.chat
+			named.ResponseID, named.LastMessageTime = nil, nil
+			_, err = a.ds.UpdateChat(ctx, userID, named)
 			if err != nil {
 				a.logger.Error("failed to update chat name", zap.Error(err))
 			}

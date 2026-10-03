@@ -3,6 +3,7 @@ package datastore
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -12,7 +13,7 @@ import (
 // Datastore halves of the issue #254 concurrency fixes: the per-chat turn-job listing the turn gate
 // polls, and the scratchpad revision that makes checkpoint writes conditional.
 
-func TestListActiveTurnJobsForChat(t *testing.T) {
+func TestTurnJobsForChat_GateListingAndStop(t *testing.T) {
 	ds, cleanup := newFinalizeChatJobTestDatastore(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -39,33 +40,71 @@ func TestListActiveTurnJobsForChat(t *testing.T) {
 	createJob("chat_message", turnA1.String(), models.JobStatusComplete)
 	createJob("chat_message", turnA1.String(), models.JobStatusFailed)
 	createJob("agent_job_run", chatA.String(), models.JobStatusCancelled)
-	first := createJob("chat_message", turnA1.String(), models.JobStatusInferenceComplete)
+	replied := createJob("chat_message", turnA1.String(), models.JobStatusInferenceComplete)
 	webhook := createJob("agent_job_run", chatA.String(), models.JobStatusProcessing)
 	syncRun := createJob("agent_job_run", turnA2.String(), models.JobStatusPending)
-	last := createJob("chat_message", turnA2.String(), models.JobStatusPending)
+	self := createJob("chat_message", turnA2.String(), models.JobStatusPending)
 	// Not turns in chatA: another thread's turn, a non-turn job keyed on the chat id, and a job
 	// whose reference is neither a chat nor a message.
-	createJob("chat_message", turnB.String(), models.JobStatusProcessing)
+	otherThread := createJob("chat_message", turnB.String(), models.JobStatusProcessing)
 	createJob("agent_job_run", chatB.String(), models.JobStatusProcessing)
 	createJob("thread_rehydration", chatA.String(), models.JobStatusProcessing)
 	createJob("chat_message", "not-a-uuid", models.JobStatusProcessing)
 
-	got, err := ds.ListActiveTurnJobsForChat(ctx, userID, chatA)
+	// The gate's listing: turns in the chat still before their reply, oldest first, whether keyed
+	// by chat or by message, leaving out the asking job.
+	got, err := ds.ListPendingTurnJobsForChat(ctx, userID, chatA, self.ID)
 	require.NoError(t, err)
 	ids := make([]uuid.UUID, 0, len(got))
 	for _, j := range got {
 		ids = append(ids, j.ID)
+		require.Equal(t, userID, j.UserID)
 		require.False(t, j.CreatedAt.IsZero())
 		require.False(t, j.UpdatedAt.IsZero())
 	}
-	require.Equal(t, []uuid.UUID{first.ID, webhook.ID, syncRun.ID, last.ID}, ids,
-		"live turn jobs in the chat, oldest first, whether keyed by chat or by message")
+	require.Equal(t, []uuid.UUID{webhook.ID, syncRun.ID}, ids,
+		"pending/processing turns in the chat; a turn past inference_complete no longer blocks")
 
 	// Another user never sees them.
 	stranger := createJobTestUser(t, ds)
-	got, err = ds.ListActiveTurnJobsForChat(ctx, stranger, chatA)
+	got, err = ds.ListPendingTurnJobsForChat(ctx, stranger, chatA, uuid.Nil)
 	require.NoError(t, err)
 	require.Empty(t, got)
+
+	// Heartbeat: TouchJob moves updated_at forward, and only for the owner.
+	time.Sleep(5 * time.Millisecond)
+	stale, err := ds.dbClient.Job.Get(ctx, webhook.ID)
+	require.NoError(t, err)
+	require.NoError(t, ds.TouchJob(ctx, stranger, webhook.ID))
+	unchanged, err := ds.dbClient.Job.Get(ctx, webhook.ID)
+	require.NoError(t, err)
+	require.True(t, unchanged.UpdatedAt.Equal(stale.UpdatedAt))
+	require.NoError(t, ds.TouchJob(ctx, userID, webhook.ID))
+	touched, err := ds.dbClient.Job.Get(ctx, webhook.ID)
+	require.NoError(t, err)
+	require.True(t, touched.UpdatedAt.After(stale.UpdatedAt))
+
+	// Stop covers agent_job_run turns too: listed (newest first, every non-terminal status),
+	// resolvable to their chat by chat or message reference, and cancellable.
+	stopIDs, err := ds.ListActiveChatJobIDsForChat(ctx, userID, chatA)
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{self.ID, syncRun.ID, webhook.ID, replied.ID}, stopIDs)
+	for _, id := range []uuid.UUID{webhook.ID, syncRun.ID} {
+		chatID, err := ds.ChatIDForChatJob(ctx, userID, id)
+		require.NoError(t, err)
+		require.Equal(t, chatA, chatID)
+	}
+	_, err = ds.ChatIDForChatJob(ctx, stranger, webhook.ID)
+	require.ErrorIs(t, err, ErrJobNotFound)
+	changed, err := ds.MarkChatJobCancelled(ctx, userID, webhook.ID)
+	require.NoError(t, err)
+	require.True(t, changed)
+	st, err := ds.JobStatus(ctx, userID, webhook.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.JobStatusCancelled, st)
+	st, err = ds.JobStatus(ctx, userID, otherThread.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.JobStatusProcessing, st)
 }
 
 func TestScratchpadRevision_ConditionalWrite(t *testing.T) {

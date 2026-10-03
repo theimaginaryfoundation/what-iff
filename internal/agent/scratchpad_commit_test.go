@@ -72,6 +72,8 @@ func TestCommitScratchpadUpdate_WritesAtTheTurnsRevision(t *testing.T) {
 		appendingGenerator("base", "+A", &calls))
 	require.NoError(t, err)
 	require.Equal(t, "base+A", got.Content)
+	require.Equal(t, 4, got.revision)
+	require.Nil(t, got.rebasedOn)
 	require.Equal(t, []*models.Personality{nil}, calls, "generated once, from the turn's scratchpad")
 	require.Equal(t, []int{3}, store.writes)
 	require.Equal(t, 4, store.p.ScratchpadRevision)
@@ -87,6 +89,9 @@ func TestCommitScratchpadUpdate_StaleRevisionRegeneratesAgainstLatest(t *testing
 		appendingGenerator("base", "+A", &calls))
 	require.NoError(t, err)
 	require.Equal(t, "base+B+A", got.Content, "the retry builds on the newer scratchpad")
+	require.Equal(t, 2, got.revision)
+	require.NotNil(t, got.rebasedOn)
+	require.Equal(t, "base+B", got.rebasedOn.Scratchpad)
 	require.Len(t, calls, 2)
 	require.Nil(t, calls[0])
 	require.Equal(t, "base+B", calls[1].Scratchpad)
@@ -180,12 +185,48 @@ func TestCommitScratchpadUpdate_ForcedInterleaveKeepsBothUpdates(t *testing.T) {
 
 func TestAppendScratchpadUpdateTurn(t *testing.T) {
 	t.Parallel()
-	mc := &provider.ModelContext{}
+	turnStart := func() *provider.ModelContext {
+		mc := &provider.ModelContext{}
+		mc.Append(provider.SegmentKindSystemPrompt, provider.RoleDeveloper, "persona", true)
+		mc.Append(provider.SegmentKindScratchpad, provider.RoleDeveloper, "turn-start notes", true)
+		return mc
+	}
+
+	mc := turnStart()
 	appendScratchpadUpdateTurn(mc, nil, "update it")
+	require.Len(t, mc.Segments, 3)
+	require.Equal(t, "turn-start notes", mc.Segments[1].Content)
+	require.Equal(t, "update it", mc.Segments[2].Content)
+
+	// On a conflict retry the latest scratchpad replaces the turn's, so it is the "previous"
+	// scratchpad for both the update and the memory delta that follows on this context.
+	mc = turnStart()
+	appendScratchpadUpdateTurn(mc, &models.Personality{Scratchpad: "newer notes"}, "update it")
+	require.Len(t, mc.Segments, 3)
+	require.Equal(t, provider.SegmentKindScratchpad, mc.Segments[1].Kind)
+	require.Equal(t, "newer notes", mc.Segments[1].Content)
+	require.Equal(t, provider.SegmentKindUserMessage, mc.Segments[2].Kind)
+	require.Contains(t, mc.Segments[2].Content, scratchpadRebasedNote)
+	require.Contains(t, mc.Segments[2].Content, "update it")
+
+	// A turn that started with no scratchpad gets one.
+	mc = &provider.ModelContext{}
 	appendScratchpadUpdateTurn(mc, &models.Personality{Scratchpad: "newer notes"}, "update it")
 	require.Len(t, mc.Segments, 2)
-	require.Equal(t, "update it", mc.Segments[0].Content)
-	require.Equal(t, provider.SegmentKindUserMessage, mc.Segments[1].Kind)
-	require.Contains(t, mc.Segments[1].Content, "LATEST SCRATCHPAD:\nnewer notes")
-	require.Contains(t, mc.Segments[1].Content, "update it")
+	require.Equal(t, provider.SegmentKindScratchpad, mc.Segments[0].Kind)
+	require.Equal(t, "newer notes", mc.Segments[0].Content)
+
+	require.Contains(t, concurrentScratchpadNote("newer notes"), "LATEST SCRATCHPAD:\nnewer notes")
+}
+
+func TestAdoptScratchpadUpdate(t *testing.T) {
+	t.Parallel()
+	chat := &models.Chat{Scratchpad: "turn-start", ScratchpadRevision: 1}
+	adoptScratchpadUpdate(chat, ScratchpadUpdate{Content: "new", revision: 2})
+	require.Equal(t, "turn-start", chat.Scratchpad, "not rebased: the turn's scratchpad stays the previous one")
+	require.Equal(t, 2, chat.ScratchpadRevision)
+
+	adoptScratchpadUpdate(chat, ScratchpadUpdate{Content: "newer", revision: 4, rebasedOn: &models.Personality{Scratchpad: "other chat's"}})
+	require.Equal(t, "other chat's", chat.Scratchpad, "rebased: the latest is the previous scratchpad")
+	require.Equal(t, 4, chat.ScratchpadRevision)
 }
