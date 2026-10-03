@@ -32,22 +32,55 @@ type scratchpadStore interface {
 // personality state, and the update must build on latest.Scratchpad instead.
 type scratchpadGenerateFunc func(ctx context.Context, latest *models.Personality) (ScratchpadUpdate, error)
 
-// concurrentScratchpadNote tells the model on a conflict retry that the scratchpad moved on while
-// this conversation ran, and gives it the version to build on.
+// concurrentScratchpadNote tells the model on an OpenAI-path conflict retry (whose context is a
+// chained response that cannot be edited) that the scratchpad moved on while this conversation
+// ran, and gives it the version to build on, which is also the previous scratchpad for the
+// memory-extraction delta chained off this response.
 func concurrentScratchpadNote(latest string) string {
 	return "The scratchpad was updated by another conversation after this one began. " +
-		"Its latest version is below and replaces the one shown earlier: build your update on it, " +
-		"keeping its content unless this conversation supersedes it.\n\nLATEST SCRATCHPAD:\n" + latest
+		"Its latest version is below and replaces the one shown earlier, as the previous scratchpad: " +
+		"build your update on it, keeping its content unless this conversation supersedes it." +
+		"\n\nLATEST SCRATCHPAD:\n" + latest
 }
 
-// appendScratchpadUpdateTurn appends the scratchpad-update request to a Claude-path context as one
-// user turn; on a conflict retry the latest scratchpad leads it. (A scratchpad segment would be
-// hoisted into the system blocks as "current scratchpad", which the note is not.)
+// scratchpadRebasedNote leads the update prompt on a Claude-path conflict retry, whose context
+// shows the latest scratchpad in place of the one the turn started with.
+const scratchpadRebasedNote = "The scratchpad was updated by another conversation after this one began; " +
+	"the current scratchpad shown is its latest version. Build your update on it, keeping its content " +
+	"unless this conversation supersedes it."
+
+// appendScratchpadUpdateTurn appends the scratchpad-update request to a Claude-path context. On a
+// conflict retry it first swaps the context's scratchpad for the latest one, so both the update
+// and the memory extraction that follows on this context treat the latest as the previous
+// scratchpad (the delta then holds only this conversation's changes).
 func appendScratchpadUpdateTurn(mc *provider.ModelContext, latest *models.Personality, prompt string) {
 	if latest != nil {
-		prompt = concurrentScratchpadNote(latest.Scratchpad) + "\n\n" + prompt
+		rebaseScratchpadSegment(mc, latest.Scratchpad)
+		prompt = scratchpadRebasedNote + "\n\n" + prompt
 	}
 	mc.Append(provider.SegmentKindUserMessage, provider.RoleUser, prompt, false)
+}
+
+// rebaseScratchpadSegment replaces the content of the context's scratchpad segment (added only
+// when the turn's scratchpad was non-empty), or appends one.
+func rebaseScratchpadSegment(mc *provider.ModelContext, scratchpad string) {
+	for i := range mc.Segments {
+		if mc.Segments[i].Kind == provider.SegmentKindScratchpad {
+			mc.Segments[i].Content = scratchpad
+			return
+		}
+	}
+	mc.Append(provider.SegmentKindScratchpad, provider.RoleDeveloper, scratchpad, false)
+}
+
+// adoptScratchpadUpdate records a written scratchpad update on the turn's chat: the new revision
+// and, when the update was rebased after a conflict, the scratchpad it was rebased on as the
+// turn's previous scratchpad (the compaction record's old side and the memory delta's base).
+func adoptScratchpadUpdate(chat *models.Chat, update ScratchpadUpdate) {
+	if update.rebasedOn != nil {
+		chat.Scratchpad = update.rebasedOn.Scratchpad
+	}
+	chat.ScratchpadRevision = update.revision
 }
 
 // commitScratchpadUpdate generates a scratchpad update and writes it only if the scratchpad is
@@ -66,8 +99,9 @@ func commitScratchpadUpdate(
 	if err != nil {
 		return ScratchpadUpdate{}, err
 	}
-	_, err = store.UpdatePersonalityScratchpadIfRevision(ctx, userID, personalityID, update.Content, baseRevision)
+	saved, err := store.UpdatePersonalityScratchpadIfRevision(ctx, userID, personalityID, update.Content, baseRevision)
 	if err == nil {
+		update.revision = saved.ScratchpadRevision
 		return update, nil
 	}
 	if !errors.Is(err, datastore.ErrScratchpadConflict) {
@@ -86,7 +120,7 @@ func commitScratchpadUpdate(
 	if err != nil {
 		return ScratchpadUpdate{}, fmt.Errorf("regenerate scratchpad after a concurrent update: %w", err)
 	}
-	_, err = store.UpdatePersonalityScratchpadIfRevision(ctx, userID, personalityID, update.Content, latest.ScratchpadRevision)
+	saved, err = store.UpdatePersonalityScratchpadIfRevision(ctx, userID, personalityID, update.Content, latest.ScratchpadRevision)
 	if errors.Is(err, datastore.ErrScratchpadConflict) {
 		logger.Warn("scratchpad changed concurrently again; skipping this update rather than overwriting it",
 			zap.String("personality_id", personalityID.String()),
@@ -96,5 +130,7 @@ func commitScratchpadUpdate(
 	if err != nil {
 		return ScratchpadUpdate{}, fmt.Errorf("failed to save updated scratchpad: %w", err)
 	}
+	update.revision = saved.ScratchpadRevision
+	update.rebasedOn = latest
 	return update, nil
 }

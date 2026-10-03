@@ -25,6 +25,12 @@ const scratchpadMaxTokens = 3072
 type ScratchpadUpdate struct {
 	Content    string
 	ResponseID *string
+
+	// revision is the scratchpad revision the update was saved at.
+	revision int
+	// rebasedOn is the newer personality state the update was regenerated on after a conflict;
+	// nil when it was written on the turn's own scratchpad.
+	rebasedOn *models.Personality
 }
 
 var scratchpadUpdateDeveloperMessage = `The current scratchpad is provided at the start of the conversation, in a developer message. Please use it as a reference while generating an updated scratchpad.
@@ -104,6 +110,8 @@ func (a *Agent) updateScratchpad(ctx context.Context, userID uuid.UUID, response
 		a.logger.Error("failed to save updated scratchpad", zap.Error(err))
 		return ScratchpadUpdate{}, err
 	}
+
+	adoptScratchpadUpdate(chatCtx.chat, update)
 
 	a.logger.Info("successfully updated personality scratchpad",
 		zap.String("personality_id", chatCtx.chat.PersonalityID.String()),
@@ -209,6 +217,7 @@ func (a *Agent) updateScratchpadClaude(ctx context.Context, userID uuid.UUID, ch
 	}
 	// The caller continues on modelContext (memory extraction), which must hold the update turn.
 	appendScratchpadUpdateTurn(modelContext, usedLatest, usedPrompt)
+	adoptScratchpadUpdate(chatCtx.chat, update)
 	updatedScratchpad := update.Content
 
 	a.logger.Info("successfully updated personality scratchpad (Claude)",

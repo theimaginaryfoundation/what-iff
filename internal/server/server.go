@@ -72,6 +72,9 @@ type Server struct {
 	agentJobScheduler       *agentjobscheduler.Manager
 	agentJobSchedulerCancel context.CancelFunc
 
+	// chatAgent runs chat turns; Shutdown finishes the turn jobs it still has in flight.
+	chatAgent *agent.Agent
+
 	lifecycleCtx    context.Context
 	lifecycleCancel context.CancelFunc
 }
@@ -147,9 +150,10 @@ func (s *Server) setupRoutes() {
 	// non-terminal forever, and a client returning to its thread resumes it — a permanently stuck
 	// "thinking" reply. No chat turn runs anywhere near 30 minutes, so the bound leaves turns in
 	// flight on another instance alone. They are marked failed (not cancelled) so the thread shows
-	// the turn's failure banner instead of silently dropping it.
+	// the turn's failure banner instead of silently dropping it. agent_job_run turns (webhook
+	// background, scheduled runs) are reaped the same way so none is left non-terminal forever.
 	if n, rerr := dataStore.FailInterruptedJobs(context.Background(),
-		[]string{agent.JobTypeChatMessage},
+		[]string{agent.JobTypeChatMessage, agent.JobTypeAgentJobRun},
 		time.Now().Add(-30*time.Minute),
 		"Interrupted by a server restart"); rerr != nil {
 		s.logger.Warn("startup: failed to reconcile interrupted chat jobs", zap.Error(rerr))
@@ -260,6 +264,7 @@ func (s *Server) setupRoutes() {
 		LockKey: s.config.MemoryEmbeddingBackfillLockKey,
 	}
 	agent := agent.NewAgent(dataStore, s.logger, s.telemetry, s.config.OpenAIKey, fileStore, s.config.AnthropicKey, agentCfg)
+	s.chatAgent = agent
 	agent.StartSummaryMemoryBackfill(context.Background())
 	agent.StartMemoryEmbeddingBackfill(s.lifecycleCtx, memoryEmbeddingBackfillCfg)
 	if s.config.EnableAgentJobsScheduler {
@@ -492,8 +497,20 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.agentJobScheduler != nil {
 		s.agentJobScheduler.Stop(ctx)
 	}
-	return s.server.Shutdown(ctx)
+	err := s.server.Shutdown(ctx)
+	// Turns run in detached workers that die with the process. Finish their jobs now, so their
+	// chats are not held up (the per-chat turn gate) and clients don't resume a dead turn. Done
+	// after the HTTP drain, on its own short budget, so it runs even if the drain used up ctx.
+	if s.chatAgent != nil {
+		turnsCtx, cancel := context.WithTimeout(context.Background(), shutdownTurnFinishTimeout)
+		s.chatAgent.FailInFlightTurns(turnsCtx)
+		cancel()
+	}
+	return err
 }
+
+// shutdownTurnFinishTimeout bounds marking in-flight turn jobs finished at shutdown.
+const shutdownTurnFinishTimeout = 5 * time.Second
 
 // Middleware functions
 func (s *Server) isAllowedOrigin(origin string) bool {
