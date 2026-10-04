@@ -81,7 +81,9 @@ describe('ThreadMemoryAccessComponent', () => {
     chatService.patchChat.mockReturnValue(of(saved));
     fixture.detectChanges();
 
-    radios().find(r => r.value === 'personal')!.click();
+    radios()
+      .find(r => r.value === 'personal')!
+      .click();
     await settle();
 
     expect(chatService.patchChat).toHaveBeenCalledTimes(1);
@@ -97,7 +99,9 @@ describe('ThreadMemoryAccessComponent', () => {
     chatService.patchChat.mockReturnValue(of(makeChat({ memory_sensitivity_limit: 'sensitive' })));
     fixture.detectChanges();
 
-    radios().find(r => r.value === 'sensitive')!.click();
+    radios()
+      .find(r => r.value === 'sensitive')!
+      .click();
     await settle();
 
     expect(chatService.patchChat).toHaveBeenCalledWith('chat-1', { memory_sensitivity_limit: 'sensitive' });
@@ -118,7 +122,9 @@ describe('ThreadMemoryAccessComponent', () => {
     chatService.patchChat.mockReturnValue(throwError(() => new Error('nope')));
     fixture.detectChanges();
 
-    radios().find(r => r.value === 'public')!.click();
+    radios()
+      .find(r => r.value === 'public')!
+      .click();
     await settle();
 
     expect(host().querySelector('.access__error')?.textContent).toContain('nope');

@@ -5,12 +5,7 @@ import { MemorySensitivity } from '../../../../core/models/memory.model';
 import { ChatService } from '../../../../core/services/chat.service';
 import { apiErrorMessage } from '../../../../core/utils/api-error.helpers';
 import { HelpHintComponent } from '../../../../shared/ui/help-hint/help-hint.component';
-import {
-  isMemoryRestricted,
-  MEMORY_ACCESS_OPTIONS,
-  memoryAccessOf,
-  RESTRICTED_WITHHELD_COPY,
-} from '../../helpers/memory-access.helpers';
+import { isMemoryRestricted, MEMORY_ACCESS_OPTIONS, memoryAccessOf, RESTRICTED_WITHHELD_COPY } from '../../helpers/memory-access.helpers';
 import { ContextPanelService } from '../../services/context-panel.service';
 
 /**
@@ -28,8 +23,8 @@ import { ContextPanelService } from '../../services/context-panel.service';
         <div class="access__legend">
           <span id="thread-memory-access-label">Memory access</span>
           <ui-help-hint label="What is memory access?" heading="Memory access" align="end">
-            Limits which memories this thread can use, by how sensitive they are. Set each memory's sensitivity in the
-            memory manager. {{ withheldCopy }}
+            Limits which memories this thread can use, by how sensitive they are. Set each memory's sensitivity in the memory manager.
+            {{ withheldCopy }}
           </ui-help-hint>
         </div>
         @for (option of options; track option.value) {

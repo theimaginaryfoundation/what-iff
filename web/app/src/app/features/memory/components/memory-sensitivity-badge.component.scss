@@ -15,10 +15,10 @@
   white-space: nowrap;
 }
 
-.sensitivity-badge[data-sensitivity='public'] {
+.sensitivity-badge[data-sensitivity="public"] {
   --sensitivity-color: var(--color-success);
 }
 
-.sensitivity-badge[data-sensitivity='sensitive'] {
+.sensitivity-badge[data-sensitivity="sensitive"] {
   --sensitivity-color: var(--color-warning);
 }

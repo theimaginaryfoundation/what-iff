@@ -23,7 +23,9 @@ describe('SetSensitivityModalComponent', () => {
   }
 
   const confirmButton = () =>
-    Array.from(host.querySelectorAll('button')).find(b => b.textContent?.includes('Set to') || b.textContent?.includes('Saving')) as HTMLButtonElement;
+    Array.from(host.querySelectorAll('button')).find(
+      b => b.textContent?.includes('Set to') || b.textContent?.includes('Saving'),
+    ) as HTMLButtonElement;
 
   it('renders nothing while closed', () => {
     fixture.detectChanges();

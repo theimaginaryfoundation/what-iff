@@ -1,6 +1,6 @@
 <ui-modal [open]="open()" labelledBy="set-sensitivity-title" size="sm" (dismiss)="cancel.emit()">
   <h3 id="set-sensitivity-title" modal-header class="text-base font-semibold text-text-primary">
-    Set sensitivity for {{ count() }} {{ count() === 1 ? 'memory' : 'memories' }}
+    Set sensitivity for {{ count() }} {{ count() === 1 ? "memory" : "memories" }}
   </h3>
   <fieldset class="grid gap-2 border-0 p-0" [disabled]="saving()">
     <legend class="sr-only">Sensitivity</legend>
@@ -29,15 +29,17 @@
       type="button"
       class="rounded-lg border border-border-base px-3 py-2 text-sm text-text-secondary"
       [disabled]="saving()"
-      (click)="cancel.emit()">
+      (click)="cancel.emit()"
+    >
       Cancel
     </button>
     <button
       type="button"
       class="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
       [disabled]="saving()"
-      (click)="confirm.emit(level())">
-      {{ saving() ? 'Saving…' : 'Set to ' + labelFor(level()) }}
+      (click)="confirm.emit(level())"
+    >
+      {{ saving() ? "Saving…" : "Set to " + labelFor(level()) }}
     </button>
   </div>
 </ui-modal>
