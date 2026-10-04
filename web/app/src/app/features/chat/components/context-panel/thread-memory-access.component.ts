@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, computed, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
 import { MemorySensitivity } from '../../../../core/models/memory.model';
@@ -129,6 +129,7 @@ import { ContextPanelService } from '../../services/context-panel.service';
 export class ThreadMemoryAccessComponent {
   private readonly context = inject(ContextPanelService);
   private readonly chatService = inject(ChatService);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
   readonly options = MEMORY_ACCESS_OPTIONS;
   readonly withheldCopy = RESTRICTED_WITHHELD_COPY;
@@ -149,8 +150,17 @@ export class ThreadMemoryAccessComponent {
       this.context.publishThreadUpdate(updated);
     } catch (error) {
       this.error.set(apiErrorMessage(error, 'Failed to update memory access'));
+      this.resyncRadios();
     } finally {
       this.saving.set(false);
     }
+  }
+
+  /** The bound limit didn't change, so Angular won't un-tick the radio the user just clicked. */
+  private resyncRadios(): void {
+    const current = this.limit();
+    this.host.nativeElement.querySelectorAll<HTMLInputElement>('input[type="radio"]').forEach(radio => {
+      radio.checked = radio.value === current;
+    });
   }
 }

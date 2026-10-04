@@ -226,6 +226,55 @@ describe('ChatPageComponent', () => {
         expect(memoriesButton.getAttribute('aria-current')).toBe('true');
     });
 
+    describe('restricted memory access', () => {
+        it('shows no indicator for an unrestricted thread', async () => {
+            fixture.detectChanges();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            expect(fixture.nativeElement.querySelector('app-thread-restricted-chip button')).toBeNull();
+        });
+
+        it('shows a Restricted chip with the withheld-context tooltip when the limit is below sensitive', async () => {
+            chatService.getChat.mockReturnValue(of({ ...chat, memory_sensitivity_limit: 'public' }));
+            fixture.detectChanges();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            const chip = fixture.nativeElement.querySelector('app-thread-restricted-chip button') as HTMLButtonElement;
+            expect(chip?.textContent).toContain('Restricted');
+        });
+
+        it('opens the Memories tab when the chip is clicked', async () => {
+            chatService.getChat.mockReturnValue(of({ ...chat, memory_sensitivity_limit: 'personal' }));
+            const context = TestBed.inject(ContextPanelService);
+            fixture.detectChanges();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            (fixture.nativeElement.querySelector('app-thread-restricted-chip button') as HTMLButtonElement).click();
+
+            expect(context.activeTab()).toBe('memories');
+            expect(TestBed.inject(RightPanelService).visible()).toBe(true);
+        });
+
+        it('adopts a limit saved from the context panel so the chip appears without a reload', async () => {
+            const context = TestBed.inject(ContextPanelService);
+            fixture.detectChanges();
+            await fixture.whenStable();
+            fixture.detectChanges();
+            expect(fixture.nativeElement.querySelector('app-thread-restricted-chip button')).toBeNull();
+
+            context.publishThreadUpdate({ ...chat, memory_sensitivity_limit: 'personal' });
+            fixture.detectChanges();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            expect(fixture.nativeElement.querySelector('app-thread-restricted-chip button')).not.toBeNull();
+            expect(context.activeChat()?.memory_sensitivity_limit).toBe('personal');
+        });
+    });
+
     it('exports the active thread from the compact title bar', () => {
         fixture.detectChanges();
 
