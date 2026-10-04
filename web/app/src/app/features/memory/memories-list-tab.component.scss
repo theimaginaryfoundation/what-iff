@@ -171,20 +171,23 @@
   background: color-mix(in srgb, var(--color-danger) 10%, transparent);
 }
 
-.memories-list__sort-wrap {
+.memories-list__sort-wrap,
+.memories-list__sensitivity-wrap {
   position: relative;
   display: inline-flex;
   align-items: center;
 }
 
-.memories-list__sort-wrap ui-chev-down-icon {
+.memories-list__sort-wrap ui-chev-down-icon,
+.memories-list__sensitivity-wrap ui-chev-down-icon {
   position: absolute;
   right: 0.5rem;
   pointer-events: none;
   color: var(--color-text-muted);
 }
 
-.memories-list__sort-wrap select {
+.memories-list__sort-wrap select,
+.memories-list__sensitivity-wrap select {
   appearance: none;
   padding-right: 1.5rem;
 }
@@ -411,7 +414,8 @@
   .memories-list__date-wrap,
   .memories-list__filter-field select,
   .memories-list__filter-field input,
-  .memories-list__sort-wrap {
+  .memories-list__sort-wrap,
+  .memories-list__sensitivity-wrap {
     width: 100%;
     min-width: 0;
   }

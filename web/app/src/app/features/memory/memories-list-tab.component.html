@@ -74,8 +74,19 @@
         </div>
       </label>
       <label class="memories-list__filter-field">
-        <span>Sensitivity</span>
+        <span>Sort</span>
         <div class="memories-list__sort-wrap">
+          <select [value]="filters().sort" (change)="setSort($any($event.target).value)">
+            <option value="created_desc">Newest first</option>
+            <option value="created_asc">Oldest first</option>
+            <option value="updated_desc">Last updated</option>
+          </select>
+          <ui-chev-down-icon [size]="12" />
+        </div>
+      </label>
+      <label class="memories-list__filter-field">
+        <span>Sensitivity</span>
+        <div class="memories-list__sensitivity-wrap">
           <select
             aria-label="Filter by sensitivity"
             [uiTooltip]="sensitivityFilterHint()"
@@ -86,17 +97,6 @@
             @for (option of sensitivityOptions; track option.value) {
               <option [value]="option.value">{{ option.label }}</option>
             }
-          </select>
-          <ui-chev-down-icon [size]="12" />
-        </div>
-      </label>
-      <label class="memories-list__filter-field">
-        <span>Sort</span>
-        <div class="memories-list__sort-wrap">
-          <select [value]="filters().sort" (change)="setSort($any($event.target).value)">
-            <option value="created_desc">Newest first</option>
-            <option value="created_asc">Oldest first</option>
-            <option value="updated_desc">Last updated</option>
           </select>
           <ui-chev-down-icon [size]="12" />
         </div>
