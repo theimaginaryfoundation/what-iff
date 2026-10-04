@@ -199,6 +199,15 @@ type ChatSummaryBackfillCandidate struct {
 	Summary string
 }
 
+// MemoryEmbeddingCandidate identifies a memory that has no Embedding row and
+// the content to embed for it. CreatedAt doubles as the keyset cursor when
+// paging through backfill candidates.
+type MemoryEmbeddingCandidate struct {
+	MemoryID  uuid.UUID
+	Content   string
+	CreatedAt time.Time
+}
+
 // MemoryRecord is a single memory in the export (used inside each section).
 // The Chat edge must be preloaded (WithChat) for ChatID and ChatName to populate.
 type MemoryRecord struct {

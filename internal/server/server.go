@@ -256,8 +256,12 @@ func (s *Server) setupRoutes() {
 	if userhooks.New != nil {
 		userhooks.OnRegistered = userhooks.New(dataStore, s.logger)
 	}
+	memoryEmbeddingBackfillCfg := agent.MemoryEmbeddingBackfillConfig{
+		LockKey: s.config.MemoryEmbeddingBackfillLockKey,
+	}
 	agent := agent.NewAgent(dataStore, s.logger, s.telemetry, s.config.OpenAIKey, fileStore, s.config.AnthropicKey, agentCfg)
 	agent.StartSummaryMemoryBackfill(context.Background())
+	agent.StartMemoryEmbeddingBackfill(s.lifecycleCtx, memoryEmbeddingBackfillCfg)
 	if s.config.EnableAgentJobsScheduler {
 		instanceID := "unknown"
 		if host, hostErr := os.Hostname(); hostErr == nil && host != "" {
