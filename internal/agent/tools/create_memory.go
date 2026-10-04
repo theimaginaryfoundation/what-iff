@@ -13,9 +13,10 @@ import (
 type createMemoryToolArgs struct {
 	Content string `json:"content"`
 	Scope   string `json:"scope"`
-	// Sensitivity is optional (public, personal or sensitive; default personal). The stored value
-	// is capped by the conversation's memory sensitivity limit: it can lower what the chat would
-	// use but never raise it above what this conversation can see.
+	// Sensitivity is optional: personal (the default) or sensitive. An agent can never mark a
+	// memory public; public is assignable only through the memory manager. A personal memory
+	// created in a restricted chat is capped to that chat's limit (so it stays readable there); an
+	// explicit sensitive is never lowered.
 	Sensitivity string `json:"sensitivity,omitempty"`
 }
 
@@ -27,7 +28,10 @@ type createMemoryToolResult struct {
 	Scope    string `json:"scope"`
 	// Sensitivity is the level actually stored.
 	Sensitivity string `json:"sensitivity,omitempty"`
-	Error       string `json:"error,omitempty"`
+	// Note explains an adjustment the tool made, such as a User-scoped request kept to this
+	// conversation in a restricted chat.
+	Note  string `json:"note,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // createMemoryTool is the implementation of the create_memory function
@@ -58,6 +62,25 @@ func (t *VectorStoreMemoryTool) CreateMemoryTool(ctx context.Context, chat *mode
 		memoryArgs.Scope = MemoryScopeChat
 		t.logger.Warn("invalid scope, defaulting to chat scope", zap.String("user_id", chat.UserID.String()), zap.String("chat_id", chat.ID.String()), zap.String("scope", memoryArgs.Scope))
 	}
+	// A restricted chat is a sandbox that strangers may be talking in: whatever they get it to
+	// write must not become a trusted account-wide fact, so its memories are kept to this chat.
+	scopeNote := ""
+	if chat.MemoryRestricted() && memoryArgs.Scope != MemoryScopeChat {
+		memoryArgs.Scope = MemoryScopeChat
+		scopeNote = restrictedMemoryScopeNote
+	}
+
+	// An agent may classify a memory personal or sensitive only; public is for the memory manager.
+	requestedSensitivity, ok := agentMemorySensitivity(memoryArgs.Sensitivity)
+	if !ok {
+		result := createMemoryToolResult{
+			Success: false,
+			Content: trimmedContent,
+			Scope:   memoryArgs.Scope,
+			Error:   "sensitivity must be 'personal' or 'sensitive'",
+		}
+		return marshalToolResult(result, "create_memory")
+	}
 
 	// Create embedding for the memory content
 	embedding, err := t.CreateEmbedding(ctx, trimmedContent)
@@ -75,7 +98,7 @@ func (t *VectorStoreMemoryTool) CreateMemoryTool(ctx context.Context, chat *mode
 		return marshalToolResult(result, "create_memory")
 	}
 
-	sensitivity := cappedMemorySensitivity(chat, memoryArgs.Sensitivity)
+	sensitivity := cappedMemorySensitivity(chat, requestedSensitivity)
 	memory, err := t.ds.CreateMemory(ctx, chat.UserID, models.Memory{
 		ChatID:      chat.ID,
 		Content:     trimmedContent,
@@ -104,6 +127,7 @@ func (t *VectorStoreMemoryTool) CreateMemoryTool(ctx context.Context, chat *mode
 		Content:     trimmedContent,
 		Scope:       memoryArgs.Scope,
 		Sensitivity: string(sensitivity),
+		Note:        scopeNote,
 	}
 
 	return marshalToolResult(result, "create_memory")

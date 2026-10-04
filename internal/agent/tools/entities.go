@@ -373,7 +373,9 @@ type rememberEntityArgs struct {
 	Forget          bool     `json:"forget"`
 }
 
-// RememberEntity handles a remember_entity call: create, update or forget.
+// RememberEntity handles a remember_entity call: create, update or forget. A restricted chat may
+// only create: entities that already exist (made by the owner or another conversation) are
+// read-only there, so a stranger cannot rewrite or retire the owner's notes.
 func (t *EntityTool) RememberEntity(ctx context.Context, chat *models.Chat, input []byte) (string, error) {
 	var a rememberEntityArgs
 	if err := json.Unmarshal(input, &a); err != nil {
@@ -390,9 +392,19 @@ func (t *EntityTool) RememberEntity(ctx context.Context, chat *models.Chat, inpu
 		return t.fail(ToolNameRememberEntity, fmt.Sprintf("name is too long (max %d characters)", entityMaxNameChars))
 	}
 
+	restricted := chat.MemoryRestricted()
+	if restricted && a.Forget {
+		return t.fail(ToolNameRememberEntity, "forgetting an entity is not available in this restricted conversation (it can only create new entities)")
+	}
+
 	existing, err := t.store.FindEntityByName(ctx, chat.UserID, chat.PersonalityID, name, chat.MemoryLimit())
 	if err != nil && !errors.Is(err, datastore.ErrEntityNotFound) {
 		return t.fail(ToolNameRememberEntity, fmt.Sprintf("failed to look up %q: %v", name, err))
+	}
+	if restricted && existing != nil {
+		// Same text as the clash with an entity above this chat's limit (saveError), so the reply
+		// does not tell the two apart.
+		return t.fail(ToolNameRememberEntity, restrictedEntityNameUsed(name))
 	}
 
 	if a.Forget {
@@ -403,7 +415,7 @@ func (t *EntityTool) RememberEntity(ctx context.Context, chat *models.Chat, inpu
 			return t.fail(ToolNameRememberEntity, "base_revision (from recall_entity) is required to forget an entity")
 		}
 		if err := t.store.ArchiveEntity(ctx, chat.UserID, existing.ID, *a.BaseRevision); err != nil {
-			return t.saveError(err, chat.MemoryRestricted())
+			return t.saveError(err, restricted)
 		}
 		t.invalidate(chat.UserID)
 		return marshalToolResult(entityResult{Success: true, Op: "forget", Note: fmt.Sprintf("Forgot %s.", existing.Name)}, ToolNameRememberEntity)
@@ -474,7 +486,7 @@ func (t *EntityTool) RememberEntity(ctx context.Context, chat *models.Chat, inpu
 	}
 	saved, err := t.store.SaveEntity(ctx, chat.UserID, existingID, base, in)
 	if err != nil {
-		return t.saveError(err, chat.MemoryRestricted())
+		return t.saveError(err, restricted)
 	}
 	t.invalidate(chat.UserID)
 	return marshalToolResult(entityResult{Success: true, Op: op, Entity: toEntityView(saved)}, ToolNameRememberEntity)
@@ -493,8 +505,8 @@ func (t *EntityTool) saveError(err error, restricted bool) (string, error) {
 	var taken *datastore.EntityAliasTakenError
 	if errors.As(err, &taken) {
 		if restricted {
-			// The clashing entity may be above this chat's limit; do not reveal its name.
-			return t.fail(ToolNameRememberEntity, fmt.Sprintf("the name %q is already used", taken.Alias))
+			// The clashing entity may be above this chat's limit; do not name or confirm it.
+			return t.fail(ToolNameRememberEntity, restrictedEntityNameUsed(taken.Alias))
 		}
 		msg := fmt.Sprintf("the name %q is already used", taken.Alias)
 		if taken.Owner != "" {
@@ -506,6 +518,13 @@ func (t *EntityTool) saveError(err error, restricted bool) (string, error) {
 		return t.fail(ToolNameRememberEntity, "that entity no longer exists")
 	}
 	return t.fail(ToolNameRememberEntity, fmt.Sprintf("failed to save: %v", err))
+}
+
+// restrictedEntityNameUsed is the one refusal a restricted chat gets for a name that is taken,
+// whether by an entity it can read (read-only there) or by one above its limit (which must not be
+// named or confirmed).
+func restrictedEntityNameUsed(name string) string {
+	return fmt.Sprintf("the name %q is already used", name)
 }
 
 func (t *EntityTool) fail(tool, msg string) (string, error) {

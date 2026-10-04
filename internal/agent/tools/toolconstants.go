@@ -160,8 +160,8 @@ var CreateMemoryToolSpec = FunctionToolSpec{
 		},
 		"sensitivity": map[string]interface{}{
 			"type":        "string",
-			"description": "Optional. How delicate the memory is: 'personal' (default), 'sensitive' (health, finances, intimate or otherwise delicate material; used only in conversations that allow it) or 'public' (safe to use anywhere, including public surfaces). The level is capped by what this conversation can see, so it can be lowered but never raised above it.",
-			"enum":        []string{"public", "personal", "sensitive"},
+			"description": "Optional. How delicate the memory is: 'personal' (default) or 'sensitive' (health, finances, intimate or otherwise delicate material; used only in conversations that allow it). You cannot mark a memory public.",
+			"enum":        []string{"personal", "sensitive"},
 		},
 	},
 	Required: []string{"content", "scope"},

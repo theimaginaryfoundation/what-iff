@@ -2,11 +2,13 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
 
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -45,7 +47,9 @@ func isHexToken(s string) bool {
 // resolveMemory looks up a memory by full UUID, "memory:<uuid>", or a unique hex ID prefix
 // (e.g. the short form agents historically copied from sources: "memory:df3e519d"). A memory the
 // chat may not read (above its sensitivity limit, or another conversation's summary in a
-// restricted chat) resolves exactly like a missing one, so its existence is not revealed.
+// restricted chat) resolves exactly like a missing one, so its existence is not revealed: in a
+// restricted chat an unknown id, a hidden memory and an ambiguous prefix all return the same error
+// (an ambiguous prefix could otherwise confirm that a hidden memory shares it).
 func (t *RecallTool) resolveMemory(ctx context.Context, chat *models.Chat, target string) (*models.Memory, error) {
 	userID := chat.UserID
 	token := normalizeMemoryTarget(target)
@@ -53,13 +57,22 @@ func (t *RecallTool) resolveMemory(ctx context.Context, chat *models.Chat, targe
 		return nil, fmt.Errorf("target must be a memory ID (UUID or memory:<uuid>)")
 	}
 
+	notFound := func() error { return fmt.Errorf("memory %q not found", target) }
+	// restrictedMiss reports a store error a restricted chat must show as plain "not found".
+	restrictedMiss := func(err error) bool {
+		return chat.MemoryRestricted() && (errors.Is(err, datastore.ErrMemoryNotFound) || errors.Is(err, datastore.ErrMemoryIDPrefixAmbiguous))
+	}
+
 	if id, err := uuid.Parse(token); err == nil {
 		mem, err := t.store.GetMemory(ctx, userID, id)
 		if err != nil {
+			if restrictedMiss(err) {
+				return nil, notFound()
+			}
 			return nil, err
 		}
 		if mem == nil || !memoryReadableBy(chat, mem) {
-			return nil, fmt.Errorf("memory %q not found", target)
+			return nil, notFound()
 		}
 		return mem, nil
 	}
@@ -71,10 +84,13 @@ func (t *RecallTool) resolveMemory(ctx context.Context, chat *models.Chat, targe
 	}
 	mem, err := t.store.GetMemoryByIDPrefix(ctx, userID, compact)
 	if err != nil {
+		if restrictedMiss(err) {
+			return nil, notFound()
+		}
 		return nil, err
 	}
 	if mem == nil || !memoryReadableBy(chat, mem) {
-		return nil, fmt.Errorf("memory %q not found", target)
+		return nil, notFound()
 	}
 	return mem, nil
 }

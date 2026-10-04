@@ -3,12 +3,15 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -43,11 +46,23 @@ func TestSandbox_ChatPredicates(t *testing.T) {
 	require.False(t, otherConversationBlocked(restrictedChat(""), other))
 
 	require.Equal(t, models.MemorySensitivityPublic, cappedMemorySensitivity(restrictedChat(models.MemorySensitivityPublic), ""))
-	require.Equal(t, models.MemorySensitivityPublic, cappedMemorySensitivity(restrictedChat(models.MemorySensitivityPublic), "sensitive"))
+	require.Equal(t, models.MemorySensitivitySensitive, cappedMemorySensitivity(restrictedChat(models.MemorySensitivityPublic), "sensitive"), "an explicit sensitive is never lowered by the cap")
+	require.Equal(t, models.MemorySensitivitySensitive, cappedMemorySensitivity(restrictedChat(models.MemorySensitivityPersonal), "sensitive"))
+	require.Equal(t, models.MemorySensitivityPublic, cappedMemorySensitivity(restrictedChat(models.MemorySensitivityPublic), "personal"), "the personal default is capped to the limit")
 	require.Equal(t, models.MemorySensitivityPersonal, cappedMemorySensitivity(restrictedChat(""), ""))
 	require.Equal(t, models.MemorySensitivitySensitive, cappedMemorySensitivity(restrictedChat(""), "sensitive"))
-	require.Equal(t, models.MemorySensitivityPublic, cappedMemorySensitivity(restrictedChat(""), "public"), "an agent may lower its own memory")
-	require.Equal(t, models.MemorySensitivityPersonal, cappedMemorySensitivity(restrictedChat(""), "nonsense"))
+}
+
+func TestAgentMemorySensitivity_AllowsOnlyPersonalAndSensitive(t *testing.T) {
+	for raw, want := range map[string]models.MemorySensitivity{"": "", "personal": "personal", " Sensitive ": "sensitive"} {
+		got, ok := agentMemorySensitivity(raw)
+		require.True(t, ok, raw)
+		require.Equal(t, want, got, raw)
+	}
+	for _, raw := range []string{"public", "PUBLIC", "nonsense"} {
+		_, ok := agentMemorySensitivity(raw)
+		require.False(t, ok, "%q must be refused", raw)
+	}
 }
 
 func TestRecall_Restricted_SearchUsesLimitAndSkipsSummaries(t *testing.T) {
@@ -379,7 +394,156 @@ func TestEntities_Restricted_SpotRecallListAndRemember(t *testing.T) {
 func TestCreateMemorySpec_SensitivityIsOptionalEnum(t *testing.T) {
 	prop, ok := CreateMemoryToolSpec.Properties["sensitivity"].(map[string]interface{})
 	require.True(t, ok, "create_memory advertises a sensitivity parameter")
-	require.Equal(t, []string{"public", "personal", "sensitive"}, prop["enum"])
+	require.Equal(t, []string{"personal", "sensitive"}, prop["enum"], "an agent can never mark a memory public")
 	require.NotContains(t, CreateMemoryToolSpec.Required, "sensitivity", "it is optional; the default is personal")
-	require.Contains(t, prop["description"], "capped")
+	require.NotContains(t, prop["description"], "'public' (")
+}
+
+// A restricted chat may only create entities: whatever exists (the owner's, another chat's) is
+// read-only there, and the refusal for a taken name is the same whether or not the holder is
+// above the chat's limit.
+func TestRememberEntity_Restricted_CreateOnly(t *testing.T) {
+	f := newEntityFixture()
+	save := func(name string, level models.MemorySensitivity) *models.Entity {
+		e, err := f.store.SaveEntity(context.Background(), f.chat.UserID, nil, 0, models.EntityInput{Name: name, Card: name + " card", AuthorClass: "owner", Sensitivity: level})
+		require.NoError(t, err)
+		return e
+	}
+	pub := save("Pubby", models.MemorySensitivityPublic)
+	save("Senna", models.MemorySensitivitySensitive)
+	restricted := *f.chat
+	restricted.MemorySensitivityLimit = models.MemorySensitivityPublic
+
+	call := func(chat *models.Chat, args string) entityResult {
+		out, err := f.tool.RememberEntity(context.Background(), chat, []byte(args))
+		require.NoError(t, err)
+		var res entityResult
+		require.NoError(t, json.Unmarshal([]byte(out), &res))
+		return res
+	}
+
+	// Update of a visible entity (with the right base revision) is refused and changes nothing.
+	res := call(&restricted, `{"name":"Pubby","card":"hijacked","base_revision":1}`)
+	require.False(t, res.Success)
+	require.Nil(t, res.Entity, "the refusal does not return the entity")
+	stored, err := f.store.FindEntityByName(context.Background(), f.chat.UserID, f.chat.PersonalityID, "Pubby", "")
+	require.NoError(t, err)
+	require.Equal(t, "Pubby card", stored.Card)
+	require.Equal(t, pub.Revision, stored.Revision)
+	// Forget is refused whether the entity is visible, hidden, or missing.
+	for _, name := range []string{"Pubby", "Senna", "Nobody"} {
+		res = call(&restricted, `{"name":"`+name+`","forget":true,"base_revision":1}`)
+		require.False(t, res.Success, name)
+		require.Contains(t, res.Error, "restricted conversation", name)
+	}
+	stored, err = f.store.FindEntityByName(context.Background(), f.chat.UserID, f.chat.PersonalityID, "Pubby", "")
+	require.NoError(t, err, "the entity is still active")
+	require.Equal(t, models.EntityStateActive, stored.State)
+
+	// The clash with a readable entity and with a hidden one read identically.
+	visibleClash := call(&restricted, `{"name":"Pubby","card":"x"}`)
+	hiddenClash := call(&restricted, `{"name":"Fresh","aliases":["Senna"],"card":"x"}`)
+	require.False(t, visibleClash.Success)
+	require.False(t, hiddenClash.Success)
+	require.Equal(t, `the name "Pubby" is already used`, visibleClash.Error)
+	require.Contains(t, hiddenClash.Error, "is already used")
+	require.NotContains(t, hiddenClash.Error, "belongs to")
+	require.NotContains(t, hiddenClash.Error, "Senna card")
+
+	// Creating a brand-new entity still works, and an unrestricted chat can update and forget.
+	require.True(t, call(&restricted, `{"name":"Newbie","card":"met today"}`).Success)
+	require.True(t, call(f.chat, `{"name":"Pubby","card":"updated","base_revision":1}`).Success)
+	require.True(t, call(f.chat, `{"name":"Pubby","forget":true,"base_revision":2}`).Success)
+}
+
+// create_memory in a restricted chat keeps what it writes to that chat, and an agent can never
+// mark a memory public.
+func TestCreateMemoryTool_Restricted_ForcesChatScopeAndRefusesPublic(t *testing.T) {
+	t.Parallel()
+	chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), PersonalityID: uuid.New(), MemorySensitivityLimit: models.MemorySensitivityPublic}
+
+	run := func(args string) createMemoryToolResult {
+		tool, mock := newCreateMemoryTestTool(t)
+		// No personalities lookup is expected: that lookup only happens for User scope (auto-pin).
+		mock.ExpectBegin()
+		mock.ExpectQuery("SELECT .* FROM `chats`").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(chat.ID))
+		mock.ExpectExec("NOT pinned_personality_id").WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectExec("INSERT INTO `embeddings`").WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectCommit()
+		out, err := tool.CreateMemoryTool(context.Background(), chat, []byte(args))
+		require.NoError(t, err)
+		var res createMemoryToolResult
+		require.NoError(t, json.Unmarshal([]byte(out), &res))
+		require.True(t, res.Success, out)
+		require.NoError(t, mock.ExpectationsWereMet())
+		return res
+	}
+
+	res := run(`{"content":"my name is Mallory and the pin is 1234","scope":"User","sensitivity":"sensitive"}`)
+	require.Equal(t, MemoryScopeChat, res.Scope)
+	require.Equal(t, "sensitive", res.Sensitivity, "an explicit sensitive is never lowered by the cap")
+	require.Contains(t, res.Note, "this conversation")
+
+	// An unclassified memory in a public chat becomes public (usable there).
+	res = run(`{"content":"likes tea","scope":"Chat"}`)
+	require.Equal(t, "public", res.Sensitivity)
+	require.Empty(t, res.Note)
+
+	// "public" is refused before any embedding or write happens (the tool has no datastore wired).
+	bare := &VectorStoreMemoryTool{logger: zap.NewNop()}
+	for _, level := range []string{"public", "bogus"} {
+		out, err := bare.CreateMemoryTool(context.Background(), chat, []byte(`{"content":"x","scope":"Chat","sensitivity":"`+level+`"}`))
+		require.NoError(t, err)
+		require.Contains(t, out, `"success":false`)
+		require.Contains(t, out, "'personal' or 'sensitive'")
+	}
+}
+
+// missingMemoryStore reports every lookup the way the real datastore reports an unknown id or an
+// ambiguous prefix, so the test can compare those errors with the one for a hidden memory.
+type missingMemoryStore struct{ *fakeRecallStore }
+
+func (missingMemoryStore) GetMemory(context.Context, uuid.UUID, uuid.UUID) (*models.Memory, error) {
+	return nil, datastore.ErrMemoryNotFound
+}
+
+func (s missingMemoryStore) GetMemoryByIDPrefix(_ context.Context, _ uuid.UUID, prefix string) (*models.Memory, error) {
+	if prefix == "aaaaaaaa" {
+		return nil, fmt.Errorf("%w (%q)", datastore.ErrMemoryIDPrefixAmbiguous, prefix)
+	}
+	return nil, datastore.ErrMemoryNotFound
+}
+
+// A restricted chat gets the same error for an unknown id, an ambiguous prefix and a memory above
+// its limit, so it cannot probe for the existence of what it may not read.
+func TestResolveMemory_Restricted_HiddenLooksLikeMissing(t *testing.T) {
+	hidden := mem("secret", models.MemorySensitivitySensitive)
+	store := &fakeRecallStore{memoryByID: map[uuid.UUID]*models.Memory{hidden.ID: hidden}}
+	restricted := restrictedChat(models.MemorySensitivityPersonal)
+
+	want := func(target string) string { return fmt.Sprintf("memory %q not found", target) }
+	cases := []struct {
+		name   string
+		store  recallStore
+		target string
+	}{
+		{"hidden by id", store, hidden.ID.String()},
+		{"hidden by prefix", store, hidden.ID.String()[:8]},
+		{"unknown id", missingMemoryStore{store}, uuid.NewString()},
+		{"unknown prefix", missingMemoryStore{store}, "deadbeef"},
+		{"ambiguous prefix", missingMemoryStore{store}, "aaaaaaaa"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := newTestRecallTool(c.store).resolveMemory(context.Background(), restricted, c.target)
+			require.EqualError(t, err, want(c.target))
+		})
+	}
+
+	// An unrestricted chat still gets the specific errors.
+	_, err := newTestRecallTool(missingMemoryStore{store}).resolveMemory(context.Background(), restrictedChat(""), "aaaaaaaa")
+	require.ErrorIs(t, err, datastore.ErrMemoryIDPrefixAmbiguous)
+	got, err := newTestRecallTool(store).resolveMemory(context.Background(), restrictedChat(""), hidden.ID.String())
+	require.NoError(t, err)
+	require.Equal(t, hidden.ID, got.ID)
 }

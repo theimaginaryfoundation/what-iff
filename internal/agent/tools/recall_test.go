@@ -234,7 +234,7 @@ func (f *fakeRecallStore) GetMemoryByIDPrefix(_ context.Context, _ uuid.UUID, pr
 		compact := strings.ReplaceAll(id.String(), "-", "")
 		if strings.HasPrefix(compact, prefix) {
 			if match != nil {
-				return nil, fmt.Errorf("memory ID prefix %q is ambiguous; pass the full UUID", prefix)
+				return nil, fmt.Errorf("%w (%q); pass the full UUID", datastore.ErrMemoryIDPrefixAmbiguous, prefix)
 			}
 			match = m
 		}

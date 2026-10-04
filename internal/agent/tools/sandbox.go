@@ -2,6 +2,7 @@ package tools
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -52,12 +53,29 @@ func otherConversationBlocked(chat *models.Chat, conversationID uuid.UUID) bool 
 	return chat.MemoryRestricted() && conversationID != chat.ID
 }
 
+// restrictedMemoryScopeNote is returned when a restricted chat asked for a User-scoped memory.
+const restrictedMemoryScopeNote = "This is a restricted conversation, so the memory was kept to this conversation (Chat scope) instead of the whole account."
+
+// agentMemorySensitivity parses the sensitivity an agent tool passed. Only personal and sensitive
+// are allowed (empty means the default, personal): an agent may never mark a memory public, which
+// is assignable only through the memory manager. ok is false for any other value.
+func agentMemorySensitivity(raw string) (models.MemorySensitivity, bool) {
+	if strings.TrimSpace(raw) == "" {
+		return "", true
+	}
+	s, valid := models.ParseMemorySensitivity(raw)
+	if !valid || s == models.MemorySensitivityPublic {
+		return "", false
+	}
+	return s, true
+}
+
 // cappedMemorySensitivity is the level a memory or entity created from chat gets: the requested
-// level (empty or unknown means personal) capped by the chat's limit, so a restricted chat's
-// writes stay readable there and an unrestricted chat's default is personal.
-func cappedMemorySensitivity(chat *models.Chat, requested string) models.MemorySensitivity {
-	want, _ := models.ParseMemorySensitivity(requested)
-	return models.CapToLimit(want, chat.MemoryLimit())
+// level (empty means the personal default) passed through models.CapToLimit. A restricted chat's
+// default level is lowered to its limit so what it writes stays readable there; an explicit
+// sensitive is never lowered.
+func cappedMemorySensitivity(chat *models.Chat, requested models.MemorySensitivity) models.MemorySensitivity {
+	return models.CapToLimit(requested, chat.MemoryLimit())
 }
 
 // fileInChatScope reports whether fa is within what a restricted chat may read: an upload on this
