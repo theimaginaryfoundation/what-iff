@@ -17,6 +17,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -59,6 +60,11 @@ type Deps struct {
 	// messages from outside the app (another chat service, say). It is nil when
 	// the server was built without an agent; callers must check before use.
 	Turns TurnStarter
+	// Attachments saves a file to one of a user's chats, for plugins that receive
+	// files from outside the app (a picture posted in another chat service, say).
+	// The attachment it returns goes on the UserTurn's message. It is nil when the
+	// server was built without an agent; callers must check before use.
+	Attachments AttachmentIngester
 }
 
 // UserTurn is one message to answer as if the user had sent it in the app.
@@ -82,6 +88,42 @@ type UserTurn struct {
 // does not belong to UserID is not found.
 type TurnStarter interface {
 	StartUserTurn(ctx context.Context, turn UserTurn) (*models.ChatMessageResponse, error)
+}
+
+// AttachmentUpload is one file to save to a chat.
+type AttachmentUpload struct {
+	// UserID owns the chat. The file is saved, and counted, as this user.
+	UserID uuid.UUID
+	// ChatID is the chat the file belongs to.
+	ChatID uuid.UUID
+	// Name is the file name. Its extension decides the file type, as it does for an
+	// upload in the app; only the types the app accepts are accepted.
+	Name string
+	// Data is the file's bytes (at most 30 MB, the app's upload limit).
+	Data []byte
+}
+
+// Why IngestAttachment turned a file away. A plugin tests for these with
+// errors.Is, to tell the sender something useful (the type, the size, a stale
+// chat); any other error is an internal failure it should log and report
+// generically.
+var (
+	ErrAttachmentUnsupported = errors.New("attachment: unsupported file type")
+	ErrAttachmentTooLarge    = errors.New("attachment: file too large")
+	// ErrAttachmentChatNotFound means the chat does not exist or is not the
+	// user's; the two are not told apart.
+	ErrAttachmentChatNotFound = errors.New("attachment: chat not found")
+)
+
+// AttachmentIngester saves a file the way the app's upload does: the type is
+// checked, images are normalized, the provider is given its copy, and the object
+// store, thumbnail and text chunking follow. The returned attachment is not yet on
+// a message; set it in UserTurn.Message.Attachments to send it with a turn.
+//
+// Ownership is enforced as it is for every upload: a chat that does not belong to
+// UserID is not found.
+type AttachmentIngester interface {
+	IngestAttachment(ctx context.Context, upload AttachmentUpload) (*models.FileAttachment, error)
 }
 
 // Registrar wires one plugin's routes/handlers onto the server.

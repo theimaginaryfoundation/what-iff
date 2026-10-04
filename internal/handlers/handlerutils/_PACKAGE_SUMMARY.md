@@ -8,8 +8,12 @@
 
 - **`fileattachment.go`:** Utilities for reading uploads and binding to models (see tests for expected behavior).
   It also owns the upload metrics for every upload path (chat, personality, image gallery), through `telemetry.Global()`.
-  `UploadFileAttachment` records the spooled size (`whatiff.file.size`, operation `upload`) and the image `normalize` stage time.
-  `whatiff.file.uploads` counts each upload once: failures in `UploadFileAttachment` or `UploadToS3`, success in `TriggerAsyncFileChunking`, which every path calls exactly once after the attachment is stored.
+  `UploadFileAttachment` is the multipart wrapper over `ProcessUpload`, which holds the steps that need no HTTP: type check, buffering to a temp file (at most 30 MB), image normalization, and the provider upload.
+  `ProcessUpload` returns an `*UploadError` (the status and message a client sees; it wraps `ErrUnsupportedFileType` or `ErrFileTooLarge` where they apply), and `RespondWithUploadError` writes one.
+  `StoreChatAttachment` is the storage half for a chat upload: the record, the object-store key (images under the gallery path with a thumbnail, other files under the chat), and chunking.
+  The chat upload handler and the plugin attachment seam (`internal/server/plugin_attachments.go`) both call it.
+  `ProcessUpload` records the spooled size (`whatiff.file.size`, operation `upload`) and the image `normalize` stage time.
+  `whatiff.file.uploads` counts each upload once: failures in `ProcessUpload`, the multipart parse in `UploadFileAttachment`, or `UploadToS3`, success in `TriggerAsyncFileChunking`, which every path calls exactly once after the attachment is stored.
   Callers must not count uploads themselves.
   A caller whose attachment record fails to save calls `AbandonFileAttachmentUpload`, which counts the failure, removes the temp file, and best-effort deletes the provider-side file.
   Rolling back a saved record (e.g. after an S3 failure) calls `DeleteProviderFile`, so the provider copy is not orphaned either.
@@ -51,6 +55,7 @@
 ## Testing
 
 - `fileattachment_test.go` — multipart and edge cases.
+- `fileattachment_ingest_test.go` — `ProcessUpload` without HTTP (type, size, normalization, provider failure) and `StoreChatAttachment` (key routing, thumbnail, rollback, cleanup).
 - `fileattachment_metrics_test.go` — upload size/kind, the normalize stage, that each upload is counted exactly once, and provider-file cleanup for abandoned uploads.
 - `httpresponse_test.go` — that raw errors never reach the body, and that every error response carries a code (including unmapped statuses).
 
