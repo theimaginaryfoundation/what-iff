@@ -2,6 +2,10 @@
   <header class="focus-panel__header">
     <div class="focus-panel__tags">
       <span class="focus-panel__level" [attr.data-level]="memory().level" [uiTooltip]="levelHint()">{{ memory().levelLabel }}</span>
+      @if (!readOnly()) {
+        <app-memory-sensitivity-badge [sensitivity]="memory().sensitivity" />
+      }
+
       @if (memory().starred) {
         <span class="focus-panel__starred">Starred</span>
       }

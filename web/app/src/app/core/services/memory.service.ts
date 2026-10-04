@@ -70,9 +70,13 @@ export class MemoryService {
     if (filters?.status) {
       params = params.set('status', filters.status);
     }
+    if (filters?.sensitivity) {
+      params = params.set('sensitivity', filters.sensitivity);
+    }
     if (filters?.sort) {
       params = params.set('sort', filters.sort);
     }
+
     if (filters?.min_date) {
       params = params.set('min_date', filters.min_date);
     }

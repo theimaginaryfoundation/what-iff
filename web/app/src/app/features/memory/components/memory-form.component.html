@@ -17,8 +17,28 @@
     <p id="memory-level-hint" class="mt-1 text-[11px] text-text-muted">{{ levelHint() }}</p>
   </div>
 
+  <div>
+    <label class="block text-xs text-text-secondary">
+      Sensitivity
+      <select
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        [ngModel]="sensitivity()"
+        name="memory-sensitivity"
+        aria-describedby="memory-sensitivity-hint"
+        (ngModelChange)="sensitivity.set($event)">
+        @for (option of sensitivityOptions; track option.value) {
+          <option [value]="option.value">{{ option.label }}</option>
+        }
+      </select>
+    </label>
+    <p id="memory-sensitivity-hint" class="mt-1 text-[11px] text-text-muted">
+      {{ sensitivityHint() }}. Threads can be limited to memories at or below a level.
+    </p>
+  </div>
+
   @if (showPinControl()) {
-    <div class="memory-form__pin rounded-xl border border-border-base bg-surface-elevated p-3">
+    <div class="memory-form__pin
+ rounded-xl border border-border-base bg-surface-elevated p-3">
       <label class="flex flex-col gap-1 text-xs text-text-secondary">
         <span class="font-semibold text-text-primary">Pin to personality</span>
         <select

@@ -35,6 +35,10 @@
       <div class="memory-card__identity">
         <span class="memory-card__name">{{ association() }}</span>
         <span class="memory-card__level" [attr.data-level]="memory().level" [uiTooltip]="levelHint()">{{ memory().levelLabel }}</span>
+        @if (!readOnly()) {
+          <app-memory-sensitivity-badge [sensitivity]="memory().sensitivity" />
+        }
+
         @if (memory().starred) {
           <ui-star-icon
             [size]="12"

@@ -12,6 +12,7 @@ import {
   VERIFIED_HINT,
 } from '../helpers/memory-vm.helpers';
 import { MemoryPersonalityOption } from './memory-form.component';
+import { MemorySensitivityBadgeComponent } from './memory-sensitivity-badge.component';
 import { StarIconComponent } from '../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.component';
@@ -24,7 +25,9 @@ import { PersonaCoverComponent } from '../../personality/picker/persona-cover.co
   imports: [
     DatePipe,
     RouterLink,
+    MemorySensitivityBadgeComponent,
     StarIconComponent,
+
     TooltipDirective,
     HelpHintComponent,
     PersonaAccentScopeComponent,
