@@ -9506,7 +9506,7 @@ export interface components {
             tts_autoplay_override?: boolean | null;
             /** @description When true, the thread is in the archive and omitted from default list responses */
             archived?: boolean;
-            /** @description Highest memory/entity sensitivity this chat may read; default `sensitive` (unrestricted). Anything lower makes the chat a restricted sandbox: it reads only memories and entities at or below the limit, cannot read other conversations, account-wide files, jobs, the personality scratchpad or the agent notebook, and what it learns is capped to the limit. */
+            /** @description Highest memory/entity sensitivity this chat may read; default `sensitive` (unrestricted). Anything lower makes the chat a restricted sandbox: it reads only memories and entities at or below the limit, cannot read other conversations, account-wide files, jobs, the personality scratchpad or the agent notebook, cannot schedule jobs or run sub-agents as other personalities or with skills, and anything it writes is kept to that thread (memories are chat-scoped, an explicit `sensitive` classification is never lowered, existing entities and memories are read-only). */
             memory_sensitivity_limit?: components["schemas"]["MemorySensitivity"];
             /** Format: date-time */
             created_at?: string;
@@ -10381,7 +10381,7 @@ export interface components {
             updated_at: string;
         };
         /**
-         * @description How delicate a memory or entity is, ordered least to most restricted: public < personal < sensitive. `public` is safe to use on public surfaces (for example a Discord thread) and is never assigned automatically; `personal` is the default for every existing and new memory; `sensitive` is health, finances, intimate or otherwise delicate material. A chat only reads memories and entities at or below its `memory_sensitivity_limit`.
+         * @description How delicate a memory or entity is, ordered least to most restricted: public < personal < sensitive. `public` is safe to use on public surfaces (for example a Discord thread); it is assigned only through this API (or the memory manager), or when a public-limited chat lowers the default level of a memory it creates. An agent tool or memory extraction never marks a memory `public`. `personal` is the default for every existing and new memory; `sensitive` is health, finances, intimate or otherwise delicate material. A chat only reads memories and entities at or below its `memory_sensitivity_limit`.
          * @enum {string}
          */
         MemorySensitivity: "public" | "personal" | "sensitive";

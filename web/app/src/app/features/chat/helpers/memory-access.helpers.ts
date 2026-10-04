@@ -30,9 +30,12 @@ export const MEMORY_ACCESS_OPTIONS: readonly MemoryAccessOption[] = [
   },
 ];
 
-/** What a restricted thread can't see beyond the filtered memories. Shared by the picker and the header chip. */
+/**
+ * What a restricted thread can't see or do beyond the filtered memories. Shared by the picker and
+ * the header chip. Keep in step with the sandbox rules in docs/ARCHITECTURE_SUMMARY.md.
+ */
 export const RESTRICTED_WITHHELD_COPY =
-  "Restricted threads also can't see the personality's shared scratchpad, other conversations, account-wide file and job lists, or its notebook (agent/ workspace files).";
+  "Restricted threads also can't see the personality's shared scratchpad, other conversations, account-wide file and job lists, or its notebook (agent/ workspace files). They can't schedule jobs or run sub-agents as other personalities or with skills. Anything they write stays in this thread: memories they save are kept to it, and they can add notes about new people and places but can't change existing ones.";
 
 export function memoryAccessOf(chat: Pick<Chat, 'memory_sensitivity_limit'> | null | undefined): MemorySensitivity {
   return chat?.memory_sensitivity_limit ?? DEFAULT_MEMORY_ACCESS;

@@ -28,7 +28,9 @@ export interface Chat {
   /**
    * Most sensitive memories this thread may use. `sensitive` (the default; absent on older
    * responses) is unrestricted. Below that the thread is restricted: the backend also withholds the
-   * shared scratchpad, other conversations, account-wide file/job listings and the notebook.
+   * shared scratchpad, other conversations, account-wide file/job listings and the notebook, the
+   * thread can't schedule jobs or run sub-agents as other personalities or with skills, and
+   * anything it writes is kept to the thread.
    */
   memory_sensitivity_limit?: MemorySensitivity;
   created_at: string;

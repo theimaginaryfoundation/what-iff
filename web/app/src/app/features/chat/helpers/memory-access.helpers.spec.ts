@@ -40,7 +40,16 @@ describe('memory-access.helpers', () => {
   });
 
   it('spells out what a restricted thread loses', () => {
-    for (const part of ['scratchpad', 'other conversations', 'file and job lists', 'notebook']) {
+    for (const part of [
+      'scratchpad',
+      'other conversations',
+      'file and job lists',
+      'notebook',
+      'schedule jobs',
+      'sub-agents',
+      'stays in this thread',
+      "can't change existing ones",
+    ]) {
       expect(RESTRICTED_WITHHELD_COPY).toContain(part);
     }
   });
