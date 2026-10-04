@@ -1,5 +1,5 @@
 import { CommonModule, DOCUMENT } from '@angular/common';
-import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
 import { filter } from 'rxjs/operators';
@@ -46,6 +46,7 @@ import { ThreadListPanelComponent } from './components/thread-list-panel/thread-
 import { ContextPanelService, ContextPanelTab } from './services/context-panel.service';
 import { ScratchpadService } from './services/scratchpad.service';
 import { ContextPanelToggleComponent } from './components/context-panel/context-panel-toggle.component';
+import { ThreadRestrictedChipComponent } from './components/thread-restricted-chip/thread-restricted-chip.component';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { BrainIconComponent, ChevDownIconComponent, EditIconComponent, FileIconComponent, LayersIconComponent, NoteIconComponent, WrenchIconComponent, XIconComponent } from '../../shared/ui/icons/icons';
@@ -75,6 +76,7 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
     AuthImagePipe,
     ThreadListPanelComponent,
     ContextPanelToggleComponent,
+    ThreadRestrictedChipComponent,
     HelpHintComponent,
     TooltipDirective,
     BrainIconComponent,
@@ -269,6 +271,13 @@ export class ChatPageComponent implements OnInit, OnDestroy {
 
   private readonly syncContextPanelChat = effect(() => {
     this.contextPanel.setActiveChat(this.session.thread());
+  });
+
+  // A change saved from the context panel (memory access) is the newest copy of the chat; fold it
+  // into the session so the header and later optimistic updates don't use a stale limit.
+  private readonly adoptContextPanelUpdate = effect(() => {
+    const updated = this.contextPanel.threadUpdate();
+    if (updated) untracked(() => this.session.adoptThreadUpdate(updated));
   });
 
   // When a background checkpoint (scratchpad + summary) completes for the active
@@ -679,6 +688,15 @@ export class ChatPageComponent implements OnInit, OnDestroy {
       return;
     }
     this.contextPanel.setActiveTab(tab);
+    this.contextPanel.setDesktopVisible(true);
+    if (this.isMobileViewport()) {
+      this.contextPanel.openMobile();
+    }
+  }
+
+  /** Reveals the Memories tab, where the thread's memory access is set (never toggles closed). */
+  openMemoryAccess(): void {
+    this.contextPanel.setActiveTab('memories');
     this.contextPanel.setDesktopVisible(true);
     if (this.isMobileViewport()) {
       this.contextPanel.openMobile();

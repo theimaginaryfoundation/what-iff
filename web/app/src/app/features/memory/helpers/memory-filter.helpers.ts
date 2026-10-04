@@ -1,11 +1,14 @@
 import { Params } from '@angular/router';
 
-import { MemoryFilters, MemorySort } from '../../../core/models/memory.model';
+import { MemoryFilters, MemorySensitivity, MemorySort } from '../../../core/models/memory.model';
+import { normalizeSensitivity } from './memory-sensitivity.helpers';
 
 export type MemoryScopeFilter = 'all' | 'user' | 'chat';
 export type MemoryLevelFilter = 'all' | 'global' | 'personality' | 'thread' | 'summary';
 /** Active / Archived are status filters; Summaries is a dedicated view of checkpoint summaries. */
 export type MemoryStatusFilter = 'active' | 'inactive' | 'summaries';
+/** `all` sends no sensitivity filter; otherwise lists memories at exactly that level. */
+export type MemorySensitivityFilter = 'all' | MemorySensitivity;
 /** Persona-filter sentinel for unpinned User memories shared across all personas. */
 export const GLOBAL_PERSONALITY_FILTER = '__global__';
 
@@ -14,6 +17,7 @@ export interface MemoryViewFilters {
   level: MemoryLevelFilter;
   status: MemoryStatusFilter;
   sort: MemorySort;
+  sensitivity: MemorySensitivityFilter;
   query: string;
   personalityId: string;
   chatId: string;
@@ -26,6 +30,7 @@ export const DEFAULT_MEMORY_VIEW_FILTERS: MemoryViewFilters = {
   level: 'all',
   status: 'active',
   sort: 'created_desc',
+  sensitivity: 'all',
   query: '',
   personalityId: '',
   chatId: '',
@@ -51,6 +56,7 @@ export function parseQueryParams(params: Params): MemoryViewFilters {
     level,
     status,
     sort: normalizeSort(params['sort']),
+    sensitivity: normalizeSensitivity(params['sensitivity']) ?? 'all',
     query: String(params['query'] ?? '').trim(),
     personalityId: String(params['personality_id'] ?? '').trim(),
     chatId: String(params['chat'] ?? params['chat_id'] ?? '').trim(),
@@ -69,6 +75,7 @@ export function serializeFilters(filters: MemoryViewFilters): Params {
     if (filters.status !== 'active') params['status'] = filters.status;
   }
   if (filters.sort !== 'created_desc') params['sort'] = filters.sort;
+  if (filters.sensitivity !== 'all') params['sensitivity'] = filters.sensitivity;
   if (filters.query.trim()) params['query'] = filters.query.trim();
   if (filters.personalityId.trim()) params['personality_id'] = filters.personalityId.trim();
   if (filters.chatId.trim()) params['chat'] = filters.chatId.trim();
@@ -82,6 +89,7 @@ export function toApiFilters(filters: MemoryViewFilters): MemoryFilters {
   const api: MemoryFilters = {};
   if (filters.query.trim()) api.query = filters.query.trim();
   api.sort = filters.sort;
+  if (filters.sensitivity !== 'all') api.sensitivity = filters.sensitivity;
   if (filters.personalityId === GLOBAL_PERSONALITY_FILTER) {
     api.global_only = true;
   } else if (filters.personalityId.trim()) {

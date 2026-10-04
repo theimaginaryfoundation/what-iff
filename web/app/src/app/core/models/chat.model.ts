@@ -1,3 +1,5 @@
+import { MemorySensitivity } from './memory.model';
+
 export interface Chat {
   id: string;
   user_id: string;
@@ -23,6 +25,12 @@ export interface Chat {
    * restored (unarchived) and its summary is generated in the background.
    */
   rehydration_state?: string;
+  /**
+   * Most sensitive memories this thread may use. `sensitive` (the default; absent on older
+   * responses) is unrestricted. Below that the thread is restricted: the backend also withholds the
+   * shared scratchpad, other conversations, account-wide file/job listings and the notebook.
+   */
+  memory_sensitivity_limit?: MemorySensitivity;
   created_at: string;
   updated_at: string;
 }
@@ -79,6 +87,7 @@ export interface PatchChatRequest {
   /** Set to true to explicitly clear the active mood (Auto mood). */
   clear_active_mood?: boolean;
   archived?: boolean;
+  memory_sensitivity_limit?: MemorySensitivity;
 }
 
 export interface ChatContext {

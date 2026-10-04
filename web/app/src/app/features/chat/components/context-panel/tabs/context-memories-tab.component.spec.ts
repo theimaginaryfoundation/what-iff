@@ -103,6 +103,41 @@ describe('ContextMemoriesTabComponent', () => {
         expect(actions.textContent).toContain('Manage all memories');
     });
 
+    it('shows each memory sensitivity badge, defaulting to Personal', () => {
+        expect(fixture.nativeElement.querySelector('.memory-meta .sensitivity-badge')?.textContent?.trim()).toBe('Personal');
+    });
+
+    it('creates a thread memory with the chosen sensitivity', async () => {
+        fixture.componentInstance.openCreateModal();
+        fixture.detectChanges();
+        expect(fixture.componentInstance.draftSensitivity()).toBe('personal');
+
+        const select = document.querySelector('#memory-sensitivity') as HTMLSelectElement;
+        select.value = 'sensitive';
+        select.dispatchEvent(new Event('change'));
+        fixture.componentInstance.draft.set('new fact');
+        await fixture.componentInstance.saveEditor();
+
+        expect(memoryService.createMemory).toHaveBeenCalledWith({
+            chat_id: 'chat-1',
+            content: 'new fact',
+            level: 'thread',
+            type: 'Context',
+            sensitivity: 'sensitive',
+        });
+    });
+
+    it('edits start from the memory sensitivity and save it with the content', async () => {
+        const target = memory({ id: 'thread-1', content: 'thread memory', sensitivity: 'public' });
+        fixture.componentInstance.openEditModal(target);
+        expect(fixture.componentInstance.draftSensitivity()).toBe('public');
+
+        fixture.componentInstance.draftSensitivity.set('sensitive');
+        await fixture.componentInstance.saveEditor();
+
+        expect(memoryService.patchMemory).toHaveBeenCalledWith('thread-1', { content: 'thread memory', sensitivity: 'sensitive' });
+    });
+
     it('deletes memories through the memory service', async () => {
         vi.spyOn(window, 'confirm').mockReturnValue(true);
 

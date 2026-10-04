@@ -84,7 +84,24 @@
           <ui-chev-down-icon [size]="12" />
         </div>
       </label>
-      <button type="button" class="memories-list__clear" uiTooltip="Reset search, personality, dates and sort" (click)="onClearFilters()">
+      <label class="memories-list__filter-field">
+        <span>Sensitivity</span>
+        <div class="memories-list__sensitivity-wrap">
+          <select
+            aria-label="Filter by sensitivity"
+            [uiTooltip]="sensitivityFilterHint()"
+            [value]="filters().sensitivity"
+            (change)="setSensitivityFilter($any($event.target).value)"
+          >
+            <option value="all">All</option>
+            @for (option of sensitivityOptions; track option.value) {
+              <option [value]="option.value">{{ option.label }}</option>
+            }
+          </select>
+          <ui-chev-down-icon [size]="12" />
+        </div>
+      </label>
+      <button type="button" class="memories-list__clear" uiTooltip="Reset search, personality, dates, sensitivity and sort" (click)="onClearFilters()">
         Clear
       </button>
       @if (dateRangeError(); as dateError) {
@@ -168,6 +185,14 @@
         }
         <button
           type="button"
+          uiTooltip="Set how freely the selected memories may be used (public, personal or sensitive)"
+          (click)="onSetSensitivitySelected()"
+          [disabled]="mutating()"
+        >
+          Set sensitivity
+        </button>
+        <button
+          type="button"
           [uiTooltip]="isArchivedView() ? 'Make the selected memories usable again' : 'Stop using the selected memories in replies'"
           (click)="onArchiveSelected()"
           [disabled]="mutating()"
@@ -184,6 +209,16 @@
           Delete
         </button>
       </div>
+    }
+
+    @if (bulkFeedback(); as feedback) {
+      <p
+        class="memories-list__feedback"
+        [class.memories-list__feedback--error]="feedback.kind === 'error'"
+        [attr.role]="feedback.kind === 'error' ? 'alert' : 'status'"
+      >
+        {{ feedback.text }}
+      </p>
     }
 
     <app-memory-card-grid
@@ -265,6 +300,14 @@
     </div>
   </div>
 }
+
+<app-set-sensitivity-modal
+  [open]="sensitivityModalOpen()"
+  [count]="selectedCount()"
+  [saving]="mutating()"
+  (confirm)="confirmSetSensitivity($event)"
+  (cancel)="closeSensitivityModal()"
+/>
 
 <app-delete-memory-modal
   [open]="deleteModalOpen()"

@@ -1246,3 +1246,162 @@ describe('MemoriesListTabComponent computed signal edge cases', () => {
     });
   });
 });
+
+describe('MemoriesListTabComponent sensitivity', () => {
+  const findButton = (host: HTMLElement, text: string) =>
+    Array.from(host.querySelectorAll('button')).find(b => b.textContent?.trim() === text) as HTMLButtonElement | undefined;
+
+  describe('filter', () => {
+    it('offers All, Public, Personal and Sensitive and starts on All', async () => {
+      const { fixture } = await createComponent();
+      const select = (fixture.nativeElement as HTMLElement).querySelector('select[aria-label="Filter by sensitivity"]') as HTMLSelectElement;
+      expect(Array.from(select.options).map(o => o.textContent?.trim())).toEqual(['All', 'Public', 'Personal', 'Sensitive']);
+      expect(select.value).toBe('all');
+    });
+
+    it('applies the chosen level, clears the selection and mirrors it into the URL', async () => {
+      const { fixture, view, router } = await createComponent();
+      const select = (fixture.nativeElement as HTMLElement).querySelector('select[aria-label="Filter by sensitivity"]') as HTMLSelectElement;
+
+      select.value = 'sensitive';
+      select.dispatchEvent(new Event('change'));
+
+      expect(view.clearSelection).toHaveBeenCalled();
+      expect(view.setFilters).toHaveBeenCalledWith({ sensitivity: 'sensitive' });
+      expect(router.navigate).toHaveBeenCalledWith([], {
+        queryParams: expect.objectContaining({ sensitivity: 'sensitive' }),
+        replaceUrl: true,
+      });
+    });
+
+    it('drops the URL param when set back to All', async () => {
+      const view = makeViewService({ filters: { sensitivity: 'public' } });
+      const { component, router } = await createComponent({ view });
+
+      component.setSensitivityFilter('all');
+
+      const params = router.navigate.mock.calls.at(-1)![1].queryParams;
+      expect(params).not.toHaveProperty('sensitivity');
+    });
+
+    it('restores the filter from the URL on load', async () => {
+      const { view } = await createComponent({ queryParams: of({ sensitivity: 'personal' }) });
+      expect(view.applyFilters).toHaveBeenCalledWith(expect.objectContaining({ sensitivity: 'personal' }), 1);
+    });
+  });
+
+  describe('bulk set sensitivity', () => {
+    it('shows the action in the bulk toolbar only with a selection', async () => {
+      const none = await createComponent();
+      expect(findButton(none.fixture.nativeElement, 'Set sensitivity')).toBeUndefined();
+
+      const some = await createComponent({ view: makeViewService({ selectedIds: ['m-1'] }) });
+      expect(findButton(some.fixture.nativeElement, 'Set sensitivity')).toBeDefined();
+    });
+
+    it('keeps the action available in the Thread view', async () => {
+      const view = makeViewService({ selectedIds: ['m-1'], filters: { scope: 'chat' } });
+      const { fixture } = await createComponent({ view });
+      expect(findButton(fixture.nativeElement, 'Set sensitivity')).toBeDefined();
+    });
+
+    it('opens a confirmation dialog for the selected memories', async () => {
+      const view = makeViewService({ selectedIds: ['m-1', 'm-2'] });
+      const { fixture, component } = await createComponent({ view });
+
+      findButton(fixture.nativeElement, 'Set sensitivity')!.click();
+      fixture.detectChanges();
+
+      expect(component.sensitivityModalOpen()).toBe(true);
+      expect((fixture.nativeElement as HTMLElement).querySelector('#set-sensitivity-title')?.textContent).toContain('2 memories');
+      expect(view.patchSelected).not.toHaveBeenCalled();
+    });
+
+    it('does not open the dialog with nothing selected', async () => {
+      const { component } = await createComponent();
+      component.onSetSensitivitySelected();
+      expect(component.sensitivityModalOpen()).toBe(false);
+    });
+
+    it('patches every selected id once with the chosen level, then confirms and reloads', async () => {
+      const view = makeViewService({ selectedIds: ['m-1', 'm-2', 'm-3'], currentPage: 2 });
+      view.patchSelected.mockReturnValue(of(void 0));
+      const { fixture, component } = await createComponent({ view });
+      component.onSetSensitivitySelected();
+
+      component.confirmSetSensitivity('sensitive');
+      fixture.detectChanges();
+
+      expect(view.patchSelected).toHaveBeenCalledTimes(1);
+      expect(view.patchSelected).toHaveBeenCalledWith({ sensitivity: 'sensitive' });
+      expect(component.sensitivityModalOpen()).toBe(false);
+      expect(view.load).toHaveBeenCalledWith(2);
+      const status = (fixture.nativeElement as HTMLElement).querySelector('.memories-list__feedback') as HTMLElement;
+      expect(status.textContent?.trim()).toBe('Set 3 memories to Sensitive.');
+      expect(status.getAttribute('role')).toBe('status');
+    });
+
+    it('uses the singular in the success message', async () => {
+      const view = makeViewService({ selectedIds: ['m-1'] });
+      view.patchSelected.mockReturnValue(of(void 0));
+      const { component } = await createComponent({ view });
+
+      component.confirmSetSensitivity('public');
+
+      expect(component.bulkFeedback()).toEqual({ kind: 'success', text: 'Set 1 memory to Public.' });
+    });
+
+    it('reports a failure, includes the server reason and does not reload', async () => {
+      const view = makeViewService({ selectedIds: ['m-1', 'm-2'] });
+      view.patchSelected.mockReturnValue(throwError(() => new Error('memory not found')));
+      const { fixture, component } = await createComponent({ view });
+      component.onSetSensitivitySelected();
+
+      component.confirmSetSensitivity('public');
+      fixture.detectChanges();
+
+      expect(component.sensitivityModalOpen()).toBe(false);
+      expect(view.load).not.toHaveBeenCalled();
+      const alert = (fixture.nativeElement as HTMLElement).querySelector('.memories-list__feedback--error') as HTMLElement;
+      expect(alert.getAttribute('role')).toBe('alert');
+      expect(alert.textContent).toContain('no memories were updated');
+      expect(alert.textContent).toContain('memory not found');
+    });
+
+    it('clears an earlier result when the dialog is opened again', async () => {
+      const view = makeViewService({ selectedIds: ['m-1'] });
+      view.patchSelected.mockReturnValue(of(void 0));
+      const { component } = await createComponent({ view });
+      component.confirmSetSensitivity('public');
+      expect(component.bulkFeedback()).not.toBeNull();
+
+      component.onSetSensitivitySelected();
+
+      expect(component.bulkFeedback()).toBeNull();
+    });
+
+    it('does nothing when confirmed with an empty selection', async () => {
+      const { component, view } = await createComponent();
+      component.confirmSetSensitivity('public');
+      expect(view.patchSelected).not.toHaveBeenCalled();
+    });
+
+    it('closes the dialog on cancel without patching', async () => {
+      const view = makeViewService({ selectedIds: ['m-1'] });
+      const { component } = await createComponent({ view });
+      component.onSetSensitivitySelected();
+
+      component.closeSensitivityModal();
+
+      expect(component.sensitivityModalOpen()).toBe(false);
+      expect(view.patchSelected).not.toHaveBeenCalled();
+    });
+
+    it('disables the toolbar action while a mutation is in flight', async () => {
+      const view = makeViewService({ selectedIds: ['m-1'] });
+      view.mutating.set(true);
+      const { fixture } = await createComponent({ view });
+      expect(findButton(fixture.nativeElement, 'Set sensitivity')!.disabled).toBe(true);
+    });
+  });
+});

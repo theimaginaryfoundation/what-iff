@@ -300,6 +300,53 @@ describe('MemoryService', () => {
     });
   });
 
+  describe('sensitivity', () => {
+    it('sends the sensitivity filter on the list query', () => {
+      service.getMemories(1, 10, { sensitivity: 'sensitive' }).subscribe();
+
+      const req = httpMock.expectOne(r => r.url === `${environment.apiUrl}/memory`);
+      expect(req.request.params.get('sensitivity')).toBe('sensitive');
+      req.flush({ results: [], total_count: 0, page: 1 });
+    });
+
+    it('omits the sensitivity param when no filter is set', () => {
+      service.getMemories(1, 10, { status: 'active' }).subscribe();
+
+      const req = httpMock.expectOne(r => r.url === `${environment.apiUrl}/memory`);
+      expect(req.request.params.has('sensitivity')).toBe(false);
+      req.flush({ results: [], total_count: 0, page: 1 });
+    });
+
+    it('creates a memory with an explicit sensitivity', () => {
+      service.createMemory({ content: 'x', level: 'thread', sensitivity: 'public' }).subscribe();
+
+      const req = httpMock.expectOne(`${environment.apiUrl}/memory`);
+      expect(req.request.method).toBe('POST');
+      expect(req.request.body).toEqual({ content: 'x', level: 'thread', sensitivity: 'public' });
+      req.flush({ ...mockMemory, sensitivity: 'public' });
+    });
+
+    it('patches one memory with a sensitivity', () => {
+      let received: Memory | undefined;
+      service.patchMemory('mem-1', { sensitivity: 'sensitive' }).subscribe(memory => (received = memory));
+
+      const req = httpMock.expectOne(`${environment.apiUrl}/memory/mem-1`);
+      expect(req.request.method).toBe('PATCH');
+      expect(req.request.body).toEqual({ sensitivity: 'sensitive' });
+      req.flush({ ...mockMemory, sensitivity: 'sensitive' });
+      expect(received?.sensitivity).toBe('sensitive');
+    });
+
+    it('batch-patches sensitivity for many ids in one request', () => {
+      const payload = { ids: ['mem-1', 'mem-2'], patch: { sensitivity: 'public' as const }, all_or_none: true };
+      service.patchMemoriesBatch(payload).subscribe();
+
+      const req = httpMock.expectOne(`${environment.apiUrl}/memory/batch/patch`);
+      expect(req.request.body).toEqual(payload);
+      req.flush({ results: [], updated_count: 2 });
+    });
+  });
+
   describe('deleteMemory', () => {
     it('DELETEs the memory by id', () => {
       service.deleteMemory('mem-1').subscribe();

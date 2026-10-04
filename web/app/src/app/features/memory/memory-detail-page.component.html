@@ -29,6 +29,7 @@
           {{ levelLabel(currentMemory.level) }} · Created {{ currentMemory.created_at | date: "medium" }} · Updated
           {{ currentMemory.updated_at | date: "medium" }}
         </p>
+        <div class="mt-2"><app-memory-sensitivity-badge [sensitivity]="currentMemory.sensitivity ?? 'personal'" /></div>
       </article>
       <div class="flex gap-2">
         <button
@@ -69,6 +70,10 @@
             <div>
               <dt class="font-medium text-text-primary">Level</dt>
               <dd><span [uiTooltip]="levelHint(currentMemory.level)">{{ levelLabel(currentMemory.level) }}</span></dd>
+            </div>
+            <div>
+              <dt class="font-medium text-text-primary">Sensitivity</dt>
+              <dd><app-memory-sensitivity-badge [sensitivity]="currentMemory.sensitivity ?? 'personal'" /></dd>
             </div>
             <div>
               <dt class="font-medium text-text-primary">Type</dt>

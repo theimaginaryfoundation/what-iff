@@ -3,7 +3,13 @@ import { ChangeDetectionStrategy, Component, OnChanges, SimpleChanges, computed,
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
-import { Memory } from '../../../../../core/models/memory.model';
+import { Memory, MemorySensitivity } from '../../../../../core/models/memory.model';
+import { MemorySensitivityBadgeComponent } from '../../../../memory/components/memory-sensitivity-badge.component';
+import {
+  DEFAULT_MEMORY_SENSITIVITY,
+  MEMORY_SENSITIVITY_OPTIONS,
+  normalizeSensitivity,
+} from '../../../../memory/helpers/memory-sensitivity.helpers';
 import { MemoryService } from '../../../../../core/services/memory.service';
 import { apiErrorMessage } from '../../../../../core/utils/api-error.helpers';
 import { ButtonComponent } from '../../../../../shared/ui/button/button.component';
@@ -17,7 +23,7 @@ type MemoryContextTab = 'thread' | 'global';
 @Component({
   selector: 'app-context-memories-tab',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, ModalComponent, HelpHintComponent, TooltipDirective],
+  imports: [CommonModule, ButtonComponent, ModalComponent, HelpHintComponent, MemorySensitivityBadgeComponent, TooltipDirective],
   template: `
     <section class="tab-body">
       <div class="memory-scope-row">
@@ -76,6 +82,7 @@ type MemoryContextTab = 'thread' | 'global';
               <p class="memory-item__content">{{ memory.content }}</p>
               <div class="memory-meta">
                 <time [attr.datetime]="memory.updated_at">{{ memory.updated_at | date: 'MMM d h:mm a' }}</time>
+                <app-memory-sensitivity-badge [sensitivity]="memory.sensitivity ?? 'personal'" />
                 <span class="memory-meta__actions">
                   <button type="button" (click)="openEditModal(memory)">edit</button>
                   <button type="button" class="memory-meta__delete" (click)="deleteMemory(memory)">delete</button>
@@ -95,6 +102,12 @@ type MemoryContextTab = 'thread' | 'global';
       <h4 modal-header id="memory-editor-title">{{ editingId() ? 'Edit memory' : 'Create memory' }}</h4>
       <label class="label" for="memory-content">Memory content</label>
       <textarea id="memory-content" [value]="draft()" (input)="draft.set($any($event.target).value)"></textarea>
+      <label class="label label--spaced" for="memory-sensitivity">Sensitivity</label>
+      <select id="memory-sensitivity" [value]="draftSensitivity()" (change)="draftSensitivity.set($any($event.target).value)">
+        @for (option of sensitivityOptions; track option.value) {
+          <option [value]="option.value">{{ option.label }}</option>
+        }
+      </select>
       <div modal-footer>
         <ui-button size="sm" variant="secondary" (activate)="closeEditor()">Cancel</ui-button>
         <ui-button size="sm" variant="primary" (activate)="saveEditor()">Save</ui-button>
@@ -261,6 +274,19 @@ type MemoryContextTab = 'thread' | 'global';
       margin-bottom: 0.25rem;
     }
 
+    .label--spaced {
+      margin-top: 0.75rem;
+    }
+
+    select {
+      width: 100%;
+      border: 1px solid var(--color-border-base);
+      border-radius: 0.625rem;
+      padding: 0.5rem 0.6rem;
+      color: var(--color-text-primary);
+      background: var(--color-surface-base);
+    }
+
     textarea {
       width: 100%;
       min-height: 8rem;
@@ -293,6 +319,8 @@ export class ContextMemoriesTabComponent implements OnChanges {
 
   readonly editorOpen = signal(false);
   readonly draft = signal('');
+  readonly draftSensitivity = signal<MemorySensitivity>(DEFAULT_MEMORY_SENSITIVITY);
+  readonly sensitivityOptions = MEMORY_SENSITIVITY_OPTIONS;
   readonly editingId = signal<string | null>(null);
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -328,12 +356,14 @@ export class ContextMemoriesTabComponent implements OnChanges {
   openCreateModal(): void {
     this.editingId.set(null);
     this.draft.set('');
+    this.draftSensitivity.set(DEFAULT_MEMORY_SENSITIVITY);
     this.editorOpen.set(true);
   }
 
   openEditModal(memory: Memory): void {
     this.editingId.set(memory.id);
     this.draft.set(memory.content);
+    this.draftSensitivity.set(normalizeSensitivity(memory.sensitivity) ?? DEFAULT_MEMORY_SENSITIVITY);
     this.editorOpen.set(true);
   }
 
@@ -348,13 +378,14 @@ export class ContextMemoriesTabComponent implements OnChanges {
 
     try {
       if (this.editingId()) {
-        await firstValueFrom(this.memoryService.patchMemory(this.editingId()!, { content }));
+        await firstValueFrom(this.memoryService.patchMemory(this.editingId()!, { content, sensitivity: this.draftSensitivity() }));
       } else {
         await firstValueFrom(this.memoryService.createMemory({
           chat_id: chatId,
           content,
           level: 'thread',
           type: 'Context',
+          sensitivity: this.draftSensitivity(),
         }));
       }
       this.closeEditor();

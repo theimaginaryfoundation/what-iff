@@ -1,0 +1,24 @@
+:host {
+  display: inline-flex;
+}
+
+.sensitivity-badge {
+  --sensitivity-color: var(--color-text-muted);
+  background: color-mix(in srgb, var(--sensitivity-color) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sensitivity-color) 40%, var(--color-border-base));
+  border-radius: 999px;
+  color: var(--sensitivity-color);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 0.05rem 0.45rem;
+  white-space: nowrap;
+}
+
+.sensitivity-badge[data-sensitivity="public"] {
+  --sensitivity-color: var(--color-success);
+}
+
+.sensitivity-badge[data-sensitivity="sensitive"] {
+  --sensitivity-color: var(--color-warning);
+}

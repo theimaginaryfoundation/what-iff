@@ -1,3 +1,12 @@
+/**
+ * How freely a memory may be used, ordered public < personal < sensitive. A thread with a
+ * `memory_sensitivity_limit` of L may only use memories at or below L. Existing memories are personal.
+ */
+export type MemorySensitivity = 'public' | 'personal' | 'sensitive';
+
+/** Least to most sensitive; the order the backend compares against a thread's limit. */
+export const MEMORY_SENSITIVITIES: readonly MemorySensitivity[] = ['public', 'personal', 'sensitive'];
+
 export interface Memory {
   id: string;
   chat_id?: string;
@@ -6,6 +15,8 @@ export interface Memory {
   level: 'global' | 'personality' | 'thread' | 'summary';
   type: 'Context';
   status: 'active' | 'inactive';
+  /** The backend always sends it (default `personal`); optional here so older payloads and fixtures still type-check. */
+  sensitivity?: MemorySensitivity;
   // Stored confidence is a float in [0,1] (LLM buckets map to anchors 0.3/0.6/0.9; other signals
   // can refine it). Create/patch still accept the coarse buckets below.
   confidence: number;
@@ -36,6 +47,7 @@ export interface MemoryFilters {
   global_only?: boolean;
   query?: string;
   status?: 'active' | 'inactive';
+  sensitivity?: MemorySensitivity;
   sort?: MemorySort;
   min_date?: string;
   max_date?: string;
@@ -55,6 +67,8 @@ export interface CreateMemoryInput {
   starred?: boolean;
   pinned_personality_id?: string | null;
   confidence?: 'low' | 'medium' | 'high';
+  /** Omit to let the backend default (personal). */
+  sensitivity?: MemorySensitivity;
 }
 
 export interface BatchCreateMemoryInput {
@@ -95,6 +109,7 @@ export interface MemoryPatch {
   pinned_personality_id?: string | null;
   status?: 'active' | 'inactive';
   confidence?: 'low' | 'medium' | 'high';
+  sensitivity?: MemorySensitivity;
 }
 
 export interface MemoryImportResult {

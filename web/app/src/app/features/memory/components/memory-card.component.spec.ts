@@ -12,6 +12,7 @@ function makeVm(partial: Partial<MemoryCardVm> = {}): MemoryCardVm {
     level: 'thread',
     levelLabel: 'Thread',
     status: 'active',
+    sensitivity: 'personal',
     starred: false,
     chatName: 'Thread A',
     chatId: 'c-1',
@@ -462,5 +463,36 @@ describe('MemoryCardComponent', () => {
     fixture.detectChanges();
 
     expect(fixture.nativeElement.querySelector('.memory-card__star')).toBeTruthy();
+  });
+});
+
+describe('MemoryCardComponent sensitivity badge', () => {
+  async function render(partial: Partial<MemoryCardVm>, readOnly = false): Promise<HTMLElement> {
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [MemoryCardComponent],
+      providers: [provideZonelessChangeDetection()],
+    }).compileComponents();
+    const fixture = TestBed.createComponent(MemoryCardComponent);
+    fixture.componentRef.setInput('memory', makeVm(partial));
+    fixture.componentRef.setInput('readOnly', readOnly);
+    fixture.detectChanges();
+    return fixture.nativeElement as HTMLElement;
+  }
+
+  it.each([
+    ['public', 'Public'],
+    ['personal', 'Personal'],
+    ['sensitive', 'Sensitive'],
+  ] as const)('shows the %s badge', async (sensitivity, label) => {
+    const host = await render({ sensitivity });
+    const badge = host.querySelector('.sensitivity-badge');
+    expect(badge?.textContent?.trim()).toBe(label);
+    expect(badge?.getAttribute('data-sensitivity')).toBe(sensitivity);
+  });
+
+  it('omits the badge on read-only summary cards', async () => {
+    const host = await render({ sensitivity: 'sensitive' }, true);
+    expect(host.querySelector('.sensitivity-badge')).toBeNull();
   });
 });

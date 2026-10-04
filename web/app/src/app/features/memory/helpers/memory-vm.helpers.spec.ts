@@ -155,3 +155,15 @@ describe('memory-vm.helpers', () => {
         expect(associationLabel(neither)).toBe('Global');
     });
 });
+
+describe('memory-vm.helpers sensitivity', () => {
+    it('carries the memory sensitivity onto the card vm', () => {
+        expect(toMemoryCardVm(makeMemory({ sensitivity: 'sensitive' })).sensitivity).toBe('sensitive');
+        expect(toMemoryCardVm(makeMemory({ sensitivity: 'public' })).sensitivity).toBe('public');
+    });
+
+    it('treats a missing or unknown sensitivity as personal', () => {
+        expect(toMemoryCardVm(makeMemory()).sensitivity).toBe('personal');
+        expect(toMemoryCardVm(makeMemory({ sensitivity: 'bogus' as never })).sensitivity).toBe('personal');
+    });
+});

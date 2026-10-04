@@ -2,18 +2,28 @@ import { CommonModule, DatePipe, PercentPipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, OnInit, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 
-import { Memory } from '../../core/models/memory.model';
+import { Memory, MemorySensitivity } from '../../core/models/memory.model';
 import { MemoryService } from '../../core/services/memory.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { MemoryFormComponent, MemoryPersonalityOption } from './components/memory-form.component';
 import { DeleteMemoryModalComponent } from './components/delete-memory-modal.component';
 import { CONFIDENCE_HINT, levelBadgeText, levelDescription, VERIFIED_HINT } from './helpers/memory-vm.helpers';
+import { MemorySensitivityBadgeComponent } from './components/memory-sensitivity-badge.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 
 @Component({
   selector: 'app-memory-detail-page',
   standalone: true,
-  imports: [CommonModule, DatePipe, PercentPipe, MemoryFormComponent, DeleteMemoryModalComponent, RouterLink, TooltipDirective],
+  imports: [
+    CommonModule,
+    DatePipe,
+    PercentPipe,
+    MemoryFormComponent,
+    MemorySensitivityBadgeComponent,
+    DeleteMemoryModalComponent,
+    RouterLink,
+    TooltipDirective,
+  ],
   templateUrl: './memory-detail-page.component.html',
   styleUrl: './memory-detail-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -91,7 +101,7 @@ export class MemoryDetailPageComponent implements OnInit {
     });
   }
 
-  save(changes: { content: string; level: Memory['level'] }): void {
+  save(changes: { content: string; level: Memory['level']; sensitivity: MemorySensitivity }): void {
     if (!this.memory()) return;
     this.saving.set(true);
     this.memoryService.patchMemory(this.memory()!.id, changes).subscribe({

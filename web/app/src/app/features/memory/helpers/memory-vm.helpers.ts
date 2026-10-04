@@ -1,4 +1,5 @@
-import { Memory, MemoryMergeType } from '../../../core/models/memory.model';
+import { Memory, MemoryMergeType, MemorySensitivity } from '../../../core/models/memory.model';
+import { DEFAULT_MEMORY_SENSITIVITY, normalizeSensitivity } from './memory-sensitivity.helpers';
 
 /** Label for memories with no pinned personality, used in filters, move menus and pickers. */
 export const GLOBAL_SCOPE_LABEL = 'Global (every personality)';
@@ -16,6 +17,7 @@ export interface MemoryCardVm {
   level: Memory['level'];
   levelLabel: string;
   status: Memory['status'];
+  sensitivity: MemorySensitivity;
   starred: boolean;
   chatName: string | null;
   chatId: string | null;
@@ -48,6 +50,7 @@ export function toMemoryCardVm(
     level: memory.level,
     levelLabel: levelBadgeText(memory.level),
     status: memory.status,
+    sensitivity: normalizeSensitivity(memory.sensitivity) ?? DEFAULT_MEMORY_SENSITIVITY,
     starred: memory.starred,
     chatName: memory.chat_name ?? null,
     chatId: memory.chat_id ?? null,
