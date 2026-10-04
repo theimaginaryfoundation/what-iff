@@ -9791,6 +9791,40 @@ export interface components {
              * @description When the snapshot was captured.
              */
             captured_at: string;
+            /** @description What this context was built from, by reference (IDs and short hashes, never content). Absent on snapshots captured before it existed. */
+            inputs?: components["schemas"]["ContextInputs"] | null;
+        };
+        /** @description Input manifest for one assistant turn: references to the memories, mode, scratchpad and checkpoint summary the model context was built from, so "why was this loaded?" can be answered after the fact. */
+        ContextInputs: {
+            /** @description Memories retrieved for this turn, in load order. */
+            memories?: components["schemas"]["ContextMemoryInput"][];
+            /** @description Memories carried into this turn from earlier turns' context. */
+            replayed_memory_ids?: string[];
+            /** @description True when automatic memory loading failed for this turn. */
+            memory_enrichment_failed?: boolean;
+            /**
+             * Format: uuid
+             * @description The active mode (mood) when one shaped the turn.
+             */
+            mood_id?: string;
+            /** @description First 12 hex characters of the SHA-256 of the scratchpad that was in context. */
+            scratchpad_sha?: string;
+            /** @description First 12 hex characters of the SHA-256 of the checkpoint summary that was in context. */
+            summary_sha?: string;
+        };
+        /** @description One memory retrieved for a turn. */
+        ContextMemoryInput: {
+            /** Format: uuid */
+            id: string;
+            /** @description Memory scope (User, Chat). */
+            scope?: string;
+            /**
+             * @description prefetch = loaded automatically for the turn; tool = pulled in by the agent during the turn.
+             * @enum {string}
+             */
+            stage: "prefetch" | "tool";
+            /** @description Retrieval similarity in [0,1], when the memory came from vector search. */
+            relevance?: number;
         };
         /**
          * @example {
