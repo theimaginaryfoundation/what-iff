@@ -104,12 +104,12 @@ func persistedAdditionalContext(carryOver [][2]*models.ChatMessage, history []*m
 // limit it ran under, so a restricted chat replays none of them (fail closed); the live tools it
 // calls this turn are already gated.
 var restrictedToolResultTools = map[string]struct{}{
-	tools.RecallToolSpec.Name:       {},
-	tools.ListToolSpec.Name:         {},
-	tools.RunSubagentToolSpec.Name:  {},
-	tools.ToolNameRecallEntity:      {},
-	tools.ToolNameReadFile:          {},
-	tools.ToolNameGrepFiles:         {},
+	tools.RecallToolSpec.Name:      {},
+	tools.ListToolSpec.Name:        {},
+	tools.RunSubagentToolSpec.Name: {},
+	tools.ToolNameRecallEntity:     {},
+	tools.ToolNameReadFile:         {},
+	tools.ToolNameGrepFiles:        {},
 }
 
 // withoutAccountDataToolResults returns turns with the tool calls a restricted chat must not
