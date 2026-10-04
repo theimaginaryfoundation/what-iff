@@ -27,9 +27,11 @@ type Entity struct {
 	State               string     `json:"state"`
 	AuthorClass         string     `json:"author_class"`
 	PinnedPersonalityID *uuid.UUID `json:"pinned_personality_id,omitempty"`
-	CardUpdatedAt       time.Time  `json:"card_updated_at"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
+	// Sensitivity is how delicate the entity is; see MemorySensitivity.
+	Sensitivity   MemorySensitivity `json:"sensitivity"`
+	CardUpdatedAt time.Time         `json:"card_updated_at"`
+	CreatedAt     time.Time         `json:"created_at"`
+	UpdatedAt     time.Time         `json:"updated_at"`
 }
 
 // EntityInput is a create or update. Aliases are the names besides Name; Name is always an alias.
@@ -40,6 +42,8 @@ type EntityInput struct {
 	Aliases             []string
 	PinnedPersonalityID *uuid.UUID
 	AuthorClass         string
+	// Sensitivity is empty for the default (personal); on update, empty keeps the stored value.
+	Sensitivity MemorySensitivity
 }
 
 // EntityAliasMatch is one matchable name: what mention spotting loads per turn.

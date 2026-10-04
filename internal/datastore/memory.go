@@ -86,16 +86,17 @@ func toMemoryModel(e *ent.Memory) *models.Memory {
 	}
 
 	memoryModel := &models.Memory{
-		ID:         e.ID,
-		Content:    e.Content,
-		Level:      memoryLevelForEntity(e),
-		Type:       models.MemoryType(e.Type),
-		Status:     status,
-		Confidence: models.ClampConfidence(e.Confidence),
-		Starred:    e.Starred,
-		Scope:      string(e.Scope),
-		CreatedAt:  e.CreatedAt,
-		UpdatedAt:  e.UpdatedAt,
+		ID:          e.ID,
+		Content:     e.Content,
+		Level:       memoryLevelForEntity(e),
+		Type:        models.MemoryType(e.Type),
+		Status:      status,
+		Confidence:  models.ClampConfidence(e.Confidence),
+		Starred:     e.Starred,
+		Sensitivity: models.MemorySensitivity(e.Sensitivity).OrDefault(),
+		Scope:       string(e.Scope),
+		CreatedAt:   e.CreatedAt,
+		UpdatedAt:   e.UpdatedAt,
 	}
 	if e.ChainMetadata != nil {
 		memoryModel.ChainMetadata = chainMetadataToModel(e.ChainMetadata)
@@ -191,6 +192,7 @@ func (d *Datastore) CreateMemory(ctx context.Context, userID uuid.UUID, mem mode
 		SetStatus(normalizeMemoryStatus(mem.Status)).
 		SetConfidence(models.ClampConfidence(mem.Confidence)).
 		SetStarred(mem.Starred).
+		SetSensitivity(memory.Sensitivity(mem.Sensitivity.OrDefault())).
 		SetCreatedAt(time.Now()).
 		SetUpdatedAt(time.Now())
 
@@ -352,6 +354,9 @@ func (d *Datastore) createMemoryFromLevelInput(ctx context.Context, tx *ent.Tx, 
 	if strings.TrimSpace(input.Content) == "" {
 		return nil, fmt.Errorf("%w: memory content is required", ErrInvalidRequestBody)
 	}
+	if input.Sensitivity != "" && !input.Sensitivity.Valid() {
+		return nil, fmt.Errorf("%w: invalid sensitivity: %s", ErrInvalidRequestBody, input.Sensitivity)
+	}
 	if err := validateLevelInput(input); err != nil {
 		return nil, err
 	}
@@ -396,6 +401,7 @@ func (d *Datastore) createMemoryFromLevelInput(ctx context.Context, tx *ent.Tx, 
 		SetStatus(memory.StatusActive).
 		SetConfidence(input.Confidence.Float()).
 		SetStarred(input.Starred).
+		SetSensitivity(memory.Sensitivity(input.Sensitivity.OrDefault())).
 		SetOwnerID(userID).
 		SetCreatedAt(time.Now()).
 		SetUpdatedAt(time.Now())
@@ -552,6 +558,19 @@ func (d *Datastore) UpdateMemory(ctx context.Context, userID, memoryID uuid.UUID
 		nextConfidence = *patch.Confidence
 	}
 
+	nextSensitivity := models.MemorySensitivity(existing.Sensitivity).OrDefault()
+	if patch.Sensitivity != nil {
+		if !patch.Sensitivity.Valid() {
+			tx.Rollback()
+			return nil, fmt.Errorf("%w: invalid sensitivity: %s", ErrInvalidRequestBody, *patch.Sensitivity)
+		}
+		if existing.Scope == memory.ScopeSummary {
+			tx.Rollback()
+			return nil, fmt.Errorf("%w: summary memories have no sensitivity", ErrInvalidRequestBody)
+		}
+		nextSensitivity = *patch.Sensitivity
+	}
+
 	currentLevel := memoryLevelForEntity(existing)
 	nextLevel := currentLevel
 	if patch.Level != nil {
@@ -626,6 +645,7 @@ func (d *Datastore) UpdateMemory(ctx context.Context, userID, memoryID uuid.UUID
 		SetStatus(normalizeMemoryStatus(nextStatus)).
 		SetConfidence(nextConfidence.Float()).
 		SetStarred(nextStarred).
+		SetSensitivity(memory.Sensitivity(nextSensitivity)).
 		SetUpdatedAt(time.Now())
 
 	if nextChatID != nil && *nextChatID != uuid.Nil {
@@ -922,6 +942,8 @@ func (d *Datastore) ListMemories(ctx context.Context, userID uuid.UUID, pageNum,
 		query = query.Where(memory.StarredEQ(*filters.Starred))
 	}
 
+	query = applyMemorySensitivityFilters(query, filters)
+
 	if filters.PinnedPersonalityID != nil {
 		if *filters.PinnedPersonalityID == uuid.Nil {
 			query = query.Where(memory.PinnedPersonalityIDIsNil())
@@ -1146,6 +1168,9 @@ func (d *Datastore) PatchMemoriesBatch(ctx context.Context, userID uuid.UUID, in
 	}
 	if len(input.IDs) > models.MaxMemoryBatchIDs {
 		return nil, fmt.Errorf("%w: at most %d memory ids per batch", ErrInvalidRequestBody, models.MaxMemoryBatchIDs)
+	}
+	if isSensitivityOnlyPatch(input.Patch) {
+		return d.patchMemoriesSensitivityBatch(ctx, userID, input.IDs, *input.Patch.Sensitivity, input.AllOrNone)
 	}
 	if patchChangesThreadScope(input.Patch) {
 		hasThreadMemory, err := d.dbClient.Memory.Query().
@@ -1775,6 +1800,7 @@ func (d *Datastore) importPreparedMemories(ctx context.Context, userID uuid.UUID
 			SetScope(p.candidate.scope).
 			SetStatus(memory.StatusActive).
 			SetConfidence(models.DefaultMemoryConfidence).
+			SetSensitivity(memory.Sensitivity(p.candidate.record.Sensitivity.OrDefault())).
 			SetOwnerID(userID).
 			SetCreatedAt(p.candidate.record.CreatedAt)
 		if p.candidate.chatID != nil {
@@ -2314,9 +2340,10 @@ func (d *Datastore) ExportMemories(ctx context.Context, userID uuid.UUID, w io.W
 // The Chat edge must be preloaded (WithChat) for ChatID and ChatName to populate.
 func toMemoryRecord(m *ent.Memory) models.MemoryRecord {
 	rec := models.MemoryRecord{
-		ID:        m.ID,
-		Content:   m.Content,
-		CreatedAt: m.CreatedAt,
+		ID:          m.ID,
+		Content:     m.Content,
+		CreatedAt:   m.CreatedAt,
+		Sensitivity: models.MemorySensitivity(m.Sensitivity).OrDefault(),
 	}
 
 	if m.Scope == memory.ScopeChat && m.Edges.Chat != nil {

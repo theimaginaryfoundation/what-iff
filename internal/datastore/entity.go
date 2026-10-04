@@ -11,6 +11,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/ent/entity"
 	"github.com/theimaginaryfoundation/what-iff/ent/entityalias"
+	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
@@ -58,6 +59,7 @@ func toEntityModel(e *ent.Entity, userID uuid.UUID) *models.Entity {
 		State:               string(e.State),
 		AuthorClass:         string(e.AuthorClass),
 		PinnedPersonalityID: e.PinnedPersonalityID,
+		Sensitivity:         models.MemorySensitivity(e.Sensitivity).OrDefault(),
 		CardUpdatedAt:       e.CardUpdatedAt,
 		CreatedAt:           e.CreatedAt,
 		UpdatedAt:           e.UpdatedAt,
@@ -72,16 +74,22 @@ func toEntityModel(e *ent.Entity, userID uuid.UUID) *models.Entity {
 
 // ListEntityAliasesForScope returns every matchable name of the active entities a personality can
 // see: the user's unpinned entities plus those pinned to personalityID. limit caps the result.
-func (d *Datastore) ListEntityAliasesForScope(ctx context.Context, userID, personalityID uuid.UUID, limit int) ([]models.EntityAliasMatch, error) {
+// maxSensitivity is the asking chat's memory sensitivity limit; entities above it are never
+// returned (empty means unrestricted).
+func (d *Datastore) ListEntityAliasesForScope(ctx context.Context, userID, personalityID uuid.UUID, limit int, maxSensitivity models.MemorySensitivity) ([]models.EntityAliasMatch, error) {
 	scopes := []uuid.UUID{uuid.Nil}
 	if personalityID != uuid.Nil {
 		scopes = append(scopes, personalityID)
+	}
+	entityPreds := []predicate.Entity{entity.StateEQ(entity.StateActive)}
+	if p := entitySensitivityAtMost(maxSensitivity); p != nil {
+		entityPreds = append(entityPreds, p)
 	}
 	rows, err := d.dbClient.EntityAlias.Query().
 		Where(
 			entityalias.OwnerID(userID),
 			entityalias.ScopeKeyIn(scopes...),
-			entityalias.HasEntityWith(entity.StateEQ(entity.StateActive)),
+			entityalias.HasEntityWith(entityPreds...),
 		).
 		WithEntity(func(q *ent.EntityQuery) { q.Select(entity.FieldID) }).
 		Limit(limit).
@@ -100,16 +108,20 @@ func (d *Datastore) ListEntityAliasesForScope(ctx context.Context, userID, perso
 }
 
 // GetEntitiesByIDs loads active entities (with aliases) owned by userID, in the order given.
-func (d *Datastore) GetEntitiesByIDs(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) ([]*models.Entity, error) {
+func (d *Datastore) GetEntitiesByIDs(ctx context.Context, userID uuid.UUID, ids []uuid.UUID, maxSensitivity models.MemorySensitivity) ([]*models.Entity, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	rows, err := d.dbClient.Entity.Query().
+	q := d.dbClient.Entity.Query().
 		Where(
 			entity.IDIn(ids...),
 			entity.HasOwnerWith(user.ID(userID)),
 			entity.StateEQ(entity.StateActive),
-		).
+		)
+	if p := entitySensitivityAtMost(maxSensitivity); p != nil {
+		q = q.Where(p)
+	}
+	rows, err := q.
 		WithAliases().
 		All(ctx)
 	if err != nil {
@@ -130,7 +142,7 @@ func (d *Datastore) GetEntitiesByIDs(ctx context.Context, userID uuid.UUID, ids 
 
 // FindEntityByName resolves a name (any alias) to the active entity a personality can see,
 // preferring one pinned to that personality over an unpinned one.
-func (d *Datastore) FindEntityByName(ctx context.Context, userID, personalityID uuid.UUID, name string) (*models.Entity, error) {
+func (d *Datastore) FindEntityByName(ctx context.Context, userID, personalityID uuid.UUID, name string, maxSensitivity models.MemorySensitivity) (*models.Entity, error) {
 	norm := models.NormalizeEntityName(name)
 	if norm == "" {
 		return nil, ErrEntityNotFound
@@ -139,12 +151,16 @@ func (d *Datastore) FindEntityByName(ctx context.Context, userID, personalityID 
 	if personalityID != uuid.Nil {
 		scopes = append(scopes, personalityID)
 	}
+	entityPreds := []predicate.Entity{entity.StateEQ(entity.StateActive)}
+	if p := entitySensitivityAtMost(maxSensitivity); p != nil {
+		entityPreds = append(entityPreds, p)
+	}
 	aliases, err := d.dbClient.EntityAlias.Query().
 		Where(
 			entityalias.OwnerID(userID),
 			entityalias.ScopeKeyIn(scopes...),
 			entityalias.AliasNorm(norm),
-			entityalias.HasEntityWith(entity.StateEQ(entity.StateActive)),
+			entityalias.HasEntityWith(entityPreds...),
 		).
 		All(ctx)
 	if err != nil {
@@ -171,12 +187,15 @@ func (d *Datastore) FindEntityByName(ctx context.Context, userID, personalityID 
 
 // ListEntities lists the active entities a personality can see, by name, optionally filtered by a
 // name substring.
-func (d *Datastore) ListEntities(ctx context.Context, userID, personalityID uuid.UUID, filter string, limit int) ([]*models.Entity, error) {
+func (d *Datastore) ListEntities(ctx context.Context, userID, personalityID uuid.UUID, filter string, limit int, maxSensitivity models.MemorySensitivity) ([]*models.Entity, error) {
 	q := d.dbClient.Entity.Query().
 		Where(
 			entity.HasOwnerWith(user.ID(userID)),
 			entity.StateEQ(entity.StateActive),
 		)
+	if p := entitySensitivityAtMost(maxSensitivity); p != nil {
+		q = q.Where(p)
+	}
 	if personalityID != uuid.Nil {
 		q = q.Where(entity.Or(entity.PinnedPersonalityIDIsNil(), entity.PinnedPersonalityID(personalityID)))
 	} else {
@@ -255,6 +274,7 @@ func (d *Datastore) SaveEntity(ctx context.Context, userID uuid.UUID, existingID
 			SetType(in.Type).
 			SetCard(in.Card).
 			SetAuthorClass(entity.AuthorClass(in.AuthorClass)).
+			SetSensitivity(entity.Sensitivity(in.Sensitivity.OrDefault())).
 			SetNillablePinnedPersonalityID(in.PinnedPersonalityID).
 			SetCardUpdatedAt(now).
 			Save(ctx)
@@ -275,15 +295,18 @@ func (d *Datastore) SaveEntity(ctx context.Context, userID uuid.UUID, existingID
 		if baseRevision != existing.Revision {
 			return rollback(&EntityConflictError{Current: existing.Revision})
 		}
-		n, err := tx.Entity.Update().
+		upd := tx.Entity.Update().
 			Where(entity.ID(existing.ID), entity.Revision(existing.Revision)).
 			SetName(in.Name).
 			SetType(in.Type).
 			SetCard(in.Card).
 			SetAuthorClass(entity.AuthorClass(in.AuthorClass)).
 			SetRevision(existing.Revision + 1).
-			SetCardUpdatedAt(now).
-			Save(ctx)
+			SetCardUpdatedAt(now)
+		if in.Sensitivity.Valid() { // empty keeps the stored value
+			upd = upd.SetSensitivity(entity.Sensitivity(in.Sensitivity))
+		}
+		n, err := upd.Save(ctx)
 		if err != nil {
 			return rollback(err)
 		}

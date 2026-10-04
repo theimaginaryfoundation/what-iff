@@ -54,8 +54,10 @@ type AccountBackupChat struct {
 	LastCheckpointAt           *time.Time `json:"last_checkpoint_at,omitempty"`
 	DisabledTools              []string   `json:"disabled_tools,omitempty"`
 	IsAutoMood                 bool       `json:"is_auto_mood"`
-	CreatedAt                  time.Time  `json:"created_at"`
-	UpdatedAt                  time.Time  `json:"updated_at"`
+	// MemorySensitivityLimit round-trips the chat's limit; absent in older backups (= unrestricted).
+	MemorySensitivityLimit MemorySensitivity `json:"memory_sensitivity_limit,omitempty"`
+	CreatedAt              time.Time         `json:"created_at"`
+	UpdatedAt              time.Time         `json:"updated_at"`
 }
 
 type AccountBackupChatMessage struct {

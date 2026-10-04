@@ -55,5 +55,5 @@ func TestMessageContextBuilder_Build_InjectsEntityCardsAfterMemories(t *testing.
 
 func TestSpotEntityCards_NilToolIsANoop(t *testing.T) {
 	a := &Agent{logger: zap.NewNop()}
-	require.Empty(t, a.spotEntityCards(context.Background(), uuid.New(), uuid.New(), "hello John"))
+	require.Empty(t, a.spotEntityCards(context.Background(), uuid.New(), uuid.New(), "hello John", models.MemorySensitivitySensitive))
 }

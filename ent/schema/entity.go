@@ -40,6 +40,11 @@ func (Entity) Fields() []ent.Field {
 		field.Enum("state").
 			Values("active", "archived").
 			Default("active"),
+		// sensitivity gates which conversations may see the entity: a chat whose memory
+		// sensitivity limit is below this level never reads it. Ordered public < personal < sensitive.
+		field.Enum("sensitivity").
+			Values("public", "personal", "sensitive").
+			Default("personal"),
 		// author_class is who last changed the card (the trust class).
 		field.Enum("author_class").
 			Values("user", "agent", "system").

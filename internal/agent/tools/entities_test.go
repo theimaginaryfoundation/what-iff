@@ -35,8 +35,9 @@ func scopeOf(e *models.Entity) uuid.UUID {
 	return *e.PinnedPersonalityID
 }
 
-func visible(e *models.Entity, userID, personalityID uuid.UUID) bool {
+func visible(e *models.Entity, userID, personalityID uuid.UUID, limit models.MemorySensitivity) bool {
 	return e.UserID == userID && e.State == models.EntityStateActive &&
+		e.Sensitivity.AllowedUnder(limit) &&
 		(e.PinnedPersonalityID == nil || *e.PinnedPersonalityID == personalityID)
 }
 
@@ -48,13 +49,13 @@ func namesOf(e *models.Entity) []string {
 	return out
 }
 
-func (s *memEntityStore) ListEntityAliasesForScope(_ context.Context, userID, personalityID uuid.UUID, _ int) ([]models.EntityAliasMatch, error) {
+func (s *memEntityStore) ListEntityAliasesForScope(_ context.Context, userID, personalityID uuid.UUID, _ int, limit models.MemorySensitivity) ([]models.EntityAliasMatch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.aliasLoad++
 	var out []models.EntityAliasMatch
 	for _, e := range s.entities {
-		if !visible(e, userID, personalityID) {
+		if !visible(e, userID, personalityID, limit) {
 			continue
 		}
 		for _, n := range namesOf(e) {
@@ -64,12 +65,12 @@ func (s *memEntityStore) ListEntityAliasesForScope(_ context.Context, userID, pe
 	return out, nil
 }
 
-func (s *memEntityStore) GetEntitiesByIDs(_ context.Context, userID uuid.UUID, ids []uuid.UUID) ([]*models.Entity, error) {
+func (s *memEntityStore) GetEntitiesByIDs(_ context.Context, userID uuid.UUID, ids []uuid.UUID, limit models.MemorySensitivity) ([]*models.Entity, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []*models.Entity
 	for _, id := range ids {
-		if e, ok := s.entities[id]; ok && e.UserID == userID && e.State == models.EntityStateActive {
+		if e, ok := s.entities[id]; ok && e.UserID == userID && e.State == models.EntityStateActive && e.Sensitivity.AllowedUnder(limit) {
 			cp := *e
 			out = append(out, &cp)
 		}
@@ -77,13 +78,13 @@ func (s *memEntityStore) GetEntitiesByIDs(_ context.Context, userID uuid.UUID, i
 	return out, nil
 }
 
-func (s *memEntityStore) FindEntityByName(_ context.Context, userID, personalityID uuid.UUID, name string) (*models.Entity, error) {
+func (s *memEntityStore) FindEntityByName(_ context.Context, userID, personalityID uuid.UUID, name string, limit models.MemorySensitivity) (*models.Entity, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	norm := models.NormalizeEntityName(name)
 	var found *models.Entity
 	for _, e := range s.entities {
-		if !visible(e, userID, personalityID) {
+		if !visible(e, userID, personalityID, limit) {
 			continue
 		}
 		for _, n := range namesOf(e) {
@@ -99,12 +100,12 @@ func (s *memEntityStore) FindEntityByName(_ context.Context, userID, personality
 	return &cp, nil
 }
 
-func (s *memEntityStore) ListEntities(_ context.Context, userID, personalityID uuid.UUID, filter string, limit int) ([]*models.Entity, error) {
+func (s *memEntityStore) ListEntities(_ context.Context, userID, personalityID uuid.UUID, filter string, limit int, maxSensitivity models.MemorySensitivity) ([]*models.Entity, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []*models.Entity
 	for _, e := range s.entities {
-		if visible(e, userID, personalityID) && strings.Contains(strings.ToLower(e.Name), strings.ToLower(filter)) {
+		if visible(e, userID, personalityID, maxSensitivity) && strings.Contains(strings.ToLower(e.Name), strings.ToLower(filter)) {
 			cp := *e
 			out = append(out, &cp)
 		}
@@ -148,7 +149,7 @@ func (s *memEntityStore) SaveEntity(_ context.Context, userID uuid.UUID, existin
 	}
 	if existingID == nil {
 		e := &models.Entity{ID: uuid.New(), UserID: userID, Name: in.Name, Type: in.Type, Card: in.Card, Aliases: in.Aliases,
-			Revision: 1, State: models.EntityStateActive, AuthorClass: in.AuthorClass, PinnedPersonalityID: in.PinnedPersonalityID, CardUpdatedAt: time.Now()}
+			Revision: 1, State: models.EntityStateActive, AuthorClass: in.AuthorClass, PinnedPersonalityID: in.PinnedPersonalityID, Sensitivity: in.Sensitivity.OrDefault(), CardUpdatedAt: time.Now()}
 		s.entities[e.ID] = e
 		cp := *e
 		return &cp, nil
@@ -161,6 +162,9 @@ func (s *memEntityStore) SaveEntity(_ context.Context, userID uuid.UUID, existin
 		return nil, &datastore.EntityConflictError{Current: e.Revision}
 	}
 	e.Name, e.Type, e.Card, e.Aliases, e.AuthorClass = in.Name, in.Type, in.Card, in.Aliases, in.AuthorClass
+	if in.Sensitivity.Valid() {
+		e.Sensitivity = in.Sensitivity
+	}
 	e.Revision++
 	cp := *e
 	return &cp, nil
@@ -219,7 +223,7 @@ func (f *entityFixture) recall(t *testing.T, name string) entityResult {
 
 func (f *entityFixture) spot(t *testing.T, text string) []string {
 	t.Helper()
-	found, err := f.tool.Spot(context.Background(), f.chat.UserID, f.chat.PersonalityID, text, entitySpotMaxCards)
+	found, err := f.tool.Spot(context.Background(), f.chat.UserID, f.chat.PersonalityID, text, entitySpotMaxCards, f.chat.MemoryLimit())
 	require.NoError(t, err)
 	var names []string
 	for _, e := range found {

@@ -53,6 +53,10 @@ type Chat struct {
 	Source *string `json:"-"`
 	// ImportHash is the per-conversation dedup key used by the import pipeline. Internal-only; not exposed in JSON.
 	ImportHash *string `json:"-"`
+	// MemorySensitivityLimit is the highest memory/entity sensitivity this chat may read.
+	// Empty means "not provided" (PATCH semantics) on input and is always populated on output;
+	// "sensitive" (the default) is unrestricted. Anything lower makes the chat a sandbox.
+	MemorySensitivityLimit MemorySensitivity `json:"memory_sensitivity_limit"`
 	// RehydrationState tracks lazy summarization of imported threads on unarchive:
 	// "" (none) / "pending" / "processing" / "ready" / "failed". Surfaced read-only so the UI can
 	// show a "preparing thread" affordance while the summary is generated.
@@ -62,6 +66,19 @@ type Chat struct {
 	// IsFirstChat is an internal-only flag set by CreateChat to indicate whether
 	// this row is the user's first chat at creation time.
 	IsFirstChat bool `json:"-"`
+}
+
+// MemoryLimit returns the chat's effective sensitivity limit (unrestricted when unset).
+func (c *Chat) MemoryLimit() MemorySensitivity {
+	if c == nil {
+		return DefaultMemorySensitivityLimit
+	}
+	return c.MemorySensitivityLimit.LimitOrDefault()
+}
+
+// MemoryRestricted reports whether the chat is a restricted sandbox (limit below sensitive).
+func (c *Chat) MemoryRestricted() bool {
+	return c.MemoryLimit().Restricted()
 }
 
 // ChatFilters defines filters for listing chats

@@ -2074,7 +2074,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 
 	// Get relevant memories.
 	memories, liveMemories, memoryEnrichmentFailed := a.loadTurnMemories(ctx, memoryProgress, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message)
-	entityCards := a.spotEntityCards(ctx, userID, parentChat.PersonalityID, chatMessage.Message)
+	entityCards := a.spotEntityCards(ctx, userID, parentChat.PersonalityID, chatMessage.Message, parentChat.MemoryLimit())
 	// Resolve model from the chat's model_id (authoritative). Do not trust model_name
 	// alone — it can be stale, and a missing edge used to fall through to defaultModel
 	// (gpt-5.1) even when the user selected a different provider.

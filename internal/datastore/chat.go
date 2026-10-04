@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -58,6 +59,7 @@ func toChatModel(e *ent.Chat) *models.Chat {
 		chatModel.ImportHash = &h
 	}
 	chatModel.RehydrationState = e.RehydrationState
+	chatModel.MemorySensitivityLimit = models.MemorySensitivity(e.MemorySensitivityLimit).LimitOrDefault()
 
 	if e.ResponseID != "" {
 		chatModel.ResponseID = &e.ResponseID
@@ -258,6 +260,15 @@ func (d *Datastore) CreateChat(ctx context.Context, userID uuid.UUID, chat model
 		SetTags(normalizedTags).
 		SetNillableIsFavorite(chat.IsFavorite).
 		SetIsAutoMood(true)
+	if chat.MemorySensitivityLimit != "" {
+		if !chat.MemorySensitivityLimit.Valid() {
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, fmt.Errorf("%w: invalid memory_sensitivity_limit: %s", ErrInvalidRequestBody, chat.MemorySensitivityLimit)
+		}
+		create.SetMemorySensitivityLimit(entchat.MemorySensitivityLimit(chat.MemorySensitivityLimit))
+	}
 
 	if chat.LastMessageTime != nil {
 		create.SetLastMessageTime(*chat.LastMessageTime)
@@ -935,6 +946,16 @@ func (d *Datastore) UpdateChat(ctx context.Context, userID uuid.UUID, chat model
 	}
 	update.SetIsAutoMood(chat.IsAutoMood)
 	update.SetNillableArchived(chat.Archived)
+	// Empty means "not provided": PATCH callers that omit the limit keep the stored one.
+	if chat.MemorySensitivityLimit != "" {
+		if !chat.MemorySensitivityLimit.Valid() {
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, fmt.Errorf("%w: invalid memory_sensitivity_limit: %s", ErrInvalidRequestBody, chat.MemorySensitivityLimit)
+		}
+		update.SetMemorySensitivityLimit(entchat.MemorySensitivityLimit(chat.MemorySensitivityLimit))
+	}
 
 	entChat, err := update.Save(ctx)
 	if err != nil {

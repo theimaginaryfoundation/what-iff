@@ -94,10 +94,12 @@ var RememberEntityToolSpec = FunctionToolSpec{
 
 // entityStore is the datastore surface entities need. Every call is owner-scoped.
 type entityStore interface {
-	ListEntityAliasesForScope(ctx context.Context, userID, personalityID uuid.UUID, limit int) ([]models.EntityAliasMatch, error)
-	GetEntitiesByIDs(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) ([]*models.Entity, error)
-	FindEntityByName(ctx context.Context, userID, personalityID uuid.UUID, name string) (*models.Entity, error)
-	ListEntities(ctx context.Context, userID, personalityID uuid.UUID, filter string, limit int) ([]*models.Entity, error)
+	// The trailing maxSensitivity is the asking chat's memory sensitivity limit: entities above it
+	// are filtered in SQL and never returned (empty means unrestricted).
+	ListEntityAliasesForScope(ctx context.Context, userID, personalityID uuid.UUID, limit int, maxSensitivity models.MemorySensitivity) ([]models.EntityAliasMatch, error)
+	GetEntitiesByIDs(ctx context.Context, userID uuid.UUID, ids []uuid.UUID, maxSensitivity models.MemorySensitivity) ([]*models.Entity, error)
+	FindEntityByName(ctx context.Context, userID, personalityID uuid.UUID, name string, maxSensitivity models.MemorySensitivity) (*models.Entity, error)
+	ListEntities(ctx context.Context, userID, personalityID uuid.UUID, filter string, limit int, maxSensitivity models.MemorySensitivity) ([]*models.Entity, error)
 	CountActiveEntities(ctx context.Context, userID uuid.UUID) (int, error)
 	SaveEntity(ctx context.Context, userID uuid.UUID, existingID *uuid.UUID, baseRevision int, in models.EntityInput) (*models.Entity, error)
 	ArchiveEntity(ctx context.Context, userID, id uuid.UUID, baseRevision int) error
@@ -115,6 +117,9 @@ type EntityTool struct {
 
 type entityScope struct {
 	user, personality uuid.UUID
+	// limit is the chat's memory sensitivity limit: restricted chats see a smaller alias set, so
+	// they must not share a cached index with an unrestricted chat.
+	limit models.MemorySensitivity
 }
 
 // aliasIndex maps normalized names to entity IDs for one (user, personality) scope.
@@ -140,12 +145,14 @@ func NewEntityTool(store entityStore, logger *zap.Logger) *EntityTool {
 
 // Spot finds the entities mentioned in text, in order of first mention, at most max. It loads
 // the scope's names (cached for a minute; this process's own writes invalidate it immediately)
-// and matches 1 to 4 word phrases against them.
-func (t *EntityTool) Spot(ctx context.Context, userID, personalityID uuid.UUID, text string, max int) ([]*models.Entity, error) {
+// and matches 1 to 4 word phrases against them. limit is the chat's memory sensitivity limit:
+// entities above it are never matched.
+func (t *EntityTool) Spot(ctx context.Context, userID, personalityID uuid.UUID, text string, max int, limit models.MemorySensitivity) ([]*models.Entity, error) {
 	if strings.TrimSpace(text) == "" || max <= 0 {
 		return nil, nil
 	}
-	idx, err := t.aliasIndexFor(ctx, userID, personalityID)
+	limit = limit.LimitOrDefault()
+	idx, err := t.aliasIndexFor(ctx, userID, personalityID, limit)
 	if err != nil || len(idx.byName) == 0 {
 		return nil, err
 	}
@@ -153,18 +160,18 @@ func (t *EntityTool) Spot(ctx context.Context, userID, personalityID uuid.UUID, 
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	return t.store.GetEntitiesByIDs(ctx, userID, ids)
+	return t.store.GetEntitiesByIDs(ctx, userID, ids, limit)
 }
 
-func (t *EntityTool) aliasIndexFor(ctx context.Context, userID, personalityID uuid.UUID) (*aliasIndex, error) {
-	key := entityScope{user: userID, personality: personalityID}
+func (t *EntityTool) aliasIndexFor(ctx context.Context, userID, personalityID uuid.UUID, limit models.MemorySensitivity) (*aliasIndex, error) {
+	key := entityScope{user: userID, personality: personalityID, limit: limit}
 	t.mu.Lock()
 	idx := t.index[key]
 	t.mu.Unlock()
 	if idx != nil && t.now().Sub(idx.builtAt) < entityAliasCacheTTL {
 		return idx, nil
 	}
-	rows, err := t.store.ListEntityAliasesForScope(ctx, userID, personalityID, entityAliasIndexLimit)
+	rows, err := t.store.ListEntityAliasesForScope(ctx, userID, personalityID, entityAliasIndexLimit, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -336,10 +343,10 @@ func (t *EntityTool) RecallEntity(ctx context.Context, chat *models.Chat, input 
 	if strings.TrimSpace(a.Name) == "" {
 		return t.fail(ToolNameRecallEntity, "name cannot be empty")
 	}
-	e, err := t.store.FindEntityByName(ctx, chat.UserID, chat.PersonalityID, a.Name)
+	e, err := t.store.FindEntityByName(ctx, chat.UserID, chat.PersonalityID, a.Name, chat.MemoryLimit())
 	if errors.Is(err, datastore.ErrEntityNotFound) {
 		res := entityResult{Success: false, Error: fmt.Sprintf("no entity named %q", a.Name)}
-		if similar, lerr := t.store.ListEntities(ctx, chat.UserID, chat.PersonalityID, a.Name, 5); lerr == nil && len(similar) > 0 {
+		if similar, lerr := t.store.ListEntities(ctx, chat.UserID, chat.PersonalityID, a.Name, 5, chat.MemoryLimit()); lerr == nil && len(similar) > 0 {
 			names := make([]string, 0, len(similar))
 			for _, s := range similar {
 				names = append(names, s.Name)
@@ -383,7 +390,7 @@ func (t *EntityTool) RememberEntity(ctx context.Context, chat *models.Chat, inpu
 		return t.fail(ToolNameRememberEntity, fmt.Sprintf("name is too long (max %d characters)", entityMaxNameChars))
 	}
 
-	existing, err := t.store.FindEntityByName(ctx, chat.UserID, chat.PersonalityID, name)
+	existing, err := t.store.FindEntityByName(ctx, chat.UserID, chat.PersonalityID, name, chat.MemoryLimit())
 	if err != nil && !errors.Is(err, datastore.ErrEntityNotFound) {
 		return t.fail(ToolNameRememberEntity, fmt.Sprintf("failed to look up %q: %v", name, err))
 	}
@@ -500,7 +507,7 @@ func (t *EntityTool) fail(tool, msg string) (string, error) {
 
 // listForChat backs list kind=entities.
 func (t *EntityTool) listForChat(ctx context.Context, chat *models.Chat, filter string, limit int) ([]*models.Entity, error) {
-	return t.store.ListEntities(ctx, chat.UserID, chat.PersonalityID, filter, limit)
+	return t.store.ListEntities(ctx, chat.UserID, chat.PersonalityID, filter, limit, chat.MemoryLimit())
 }
 
 // commonWords are one-word names that are also everyday English words; as a lone token they only

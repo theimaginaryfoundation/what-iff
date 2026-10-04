@@ -65,7 +65,7 @@ func TestSaveEntity_CreateUpdateConflictAndNames(t *testing.T) {
 	assert.Equal(t, 1, john.Revision)
 	assert.ElementsMatch(t, []string{"John", "my boss"}, john.Aliases, "the canonical name and duplicates aren't repeated as aliases")
 
-	found, err := ds.FindEntityByName(ctx, userID, uuid.Nil, "MY BOSS")
+	found, err := ds.FindEntityByName(ctx, userID, uuid.Nil, "MY BOSS", "")
 	require.NoError(t, err)
 	assert.Equal(t, john.ID, found.ID)
 
@@ -84,7 +84,7 @@ func TestSaveEntity_CreateUpdateConflictAndNames(t *testing.T) {
 	assert.Equal(t, 2, updated.Revision)
 	assert.Equal(t, []string{"JP"}, updated.Aliases)
 	assert.Equal(t, "user", updated.AuthorClass)
-	_, err = ds.FindEntityByName(ctx, userID, uuid.Nil, "my boss")
+	_, err = ds.FindEntityByName(ctx, userID, uuid.Nil, "my boss", "")
 	assert.ErrorIs(t, err, ErrEntityNotFound, "replaced aliases stop matching")
 
 	// The freed name can be taken by another entity now.
@@ -104,14 +104,14 @@ func TestEntities_ScopesAndSpottingIndex(t *testing.T) {
 	pinned, err := ds.SaveEntity(ctx, userID, nil, 0, models.EntityInput{Name: "Vex", Card: "campaign ranger", PinnedPersonalityID: &persona, AuthorClass: "agent"})
 	require.NoError(t, err, "the same name may exist once per scope")
 
-	got, err := ds.FindEntityByName(ctx, userID, persona, "vex")
+	got, err := ds.FindEntityByName(ctx, userID, persona, "vex", "")
 	require.NoError(t, err)
 	assert.Equal(t, pinned.ID, got.ID, "a personality's own entity wins over the shared one")
-	got, err = ds.FindEntityByName(ctx, userID, uuid.New(), "vex")
+	got, err = ds.FindEntityByName(ctx, userID, uuid.New(), "vex", "")
 	require.NoError(t, err)
 	assert.Equal(t, shared.ID, got.ID, "other personalities see the shared one")
 
-	matches, err := ds.ListEntityAliasesForScope(ctx, userID, persona, 100)
+	matches, err := ds.ListEntityAliasesForScope(ctx, userID, persona, 100, "")
 	require.NoError(t, err)
 	assert.Len(t, matches, 2)
 	pinnedSeen := false
@@ -123,17 +123,17 @@ func TestEntities_ScopesAndSpottingIndex(t *testing.T) {
 	}
 	assert.True(t, pinnedSeen)
 
-	list, err := ds.ListEntities(ctx, userID, uuid.Nil, "", 10)
+	list, err := ds.ListEntities(ctx, userID, uuid.Nil, "", 10, "")
 	require.NoError(t, err)
 	assert.Len(t, list, 1, "without a personality only shared entities are listed")
 
-	byIDs, err := ds.GetEntitiesByIDs(ctx, userID, []uuid.UUID{pinned.ID, shared.ID})
+	byIDs, err := ds.GetEntitiesByIDs(ctx, userID, []uuid.UUID{pinned.ID, shared.ID}, "")
 	require.NoError(t, err)
 	require.Len(t, byIDs, 2)
 	assert.Equal(t, pinned.ID, byIDs[0].ID, "results keep the requested order")
 
 	stranger := createFATestUser(t, ds)
-	none, err := ds.GetEntitiesByIDs(ctx, stranger, []uuid.UUID{pinned.ID})
+	none, err := ds.GetEntitiesByIDs(ctx, stranger, []uuid.UUID{pinned.ID}, "")
 	require.NoError(t, err)
 	assert.Empty(t, none)
 	n, err := ds.CountActiveEntities(ctx, userID)
@@ -156,9 +156,9 @@ func TestArchiveEntity_FreesNamesAndChecksRevision(t *testing.T) {
 	assert.Equal(t, 1, conflict.Current)
 
 	require.NoError(t, ds.ArchiveEntity(ctx, userID, e.ID, 1))
-	_, err = ds.FindEntityByName(ctx, userID, uuid.Nil, "Grog")
+	_, err = ds.FindEntityByName(ctx, userID, uuid.Nil, "Grog", "")
 	assert.ErrorIs(t, err, ErrEntityNotFound)
-	matches, err := ds.ListEntityAliasesForScope(ctx, userID, uuid.Nil, 100)
+	matches, err := ds.ListEntityAliasesForScope(ctx, userID, uuid.Nil, 100, "")
 	require.NoError(t, err)
 	assert.Empty(t, matches)
 

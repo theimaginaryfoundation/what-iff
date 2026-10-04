@@ -82,8 +82,11 @@ type ImportConversation struct {
 	Tags                       []string
 	IsFavorite                 bool
 	IsAutoMood                 bool
-	AccountExport              bool
-	RestoreReady               bool
+	// MemorySensitivityLimit restores the chat's limit from an account export; empty (an export
+	// from before the field existed, or an unrestricted chat) leaves the unrestricted default.
+	MemorySensitivityLimit MemorySensitivity
+	AccountExport          bool
+	RestoreReady           bool
 }
 
 // MaxImportTitleLen is the maximum number of runes from a conversation title included in
