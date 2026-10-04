@@ -7576,7 +7576,65 @@ components:
           type: string
           format: date-time
           description: When the snapshot was captured.
+        inputs:
+          allOf:
+            - $ref: '#/components/schemas/ContextInputs'
+          nullable: true
+          description: >-
+            What this context was built from, by reference (IDs and short hashes, never content).
+            Absent on snapshots captured before it existed.
       required: [segments, total_tokens, budget_tokens, captured_at]
+
+    ContextInputs:
+      type: object
+      description: >-
+        Input manifest for one assistant turn: references to the memories, mode, scratchpad and
+        checkpoint summary the model context was built from, so "why was this loaded?" can be
+        answered after the fact.
+      properties:
+        memories:
+          type: array
+          description: Memories retrieved for this turn, in load order.
+          items:
+            $ref: '#/components/schemas/ContextMemoryInput'
+        replayed_memory_ids:
+          type: array
+          description: Memories carried into this turn from earlier turns' context.
+          items:
+            type: string
+            format: uuid
+        memory_enrichment_failed:
+          type: boolean
+          description: True when automatic memory loading failed for this turn.
+        mood_id:
+          type: string
+          format: uuid
+          description: The active mode (mood) when one shaped the turn.
+        scratchpad_sha:
+          type: string
+          description: First 12 hex characters of the SHA-256 of the scratchpad that was in context.
+        summary_sha:
+          type: string
+          description: First 12 hex characters of the SHA-256 of the checkpoint summary that was in context.
+
+    ContextMemoryInput:
+      type: object
+      description: One memory retrieved for a turn.
+      properties:
+        id:
+          type: string
+          format: uuid
+        scope:
+          type: string
+          description: Memory scope (User, Chat).
+        stage:
+          type: string
+          enum: [prefetch, tool]
+          description: prefetch = loaded automatically for the turn; tool = pulled in by the agent during the turn.
+        relevance:
+          type: number
+          description: Retrieval similarity in [0,1], when the memory came from vector search.
+      required: [id, stage]
 
     ChatMessageResponse:
       type: object
