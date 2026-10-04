@@ -89,6 +89,8 @@
           </div>
         </div>
         <div class="chat-page__title-actions">
+          <app-thread-restricted-chip [limit]="session.thread()?.memory_sensitivity_limit" (openSettings)="openMemoryAccess()" />
+
           <app-thread-bookmarks [bookmarks]="bookmarks()" (jump)="jumpToBookmark($event)" (commitRemovals)="commitBookmarkRemovals($event)" />
           <button type="button" class="chat-page__export" (click)="exportActiveChat()" aria-label="Export thread" uiTooltip="Download this thread as a ZIP" placement="bottom">
             <ui-file-icon [size]="12" />

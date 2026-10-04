@@ -26,7 +26,12 @@ export class ContextPanelService {
   // breakdown always resolves to a message id (see shownBreakdownId).
   private readonly _pinnedBreakdownId = signal<string | null>(null);
 
+  // Latest server copy of the active chat after a panel-side change (e.g. memory access). The
+  // chat page folds it into the session's thread, which owns the chat and feeds activeChat back.
+  private readonly _threadUpdate = signal<Chat | null>(null);
+
   readonly activeChat = this._activeChat.asReadonly();
+  readonly threadUpdate = this._threadUpdate.asReadonly();
   readonly mobileOpen = this._mobileOpen.asReadonly();
   readonly composerInsert = this._composerInsert.asReadonly();
   /** Threads attached to the message being composed; rendered as chips above the composer. */
@@ -56,8 +61,15 @@ export class ContextPanelService {
     this.rebindComposerThreadReferences(previousId, chat?.id ?? null);
   }
 
+  /** Publishes a chat the panel just PATCHed so the session adopts it instead of keeping a stale copy. */
+  publishThreadUpdate(chat: Chat): void {
+    this._activeChat.set(chat);
+    this._threadUpdate.set(chat);
+  }
+
   /**
-   * Keeps attached threads tied to the chat they were attached for. References added while a
+   * Keeps attached threads tied
+ to the chat they were attached for. References added while a
    * chat is open belong to it and are dropped when the user moves to another chat (or none).
    * References added with no chat open (e.g. from the Thread Manager) are unbound and follow
    * the user into the next chat they open, minus that chat itself (no self-references).
