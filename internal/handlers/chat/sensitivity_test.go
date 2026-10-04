@@ -51,6 +51,7 @@ func TestPatchChat_MemorySensitivityLimit(t *testing.T) {
 	w := sendChat(router, userID, http.MethodPatch, path, `{"memory_sensitivity_limit":"public"}`, vars)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Equal(t, models.MemorySensitivityPublic, got.MemorySensitivityLimit, "the patch sets the limit")
+	require.True(t, got.SetMemorySensitivityLimit, "and marks it as an explicit change")
 	require.Contains(t, w.Body.String(), `"memory_sensitivity_limit":"public"`)
 
 	// Normalized like every other level.
@@ -62,6 +63,7 @@ func TestPatchChat_MemorySensitivityLimit(t *testing.T) {
 	w = sendChat(router, userID, http.MethodPatch, path, `{"name":"Renamed"}`, vars)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Equal(t, models.MemorySensitivitySensitive, got.MemorySensitivityLimit, "PATCH semantics: untouched fields pass through from the loaded chat")
+	require.False(t, got.SetMemorySensitivityLimit, "an unrelated patch is not a limit change")
 
 	// Invalid values are a 400 and nothing is written.
 	got = models.Chat{}
@@ -94,6 +96,7 @@ func TestUpdateChat_MemorySensitivityLimit(t *testing.T) {
 	w = sendChat(router, userID, http.MethodPut, path, `{"name":"Thread"}`, vars)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Equal(t, models.MemorySensitivityPersonal, got.MemorySensitivityLimit, "PUT without the field does not reset the limit")
+	require.False(t, got.SetMemorySensitivityLimit)
 
 	w = sendChat(router, userID, http.MethodPut, path, `{"name":"Thread","memory_sensitivity_limit":"bogus"}`, vars)
 	require.Equal(t, http.StatusBadRequest, w.Code)

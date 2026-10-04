@@ -54,9 +54,15 @@ type Chat struct {
 	// ImportHash is the per-conversation dedup key used by the import pipeline. Internal-only; not exposed in JSON.
 	ImportHash *string `json:"-"`
 	// MemorySensitivityLimit is the highest memory/entity sensitivity this chat may read.
-	// Empty means "not provided" (PATCH semantics) on input and is always populated on output;
-	// "sensitive" (the default) is unrestricted. Anything lower makes the chat a sandbox.
+	// It is always populated on output; "sensitive" (the default) is unrestricted. Anything
+	// lower makes the chat a sandbox. CreateChat applies it when set; UpdateChat applies it only
+	// when SetMemorySensitivityLimit is true.
 	MemorySensitivityLimit MemorySensitivity `json:"memory_sensitivity_limit"`
+	// SetMemorySensitivityLimit marks MemorySensitivityLimit as an explicit change on UpdateChat.
+	// Internal writers (turn bookkeeping, naming) save a copy of the chat they loaded at the start
+	// of the turn; without this flag they cannot write back a stale limit over a change the user
+	// made while the turn ran. Only the chat HTTP handlers set it.
+	SetMemorySensitivityLimit bool `json:"-"`
 	// RehydrationState tracks lazy summarization of imported threads on unarchive:
 	// "" (none) / "pending" / "processing" / "ready" / "failed". Surfaced read-only so the UI can
 	// show a "preparing thread" affordance while the summary is generated.

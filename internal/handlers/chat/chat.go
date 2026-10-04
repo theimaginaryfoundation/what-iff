@@ -534,6 +534,7 @@ func (h *Handler) UpdateChat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		updated.MemorySensitivityLimit = limit
+		updated.SetMemorySensitivityLimit = true
 	}
 
 	// Update chat
@@ -681,6 +682,7 @@ func (h *Handler) PatchChat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		updated.MemorySensitivityLimit = limit
+		updated.SetMemorySensitivityLimit = true
 	}
 
 	chat, err := h.ds.UpdateChat(r.Context(), userID, updated)

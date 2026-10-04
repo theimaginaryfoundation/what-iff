@@ -950,8 +950,9 @@ func (d *Datastore) UpdateChat(ctx context.Context, userID uuid.UUID, chat model
 	}
 	update.SetIsAutoMood(chat.IsAutoMood)
 	update.SetNillableArchived(chat.Archived)
-	// Empty means "not provided": PATCH callers that omit the limit keep the stored one.
-	if chat.MemorySensitivityLimit != "" {
+	// Only an explicit change writes the limit (see models.Chat.SetMemorySensitivityLimit): a stale
+	// copy saved by a turn that started before the user lowered the limit must not raise it again.
+	if chat.SetMemorySensitivityLimit {
 		if !chat.MemorySensitivityLimit.Valid() {
 			if rerr := tx.Rollback(); rerr != nil {
 				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
