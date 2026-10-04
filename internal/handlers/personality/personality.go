@@ -358,6 +358,9 @@ func (h *Handler) DeletePersonality(w http.ResponseWriter, r *http.Request) {
 
 	// Delete personality
 	err = h.ds.DeletePersonality(r.Context(), userID, personalityID)
+	if err == nil && h.agent != nil {
+		h.agent.PurgePersonalityWorkspace(r.Context(), userID, personalityID)
+	}
 	if ent.IsNotFound(err) || err == datastore.ErrPersonalityNotFound {
 		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Personality not found", err)
 		return

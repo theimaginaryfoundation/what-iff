@@ -805,6 +805,9 @@ func (h *Handler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 
 	// Delete chat
 	err = h.ds.DeleteChat(r.Context(), userID, chatID)
+	if err == nil && h.agent != nil {
+		h.agent.PurgeChatWorkspace(r.Context(), userID, chatID)
+	}
 	if ent.IsNotFound(err) || err == datastore.ErrChatNotFound {
 		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Chat not found", err)
 		return

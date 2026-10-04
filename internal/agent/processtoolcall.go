@@ -92,6 +92,26 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 			out, err := a.fetchPageTool(ctx, input)
 			return out, nil, err
 		},
+		tools.ReadFileToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.fileReadTool.ReadFile(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
+		tools.WriteFileToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.workspaceTool.WriteFile(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
+		tools.RecallEntityToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.entityTool.RecallEntity(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
+		tools.RememberEntityToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.entityTool.RememberEntity(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
+		tools.GrepFilesToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.fileReadTool.GrepFiles(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
 		tools.RecallToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
 			out, memories, attachments, err := a.recallTool.Recall(ctx, chatCtx.chat, input)
 			if err == nil && len(memories) > 0 {

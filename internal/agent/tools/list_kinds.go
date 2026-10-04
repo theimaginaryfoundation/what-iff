@@ -305,3 +305,74 @@ func normalizeFileScope(raw string) string {
 		return listFileScopeAll
 	}
 }
+
+// listWorkspace lists the agent's workspace files for this conversation: chat/ then agent/.
+// filter, when given, is a path prefix ("agent/", "chat/notes").
+func (t *ListTool) listWorkspace(ctx context.Context, chat *models.Chat, a listArgs) (string, error) {
+	if t.workspace == nil {
+		return t.fail(listKindWorkspace, "the workspace is not available here")
+	}
+	limit := clampLimit(a.Limit, listDefaultLimit)
+	files, err := t.workspace.listForChat(ctx, chat, a.Filter, limit+1)
+	if err != nil {
+		return t.fail(listKindWorkspace, fmt.Sprintf("failed to list workspace files: %v", err))
+	}
+	note := ""
+	if len(files) > limit {
+		files = files[:limit]
+		note = "More files exist; narrow with filter (a path prefix) or raise limit."
+	}
+	items := make([]listItem, 0, len(files))
+	for _, f := range files {
+		items = append(items, listItem{
+			ID:        f.Root + "/" + f.Path,
+			Name:      f.Root + "/" + f.Path,
+			FileType:  f.ContentType,
+			Revision:  f.CurrentRevision,
+			Size:      f.Size,
+			UpdatedAt: f.ContentUpdatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	if len(items) == 0 && note == "" {
+		note = "No workspace files yet. Create one with write_file, e.g. agent/notes.md."
+	}
+	return t.ok(listKindWorkspace, items, note)
+}
+
+// listEntities lists the entities this conversation's personality can see.
+func (t *ListTool) listEntities(ctx context.Context, chat *models.Chat, a listArgs) (string, error) {
+	if t.entities == nil {
+		return t.fail(listKindEntities, "entities are not available here")
+	}
+	limit := clampLimit(a.Limit, listDefaultLimit)
+	found, err := t.entities.listForChat(ctx, chat, a.Filter, limit+1)
+	if err != nil {
+		return t.fail(listKindEntities, fmt.Sprintf("failed to list entities: %v", err))
+	}
+	note := ""
+	if len(found) > limit {
+		found = found[:limit]
+		note = "More entities exist; narrow with filter or raise limit."
+	}
+	items := make([]listItem, 0, len(found))
+	for _, e := range found {
+		desc := e.Type
+		if len(e.Aliases) > 0 {
+			if desc != "" {
+				desc += "; "
+			}
+			desc += "aka " + strings.Join(e.Aliases, ", ")
+		}
+		items = append(items, listItem{
+			ID:          e.ID.String(),
+			Name:        e.Name,
+			Description: desc,
+			Revision:    e.Revision,
+			UpdatedAt:   e.CardUpdatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	if len(items) == 0 && note == "" {
+		note = "No entities yet. Keep a card about someone or something with remember_entity."
+	}
+	return t.ok(listKindEntities, items, note)
+}
