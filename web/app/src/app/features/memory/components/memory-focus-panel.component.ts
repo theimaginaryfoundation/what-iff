@@ -27,7 +27,6 @@ import { PersonaCoverComponent } from '../../personality/picker/persona-cover.co
     RouterLink,
     MemorySensitivityBadgeComponent,
     StarIconComponent,
-
     TooltipDirective,
     HelpHintComponent,
     PersonaAccentScopeComponent,

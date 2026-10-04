@@ -68,8 +68,7 @@ export class ContextPanelService {
   }
 
   /**
-   * Keeps attached threads tied
- to the chat they were attached for. References added while a
+   * Keeps attached threads tied to the chat they were attached for. References added while a
    * chat is open belong to it and are dropped when the user moves to another chat (or none).
    * References added with no chat open (e.g. from the Thread Manager) are unbound and follow
    * the user into the next chat they open, minus that chat itself (no self-references).

@@ -113,7 +113,6 @@ export interface MemoryPatch {
 }
 
 export interface MemoryImportResult {
-
   imported_count: number;
   duplicate_count: number;
   invalid_record_count: number;

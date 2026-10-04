@@ -24,7 +24,6 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
     ContextToolsTabComponent,
     ThreadMemoryAccessComponent,
     ContextBreakdownTabComponent,
-
     XIconComponent,
     NoteIconComponent,
     BrainIconComponent,

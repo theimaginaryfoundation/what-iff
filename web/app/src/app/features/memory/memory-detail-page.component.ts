@@ -102,7 +102,6 @@ export class MemoryDetailPageComponent implements OnInit {
   }
 
   save(changes: { content: string; level: Memory['level']; sensitivity: MemorySensitivity }): void {
-
     if (!this.memory()) return;
     this.saving.set(true);
     this.memoryService.patchMemory(this.memory()!.id, changes).subscribe({

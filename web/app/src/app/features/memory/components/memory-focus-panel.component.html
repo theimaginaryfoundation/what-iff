@@ -5,7 +5,6 @@
       @if (!readOnly()) {
         <app-memory-sensitivity-badge [sensitivity]="memory().sensitivity" />
       }
-
       @if (memory().starred) {
         <span class="focus-panel__starred">Starred</span>
       }

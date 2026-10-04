@@ -80,6 +80,5 @@ export class MemoryFormComponent {
       level: this.level(),
       sensitivity: this.sensitivity(),
     });
-
   }
 }

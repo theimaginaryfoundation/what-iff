@@ -52,7 +52,6 @@ export function toMemoryCardVm(
     status: memory.status,
     sensitivity: normalizeSensitivity(memory.sensitivity) ?? DEFAULT_MEMORY_SENSITIVITY,
     starred: memory.starred,
-
     chatName: memory.chat_name ?? null,
     chatId: memory.chat_id ?? null,
     pinnedPersonalityId,

@@ -90,8 +90,7 @@ export function toApiFilters(filters: MemoryViewFilters): MemoryFilters {
   if (filters.query.trim()) api.query = filters.query.trim();
   api.sort = filters.sort;
   if (filters.sensitivity !== 'all') api.sensitivity = filters.sensitivity;
-  if (filters.personalityId
- === GLOBAL_PERSONALITY_FILTER) {
+  if (filters.personalityId === GLOBAL_PERSONALITY_FILTER) {
     api.global_only = true;
   } else if (filters.personalityId.trim()) {
     api.pinned_personality_ids = [filters.personalityId.trim()];

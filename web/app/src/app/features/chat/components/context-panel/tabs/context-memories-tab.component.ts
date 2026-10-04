@@ -387,7 +387,6 @@ export class ContextMemoriesTabComponent implements OnChanges {
           type: 'Context',
           sensitivity: this.draftSensitivity(),
         }));
-
       }
       this.closeEditor();
       await this.refresh();

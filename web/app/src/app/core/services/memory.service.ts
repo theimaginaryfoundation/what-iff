@@ -76,7 +76,6 @@ export class MemoryService {
     if (filters?.sort) {
       params = params.set('sort', filters.sort);
     }
-
     if (filters?.min_date) {
       params = params.set('min_date', filters.min_date);
     }

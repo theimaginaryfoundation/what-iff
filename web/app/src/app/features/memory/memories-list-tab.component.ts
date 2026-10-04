@@ -334,7 +334,6 @@ export class MemoriesListTabComponent implements OnInit {
   }
 
   onDeleteSingle(memoryId: string): void {
-
     this.deleteTargetIds.set([memoryId]);
     this.deleteModalOpen.set(true);
   }

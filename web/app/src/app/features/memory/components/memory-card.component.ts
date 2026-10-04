@@ -28,7 +28,6 @@ import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
     MemorySensitivityBadgeComponent,
     StarIconComponent,
     PersonaAccentScopeComponent,
-
     PersonaCoverComponent,
     TooltipDirective,
   ],

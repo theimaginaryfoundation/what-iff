@@ -588,7 +588,6 @@ export class ChatSessionService implements OnDestroy {
   }
 
   /** Pins a generation mode on the thread, or clears to Auto when moodId is null. */
-
   setActiveMood(moodId: string | null): void {
     const chat = this._thread();
     if (!chat || !this.isActiveThread(chat.id)) return;

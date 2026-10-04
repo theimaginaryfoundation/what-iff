@@ -280,7 +280,6 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     if (updated) untracked(() => this.session.adoptThreadUpdate(updated));
   });
 
-
   // When a background checkpoint (scratchpad + summary) completes for the active
   // thread, refresh the header summary and sidebar scratchpad in place so users
   // see the new context without a full page reload.
@@ -704,8 +703,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     }
   }
 
-  // "Show context" on a past assistant message: pin
- that turn's breakdown and open the
+  // "Show context" on a past assistant message: pin that turn's breakdown and open the
   // Context tab. Unlike openContextPanel this never toggles closed — it always reveals.
   openContextForMessage(message: ChatMessage): void {
     const breakdown = message.context_breakdown;

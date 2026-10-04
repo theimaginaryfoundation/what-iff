@@ -91,7 +91,6 @@ export interface PatchChatRequest {
 }
 
 export interface ChatContext {
-
   chat_id: string;
   active_scratchpad: string;
   summary: string;
