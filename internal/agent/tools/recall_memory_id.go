@@ -43,8 +43,11 @@ func isHexToken(s string) bool {
 }
 
 // resolveMemory looks up a memory by full UUID, "memory:<uuid>", or a unique hex ID prefix
-// (e.g. the short form agents historically copied from sources: "memory:df3e519d").
-func (t *RecallTool) resolveMemory(ctx context.Context, userID uuid.UUID, target string) (*models.Memory, error) {
+// (e.g. the short form agents historically copied from sources: "memory:df3e519d"). A memory the
+// chat may not read (above its sensitivity limit, or another conversation's summary in a
+// restricted chat) resolves exactly like a missing one, so its existence is not revealed.
+func (t *RecallTool) resolveMemory(ctx context.Context, chat *models.Chat, target string) (*models.Memory, error) {
+	userID := chat.UserID
 	token := normalizeMemoryTarget(target)
 	if token == "" {
 		return nil, fmt.Errorf("target must be a memory ID (UUID or memory:<uuid>)")
@@ -55,7 +58,7 @@ func (t *RecallTool) resolveMemory(ctx context.Context, userID uuid.UUID, target
 		if err != nil {
 			return nil, err
 		}
-		if mem == nil {
+		if mem == nil || !memoryReadableBy(chat, mem) {
 			return nil, fmt.Errorf("memory %q not found", target)
 		}
 		return mem, nil
@@ -70,7 +73,7 @@ func (t *RecallTool) resolveMemory(ctx context.Context, userID uuid.UUID, target
 	if err != nil {
 		return nil, err
 	}
-	if mem == nil {
+	if mem == nil || !memoryReadableBy(chat, mem) {
 		return nil, fmt.Errorf("memory %q not found", target)
 	}
 	return mem, nil

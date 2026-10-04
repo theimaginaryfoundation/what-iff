@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"time"
 
+	"entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/ent/entity"
 	"github.com/theimaginaryfoundation/what-iff/ent/memory"
+	entmerge "github.com/theimaginaryfoundation/what-iff/ent/memorymergeevent"
 	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -46,6 +48,45 @@ func entitySensitivityAtMost(limit models.MemorySensitivity) predicate.Entity {
 		vals = append(vals, entity.Sensitivity(l))
 	}
 	return entity.SensitivityIn(vals...)
+}
+
+// mergeSurvivorSensitivityAtMost matches merge events whose survivor memory is at or below the
+// limit. The survivor id is a plain column (no edge), so this is a subquery on the memories table.
+func mergeSurvivorSensitivityAtMost(limit models.MemorySensitivity) predicate.MemoryMergeEvent {
+	levels := models.SensitivitiesUpTo(limit)
+	vals := make([]any, 0, len(levels))
+	for _, l := range levels {
+		vals = append(vals, l)
+	}
+	return func(s *sql.Selector) {
+		t := sql.Table(memory.Table)
+		s.Where(sql.In(
+			s.C(entmerge.FieldSurvivorMemoryID),
+			sql.Select(t.C(memory.FieldID)).From(t).Where(sql.In(t.C(memory.FieldSensitivity), vals...)),
+		))
+	}
+}
+
+// MemoryIDsWithinSensitivity returns which of ids are owner-scoped, still exist and are at or
+// below the limit. It backs re-filtering of memory context persisted on earlier turns of a chat
+// whose limit may have been lowered since they were loaded.
+func (d *Datastore) MemoryIDsWithinSensitivity(ctx context.Context, userID uuid.UUID, ids []uuid.UUID, limit models.MemorySensitivity) (map[uuid.UUID]struct{}, error) {
+	out := make(map[uuid.UUID]struct{}, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	preds := []predicate.Memory{memory.IDIn(ids...), memory.HasOwnerWith(user.ID(userID))}
+	if p := memorySensitivityAtMost(limit); p != nil {
+		preds = append(preds, p)
+	}
+	found, err := d.dbClient.Memory.Query().Where(preds...).IDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range found {
+		out[id] = struct{}{}
+	}
+	return out, nil
 }
 
 // applyMemorySensitivityFilters applies the list filters: an exact Sensitivity match (the memory

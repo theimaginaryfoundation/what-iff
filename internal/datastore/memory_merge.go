@@ -799,6 +799,12 @@ func (d *Datastore) ListMemoryMergeEvents(ctx context.Context, userID uuid.UUID,
 	if filters.ExcludeReverted {
 		query = query.Where(entmerge.RevertedAtIsNil())
 	}
+	if filters.MaxSensitivity != nil && filters.MaxSensitivity.Restricted() {
+		query = query.Where(
+			entmerge.MergeTypeEQ(entmerge.MergeTypeFoldLive),
+			mergeSurvivorSensitivityAtMost(*filters.MaxSensitivity),
+		)
+	}
 
 	totalCount, err := query.Clone().Count(ctx)
 	if err != nil {

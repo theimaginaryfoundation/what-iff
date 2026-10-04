@@ -164,7 +164,7 @@ func TestGetMemories_GetUserByIDErrorIsReturned(t *testing.T) {
 	mock.ExpectQuery("SELECT .*").WillReturnError(errCoverageTestSentinel)
 
 	a := newTestAgent(ds)
-	_, _, err := a.getMemories(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hello")
+	_, _, err := a.getMemories(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hello", "")
 	require.Error(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

@@ -2073,7 +2073,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 	}
 
 	// Get relevant memories.
-	memories, liveMemories, memoryEnrichmentFailed := a.loadTurnMemories(ctx, memoryProgress, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message)
+	memories, liveMemories, memoryEnrichmentFailed := a.loadTurnMemories(ctx, memoryProgress, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message, parentChat.MemoryLimit())
 	entityCards := a.spotEntityCards(ctx, userID, parentChat.PersonalityID, chatMessage.Message, parentChat.MemoryLimit())
 	// Resolve model from the chat's model_id (authoritative). Do not trust model_name
 	// alone — it can be stale, and a missing edge used to fall through to defaultModel
@@ -2202,7 +2202,7 @@ func (a *Agent) assertUserCanRunChatModel(ctx context.Context, userID uuid.UUID,
 	return fmt.Errorf("experimental model provider %q: %w", modelProvider, datastore.ErrExperimentalModelNotAllowed)
 }
 
-func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string) ([]string, []*models.Memory, error) {
+func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, limit models.MemorySensitivity) ([]string, []*models.Memory, error) {
 	if a.testHooks.GetMemoriesOverride != nil {
 		formatted, err := a.testHooks.GetMemoriesOverride(ctx, userID, chatID, personalityID, userMessage)
 		return formatted, nil, err
@@ -2211,7 +2211,7 @@ func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, 
 		a.logger.Debug("mock/local mode: skipping memory enrichment", zap.String("chat_id", chatID.String()))
 		return nil, nil, nil
 	}
-	return a.getMemories(ctx, userID, chatID, personalityID, userMessage)
+	return a.getMemories(ctx, userID, chatID, personalityID, userMessage, limit)
 }
 
 // memoryEnrichmentRuns reports whether getMemoriesForEnrichment will actually retrieve memories.
@@ -2226,11 +2226,11 @@ func (a *Agent) memoryEnrichmentRuns() bool {
 // timeline as a "Load Memory" row: running during retrieval, then complete with the memories (or
 // an error). The row is only added when retrieval really runs, so mock/local turns (which skip
 // it) never show one.
-func (a *Agent) loadTurnMemories(ctx context.Context, progress *memoryLoadProgress, userID, chatID, personalityID uuid.UUID, userMessage string) ([]string, []*models.Memory, bool) {
+func (a *Agent) loadTurnMemories(ctx context.Context, progress *memoryLoadProgress, userID, chatID, personalityID uuid.UUID, userMessage string, limit models.MemorySensitivity) ([]string, []*models.Memory, bool) {
 	if progress != nil && a.memoryEnrichmentRuns() {
 		progress.Started(ctx)
 	}
-	memories, liveMemories, failed := a.getMemoriesBestEffort(ctx, userID, chatID, personalityID, userMessage)
+	memories, liveMemories, failed := a.getMemoriesBestEffort(ctx, userID, chatID, personalityID, userMessage, limit)
 	if progress != nil {
 		progress.Finished(ctx, memories, failed)
 	}
@@ -2239,9 +2239,9 @@ func (a *Agent) loadTurnMemories(ctx context.Context, progress *memoryLoadProgre
 
 // getMemoriesBestEffort attempts memory enrichment and degrades gracefully on any failure.
 // When it fails, it logs the error and returns an empty memory list along with a failure flag.
-func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string) ([]string, []*models.Memory, bool) {
+func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, limit models.MemorySensitivity) ([]string, []*models.Memory, bool) {
 	defer a.timeTurnStage(ctx, turnStageMemoryEnrichment)()
-	memories, liveMemories, err := a.getMemoriesForEnrichment(ctx, userID, chatID, personalityID, userMessage)
+	memories, liveMemories, err := a.getMemoriesForEnrichment(ctx, userID, chatID, personalityID, userMessage, limit)
 	if err != nil {
 		// Note: the underlying memory retrieval path logs errors at the failure site(s).
 		// Keep this at Debug to avoid duplicate error logs while still attaching user/chat context.

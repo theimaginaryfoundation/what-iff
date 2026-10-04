@@ -189,6 +189,8 @@ type fakeRecallStore struct {
 	lastMergeFilters   models.MemoryMergeEventFilters
 	lastMergePageNum   int
 	lastMergePageSize  int
+	lastRelatedLimit   models.MemorySensitivity
+	scopeCalls         int
 }
 
 type recallImageStore struct{ content []byte }
@@ -199,8 +201,25 @@ func (s recallImageStore) DownloadFile(context.Context, string) ([]byte, error) 
 }
 func (s recallImageStore) DeleteFile(context.Context, string) error { return nil }
 
-func (f *fakeRecallStore) GetRelatedMemories(_ context.Context, _, _ uuid.UUID, _ []float32, _ uuid.UUID) ([]*models.Memory, error) {
-	return f.relatedMemories, nil
+func (f *fakeRecallStore) GetRelatedMemories(_ context.Context, _, _ uuid.UUID, _ []float32, _ uuid.UUID, limit models.MemorySensitivity) ([]*models.Memory, error) {
+	f.lastRelatedLimit = limit
+	out := make([]*models.Memory, 0, len(f.relatedMemories))
+	for _, m := range f.relatedMemories { // mirror the SQL filter the real store applies
+		if m.Sensitivity.AllowedUnder(limit) {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+func (f *fakeRecallStore) ListFileAttachmentsInChatScope(_ context.Context, _, chatID uuid.UUID, personalityID *uuid.UUID, _ int) ([]*models.FileAttachment, error) {
+	f.scopeCalls++
+	var out []*models.FileAttachment
+	for _, fa := range f.fileList {
+		if (fa.ChatID != nil && *fa.ChatID == chatID) || (personalityID != nil && fa.PersonalityID != nil && *fa.PersonalityID == *personalityID) {
+			out = append(out, fa)
+		}
+	}
+	return out, nil
 }
 func (f *fakeRecallStore) GetMemory(_ context.Context, _, id uuid.UUID) (*models.Memory, error) {
 	if m, ok := f.memoryByID[id]; ok {

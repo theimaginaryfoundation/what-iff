@@ -182,7 +182,9 @@ func (a *Agent) getMemoryQuery(ctx context.Context, userID uuid.UUID, prompt str
 	return memoryQuery, nil
 }
 
-func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string) ([]string, []*models.Memory, error) {
+// getMemories prefetches the memories relevant to userMessage for one turn. limit is the chat's
+// memory sensitivity limit, applied in the retrieval SQL.
+func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, limit models.MemorySensitivity) ([]string, []*models.Memory, error) {
 	chatUser, err := a.ds.GetUserByID(ctx, userID)
 	if err != nil {
 		a.logger.Error("failed to get chat user", zap.Error(err))
@@ -214,7 +216,7 @@ func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.U
 			return nil, nil, err
 		}
 
-		dbMemories, err := a.ds.GetRelatedMemories(ctx, userID, chatID, memoryQueryEmbedding, personalityID)
+		dbMemories, err := a.ds.GetRelatedMemories(ctx, userID, chatID, memoryQueryEmbedding, personalityID, limit)
 		if err != nil {
 			a.logger.Error("failed to get related memories", zap.Error(err))
 			return nil, nil, err

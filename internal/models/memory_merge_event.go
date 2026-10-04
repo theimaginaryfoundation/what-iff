@@ -38,6 +38,10 @@ type MemoryMergeEventFilters struct {
 	MinDate, MaxDate *time.Time
 	// ExcludeReverted, when true, restricts results to events with RevertedAt == nil.
 	ExcludeReverted bool
+	// MaxSensitivity, when set below sensitive, restricts results to fold events whose survivor
+	// memory is at or below that sensitivity (link events are excluded: their members can differ
+	// in sensitivity). It is the chat sandbox gate and is never taken from a request.
+	MaxSensitivity *MemorySensitivity
 }
 
 type MemoryMergeEvent struct {

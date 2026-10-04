@@ -157,12 +157,15 @@ var RecallToolSpec = FunctionToolSpec{
 // recallStore is the narrow datastore surface recall needs. *datastore.Datastore satisfies it;
 // tests inject a fake. Keeping the surface explicit documents recall's blast radius.
 type recallStore interface {
-	GetRelatedMemories(ctx context.Context, userID, chatID uuid.UUID, queryEmbedding []float32, activePersonalityID uuid.UUID) ([]*models.Memory, error)
+	// GetRelatedMemories takes the asking chat's memory sensitivity limit and filters in SQL.
+	GetRelatedMemories(ctx context.Context, userID, chatID uuid.UUID, queryEmbedding []float32, activePersonalityID uuid.UUID, maxSensitivity models.MemorySensitivity) ([]*models.Memory, error)
 	GetMemory(ctx context.Context, userID, id uuid.UUID) (*models.Memory, error)
 	GetMemoryByIDPrefix(ctx context.Context, userID uuid.UUID, prefix string) (*models.Memory, error)
 	GetRelatedFileChunks(ctx context.Context, userID uuid.UUID, personalityID *uuid.UUID, chatID *uuid.UUID, queryEmbedding []float32, limit int) ([]datastore.FileChunkResult, error)
 	ListFileChunksForAttachment(ctx context.Context, fileAttachmentID uuid.UUID, limit int) ([]datastore.FileChunkResult, error)
 	ListFileAttachments(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.FileAttachmentFilters) (*models.PaginatedResponse, error)
+	// ListFileAttachmentsInChatScope is the conversation + personality file scope a restricted chat is held to.
+	ListFileAttachmentsInChatScope(ctx context.Context, userID, chatID uuid.UUID, personalityID *uuid.UUID, limit int) ([]*models.FileAttachment, error)
 	GetFileAttachment(ctx context.Context, userID, id uuid.UUID) (*models.FileAttachment, error)
 	GetChatMessage(ctx context.Context, userID, id uuid.UUID) (*models.ChatMessage, error)
 	ListChatMessages(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)

@@ -20,6 +20,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/embedding"
 	"github.com/theimaginaryfoundation/what-iff/ent/memory"
 	entpersonality "github.com/theimaginaryfoundation/what-iff/ent/personality"
+	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
 	entschema "github.com/theimaginaryfoundation/what-iff/ent/schema"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
@@ -2356,7 +2357,12 @@ func toMemoryRecord(m *ent.Memory) models.MemoryRecord {
 	return rec
 }
 
-func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.UUID, queryEmbedding []float32, activePersonalityID uuid.UUID) ([]*models.Memory, error) {
+// GetRelatedMemories returns the active memories nearest queryEmbedding that the asking chat may
+// use: its own Chat-scoped memories plus User-scoped ones visible to the active personality.
+// maxSensitivity is the chat's memory sensitivity limit and is applied in the WHERE clause, so a
+// restricted chat still gets a full set of permitted matches (never a post-filtered top-5).
+// Empty means unrestricted.
+func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.UUID, queryEmbedding []float32, activePersonalityID uuid.UUID, maxSensitivity models.MemorySensitivity) ([]*models.Memory, error) {
 
 	// Start transaction
 	tx, err := d.dbClient.Tx(ctx)
@@ -2402,17 +2408,19 @@ func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.
 		)
 	}
 
+	memoryPreds := []predicate.Memory{
+		memory.HasOwnerWith(user.ID(userId)),
+		memory.StatusEQ(memory.StatusActive),
+		memory.Or(
+			chatScopedPredicate,
+			userScopedPredicate,
+		),
+	}
+	if p := memorySensitivityAtMost(maxSensitivity); p != nil {
+		memoryPreds = append(memoryPreds, p)
+	}
 	dbEmbeddings, err := tx.Embedding.Query().
-		Where(
-			embedding.HasMemoryWith(
-				memory.HasOwnerWith(user.ID(userId)),
-				memory.StatusEQ(memory.StatusActive),
-				memory.Or(
-					chatScopedPredicate,
-					userScopedPredicate,
-				),
-			),
-		).
+		Where(embedding.HasMemoryWith(memoryPreds...)).
 		Where(func(s *sql.Selector) {
 			// Use string formatting to embed vector and threshold directly in SQL
 			s.Where(sql.ExprP(fmt.Sprintf("embedding <-> '%s' <= %f", vectorStr, MemoryRelevanceThreshold)))
