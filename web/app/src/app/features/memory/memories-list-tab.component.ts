@@ -8,7 +8,8 @@ import { fromEvent } from 'rxjs';
 import { MemoryService } from '../../core/services/memory.service';
 import { MemoryViewService } from '../../core/services/memory-view.service';
 import { PersonalityService } from '../../core/services/personality.service';
-import { MemoryMergeEvent, MemorySort } from '../../core/models/memory.model';
+import { MemoryMergeEvent, MemorySensitivity, MemorySort } from '../../core/models/memory.model';
+import { MEMORY_SENSITIVITY_OPTIONS, sensitivityDescription, sensitivityLabel } from './helpers/memory-sensitivity.helpers';
 import { GLOBAL_SCOPE_LABEL, toMemoryCardVm } from './helpers/memory-vm.helpers';
 import {
   parseQueryParams,
@@ -16,12 +17,14 @@ import {
   normalizeDateRange,
   GLOBAL_PERSONALITY_FILTER,
   MemoryViewFilters,
+  MemorySensitivityFilter,
   MemoryStatusFilter,
 } from './helpers/memory-filter.helpers';
 import { MemoryPersonalityOption } from './components/memory-form.component';
 import { MemoryCardGridComponent } from './components/memory-card-grid.component';
 import { MemoryFocusPanelComponent } from './components/memory-focus-panel.component';
 import { DeleteMemoryModalComponent } from './components/delete-memory-modal.component';
+import { SetSensitivityModalComponent } from './components/set-sensitivity-modal.component';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { CalendarIconComponent, ChevDownIconComponent, SearchIconComponent } from '../../shared/ui/icons/icons';
@@ -37,6 +40,7 @@ const DESKTOP_FOCUS_QUERY = '(min-width: 961px)';
     MemoryCardGridComponent,
     MemoryFocusPanelComponent,
     DeleteMemoryModalComponent,
+    SetSensitivityModalComponent,
     ModalComponent,
     CalendarIconComponent,
     ChevDownIconComponent,
@@ -61,6 +65,9 @@ export class MemoriesListTabComponent implements OnInit {
   readonly deleteTargetIds = signal<string[]>([]);
   readonly moveMenuOpen = signal(false);
   readonly moveTargetIds = signal<string[]>([]);
+  readonly sensitivityModalOpen = signal(false);
+  /** Outcome of the last bulk sensitivity change, shown above the list until the next one. */
+  readonly bulkFeedback = signal<{ kind: 'success' | 'error'; text: string } | null>(null);
   readonly searchDraft = signal('');
   readonly pinUpdatingId = signal<string | null>(null);
   readonly focusedId = signal<string | null>(null);
@@ -81,6 +88,11 @@ export class MemoriesListTabComponent implements OnInit {
   readonly allSelected = this.view.allSelected;
   readonly globalPersonalityFilter = GLOBAL_PERSONALITY_FILTER;
   readonly globalScopeLabel = GLOBAL_SCOPE_LABEL;
+  readonly sensitivityOptions = MEMORY_SENSITIVITY_OPTIONS;
+  readonly sensitivityFilterHint = computed(() => {
+    const filter = this.filters().sensitivity;
+    return filter === 'all' ? 'Filter by how freely memories may be used' : sensitivityDescription(filter);
+  });
   readonly deleting = this.view.deleting;
   readonly mutating = this.view.mutating;
 
@@ -191,6 +203,11 @@ export class MemoriesListTabComponent implements OnInit {
     this.onFilterChanged({ sort });
   }
 
+  setSensitivityFilter(sensitivity: MemorySensitivityFilter): void {
+    this.clearSelection();
+    this.onFilterChanged({ sensitivity });
+  }
+
   onSearchSubmit(): void {
     this.onFilterChanged({ query: this.searchDraft().trim() });
   }
@@ -287,7 +304,37 @@ export class MemoriesListTabComponent implements OnInit {
     this.view.clearSelection();
   }
 
+  onSetSensitivitySelected(): void {
+    if (this.selectedIds().length === 0) return;
+    this.bulkFeedback.set(null);
+    this.sensitivityModalOpen.set(true);
+  }
+
+  closeSensitivityModal(): void {
+    this.sensitivityModalOpen.set(false);
+  }
+
+  /** Applies one level to every selected memory in a single all-or-none batch patch. */
+  confirmSetSensitivity(sensitivity: MemorySensitivity): void {
+    const count = this.selectedIds().length;
+    if (count === 0) return;
+    const noun = count === 1 ? 'memory' : 'memories';
+    this.view.patchSelected({ sensitivity }).subscribe({
+      next: () => {
+        this.sensitivityModalOpen.set(false);
+        this.bulkFeedback.set({ kind: 'success', text: `Set ${count} ${noun} to ${sensitivityLabel(sensitivity)}.` });
+        this.view.load(this.currentPage());
+      },
+      error: (error: unknown) => {
+        this.sensitivityModalOpen.set(false);
+        const reason = error instanceof Error && error.message ? ` ${error.message}` : '';
+        this.bulkFeedback.set({ kind: 'error', text: `Couldn't change sensitivity; no memories were updated.${reason}` });
+      },
+    });
+  }
+
   onDeleteSingle(memoryId: string): void {
+
     this.deleteTargetIds.set([memoryId]);
     this.deleteModalOpen.set(true);
   }

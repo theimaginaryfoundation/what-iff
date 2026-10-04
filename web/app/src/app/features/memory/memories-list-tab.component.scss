@@ -156,8 +156,24 @@
   color: var(--color-danger, #ef4444);
 }
 
+.memories-list__feedback {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--color-success) 40%, var(--color-border-base));
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+  font-size: 0.8125rem;
+  color: var(--color-text-primary);
+}
+
+.memories-list__feedback--error {
+  border-color: color-mix(in srgb, var(--color-danger) 40%, var(--color-border-base));
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+}
+
 .memories-list__sort-wrap {
   position: relative;
+
   display: inline-flex;
   align-items: center;
 }
