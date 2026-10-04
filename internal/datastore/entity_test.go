@@ -26,6 +26,7 @@ func createEntityTestSchema(t *testing.T, db *sql.DB) {
 			revision integer NOT NULL DEFAULT 1,
 			state text NOT NULL DEFAULT 'active',
 			author_class text NOT NULL DEFAULT 'agent',
+			sensitivity text NOT NULL DEFAULT 'personal',
 			pinned_personality_id uuid,
 			card_updated_at datetime NOT NULL,
 			user_entities uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE
