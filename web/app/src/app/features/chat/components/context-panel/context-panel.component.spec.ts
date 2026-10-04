@@ -76,4 +76,14 @@ describe('ContextPanelComponent', () => {
         expect(fixture.nativeElement.textContent).not.toContain('Conversation context');
         expect(fixture.nativeElement.querySelector('[aria-label="Memory scope"]')).not.toBeNull();
     });
+
+    it('shows the Memory access control on the Memories tab only', () => {
+        context.setActiveTab('memories');
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('app-thread-memory-access [role="radiogroup"]')).not.toBeNull();
+
+        context.setActiveTab('tools');
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('app-thread-memory-access')).toBeNull();
+    });
 });

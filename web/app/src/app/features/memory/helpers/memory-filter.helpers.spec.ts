@@ -265,3 +265,29 @@ describe('memory-filter.helpers', () => {
     expect(normalizeDateRange('  2026-01-01  ', '').minDate).toBe('2026-01-01');
   });
 });
+
+describe('memory-filter.helpers sensitivity', () => {
+  it('defaults to All and omits it from the URL and the API query', () => {
+    expect(DEFAULT_MEMORY_VIEW_FILTERS.sensitivity).toBe('all');
+    expect(serializeFilters(DEFAULT_MEMORY_VIEW_FILTERS)).not.toHaveProperty('sensitivity');
+    expect(toApiFilters(DEFAULT_MEMORY_VIEW_FILTERS).sensitivity).toBeUndefined();
+  });
+
+  it('parses a known level from the URL and ignores unknown ones', () => {
+    expect(parseQueryParams({ sensitivity: 'public' }).sensitivity).toBe('public');
+    expect(parseQueryParams({ sensitivity: 'sensitive' }).sensitivity).toBe('sensitive');
+    expect(parseQueryParams({ sensitivity: 'secret' }).sensitivity).toBe('all');
+    expect(parseQueryParams({}).sensitivity).toBe('all');
+  });
+
+  it('round-trips a level through the URL', () => {
+    const params = serializeFilters({ ...DEFAULT_MEMORY_VIEW_FILTERS, sensitivity: 'personal' });
+    expect(params['sensitivity']).toBe('personal');
+    expect(parseQueryParams(params).sensitivity).toBe('personal');
+  });
+
+  it('sends the level to the list query, also on the Archived tab', () => {
+    expect(toApiFilters({ ...DEFAULT_MEMORY_VIEW_FILTERS, sensitivity: 'sensitive' }).sensitivity).toBe('sensitive');
+    expect(toApiFilters({ ...DEFAULT_MEMORY_VIEW_FILTERS, status: 'inactive', sensitivity: 'public' }).sensitivity).toBe('public');
+  });
+});

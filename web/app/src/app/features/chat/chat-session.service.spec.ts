@@ -584,6 +584,24 @@ describe('ChatSessionService', () => {
         expect(service.thread()).toEqual(chat);
     });
 
+    describe('adoptThreadUpdate', () => {
+        it('replaces the active thread with the newer server copy', () => {
+            service.setActive('chat-1');
+
+            service.adoptThreadUpdate({ ...chat, memory_sensitivity_limit: 'public' });
+
+            expect(service.thread()?.memory_sensitivity_limit).toBe('public');
+        });
+
+        it('ignores an update for a thread that is no longer active', () => {
+            service.setActive('chat-1');
+
+            service.adoptThreadUpdate({ ...chat, id: 'chat-other', memory_sensitivity_limit: 'public' });
+
+            expect(service.thread()?.memory_sensitivity_limit).toBeUndefined();
+        });
+    });
+
     it('ignores stale load errors after switching threads', () => {
         const firstChat$ = new Subject<Chat>();
         const firstMessages$ = new Subject<{
