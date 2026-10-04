@@ -78,6 +78,11 @@ func (t *ScratchpadTool) UpdateScratchpadTool(ctx context.Context, chat *models.
 		return marshalToolResult(result, "update_scratchpad")
 	}
 
+	// This turn now knows the scratchpad it wrote: its own checkpoint must not treat the write as
+	// a concurrent change (conditional write, agent/scratchpad_commit.go).
+	chat.Scratchpad = updatedPersonality.Scratchpad
+	chat.ScratchpadRevision = updatedPersonality.ScratchpadRevision
+
 	result := updateScratchpadToolResult{
 		PersonalityID: chat.PersonalityID.String(),
 		Success:       true,

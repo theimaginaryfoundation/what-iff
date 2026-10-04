@@ -12,6 +12,9 @@ type Personality struct {
 	SystemPrompt      string    `json:"system_prompt"`
 	Scratchpad        string    `json:"scratchpad"`
 	ScratchpadHistory []string  `json:"scratchpad_history"`
+	// ScratchpadRevision counts scratchpad writes; a checkpoint's write is conditional on the
+	// revision it read so a concurrent update is detected instead of overwritten. Server-internal.
+	ScratchpadRevision int `json:"-"`
 	// Deprecated: persisted for compatibility; ignored by archival/memory paths.
 	ArchivalModel string `json:"archival_model"`
 	// Optional override for checkpoint scratchpad update; empty uses the agent default prompt.
