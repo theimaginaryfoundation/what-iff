@@ -56,11 +56,14 @@ func newMessageContextBuilder(ds *datastore.Datastore, tel *telemetry.Telemetry,
 
 // messageContextBuildRequest holds all inputs for a single chat-turn context build.
 type messageContextBuildRequest struct {
-	UserID             uuid.UUID
-	Chat               *models.Chat
-	UserPrompt         string
-	CurrentMessage     *models.ChatMessage
-	Memories           []string
+	UserID         uuid.UUID
+	Chat           *models.Chat
+	UserPrompt     string
+	CurrentMessage *models.ChatMessage
+	Memories       []string
+	// UserNameLine is the entry of Memories that is the user-name profile line (empty when none),
+	// so it is persisted as its own context item type rather than recognised by its text.
+	UserNameLine       string
 	LiveMemories       []*models.Memory
 	EntityCards        string // rendered cards of entities mentioned in the user's message
 	ActiveMood         *models.Mood
@@ -90,7 +93,7 @@ func (b *messageContextBuilder) build(ctx context.Context, req messageContextBui
 		return nil, err
 	}
 	keepPersisted := b.persistedMemoryFilter(ctx, req.UserID, req.Chat, persistedAdditionalContext(carryOver, history, req.CurrentMessage)...)
-	appendMergedAdditionalContext(modelCtx, mergeAdditionalContextItems(carryOver, history, req.CurrentMessage, req.Memories, req.LiveMemories, keepPersisted))
+	appendMergedAdditionalContext(modelCtx, mergeAdditionalContextItems(carryOver, history, req.CurrentMessage, req.Memories, req.UserNameLine, req.LiveMemories, keepPersisted))
 	if cards := strings.TrimSpace(req.EntityCards); cards != "" {
 		modelCtx.Append(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, cards, false)
 	}
@@ -314,7 +317,7 @@ func (b *messageContextBuilder) buildHistoryContext(ctx context.Context, userID 
 	// after the (cacheable) history turns so the block never fragments the cache prefix.
 	turns := assistantTurnsFromHistory(history)
 	if chat.MemoryRestricted() {
-		turns = withoutAccountDataToolResults(turns)
+		turns = withoutPersistedToolResults(turns)
 	}
 	appendPersistedToolResults(modelCtx, selectPersistedToolResults(turns))
 
@@ -481,6 +484,7 @@ func mergeAdditionalContextItems(
 	history []*models.ChatMessage,
 	current *models.ChatMessage,
 	currentMemories []string,
+	userNameLine string,
 	currentLive []*models.Memory,
 	keepPersisted func(models.AdditionalContextItem) bool,
 ) []models.AdditionalContextItem {
@@ -507,7 +511,9 @@ func mergeAdditionalContextItems(
 			continue
 		}
 		item := models.AdditionalContextItem{Type: models.AdditionalContextTypeMemory, Content: m}
-		if mem := matchLiveMemoryByFormattedContent(m, currentLive); mem != nil {
+		if userNameLine != "" && m == userNameLine {
+			item.Type = models.AdditionalContextTypeUserName
+		} else if mem := matchLiveMemoryByFormattedContent(m, currentLive); mem != nil {
 			id := mem.ID
 			item.MemoryID = &id
 			item.Scope = normalizeMemoryScope(mem.Scope)
@@ -519,7 +525,7 @@ func mergeAdditionalContextItems(
 	for _, it := range raw {
 		scope := normalizeMemoryScope(it.Scope)
 		it.Scope = scope
-		key := it.Type + "\x00" + scope + "\x00" + additionalContextDedupeIdentity(it)
+		key := mergeContextType(it.Type) + "\x00" + scope + "\x00" + additionalContextDedupeIdentity(it)
 		if idx, ok := seen[key]; ok {
 			// Later entries are fresher: raw is assembled oldest-first (carry-over,
 			// history, current row, then this turn's prefetch), so the last rendering of
@@ -553,10 +559,20 @@ func mergeAdditionalContextItems(
 // synthesised name line has none — and mixing the two would split an id-bearing copy from
 // an identical id-less one.
 func additionalContextDedupeIdentity(it models.AdditionalContextItem) string {
-	if it.Type != models.AdditionalContextTypeMemory {
+	if mergeContextType(it.Type) != models.AdditionalContextTypeMemory {
 		return it.Content
 	}
 	return memoryutil.NormalizeContentForDedupe(memoryutil.StripMemoryContextMetadata(it.Content))
+}
+
+// mergeContextType is the type an item is merged and rendered under. The user-name line shares the
+// memory context (it always has, before it had its own type), so it dedupes against a legacy
+// MEMORY-typed copy and renders in the same segment.
+func mergeContextType(t string) string {
+	if t == models.AdditionalContextTypeUserName {
+		return models.AdditionalContextTypeMemory
+	}
+	return t
 }
 
 func appendMergedAdditionalContext(modelCtx *provider.ModelContext, items []models.AdditionalContextItem) {
@@ -581,7 +597,8 @@ func appendMergedAdditionalContext(modelCtx *provider.ModelContext, items []mode
 				memoryRefs = append(memoryRefs, ref)
 			}
 		}
-		byType[it.Type] = append(byType[it.Type], it.Content)
+		typ := mergeContextType(it.Type)
+		byType[typ] = append(byType[typ], it.Content)
 	}
 	if len(memoryRefs) > 0 {
 		modelCtx.MemoryRefs = append(modelCtx.MemoryRefs, memoryRefs...)

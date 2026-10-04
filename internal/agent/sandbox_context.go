@@ -2,10 +2,8 @@ package agent
 
 import (
 	"context"
-	"strings"
 
 	"github.com/google/uuid"
-	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -22,14 +20,13 @@ import (
 // MemoryIDsWithinSensitivity; tests substitute a fake.
 type memoryIDLookup func(ctx context.Context, userID uuid.UUID, ids []uuid.UUID, limit models.MemorySensitivity) (map[uuid.UUID]struct{}, error)
 
-// userNameContextPrefix marks the first-message line naming the user. It is profile data, not a
-// stored memory, so it carries no id and is kept in restricted chats.
-const userNameContextPrefix = "The user's name is "
-
 // persistedMemoryFilter returns a predicate that keeps a persisted additional-context item only if
 // it is still readable under chat's limit, or nil when the chat is unrestricted (keep everything).
 // Memory items are matched by id; one without an id cannot be classified and is dropped (fail
-// closed). The sets are loaded in one query. A failed lookup drops every id-bearing memory item.
+// closed), including a legacy MEMORY item that merely looks like the user-name line: only an item
+// explicitly typed USER_NAME (profile data, see models.AdditionalContextTypeUserName) is kept
+// without an id. The sets are loaded in one query. A failed lookup drops every id-bearing memory
+// item.
 func (b *messageContextBuilder) persistedMemoryFilter(ctx context.Context, userID uuid.UUID, chat *models.Chat, persisted ...[]models.AdditionalContextItem) func(models.AdditionalContextItem) bool {
 	if !chat.MemoryRestricted() {
 		return nil
@@ -68,9 +65,6 @@ func (b *messageContextBuilder) persistedMemoryFilter(ctx context.Context, userI
 		if it.Type != models.AdditionalContextTypeMemory {
 			return true
 		}
-		if strings.HasPrefix(it.Content, userNameContextPrefix) {
-			return true
-		}
 		if it.MemoryID == nil {
 			return false
 		}
@@ -98,23 +92,14 @@ func persistedAdditionalContext(carryOver [][2]*models.ChatMessage, history []*m
 	return out
 }
 
-// restrictedToolResultTools are tools whose persisted results can hold account data a restricted
-// chat may no longer (or never could) read: memories, other conversations, files, the scratchpad
-// via a sub-agent, entity cards, the agent/ notebook. A ToolCall row records nothing about the
-// limit it ran under, so a restricted chat replays none of them (fail closed); the live tools it
-// calls this turn are already gated.
-var restrictedToolResultTools = map[string]struct{}{
-	tools.RecallToolSpec.Name:      {},
-	tools.ListToolSpec.Name:        {},
-	tools.RunSubagentToolSpec.Name: {},
-	tools.ToolNameRecallEntity:     {},
-	tools.ToolNameReadFile:         {},
-	tools.ToolNameGrepFiles:        {},
-}
-
-// withoutAccountDataToolResults returns turns with the tool calls a restricted chat must not
-// replay removed. The input messages are not mutated.
-func withoutAccountDataToolResults(turns []*models.ChatMessage) []*models.ChatMessage {
+// withoutPersistedToolResults returns turns with every tool call removed, which is what a
+// restricted chat replays from earlier turns. It is deliberately not a list of tools known to read
+// account data: a ToolCall row records nothing about the limit it ran under or which data it
+// touched, and result text can carry anything (an mcp__ connector's output, shell_exec or
+// web_search results, a create_memory echo, a tool added tomorrow). Fail closed: a restricted chat
+// replays none, and the live tools it calls this turn are already gated. The input messages are
+// not mutated.
+func withoutPersistedToolResults(turns []*models.ChatMessage) []*models.ChatMessage {
 	out := make([]*models.ChatMessage, 0, len(turns))
 	for _, msg := range turns {
 		if msg == nil || len(msg.ToolCalls) == 0 {
@@ -122,16 +107,7 @@ func withoutAccountDataToolResults(turns []*models.ChatMessage) []*models.ChatMe
 			continue
 		}
 		cp := *msg
-		cp.ToolCalls = make([]*models.ToolCall, 0, len(msg.ToolCalls))
-		for _, tc := range msg.ToolCalls {
-			if tc == nil {
-				continue
-			}
-			if _, drop := restrictedToolResultTools[strings.TrimSpace(tc.ToolName)]; drop {
-				continue
-			}
-			cp.ToolCalls = append(cp.ToolCalls, tc)
-		}
+		cp.ToolCalls = nil
 		out = append(out, &cp)
 	}
 	return out

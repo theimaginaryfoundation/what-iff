@@ -196,6 +196,33 @@ func (a *Agent) getMemoryQuery(ctx context.Context, userID uuid.UUID, prompt str
 	return memoryQuery, nil
 }
 
+// userNameContextPrefix starts the first-message line naming the user.
+const userNameContextPrefix = "The user's name is "
+
+// userNameContextLine is the first-message line naming the user.
+func userNameContextLine(username string) string {
+	return userNameContextPrefix + username
+}
+
+// recognizeUserNameLine returns the turn's user-name line when memories starts with it, else "".
+// The line is built by the server from the user's profile, so it is recognised by being identical
+// to that line, never by a text prefix on whatever the memory loader returned: a memory line always
+// ends in a metadata block and can never equal it, whatever text the memory starts with. The
+// prefix check below only avoids a profile lookup on turns that have no such line.
+func (a *Agent) recognizeUserNameLine(ctx context.Context, userID uuid.UUID, memories []string) string {
+	if len(memories) == 0 || !strings.HasPrefix(memories[0], userNameContextPrefix) || a.ds == nil {
+		return ""
+	}
+	user, err := a.ds.GetUserByID(ctx, userID)
+	if err != nil || user == nil {
+		return ""
+	}
+	if line := userNameContextLine(user.Username); memories[0] == line {
+		return line
+	}
+	return ""
+}
+
 // getMemories prefetches the memories relevant to userMessage for one turn. limit is the chat's
 // memory sensitivity limit, applied in the retrieval SQL.
 func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, limit models.MemorySensitivity) ([]string, []*models.Memory, error) {
@@ -213,8 +240,7 @@ func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.U
 	liveMemories := []*models.Memory{}
 	// Only append the username to the first request, to not spam our context.
 	if userMessageCount == 0 {
-		memories = append(memories, fmt.Sprintf("The user's name is %s", chatUser.Username))
-
+		memories = append(memories, userNameContextLine(chatUser.Username))
 	}
 	prompt := MemoryQueryPrompt
 	memoryQuery, err := a.getMemoryQuery(ctx, userID, prompt, userMessage)
@@ -262,6 +288,18 @@ func (a *Agent) compactMemoriesFromCheckpoint(
 	memories []models.ExtractedMemory,
 	compactionEventID *uuid.UUID,
 ) {
+	restricted := chatCtx != nil && chatCtx.chat.MemoryRestricted()
+	var liveMemories []*models.Memory
+	if chatCtx != nil {
+		liveMemories = chatCtx.liveMemories
+	}
+	if restricted {
+		// A restricted chat is a sandbox a stranger may be talking in: what it extracts is kept to
+		// this chat, and the merge may only touch memories this chat created (see
+		// restrictedCompactionInputs). The datastore enforces the same rule on write.
+		memories, liveMemories = restrictedCompactionInputs(chatID, memories, liveMemories)
+		inferenceModelContext = nil // its memory refs are the owner's wider memories; none are ours to fold
+	}
 	collapsed := memoryutil.CollapseExtractedMemories(memories)
 
 	// DO NOT bail when nothing was freshly extracted. A checkpoint that only
@@ -274,10 +312,6 @@ func (a *Agent) compactMemoriesFromCheckpoint(
 	// chatCtx.liveMemories is the complete set of memories actually loaded this turn — prefetched
 	// AND anything the agent pulled in via find_context() — so it catches memories the frozen
 	// MemoryRefs snapshot misses.
-	var liveMemories []*models.Memory
-	if chatCtx != nil {
-		liveMemories = chatCtx.liveMemories
-	}
 	candidates := buildMemoryMergeCandidates(inferenceModelContext, liveMemories, collapsed)
 	if len(candidates) == 0 {
 		return
@@ -294,6 +328,11 @@ func (a *Agent) compactMemoriesFromCheckpoint(
 	// collapse on its own. This stays idempotent because folded members go status=inactive and
 	// are not retrieved again, so a settled cluster reduces to a singleton next checkpoint.
 	groups := a.inferMemoryMergeGroups(ctx, userID, personaInstructions, candidates)
+	if restricted {
+		for i := range groups {
+			groups[i].Scope = memoryScopeChat // the grouping model may propose User scope; a sandbox never writes it
+		}
+	}
 	plan := planMemoryCompaction(groups, candidates)
 	if chatCtx != nil {
 		plan.SensitivityLimit = chatCtx.chat.MemoryLimit()
@@ -301,15 +340,41 @@ func (a *Agent) compactMemoriesFromCheckpoint(
 	a.applyMemoryCompactionPlan(ctx, userID, chatID, activePersonalityID, plan, compactionEventID)
 }
 
+// memoryScopeChat is the Chat memory scope in the merge pipeline's vocabulary.
+const memoryScopeChat = "Chat"
+
+// restrictedCompactionInputs narrows a restricted chat's checkpoint inputs: every new extraction is
+// forced to Chat scope (nothing a stranger says becomes an account-wide fact), and only loaded
+// memories this chat created stay (the owner's and other chats' memories cannot be folded,
+// rewritten or retired from here). The inputs are not mutated.
+func restrictedCompactionInputs(chatID uuid.UUID, extracted []models.ExtractedMemory, live []*models.Memory) ([]models.ExtractedMemory, []*models.Memory) {
+	scoped := make([]models.ExtractedMemory, 0, len(extracted))
+	for _, m := range extracted {
+		m.Scope = memoryScopeChat
+		scoped = append(scoped, m)
+	}
+	own := make([]*models.Memory, 0, len(live))
+	for _, mem := range live {
+		if mem != nil && chatID != uuid.Nil && mem.ChatID == chatID {
+			own = append(own, mem)
+		}
+	}
+	return scoped, own
+}
+
 // foldMemberOptions carries a fold's new-member sensitivity to the datastore, capped by the
 // asking chat's limit. A group with no new member passes nothing, leaving the stored members'
-// levels to decide the survivor's.
+// levels to decide the survivor's. A restricted chat's fold is also confined to memories that chat
+// created (datastore.WithChatMemoriesOnly).
 func foldMemberOptions(fold memoryFoldPlan, limit models.MemorySensitivity) []datastore.MergeGroupOption {
-	level := foldNewMemberSensitivity(fold, limit)
-	if level == "" {
-		return nil
+	var opts []datastore.MergeGroupOption
+	if limit.Restricted() {
+		opts = append(opts, datastore.WithChatMemoriesOnly())
 	}
-	return []datastore.MergeGroupOption{datastore.WithNewMemberSensitivity(level)}
+	if level := foldNewMemberSensitivity(fold, limit); level != "" {
+		opts = append(opts, datastore.WithNewMemberSensitivity(level))
+	}
+	return opts
 }
 
 // foldNewMemberSensitivity is the level a fold's new members are stored at: the level extraction
@@ -398,8 +463,18 @@ func (a *Agent) applyMemoryCompactionPlan(
 			link.SourceMembers,
 			compactionEventID,
 			activePersonalityID,
+			linkGroupOptions(plan.SensitivityLimit)...,
 		); err != nil {
 			a.logger.Error("failed to persist memory link group", zap.Error(err))
 		}
 	}
+}
+
+// linkGroupOptions are the datastore options for a link group written under limit: a restricted
+// chat's link is confined to memories that chat created and writes Chat scope.
+func linkGroupOptions(limit models.MemorySensitivity) []datastore.MergeGroupOption {
+	if limit.Restricted() {
+		return []datastore.MergeGroupOption{datastore.WithChatMemoriesOnly()}
+	}
+	return nil
 }

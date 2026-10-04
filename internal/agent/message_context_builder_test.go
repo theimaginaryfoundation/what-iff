@@ -36,7 +36,7 @@ func TestMergeAdditionalContextItems_DedupesByTypeAndContent(t *testing.T) {
 			{Type: models.AdditionalContextTypeMemory, Content: "dup"},
 		},
 	}
-	got := mergeAdditionalContextItems(nil, history, current, []string{"from-fetch", "from-db"}, nil, nil)
+	got := mergeAdditionalContextItems(nil, history, current, []string{"from-fetch", "from-db"}, "", nil, nil)
 	require.Len(t, got, 3)
 	keys := make(map[string]int)
 	for _, it := range got {
@@ -71,7 +71,7 @@ func TestMergeAdditionalContextItems_DedupesMemoriesAcrossRerenders(t *testing.T
 		},
 	}
 
-	got := mergeAdditionalContextItems(nil, history, nil, []string{fresh}, nil, nil)
+	got := mergeAdditionalContextItems(nil, history, nil, []string{fresh}, "", nil, nil)
 
 	require.Len(t, got, 1, "the same memory rendered twice must collapse to one entry")
 	require.Equal(t, fresh, got[0].Content,

@@ -56,7 +56,9 @@ func TestBuild_RestrictedChatRefiltersReplayedMemoriesByCurrentLimit(t *testing.
 			memoryItem(&pubID, "A public fact"),
 			memoryItem(&sensID, "A sensitive diagnosis loaded back when the limit was higher"),
 			memoryItem(nil, "A memory line whose id was never matched"),
-			memoryItem(nil, "The user's name is Ada"),
+			{Type: models.AdditionalContextTypeUserName, Content: "The user's name is Ada"},
+			memoryItem(nil, "The user's name is Mallory [stored_at=2026-01-01T00:00:00Z age_days=3]"), // a sensitive memory that merely starts like the name line
+			memoryItem(nil, "The user's name is Eve"),                                                 // a legacy MEMORY-typed item cannot be told from a memory by its text
 			{Type: "FILE_HINT", Content: "not a memory"},
 		},
 	}}
@@ -74,6 +76,8 @@ func TestBuild_RestrictedChatRefiltersReplayedMemoriesByCurrentLimit(t *testing.
 	mem := segmentText(mc, provider.SegmentKindMemoryContext)
 	require.Contains(t, mem, "A public fact")
 	require.Contains(t, mem, "The user's name is Ada", "profile data is not a stored memory")
+	require.NotContains(t, mem, "Mallory", "a memory that starts with the name-line text is not the name line")
+	require.NotContains(t, mem, "Eve", "legacy items fail closed")
 	require.NotContains(t, mem, "sensitive diagnosis", "a memory above the CURRENT limit does not replay")
 	require.NotContains(t, mem, "never matched", "an unclassifiable memory line fails closed")
 	require.Equal(t, models.MemorySensitivityPersonal, askedLimit)
@@ -152,7 +156,7 @@ func TestBuild_RestrictedChatGetsNoScratchpadOrAccountDataToolReplay(t *testing.
 	for _, leaked := range []string{"cardiology", "past conversations", "written with the scratchpad", "entity card for John", "agent/journal.md"} {
 		require.NotContains(t, text, leaked)
 	}
-	require.Contains(t, text, "a fox", "tool results that read no account data replay as before")
+	require.NotContains(t, text, "a fox", "no persisted tool result replays in a restricted chat, not even image_generate")
 
 	// Unrestricted control: the scratchpad and the tool results are there.
 	open := &models.Chat{ID: chat.ID, SystemPrompt: "p", Scratchpad: "PERSONALITY SCRATCHPAD"}
@@ -166,15 +170,53 @@ func TestBuild_RestrictedChatGetsNoScratchpadOrAccountDataToolReplay(t *testing.
 	require.Contains(t, all.String(), "cardiology")
 }
 
-func TestWithoutAccountDataToolResults_DoesNotMutateInput(t *testing.T) {
+func TestWithoutPersistedToolResults_DropsEveryToolAndDoesNotMutateInput(t *testing.T) {
 	t.Parallel()
-	keep := &models.ToolCall{ToolName: agenttools.GenerateImageToolSpec.Name}
-	drop := &models.ToolCall{ToolName: agenttools.RecallToolSpec.Name}
-	in := []*models.ChatMessage{{ToolCalls: []*models.ToolCall{drop, keep}}, nil, {}}
-	out := withoutAccountDataToolResults(in)
+	in := []*models.ChatMessage{{ToolCalls: []*models.ToolCall{
+		{ToolName: agenttools.RecallToolSpec.Name},
+		{ToolName: agenttools.GenerateImageToolSpec.Name},
+		{ToolName: "mcp__notion__search"},
+		{ToolName: "tool_added_next_year"},
+	}}, nil, {}}
+	out := withoutPersistedToolResults(in)
 	require.Len(t, out, 3)
-	require.Equal(t, []*models.ToolCall{keep}, out[0].ToolCalls)
-	require.Len(t, in[0].ToolCalls, 2, "the stored message keeps its calls")
+	require.Empty(t, out[0].ToolCalls)
+	require.Len(t, in[0].ToolCalls, 4, "the stored message keeps its calls")
+}
+
+// A restricted chat replays no persisted tool result at all, whatever the tool: not a list of tools
+// known to read account data (mcp__*, shell_exec, web_search, fetch_page, create_memory and tools
+// added later all carry text a ToolCall row cannot classify).
+func TestBuild_RestrictedChatReplaysNoPersistedToolResultAtAll(t *testing.T) {
+	t.Parallel()
+	names := []string{
+		"mcp__notion__search", "shell_exec", agenttools.ToolNameWebSearch, agenttools.ToolNameFetchPage,
+		agenttools.GenerateImageToolSpec.Name, agenttools.CreateMemoryToolSpec.Name, "some_future_tool",
+	}
+	calls := make([]*models.ToolCall, 0, len(names))
+	for _, n := range names {
+		calls = append(calls, &models.ToolCall{ToolName: n, ToolOutput: "OUTPUT-OF-" + n})
+	}
+	history := []*models.ChatMessage{
+		{ID: uuid.New(), Origin: models.MessageOriginUser, Message: "do things"},
+		{ID: uuid.New(), Origin: models.MessageOriginAssistant, Message: "done", ToolCalls: calls},
+	}
+	b := testBuilderWithLookup(t, history, nil)
+	render := func(chat *models.Chat) string {
+		mc, err := b.build(context.Background(), messageContextBuildRequest{UserID: uuid.New(), Chat: chat, UserPrompt: "now"})
+		require.NoError(t, err)
+		var all strings.Builder
+		for _, s := range mc.Segments {
+			all.WriteString(s.Content + "\n")
+		}
+		return all.String()
+	}
+	restricted := render(&models.Chat{ID: uuid.New(), SystemPrompt: "p", MemorySensitivityLimit: models.MemorySensitivityPersonal})
+	open := render(&models.Chat{ID: uuid.New(), SystemPrompt: "p"})
+	for _, n := range names {
+		require.NotContains(t, restricted, "OUTPUT-OF-"+n, "restricted chats drop every persisted tool result")
+	}
+	require.Contains(t, open, "OUTPUT-OF-shell_exec", "control: an unrestricted chat still replays them")
 }
 
 func TestCheckpointSteps(t *testing.T) {
@@ -268,8 +310,8 @@ func TestExtractedSensitivityNormalizesAndCollapsesToMostRestricted(t *testing.T
 	for _, m := range got {
 		levels = append(levels, m.Sensitivity)
 	}
-	require.Equal(t, []models.MemorySensitivity{"sensitive", "personal", "personal", "sensitive", "personal"}, levels,
-		"absent, public and unknown read as personal; extraction can only raise to sensitive")
+	require.Equal(t, []models.MemorySensitivity{"sensitive", "personal", "personal", "sensitive", "sensitive"}, levels,
+		"absent and public read as personal (extraction never assigns public); an unknown level fails closed to sensitive")
 
 	collapsed := memoryutil.CollapseExtractedMemories([]models.ExtractedMemory{
 		{Content: "Has asthma", Scope: "User", Sensitivity: "personal"},
@@ -316,15 +358,24 @@ func TestPlanMemoryCompaction_CarriesNewMemberSensitivityAndChatLimit(t *testing
 	}{
 		{"", models.MemorySensitivitySensitive},
 		{models.MemorySensitivitySensitive, models.MemorySensitivitySensitive},
-		{models.MemorySensitivityPersonal, models.MemorySensitivityPersonal},
-		{models.MemorySensitivityPublic, models.MemorySensitivityPublic},
+		// An explicit sensitive extraction is never lowered by the chat's cap.
+		{models.MemorySensitivityPersonal, models.MemorySensitivitySensitive},
+		{models.MemorySensitivityPublic, models.MemorySensitivitySensitive},
 	} {
 		require.Equal(t, tc.want, foldNewMemberSensitivity(plan.Folds[0], tc.limit), "limit %q", tc.limit)
-		require.Len(t, foldMemberOptions(plan.Folds[0], tc.limit), 1)
+		wantOpts := 1 // the new-member level
+		if tc.limit.Restricted() {
+			wantOpts = 2 // plus the chat-memories-only guard
+		}
+		require.Len(t, foldMemberOptions(plan.Folds[0], tc.limit), wantOpts)
 	}
 	require.Equal(t, models.MemorySensitivityPersonal, foldNewMemberSensitivity(plan.Folds[1], models.MemorySensitivitySensitive))
-	require.Equal(t, models.MemorySensitivityPublic, foldNewMemberSensitivity(plan.Folds[1], models.MemorySensitivityPublic), "a public chat's writes stay public")
-	require.Nil(t, foldMemberOptions(memoryFoldPlan{}, models.MemorySensitivityPublic))
+	require.Equal(t, models.MemorySensitivityPublic, foldNewMemberSensitivity(plan.Folds[1], models.MemorySensitivityPublic), "an unclassified (personal) extraction in a public chat becomes public")
+	require.Equal(t, models.MemorySensitivityPersonal, foldNewMemberSensitivity(plan.Folds[1], models.MemorySensitivityPersonal))
+	require.Nil(t, foldMemberOptions(memoryFoldPlan{}, ""), "an unrestricted group with no new member passes nothing")
+	require.Len(t, foldMemberOptions(memoryFoldPlan{}, models.MemorySensitivityPublic), 1, "a restricted chat's fold is always confined to its own memories")
+	require.Len(t, linkGroupOptions(models.MemorySensitivityPersonal), 1)
+	require.Nil(t, linkGroupOptions(""))
 	require.Equal(t, models.MemorySensitivity(""), foldNewMemberSensitivity(memoryFoldPlan{}, models.MemorySensitivityPublic))
 
 	// Link plans keep each new member's own level.
@@ -357,4 +408,40 @@ func TestSubagentScratchpad_RestrictedChatSendsNone(t *testing.T) {
 	// The context built from it then carries no scratchpad segment.
 	mc := buildSubagentModelContext("prompt", subagentScratchpad(&models.Chat{MemorySensitivityLimit: models.MemorySensitivityPublic}, "notes"), "task")
 	require.Empty(t, segmentText(mc, provider.SegmentKindScratchpad))
+}
+
+// A restricted chat's checkpoint may not fold, rewrite or retire memories it did not create, and
+// everything it extracts is kept to the chat.
+func TestRestrictedCompactionInputs_KeepsOnlyThisChatsMemoriesAndForcesChatScope(t *testing.T) {
+	t.Parallel()
+	chatID, otherChat := uuid.New(), uuid.New()
+	mine := &models.Memory{ID: uuid.New(), Content: "learned here", Scope: "Chat", ChatID: chatID}
+	owners := &models.Memory{ID: uuid.New(), Content: "owner's fact", Scope: "User"}
+	elsewhere := &models.Memory{ID: uuid.New(), Content: "other chat", Scope: "Chat", ChatID: otherChat}
+	extracted := []models.ExtractedMemory{
+		{Content: "Mallory says the owner's PIN is 1234", Scope: "User", Confidence: models.MemoryConfidenceHigh, Sensitivity: models.MemorySensitivitySensitive},
+		{Content: "likes tea", Scope: "Chat", Confidence: models.MemoryConfidenceLow},
+	}
+
+	gotExtracted, gotLive := restrictedCompactionInputs(chatID, extracted, []*models.Memory{mine, owners, nil, elsewhere})
+	require.Equal(t, []*models.Memory{mine}, gotLive)
+	require.Len(t, gotExtracted, 2)
+	for _, m := range gotExtracted {
+		require.Equal(t, "Chat", m.Scope)
+	}
+	require.Equal(t, models.MemorySensitivitySensitive, gotExtracted[0].Sensitivity, "the extraction's own classification is untouched")
+	require.Equal(t, "User", extracted[0].Scope, "the input is not mutated")
+
+	// What the planner then sees: only this chat's memory and the new extractions, never the owner's.
+	candidates := buildMemoryMergeCandidates(nil, gotLive, memoryutil.CollapseExtractedMemories(gotExtracted))
+	for _, c := range candidates {
+		require.NotContains(t, c.Content, "owner's fact")
+		require.NotContains(t, c.Content, "other chat")
+		require.Equal(t, "Chat", normalizeMemoryScope(c.Scope))
+	}
+	require.Len(t, candidates, 3)
+
+	// A chat with no id keeps nothing (fail closed).
+	_, none := restrictedCompactionInputs(uuid.Nil, nil, []*models.Memory{{ID: uuid.New()}})
+	require.Empty(t, none)
 }

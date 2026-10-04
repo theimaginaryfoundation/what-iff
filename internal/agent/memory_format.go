@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"strings"
-
 	"github.com/theimaginaryfoundation/what-iff/internal/memoryutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
@@ -44,7 +42,7 @@ func (c *chatContext) addLoadedMemories(memories []*models.Memory) {
 
 	seenContentScope := make(map[string]struct{}, len(c.memories))
 	for _, line := range c.memories {
-		if line == memoryStalenessNote || isNonMemoryContextLine(line) {
+		if line == memoryStalenessNote || c.isUserNameLine(line) {
 			continue
 		}
 		scope := ""
@@ -84,8 +82,10 @@ func (c *chatContext) addLoadedMemories(memories []*models.Memory) {
 	}
 }
 
-func isNonMemoryContextLine(line string) bool {
-	return strings.HasPrefix(line, "The user's name is ")
+// isUserNameLine reports whether line is this turn's user-name profile line (see
+// chatContext.userNameLine), which is not a memory.
+func (c *chatContext) isUserNameLine(line string) bool {
+	return c != nil && c.userNameLine != "" && line == c.userNameLine
 }
 
 func loadedMemoryPoolKey(content, scope string) string {

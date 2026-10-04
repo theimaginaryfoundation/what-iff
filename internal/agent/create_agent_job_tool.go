@@ -15,6 +15,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// restrictedAgentJobNote is the refusal a restricted conversation gets for create_agent_job.
+const restrictedAgentJobNote = "scheduling jobs is not available in this restricted conversation"
+
 type createAgentJobToolArgs struct {
 	Title            *string  `json:"title,omitempty"`
 	ScheduleInput    string   `json:"schedule_input"`
@@ -42,6 +45,15 @@ func (a *Agent) createAgentJobTool(ctx context.Context, chat *models.Chat, args 
 		return marshalAgentJobToolResult(createAgentJobToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("invalid arguments: %v", err),
+		})
+	}
+	// A job runs in a chat of its own (sensitivity limit "sensitive", no persona) and may attach
+	// the owner's skills and their MCP servers, so a restricted chat must not schedule one. The
+	// tool is not offered there; this refuses a call the model makes anyway.
+	if chat.MemoryRestricted() {
+		return marshalAgentJobToolResult(createAgentJobToolResult{
+			Success: false,
+			Error:   restrictedAgentJobNote,
 		})
 	}
 	if !featuregate.IsEntitled(ctx, chat.UserID) {

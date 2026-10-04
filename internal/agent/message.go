@@ -624,6 +624,7 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 		UserPrompt:                 userPrompt,
 		CurrentMessage:             chatMessage,
 		Memories:                   chatCtx.memories,
+		UserNameLine:               chatCtx.userNameLine,
 		LiveMemories:               chatCtx.liveMemories,
 		EntityCards:                chatCtx.entityCards,
 		ActiveMood:                 chatCtx.activeMood,
@@ -826,8 +827,15 @@ type chatContext struct {
 	prefetchedMemoryCount  int // leading liveMemories from enrichment; the rest came from tools
 	memoryEnrichmentFailed bool
 	entityCards            string // cards of entities mentioned in the user's message (see spotEntityCards)
-	model                  string
-	modelProvider          string
+	// userNameLine is this turn's profile line naming the user (the first line of memories on a
+	// chat's first message), recorded explicitly so it can be persisted as its own context item
+	// type instead of being recognised by its text. Empty when the turn has no such line.
+	userNameLine string
+	// offeredTools is the set of function-tool names given to the model for this turn (or this
+	// sub-agent loop); dispatchToolUse refuses any other. See setOfferedTools.
+	offeredTools  map[string]struct{}
+	model         string
+	modelProvider string
 	// modelSubscriptionTier is the model's raw SubscriptionTier string
 	// ("low"/"medium"/"high"/"ultra"), passed to the meter which classifies it for
 	// free-chat gating. Empty means unknown; the meter treats that conservatively.
@@ -1208,6 +1216,12 @@ func (a *Agent) generateAssistantForMessageMock(ctx context.Context, userID uuid
 		return a.handleImageGenerateRitual(ctx, userID, chatMessage, chatCtx, modelContext)
 	}
 
+	// The mock adapter offers no tools to a model, but record the same agent-tool set the real
+	// paths do (no MCP discovery: mock mode is hermetic), so a scripted tool call is gated exactly
+	// like a real model's.
+	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
+	chatCtx.setOfferedTools(policy.offeredAgentToolNames())
+
 	adapter := provider.NewMockAdapter(provider.MockAdapterConfig{
 		Mode:           a.mockLLMMode,
 		EchoText:       chatMessage.Message,
@@ -1309,6 +1323,9 @@ func (a *Agent) openAIResponseParamsForChat(ctx context.Context, chatCtx *chatCo
 		mcpSpecs := a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)
 		mcpTools := tools.OpenAIFunctionTools(mcpSpecs)
 		toolParams = provider.BuildOpenAITools(chatCtx.model, chatTools, agentTools, mcpTools)
+		chatCtx.setOfferedTools(offeredToolNames(append(tools.AgentFunctionToolSpecs(policy.showMoodTools), mcpSpecs...), policy.disabledTools))
+	} else {
+		chatCtx.setOfferedTools(nil) // no tools are offered, so none may run
 	}
 	a.recordToolDefinitionEstimate(modelCtx, toolParams)
 	var include []responses.ResponseIncludable
@@ -1395,6 +1412,7 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 	if policy.toolsEnabled {
 		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
 	}
+	chatCtx.setOfferedTools(offeredToolNames(specs, policy.disabledTools))
 	claudeFunctionTools := claudeFunctionTools(specs)
 	a.recordToolDefinitionEstimate(modelContext, claudeFunctionTools)
 	webSearchEnabled := nativeAnthropic && policy.nativeWebSearch
@@ -1435,6 +1453,7 @@ func (a *Agent) generateAssistantForMessageGemini(ctx context.Context, userID uu
 	if policy.toolsEnabled {
 		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
 	}
+	chatCtx.setOfferedTools(offeredToolNames(specs, policy.disabledTools))
 	geminiFunctionTools := geminiFunctionTools(specs)
 	a.recordToolDefinitionEstimate(modelContext, geminiFunctionTools)
 	toolNames := make([]string, 0, len(geminiFunctionTools))
@@ -1478,6 +1497,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	if policy.toolsEnabled {
 		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
 	}
+	chatCtx.setOfferedTools(offeredToolNames(specs, policy.disabledTools))
 	functionTools := openAIChatCompletionFunctionTools(specs)
 	a.recordToolDefinitionEstimate(modelContext, functionTools)
 
@@ -1535,6 +1555,7 @@ func (a *Agent) generateAssistantForMessageOpenAIChatCompletions(ctx context.Con
 	if policy.toolsEnabled {
 		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
 	}
+	chatCtx.setOfferedTools(offeredToolNames(specs, policy.disabledTools))
 	functionTools := openAIChatCompletionFunctionTools(specs)
 	a.recordToolDefinitionEstimate(modelContext, functionTools)
 
@@ -2031,7 +2052,8 @@ func additionalContextItemsFromChatContext(chatCtx *chatContext) []models.Additi
 			continue
 		}
 		item := models.AdditionalContextItem{Type: models.AdditionalContextTypeMemory, Content: formatted}
-		if strings.HasPrefix(formatted, "The user's name is ") {
+		if chatCtx.isUserNameLine(formatted) {
+			item.Type = models.AdditionalContextTypeUserName
 			out = append(out, item)
 			continue
 		}
@@ -2086,10 +2108,13 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 	// ExpressionsEnabled comes from the personality edge already eager-loaded by GetChat.
 	expressionsEnabled := parentChat.PersonalityExpressionsEnabled
 
+	userNameLine := a.recognizeUserNameLine(ctx, userID, memories)
+
 	return &chatContext{
 		userID:                 userID,
 		chat:                   parentChat,
 		memories:               memories,
+		userNameLine:           userNameLine,
 		liveMemories:           liveMemories,
 		prefetchedMemoryCount:  len(liveMemories),
 		memoryEnrichmentFailed: memoryEnrichmentFailed,
