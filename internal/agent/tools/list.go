@@ -255,6 +255,10 @@ func restrictedListKind(chat *models.Chat, kind string, a listArgs) (what string
 		return "Listing your other conversations", true
 	case listKindJobs:
 		return "Listing scheduled jobs", true
+	case listKindSkills:
+		return "Listing your skills", true
+	case listKindPersonalities:
+		return "Listing your other personalities", true
 	case listKindFiles:
 		if normalizeFileScope(a.Scope) != listFileScopePersonality {
 			return "Listing your account-wide files (use scope=personality for this personality's documents)", true

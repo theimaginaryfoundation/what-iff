@@ -48,7 +48,7 @@ describe('memory-access.helpers', () => {
       'schedule jobs',
       'sub-agents',
       'stays in this thread',
-      "can't change existing ones",
+      "can't add or change notes about people and places",
     ]) {
       expect(RESTRICTED_WITHHELD_COPY).toContain(part);
     }

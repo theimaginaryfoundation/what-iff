@@ -61,7 +61,7 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
   `find_context` passes the limit into `GetRelatedMemories` (SQL), resolves a hidden memory like a missing one (`resolveMemory`), refuses other conversations in `conversation`, `bookmarks`, `origin`, `fetch summary:/bookmark:` and `source_type=summaries`, scopes file lookups to the chat and personality, and filters `lifecycle_events` to fold events within the limit without their pre-merge member previews.
   `list` refuses conversations, jobs and account-wide files; `parseWorkspacePath` and `listForChat` close the `agent/` notebook; `update_scratchpad` refuses.
   `create_memory` takes an optional `sensitivity` of `personal` or `sensitive` only (an agent can never mark a memory `public`); the default level is capped by the chat's limit and an explicit `sensitive` is kept, and a restricted chat's memory is always Chat scope (the result carries a note).
-  `remember_entity` in a restricted chat can only create (at the chat's limit): updating or forgetting an existing entity is refused, and the refusal for a taken name is identical whether the holder is readable or above the limit.
+  `remember_entity` is not offered in a restricted chat (the agent turn policy removes it, and the handler stays create-only at the chat's limit as defence in depth); the refusal for a taken name is identical whether the holder is readable or above the limit.
   Every entity read takes the limit (the spotting alias index is cached per limit).
   A hidden memory, an unknown id and an ambiguous id prefix give a restricted chat the same `not found` error (`resolveMemory`).
 

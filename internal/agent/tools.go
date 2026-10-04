@@ -27,7 +27,10 @@ type ToolConfig struct {
 //
 //   - update_scratchpad writes the personality-wide scratchpad, shared across the owner's chats;
 //   - create_agent_job schedules a job that runs in a new, unrestricted chat (or attaches the
-//     owner's skills and their MCP servers), outside this sandbox.
+//     owner's skills and their MCP servers), outside this sandbox;
+//   - remember_entity writes cards that are injected into the owner's other chats whenever a name is
+//     mentioned, so anything a stranger says in a restricted thread could become a trusted-looking
+//     note there. Restricted chats can read entities (within their limit) but never write them.
 //
 // The handlers refuse as well (defence in depth), and dispatch enforces the offered set. The
 // restricted tool-surface test classifies every catalog tool, so a new tool must be placed on one
@@ -35,6 +38,7 @@ type ToolConfig struct {
 var restrictedChatDisabledTools = []string{
 	agenttools.UpdateScratchpadToolSpec.Name,
 	agenttools.CreateAgentJobToolSpec.Name,
+	agenttools.RememberEntityToolSpec.Name,
 }
 
 // offeredToolNames is the set of function-tool names the model is actually given: the specs minus

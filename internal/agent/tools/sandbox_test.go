@@ -258,7 +258,7 @@ func TestList_Restricted_AccountWideKindsUnavailable(t *testing.T) {
 		return res
 	}
 
-	for _, args := range []string{`{"kind":"conversations"}`, `{"kind":"jobs"}`, `{"kind":"files"}`, `{"kind":"files","scope":"conversation"}`, `{"kind":"files","scope":"all"}`} {
+	for _, args := range []string{`{"kind":"conversations"}`, `{"kind":"jobs"}`, `{"kind":"skills"}`, `{"kind":"personalities"}`, `{"kind":"files"}`, `{"kind":"files","scope":"conversation"}`, `{"kind":"files","scope":"all"}`} {
 		store.lastPageNum = 0
 		res := run(chat, args)
 		require.Contains(t, res.Error, "restricted conversation", args)
@@ -266,13 +266,13 @@ func TestList_Restricted_AccountWideKindsUnavailable(t *testing.T) {
 	}
 
 	// Allowed kinds still work, including the personality's own documents.
-	for _, args := range []string{`{"kind":"models"}`, `{"kind":"personalities"}`, `{"kind":"skills"}`, `{"kind":"mcp_servers"}`, `{"kind":"files","scope":"personality"}`} {
+	for _, args := range []string{`{"kind":"models"}`, `{"kind":"mcp_servers"}`, `{"kind":"files","scope":"personality"}`} {
 		res := run(chat, args)
 		require.Empty(t, res.Error, args)
 	}
 
 	// Unrestricted control.
-	for _, args := range []string{`{"kind":"conversations"}`, `{"kind":"jobs"}`, `{"kind":"files"}`} {
+	for _, args := range []string{`{"kind":"conversations"}`, `{"kind":"jobs"}`, `{"kind":"skills"}`, `{"kind":"personalities"}`, `{"kind":"files"}`} {
 		require.Empty(t, run(restrictedChat(""), args).Error, args)
 	}
 }

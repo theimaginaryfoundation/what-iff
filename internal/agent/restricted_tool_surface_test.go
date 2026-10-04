@@ -37,7 +37,7 @@ var restrictedToolSurface = map[string]struct {
 	agenttools.GrepFilesToolSpec.Name:         {true, "files limited to this chat and its personality's documents"},
 	agenttools.WriteFileToolSpec.Name:         {true, "chat/ workspace only; no agent/ notebook"},
 	agenttools.RecallEntityToolSpec.Name:      {true, "entities at or below the chat's limit"},
-	agenttools.RememberEntityToolSpec.Name:    {true, "create only; existing entities are read-only"},
+	agenttools.RememberEntityToolSpec.Name:    {false, "writes cards injected into the owner's other chats"},
 	agenttools.RecallToolSpec.Name:            {true, "memories at or below the limit, this conversation only"},
 }
 
