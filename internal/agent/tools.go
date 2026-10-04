@@ -94,6 +94,11 @@ func (a *Agent) buildTurnToolPolicy(ctx context.Context, chatCtx *chatContext, u
 	delete(disabledTools, agenttools.ListMoodsToolSpec.Name)
 	delete(disabledTools, agenttools.ChangeMoodToolSpec.Name)
 
+	// A restricted chat is a sandbox: it neither reads nor writes the personality-wide scratchpad.
+	if chatCtx.chat.MemoryRestricted() {
+		disabledTools[agenttools.UpdateScratchpadToolSpec.Name] = true
+	}
+
 	policy := turnToolPolicy{
 		toolsEnabled:  chatCtx.chat.ToolsEnabled,
 		disabledTools: disabledTools,

@@ -301,8 +301,10 @@ func (a *Agent) handleEphemeralPrompt(
 		if err == nil && personality != nil {
 			chatCtx.chat.PersonalityID = personality.ID
 			chatCtx.chat.SystemPrompt = personality.SystemPrompt
-			chatCtx.chat.Scratchpad = personality.Scratchpad
-			chatCtx.chat.ScratchpadRevision = personality.ScratchpadRevision
+			if !chatCtx.chat.MemoryRestricted() { // see datastore.toChatModel: no scratchpad in a restricted chat
+				chatCtx.chat.Scratchpad = personality.Scratchpad
+				chatCtx.chat.ScratchpadRevision = personality.ScratchpadRevision
+			}
 		}
 	}
 

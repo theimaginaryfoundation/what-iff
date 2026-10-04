@@ -102,6 +102,9 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 		systemPrompt = personality.SystemPrompt
 		scratchpad = personality.Scratchpad
 	}
+	if chatCtx.chat.MemoryRestricted() {
+		scratchpad = "" // the sub-agent must not carry the personality scratchpad out of a restricted chat
+	}
 
 	// Enrich message with any requested ritual content and collect ritual IDs for MCP loading.
 	ritualUUIDs := parseSkillIDs(toolArgs.RitualIDs)

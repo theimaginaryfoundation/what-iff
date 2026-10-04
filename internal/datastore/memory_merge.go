@@ -26,6 +26,22 @@ import (
 	"go.uber.org/zap"
 )
 
+// MergeGroupOption tunes PersistMemoryMergeGroup. Options are variadic so existing callers are
+// unchanged.
+type MergeGroupOption func(*mergeGroupOptions)
+
+type mergeGroupOptions struct {
+	newSensitivity models.MemorySensitivity
+}
+
+// WithNewMemberSensitivity sets the sensitivity of the group's new (not yet stored) members: the
+// most restricted level among them, already capped by the asking chat's limit. A new-only group
+// is created at this level; a fold into a survivor takes the most restricted of this, the
+// survivor and the absorbed members. Omit when the group has no new member.
+func WithNewMemberSensitivity(s models.MemorySensitivity) MergeGroupOption {
+	return func(o *mergeGroupOptions) { o.newSensitivity = s }
+}
+
 // PersistMemoryMergeGroup writes one merge grouping using only known memory IDs from
 // thread context (no duplicate scans). When survivorMemoryID is set, that row is
 // updated in place; absorbMemoryIDs are soft-retired when consolidating duplicates.
@@ -46,7 +62,12 @@ func (d *Datastore) PersistMemoryMergeGroup(
 	activePersonalityID uuid.UUID,
 	sourceMembers []models.MemoryMergeSourceMember,
 	compactionEventID *uuid.UUID,
+	opts ...MergeGroupOption,
 ) (*models.Memory, error) {
+	var mergeOpts mergeGroupOptions
+	for _, opt := range opts {
+		opt(&mergeOpts)
+	}
 	if strings.TrimSpace(group.CanonicalContent) == "" {
 		return nil, nil
 	}
@@ -106,7 +127,7 @@ func (d *Datastore) PersistMemoryMergeGroup(
 			Confidence:          confidence,
 			BatchDuplicateCount: foldedIn,
 		}
-		absorbed, err := retireAbsorbedMemoriesTx(ctx, tx, userID, existing.ID, absorbMemoryIDs, now)
+		absorbed, absorbedSensitivity, err := retireAbsorbedMemoriesTx(ctx, tx, userID, existing.ID, absorbMemoryIDs, now)
 		if err != nil {
 			_ = tx.Rollback()
 			return nil, err
@@ -116,6 +137,8 @@ func (d *Datastore) PersistMemoryMergeGroup(
 			compactionEventID:  compactionEventID,
 			canonicalEmbedding: embeddingVector,
 			absorbed:           absorbed,
+			// The survivor stands for the whole group, so it takes the most restricted level in it.
+			otherSensitivity: mostRestrictedPresent(absorbedSensitivity, mergeOpts.newSensitivity),
 		})
 		if foldErr != nil {
 			_ = tx.Rollback()
@@ -132,6 +155,7 @@ func (d *Datastore) PersistMemoryMergeGroup(
 		Scope:               group.Scope,
 		Confidence:          confidence,
 		BatchDuplicateCount: duplicatesFolded,
+		Sensitivity:         mergeOpts.newSensitivity,
 	}
 	mem, createErr := d.createMergedMemory(ctx, tx, userID, chatID, extract, embeddingVector, activePersonalityID, targetScope, now, compactionEventID)
 	if createErr != nil {
@@ -150,6 +174,9 @@ type LinkGroupNewMember struct {
 	Content    string
 	Confidence models.MemoryConfidence
 	Embedding  []float32
+	// Sensitivity is the new member's own level (capped by the asking chat's limit); empty is
+	// personal. Linking never changes the level of any member.
+	Sensitivity models.MemorySensitivity
 }
 
 // PersistMemoryLinkGroup cross-references related-but-distinct memories — the same topic or event
@@ -219,6 +246,7 @@ func (d *Datastore) PersistMemoryLinkGroup(
 			SetType(memory.TypeContext).
 			SetStatus(memory.StatusActive).
 			SetConfidence(confidence.Float()).
+			SetSensitivity(memory.Sensitivity(nm.Sensitivity.OrDefault())).
 			SetOwnerID(userID).
 			SetLinkGroupID(linkGroupID).
 			SetCreatedAt(now).
@@ -356,7 +384,10 @@ func (d *Datastore) MergeLiveExtractedMemory(
 		sourceMembers := sourceMembersForLiveFold(liveMatch, extract)
 		// liveMatch already equals extract.Content after normalization, so this fold never rewrites
 		// the survivor and needs no embedding.
-		mem, mergeErr := d.foldIntoLiveMemory(ctx, tx, userID, liveMatch, extract, now, foldLiveOptions{sourceMembers: sourceMembers})
+		mem, mergeErr := d.foldIntoLiveMemory(ctx, tx, userID, liveMatch, extract, now, foldLiveOptions{
+			sourceMembers:    sourceMembers,
+			otherSensitivity: mostRestrictedPresent("", extract.Sensitivity),
+		})
 		if mergeErr != nil {
 			_ = tx.Rollback()
 			return nil, mergeErr
@@ -432,6 +463,26 @@ type foldLiveOptions struct {
 	canonicalEmbedding []float32
 	// absorbed are the memories this fold retired (retireAbsorbedMemoriesTx), recorded for undo.
 	absorbed []entschema.MemoryMergeAbsorbedMember
+	// otherSensitivity is the most restricted level among the group's other members (absorbed and
+	// new); empty when there are none. The survivor takes the most restricted of this and its own.
+	otherSensitivity models.MemorySensitivity
+}
+
+// mostRestrictedPresent returns the most restricted of the levels that are set, or "" when none is.
+// (MostRestricted alone would read an unset level as personal and could raise a public survivor.)
+func mostRestrictedPresent(levels ...models.MemorySensitivity) models.MemorySensitivity {
+	var out models.MemorySensitivity
+	for _, l := range levels {
+		if l == "" {
+			continue
+		}
+		if out == "" {
+			out = l.OrDefault()
+			continue
+		}
+		out = models.MostRestricted(out, l)
+	}
+	return out
 }
 
 // survivorRewriteDecision is the outcome of decideSurvivorRewrite; non-rewrite values double as
@@ -537,9 +588,22 @@ func (d *Datastore) foldIntoLiveMemory(
 		AbsorbedMembers:          opts.absorbed,
 	}
 
+	// A survivor stands for its whole group, so it takes the most restricted sensitivity in it;
+	// the prior level is recorded so undo can put it back.
+	existingSensitivity := models.MemorySensitivity(existing.Sensitivity).OrDefault()
+	foldedSensitivity := existingSensitivity
+	if opts.otherSensitivity != "" {
+		foldedSensitivity = models.MostRestricted(existingSensitivity, opts.otherSensitivity)
+	}
+	if foldedSensitivity != existingSensitivity {
+		snapshot.PriorSensitivity = string(existingSensitivity)
+		snapshot.FoldedSensitivity = string(foldedSensitivity)
+	}
+
 	update := tx.Memory.UpdateOneID(existing.ID).
 		SetUpdatedAt(now).
 		SetConfidence(mergedConfidence).
+		SetSensitivity(memory.Sensitivity(foldedSensitivity)).
 		SetChainMetadata(&entschema.MemoryChainMetadata{
 			DuplicateCount:          duplicateCount,
 			VerifiedTimestampsFirst: first,
@@ -632,9 +696,12 @@ func replaceMemoryEmbeddingTx(ctx context.Context, tx *ent.Tx, memoryID uuid.UUI
 // (GetRelatedMemories and GetRelatedSummaryMemories both filter status=active), so an inactive row
 // with an embedding is already invisible, and undo can make it visible again exactly, without
 // re-embedding.
-func retireAbsorbedMemoriesTx(ctx context.Context, tx *ent.Tx, userID, survivorID uuid.UUID, ids []uuid.UUID, now time.Time) ([]entschema.MemoryMergeAbsorbedMember, error) {
+//
+// It also returns the most restricted sensitivity among the retired rows ("" when none), which the
+// survivor takes on.
+func retireAbsorbedMemoriesTx(ctx context.Context, tx *ent.Tx, userID, survivorID uuid.UUID, ids []uuid.UUID, now time.Time) ([]entschema.MemoryMergeAbsorbedMember, models.MemorySensitivity, error) {
 	if len(ids) == 0 {
-		return nil, nil
+		return nil, "", nil
 	}
 	rows, err := tx.Memory.Query().
 		Where(
@@ -644,14 +711,16 @@ func retireAbsorbedMemoriesTx(ctx context.Context, tx *ent.Tx, userID, survivorI
 		).
 		All(ctx)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if len(rows) == 0 {
-		return nil, nil
+		return nil, "", nil
 	}
 	priorStatus := make(map[uuid.UUID]memory.Status, len(rows))
+	var maxSensitivity models.MemorySensitivity
 	for _, row := range rows {
 		priorStatus[row.ID] = row.Status
+		maxSensitivity = mostRestrictedPresent(maxSensitivity, models.MemorySensitivity(row.Sensitivity))
 	}
 	// Keep the caller's order (stable audit rows) and drop repeats.
 	absorbed := make([]entschema.MemoryMergeAbsorbedMember, 0, len(rows))
@@ -670,9 +739,9 @@ func retireAbsorbedMemoriesTx(ctx context.Context, tx *ent.Tx, userID, survivorI
 		SetStatus(memory.StatusInactive).
 		SetUpdatedAt(now).
 		Save(ctx); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return absorbed, nil
+	return absorbed, maxSensitivity, nil
 }
 
 func existingChainSourceIDs(existing *ent.Memory) []uuid.UUID {
@@ -709,6 +778,7 @@ func (d *Datastore) createMergedMemory(
 		SetType(memory.TypeContext).
 		SetStatus(memory.StatusActive).
 		SetConfidence(confidence.Float()).
+		SetSensitivity(memory.Sensitivity(extract.Sensitivity.OrDefault())).
 		SetOwnerID(userID).
 		SetCreatedAt(now).
 		SetUpdatedAt(now)
@@ -1015,6 +1085,14 @@ func (d *Datastore) undoFoldLiveMerge(ctx context.Context, tx *ent.Tx, userID uu
 	update := tx.Memory.UpdateOneID(entMemory.ID).
 		SetUpdatedAt(now).
 		SetConfidence(snap.PriorConfidence)
+
+	// Put the survivor's sensitivity back, unless it is no longer the level the fold set (the user
+	// changed it since, and their choice wins).
+	if snap.FoldedSensitivity != "" && snap.PriorSensitivity != "" &&
+		string(entMemory.Sensitivity) == snap.FoldedSensitivity &&
+		memory.SensitivityValidator(memory.Sensitivity(snap.PriorSensitivity)) == nil {
+		update = update.SetSensitivity(memory.Sensitivity(snap.PriorSensitivity))
+	}
 
 	if snap.PriorChainMetadataWasNil {
 		update = update.ClearChainMetadata()

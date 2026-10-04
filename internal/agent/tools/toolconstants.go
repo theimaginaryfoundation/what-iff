@@ -158,6 +158,11 @@ var CreateMemoryToolSpec = FunctionToolSpec{
 			"description": "The scope of the memory. Use 'User' for information that applies globally across all conversations (e.g., preferences, personal facts). Use 'Chat' for information specific to this conversation (e.g., project-specific context, conversation goals).",
 			"enum":        []string{MemoryScopeUser, MemoryScopeChat},
 		},
+		"sensitivity": map[string]interface{}{
+			"type":        "string",
+			"description": "Optional. How delicate the memory is: 'personal' (default), 'sensitive' (health, finances, intimate or otherwise delicate material; used only in conversations that allow it) or 'public' (safe to use anywhere, including public surfaces). The level is capped by what this conversation can see, so it can be lowered but never raised above it.",
+			"enum":        []string{"public", "personal", "sensitive"},
+		},
 	},
 	Required: []string{"content", "scope"},
 }

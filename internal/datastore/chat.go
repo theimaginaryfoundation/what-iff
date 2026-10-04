@@ -86,8 +86,12 @@ func toChatModel(e *ent.Chat) *models.Chat {
 		chatModel.PersonalityID = e.Edges.Personality.ID
 		chatModel.PersonalityName = e.Edges.Personality.Name
 		chatModel.SystemPrompt = e.Edges.Personality.SystemPrompt
-		chatModel.Scratchpad = e.Edges.Personality.Scratchpad
-		chatModel.ScratchpadRevision = e.Edges.Personality.ScratchpadRevision
+		// The personality scratchpad is shared by all of its conversations, so a restricted chat
+		// (limit below sensitive) is never handed it: this is the one place it enters a Chat model.
+		if !chatModel.MemoryRestricted() {
+			chatModel.Scratchpad = e.Edges.Personality.Scratchpad
+			chatModel.ScratchpadRevision = e.Edges.Personality.ScratchpadRevision
+		}
 		chatModel.PersonalityExpressionsEnabled = e.Edges.Personality.ExpressionsEnabled
 	}
 

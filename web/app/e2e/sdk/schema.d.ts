@@ -9819,6 +9819,8 @@ export interface components {
             scratchpad_sha?: string;
             /** @description First 12 hex characters of the SHA-256 of the checkpoint summary that was in context. */
             summary_sha?: string;
+            /** @description The chat's memory sensitivity limit when this turn ran. Every memory and entity in the turn is at or below it; a restricted chat also has no scratchpad, agent notebook or other-conversation context. Always present on turns with a manifest. */
+            memory_sensitivity_limit?: components["schemas"]["MemorySensitivity"];
         };
         /** @description One memory retrieved for a turn. */
         ContextMemoryInput: {

@@ -36,6 +36,8 @@ type messageContextBuilder struct {
 	tokenCounter         *provider.TokenCounter
 	loadHistoryOverride  func(ctx context.Context, userID, chatID, excludeMessageID uuid.UUID, pageSize int, minDate *time.Time, logContext string) []*models.ChatMessage
 	expressionThumbCache *expressionPortraitThumbCache
+	// memoryIDLookup re-checks persisted memory ids against a restricted chat's limit; nil uses ds.
+	memoryIDLookup memoryIDLookup
 }
 
 func newMessageContextBuilder(ds *datastore.Datastore, tel *telemetry.Telemetry, fileStore storage.FileStore, loadHistoryOverride func(ctx context.Context, userID, chatID, excludeMessageID uuid.UUID, pageSize int, minDate *time.Time, logContext string) []*models.ChatMessage, expressionThumbCache *expressionPortraitThumbCache) (*messageContextBuilder, error) {
@@ -87,7 +89,8 @@ func (b *messageContextBuilder) build(ctx context.Context, req messageContextBui
 	if err != nil {
 		return nil, err
 	}
-	appendMergedAdditionalContext(modelCtx, mergeAdditionalContextItems(carryOver, history, req.CurrentMessage, req.Memories, req.LiveMemories))
+	keepPersisted := b.persistedMemoryFilter(ctx, req.UserID, req.Chat, persistedAdditionalContext(carryOver, history, req.CurrentMessage)...)
+	appendMergedAdditionalContext(modelCtx, mergeAdditionalContextItems(carryOver, history, req.CurrentMessage, req.Memories, req.LiveMemories, keepPersisted))
 	if cards := strings.TrimSpace(req.EntityCards); cards != "" {
 		modelCtx.Append(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, cards, false)
 	}
@@ -277,7 +280,7 @@ func (b *messageContextBuilder) buildHistoryContext(ctx context.Context, userID 
 	if chat.CheckpointSummary != "" {
 		modelCtx.Append(provider.SegmentKindCheckpointSummary, provider.RoleDeveloper, chat.CheckpointSummary, true)
 	}
-	if chat.Scratchpad != "" {
+	if chat.Scratchpad != "" && !chat.MemoryRestricted() {
 		modelCtx.Append(provider.SegmentKindScratchpad, provider.RoleDeveloper, chat.Scratchpad, true)
 	}
 
@@ -309,7 +312,11 @@ func (b *messageContextBuilder) buildHistoryContext(ctx context.Context, userID 
 	// compressed into the checkpoint summary, so replaying old tool dumps there would
 	// only add noise. Ages are measured in assistant turns within this window. Appended
 	// after the (cacheable) history turns so the block never fragments the cache prefix.
-	appendPersistedToolResults(modelCtx, selectPersistedToolResults(assistantTurnsFromHistory(history)))
+	turns := assistantTurnsFromHistory(history)
+	if chat.MemoryRestricted() {
+		turns = withoutAccountDataToolResults(turns)
+	}
+	appendPersistedToolResults(modelCtx, selectPersistedToolResults(turns))
 
 	return modelCtx, carryOver, history, nil
 }
@@ -466,12 +473,16 @@ func appendItemsFromMessage(msg *models.ChatMessage, out *[]models.AdditionalCon
 
 // mergeAdditionalContextItems collects typed snippets from checkpoint carry-over, main history,
 // the current message row, and this turn's prefetched memories, deduped by type+content.
+// keepPersisted, when non-nil, filters the PERSISTED items (carry-over, history, current row): a
+// restricted chat re-checks them against its current limit. This turn's memories were gated in SQL
+// when retrieved and are not filtered again.
 func mergeAdditionalContextItems(
 	carryOver [][2]*models.ChatMessage,
 	history []*models.ChatMessage,
 	current *models.ChatMessage,
 	currentMemories []string,
 	currentLive []*models.Memory,
+	keepPersisted func(models.AdditionalContextItem) bool,
 ) []models.AdditionalContextItem {
 	var raw []models.AdditionalContextItem
 	for _, t := range carryOver {
@@ -482,6 +493,15 @@ func mergeAdditionalContextItems(
 		appendItemsFromMessage(msg, &raw)
 	}
 	appendItemsFromMessage(current, &raw)
+	if keepPersisted != nil {
+		kept := raw[:0]
+		for _, it := range raw {
+			if keepPersisted(it) {
+				kept = append(kept, it)
+			}
+		}
+		raw = kept
+	}
 	for _, m := range currentMemories {
 		if strings.TrimSpace(m) == "" {
 			continue

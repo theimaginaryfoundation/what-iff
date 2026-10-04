@@ -35,6 +35,17 @@ func (t *ScratchpadTool) UpdateScratchpadTool(ctx context.Context, chat *models.
 		return marshalToolResult(result, "update_scratchpad")
 	}
 
+	// The scratchpad is shared by every conversation of the personality, so a restricted chat
+	// can neither read it nor leave anything in it.
+	if chat.MemoryRestricted() {
+		result := updateScratchpadToolResult{
+			PersonalityID: chat.PersonalityID.String(),
+			Success:       false,
+			Error:         restrictedNote(chat, "The scratchpad"),
+		}
+		return marshalToolResult(result, "update_scratchpad")
+	}
+
 	// Validate content is not empty (including whitespace-only)
 	trimmedContent, valid := validateNonEmptyString(updateArgs.Content)
 	if !valid {

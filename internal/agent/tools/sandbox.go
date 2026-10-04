@@ -52,6 +52,14 @@ func otherConversationBlocked(chat *models.Chat, conversationID uuid.UUID) bool 
 	return chat.MemoryRestricted() && conversationID != chat.ID
 }
 
+// cappedMemorySensitivity is the level a memory or entity created from chat gets: the requested
+// level (empty or unknown means personal) capped by the chat's limit, so a restricted chat's
+// writes stay readable there and an unrestricted chat's default is personal.
+func cappedMemorySensitivity(chat *models.Chat, requested string) models.MemorySensitivity {
+	want, _ := models.ParseMemorySensitivity(requested)
+	return models.CapToLimit(want, chat.MemoryLimit())
+}
+
 // fileInChatScope reports whether fa is within what a restricted chat may read: an upload on this
 // conversation or a document attached to its personality. Unrestricted chats are not limited here.
 func fileInChatScope(chat *models.Chat, fa *models.FileAttachment) bool {

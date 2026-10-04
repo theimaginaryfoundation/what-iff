@@ -70,6 +70,9 @@ type ContextInputs struct {
 	// were in context (first 12 hex characters of their SHA-256).
 	ScratchpadSHA string `json:"scratchpad_sha,omitempty"`
 	SummarySHA    string `json:"summary_sha,omitempty"`
+	// MemorySensitivityLimit is the chat's memory sensitivity limit when the turn ran (public,
+	// personal or sensitive). Everything in the turn's context is at or below it.
+	MemorySensitivityLimit string `json:"memory_sensitivity_limit,omitempty"`
 }
 
 // ContextMemoryInput is one retrieved memory: which one, how it got here, and how relevant the

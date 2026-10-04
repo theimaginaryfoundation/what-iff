@@ -7637,6 +7637,13 @@ components:
         summary_sha:
           type: string
           description: First 12 hex characters of the SHA-256 of the checkpoint summary that was in context.
+        memory_sensitivity_limit:
+          allOf:
+            - $ref: '#/components/schemas/MemorySensitivity'
+          description: >-
+            The chat's memory sensitivity limit when this turn ran. Every memory and entity in
+            the turn is at or below it; a restricted chat also has no scratchpad, agent notebook
+            or other-conversation context. Always present on turns with a manifest.
 
     ContextMemoryInput:
       type: object

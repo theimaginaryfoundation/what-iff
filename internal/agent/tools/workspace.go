@@ -169,6 +169,11 @@ func parseWorkspacePath(chat *models.Chat, raw string) (workspaceAddr, error) {
 	var addr workspaceAddr
 	switch strings.ToLower(root) {
 	case models.WorkspaceRootAgent:
+		if chat.MemoryRestricted() {
+			// The notebook is shared by all of the personality's conversations, so a restricted
+			// chat can neither read what other conversations wrote nor leave notes for them.
+			return workspaceAddr{}, errors.New(restrictedNote(chat, "The agent/ notebook") + " Use chat/ instead.")
+		}
 		if chat.PersonalityID == uuid.Nil {
 			return workspaceAddr{}, errors.New("agent/ needs a personality; this conversation has none, so use chat/")
 		}
@@ -529,6 +534,9 @@ func (t *WorkspaceTool) resolve(ctx context.Context, chat *models.Chat, ref stri
 // the conversation has a personality.
 func (t *WorkspaceTool) listForChat(ctx context.Context, chat *models.Chat, prefix string, limit int) ([]*models.WorkspaceFile, error) {
 	chatPrefix, agentPrefix, wantChat, wantAgent := splitWorkspacePrefix(prefix)
+	if chat.MemoryRestricted() {
+		wantAgent = false // see parseWorkspacePath
+	}
 	var out []*models.WorkspaceFile
 	if wantChat {
 		files, err := t.store.ListWorkspaceFiles(ctx, chat.UserID, models.WorkspaceRootChat, chat.ID, chatPrefix, limit)

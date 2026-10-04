@@ -403,13 +403,15 @@ func (t *EntityTool) RememberEntity(ctx context.Context, chat *models.Chat, inpu
 			return t.fail(ToolNameRememberEntity, "base_revision (from recall_entity) is required to forget an entity")
 		}
 		if err := t.store.ArchiveEntity(ctx, chat.UserID, existing.ID, *a.BaseRevision); err != nil {
-			return t.saveError(err)
+			return t.saveError(err, chat.MemoryRestricted())
 		}
 		t.invalidate(chat.UserID)
 		return marshalToolResult(entityResult{Success: true, Op: "forget", Note: fmt.Sprintf("Forgot %s.", existing.Name)}, ToolNameRememberEntity)
 	}
 
 	in := models.EntityInput{Name: name, AuthorClass: models.WorkspaceAuthorAgent}
+	// New entities get the default sensitivity capped by this chat's limit (public in a public
+	// chat). An update leaves the stored level alone (an empty value keeps it).
 	if existing != nil {
 		if a.BaseRevision == nil || *a.BaseRevision < 1 {
 			return marshalToolResult(entityResult{
@@ -435,6 +437,7 @@ func (t *EntityTool) RememberEntity(ctx context.Context, chat *models.Chat, inpu
 			pid := chat.PersonalityID
 			in.PinnedPersonalityID = &pid
 		}
+		in.Sensitivity = cappedMemorySensitivity(chat, "")
 		if n, err := t.store.CountActiveEntities(ctx, chat.UserID); err == nil && n >= entityMaxPerUser {
 			return t.fail(ToolNameRememberEntity, fmt.Sprintf("you already have %d entities; forget ones that no longer matter first", entityMaxPerUser))
 		}
@@ -471,13 +474,13 @@ func (t *EntityTool) RememberEntity(ctx context.Context, chat *models.Chat, inpu
 	}
 	saved, err := t.store.SaveEntity(ctx, chat.UserID, existingID, base, in)
 	if err != nil {
-		return t.saveError(err)
+		return t.saveError(err, chat.MemoryRestricted())
 	}
 	t.invalidate(chat.UserID)
 	return marshalToolResult(entityResult{Success: true, Op: op, Entity: toEntityView(saved)}, ToolNameRememberEntity)
 }
 
-func (t *EntityTool) saveError(err error) (string, error) {
+func (t *EntityTool) saveError(err error, restricted bool) (string, error) {
 	var conflict *datastore.EntityConflictError
 	if errors.As(err, &conflict) {
 		return marshalToolResult(entityResult{
@@ -489,6 +492,10 @@ func (t *EntityTool) saveError(err error) (string, error) {
 	}
 	var taken *datastore.EntityAliasTakenError
 	if errors.As(err, &taken) {
+		if restricted {
+			// The clashing entity may be above this chat's limit; do not reveal its name.
+			return t.fail(ToolNameRememberEntity, fmt.Sprintf("the name %q is already used", taken.Alias))
+		}
 		msg := fmt.Sprintf("the name %q is already used", taken.Alias)
 		if taken.Owner != "" {
 			msg = fmt.Sprintf("the name %q already belongs to %s; use a different alias or update that entity", taken.Alias, taken.Owner)

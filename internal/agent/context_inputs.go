@@ -61,12 +61,17 @@ func contextInputs(chatCtx *chatContext, modelContext *provider.ModelContext) *m
 	if chatCtx.activeMood != nil {
 		in.MoodID = chatCtx.activeMood.ID.String()
 	}
+	restricted := false
 	if chatCtx.chat != nil {
 		in.ScratchpadSHA = shortContentHash(chatCtx.chat.Scratchpad)
 		in.SummarySHA = shortContentHash(chatCtx.chat.CheckpointSummary)
+		in.MemorySensitivityLimit = string(chatCtx.chat.MemoryLimit())
+		restricted = chatCtx.chat.MemoryRestricted()
 	}
 
-	if len(in.Memories) == 0 && len(in.ReplayedMemoryIDs) == 0 && !in.MemoryEnrichmentFailed &&
+	// A manifest is only worth writing when it records something; a restricted chat always
+	// records, so the limit it ran under is on file.
+	if !restricted && len(in.Memories) == 0 && len(in.ReplayedMemoryIDs) == 0 && !in.MemoryEnrichmentFailed &&
 		in.MoodID == "" && in.ScratchpadSHA == "" && in.SummarySHA == "" {
 		return nil
 	}

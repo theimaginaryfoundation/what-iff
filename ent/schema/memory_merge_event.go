@@ -55,6 +55,12 @@ type MemoryMergeUndoSnapshot struct {
 	PriorEmbeddingMissing bool      `json:"prior_embedding_missing,omitempty"`
 	// AbsorbedMembers lists every memory the fold set inactive, with its status beforehand.
 	AbsorbedMembers []MemoryMergeAbsorbedMember `json:"absorbed_members,omitempty"`
+	// FoldedSensitivity is set when the fold raised the survivor's sensitivity (it takes the most
+	// restricted level of its group), with PriorSensitivity the level before. Undo restores
+	// PriorSensitivity only while the survivor still holds FoldedSensitivity, so a level the user
+	// set afterwards wins. Both are empty for folds that left the level alone and for legacy rows.
+	PriorSensitivity  string `json:"prior_sensitivity,omitempty"`
+	FoldedSensitivity string `json:"folded_sensitivity,omitempty"`
 }
 
 // UnmarshalJSON accepts confidence buckets written before confidence became numeric.

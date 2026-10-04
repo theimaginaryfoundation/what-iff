@@ -42,6 +42,20 @@ type ChatMessage struct {
 }
 
 var memoryQuerySchema = provider.GenerateSchema[models.MemoryQuery]()
+
+// memoryExtractionDeveloperMessageNoScratchpad replaces memoryExtractionDeveloperMessage in restricted
+// chats, which have no scratchpad delta to read.
+var memoryExtractionDeveloperMessageNoScratchpad = `Use the recent conversation to decide what should be written to long-term memory.
+Prefer information that will remain useful later. `
+
+// memoryExtractionDeveloperMessageFor picks the extraction developer message for a chat.
+func memoryExtractionDeveloperMessageFor(chatCtx *chatContext) string {
+	if chatCtx != nil && chatCtx.chat.MemoryRestricted() {
+		return memoryExtractionDeveloperMessageNoScratchpad
+	}
+	return memoryExtractionDeveloperMessage
+}
+
 var memoryExtractionDeveloperMessage = `You can see the previous scratchpad in the earlier developer message and the updated scratchpad in the latest assistant message.
 Use both, along with the recent conversation, to decide what should be written to long-term memory.
 Prefer information that will remain useful after it falls out of the scratchpad.
@@ -65,7 +79,7 @@ func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID u
 		Input: responses.ResponseNewParamsInputUnion{
 			OfInputItemList: []responses.ResponseInputItemUnionParam{
 				responses.ResponseInputItemParamOfMessage(
-					fmt.Sprintf("%s\n\nDO NOT extract memories that would be duplicative of the following memories:\n\n %s", memoryExtractionDeveloperMessage, strings.Join(chatCtx.memories, "\n\n")), provider.RoleDeveloper),
+					fmt.Sprintf("%s\n\nDO NOT extract memories that would be duplicative of the following memories:\n\n %s", memoryExtractionDeveloperMessageFor(chatCtx), strings.Join(chatCtx.memories, "\n\n")), provider.RoleDeveloper),
 				responses.ResponseInputItemParamOfMessage(prompt, provider.RoleUser),
 			},
 		},
@@ -111,7 +125,7 @@ func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, us
 	prompt := memoryWritePromptText()
 
 	dedupNote := fmt.Sprintf("%s\n\nDO NOT extract memories that would be duplicative of the following memories:\n\n %s",
-		memoryExtractionDeveloperMessage, strings.Join(chatCtx.memories, "\n\n"))
+		memoryExtractionDeveloperMessageFor(chatCtx), strings.Join(chatCtx.memories, "\n\n"))
 
 	modelContext.Append(provider.SegmentKindUserMessage, provider.RoleUser, prompt, false)
 	modelContext.Append(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, dedupNote, false)
@@ -281,7 +295,20 @@ func (a *Agent) compactMemoriesFromCheckpoint(
 	// are not retrieved again, so a settled cluster reduces to a singleton next checkpoint.
 	groups := a.inferMemoryMergeGroups(ctx, userID, personaInstructions, candidates)
 	plan := planMemoryCompaction(groups, candidates)
+	if chatCtx != nil {
+		plan.SensitivityLimit = chatCtx.chat.MemoryLimit()
+	}
 	a.applyMemoryCompactionPlan(ctx, userID, chatID, activePersonalityID, plan, compactionEventID)
+}
+
+// foldMemberOptions carries a fold's new-member sensitivity to the datastore, capped by the
+// asking chat's limit. A group with no new member passes nothing, leaving the stored members'
+// levels to decide the survivor's.
+func foldMemberOptions(fold memoryFoldPlan, limit models.MemorySensitivity) []datastore.MergeGroupOption {
+	if fold.NewSensitivity == "" {
+		return nil
+	}
+	return []datastore.MergeGroupOption{datastore.WithNewMemberSensitivity(models.CapToLimit(fold.NewSensitivity, limit))}
 }
 
 // applyMemoryCompactionPlan embeds where needed and writes fold/link plans to the datastore.
@@ -325,6 +352,7 @@ func (a *Agent) applyMemoryCompactionPlan(
 			activePersonalityID,
 			fold.SourceMembers,
 			compactionEventID,
+			foldMemberOptions(fold, plan.SensitivityLimit)...,
 		); err != nil {
 			a.logger.Error("failed to persist memory merge group", zap.Error(err))
 		}
@@ -342,6 +370,8 @@ func (a *Agent) applyMemoryCompactionPlan(
 				Content:    member.Content,
 				Confidence: member.Confidence,
 				Embedding:  vec,
+				// New memories are capped by the chat's limit, so a restricted chat's writes stay readable there.
+				Sensitivity: models.CapToLimit(member.Sensitivity, plan.SensitivityLimit),
 			})
 		}
 		if len(link.ExistingIDs)+len(newMembers) < 2 {

@@ -13,6 +13,10 @@ import (
 type createMemoryToolArgs struct {
 	Content string `json:"content"`
 	Scope   string `json:"scope"`
+	// Sensitivity is optional (public, personal or sensitive; default personal). The stored value
+	// is capped by the conversation's memory sensitivity limit: it can lower what the chat would
+	// use but never raise it above what this conversation can see.
+	Sensitivity string `json:"sensitivity,omitempty"`
 }
 
 // createMemoryToolResult represents the result of creating a memory
@@ -21,7 +25,9 @@ type createMemoryToolResult struct {
 	MemoryID string `json:"memory_id,omitempty"`
 	Content  string `json:"content"`
 	Scope    string `json:"scope"`
-	Error    string `json:"error,omitempty"`
+	// Sensitivity is the level actually stored.
+	Sensitivity string `json:"sensitivity,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 // createMemoryTool is the implementation of the create_memory function
@@ -69,10 +75,12 @@ func (t *VectorStoreMemoryTool) CreateMemoryTool(ctx context.Context, chat *mode
 		return marshalToolResult(result, "create_memory")
 	}
 
+	sensitivity := cappedMemorySensitivity(chat, memoryArgs.Sensitivity)
 	memory, err := t.ds.CreateMemory(ctx, chat.UserID, models.Memory{
-		ChatID:  chat.ID,
-		Content: trimmedContent,
-		Scope:   memoryArgs.Scope,
+		ChatID:      chat.ID,
+		Content:     trimmedContent,
+		Scope:       memoryArgs.Scope,
+		Sensitivity: sensitivity,
 	}, embedding, chat.PersonalityID)
 
 	if err != nil {
@@ -91,10 +99,11 @@ func (t *VectorStoreMemoryTool) CreateMemoryTool(ctx context.Context, chat *mode
 	}
 
 	result := createMemoryToolResult{
-		Success:  true,
-		MemoryID: memory.ID.String(),
-		Content:  trimmedContent,
-		Scope:    memoryArgs.Scope,
+		Success:     true,
+		MemoryID:    memory.ID.String(),
+		Content:     trimmedContent,
+		Scope:       memoryArgs.Scope,
+		Sensitivity: string(sensitivity),
 	}
 
 	return marshalToolResult(result, "create_memory")

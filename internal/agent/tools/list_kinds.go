@@ -312,6 +312,9 @@ func (t *ListTool) listWorkspace(ctx context.Context, chat *models.Chat, a listA
 	if t.workspace == nil {
 		return t.fail(listKindWorkspace, "the workspace is not available here")
 	}
+	if chat.MemoryRestricted() && strings.HasPrefix(strings.ToLower(strings.TrimSpace(a.Filter)), models.WorkspaceRootAgent) {
+		return t.fail(listKindWorkspace, restrictedNote(chat, "The agent/ notebook")+" Use chat/ instead.")
+	}
 	limit := clampLimit(a.Limit, listDefaultLimit)
 	files, err := t.workspace.listForChat(ctx, chat, a.Filter, limit+1)
 	if err != nil {

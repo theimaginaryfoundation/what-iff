@@ -689,7 +689,7 @@ func (t *FileReadTool) resolveSource(ctx context.Context, chat *models.Chat, ref
 func (t *FileReadTool) resolveFile(ctx context.Context, chat *models.Chat, ref string) (*models.FileAttachment, string, error) {
 	if id, err := uuid.Parse(ref); err == nil {
 		fa, err := t.store.GetFileAttachment(ctx, chat.UserID, id)
-		if err != nil || fa == nil {
+		if err != nil || fa == nil || !fileInChatScope(chat, fa) {
 			return nil, fmt.Sprintf("no file found with ID %q", ref), nil
 		}
 		return fa, "", nil
@@ -708,6 +708,10 @@ func (t *FileReadTool) resolveFile(ctx context.Context, chat *models.Chat, ref s
 		}
 	}
 
+	if chat.MemoryRestricted() {
+		// A restricted chat only sees this conversation's and personality's files (searched above).
+		return nil, fmt.Sprintf("no file exactly named %q in this conversation or its personality's documents", ref), nil
+	}
 	page, err := t.store.ListFileAttachments(ctx, chat.UserID, 1, 10, models.FileAttachmentFilters{Name: strPtr(ref)})
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to look up file %q: %v", ref, err)
