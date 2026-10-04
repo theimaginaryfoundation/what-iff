@@ -238,7 +238,7 @@ func TestNormalizeEntityName(t *testing.T) {
 func TestRememberEntity_CreateRecallUpdateForget(t *testing.T) {
 	f := newEntityFixture()
 
-	created := f.remember(t, map[string]interface{}{"name": "John Park", "type": "person", "card": "Gori's manager at Acme.", "aliases": []string{"John", "my boss"}})
+	created := f.remember(t, map[string]interface{}{"name": "John Park", "type": "person", "card": "the user's manager at Acme.", "aliases": []string{"John", "my boss"}})
 	require.True(t, created.Success, created.Error)
 	assert.Equal(t, "create", created.Op)
 	assert.Equal(t, 1, created.Entity.Revision)
@@ -286,15 +286,15 @@ func TestRememberEntity_Validation(t *testing.T) {
 
 func TestRememberEntity_NameClashAndPersonalityScope(t *testing.T) {
 	f := newEntityFixture()
-	require.True(t, f.remember(t, map[string]interface{}{"name": "Arielle", "card": "Chris's spouse", "aliases": []string{"Ari"}}).Success)
+	require.True(t, f.remember(t, map[string]interface{}{"name": "Alex", "card": "Sam's spouse", "aliases": []string{"Ari"}}).Success)
 
 	clash := f.remember(t, map[string]interface{}{"name": "Ariadne", "card": "x", "aliases": []string{"Ari"}})
 	assert.False(t, clash.Success)
-	assert.Contains(t, clash.Error, "already belongs to Arielle")
+	assert.Contains(t, clash.Error, "already belongs to Alex")
 
 	// A personality-only entity may reuse a shared name, and wins for that personality.
 	pinned := f.remember(t, map[string]interface{}{"name": "Ari", "card": "the campaign's rogue", "personality_only": true})
-	require.False(t, pinned.Success, "Ari resolves to the shared Arielle first, so this is an update without base_revision")
+	require.False(t, pinned.Success, "Ari resolves to the shared Alex first, so this is an update without base_revision")
 
 	otherName := f.remember(t, map[string]interface{}{"name": "Grog", "card": "the campaign's barbarian", "personality_only": true})
 	require.True(t, otherName.Success, otherName.Error)
@@ -304,7 +304,7 @@ func TestRememberEntity_NameClashAndPersonalityScope(t *testing.T) {
 	otherPersona.PersonalityID = uuid.New()
 	f.chat = &otherPersona
 	assert.False(t, f.recall(t, "Grog").Success, "a personality-only entity is invisible to other personalities")
-	assert.True(t, f.recall(t, "Arielle").Success, "shared entities are visible to every personality")
+	assert.True(t, f.recall(t, "Alex").Success, "shared entities are visible to every personality")
 }
 
 func TestSpot_MatchesNamesAndAliasesInOrder(t *testing.T) {
