@@ -46,6 +46,13 @@ var (
 
 	// Memory-related errors
 	ErrMemoryNotFound = errors.New("memory not found")
+	// ErrMemoryOutsideChat is returned by a merge or link that was restricted to the asking chat's
+	// own memories (WithChatMemoriesOnly) when it names a memory the chat did not create.
+	ErrMemoryOutsideChat = errors.New("memory was not created in this chat")
+	// ErrMemoryIDPrefixAmbiguous is returned when a short memory ID prefix matches more than one
+	// memory. A restricted chat treats it like ErrMemoryNotFound so it cannot probe for memories it
+	// may not read.
+	ErrMemoryIDPrefixAmbiguous = errors.New("memory ID prefix is ambiguous")
 
 	// Personality-related errors
 	ErrPersonalityNotFound = errors.New("personality not found")

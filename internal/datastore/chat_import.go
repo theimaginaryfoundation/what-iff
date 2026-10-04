@@ -125,8 +125,19 @@ func normalizeImportedMessageTimes(messages []models.ChatMessage) []models.ChatM
 	return normalized
 }
 
-// persistImportedConversation runs dedup, create, bulk messages, and commit inside an open tx.
 // Returns true only when the conversation was committed. Skip and error paths update result in place.
+// importedChatMemoryLimit is the memory sensitivity limit to restore on an imported chat. An empty
+// value (an export from before limits existed) reports ok=false, which keeps the chat default. A
+// non-empty value that is not a known level fails closed to the most restrictive limit (public),
+// never open.
+func importedChatMemoryLimit(raw models.MemorySensitivity) (limit entchat.MemorySensitivityLimit, ok bool) {
+	if raw == "" {
+		return "", false
+	}
+	return entchat.MemorySensitivityLimit(raw.LimitOrDefault()), true
+}
+
+// persistImportedConversation runs dedup, create, bulk messages, and commit inside an open tx.
 func (d *Datastore) persistImportedConversation(ctx context.Context, tx *ent.Tx, userID uuid.UUID, conv models.ImportConversation, result *models.ImportResult) (committed bool) {
 	// rollback is safe to call multiple times in pre-commit error paths; ent.Tx.Rollback is idempotent.
 	rollback := func() {
@@ -193,8 +204,8 @@ func (d *Datastore) persistImportedConversation(ctx context.Context, tx *ent.Tx,
 		create.SetArchived(!conv.RestoreReady).
 			SetIsAutoMood(conv.IsAutoMood).
 			SetIsFavorite(conv.IsFavorite)
-		if conv.MemorySensitivityLimit.Valid() {
-			create.SetMemorySensitivityLimit(entchat.MemorySensitivityLimit(conv.MemorySensitivityLimit))
+		if limit, ok := importedChatMemoryLimit(conv.MemorySensitivityLimit); ok {
+			create.SetMemorySensitivityLimit(limit)
 		}
 		if conv.RestoreReady {
 			create.SetRehydrationState(models.RehydrationStateReady)

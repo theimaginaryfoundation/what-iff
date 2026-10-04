@@ -1321,7 +1321,7 @@ func (d *Datastore) GetMemoryByIDPrefix(ctx context.Context, userID uuid.UUID, p
 		if rerr := tx.Rollback(); rerr != nil {
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 		}
-		return nil, fmt.Errorf("memory ID prefix %q is ambiguous; pass the full UUID", prefix)
+		return nil, fmt.Errorf("%w (%q); pass the full UUID", ErrMemoryIDPrefixAmbiguous, prefix)
 	}
 	if err := tx.Commit(); err != nil {
 		d.logger.Error(i18n.T("tx.commit_failed"), zap.Error(err))

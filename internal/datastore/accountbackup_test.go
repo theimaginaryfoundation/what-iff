@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/ent/agentjob"
+	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
 	"github.com/theimaginaryfoundation/what-iff/ent/chatmessage"
 	"github.com/theimaginaryfoundation/what-iff/ent/mood"
 	"github.com/theimaginaryfoundation/what-iff/ent/personality"
@@ -970,4 +971,46 @@ func TestReadBackupJSONLRituals(t *testing.T) {
 	require.Equal(t, rec.ID, got[0].ID)
 	require.Equal(t, rec.Name, got[0].Name)
 	require.Equal(t, rec.PersonalityID, got[0].PersonalityID)
+}
+
+// An empty limit in a backup (one from before limits existed) restores as the chat default
+// (unrestricted); a limit that is not a known level fails closed to the most restrictive one.
+func TestAdminImportAccountBackup_ChatSensitivityLimit_InvalidFailsClosed(t *testing.T) {
+	ds, cleanup := newAccountBackupTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := uuid.New()
+	createAccountBackupTestUser(t, ds, userID)
+	createAccountBackupTestModelAndPreference(t, ds, userID)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	cases := map[string]models.MemorySensitivity{
+		"":          models.MemorySensitivitySensitive, // old backup
+		"personal":  models.MemorySensitivityPersonal,
+		"public":    models.MemorySensitivityPublic,
+		"garbage":   models.MemorySensitivityPublic,
+		"Sensitive": models.MemorySensitivityPublic, // wrong case is not the default
+	}
+	ids := map[string]uuid.UUID{}
+	records := make([]models.AccountBackupChat, 0, len(cases))
+	for raw := range cases {
+		id := uuid.New()
+		ids[raw] = id
+		records = append(records, models.AccountBackupChat{ID: id, Name: "chat " + raw, CreatedAt: now, UpdatedAt: now, MemorySensitivityLimit: models.MemorySensitivity(raw)})
+	}
+	zr := buildZipReaderForTest(t, map[string]string{
+		"manifest.json": `{"format_version":1}`,
+		"chats.jsonl":   accountBackupJSONL(t, records...),
+	})
+	result, err := ds.AdminImportAccountBackup(ctx, userID, zr, nil)
+	require.NoError(t, err)
+	require.Equal(t, len(cases), result.Sections["chats"].Created)
+
+	for raw, want := range cases {
+		// Select just the column: the shared test schema predates some chat columns.
+		got, err := ds.dbClient.Chat.Query().Where(entchat.ID(ids[raw])).Select(entchat.FieldMemorySensitivityLimit).Strings(ctx)
+		require.NoError(t, err)
+		require.Equal(t, []string{string(want)}, got, "backup limit %q", raw)
+	}
 }

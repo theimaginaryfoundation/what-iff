@@ -157,7 +157,9 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   `PatchMemoriesBatch` applies a sensitivity-only patch as one owner-scoped `UPDATE` in one transaction (`patchMemoriesSensitivityBatch`); Summary-scope memories are excluded and count as not found (with `all_or_none`, any such id rejects the batch).
   Folding gives the survivor the most restricted sensitivity of the group and records `PriorSensitivity` / `FoldedSensitivity` in the undo snapshot; undo restores it unless the user changed it since.
   `toChatModel` blanks the personality scratchpad for a restricted chat.
-  Memory export/import and the account export carry `sensitivity` and the chat's limit; absent values read as personal and unrestricted.
+  Memory export/import and the account export carry `sensitivity` and the chat's limit; absent values read as personal and unrestricted, while a non-empty value that is not a level fails closed (memory `sensitive`, chat limit `public`; see `importedChatMemoryLimit`).
+  `WithChatMemoriesOnly` confines `PersistMemoryMergeGroup` and `PersistMemoryLinkGroup` to memories the asking chat created (`ErrMemoryOutsideChat`, nothing written) and forces new memories to Chat scope; restricted chats' checkpoints pass it.
+  `ErrMemoryIDPrefixAmbiguous` lets a restricted chat treat an ambiguous id prefix like a missing memory.
 
 ## Testing
 

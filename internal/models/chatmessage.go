@@ -38,6 +38,12 @@ const (
 // AdditionalContextTypeMemory tags prefetched memory snippets persisted on a user message.
 const AdditionalContextTypeMemory = "MEMORY"
 
+// AdditionalContextTypeUserName tags the first-message line naming the user. It is profile data,
+// not a stored memory: it has no memory id and is rendered with the memory context. A restricted
+// chat keeps this type when it replays persisted context; it never trusts a MEMORY item's text to
+// decide that something is the name line.
+const AdditionalContextTypeUserName = "USER_NAME"
+
 // AdditionalContextItem is a typed snippet (e.g. semantic-search memories) attached to a
 // message so later turns can rehydrate the same model context.
 type AdditionalContextItem struct {

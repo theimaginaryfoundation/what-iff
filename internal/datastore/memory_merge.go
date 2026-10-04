@@ -32,6 +32,40 @@ type MergeGroupOption func(*mergeGroupOptions)
 
 type mergeGroupOptions struct {
 	newSensitivity models.MemorySensitivity
+	chatOnly       bool
+}
+
+// WithChatMemoriesOnly confines a merge or link to memories the asking chat created. It is the
+// datastore-level guard for restricted (sandbox) chats: a fold or link may not fold, rewrite,
+// retire or relink a memory made elsewhere (the owner's, or another conversation's), whatever the
+// caller's plan says. Any such member makes the call fail with ErrMemoryOutsideChat before
+// anything is written. New memories the call creates are forced to Chat scope, so what a
+// restricted chat writes stays in that chat. Brand-new members are unaffected.
+func WithChatMemoriesOnly() MergeGroupOption {
+	return func(o *mergeGroupOptions) { o.chatOnly = true }
+}
+
+// ensureMemoriesCreatedInChatTx fails with ErrMemoryOutsideChat when any of ids is one of the
+// user's memories that chatID did not create. IDs that do not exist are ignored (the writes that
+// follow treat them as no-ops).
+func ensureMemoriesCreatedInChatTx(ctx context.Context, tx *ent.Tx, userID, chatID uuid.UUID, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	outside, err := tx.Memory.Query().
+		Where(
+			memory.IDIn(ids...),
+			memory.HasOwnerWith(user.ID(userID)),
+			memory.Not(memory.HasChatWith(entchat.ID(chatID))),
+		).
+		Count(ctx)
+	if err != nil {
+		return err
+	}
+	if outside > 0 {
+		return ErrMemoryOutsideChat
+	}
+	return nil
 }
 
 // WithNewMemberSensitivity sets the sensitivity of the group's new (not yet stored) members: the
@@ -90,6 +124,18 @@ func (d *Datastore) PersistMemoryMergeGroup(
 	targetScope := memory.Scope(group.Scope)
 	if group.Scope != string(memory.ScopeUser) && group.Scope != string(memory.ScopeChat) {
 		targetScope = memory.ScopeChat
+	}
+	if mergeOpts.chatOnly {
+		targetScope = memory.ScopeChat
+		var existingIDs []uuid.UUID
+		if survivorMemoryID != nil && *survivorMemoryID != uuid.Nil {
+			existingIDs = append(existingIDs, *survivorMemoryID)
+		}
+		existingIDs = append(existingIDs, absorbMemoryIDs...)
+		if err := ensureMemoriesCreatedInChatTx(ctx, tx, userID, chatID, existingIDs); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
 	}
 	confidence := group.Confidence
 	if confidence == "" {
@@ -201,7 +247,12 @@ func (d *Datastore) PersistMemoryLinkGroup(
 	sourceMembers []models.MemoryMergeSourceMember,
 	compactionEventID *uuid.UUID,
 	activePersonalityID uuid.UUID,
+	opts ...MergeGroupOption,
 ) (*models.MemoryMergeEvent, error) {
+	var linkOpts mergeGroupOptions
+	for _, opt := range opts {
+		opt(&linkOpts)
+	}
 	if len(existingMemberIDs)+len(newMembers) < 2 {
 		// A link needs at least two surfaces to relate.
 		return nil, nil
@@ -223,6 +274,13 @@ func (d *Datastore) PersistMemoryLinkGroup(
 	targetScope := memory.Scope(scope)
 	if scope != string(memory.ScopeUser) && scope != string(memory.ScopeChat) {
 		targetScope = memory.ScopeChat
+	}
+	if linkOpts.chatOnly {
+		targetScope = memory.ScopeChat
+		if err := ensureMemoriesCreatedInChatTx(ctx, tx, userID, chatID, existingMemberIDs); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
 	}
 
 	// New members follow the same auto-pin rule as any other new memory; existing members keep

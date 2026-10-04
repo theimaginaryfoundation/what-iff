@@ -43,7 +43,11 @@
 - **`ErrorResponse.Error` is deprecated** and duplicates `Message`. It exists only until the frontend reads `Message`/`Code`; it should not gain new meaning.
 - **Memory sensitivity:** `sensitivity.go` defines `MemorySensitivity` (`public` < `personal` < `sensitive`) and its helpers (`AllowedUnder`, `Restricted`, `MostRestricted`, `CapToLimit`, `SensitivitiesUpTo`, `ParseMemorySensitivity`).
   `Memory.Sensitivity`, `Entity.Sensitivity` and `Chat.MemorySensitivityLimit` carry it; `Chat.MemoryRestricted()` is true below `sensitive`.
-  An empty memory level reads as personal and an empty chat limit as unrestricted, so a missing value can never silently restrict a chat or expose a memory as public.
+  An empty memory level reads as personal and an empty chat limit as unrestricted, so a missing value (an old export, a legacy row) never silently restricts a chat or exposes a memory as public.
+  A non-empty value that is not a level (corrupt data, wrong case) fails closed: a memory reads as `sensitive` and a chat limit as `public`.
+  `CapToLimit` lowers only the default level to a chat's limit; an explicit `sensitive` is never lowered.
+  `public` is assignable only through the memory manager API or that cap, never by an agent tool or extraction.
+  `AdditionalContextTypeUserName` tags the first-message user-name profile line, which has no memory id.
 
 ## Testing
 

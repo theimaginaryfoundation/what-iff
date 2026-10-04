@@ -299,7 +299,7 @@ func TestMemorySensitivity_ExportImportRoundTrip(t *testing.T) {
 	}, got)
 }
 
-func TestMemorySensitivity_ImportOldExportDefaultsToPersonal(t *testing.T) {
+func TestMemorySensitivity_ImportOldExportDefaultsToPersonalAndGarbageFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	ds, cleanup := newMemoryTestDatastore(t)
 	defer cleanup()
@@ -314,14 +314,18 @@ func TestMemorySensitivity_ImportOldExportDefaultsToPersonal(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, sPersonal, sensitivityOf(t, ds, id))
 
-	// An unknown value in a hand-edited export reads as personal rather than failing the row.
-	id2 := uuid.New()
-	line = strings.Replace(line, id.String(), id2.String(), 1)
-	line = strings.Replace(line, `"content"`, `"sensitivity":"top-secret","content"`, 1)
-	zr = buildZipReaderForTest(t, map[string]string{"user.json": line})
-	_, err = ds.ImportMemories(ctx, userID, zr, func(context.Context, string) ([]float32, error) { return []float32{1}, nil })
-	require.NoError(t, err)
-	require.Equal(t, sPersonal, sensitivityOf(t, ds, id2))
+	// A non-empty value that is not a level (hand-edited, corrupt, or the wrong case) fails
+	// closed: the memory imports as sensitive rather than failing the row or reading as less
+	// delicate than it may be.
+	for _, garbage := range []string{"top-secret", "Public", "PERSONAL"} {
+		id2 := uuid.New()
+		line2 := strings.Replace(line, id.String(), id2.String(), 1)
+		line2 = strings.Replace(line2, `"content"`, `"sensitivity":"`+garbage+`","content"`, 1)
+		zr = buildZipReaderForTest(t, map[string]string{"user.json": line2})
+		_, err = ds.ImportMemories(ctx, userID, zr, func(context.Context, string) ([]float32, error) { return []float32{1}, nil })
+		require.NoError(t, err)
+		require.Equal(t, sSensitive, sensitivityOf(t, ds, id2), "imported sensitivity %q", garbage)
+	}
 }
 
 // --- merge: a survivor takes the most restricted level of its group; undo puts it back ---

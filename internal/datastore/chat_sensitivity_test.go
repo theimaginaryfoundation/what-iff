@@ -68,3 +68,23 @@ func TestChat_MemorySensitivityLimit_DefaultUpdateAndScratchpadGate(t *testing.T
 	_, err = ds.UpdateChat(ctx, userID, models.Chat{ID: chatID, Name: "again", MemorySensitivityLimit: "bogus", SetMemorySensitivityLimit: true})
 	require.ErrorIs(t, err, ErrInvalidRequestBody)
 }
+
+// A chat imported from an account export keeps today's default when the export has no limit, and
+// fails closed (public) when it carries a value that is not a level.
+func TestImportedChatMemoryLimit_InvalidFailsClosed(t *testing.T) {
+	_, ok := importedChatMemoryLimit("")
+	require.False(t, ok, "an old export without a limit keeps the chat default")
+
+	for raw, want := range map[models.MemorySensitivity]string{
+		"public":    "public",
+		"personal":  "personal",
+		"sensitive": "sensitive",
+		"garbage":   "public",
+		"Sensitive": "public",
+		" personal": "public",
+	} {
+		limit, ok := importedChatMemoryLimit(raw)
+		require.True(t, ok, raw)
+		require.Equal(t, want, string(limit), "export limit %q", raw)
+	}
+}

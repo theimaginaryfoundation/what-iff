@@ -22,8 +22,11 @@ func TestMemorySensitivityOrdering(t *testing.T) {
 		{"", MemorySensitivitySensitive, true},      // legacy row reads as personal
 		{"", MemorySensitivityPublic, false},        // and is not public
 		{MemorySensitivitySensitive, "", true},      // an empty limit is unrestricted
-		{"bogus", MemorySensitivityPersonal, true},  // unknown level reads as personal
-		{MemorySensitivitySensitive, "bogus", true}, // unknown limit is unrestricted
+		{"bogus", MemorySensitivityPersonal, false}, // unknown level fails closed (sensitive)
+		{"bogus", MemorySensitivitySensitive, true}, // ...and is readable only by an unrestricted chat
+		{MemorySensitivityPersonal, "bogus", false}, // unknown limit fails closed (public)
+		{MemorySensitivityPublic, "bogus", true},
+		{MemorySensitivitySensitive, "Sensitive", false}, // wrong case is not the empty default
 	}
 	for _, c := range cases {
 		if got := c.level.AllowedUnder(c.limit); got != c.want {
@@ -48,7 +51,11 @@ func TestMemorySensitivityHelpers(t *testing.T) {
 	capCases := []struct{ want, limit, out MemorySensitivity }{
 		{"", MemorySensitivitySensitive, MemorySensitivityPersonal},
 		{"", MemorySensitivityPublic, MemorySensitivityPublic},
-		{MemorySensitivitySensitive, MemorySensitivityPersonal, MemorySensitivityPersonal},
+		{MemorySensitivitySensitive, MemorySensitivityPersonal, MemorySensitivitySensitive},
+		{MemorySensitivitySensitive, MemorySensitivityPublic, MemorySensitivitySensitive},
+		{MemorySensitivityPersonal, MemorySensitivityPublic, MemorySensitivityPublic},
+		{MemorySensitivityPersonal, MemorySensitivityPersonal, MemorySensitivityPersonal},
+		{"bogus", MemorySensitivityPublic, MemorySensitivitySensitive},
 		{MemorySensitivityPublic, MemorySensitivitySensitive, MemorySensitivityPublic},
 		{MemorySensitivitySensitive, MemorySensitivitySensitive, MemorySensitivitySensitive},
 	}
@@ -75,5 +82,30 @@ func TestMemorySensitivityHelpers(t *testing.T) {
 	}
 	if !(&Chat{MemorySensitivityLimit: MemorySensitivityPublic}).MemoryRestricted() {
 		t.Error("public-limited chat is restricted")
+	}
+}
+
+func TestMemorySensitivityFailsClosedOnInvalid(t *testing.T) {
+	// An empty value keeps today's defaults so old exports and legacy rows still work.
+	if MemorySensitivity("").OrDefault() != MemorySensitivityPersonal {
+		t.Error("empty memory level defaults to personal")
+	}
+	if MemorySensitivity("").LimitOrDefault() != MemorySensitivitySensitive {
+		t.Error("empty chat limit defaults to sensitive")
+	}
+	// A non-empty invalid value fails closed.
+	for _, bad := range []MemorySensitivity{"bogus", "Sensitive", "PUBLIC", " personal"} {
+		if got := bad.OrDefault(); got != MemorySensitivitySensitive {
+			t.Errorf("%q.OrDefault() = %q, want sensitive", bad, got)
+		}
+		if got := bad.LimitOrDefault(); got != MemorySensitivityPublic {
+			t.Errorf("%q.LimitOrDefault() = %q, want public", bad, got)
+		}
+		if !(&Chat{MemorySensitivityLimit: bad}).MemoryRestricted() {
+			t.Errorf("a chat with limit %q must be restricted", bad)
+		}
+		if bad.Rank() != MemorySensitivitySensitive.Rank() {
+			t.Errorf("%q must rank as sensitive", bad)
+		}
 	}
 }
