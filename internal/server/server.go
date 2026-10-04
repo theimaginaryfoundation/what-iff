@@ -296,7 +296,7 @@ func (s *Server) setupRoutes() {
 	}
 
 	// Create handlers
-	userHandler := user.NewHandler(dataStore, s.logger, s.config.AllowedEmails, s.config.Environment)
+	userHandler := user.NewHandler(dataStore, s.logger, s.config.AllowedEmails, s.config.Environment).WithFileStore(fileStore)
 	jobHandler := job.NewHandlerWithCanceller(dataStore, agent, s.logger)
 	memoryHandler := memory.NewHandler(dataStore, s.logger, s.config.OpenAIKey, providerHTTPClient)
 	// Account export: async export runs in-process here in the main app; the bundle lands in the

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 )
 
 // Store defines the datastore operations required by the chat handlers.
@@ -19,6 +20,10 @@ type Store interface {
 	UpdatePersonalityScratchpad(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
 	UpdateChat(ctx context.Context, userID uuid.UUID, chat models.Chat) (*models.Chat, error)
 	DeleteChat(ctx context.Context, userID, id uuid.UUID) error
+	// ListChatFileAttachmentObjectRefs and ReferencedFileAttachmentKeys let DeleteChat remove the
+	// stored objects of the attachments its cascade deletes (storage.ReleaseAttachmentObjects).
+	ListChatFileAttachmentObjectRefs(ctx context.Context, userID, chatID uuid.UUID) ([]models.FileAttachment, error)
+	storage.AttachmentKeyRefs
 
 	// Related resources used by chat endpoints.
 	ListChatMessages(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)

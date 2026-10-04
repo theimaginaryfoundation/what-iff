@@ -36,6 +36,10 @@ type fakeStore struct {
 	acceptFlowFn                         func(ctx context.Context, userID, flowID, personalityID uuid.UUID) (*models.PersonalityGenFlow, error)
 	findActivePersonalityMediaJobFn      func(ctx context.Context, userID uuid.UUID) (*models.Job, error)
 	findActivePersonalityGenerationJobFn func(ctx context.Context, userID, flowID uuid.UUID) (*models.Job, error)
+	deletePersonalityFn                  func(ctx context.Context, userID, id uuid.UUID) error
+	listPersonalityAttachmentRefsFn      func(ctx context.Context, userID, personalityID uuid.UUID) ([]models.FileAttachment, error)
+	referencedKeysFn                     func(ctx context.Context, keys []string) (map[string]bool, error)
+	existingIDsFn                        func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error)
 }
 
 func (f *fakeStore) CreatePersonality(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error) {
@@ -63,7 +67,28 @@ func (f *fakeStore) UpdatePersonality(ctx context.Context, userID uuid.UUID, per
 	return nil, errors.New("not implemented")
 }
 func (f *fakeStore) DeletePersonality(ctx context.Context, userID, id uuid.UUID) error {
+	if f.deletePersonalityFn != nil {
+		return f.deletePersonalityFn(ctx, userID, id)
+	}
 	return errors.New("not implemented")
+}
+func (f *fakeStore) ListPersonalityFileAttachmentObjectRefs(ctx context.Context, userID, personalityID uuid.UUID) ([]models.FileAttachment, error) {
+	if f.listPersonalityAttachmentRefsFn != nil {
+		return f.listPersonalityAttachmentRefsFn(ctx, userID, personalityID)
+	}
+	return nil, nil
+}
+func (f *fakeStore) ExistingFileAttachmentIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
+	if f.existingIDsFn != nil {
+		return f.existingIDsFn(ctx, ids)
+	}
+	return map[uuid.UUID]bool{}, nil
+}
+func (f *fakeStore) ReferencedFileAttachmentKeys(ctx context.Context, keys []string) (map[string]bool, error) {
+	if f.referencedKeysFn != nil {
+		return f.referencedKeysFn(ctx, keys)
+	}
+	return map[string]bool{}, nil
 }
 func (f *fakeStore) ListPersonalityExpressions(ctx context.Context, userID, personalityID uuid.UUID) ([]models.PersonalityExpression, error) {
 	if f.listExpressionsFn != nil {

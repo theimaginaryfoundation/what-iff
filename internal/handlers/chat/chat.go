@@ -16,6 +16,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
+	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -791,6 +792,17 @@ func (h *Handler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The cascade below deletes the chat's attachment rows without touching the object store, so
+	// read them first and release their objects afterwards. A failed read only means the orphan
+	// sweep has to clean up later; it must not block the delete.
+	attachments, err := h.ds.ListChatFileAttachmentObjectRefs(r.Context(), userID, chatID)
+	if err != nil {
+		h.logger.Warn("failed to list chat attachments for object cleanup",
+			zap.String("user_id", userID.String()),
+			zap.String("chat_id", chatID.String()),
+			zap.Error(err))
+	}
+
 	// Delete chat
 	err = h.ds.DeleteChat(r.Context(), userID, chatID)
 	if ent.IsNotFound(err) || err == datastore.ErrChatNotFound {
@@ -804,6 +816,8 @@ func (h *Handler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to delete chat", err)
 		return
 	}
+
+	storage.ReleaseAttachmentObjects(context.WithoutCancel(r.Context()), h.logger, h.objectStore(), h.ds, userID, attachments)
 
 	w.WriteHeader(http.StatusNoContent)
 }
