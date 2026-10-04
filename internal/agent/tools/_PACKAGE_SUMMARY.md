@@ -56,6 +56,12 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
   Provider-facing tool prompts remain unchanged on `FunctionToolSpec.Description`.
 - **Spec parity:** `toolconstants_test.go` asserts OpenAI function tool projection stays aligned with the shared catalog; Claude schema sanitization is tested in `internal/agent/provider`.
 - **Execution location:** Some tools are defined here only as shared schema/registration (`run_subagent`) while execution lives in `internal/agent` to reuse chat/user/provider context safely.
+- **Restricted chats (memory sensitivity):** `sandbox.go` holds the one rule set for a chat whose `memory_sensitivity_limit` is below `sensitive`.
+  `memoryReadableBy` (limit, plus no other conversation's summary), `otherConversationBlocked`, `fileInChatScope` and `cappedMemorySensitivity` are the predicates every tool asks; `restrictedNote` is the shared refusal text.
+  `find_context` passes the limit into `GetRelatedMemories` (SQL), resolves a hidden memory like a missing one (`resolveMemory`), refuses other conversations in `conversation`, `bookmarks`, `origin`, `fetch summary:/bookmark:` and `source_type=summaries`, scopes file lookups to the chat and personality, and filters `lifecycle_events` to fold events within the limit without their pre-merge member previews.
+  `list` refuses conversations, jobs and account-wide files; `parseWorkspacePath` and `listForChat` close the `agent/` notebook; `update_scratchpad` refuses.
+  `create_memory` takes an optional `sensitivity` that is capped by the chat's limit; `remember_entity` creates entities at the chat's limit, and every entity read takes the limit (the spotting alias index is cached per limit).
+  A name clash with an entity above the limit never names the hidden entity.
 
 ## Testing
 

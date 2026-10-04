@@ -41,6 +41,9 @@
   Generic codes are status-derived defaults and explicitly *not* stable branch targets, so a call site may narrow from a generic to a specific code freely.
   `ErrorResponse.Code` deliberately omits `omitempty`, so a missing code shows up as `""` rather than disappearing.
 - **`ErrorResponse.Error` is deprecated** and duplicates `Message`. It exists only until the frontend reads `Message`/`Code`; it should not gain new meaning.
+- **Memory sensitivity:** `sensitivity.go` defines `MemorySensitivity` (`public` < `personal` < `sensitive`) and its helpers (`AllowedUnder`, `Restricted`, `MostRestricted`, `CapToLimit`, `SensitivitiesUpTo`, `ParseMemorySensitivity`).
+  `Memory.Sensitivity`, `Entity.Sensitivity` and `Chat.MemorySensitivityLimit` carry it; `Chat.MemoryRestricted()` is true below `sensitive`.
+  An empty memory level reads as personal and an empty chat limit as unrestricted, so a missing value can never silently restrict a chat or expose a memory as public.
 
 ## Testing
 

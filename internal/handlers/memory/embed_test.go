@@ -57,7 +57,7 @@ func (f *fakeMemoryStore) embeddedContent(id uuid.UUID) (string, bool) {
 func (f *fakeMemoryStore) CreateMemoryFromInput(_ context.Context, _ uuid.UUID, input models.CreateMemoryInput) (*models.Memory, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	m := &models.Memory{ID: uuid.New(), Content: strings.TrimSpace(input.Content), Level: input.Level}
+	m := &models.Memory{ID: uuid.New(), Content: strings.TrimSpace(input.Content), Level: input.Level, Sensitivity: input.Sensitivity.OrDefault()}
 	f.memories[m.ID] = m
 	return m, nil
 }
@@ -90,6 +90,9 @@ func (f *fakeMemoryStore) UpdateMemory(_ context.Context, _ uuid.UUID, memoryID 
 	}
 	if patch.Starred != nil {
 		m.Starred = *patch.Starred
+	}
+	if patch.Sensitivity != nil {
+		m.Sensitivity = *patch.Sensitivity
 	}
 	cp := *m
 	return &cp, nil

@@ -2744,9 +2744,9 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 	var newScratchpadResponseID *string
 	hasScratchpad := false
 	// A restricted chat never touches the personality-wide scratchpad; memory extraction still
-	// runs, off the turn's own response instead of the scratchpad update's.
+	// runs, off the turn's own response instead of the scratchpad update's (see checkpointSteps).
 	restricted := chatCtx.chat.MemoryRestricted()
-	if chatCtx.chat.PersonalityID != uuid.Nil && !restricted {
+	if runScratchpad, _ := checkpointSteps(chatCtx.chat, false); runScratchpad {
 		doneScratchpad := a.timeTurnStage(ctx, turnStageCheckpointScratchpad)
 		newScratchpad, err := a.updateScratchpad(ctx, userID, agentMessage.ResponseID, chatCtx)
 		doneScratchpad()
@@ -2770,7 +2770,7 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 	if restricted {
 		newScratchpadResponseID = agentMessage.ResponseID
 	}
-	if hasScratchpad || restricted {
+	if _, runExtraction := checkpointSteps(chatCtx.chat, hasScratchpad); runExtraction {
 		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
 		a.extractMemoriesWithScratchpadDelta(ctx, userID, chatMessage.ChatID, newScratchpadResponseID, inferenceModelContext, chatCtx, compactionEventID)
 		doneMemory()
@@ -2821,11 +2821,12 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	var newScratchpadContent string
 	hasScratchpad := false
 	var scratchpadCtx *provider.ModelContext
-	restricted := chatCtx.chat.MemoryRestricted() // no scratchpad step; extraction still runs
-	if restricted {
+	runScratchpad, _ := checkpointSteps(chatCtx.chat, false)
+	if runScratchpad || chatCtx.chat.MemoryRestricted() {
+		// Restricted chats skip the scratchpad step but still extract memories from this context.
 		scratchpadCtx = archivalCtx.Clone()
-	} else if chatCtx.chat.PersonalityID != uuid.Nil {
-		scratchpadCtx = archivalCtx.Clone()
+	}
+	if runScratchpad {
 		doneScratchpad := a.timeTurnStage(ctx, turnStageCheckpointScratchpad)
 		newScratchpad, err := a.updateScratchpadClaude(ctx, userID, chatCtx, scratchpadCtx)
 		doneScratchpad()
@@ -2845,7 +2846,7 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	// scratchpad is the just-generated content. If scratchpad generation failed, intentionally
 	// defer both extraction and roll-forward dedupe to the next checkpoint: compaction requires
 	// that delta, and a later checkpoint safely retries it.
-	if hasScratchpad || restricted {
+	if _, runExtraction := checkpointSteps(chatCtx.chat, hasScratchpad); runExtraction {
 		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
 		if err := a.extractMemoriesWithScratchpadDeltaClaude(ctx, userID, chatMessage.ChatID, scratchpadCtx, modelContext, chatCtx, compactionEventID); err != nil {
 			a.logger.Error("failed to extract memories during Claude checkpoint", zap.Error(err))

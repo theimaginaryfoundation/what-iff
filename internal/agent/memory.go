@@ -305,10 +305,20 @@ func (a *Agent) compactMemoriesFromCheckpoint(
 // asking chat's limit. A group with no new member passes nothing, leaving the stored members'
 // levels to decide the survivor's.
 func foldMemberOptions(fold memoryFoldPlan, limit models.MemorySensitivity) []datastore.MergeGroupOption {
-	if fold.NewSensitivity == "" {
+	level := foldNewMemberSensitivity(fold, limit)
+	if level == "" {
 		return nil
 	}
-	return []datastore.MergeGroupOption{datastore.WithNewMemberSensitivity(models.CapToLimit(fold.NewSensitivity, limit))}
+	return []datastore.MergeGroupOption{datastore.WithNewMemberSensitivity(level)}
+}
+
+// foldNewMemberSensitivity is the level a fold's new members are stored at: the level extraction
+// gave, capped by the chat's limit; "" when the group has no new member.
+func foldNewMemberSensitivity(fold memoryFoldPlan, limit models.MemorySensitivity) models.MemorySensitivity {
+	if fold.NewSensitivity == "" {
+		return ""
+	}
+	return models.CapToLimit(fold.NewSensitivity, limit)
 }
 
 // applyMemoryCompactionPlan embeds where needed and writes fold/link plans to the datastore.

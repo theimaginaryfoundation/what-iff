@@ -12,6 +12,7 @@ source UUIDs for clone-style restore.
   persisted as a DB key on import. Optional `whatiff_*` fields preserve checkpoint/window, personality
   association, and continuation UI state without affecting standard Anthropic consumers. `ParseConversations`
   reverses this for the account-import path.
+  `whatiff_memory_sensitivity_limit` carries a restricted chat's memory sensitivity limit; the unrestricted default is not written, and an export without it imports as unrestricted.
 - `personalities/{id}/personality.json` — source personality ID, name, system prompt, scratchpad, auto-pin
   (self-contained). Source IDs are relationship references and are remapped on import.
 - `files/manifest.json` — inventory of the user's S3 objects (keys/sizes/etags); no bytes.

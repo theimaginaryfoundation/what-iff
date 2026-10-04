@@ -102,9 +102,7 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 		systemPrompt = personality.SystemPrompt
 		scratchpad = personality.Scratchpad
 	}
-	if chatCtx.chat.MemoryRestricted() {
-		scratchpad = "" // the sub-agent must not carry the personality scratchpad out of a restricted chat
-	}
+	scratchpad = subagentScratchpad(chatCtx.chat, scratchpad)
 
 	// Enrich message with any requested ritual content and collect ritual IDs for MCP loading.
 	ritualUUIDs := parseSkillIDs(toolArgs.RitualIDs)
@@ -172,6 +170,16 @@ func (a *Agent) findModelByName(ctx context.Context, name string) (*models.Model
 		AllowDisplayName: true,
 		AllowPrefixMatch: true,
 	})
+}
+
+// subagentScratchpad is the scratchpad a sub-agent started from chat receives. A restricted chat
+// gives it none: the scratchpad is shared across the personality's conversations, and the
+// sub-agent's output returns into this one.
+func subagentScratchpad(chat *models.Chat, scratchpad string) string {
+	if chat.MemoryRestricted() {
+		return ""
+	}
+	return scratchpad
 }
 
 func buildSubagentModelContext(systemPrompt, scratchpad, message string) *provider.ModelContext {

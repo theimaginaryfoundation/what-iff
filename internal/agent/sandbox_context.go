@@ -136,3 +136,15 @@ func withoutAccountDataToolResults(turns []*models.ChatMessage) []*models.ChatMe
 	}
 	return out
 }
+
+// checkpointSteps decides which archival steps a checkpoint runs for chat. The scratchpad update
+// runs only for an unrestricted chat with a personality: the scratchpad is shared across the
+// personality's conversations, so a restricted chat never reads or rewrites it. Memory extraction
+// runs after a successful scratchpad update, and always in a restricted chat (which has no
+// scratchpad delta to wait for), so what it learns is still captured, capped to its limit.
+func checkpointSteps(chat *models.Chat, scratchpadWritten bool) (runScratchpad, runExtraction bool) {
+	restricted := chat.MemoryRestricted()
+	runScratchpad = chat.PersonalityID != uuid.Nil && !restricted
+	runExtraction = scratchpadWritten || restricted
+	return runScratchpad, runExtraction
+}

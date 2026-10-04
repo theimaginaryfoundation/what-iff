@@ -156,6 +156,13 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   metering implementation may be linked to enforce usage limits and record
   usage, while builds without one fall back to `metering.NoopMeter` (allow
   all, record nothing). See `internal/metering`.
+- **Restricted chats (memory sensitivity):** `sandbox_context.go` assembles context for a chat whose `memory_sensitivity_limit` is below `sensitive`; the tool-side rules are in `internal/agent/tools/sandbox.go`.
+  Memory prefetch passes the limit into the retrieval SQL (`getMemories`).
+  Because the limit can change mid-thread, `messageContextBuilder.build` re-checks the memory items persisted on earlier messages against the current limit in one `MemoryIDsWithinSensitivity` query (an item with no id, or a failed lookup, is dropped), and drops persisted results of account-data tools (`find_context`, `list`, `run_subagent`, `recall_entity`, `read_file`, `grep_files`) because a tool call records nothing about the limit it ran under.
+  The scratchpad is never injected (the loader blanks it; the builder, the sub-agent, the agent-job personality override and `update_scratchpad` are guarded too), and `buildTurnToolPolicy` removes `update_scratchpad`.
+  `checkpointSteps` decides the checkpoint plan: a restricted chat skips the scratchpad step but still extracts memories, from the turn's own response and without the scratchpad delta.
+  Extraction emits `sensitivity` (`personal` or `sensitive` only, strict schema), which is capped by the chat's limit when stored; a fold's survivor takes the most restricted level of its group (`WithNewMemberSensitivity`), and `contextInputs` records the limit in the X-ray manifest.
+  Agent jobs created from a restricted chat run in that same chat, so they inherit its limit; MCP servers are configured per chat and are not gated.
 
 ## Testing
 
