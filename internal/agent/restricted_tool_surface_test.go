@@ -41,6 +41,14 @@ var restrictedToolSurface = map[string]struct {
 	agenttools.RecallToolSpec.Name:            {true, "memories at or below the limit, this conversation only"},
 }
 
+// conditionalRestrictedTools are classified tools that are only offered when some deployment
+// condition holds (a configured service, an existing binding), so the exact-set test below does not
+// expect them from a bare agent. Additional builds register their own conditional tools here.
+var conditionalRestrictedTools = map[string]struct{}{
+	agenttools.WebSearchFunctionToolSpec.Name: {},
+	agenttools.FetchPageToolSpec.Name:         {},
+}
+
 func sortedNames(set map[string]struct{}) []string {
 	out := make([]string, 0, len(set))
 	for n := range set {
@@ -89,8 +97,9 @@ func TestRestrictedChatToolSurface_ExactOfferedSets(t *testing.T) {
 		for name := range restrictedToolSurface {
 			set[name] = struct{}{}
 		}
-		delete(set, agenttools.WebSearchFunctionToolSpec.Name)
-		delete(set, agenttools.FetchPageToolSpec.Name)
+		for name := range conditionalRestrictedTools {
+			delete(set, name)
+		}
 		if !showMood {
 			delete(set, agenttools.ListMoodsToolSpec.Name)
 			delete(set, agenttools.ChangeMoodToolSpec.Name)
