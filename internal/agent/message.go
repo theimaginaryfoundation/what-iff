@@ -937,6 +937,11 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 	doneMood := a.timeTurnStage(ctx, turnStageMood)
 	chatCtx.activeMood = a.resolveActiveMood(ctx, chatJob.UserID, chatCtx, chatMessage.Message, chatMessage.ID)
 	moodRituals := a.loadMoodRituals(ctx, chatJob.UserID, chatCtx.activeMood)
+	if chatCtx.chat != nil && chatCtx.chat.MemoryRestricted() {
+		// A mood's rituals carry skill text and linked MCP servers from the owner's account; a
+		// restricted conversation keeps the mood's own prompt but none of that.
+		moodRituals = nil
+	}
 	chatCtx.activeMoodRituals = moodRituals
 	doneMood()
 

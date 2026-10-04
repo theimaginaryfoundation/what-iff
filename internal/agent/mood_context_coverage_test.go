@@ -282,3 +282,24 @@ func TestActiveMoodID_NonNilMoodReturnsPointerToID(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, id, *got)
 }
+
+func TestChangeMoodTool_RestrictedChatCannotOverrideTheModel(t *testing.T) {
+	t.Parallel()
+	a := &Agent{logger: zap.NewNop()} // no datastore: the refusal happens before any lookup
+	chatCtx := &chatContext{chat: &models.Chat{UserID: uuid.New(), MemorySensitivityLimit: models.MemorySensitivityPublic}}
+	args, err := json.Marshal(changeMoodArgs{ModeID: uuid.New().String(), ModelOverride: "gpt-5.1"})
+	require.NoError(t, err)
+	out, err := a.changeMoodTool(context.Background(), chatCtx, args)
+	require.NoError(t, err)
+	var result changeMoodResult
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.False(t, result.Success)
+	require.Contains(t, result.Error, "restricted conversation")
+}
+
+func TestMoodAttachedToPersonality_FailsClosedWithoutAPersonality(t *testing.T) {
+	t.Parallel()
+	a := &Agent{logger: zap.NewNop()} // no datastore: nothing may be looked up for these
+	require.False(t, a.moodAttachedToPersonality(context.Background(), nil, uuid.New()))
+	require.False(t, a.moodAttachedToPersonality(context.Background(), &models.Chat{UserID: uuid.New()}, uuid.New()))
+}

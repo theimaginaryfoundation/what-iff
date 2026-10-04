@@ -411,9 +411,21 @@ func (a *Agent) changeMoodTool(ctx context.Context, chatCtx *chatContext, args [
 		return string(result), nil
 	}
 
+	// A restricted chat is a sandbox that strangers can talk in: it cannot override the model (that
+	// would persistently change the owner's thread and spend the owner's credits), and it may only
+	// pick a mode attached to this conversation's own personality (what list_moods shows).
+	if chat.MemoryRestricted() && strings.TrimSpace(req.ModelOverride) != "" {
+		result, _ := json.Marshal(changeMoodResult{Success: false, Error: "model_override is not available in this restricted conversation"})
+		return string(result), nil
+	}
+
 	mood, err := a.ds.GetMood(ctx, chat.UserID, moodID)
 	if err != nil {
 		result, _ := json.Marshal(changeMoodResult{Success: false, Error: fmt.Sprintf("mode not found: %v", err)})
+		return string(result), nil
+	}
+	if chat.MemoryRestricted() && !a.moodAttachedToPersonality(ctx, chat, moodID) {
+		result, _ := json.Marshal(changeMoodResult{Success: false, Error: "mode not found"})
 		return string(result), nil
 	}
 
@@ -461,4 +473,23 @@ func (a *Agent) changeMoodTool(ctx context.Context, chatCtx *chatContext, args [
 		Model:   resultModel,
 	})
 	return string(result), nil
+}
+
+// moodAttachedToPersonality reports whether a mood is attached to the chat's personality, the same
+// set list_moods offers. It fails closed: a lookup error or a chat with no personality is "no".
+func (a *Agent) moodAttachedToPersonality(ctx context.Context, chat *models.Chat, moodID uuid.UUID) bool {
+	if chat == nil || chat.PersonalityID == uuid.Nil {
+		return false
+	}
+	moods, err := a.ds.GetMoodsForPersonality(ctx, chat.UserID, chat.PersonalityID)
+	if err != nil {
+		a.logger.Warn("mood_context: failed to verify mood membership", zap.Error(err))
+		return false
+	}
+	for _, m := range moods {
+		if m.ID == moodID {
+			return true
+		}
+	}
+	return false
 }
