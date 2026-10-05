@@ -28,6 +28,7 @@ type fakeRecords struct {
 	deleted   []uuid.UUID
 	s3Keys    map[uuid.UUID]string
 	createErr error
+	s3KeyErr  error
 }
 
 func (f *fakeRecords) CreateFileAttachment(_ context.Context, _ uuid.UUID, fa models.FileAttachment) (*models.FileAttachment, error) {
@@ -51,6 +52,9 @@ func (f *fakeRecords) DeleteFileAttachment(_ context.Context, _, id uuid.UUID) e
 func (f *fakeRecords) SetFileAttachmentS3Key(_ context.Context, _, id uuid.UUID, key string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.s3KeyErr != nil {
+		return f.s3KeyErr
+	}
 	if f.s3Keys == nil {
 		f.s3Keys = map[uuid.UUID]string{}
 	}

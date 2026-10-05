@@ -8,7 +8,7 @@
 
 - **`fileattachment.go`:** Utilities for reading uploads and binding to models (see tests for expected behavior).
   It also owns the upload metrics for every upload path (chat, personality, image gallery), through `telemetry.Global()`.
-  `UploadFileAttachment` is the multipart wrapper over `ProcessUpload`, which holds the steps that need no HTTP: type check, buffering to a temp file (at most 30 MB), image normalization, and the provider upload.
+  `UploadFileAttachment` is the multipart wrapper over `ProcessUpload`, which holds the steps that need no HTTP: type check, buffering to a temp file (at most `MaxUploadBytes`, 30 MB; exported so callers that already hold the bytes can check up front), image normalization, and the provider upload.
   `ProcessUpload` returns an `*UploadError` (the status and message a client sees; it wraps `ErrUnsupportedFileType` or `ErrFileTooLarge` where they apply), and `RespondWithUploadError` writes one.
   `StoreChatAttachment` is the storage half for a chat upload: the record, the object-store key (images under the gallery path with a thumbnail, other files under the chat), and chunking.
   The chat upload handler and the plugin attachment seam (`internal/server/plugin_attachments.go`) both call it.
@@ -56,6 +56,7 @@
 
 - `fileattachment_test.go` — multipart and edge cases.
 - `fileattachment_ingest_test.go` — `ProcessUpload` without HTTP (type, size, normalization, provider failure) and `StoreChatAttachment` (key routing, thumbnail, rollback, cleanup).
+- `fileattachment_failures_test.go` — the failure paths: unparseable/partial multipart, unreadable source, undecodable image, an unsaved S3 key, and what `TriggerAsyncFileChunking` does with files it will not chunk.
 - `fileattachment_metrics_test.go` — upload size/kind, the normalize stage, that each upload is counted exactly once, and provider-file cleanup for abandoned uploads.
 - `httpresponse_test.go` — that raw errors never reach the body, and that every error response carries a code (including unmapped statuses).
 

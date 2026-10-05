@@ -42,8 +42,11 @@ func UploadToS3(ctx context.Context, fileStore storage.FileStore, s3Key, tempFil
 }
 
 const (
-	maxUploadMb             = 30
-	maxUploadBytes          = maxUploadMb << 20
+	maxUploadMb = 30
+	// MaxUploadBytes is the largest file an upload path accepts. Callers that already hold the
+	// bytes in memory (plugins) check it up front so an oversized file is rejected before it is
+	// copied anywhere.
+	MaxUploadBytes          = maxUploadMb << 20
 	maxAsyncProcessingBytes = 16 << 20 // keep goroutine memory bounded
 )
 
@@ -167,8 +170,8 @@ func RespondWithUploadError(w http.ResponseWriter, logger *zap.Logger, err error
 // AbandonFileAttachmentUpload instead, which counts the failure and deletes the provider file.
 func UploadFileAttachment(w http.ResponseWriter, r *http.Request, logger *zap.Logger, a FileAttachmentUploader, userID uuid.UUID, attrs map[string]string) (models.FileAttachment, string, error) {
 	// Validate file size
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
-	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadBytes)
+	if err := r.ParseMultipartForm(MaxUploadBytes); err != nil {
 		telemetry.Global().RecordFileUpload(r.Context(), "", telemetry.FileUploadFailure)
 		RespondWithError(w, logger, http.StatusBadRequest, CodeNotSet, fmt.Sprintf("File too large (max %dMB)", maxUploadMb), err)
 		return models.FileAttachment{}, "", err
@@ -220,13 +223,13 @@ func ProcessUpload(ctx context.Context, a FileAttachmentUploader, userID uuid.UU
 	}
 	tempFilePath := tempFile.Name()
 
-	written, err := io.Copy(tempFile, io.LimitReader(src, maxUploadBytes+1))
+	written, err := io.Copy(tempFile, io.LimitReader(src, MaxUploadBytes+1))
 	if err != nil {
 		_ = tempFile.Close()
 		_ = os.Remove(tempFilePath)
 		return models.FileAttachment{}, "", uploadErr(http.StatusInternalServerError, "Error buffering file", err)
 	}
-	if written > maxUploadBytes {
+	if written > MaxUploadBytes {
 		_ = tempFile.Close()
 		_ = os.Remove(tempFilePath)
 		return models.FileAttachment{}, "", uploadErr(http.StatusBadRequest, fmt.Sprintf("File too large (max %dMB)", maxUploadMb), ErrFileTooLarge)
@@ -458,7 +461,7 @@ func TriggerAsyncFileChunking(
 				zap.String("file_attachment_id", attachmentID.String()))
 			return
 		}
-		if info.Size() > maxUploadBytes {
+		if info.Size() > MaxUploadBytes {
 			logger.Warn("skipping async processing: file exceeds size cap",
 				zap.Int64("size_bytes", info.Size()),
 				zap.Int("cap_mb", maxUploadMb),

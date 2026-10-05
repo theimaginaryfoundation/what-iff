@@ -8,11 +8,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/filechunker"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
+	"github.com/theimaginaryfoundation/what-iff/internal/storage"
+	"go.uber.org/zap"
 )
 
 // agentAttachmentIngester is the plugins.AttachmentIngester the server hands to plugins. It runs a
@@ -20,8 +23,45 @@ import (
 // StoreChatAttachment), so a plugin's file is checked, normalized, archived and chunked like one
 // the user attached in the app.
 type agentAttachmentIngester struct {
-	agent *agent.Agent
-	ds    *datastore.Datastore
+	ds       attachmentDatastore
+	provider attachmentProvider
+	files    storage.FileStore
+	pipeline *filechunker.FileChunkPipeline
+	logger   *zap.Logger
+}
+
+// attachmentDatastore is the slice of the datastore the ingester uses: the chat ownership check
+// and the attachment records StoreChatAttachment writes.
+type attachmentDatastore interface {
+	GetChat(ctx context.Context, userID, id uuid.UUID) (*models.Chat, error)
+	handlerutils.AttachmentRecords
+}
+
+// attachmentProvider is the file provider (OpenAI) the upload goes through and rolls back from.
+type attachmentProvider interface {
+	handlerutils.FileAttachmentUploader
+	handlerutils.FileAttachmentDeleter
+}
+
+// newAgentAttachmentIngester wires the ingester to the agent's provider, object store and chunk
+// pipeline. A missing agent, provider or datastore leaves the matching field nil, which
+// IngestAttachment reports as errAttachmentNotConfigured; the nil checks are on the concrete
+// pointers so a nil *OpenAIProvider never becomes a non-nil interface.
+func newAgentAttachmentIngester(a *agent.Agent, ds *datastore.Datastore) agentAttachmentIngester {
+	i := agentAttachmentIngester{}
+	if a == nil {
+		return i
+	}
+	if ds != nil {
+		i.ds = ds
+	}
+	if a.OpenAIProvider != nil {
+		i.provider = a.OpenAIProvider
+	}
+	i.files = a.FileStore()
+	i.pipeline = a.ChunkPipeline()
+	i.logger = a.Logger()
+	return i
 }
 
 var (
@@ -37,7 +77,12 @@ func (i agentAttachmentIngester) IngestAttachment(ctx context.Context, up plugin
 	if len(up.Data) == 0 {
 		return nil, errAttachmentEmpty
 	}
-	if i.agent == nil || i.agent.OpenAIProvider == nil || i.ds == nil {
+	// Reject before anything copies or buffers the bytes; ProcessUpload enforces the same limit
+	// again while streaming, but by then a huge slice has already been handed to us.
+	if len(up.Data) > handlerutils.MaxUploadBytes {
+		return nil, fmt.Errorf("%w: file is %d bytes (max %d)", plugins.ErrAttachmentTooLarge, len(up.Data), handlerutils.MaxUploadBytes)
+	}
+	if i.provider == nil || i.ds == nil {
 		return nil, errAttachmentNotConfigured
 	}
 	// Ownership: the chat must belong to the user, as the upload route's chat lookup requires.
@@ -51,16 +96,19 @@ func (i agentAttachmentIngester) IngestAttachment(ctx context.Context, up plugin
 
 	ctx = middleware.ContextWithUser(ctx, up.UserID, "")
 	attrs := map[string]string{"chat_id": up.ChatID.String()}
-	logger := i.agent.Logger()
-	attachment, tempFilePath, err := handlerutils.ProcessUpload(ctx, i.agent.OpenAIProvider, up.UserID, attrs, bytes.NewReader(up.Data), up.Name)
+	logger := i.logger
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	attachment, tempFilePath, err := handlerutils.ProcessUpload(ctx, i.provider, up.UserID, attrs, bytes.NewReader(up.Data), up.Name)
 	if err != nil {
 		return nil, pluginAttachmentError(err)
 	}
 	created, err := handlerutils.StoreChatAttachment(ctx, logger, handlerutils.AttachmentStorage{
 		Records:  i.ds,
-		Files:    i.agent.FileStore(),
-		Provider: i.agent.OpenAIProvider,
-		Pipeline: i.agent.ChunkPipeline(),
+		Files:    i.files,
+		Provider: i.provider,
+		Pipeline: i.pipeline,
 	}, up.UserID, up.ChatID, attachment, tempFilePath)
 	if err != nil {
 		return nil, pluginAttachmentError(err)
