@@ -89,6 +89,20 @@ describe('thread-list.helpers', () => {
         expect(recent.map(thread => thread.id)).toEqual(['old-opened', 'newest', 'messaged']);
     });
 
+    it('lists an archived thread only once it has been opened', () => {
+        const chats = [
+            makeChat({ id: 'active', name: 'Active', last_message_time: '2026-04-03T00:00:00Z' }),
+            makeChat({ id: 'archived-opened', name: 'Archived opened', archived: true }),
+            makeChat({ id: 'archived-never', name: 'Archived never opened', archived: true, last_message_time: '2026-04-09T00:00:00Z' }),
+            makeChat({ id: 'archived-starred', name: 'Archived starred', archived: true, is_favorite: true }),
+        ];
+
+        const recent = pickSidebarRecentThreads(chats, ['archived-opened', 'archived-starred']);
+
+        // Pinned threads have their own section, but an archived one is not in the loaded pinned list.
+        expect(recent.map(thread => thread.id)).toEqual(['archived-opened', 'archived-starred', 'active']);
+    });
+
     it('treats missing localStorage as a no-op for recent opened thread helpers', () => {
         const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
         Object.defineProperty(globalThis, 'localStorage', {

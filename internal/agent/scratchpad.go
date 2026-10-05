@@ -57,7 +57,6 @@ func (a *Agent) updateScratchpad(ctx context.Context, userID uuid.UUID, response
 		SafetyIdentifier:   openai.String(userID.String()),
 		PreviousResponseID: openai.String(*responseID),
 		MaxOutputTokens:    openai.Int(scratchpadMaxTokens),
-		ServiceTier:        responses.ResponseNewParamsServiceTierFlex,
 		Instructions:       openai.String(chatCtx.chat.SystemPrompt),
 
 		Input: responses.ResponseNewParamsInputUnion{
@@ -132,7 +131,6 @@ func (a *Agent) summarizeScratchpad(ctx context.Context, userID uuid.UUID, respo
 		SafetyIdentifier:   openai.String(userID.String()),
 		PreviousResponseID: openai.String(*responseID),
 		MaxOutputTokens:    openai.Int(provider.ScratchpadMaxContentLength),
-		ServiceTier:        responses.ResponseNewParamsServiceTierFlex,
 		Instructions:       openai.String(instructions),
 		Input: responses.ResponseNewParamsInputUnion{
 			OfString: openai.String(buildScratchpadSummarizationInput(scratchpad)),
@@ -214,7 +212,6 @@ func (a *Agent) summarizeScratchpadClaude(ctx context.Context, userID uuid.UUID,
 		Model:            archivalOpenAIModel,
 		SafetyIdentifier: openai.String(userID.String()),
 		MaxOutputTokens:  openai.Int(provider.ScratchpadMaxContentLength),
-		ServiceTier:      responses.ResponseNewParamsServiceTierFlex,
 		Instructions:     openai.String(instructions),
 		Input:            responses.ResponseNewParamsInputUnion{OfInputItemList: []responses.ResponseInputItemUnionParam{input}},
 	}

@@ -23,7 +23,7 @@ function makeChat(overrides: Partial<Chat> = {}): Chat {
 
 describe('ThreadListService', () => {
     let service: ThreadListService;
-    let chatService: Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat' | 'markAllChatsRead'>;
+    let chatService: Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat' | 'markAllChatsRead' | 'getChat'>;
 
     let agentJobService: { listAgentJobs: ReturnType<typeof vi.fn> };
 
@@ -35,8 +35,9 @@ describe('ThreadListService', () => {
             listAllChats: vi.fn().mockName("ChatService.listAllChats"),
             patchChat: vi.fn().mockName("ChatService.patchChat"),
             deleteChat: vi.fn().mockName("ChatService.deleteChat"),
-            markAllChatsRead: vi.fn().mockName("ChatService.markAllChatsRead")
-        } as unknown as Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat' | 'markAllChatsRead'>;
+            markAllChatsRead: vi.fn().mockName("ChatService.markAllChatsRead"),
+            getChat: vi.fn().mockName("ChatService.getChat")
+        } as unknown as Pick<MockedObject<ChatService>, 'listChats' | 'listAllChats' | 'patchChat' | 'deleteChat' | 'markAllChatsRead' | 'getChat'>;
         chatService.listAllChats.mockReturnValue(of({
             chats: [makeChat({ id: 'a', name: 'Alpha' }), makeChat({ id: 'b', name: 'Bravo' })],
             truncated: false,
@@ -185,6 +186,63 @@ describe('ThreadListService', () => {
         expect(service.recentOpenedIds()).toEqual(['a']);
         service.setActiveThreadId('b');
         expect(service.recentOpenedIds()).toEqual(['b', 'a']);
+    });
+
+    describe('opened threads outside the loaded list', () => {
+        it('keeps an opened archived thread, and ignores an active one the list already holds', async () => {
+            await service.refresh();
+            service.rememberOpenedThread(makeChat({ id: 'z', name: 'Zed', archived: true }));
+            service.rememberOpenedThread(makeChat({ id: 'a', name: 'Alpha' }));
+
+            expect(service.openedThreadsOutsideList().map(thread => thread.id)).toEqual(['z']);
+        });
+
+        it('keeps the thread listed after it is restored from the archive', async () => {
+            service.rememberOpenedThread(makeChat({ id: 'z', name: 'Zed', archived: true }));
+            service.rememberOpenedThread(makeChat({ id: 'z', name: 'Zed', archived: false }));
+
+            expect(service.openedThreadsOutsideList()).toEqual([expect.objectContaining({ id: 'z', archived: false })]);
+        });
+
+        it('keeps a recently opened thread when it is archived from the manager', async () => {
+            await service.refresh();
+            service.setActiveThreadId('a');
+
+            await service.setThreadArchived(service.filteredThreads()[0], true);
+
+            expect(service.filteredThreads().map(thread => thread.id)).toEqual(['b']);
+            expect(service.openedThreadsOutsideList().map(thread => thread.id)).toEqual(['a']);
+        });
+
+        it('does not keep an archived thread that was never opened', async () => {
+            await service.refresh();
+
+            await service.setThreadArchived(service.filteredThreads()[0], true);
+
+            expect(service.openedThreadsOutsideList()).toEqual([]);
+        });
+
+        it('drops a deleted thread', async () => {
+            service.rememberOpenedThread(makeChat({ id: 'z', name: 'Zed', archived: true }));
+
+            await service.deleteThread(makeChat({ id: 'z' }));
+
+            expect(service.openedThreadsOutsideList()).toEqual([]);
+        });
+
+        it('restores recently opened archived threads after a reload, once, and forgets ones that no longer load', async () => {
+            service.setActiveThreadId('gone');
+            service.setActiveThreadId('z');
+            chatService.getChat.mockImplementation((id: string) =>
+                id === 'z' ? of(makeChat({ id: 'z', name: 'Zed', archived: true })) : throwError(() => new Error('not found')));
+
+            await service.refresh();
+            await vi.waitFor(() => expect(service.openedThreadsOutsideList().map(thread => thread.id)).toEqual(['z']));
+            expect(service.recentOpenedIds()).toEqual(['z']);
+
+            await service.refresh();
+            expect(chatService.getChat).toHaveBeenCalledTimes(2);
+        });
     });
 
     it('clearUnreadForThread zeroes unread_count locally', async () => {

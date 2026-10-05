@@ -16,7 +16,18 @@ const (
 // still the ToolCall rows saved with the assistant message when the turn completes.
 type ChatTurnProgress struct {
 	ToolCalls []ChatTurnToolCall `json:"tool_calls"`
+	// WaitingOn is set while the turn is queued behind an earlier turn in its chat (the turn gate),
+	// naming the phase of that earlier turn it is waiting on. Empty once the turn runs.
+	WaitingOn ChatTurnWaiting `json:"waiting_on,omitempty"`
 }
+
+// ChatTurnWaiting is what a queued turn is waiting on.
+type ChatTurnWaiting string
+
+const (
+	// ChatTurnWaitingReply: an earlier turn in the chat is still generating its reply.
+	ChatTurnWaitingReply ChatTurnWaiting = "reply"
+)
 
 // ChatTurnToolCall is one tool call in ChatTurnProgress. Input and Output are truncated
 // previews; the full values are on the persisted ToolCall once the turn is saved.

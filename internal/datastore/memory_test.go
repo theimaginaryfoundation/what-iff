@@ -979,6 +979,7 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 			checkpoint_user_message_count integer NOT NULL DEFAULT 0,
 			last_message_time datetime,
 			last_checkpoint_at datetime,
+			checkpoint_started_at datetime,
 			disabled_tools json,
 			tags json,
 			is_favorite bool NOT NULL DEFAULT false,

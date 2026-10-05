@@ -98,7 +98,7 @@ func TestWaitForThreadRehydration_NotInFlightReturnsImmediately(t *testing.T) {
 	defer cleanup()
 
 	mock.ExpectQuery("SELECT .*").
-		WillReturnRows(sqlmock.NewRows([]string{"rehydration_state"}).AddRow(models.RehydrationStateReady))
+		WillReturnRows(sqlmock.NewRows([]string{"rehydration_state", "source", "checkpoint_summary"}).AddRow(models.RehydrationStateReady, "openai", "summary"))
 
 	a := newTestAgent(ds)
 	a.WaitForThreadRehydration(context.Background(), uuid.New(), uuid.New())
@@ -111,7 +111,7 @@ func TestWaitForThreadRehydration_ContextCancelledReturnsPromptly(t *testing.T) 
 	defer cleanup()
 
 	mock.ExpectQuery("SELECT .*").
-		WillReturnRows(sqlmock.NewRows([]string{"rehydration_state"}).AddRow(models.RehydrationStatePending))
+		WillReturnRows(sqlmock.NewRows([]string{"rehydration_state", "source", "checkpoint_summary"}).AddRow(models.RehydrationStatePending, "openai", "summary"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -141,7 +141,7 @@ func TestWaitForThreadRehydration_PollSettlesToReady(t *testing.T) {
 	defer cleanup()
 
 	mock.ExpectQuery("SELECT .*").
-		WillReturnRows(sqlmock.NewRows([]string{"rehydration_state"}).AddRow(models.RehydrationStatePending))
+		WillReturnRows(sqlmock.NewRows([]string{"rehydration_state", "source", "checkpoint_summary"}).AddRow(models.RehydrationStatePending, "openai", "summary"))
 	mock.ExpectQuery("SELECT .*").
 		WillReturnRows(sqlmock.NewRows([]string{"rehydration_state"}).AddRow(models.RehydrationStateReady))
 
@@ -157,7 +157,7 @@ func TestWaitForThreadRehydration_PollChatNotFoundReturnsPromptly(t *testing.T) 
 	defer cleanup()
 
 	mock.ExpectQuery("SELECT .*").
-		WillReturnRows(sqlmock.NewRows([]string{"rehydration_state"}).AddRow(models.RehydrationStatePending))
+		WillReturnRows(sqlmock.NewRows([]string{"rehydration_state", "source", "checkpoint_summary"}).AddRow(models.RehydrationStatePending, "openai", "summary"))
 	// Second poll: zero rows -> ent.IsNotFound -> ErrChatNotFound -> gate returns immediately
 	// instead of continuing to poll.
 	mock.ExpectQuery("SELECT .*").
@@ -170,21 +170,34 @@ func TestWaitForThreadRehydration_PollChatNotFoundReturnsPromptly(t *testing.T) 
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+// A turn that arrives for an imported thread that was never opened still gets its summary started
+// first. Here another caller wins the claim, so the turn waits on the state that caller set.
+func TestWaitForThreadRehydration_StartsSummaryForUnsummarizedImportThenWaitsOnTheWinner(t *testing.T) {
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	mock.ExpectQuery("SELECT .*").
+		WillReturnRows(sqlmock.NewRows([]string{"rehydration_state", "source", "checkpoint_summary"}).AddRow("", "openai", ""))
+	mock.ExpectExec("UPDATE .*chats.*").WillReturnResult(sqlmock.NewResult(0, 0)) // lost the claim
+	mock.ExpectQuery("SELECT .*").
+		WillReturnRows(sqlmock.NewRows([]string{"rehydration_state"}).AddRow(models.RehydrationStateProcessing))
+	mock.ExpectQuery("SELECT .*").
+		WillReturnRows(sqlmock.NewRows([]string{"rehydration_state"}).AddRow(models.RehydrationStateReady))
+
+	a := newTestAgent(ds)
+	start := time.Now()
+	a.WaitForThreadRehydration(context.Background(), uuid.New(), uuid.New())
+	require.Less(t, time.Since(start), 10*time.Second, "should settle on the first poll tick, not time out")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 // --- EnqueueThreadRehydration ---
 
 func ctxWithUser(userID uuid.UUID) context.Context {
 	return context.WithValue(context.Background(), middleware.UserIDKey, userID)
 }
 
-func TestEnqueueThreadRehydration_MissingUserInContextIsNoOp(t *testing.T) {
-	t.Parallel()
-	a := &Agent{logger: zap.NewNop()}
-	require.NotPanics(t, func() {
-		a.EnqueueThreadRehydration(context.Background(), uuid.New(), uuid.New())
-	})
-}
-
-func TestEnqueueThreadRehydration_SetStateFailsReturnsWithoutCreatingJob(t *testing.T) {
+func TestEnqueueThreadRehydration_ClaimFailsReturnsWithoutCreatingJob(t *testing.T) {
 	t.Parallel()
 	ds, mock, cleanup := newTestDatastore(t)
 	defer cleanup()
@@ -193,9 +206,39 @@ func TestEnqueueThreadRehydration_SetStateFailsReturnsWithoutCreatingJob(t *test
 
 	a := newTestAgent(ds)
 	userID := uuid.New()
-	require.NotPanics(t, func() {
-		a.EnqueueThreadRehydration(ctxWithUser(userID), userID, uuid.New())
-	})
+	require.False(t, a.EnqueueThreadRehydration(ctxWithUser(userID), userID, uuid.New(), false))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// A thread that is archived, not imported, already summarized or already in flight is not claimed:
+// no job runs, which is what keeps repeated opens and bulk unarchives from costing anything.
+func TestEnqueueThreadRehydration_NotClaimedStartsNoJob(t *testing.T) {
+	t.Parallel()
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	mock.ExpectExec("UPDATE .*chats.*").WillReturnResult(sqlmock.NewResult(0, 0))
+
+	a := newTestAgent(ds)
+	userID := uuid.New()
+	require.False(t, a.EnqueueThreadRehydration(ctxWithUser(userID), userID, uuid.New(), false))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// A claimed thread whose job cannot be created is released as failed, so the next attempt retries
+// instead of leaving it pending with nothing running.
+func TestEnqueueThreadRehydration_JobCreationFailureReleasesTheClaim(t *testing.T) {
+	t.Parallel()
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	mock.ExpectExec("UPDATE .*chats.*").WillReturnResult(sqlmock.NewResult(0, 1)) // claim
+	mock.ExpectBegin().WillReturnError(errCoverageTestSentinel)                   // CreateJob
+	mock.ExpectExec("UPDATE .*chats.*").WillReturnResult(sqlmock.NewResult(0, 1)) // release as failed
+
+	a := newTestAgent(ds)
+	userID := uuid.New()
+	require.False(t, a.EnqueueThreadRehydration(ctxWithUser(userID), userID, uuid.New(), false))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

@@ -5364,7 +5364,8 @@ export interface paths {
          *     **Roles:** Only user/human and assistant messages are imported. System and tool messages are dropped.
          *
          *     **Archive:** All imported threads are created in archived state (`archived=true`). Their
-         *     `rehydration_state` is summarized lazily when the user restores (unarchives) the thread.
+         *     `rehydration_state` is summarized lazily the first time the user opens the thread after restoring
+         *     (unarchiving) it, so a bulk restore does not summarize every thread.
          *
          *     **Error reporting:** Per-conversation parse and persistence failures are non-fatal and logged
          *     server-side; aggregate counts are reflected in the job's `progress`.
@@ -5849,7 +5850,11 @@ export interface paths {
         };
         /**
          * Get chat by ID
-         * @description Returns a specific chat by its ID
+         * @description Returns a specific chat by its ID.
+         *     Opening an imported thread that was restored from the archive for the first time also starts its
+         *     one-time summary in the background (`rehydration_state` is then `pending`); archived threads never do.
+         *     A message sent into an imported thread that has no summary starts it too, whether or not the thread
+         *     was opened.
          */
         get: {
             parameters: {
@@ -6347,6 +6352,80 @@ export interface paths {
                             /** @description Number of messages updated from unread to read */
                             updated_count?: number;
                         };
+                    };
+                };
+                /** @description Invalid chat ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Chat not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chat/{id}/rehydrate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start an imported chat's one-time summary now
+         * @description Starts the background summary (and long-term memory seeding) for an imported chat right away, for
+         *     callers that already know the user wants it ready, such as the post-import "prepare" picker.
+         *     Otherwise it starts when the chat is first opened after being restored from the archive, or when a
+         *     message is sent into it.
+         *     It does nothing for a chat that is archived, was not imported, or already has a summary or one in
+         *     progress. Returns the chat, with `rehydration_state` `pending` when this call started the summary.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Chat ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Chat returned; the summary was started if it was needed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Chat"];
                     };
                 };
                 /** @description Invalid chat ID */
@@ -9739,6 +9818,8 @@ export interface components {
              *     output, round, started_at, finished_at}]}`, where `status` is `running`, `complete` or
              *     `error`, `input`/`output` are truncated previews, and `output`/`finished_at` are set once the
              *     call finishes. It is display-only; the saved assistant message's `tool_calls` are authoritative.
+             *     While the turn is queued behind an earlier turn in its chat the payload also carries
+             *     `waiting_on` (`reply`), absent once the turn runs.
              */
             progress?: string;
             /** Format: date-time */

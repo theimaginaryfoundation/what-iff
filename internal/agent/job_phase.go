@@ -23,6 +23,7 @@ func (a *Agent) advanceChatJobStatus(ctx context.Context, chatJob *models.Job, s
 		return fmt.Errorf("update job status %s: %w", status, err)
 	}
 	*chatJob = *updated
+	a.noteTurnJobStatus(chatJob)
 	return nil
 }
 
@@ -54,6 +55,8 @@ func (a *Agent) persistInferencePhase(ctx context.Context, chatJob *models.Job, 
 	*chatJob = *updated
 
 	a.persistUserTurnAndChatAfterInference(ctx, chatJob.UserID, chatMessage, chat, chatCtx, result, persistUserTurnUpdate)
+	// Only now wake the turns queued behind this one: the chat's response chain is saved.
+	a.noteTurnJobStatus(chatJob)
 
 	if err := a.ds.SetChatMessageLastError(ctx, chatJob.UserID, chatMessage.ID, nil); err != nil {
 		a.logger.Warn("failed to clear user message last_error_message after inference", zap.Error(err))
@@ -119,7 +122,9 @@ func (a *Agent) applyExpressionPhase(ctx context.Context, userID uuid.UUID, chat
 	var reasoning string
 	var err error
 	if pid != uuid.Nil {
-		exprID, reasoning, err = a.PickGenerationExpression(ctx, userID, pid, inferenceModelCtx, userTurn, agentMessage.Message)
+		pickCtx, cancelPick := context.WithTimeout(ctx, expressionPickTimeout)
+		exprID, reasoning, err = a.PickGenerationExpression(pickCtx, userID, pid, inferenceModelCtx, userTurn, agentMessage.Message)
+		cancelPick()
 		if err != nil {
 			a.logger.Warn("expression picker failed", zap.Error(err))
 		}
@@ -152,5 +157,6 @@ func (a *Agent) advanceJobInferenceComplete(ctx context.Context, chatJob *models
 		return fmt.Errorf("failed to clear job draft deltas: %w", err)
 	}
 	*chatJob = *updated
+	a.noteTurnJobStatus(chatJob)
 	return nil
 }

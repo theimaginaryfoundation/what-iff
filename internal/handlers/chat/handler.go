@@ -111,6 +111,7 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	chatRouter.HandleFunc("/{id}", h.UpdateChat).Methods("PUT")
 	chatRouter.HandleFunc("/{id}", h.PatchChat).Methods("PATCH")
 	chatRouter.HandleFunc("/{id}/mark-read", h.MarkChatRead).Methods("POST")
+	chatRouter.HandleFunc("/{id}/rehydrate", h.RehydrateChat).Methods("POST")
 	chatRouter.HandleFunc("/{id}", h.DeleteChat).Methods("DELETE")
 	chatRouter.HandleFunc("/{id}/export", h.ExportChat).Methods("GET")
 }

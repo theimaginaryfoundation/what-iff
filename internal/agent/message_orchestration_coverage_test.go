@@ -230,7 +230,7 @@ func TestPersistCheckpointSummary_DatastoreErrorReturnsFalse(t *testing.T) {
 	mock.ExpectRollback()
 
 	a := &Agent{ds: ds, logger: zap.NewNop()} // memoryTool nil skips the embedding/upsert step entirely.
-	ok := a.persistCheckpointSummary(context.Background(), uuid.New(), uuid.New(), "summary text", 3, "OpenAI", uuid.New())
+	ok := a.persistCheckpointSummary(context.Background(), uuid.New(), uuid.New(), "summary text", 3, "OpenAI", nil, &models.ChatMessage{ID: uuid.New()})
 	require.False(t, ok)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

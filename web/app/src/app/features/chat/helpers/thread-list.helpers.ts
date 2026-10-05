@@ -186,6 +186,19 @@ export function recordRecentOpenedThreadId(threadId: string): string[] {
   return next;
 }
 
+/** Drops one id from the persisted recent-opened list (e.g. a thread that no longer loads). */
+export function forgetRecentOpenedThreadId(threadId: string): string[] {
+  const next = loadRecentOpenedThreadIds().filter(id => id !== threadId);
+  const storage = recentOpenedThreadStorage();
+  if (!storage) return next;
+  try {
+    storage.setItem(RECENT_OPENED_THREAD_IDS_KEY, JSON.stringify(next));
+  } catch {
+    // ignore quota / privacy mode
+  }
+  return next;
+}
+
 export function clearRecentOpenedThreadIds(): void {
   const storage = recentOpenedThreadStorage();
   if (!storage) return;
@@ -196,14 +209,20 @@ export function clearRecentOpenedThreadIds(): void {
   }
 }
 
-/** Sidebar recent list: opened threads first, then last message, then created time. */
+/**
+ * Sidebar recent list: opened threads first, then last message, then created time.
+ * Pinned threads are listed in their own section, so they are skipped here. An archived thread is
+ * listed only once the user has opened it, since the archive is otherwise browsed in the Thread Manager.
+ */
 export function pickSidebarRecentThreads(
   threads: readonly Chat[],
   openedIds: readonly string[],
   limit = SIDEBAR_RECENT_THREAD_LIMIT,
 ): Chat[] {
-  const candidates = threads.filter(thread => !!thread.id && !thread.is_favorite && !thread.archived);
   const openedRank = new Map(openedIds.map((id, index) => [id, index] as const));
+  const candidates = threads.filter(
+    thread => !!thread.id && (thread.archived ? openedRank.has(thread.id) : !thread.is_favorite),
+  );
   return [...candidates]
     .sort((a, b) => compareRecentSidebarThreads(a, b, openedRank))
     .slice(0, limit);

@@ -860,6 +860,31 @@ func (d *Datastore) listChatMessages(ctx context.Context, userID, chatID uuid.UU
 	}, nil
 }
 
+// FirstChatMessageSentAtSince returns the sent_at of the earliest message in chatID (owned by
+// userID) sent at or after since, leaving out excludeIDs, or nil when there is none. A checkpoint
+// uses it to find a message its summary did not see (agent.checkpointWindowStart).
+func (d *Datastore) FirstChatMessageSentAtSince(ctx context.Context, userID, chatID uuid.UUID, since time.Time, excludeIDs ...uuid.UUID) (*time.Time, error) {
+	query := d.dbClient.ChatMessage.Query().
+		Where(
+			chatmessage.HasChatWith(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))),
+			chatmessage.SentAtGTE(since),
+		)
+	if len(excludeIDs) > 0 {
+		query = query.Where(chatmessage.IDNotIn(excludeIDs...))
+	}
+	row, err := query.
+		Order(chatmessage.BySentAt()).
+		Select(chatmessage.FieldSentAt).
+		First(ctx)
+	if ent.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row.SentAt, nil
+}
+
 // GetChatMessageCount returns the count of messages in a chat, optionally filtered by origin
 func (d *Datastore) GetChatMessageCount(ctx context.Context, userID, chatID uuid.UUID, originFilter models.MessageOriginFilter) (int, error) {
 	// Default to ALL if empty

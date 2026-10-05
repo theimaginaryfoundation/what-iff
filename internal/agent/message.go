@@ -161,6 +161,9 @@ type Agent struct {
 
 	runningJobCancelsMu sync.Mutex
 	runningJobCancels   map[uuid.UUID]runningJobCancel
+
+	// turns tracks this process's live chat turns for the per-chat turn gate (chat_turn_gate.go).
+	turns chatTurnTracker
 }
 
 // nonVendorLLM reports whether assistant generation is served by anything
@@ -889,6 +892,15 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 	a.logger.Info("starting job for user message",
 		zap.String("user_id", chatJob.UserID.String()),
 		zap.String("chat_message_id", chatMessage.ID.String()))
+
+	// Turn gate: wait until earlier turns in this chat have finished, so this one builds its context
+	// on their replies and never races their writes to shared chat/personality state (#254).
+	releaseTurn, err := a.awaitUserChatTurn(ctx, chatJob, chatMessage.ChatID)
+	if err != nil {
+		a.failChatTurnWait(ctx, chatJob, err)
+		return nil, err
+	}
+	defer releaseTurn()
 
 	// Rehydration gate: if this thread was just restored from import and its summary is still being
 	// generated, stall here until it settles so the turn runs against the checkpoint summary + recent
@@ -2574,13 +2586,19 @@ func (a *Agent) finalizeChat(ctx context.Context, userID uuid.UUID, chatMessage,
 	// Generate chat name if it's still the default
 	if chatCtx.chat.Name == defaultChatName {
 		doneChatName := a.timeTurnStage(ctx, turnStageChatName)
-		chatName, err := a.generateChatName(ctx, chatMessage.Message)
+		nameCtx, cancelName := context.WithTimeout(ctx, chatNameTimeout)
+		chatName, err := a.generateChatName(nameCtx, chatMessage.Message)
+		cancelName()
 		doneChatName()
 		if err != nil {
 			a.logger.Error("failed to generate chat name", zap.Error(err))
 		} else {
 			chatCtx.chat.Name = chatName
-			_, err = a.ds.UpdateChat(ctx, userID, *chatCtx.chat)
+			// Write only the name: leave the response chain this turn saved at inference alone
+			// (UpdateChat skips nil fields).
+			named := *chatCtx.chat
+			named.ResponseID, named.LastMessageTime = nil, nil
+			_, err = a.ds.UpdateChat(ctx, userID, named)
 			if err != nil {
 				a.logger.Error("failed to update chat name", zap.Error(err))
 			}
@@ -2601,6 +2619,33 @@ func maxTurnsBeforeCheckpoint(chatCtx *chatContext) int {
 		return checkpointMaxAssistantMessagesSinceStart
 	}
 	return checkpointMaxAssistantMessagesSinceSummary
+}
+
+// claimCheckpoint takes the chat's checkpoint claim for a due checkpoint, so only one runs per chat
+// at a time. The next turn no longer waits for a running checkpoint, so its own end-of-turn check
+// can fire while the pass is still going; it would summarize the same turns again and race the
+// pass's writes. A turn that does not get the claim just carries on with the saved summary, and the
+// check runs again at the end of the next turn. ok is false when the checkpoint must not run; call
+// release when it is over.
+func (a *Agent) claimCheckpoint(ctx context.Context, userID, chatID uuid.UUID, decision checkpointDecision) (release func(), ok bool) {
+	claimedAt, claimed, err := a.ds.ClaimChatCheckpoint(ctx, userID, chatID, checkpointClaimStaleAfter)
+	if err != nil {
+		a.logger.Warn("failed to claim the chat checkpoint; skipping it this turn",
+			zap.String("chat_id", chatID.String()), zap.Error(err))
+		return nil, false
+	}
+	if !claimed {
+		a.metrics().Add(ctx, telemetry.ChatCheckpointsSkipped, 1, telemetry.AttrReason.String(decision.Trigger))
+		a.logger.Info("checkpoint already running for this chat; skipping",
+			zap.String("chat_id", chatID.String()), zap.String("reason", decision.Reason))
+		return nil, false
+	}
+	return func() {
+		// Detached: the turn's context may already be cancelled, and the claim must not outlive it.
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), jobTerminalPersistTimeout)
+		defer cancel()
+		_ = a.ds.ReleaseChatCheckpoint(releaseCtx, userID, chatID, claimedAt)
+	}, true
 }
 
 func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, chatMessage, agentMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext, actionType string, qd metering.Decision, skipUsageRecording bool) {
@@ -2679,6 +2724,11 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	if !decision.ShouldCheckpoint {
 		return
 	}
+	releaseCheckpoint, ok := a.claimCheckpoint(ctx, userID, chatMessage.ChatID, decision)
+	if !ok {
+		return
+	}
+	defer releaseCheckpoint()
 	a.metrics().Add(ctx, telemetry.ChatCheckpoints, 1, telemetry.AttrReason.String(decision.Trigger))
 	a.metrics().Record(ctx, telemetry.ChatCheckpointContextTokens, float64(estimatedContextTokens))
 	a.metrics().Record(ctx, telemetry.ChatCheckpointMessages, float64(chatCtx.chat.CheckpointUserMessageCount))
@@ -2691,15 +2741,24 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 		zap.Int("last_input_tokens", lastInputTokens),
 		zap.Int("estimated_context_tokens", estimatedContextTokens),
 	)
+	// The checkpoint is bounded: a provider that hangs costs this checkpoint (and the claim above),
+	// which the next one redoes, not the thread.
+	checkpointCtx, cancelCheckpoint := context.WithTimeout(ctx, checkpointTimeout)
+	defer cancelCheckpoint()
 	// Only genuine OpenAI (Responses API) chats can thread checkpoints off a
 	// PreviousResponseID. Anthropic, z.ai (GLM) and Gemini chats all rebuild
 	// context from the DB via the "Claude" checkpoint path, whose summarizer runs
 	// on GPT and whose scratchpad/memory archival runs on the Anthropic provider
 	// (a no-op that logs when ANTHROPIC_API_KEY is unset).
 	if models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model) || models.UsesOpenAIChatCompletionsAPI(chatCtx.modelProvider, chatCtx.model) {
-		a.runCheckpointClaude(ctx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
+		a.runCheckpointClaude(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
 	} else {
-		a.runCheckpointOpenAI(ctx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
+		a.runCheckpointOpenAI(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
+	}
+	if errors.Is(checkpointCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		a.logger.Warn("checkpoint ran out of time; the next checkpoint will retry it",
+			zap.String("chat_id", chatMessage.ChatID.String()),
+			zap.Duration("budget", checkpointTimeout))
 	}
 }
 
@@ -2756,7 +2815,7 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 	}
 
 	donePersist := a.timeTurnStage(ctx, turnStageCheckpointPersist)
-	if a.persistCheckpointSummary(ctx, userID, chatMessage.ChatID, summary, assistantMessageCount, "OpenAI", agentMessage.ID) {
+	if a.persistCheckpointSummary(ctx, userID, chatMessage.ChatID, summary, assistantMessageCount, "OpenAI", chatMessage, agentMessage) {
 		a.finishCompactionEvent(ctx, userID, compactionEventID, summary)
 	}
 	donePersist()
@@ -2832,16 +2891,20 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	}
 
 	donePersist := a.timeTurnStage(ctx, turnStageCheckpointPersist)
-	if a.persistCheckpointSummary(ctx, userID, chatMessage.ChatID, summary, assistantMessageCount, "Claude", agentMessage.ID) {
+	if a.persistCheckpointSummary(ctx, userID, chatMessage.ChatID, summary, assistantMessageCount, "Claude", chatMessage, agentMessage) {
 		a.finishCompactionEvent(ctx, userID, compactionEventID, summary)
 	}
 	donePersist()
 }
 
-// persistCheckpointSummary writes the live checkpoint state. It returns false only when that
-// authoritative chat write fails; best-effort summary-memory failures do not prevent the checkpoint
-// from completing.
-func (a *Agent) persistCheckpointSummary(ctx context.Context, userID, chatID uuid.UUID, summary string, assistantMessageCount int, providerName string, assistantMessageID uuid.UUID) bool {
+// persistCheckpointSummary writes the live checkpoint state for the turn userMsg -> agentMsg (either
+// may be nil). It returns false only when that authoritative chat write fails; best-effort
+// summary-memory failures do not prevent the checkpoint from completing.
+func (a *Agent) persistCheckpointSummary(ctx context.Context, userID, chatID uuid.UUID, summary string, assistantMessageCount int, providerName string, userMsg, agentMsg *models.ChatMessage) bool {
+	assistantMessageID := uuid.Nil
+	if agentMsg != nil {
+		assistantMessageID = agentMsg.ID
+	}
 	if a.memoryTool != nil {
 		embeddingVector, err := a.memoryTool.CreateEmbedding(ctx, summary)
 		if err != nil {
@@ -2859,7 +2922,8 @@ func (a *Agent) persistCheckpointSummary(ctx context.Context, userID, chatID uui
 
 	// Preserve the legacy checkpoint column and clear response_id atomically so
 	// conversation continuity survives summary-memory write failures.
-	if err := a.ds.UpdateChatCheckpointStateAndClearResponseID(ctx, userID, chatID, summary, assistantMessageCount); err != nil {
+	windowStart := a.checkpointWindowStart(ctx, userID, chatID, userMsg, agentMsg)
+	if err := a.ds.UpdateChatCheckpointStateAndClearResponseID(ctx, userID, chatID, summary, assistantMessageCount, windowStart); err != nil {
 		a.logger.Error("failed to persist chat checkpoint state and clear response id after checkpoint",
 			zap.String("provider", providerName),
 			zap.String("chat_id", chatID.String()),
@@ -2874,6 +2938,45 @@ func (a *Agent) persistCheckpointSummary(ctx context.Context, userID, chatID uui
 		}
 	}
 	return true
+}
+
+// checkpointWindowStart returns where the chat's live history window starts after a checkpoint of
+// the turn userMsg -> agentMsg. It is stored as last_checkpoint_at, and history loads the messages
+// sent at or after it. The summary covers the conversation up to and including agentMsg, so the
+// window starts just after the reply, not when the checkpoint finished. A message sent while the
+// checkpoint ran (the next user message, queued behind this turn) then stays in history instead of
+// hiding behind a summary that never saw it (#268).
+//
+// A message saved during the turn itself, other than the reply, was not seen by the summary either
+// (it arrived mid-inference, from a webhook or a second tab). Then the window starts just before the
+// turn's user message, so that message and the whole turn stay live together. With no reply time to
+// go on it falls back to now, the old cursor; a failed lookup is logged and treated as no such
+// message.
+func (a *Agent) checkpointWindowStart(ctx context.Context, userID, chatID uuid.UUID, userMsg, agentMsg *models.ChatMessage) time.Time {
+	if agentMsg == nil || agentMsg.SentAt.IsZero() {
+		return time.Now()
+	}
+	if userMsg == nil || userMsg.SentAt.IsZero() || a.ds == nil {
+		return checkpointWindowStartAfter(time.Time{}, agentMsg.SentAt, nil)
+	}
+	firstOther, err := a.ds.FirstChatMessageSentAtSince(ctx, userID, chatID, userMsg.SentAt, userMsg.ID, agentMsg.ID)
+	if err != nil {
+		a.logger.Warn("checkpoint: failed to look for messages the summary did not see; starting the window after the reply",
+			zap.String("chat_id", chatID.String()), zap.Error(err))
+		firstOther = nil
+	}
+	return checkpointWindowStartAfter(userMsg.SentAt, agentMsg.SentAt, firstOther)
+}
+
+// checkpointWindowStartAfter is checkpointWindowStart's rule, one microsecond (the database's
+// precision) either side: just after the reply, or, when another message (firstOther, the earliest
+// sent at or after the user message) came before the reply, just before the user message.
+func checkpointWindowStartAfter(userSentAt, replySentAt time.Time, firstOther *time.Time) time.Time {
+	afterReply := replySentAt.Add(time.Microsecond)
+	if firstOther != nil && firstOther.Before(afterReply) && !userSentAt.IsZero() {
+		return userSentAt.Add(-time.Microsecond)
+	}
+	return afterReply
 }
 
 type SummaryMemoryBackfillStats struct {

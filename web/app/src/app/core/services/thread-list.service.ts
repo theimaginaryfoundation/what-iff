@@ -13,6 +13,8 @@ import {
   ThreadSort,
   applyThreadFilters,
   buildThreadGroups,
+  SIDEBAR_RECENT_THREAD_LIMIT,
+  forgetRecentOpenedThreadId,
   loadRecentOpenedThreadIds,
   recordRecentOpenedThreadId,
   uniquePersonalityOptions,
@@ -54,6 +56,17 @@ export class ThreadListService implements OnDestroy {
   readonly sort = signal<ThreadSort>('recent');
   readonly activeThreadId = signal<string | null>(null);
   readonly recentOpenedIds = signal<string[]>(loadRecentOpenedThreadIds());
+  /**
+   * Opened threads the loaded list may not hold: the list covers one tab, so an archived thread the
+   * user opened is not in it. The sidebar's recent list shows these too.
+   */
+  private readonly openedOutsideList = signal<ReadonlyMap<string, Chat>>(new Map());
+  /** {@link openedOutsideList} entries that the loaded list does not already hold. */
+  readonly openedThreadsOutsideList = computed(() => {
+    const loaded = new Set(this.allThreads().map(thread => thread.id));
+    return [...this.openedOutsideList().values()].filter(thread => !loaded.has(thread.id));
+  });
+  private restoredOpenedThreads = false;
   /** Which threads {@link refresh} loads: active, archived, or those with a scheduled job (either state). */
   readonly scope = signal<ThreadListScope>('active');
   /** True on the Thread Manager archived tab. */
@@ -92,6 +105,40 @@ export class ThreadListService implements OnDestroy {
     if (threadId) {
       this.recentOpenedIds.set(recordRecentOpenedThreadId(threadId));
     }
+  }
+
+  /**
+   * Keeps an opened archived thread (or one restored from the archive after being opened) for the
+   * sidebar's recent list. Other threads come from the loaded list.
+   */
+  rememberOpenedThread(chat: Chat): void {
+    if (!chat.id) return;
+    const known = this.openedOutsideList();
+    if (!chat.archived && !known.has(chat.id)) return;
+    this.openedOutsideList.set(new Map(known).set(chat.id, chat));
+  }
+
+  /**
+   * After a reload the opened archived threads are not in memory, but their ids are still in the
+   * recent-opened list. Fetches the ones the recent list would show (once per session) that the
+   * loaded list lacks; a thread that no longer loads is dropped from the recent-opened ids.
+   */
+  private async restoreOpenedThreads(): Promise<void> {
+    if (this.restoredOpenedThreads) return;
+    this.restoredOpenedThreads = true;
+    const loaded = new Set(this.allThreads().map(thread => thread.id));
+    const missing = this.recentOpenedIds()
+      .slice(0, SIDEBAR_RECENT_THREAD_LIMIT)
+      .filter(id => !loaded.has(id) && !this.openedOutsideList().has(id));
+    await Promise.all(
+      missing.map(async id => {
+        try {
+          this.rememberOpenedThread(await firstValueFrom(this.chatService.getChat(id)));
+        } catch {
+          this.recentOpenedIds.set(forgetRecentOpenedThreadId(id));
+        }
+      }),
+    );
   }
 
   /** Switches list API scope between active and archived threads and reloads. */
@@ -242,6 +289,9 @@ export class ThreadListService implements OnDestroy {
       this.automationsByChatId.set(new Map());
       this.allThreads.set(response.chats);
       this.listTruncated.set(response.truncated);
+      if (this.scope() === 'active' && Object.keys(filters).length === 0) {
+        void this.restoreOpenedThreads();
+      }
     } catch (error) {
       if (generation !== this.refreshGeneration) return;
       this.error.set(apiErrorMessage(error, 'Failed to load threads'));
@@ -286,6 +336,8 @@ export class ThreadListService implements OnDestroy {
       if (!removeFromList) {
         this.allThreads.set(this.allThreads().map(item => (item.id === updated.id ? updated : item)));
       }
+      // A recently opened thread stays in the sidebar's recent list when it moves in or out of the archive.
+      if (this.recentOpenedIds().includes(updated.id)) this.rememberOpenedThread(updated);
       return true;
     } catch (error) {
       this.allThreads.set(snapshot);
@@ -301,6 +353,11 @@ export class ThreadListService implements OnDestroy {
     this.allThreads.set(snapshot.filter(item => item.id !== thread.id));
     try {
       await firstValueFrom(this.chatService.deleteChat(thread.id));
+      if (this.openedOutsideList().has(thread.id)) {
+        const next = new Map(this.openedOutsideList());
+        next.delete(thread.id);
+        this.openedOutsideList.set(next);
+      }
       return true;
     } catch (error) {
       this.allThreads.set(snapshot);

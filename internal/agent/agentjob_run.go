@@ -221,7 +221,7 @@ func (a *Agent) handleEphemeralPrompt(
 	actionType string,
 	callPath telemetry.CallPath,
 	opts ephemeralPromptOptions,
-) (*models.ChatMessage, error) {
+) (_ *models.ChatMessage, retErr error) {
 	userID, _ := middleware.GetUserIDFromContext(ctx)
 	if userID == uuid.Nil {
 		return nil, errors.New("user ID not found in context")
@@ -263,8 +263,18 @@ func (a *Agent) handleEphemeralPrompt(
 		Rituals: jobRituals,
 	}
 
+	// Turn gate: queue behind earlier turns in this chat (#254); see beginEphemeralChatTurn.
+	endTurn, err := a.beginEphemeralChatTurn(ctx, userID, chatID, trackingJob)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { endTurn(retErr) }()
+
 	// Rehydration gate: stall if this thread's import summary is still in flight (no-op otherwise).
 	a.WaitForThreadRehydration(ctx, userID, chatID)
+	// The prompt is "sent" when the turn starts, not when it queued: its time is shown to the
+	// model, and a checkpoint treats messages saved after it as unseen (checkpointWindowStart).
+	ephemeralUserMessage.SentAt = time.Now()
 
 	chatCtx, err := a.prepareChatContext(ctx, userID, ephemeralUserMessage, nil)
 	if err != nil {
@@ -338,6 +348,13 @@ func (a *Agent) handleEphemeralPrompt(
 		return nil, fmt.Errorf("failed to update chat metadata: %w", err)
 	}
 
+	// The reply and the chat's response chain are saved, so a turn queued behind this one may start;
+	// the expression pick and checkpoint below overlap it. A tracked job opens the gate through its
+	// own status (advanceJobInferenceComplete). A scheduled run has no job row, so its queue ticket
+	// is ended here.
+	if trackingJob == nil {
+		endTurn(nil)
+	}
 	if err := a.advanceJobInferenceComplete(ctx, trackingJob, agentMessage.ID); err != nil {
 		return nil, fmt.Errorf("failed to advance agent job after inference: %w", err)
 	}

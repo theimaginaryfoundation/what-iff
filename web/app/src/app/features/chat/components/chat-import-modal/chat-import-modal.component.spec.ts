@@ -55,6 +55,18 @@ class StubJobService {
 
 class StubChatService {
     listChatsPageCalls: string[] = [];
+    /** Calls in the order the modal made them, e.g. "patch:id", "rehydrate:id". */
+    calls: string[] = [];
+
+    patchChat(id: string): Observable<Chat> {
+        this.calls.push(`patch:${id}`);
+        return of({ id, archived: false } as Chat);
+    }
+
+    rehydrateChat(id: string): Observable<Chat> {
+        this.calls.push(`rehydrate:${id}`);
+        return of({ id, archived: false, rehydration_state: 'pending' } as Chat);
+    }
 
     importConversations(): Observable<Job> {
         return defer(() => of(jobRow('pending', PARSING_PROGRESS)));
@@ -163,6 +175,22 @@ describe('ChatImportModalComponent', () => {
         expect(modal.stage()).toBe('done');
         expect(modal.progress()?.skipped).toBe(115);
         expect(fixture.nativeElement.textContent).toContain('No new threads');
+    });
+
+    it('unarchives each picked thread and starts its summary right away', async () => {
+        jobs.responses = [jobRow('complete', COMPLETE_PROGRESS)];
+        await chooseExport();
+        await runImport();
+        expect(modal.stage()).toBe('picker');
+
+        modal.toggleSelect(IMPORTED_IDS[0]);
+        modal.prepareSelected();
+        await fixture.whenStable();
+
+        // Unarchiving alone no longer starts the summary, so the picker asks for it explicitly.
+        expect(chats.calls).toEqual([`patch:${IMPORTED_IDS[0]}`, `rehydrate:${IMPORTED_IDS[0]}`]);
+        expect(modal.preparedCount()).toBe(1);
+        expect(modal.stage()).toBe('done');
     });
 
     it('notifies the parent once so the archive list refreshes', async () => {

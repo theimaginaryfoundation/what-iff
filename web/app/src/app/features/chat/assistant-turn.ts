@@ -6,7 +6,7 @@ import { ChatStreamingService } from '../../core/services/chat-streaming.service
 import { JobService } from '../../core/services/job.service';
 import { MessageService } from '../../core/services/message.service';
 import { ChatMessage } from '../../core/models/message.model';
-import { ChatTurnProgress, ChatTurnToolCall, Job } from '../../core/models/job.model';
+import { CHAT_TURN_WAITING_STATES, ChatTurnProgress, ChatTurnToolCall, ChatTurnWaiting, Job } from '../../core/models/job.model';
 import { apiErrorMessage } from '../../core/utils/api-error.helpers';
 import { CHAT_JOB_POLL_INTERVAL_MS, CHAT_PENDING_ASSISTANT_MESSAGE_ID } from './chat.constants';
 import { ChatSendGate } from './services/chat-send-gate';
@@ -43,6 +43,7 @@ export class AssistantTurn {
   private readonly _streamingMessageId = signal<string | null>(null);
   private readonly _pendingAssistantDraftText = signal('');
   private readonly _liveToolCalls = signal<readonly ChatTurnToolCall[]>([]);
+  private readonly _waitingOn = signal<ChatTurnWaiting | null>(null);
   /** Live model reasoning for the pending reply; replaced wholesale on each job snapshot. */
   private readonly _pendingAssistantDraftReasoning = signal('');
 
@@ -69,6 +70,8 @@ export class AssistantTurn {
   readonly pendingAssistantDraftText = this._pendingAssistantDraftText.asReadonly();
   /** The active job's tool calls so far (live timeline from Job.progress); empty when idle. */
   readonly liveToolCalls = this._liveToolCalls.asReadonly();
+  /** Why the active turn has not started: queued behind an earlier turn in the chat; null otherwise. */
+  readonly waitingOn = this._waitingOn.asReadonly();
   readonly pendingAssistantDraftReasoning = this._pendingAssistantDraftReasoning.asReadonly();
   /** True while a chat_message job is in flight (after send) but not yet finished. */
   readonly jobPending = computed(() => this._activeChatJobId() !== null);
@@ -117,6 +120,7 @@ export class AssistantTurn {
     this._cancelRequestedJobId.set(null);
     this._streamingMessageId.set(null);
     this._liveToolCalls.set([]);
+    this._waitingOn.set(null);
   }
 
   dispose(): void {
@@ -131,6 +135,7 @@ export class AssistantTurn {
     this._activeChatJobId.set(AssistantTurn.PENDING_SEND_JOB_ID);
     // The placeholder shows from here; it must not carry the previous turn's tool rows.
     this._liveToolCalls.set([]);
+    this._waitingOn.set(null);
   }
 
   sendFailed(): void {
@@ -155,6 +160,7 @@ export class AssistantTurn {
 
   beginRetry(userMessageId: string): void {
     this._liveToolCalls.set([]);
+    this._waitingOn.set(null);
     this.expectingAssistantResponse = true;
     this.expectedAssistantAfterUserMessageId = userMessageId;
   }
@@ -193,6 +199,7 @@ export class AssistantTurn {
     this._activeChatJobId.set(jobId);
     this._activeJobPhase.set(null);
     this._liveToolCalls.set([]);
+    this._waitingOn.set(null);
     if (this._cancelRequestedJobId() !== jobId) {
       this._pendingAssistantDraftText.set('');
       this._pendingAssistantDraftReasoning.set('');
@@ -218,6 +225,7 @@ export class AssistantTurn {
             if (!this.isActiveThread(chatId)) return;
             if (this._activeChatJobId() === jobId) {
               this._liveToolCalls.set([]);
+    this._waitingOn.set(null);
               this._activeChatJobId.set(null);
               this._activeJobPhase.set(null);
             }
@@ -329,6 +337,7 @@ export class AssistantTurn {
       this._activeJobPhase.set(job.status);
       const toolCalls = parseChatTurnToolCalls(job.progress);
       if (toolCalls) this._liveToolCalls.set(toolCalls);
+      this._waitingOn.set(parseChatTurnWaiting(job.progress));
     }
     const cancelPendingForJob = this._cancelRequestedJobId() === job.id;
     if (cancelPendingForJob && job.status === 'cancelled') {
@@ -430,6 +439,24 @@ export function parseChatTurnToolCalls(progress: string | undefined): ChatTurnTo
   } catch {
     return undefined;
   }
+}
+
+const CHAT_TURN_WAITING = new Set<string>(CHAT_TURN_WAITING_STATES);
+
+/** What a queued turn is waiting on, from a chat_message job's progress payload; null when it is not queued. */
+export function parseChatTurnWaiting(progress: string | undefined): ChatTurnWaiting | null {
+  if (!progress) return null;
+  try {
+    const waiting = (JSON.parse(progress) as Partial<ChatTurnProgress>).waiting_on;
+    return typeof waiting === 'string' && CHAT_TURN_WAITING.has(waiting) ? waiting : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The placeholder text for a turn queued behind an earlier one. */
+export function chatTurnWaitingLabel(_waiting: ChatTurnWaiting): string {
+  return 'Waiting for the previous reply…';
 }
 
 function isTerminalJobStatus(status: Job['status']): boolean {

@@ -184,6 +184,15 @@ export class ChatService {
       );
   }
 
+  /**
+   * Starts an imported thread's one-time summary (and memory seeding) right away. Otherwise it starts
+   * when the thread is first opened after being restored, or when a message is sent into it.
+   */
+  rehydrateChat(chatId: string): Observable<Chat> {
+    return this.http.post<Chat>(`${this.apiUrl}/${chatId}/rehydrate`, {})
+      .pipe(catchError(this.handleError));
+  }
+
   getChatContext(chatId: string): Observable<ChatContext> {
     return this.http.get<ChatContext>(`${this.apiUrl}/${chatId}/context`)
       .pipe(catchError(this.handleError));

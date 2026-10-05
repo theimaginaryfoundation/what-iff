@@ -96,9 +96,18 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Streamed chat failures:** `FinalizeCancelledChatJobWithPartial` and `FinalizeFailedChatJobWithPartial` atomically consume `draft_deltas` into an assistant message when text was streamed before termination, set the terminal job status/result, and clear the draft buffer.
   Any `draft_reasoning` streamed alongside is carried onto that partial message's `model_reasoning`.
   A failed (rather than cancelled) chat job retains its error for the user-turn failure banner.
-- **Stopping a thread:** `ListActiveChatJobIDsForChat` (shares `activeChatJobsForChat` with `FindLatestActiveChatJob`), `ChatIDForChatJob`, `MarkChatJobCancelled`, and `JobStatus` back the agent's thread-wide Stop.
-  `MarkChatJobCancelled` only moves a non-terminal chat job to cancelled (clearing both drafts); a terminal job is left alone.
-  `FailInterruptedJobs` also runs for `chat_message` at startup (30m staleness bound), so a turn orphaned by a restart is failed instead of resumed forever.
+- **Stopping a thread:** `ListActiveChatJobIDsForChat`, `ChatIDForChatJob`, `MarkChatJobCancelled`, and `JobStatus` back the agent's thread-wide Stop.
+  They cover every turn job type (`turnJobTypes`: `chat_message` and `agent_job_run`, whose reference is the chat id or a user message id).
+  `MarkChatJobCancelled` only moves a non-terminal turn job to cancelled (clearing both drafts); a terminal job is left alone.
+  `FailInterruptedJobs` also runs for `chat_message` and `agent_job_run` at startup (30m staleness bound), so a turn orphaned by a restart is failed instead of resumed forever.
+- **Per-chat turn order:** `ListPendingTurnJobsForChat` lists a chat's pending and processing turn jobs, oldest first, leaving out the asking job; the agent's turn gate polls it (read-only, no lock).
+  The cutoff is the gate's stale bound: crash orphans past `inference_complete` are never reaped at startup, and without it they could fill the row limit and hide a live turn.
+  It filters on the status index (`StatusIn`), the owner foreign key column directly, and selects only the gate's fields, so the common case (no other live turn for the user) is one cheap query; the chat-message lookup runs only for message-keyed candidates.
+  `TouchJob` is the turn heartbeat (refreshes `updated_at`).
+  `FinishTurnJobIfActive` finishes a turn job its worker left non-terminal, deciding from the row (complete when the caller saw its reply, the row has a `result_id`, or its status is past `inference_complete`; failed otherwise) with writes conditional on the job still being non-terminal, so it never overwrites a status another instance wrote.
+- **Checkpoint window:** `UpdateChatCheckpointStateAndClearResponseID` takes the `last_checkpoint_at` to store (the agent passes just after the checkpointed reply, #268; zero means now).
+  `ClaimChatCheckpoint` / `ReleaseChatCheckpoint` (`chat_checkpoint_claim.go`) take and drop `chats.checkpoint_started_at` with one conditional update each, so only one checkpoint runs per chat at a time across instances; a claim older than the stale bound is taken over.
+  `FirstChatMessageSentAtSince` finds the earliest message in a chat since a time, leaving out given ids, so the agent can tell whether a message arrived mid-turn.
 - **`SetAgentJobOverrides`:** `personality_id` must belong to the job owner; `model_id` must exist in the global model catalog.
   Partial updates use `models.SetAgentJobOverridesPatch` so omitted JSON fields are not overwritten.
   Invalid IDs return `ErrInvalidRequestBody`.

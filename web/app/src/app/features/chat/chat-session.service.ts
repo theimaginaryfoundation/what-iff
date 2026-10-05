@@ -86,6 +86,8 @@ export class ChatSessionService implements OnDestroy {
   readonly pendingAssistantDraftText = this.turn.pendingAssistantDraftText;
   /** Tool calls the in-flight turn has made so far, for the live timeline above the pending reply. */
   readonly liveToolCalls = this.turn.liveToolCalls;
+  /** Why the in-flight turn has not started yet (queued behind an earlier turn), or null. */
+  readonly waitingOn = this.turn.waitingOn;
   readonly pendingAssistantDraftReasoning = this.turn.pendingAssistantDraftReasoning;
   readonly draft: WritableSignal<string> = signal('');
   readonly model: Signal<Model | null> = this._model.asReadonly();
@@ -184,6 +186,7 @@ export class ChatSessionService implements OnDestroy {
         next: chat => {
           if (!this.isActiveThread(requestedThreadId)) return;
           this._thread.set(chat);
+          this.threadList.rememberOpenedThread(chat);
           this.chatService.setLastChatId(chat.id);
         },
         error: error => {
@@ -256,6 +259,7 @@ export class ChatSessionService implements OnDestroy {
         next: chat => {
           if (!this.isActiveThread(threadId)) return;
           this._thread.set(chat);
+          this.threadList.rememberOpenedThread(chat);
         },
         error: () => {
           // Best-effort: keep showing current thread if the refetch fails.

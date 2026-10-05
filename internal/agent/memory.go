@@ -60,7 +60,6 @@ func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID u
 		SafetyIdentifier:   openai.String(userID.String()),
 		PreviousResponseID: openai.String(*responseID),
 		MaxOutputTokens:    openai.Int(provider.DefaultMaxContentLength),
-		ServiceTier:        responses.ResponseNewParamsServiceTierFlex,
 		Instructions:       openai.String(instructions),
 		Input: responses.ResponseNewParamsInputUnion{
 			OfInputItemList: []responses.ResponseInputItemUnionParam{

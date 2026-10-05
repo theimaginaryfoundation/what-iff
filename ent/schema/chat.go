@@ -32,6 +32,10 @@ func (Chat) Fields() []ent.Field {
 		field.Text("checkpoint_summary").
 			Optional().
 			Comment("Compact conversation summary used to seed a new Responses thread after checkpointing"),
+		field.Time("checkpoint_started_at").
+			Optional().
+			Nillable().
+			Comment("Set while a checkpoint (scratchpad, memory and summary pass) runs for this chat, so only one runs at a time; cleared when it ends and ignored once stale"),
 		field.Int("checkpoint_user_message_count").
 			Default(0).
 			Comment("Total number of user messages processed at the last checkpoint; used to compute messages-since-checkpoint"),

@@ -150,6 +150,10 @@ var ChatTurnStageDuration = Histogram{"whatiff.chat.turn.stage.duration", unitSe
 // ChatCheckpoints counts conversation checkpoints (compaction). Attributes: reason.
 var ChatCheckpoints = Counter{"whatiff.chat.checkpoints", "{checkpoint}", "Conversation checkpoints run."}
 
+// ChatCheckpointsSkipped counts checkpoints that were due but not started because one was already
+// running for the chat. Attributes: reason (the trigger that fired).
+var ChatCheckpointsSkipped = Counter{"whatiff.chat.checkpoints.skipped", "{checkpoint}", "Checkpoints skipped because one was already running for the chat."}
+
 // ChatCheckpointContextTokens is the estimated context size when a checkpoint runs.
 var ChatCheckpointContextTokens = Histogram{"whatiff.chat.checkpoint.context_tokens", "{token}", "Estimated context tokens when a checkpoint runs.", BucketsTokens}
 

@@ -194,6 +194,15 @@ describe('MessageBubbleComponent', () => {
         expect(pills[0].textContent?.trim()).toBe('Morning brief');
     });
 
+    it('shows the queued-behind-an-earlier-turn status instead of the dots', () => {
+        fixture.componentRef.setInput('message', { ...pendingAssistantMessage(), pending_status: 'Waiting for the previous reply…' });
+        fixture.componentRef.setInput('displayContent', '');
+        fixture.detectChanges();
+
+        expect(fixture.nativeElement.querySelector('.bubble__pending-status')?.textContent).toContain('Waiting for the previous reply…');
+        expect(fixture.nativeElement.querySelector('.bubble__pending-dots')).toBeNull();
+    });
+
     it('renders typing dots for the pending assistant placeholder without copy chrome', () => {
         fixture.componentRef.setInput('message', pendingAssistantMessage());
         fixture.componentRef.setInput('displayContent', '');

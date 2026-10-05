@@ -151,8 +151,18 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
   readonly sidebarPinnedThreads = computed(() =>
     this.sidebarFilteredThreads().filter(thread => !!thread.is_favorite && !!thread.id),
   );
+  /** Opened archived threads the loaded list lacks, narrowed by the same personality filter. */
+  private readonly sidebarOpenedOutsideList = computed(() => {
+    const selected = new Set(this.selectedPersonalityIds());
+    const threads = this.threads.openedThreadsOutsideList();
+    if (selected.size === 0) return threads;
+    return threads.filter(thread => !!thread.personality_id && selected.has(thread.personality_id));
+  });
   readonly sidebarRecentThreads = computed(() =>
-    pickSidebarRecentThreads(this.sidebarFilteredThreads(), this.threads.recentOpenedIds()),
+    pickSidebarRecentThreads(
+      [...this.sidebarFilteredThreads(), ...this.sidebarOpenedOutsideList()],
+      this.threads.recentOpenedIds(),
+    ),
   );
   readonly sidebarThreadAvatarMeta = computed(() => {
     const byId = new Map(this.personalityCatalog().map(personality => [personality.id, personality]));
@@ -161,7 +171,7 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
       ...this.sidebarRecentThreads().map(thread => thread.id),
     ]);
     return new Map(
-      this.sidebarFilteredThreads()
+      [...this.sidebarFilteredThreads(), ...this.sidebarOpenedOutsideList()]
         .filter(thread => threadIds.has(thread.id))
         .map(thread => {
         const personality = thread.personality_id ? byId.get(thread.personality_id) ?? null : null;

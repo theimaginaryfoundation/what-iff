@@ -53,6 +53,8 @@ export interface ChatMessage {
   generation_expression_image_url?: string;
   generation_expression_label?: string | null;
   generation_expression_reasoning?: string | null;
+  /** Client-only, on the pending-reply placeholder: why the reply has not started (shown instead of the dots). */
+  pending_status?: string;
   /** Reasoning/thinking the model reported for this assistant turn (GLM, MiMo). Display-only. */
   model_reasoning?: string | null;
   sent_at: string;

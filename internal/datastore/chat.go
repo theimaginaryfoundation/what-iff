@@ -403,9 +403,16 @@ func (d *Datastore) ClearChatResponseID(ctx context.Context, userID, chatID uuid
 // queries. A count alone can't serve as a DB predicate without an extra round-trip to get the current
 // total, so both are kept.
 //
+// windowStart is the LastCheckpointAt to store: the start of the live history window, just after the
+// last message the summary covers (agent.checkpointWindowStart), so a message sent while the
+// checkpoint ran is not hidden behind it. A zero windowStart stores the current time.
+//
 // This combines UpdateChatCheckpointState and ClearChatResponseID into a single transaction to avoid
 // transient inconsistent state and reduce database round trips.
-func (d *Datastore) UpdateChatCheckpointStateAndClearResponseID(ctx context.Context, userID, chatID uuid.UUID, checkpointSummary string, checkpointUserMessageCount int) error {
+func (d *Datastore) UpdateChatCheckpointStateAndClearResponseID(ctx context.Context, userID, chatID uuid.UUID, checkpointSummary string, checkpointUserMessageCount int, windowStart time.Time) error {
+	if windowStart.IsZero() {
+		windowStart = time.Now()
+	}
 	tx, err := d.dbClient.Tx(ctx)
 	if err != nil {
 		d.logger.Error(i18n.T("tx.start_failed"), zap.Error(err))
@@ -424,7 +431,7 @@ func (d *Datastore) UpdateChatCheckpointStateAndClearResponseID(ctx context.Cont
 		SetCheckpointSummary(checkpointSummary).
 		SetCheckpointUserMessageCount(checkpointUserMessageCount).
 		SetResponseID("").
-		SetLastCheckpointAt(time.Now()).
+		SetLastCheckpointAt(windowStart).
 		Save(ctx)
 	if err != nil {
 		d.logger.Error(i18n.T("chat.checkpoint_response_id.update_failed"), zap.Error(err))

@@ -44,7 +44,6 @@ func (d *recallDistiller) Distill(ctx context.Context, question, material string
 	params := responses.ResponseNewParams{
 		Model:           archivalOpenAIModel,
 		MaxOutputTokens: openai.Int(recallDistillMaxOutputTokens),
-		ServiceTier:     responses.ResponseNewParamsServiceTierFlex,
 		Instructions:    openai.String(recallDistillPrompt),
 		Input: responses.ResponseNewParamsInputUnion{
 			OfInputItemList: []responses.ResponseInputItemUnionParam{
