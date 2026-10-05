@@ -10,8 +10,8 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
-// Datastore halves of the issue #254 concurrency fixes: the per-chat turn-job listing the turn gate
-// polls, and the scratchpad revision that makes checkpoint writes conditional.
+// Datastore half of the issue #254 turn serialization: the per-chat turn-job listing the turn gate
+// polls, the heartbeat, and Stop's coverage of agent_job_run turns.
 
 func TestTurnJobsForChat_GateListingAndStop(t *testing.T) {
 	ds, cleanup := newFinalizeChatJobTestDatastore(t)
@@ -105,51 +105,4 @@ func TestTurnJobsForChat_GateListingAndStop(t *testing.T) {
 	st, err = ds.JobStatus(ctx, userID, otherThread.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.JobStatusProcessing, st)
-}
-
-func TestScratchpadRevision_ConditionalWrite(t *testing.T) {
-	ds, cleanup := newTestDatastore(t, createMemoryImportTestSchema)
-	defer cleanup()
-	ctx := context.Background()
-
-	userID := createJobTestUser(t, ds)
-	personalityID := uuid.New()
-	createTestPersonality(t, ds, personalityID, userID)
-	revision := func() (string, int, []string) {
-		t.Helper()
-		p, err := ds.dbClient.Personality.Get(ctx, personalityID)
-		require.NoError(t, err)
-		return p.Scratchpad, p.ScratchpadRevision, p.ScratchpadHistory
-	}
-	_, rev, _ := revision()
-	require.Equal(t, 0, rev)
-
-	// A write at the current revision lands and bumps it, keeping history.
-	updated, err := ds.UpdatePersonalityScratchpadIfRevision(ctx, userID, personalityID, "notes v1", 0)
-	require.NoError(t, err)
-	require.Equal(t, "notes v1", updated.Scratchpad)
-	require.Equal(t, 1, updated.ScratchpadRevision)
-
-	// An unconditional write (user edit, update_scratchpad tool) also bumps it...
-	updated, err = ds.UpdatePersonalityScratchpad(ctx, userID, models.Personality{ID: personalityID, Scratchpad: "notes v2"})
-	require.NoError(t, err)
-	require.Equal(t, 2, updated.ScratchpadRevision)
-
-	// ...so a checkpoint still holding revision 1 conflicts and changes nothing.
-	_, err = ds.UpdatePersonalityScratchpadIfRevision(ctx, userID, personalityID, "stale rewrite", 1)
-	require.ErrorIs(t, err, ErrScratchpadConflict)
-	content, rev, history := revision()
-	require.Equal(t, "notes v2", content)
-	require.Equal(t, 2, rev)
-	require.Equal(t, "notes v1", history[0])
-
-	// Ownership is still enforced; the owner's retry at the latest revision lands.
-	stranger := createJobTestUser(t, ds)
-	_, err = ds.UpdatePersonalityScratchpadIfRevision(ctx, stranger, personalityID, "x", 2)
-	require.ErrorIs(t, err, ErrPersonalityNotFound)
-	_, err = ds.UpdatePersonalityScratchpadIfRevision(ctx, userID, personalityID, "notes v3", 2)
-	require.NoError(t, err)
-	content, rev, _ = revision()
-	require.Equal(t, "notes v3", content)
-	require.Equal(t, 3, rev)
 }

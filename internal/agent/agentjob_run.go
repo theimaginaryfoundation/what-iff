@@ -302,7 +302,6 @@ func (a *Agent) handleEphemeralPrompt(
 			chatCtx.chat.PersonalityID = personality.ID
 			chatCtx.chat.SystemPrompt = personality.SystemPrompt
 			chatCtx.chat.Scratchpad = personality.Scratchpad
-			chatCtx.chat.ScratchpadRevision = personality.ScratchpadRevision
 		}
 	}
 

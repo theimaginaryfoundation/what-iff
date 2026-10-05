@@ -413,7 +413,6 @@ func (d *Datastore) RevertCheckpointSnapshot(ctx context.Context, userID, snapsh
 		updated, err := tx.Personality.Update().
 			Where(entpersonality.ID(*snap.PersonalityID), entpersonality.HasUserWith(user.ID(userID))).
 			SetScratchpad(snap.Content).
-			AddScratchpadRevision(1).
 			Save(ctx)
 		if err != nil {
 			_ = tx.Rollback()

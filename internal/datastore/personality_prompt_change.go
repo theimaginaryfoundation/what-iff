@@ -106,11 +106,6 @@ func (d *Datastore) UpdatePersonalityWithPromptHistory(ctx context.Context, user
 		SetScratchpadHistory(history).
 		SetExpressionsEnabled(personalityModel.ExpressionsEnabled).
 		SetImageStyle(personalityModel.ImageStyle)
-	// A changed scratchpad bumps its revision so an in-flight checkpoint that read the old one
-	// does not overwrite this edit (see UpdatePersonalityScratchpadIfRevision).
-	if personalityModel.Scratchpad != currentPersonality.Scratchpad {
-		update = update.AddScratchpadRevision(1)
-	}
 	if personalityModel.AccentColor != nil {
 		update = update.SetAccentColor(*personalityModel.AccentColor)
 	} else {

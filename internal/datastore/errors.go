@@ -50,10 +50,6 @@ var (
 	// Personality-related errors
 	ErrPersonalityNotFound = errors.New("personality not found")
 
-	// ErrScratchpadConflict is returned by a conditional scratchpad write when the scratchpad
-	// changed after the caller read it (its revision moved on).
-	ErrScratchpadConflict = errors.New("personality scratchpad changed concurrently")
-
 	// ErrPersonalityExpressionNotDeletable is returned when deleting a reserved expression key (e.g. thinking).
 	ErrPersonalityExpressionNotDeletable = errors.New("personality expression cannot be deleted")
 
