@@ -160,7 +160,8 @@ func (f *fakeChatTurnStore) FinishTurnJobIfActive(_ context.Context, _, id uuid.
 	if !ok || isTerminalJobStatus(j.Status) {
 		return "", nil
 	}
-	if replied || j.ResultID != nil || hasReplied(j.Status) {
+	pastReply := j.Status == models.JobStatusInferenceComplete || j.Status == models.JobStatusExpressionComplete || j.Status == models.JobStatusCompactionComplete
+	if replied || j.ResultID != nil || pastReply {
 		j.Status, j.Error = models.JobStatusComplete, ""
 	} else {
 		j.Status, j.Error = models.JobStatusFailed, failMsg
