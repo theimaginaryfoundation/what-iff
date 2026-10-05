@@ -64,10 +64,18 @@ func TestSandbox_ChatPredicates(t *testing.T) {
 	require.True(t, conversationReadable(ctx, store, restrictedChat(""), unknown), "an unrestricted chat reads every conversation")
 	require.Equal(t, calls, store.chatLimitCalls, "and never pays for the lookup")
 
-	// Summaries are memories with their own level: no special case beyond the level.
-	otherSummary := &models.Memory{Level: models.MemoryLevelSummary, ChatID: uuid.New(), Sensitivity: models.MemorySensitivityPersonal}
-	require.True(t, memoryReadableBy(ctx, store, chat, otherSummary))
-	require.False(t, memoryReadableBy(ctx, store, public, otherSummary))
+	// A checkpoint summary follows its source conversation's classification AND its own level.
+	store.chatLimitErr = nil
+	summaryOf := func(chatID uuid.UUID, level models.MemorySensitivity) *models.Memory {
+		return &models.Memory{Level: models.MemoryLevelSummary, ChatID: chatID, Sensitivity: level}
+	}
+	require.True(t, memoryReadableBy(ctx, store, chat, summaryOf(perPeer, models.MemorySensitivityPersonal)))
+	require.False(t, memoryReadableBy(ctx, store, chat, summaryOf(sensPeer, models.MemorySensitivityPersonal)), "an unrestricted thread's summary is not readable, whatever its level")
+	require.False(t, memoryReadableBy(ctx, store, public, summaryOf(perPeer, models.MemorySensitivityPublic)), "the source thread's limit must also pass")
+	require.False(t, memoryReadableBy(ctx, store, public, summaryOf(pubPeer, models.MemorySensitivityPersonal)), "and so must the level")
+	require.True(t, memoryReadableBy(ctx, store, public, summaryOf(pubPeer, models.MemorySensitivityPublic)))
+	require.True(t, memoryReadableBy(ctx, store, chat, summaryOf(chat.ID, models.MemorySensitivityPersonal)), "its own summary")
+	require.False(t, memoryReadableBy(ctx, store, chat, summaryOf(uuid.Nil, models.MemorySensitivityPublic)), "no source chat fails closed")
 
 	// By id, a restricted chat reads what retrieval would hand it: another conversation's Chat memory
 	// only when that conversation is readable, and no User memory pinned to another personality.
@@ -196,9 +204,18 @@ func TestRecall_Restricted_FetchRelatedOriginByID(t *testing.T) {
 	res = recallJSON(t, rt, chat, `{"mode":"origin","target":"`+ownThread.ID.String()+`"}`)
 	require.Len(t, res.Conversations, 1)
 
-	// Another conversation's checkpoint summary is a memory with its own level: readable within the
-	// limit however it is addressed, and not above it.
-	for _, target := range []string{otherSummary.ChatID.String(), "summary:" + otherSummary.ChatID.String(), otherSummary.ID.String()} {
+	// Another conversation's checkpoint summary follows that conversation's classification, however
+	// it is addressed: hidden while the source thread is unrestricted (here: unknown, which fails
+	// closed the same way), readable once its limit is at or below this chat's, and never above the
+	// chat's level limit.
+	summaryTargets := []string{otherSummary.ChatID.String(), "summary:" + otherSummary.ChatID.String(), otherSummary.ID.String()}
+	for _, target := range summaryTargets {
+		res = recallJSON(t, rt, chat, `{"mode":"fetch","target":"`+target+`"}`)
+		require.Empty(t, res.Chunks, target)
+		require.NotContains(t, strings.Join(res.Memories, " "), "other chat summary", target)
+	}
+	store.chatLimits[otherSummary.ChatID] = models.MemorySensitivityPersonal
+	for _, target := range summaryTargets {
 		res = recallJSON(t, rt, chat, `{"mode":"fetch","target":"`+target+`"}`)
 		require.Contains(t, strings.Join(res.Memories, " ")+chunkTexts(res), "other chat summary", target)
 		res = recallJSON(t, rt, publicChat, `{"mode":"fetch","target":"`+target+`"}`)

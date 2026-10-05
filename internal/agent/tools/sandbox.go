@@ -14,9 +14,9 @@ import (
 // disabled_tools govern which ACTIONS the agent can take. Every tool that can read the user's
 // account data asks this file, not the chat's raw limit, so the rules live in one place:
 //
-//   - memories (checkpoint summaries included, which carry their own level) are read at or below
-//     the chat's limit (SQL filters in the datastore; memoryReadableBy covers lookups by ID, where
-//     another conversation's Chat memory also needs that conversation to be readable);
+//   - memories are read at or below the chat's limit (SQL filters in the datastore;
+//     memoryReadableBy covers lookups by ID, where another conversation's Chat memory or checkpoint
+//     summary also needs that conversation to be readable);
 //   - a thread's limit is also its own classification: another conversation (its messages,
 //     bookmarks, a memory's origin) is readable only when that conversation's own limit is at or
 //     below this chat's (a public thread reads other public threads), failing closed on lookup
@@ -41,7 +41,9 @@ func restrictedNote(chat *models.Chat, what string) string {
 //   - a Chat-scoped memory only from this conversation, or from one it may read
 //     (conversationReadable);
 //   - a User-scoped memory only when it is not pinned to another personality;
-//   - a checkpoint summary by its level alone (summaries carry their own level).
+//   - a checkpoint summary only from this conversation, or from one it may read: a summary is that
+//     conversation's content, so it follows the conversation's classification as well as its
+//     own level.
 //
 // Anything else (an unknown scope) is refused.
 func memoryReadableBy(ctx context.Context, store chatLimitLookup, chat *models.Chat, m *models.Memory) bool {
@@ -57,10 +59,8 @@ func memoryReadableBy(ctx context.Context, store chatLimitLookup, chat *models.C
 	switch memoryScopeOf(m) {
 	case MemoryScopeUser:
 		return m.PinnedPersonalityID == nil || (chat.PersonalityID != uuid.Nil && *m.PinnedPersonalityID == chat.PersonalityID)
-	case MemoryScopeChat:
+	case MemoryScopeChat, memoryScopeSummary:
 		return m.ChatID == chat.ID || conversationReadable(ctx, store, chat, m.ChatID)
-	case memoryScopeSummary:
-		return true
 	default:
 		return false
 	}

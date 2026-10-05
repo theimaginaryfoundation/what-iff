@@ -136,9 +136,6 @@ type MemoryFilters struct {
 	Status               *MemoryStatus `json:"status,omitempty"`
 	// Sensitivity, when set, lists only memories of exactly that sensitivity (the manager filter).
 	Sensitivity *MemorySensitivity `json:"sensitivity,omitempty"`
-	// MaxSensitivity, when set, lists only memories at or below that sensitivity. It is the chat
-	// sandbox gate and is never taken from a request.
-	MaxSensitivity *MemorySensitivity `json:"-"`
 }
 
 type CreateMemoryInput struct {

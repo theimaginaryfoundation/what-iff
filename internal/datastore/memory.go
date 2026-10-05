@@ -2462,8 +2462,9 @@ func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.
 // source_type=summaries search uses instead. limit is clamped to [1, 20], defaulting to 5.
 //
 // maxSensitivity is the asking chat's memory sensitivity limit, applied in the WHERE clause like
-// GetRelatedMemories (empty or sensitive is unrestricted). A summary carries its own level (see
-// UpsertChatSummaryMemory), so a restricted chat finds only summaries at or below its limit.
+// GetRelatedMemories (empty or sensitive is unrestricted). A restricted chat finds only summaries
+// whose own level is at or below its limit (see UpsertChatSummaryMemory) AND whose source
+// conversation it may read (its limit at or below the asking chat's; summarySourceReadableUnder).
 func (d *Datastore) GetRelatedSummaryMemories(ctx context.Context, userID uuid.UUID, queryEmbedding []float32, limit int, maxSensitivity models.MemorySensitivity) ([]*models.Memory, error) {
 	if limit <= 0 {
 		limit = 5
@@ -2482,6 +2483,9 @@ func (d *Datastore) GetRelatedSummaryMemories(ctx context.Context, userID uuid.U
 		memory.ScopeEQ(memory.ScopeSummary),
 	}
 	if p := memorySensitivityAtMost(maxSensitivity); p != nil {
+		summaryPreds = append(summaryPreds, p)
+	}
+	if p := summarySourceReadableUnder(maxSensitivity); p != nil {
 		summaryPreds = append(summaryPreds, p)
 	}
 	dbEmbeddings, err := d.dbClient.Embedding.Query().

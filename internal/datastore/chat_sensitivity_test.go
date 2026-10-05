@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
+	entmemory "github.com/theimaginaryfoundation/what-iff/ent/memory"
 	entuser "github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
@@ -197,4 +198,40 @@ func TestGetChatContext_RestrictedChatStillShowsTheOwnerTheScratchpad(t *testing
 	cc, err := ds.GetChatContext(ctx, userID, chatID)
 	require.NoError(t, err)
 	require.Equal(t, "owner notes", cc.ActiveScratchpad)
+}
+
+// Summary search gates by the summary's source conversation as well as its level. The search
+// itself needs pgvector, so this exercises the predicate GetRelatedSummaryMemories adds.
+func TestSummarySourceReadableUnder_FollowsTheSourceThreadsLimit(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+
+	summaryIn := map[models.MemorySensitivity]uuid.UUID{}
+	for _, l := range models.AllMemorySensitivities {
+		chatID := uuid.New()
+		createTestChat(t, ds, chatID, userID)
+		require.NoError(t, ds.dbClient.Chat.UpdateOneID(chatID).SetMemorySensitivityLimit(entchat.MemorySensitivityLimit(l)).Exec(ctx))
+		require.NoError(t, ds.UpsertChatSummaryMemory(ctx, userID, chatID, "summary of a "+string(l)+" thread", []float32{0.1}))
+		sum, err := ds.GetChatSummaryMemory(ctx, userID, chatID)
+		require.NoError(t, err)
+		summaryIn[l] = sum.ID
+	}
+
+	readable := func(limit models.MemorySensitivity) []uuid.UUID {
+		q := ds.dbClient.Memory.Query().Where(entmemory.ScopeEQ(entmemory.ScopeSummary))
+		if p := summarySourceReadableUnder(limit); p != nil {
+			q = q.Where(p)
+		}
+		ids, err := q.IDs(ctx)
+		require.NoError(t, err)
+		return ids
+	}
+	pub, per, sens := models.MemorySensitivityPublic, models.MemorySensitivityPersonal, models.MemorySensitivitySensitive
+	require.ElementsMatch(t, []uuid.UUID{summaryIn[pub]}, readable(pub))
+	require.ElementsMatch(t, []uuid.UUID{summaryIn[pub], summaryIn[per]}, readable(per))
+	require.ElementsMatch(t, []uuid.UUID{summaryIn[pub], summaryIn[per], summaryIn[sens]}, readable(sens), "an unrestricted chat adds no predicate")
+	require.Nil(t, summarySourceReadableUnder(""))
 }

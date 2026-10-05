@@ -106,7 +106,7 @@ func TestMemorySensitivity_UpdateAndSummaryExcluded(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidRequestBody)
 }
 
-func TestMemorySensitivity_ListFiltersAndSandboxGate(t *testing.T) {
+func TestMemorySensitivity_ListFilter(t *testing.T) {
 	ctx := context.Background()
 	ds, cleanup := newMemoryTestDatastore(t)
 	defer cleanup()
@@ -133,17 +133,6 @@ func TestMemorySensitivity_ListFiltersAndSandboxGate(t *testing.T) {
 	require.ElementsMatch(t, []string{"pub1", "pub2", "per1", "sens1"}, contents(models.MemoryFilters{}))
 	require.ElementsMatch(t, []string{"pub1", "pub2"}, contents(models.MemoryFilters{Sensitivity: exact(sPublic)}))
 	require.ElementsMatch(t, []string{"sens1"}, contents(models.MemoryFilters{Sensitivity: exact(sSensitive)}))
-
-	// MaxSensitivity is the chat sandbox ceiling: at or below, in the SQL WHERE clause.
-	require.ElementsMatch(t, []string{"pub1", "pub2"}, contents(models.MemoryFilters{MaxSensitivity: exact(sPublic)}))
-	require.ElementsMatch(t, []string{"pub1", "pub2", "per1"}, contents(models.MemoryFilters{MaxSensitivity: exact(sPersonal)}))
-	require.ElementsMatch(t, []string{"pub1", "pub2", "per1", "sens1"}, contents(models.MemoryFilters{MaxSensitivity: exact(sSensitive)}))
-
-	// A ceiling still fills pages from permitted rows (page size 2 over 3 permitted memories).
-	res, err := ds.ListMemories(ctx, userID, 1, 2, models.MemoryFilters{MaxSensitivity: exact(sPersonal)})
-	require.NoError(t, err)
-	require.Len(t, res.Results, 2)
-	require.Equal(t, 3, res.TotalCount)
 }
 
 func TestMemoryIDsWithinSensitivity_OwnerScopedAndGated(t *testing.T) {

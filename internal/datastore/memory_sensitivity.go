@@ -59,6 +59,18 @@ func summarySensitivity(chatLimit models.MemorySensitivity) models.MemorySensiti
 	return models.CapToLimit(models.DefaultMemorySensitivity, chatLimit)
 }
 
+// summarySourceReadableUnder matches Summary memories whose source chat a chat with this limit may
+// read (chatLimitAtMost): a checkpoint summary is that conversation's content, so it follows the
+// conversation's classification (models.ConversationReadableUnder) as well as its own level. A
+// summary with no source chat does not match. It returns nil for an unrestricted limit.
+func summarySourceReadableUnder(limit models.MemorySensitivity) predicate.Memory {
+	p := chatLimitAtMost(limit)
+	if p == nil {
+		return nil
+	}
+	return memory.HasChatWith(p)
+}
+
 // GetChatMemorySensitivityLimit returns the stored memory_sensitivity_limit of one of the user's
 // chats. It returns ErrChatNotFound when the chat does not exist or belongs to someone else, so a
 // caller deciding whether another conversation is readable can fail closed on any error.
@@ -115,16 +127,10 @@ func (d *Datastore) MemoryIDsWithinSensitivity(ctx context.Context, userID uuid.
 	return out, nil
 }
 
-// applyMemorySensitivityFilters applies the list filters: an exact Sensitivity match (the memory
-// manager filter) and a MaxSensitivity ceiling (the chat sandbox gate).
+// applyMemorySensitivityFilters applies the memory manager's exact Sensitivity filter.
 func applyMemorySensitivityFilters(query *ent.MemoryQuery, filters models.MemoryFilters) *ent.MemoryQuery {
 	if filters.Sensitivity != nil && *filters.Sensitivity != "" {
 		query = query.Where(memory.SensitivityEQ(memory.Sensitivity(*filters.Sensitivity)))
-	}
-	if filters.MaxSensitivity != nil {
-		if p := memorySensitivityAtMost(*filters.MaxSensitivity); p != nil {
-			query = query.Where(p)
-		}
 	}
 	return query
 }
