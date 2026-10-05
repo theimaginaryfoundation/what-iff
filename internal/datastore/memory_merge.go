@@ -590,9 +590,15 @@ func (d *Datastore) foldIntoLiveMemory(
 	return toMemoryModel(updated), nil
 }
 
+// errDuplicateMemoryEmbedding means a memory has more than one embedding row. Embeddings are keyed
+// by memory ID, so this is a data bug; replaceMemoryEmbeddingTx refuses to guess which row a fold
+// snapshots (and undo restores) and fails the transaction instead.
+var errDuplicateMemoryEmbedding = errors.New("memory has more than one embedding row")
+
 // replaceMemoryEmbeddingTx points memoryID's embedding at vector, creating the row when the memory
 // had none. It returns the previous vector (nil when there was none) and whether a row existed, so
-// a fold can snapshot it for undo.
+// a fold can snapshot it for undo. A memory has at most one embedding row; more than one returns
+// errDuplicateMemoryEmbedding with nothing written, so the snapshot always matches what is replaced.
 func replaceMemoryEmbeddingTx(ctx context.Context, tx *ent.Tx, memoryID uuid.UUID, vector []float32) ([]float32, bool, error) {
 	rows, err := tx.Embedding.Query().
 		Where(embedding.HasMemoryWith(memory.ID(memoryID))).
@@ -614,6 +620,9 @@ func replaceMemoryEmbeddingTx(ctx context.Context, tx *ent.Tx, memoryID uuid.UUI
 			return nil, false, err
 		}
 		return nil, false, nil
+	}
+	if len(rows) > 1 {
+		return nil, false, fmt.Errorf("%w: memory %s has %d", errDuplicateMemoryEmbedding, memoryID, len(rows))
 	}
 	prior := append([]float32(nil), rows[0].Embedding.Slice()...)
 	if _, err := tx.Embedding.Update().

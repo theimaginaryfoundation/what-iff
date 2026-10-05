@@ -98,6 +98,14 @@ func foldTestState(t *testing.T, ds *Datastore, id uuid.UUID) foldTestMemoryStat
 	return state
 }
 
+// foldTestStateIgnoringEmbeddings is foldTestState for a memory that may have several embedding rows.
+func foldTestStateIgnoringEmbeddings(t *testing.T, ds *Datastore, id uuid.UUID) foldTestMemoryState {
+	t.Helper()
+	row, err := ds.dbClient.Memory.Get(context.Background(), id)
+	require.NoError(t, err)
+	return foldTestMemoryState{Status: row.Status, Content: row.Content, Confidence: row.Confidence}
+}
+
 func foldTestEvent(t *testing.T, ds *Datastore, userID, survivorID uuid.UUID) *ent.MemoryMergeEvent {
 	t.Helper()
 	row, err := ds.dbClient.MemoryMergeEvent.Query().
@@ -398,4 +406,62 @@ func TestLockRowsForUpdate_PostgresOnly(t *testing.T) {
 		query, _ := sel.Query()
 		require.Equal(t, tc.want, strings.Contains(query, "FOR UPDATE"), "%s: %s", tc.dialect, query)
 	}
+}
+
+// insertDuplicateFoldTestEmbedding gives a memory a second embedding row, a data bug the schema
+// does not forbid.
+func insertDuplicateFoldTestEmbedding(t *testing.T, ds *Datastore, memoryID uuid.UUID) {
+	t.Helper()
+	_, err := ds.dbClient.Embedding.Create().
+		SetEmbedding(pgvector.NewVector(foldTestVector(5))).
+		SetMemoryID(memoryID).
+		Save(context.Background())
+	require.NoError(t, err)
+}
+
+// A survivor with more than one embedding row makes the fold fail rather than snapshot one row and
+// overwrite all of them; the transaction rolls back, so nothing is folded.
+func TestPersistMemoryMergeGroup_FoldRefusesASurvivorWithDuplicateEmbeddings(t *testing.T) {
+	ds, userID, chatID := newFoldTestDatastore(t)
+	ctx := context.Background()
+
+	survivorID := insertFoldTestMemory(t, ds, userID, foldTestMemory{content: "Likes tea", confidence: 0.6, embedding: foldTestVector(1)})
+	absorbedID := insertFoldTestMemory(t, ds, userID, foldTestMemory{content: "Drinks oolong most mornings", confidence: 0.6, embedding: foldTestVector(2)})
+	insertDuplicateFoldTestEmbedding(t, ds, survivorID)
+
+	_, err := ds.PersistMemoryMergeGroup(ctx, userID, chatID, foldTestGroup("Likes tea, especially oolong in the morning"), 2,
+		&survivorID, []uuid.UUID{absorbedID}, foldTestVector(9), uuid.Nil, nil, nil)
+
+	require.ErrorIs(t, err, errDuplicateMemoryEmbedding)
+	require.Equal(t, "Likes tea", foldTestStateIgnoringEmbeddings(t, ds, survivorID).Content)
+	require.Equal(t, entmemory.StatusActive, foldTestState(t, ds, absorbedID).Status, "the absorbed memory is not retired")
+	count, err := ds.dbClient.MemoryMergeEvent.Query().Where(entmerge.UserIDEQ(userID)).Count(ctx)
+	require.NoError(t, err)
+	require.Zero(t, count, "no undo event for a fold that did not happen")
+	embeddings, err := ds.dbClient.Embedding.Query().Where(entembedding.HasMemoryWith(entmemory.ID(survivorID))).All(ctx)
+	require.NoError(t, err)
+	for _, e := range embeddings {
+		require.NotEqual(t, foldTestVector(9), e.Embedding.Slice(), "no embedding row was overwritten")
+	}
+}
+
+// Undo has the same guard: with duplicate embedding rows it fails and leaves the fold in place.
+func TestUndoFoldLive_RefusesASurvivorWithDuplicateEmbeddings(t *testing.T) {
+	ds, userID, chatID := newFoldTestDatastore(t)
+	ctx := context.Background()
+
+	survivorID := insertFoldTestMemory(t, ds, userID, foldTestMemory{content: "Likes tea", confidence: 0.6, embedding: foldTestVector(1)})
+	absorbedID := insertFoldTestMemory(t, ds, userID, foldTestMemory{content: "Drinks oolong most mornings", confidence: 0.6, embedding: foldTestVector(2)})
+	canonical := "Likes tea, especially oolong in the morning"
+	_, err := ds.PersistMemoryMergeGroup(ctx, userID, chatID, foldTestGroup(canonical), 2,
+		&survivorID, []uuid.UUID{absorbedID}, foldTestVector(9), uuid.Nil, nil, nil)
+	require.NoError(t, err)
+	event := foldTestEvent(t, ds, userID, survivorID)
+	insertDuplicateFoldTestEmbedding(t, ds, survivorID)
+
+	_, err = ds.UndoMemoryMergeEvent(ctx, userID, event.ID)
+
+	require.ErrorIs(t, err, errDuplicateMemoryEmbedding)
+	require.Equal(t, canonical, foldTestStateIgnoringEmbeddings(t, ds, survivorID).Content, "the fold is still in place")
+	require.Equal(t, entmemory.StatusInactive, foldTestState(t, ds, absorbedID).Status)
 }

@@ -110,6 +110,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Memory folds (`memory_merge.go`):** a `fold_live` into an existing survivor adopts the merger's canonical content and re-embeds the survivor in the same transaction, using the embedding the caller passes to `PersistMemoryMergeGroup` (the datastore never calls the embedding API).
   The survivor row is locked for the transaction (`lockRowsForUpdate`: `FOR UPDATE` on Postgres only, since SQLite rejects it) so a concurrent edit or star is not overwritten.
   A survivor that had no embedding gets one keyed by its memory ID with an on-conflict upsert, so a racing writer cannot leave two rows.
+  A survivor that already has more than one embedding row (a data bug) fails the fold or undo with `errDuplicateMemoryEmbedding` and rolls back, rather than snapshotting one row while overwriting all of them.
   `decideSurvivorRewrite` is the rule: no rewrite when the content only differs in case/whitespace, when the survivor is **starred** (the user's "keep this" signal), or when no embedding was supplied.
   Absorbed memories are set inactive but keep their embeddings; recall only searches `status=active`, so they are invisible until an undo reactivates them.
   The undo snapshot records the survivor's prior content and embedding plus each absorbed memory's prior status, so `UndoMemoryMergeEvent` restores every row exactly.
