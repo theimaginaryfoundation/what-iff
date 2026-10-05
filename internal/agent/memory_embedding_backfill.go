@@ -9,12 +9,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// DefaultMemoryEmbeddingBackfillInterval is how often the memory embedding
-// backfill runs. Hourly is enough to heal a memory whose post-save embedding
-// failed without waiting for a deploy, and a run with nothing missing costs one
-// query.
-const DefaultMemoryEmbeddingBackfillInterval = time.Hour
-
 // memoryEmbeddingBackfillStore is what the backfill needs from the datastore.
 type memoryEmbeddingBackfillStore interface {
 	TryAcquireSchedulerLeaderLock(ctx context.Context, lockKey int64) (datastore.SchedulerLeaderLock, bool, error)
@@ -24,41 +18,26 @@ type memoryEmbeddingBackfillStore interface {
 // MemoryEmbeddingBackfillConfig configures StartMemoryEmbeddingBackfill.
 type MemoryEmbeddingBackfillConfig struct {
 	// LockKey is the Postgres advisory lock key that elects the one instance
-	// running each pass (see server.Config.MemoryEmbeddingBackfillLockKey).
+	// running the pass (see server.Config.MemoryEmbeddingBackfillLockKey).
 	LockKey int64
-	// Interval between passes; DefaultMemoryEmbeddingBackfillInterval when zero.
-	Interval time.Duration
 }
 
 // StartMemoryEmbeddingBackfill embeds, in the background, every active
 // non-Summary memory that has no Embedding row: rows written before memories
 // were embedded on save (issue #248), and any whose post-save embedding failed.
-// It runs once at start and then every cfg.Interval until ctx is cancelled.
-// Each pass runs only on the instance that wins the advisory lock; the others
-// skip it quietly, as does a database without advisory locks. Under a mock or
-// local LLM backend it never starts: embeddings cannot reach a provider there
-// (deny-network client), so every pass would only make failing calls.
+// It runs once, at startup, and never again: new and edited memories are embedded
+// when they are saved, so this only has to catch up the rows that predate that,
+// plus any save-time failure since the last restart. The pass runs only on the
+// instance that wins the advisory lock; the others skip it quietly, as does a
+// database without advisory locks. Under a mock or local LLM backend it never
+// starts: embeddings cannot reach a provider there (deny-network client), so the
+// pass would only make failing calls.
 func (a *Agent) StartMemoryEmbeddingBackfill(ctx context.Context, cfg MemoryEmbeddingBackfillConfig) {
 	if run, reason := a.memoryEmbeddingBackfillEnabled(); !run {
 		a.logger.Info("memory embedding backfill disabled", zap.String("reason", reason))
 		return
 	}
-	interval := cfg.Interval
-	if interval <= 0 {
-		interval = DefaultMemoryEmbeddingBackfillInterval
-	}
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			runMemoryEmbeddingBackfillPass(ctx, a.ds, cfg.LockKey, a.memoryTool.CreateEmbeddings, a.logger)
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
-		}
-	}()
+	go runMemoryEmbeddingBackfillPass(ctx, a.ds, cfg.LockKey, a.memoryTool.CreateEmbeddings, a.logger)
 }
 
 // memoryEmbeddingBackfillEnabled reports whether the backfill should run, and
@@ -89,7 +68,7 @@ func runMemoryEmbeddingBackfillPass(
 	lock, acquired, err := store.TryAcquireSchedulerLeaderLock(ctx, lockKey)
 	if err != nil {
 		// No advisory locks (non-Postgres database) or a transient lock error:
-		// skip this pass; the next tick tries again.
+		// skip the pass; the next startup tries again.
 		logger.Debug("memory embedding backfill skipped: advisory lock unavailable",
 			zap.Int64("lock_key", lockKey),
 			zap.Error(err))

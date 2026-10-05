@@ -13,7 +13,7 @@ import (
 const (
 	// memoryEmbedTimeout bounds the post-save embedding call so a slow provider
 	// cannot hold the request open indefinitely. The save has already committed
-	// by then; a timeout only leaves the memory for the backfill.
+	// by then; a timeout only leaves the memory for the startup backfill.
 	memoryEmbedTimeout = 20 * time.Second
 	// memoryEmbedChunkSize caps inputs per embeddings request (the provider
 	// limit is far higher; this keeps a single request small).
@@ -39,7 +39,7 @@ func (h *Handler) embeddingAvailable() bool {
 // embedMemories gives each of ids that lacks an embedding one, after the
 // memory itself has been saved. It is best-effort by design: a failure is
 // logged and never surfaces to the caller, because the user's write already
-// succeeded and BackfillMemoryEmbeddings picks up whatever is still missing.
+// succeeded and the startup BackfillMemoryEmbeddings pass picks up whatever is still missing.
 //
 // "Lacks an embedding" is what makes this the right hook for both creates and
 // edits: a new memory has none, and UpdateMemory drops the embedding in the
