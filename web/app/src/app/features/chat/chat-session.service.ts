@@ -578,6 +578,15 @@ export class ChatSessionService implements OnDestroy {
     );
   }
 
+  /**
+   * Adopts a newer server copy of the active thread that was saved outside this service (the
+   * context panel's memory-access setting), so later optimistic updates don't start from stale state.
+   */
+  adoptThreadUpdate(updated: Chat): void {
+    if (!this.isActiveThread(updated.id)) return;
+    this._thread.set(updated);
+  }
+
   /** Pins a generation mode on the thread, or clears to Auto when moodId is null. */
   setActiveMood(moodId: string | null): void {
     const chat = this._thread();

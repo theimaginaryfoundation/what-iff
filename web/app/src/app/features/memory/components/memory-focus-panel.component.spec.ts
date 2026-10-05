@@ -13,6 +13,7 @@ function makeVm(partial: Partial<MemoryCardVm> = {}): MemoryCardVm {
     level: 'global',
     levelLabel: 'Global',
     status: 'active',
+    sensitivity: 'personal',
     starred: false,
     chatName: null,
     chatId: null,
@@ -348,5 +349,21 @@ describe('MemoryFocusPanelComponent', () => {
 
     expect(members[1].querySelector('a')).toBeNull();
     expect(members[1].querySelector('span')?.textContent).toBe('Plain member');
+  });
+});
+
+describe('MemoryFocusPanelComponent sensitivity badge', () => {
+  it('shows the memory sensitivity next to the level', async () => {
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [MemoryFocusPanelComponent],
+      providers: [provideZonelessChangeDetection(), provideRouter([])],
+    }).compileComponents();
+    const fixture = TestBed.createComponent(MemoryFocusPanelComponent);
+    fixture.componentRef.setInput('memory', makeVm({ sensitivity: 'sensitive' }));
+    fixture.detectChanges();
+
+    const badge = (fixture.nativeElement as HTMLElement).querySelector('.sensitivity-badge');
+    expect(badge?.textContent?.trim()).toBe('Sensitive');
   });
 });

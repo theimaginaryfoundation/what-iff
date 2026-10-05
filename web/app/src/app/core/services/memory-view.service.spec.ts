@@ -238,6 +238,26 @@ describe('MemoryViewService', () => {
     expect(service.mutating()).toBe(false);
   });
 
+  it('patchSelected forwards a sensitivity change to every selected id in one all-or-none batch', () => {
+    memoryApi.patchMemoriesBatch.mockReturnValue(of({ results: [], updated_count: 3 }));
+    service.setSelectedIds(['m-1', 'm-2', 'm-3']);
+
+    service.patchSelected({ sensitivity: 'sensitive' }).subscribe();
+
+    expect(memoryApi.patchMemoriesBatch).toHaveBeenCalledTimes(1);
+    expect(memoryApi.patchMemoriesBatch).toHaveBeenCalledWith({
+      ids: ['m-1', 'm-2', 'm-3'],
+      patch: { sensitivity: 'sensitive' },
+      all_or_none: true,
+    });
+  });
+
+  it('sends the sensitivity filter to the list query', () => {
+    service.setFilters({ sensitivity: 'public' });
+
+    expect(memoryApi.getMemories).toHaveBeenLastCalledWith(1, 100, expect.objectContaining({ sensitivity: 'public' }));
+  });
+
   it('patchSelected emits void regardless of the response payload', () => {
     service.toggleSelection('m-1');
     let received: unknown = 'not-emitted';

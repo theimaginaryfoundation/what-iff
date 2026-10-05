@@ -74,6 +74,28 @@ describe('MemoryDetailPageComponent', () => {
     expect(fixture.componentInstance.memory()?.id).toBe('m-1');
   });
 
+  it('shows the sensitivity badge in the metadata, defaulting to Personal', () => {
+    const fixture = TestBed.createComponent(MemoryDetailPageComponent);
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+
+    expect(host.querySelector('aside .sensitivity-badge')?.textContent?.trim()).toBe('Personal');
+
+    fixture.componentInstance.memory.set({ ...fixture.componentInstance.memory()!, sensitivity: 'sensitive' });
+    fixture.detectChanges();
+    expect(host.querySelector('aside .sensitivity-badge')?.textContent?.trim()).toBe('Sensitive');
+  });
+
+  it('patches the memory with the chosen sensitivity on save', () => {
+    const fixture = TestBed.createComponent(MemoryDetailPageComponent);
+    fixture.detectChanges();
+    const patch = vi.spyOn(TestBed.inject(MemoryService), 'patchMemory');
+
+    fixture.componentInstance.save({ content: 'hello', level: 'thread', sensitivity: 'public' });
+
+    expect(patch).toHaveBeenCalledWith('m-1', { content: 'hello', level: 'thread', sensitivity: 'public' });
+  });
+
   it('renders inactive memories with only Unarchive and Delete controls', () => {
     const fixture = TestBed.createComponent(MemoryDetailPageComponent);
     const component = fixture.componentInstance;
