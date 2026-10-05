@@ -154,6 +154,24 @@ func (f *fakeChatTurnStore) UpdateJobStatus(_ context.Context, _, id uuid.UUID, 
 	return &cp, nil
 }
 
+// FinishTurnJobIfActive mirrors the datastore: a no-op on a terminal job, complete when the turn
+// replied (per the caller, the row's result or its status), failed otherwise.
+func (f *fakeChatTurnStore) FinishTurnJobIfActive(_ context.Context, _, id uuid.UUID, replied bool, failMsg string) (models.JobStatus, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	j, ok := f.jobs[id]
+	if !ok || isTerminalJobStatus(j.Status) {
+		return "", nil
+	}
+	if replied || j.ResultID != nil || hasReplied(j.Status) {
+		j.Status, j.Error = models.JobStatusComplete, ""
+	} else {
+		j.Status, j.Error = models.JobStatusFailed, failMsg
+	}
+	j.UpdatedAt = time.Now()
+	return j.Status, nil
+}
+
 // testTurnGate builds a gate over store with fast polling, no heartbeat and the given timeout.
 func testTurnGate(store chatTurnStore, timeout time.Duration) *chatTurnGate {
 	return &chatTurnGate{
@@ -573,6 +591,8 @@ func TestAwaitUserChatTurn_ReleaseFinishesAJobLeftNonTerminal(t *testing.T) {
 		"reply saved, final write lost": {models.JobStatusCompactionComplete, &resultID, models.JobStatusComplete},
 		"no reply":                      {models.JobStatusProcessing, nil, models.JobStatusFailed},
 		"cancelled elsewhere is kept":   {models.JobStatusCancelled, nil, models.JobStatusCancelled},
+		"reply saved per the row only":  {models.JobStatusInferenceComplete, nil, models.JobStatusComplete},
+		"completed elsewhere is kept":   {models.JobStatusComplete, nil, models.JobStatusComplete},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

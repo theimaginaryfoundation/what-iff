@@ -44,7 +44,7 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
   A turn that queues longer than `chatTurnWaitTimeout` (10m, enough for a few long turns with checkpoints; queued turns heartbeat too, so it need not stay below the stale bound) fails with `ErrChatTurnWaitTimeout` instead of running concurrently.
   A queued turn whose job was cancelled meanwhile (Stop on another instance) does not run (`errQueuedTurnCancelled`), and a cancelled queued chat turn is marked cancelled.
   A scheduled run has no job row, so `beginEphemeralChatTurn` creates an `agent_job_run` ticket job (reference = chat id) to hold its place and finishes it with the run's outcome.
-  `handleUserMessage` owns its job's status, so its release also finishes a job the turn left non-terminal (a lost final status write): complete if it saved a reply, else failed.
+  `handleUserMessage` owns its job's status, so its release also finishes a job the turn left non-terminal (a lost final status write): complete if it saved a reply (per the worker or the row), else failed, via the conditional `FinishTurnJobIfActive` so a status Stop or the reaper wrote meanwhile is kept.
   On shutdown, `FailInFlightTurns` (called by `server.Shutdown`) finishes this process's in-flight turn jobs: complete if past their reply, else failed.
   `finalizeChat` renames a new chat without writing `response_id`, so the rename never touches the response chain.
   The gate serializes turns within a chat only: the scratchpad belongs to the personality, so checkpoints in two chats of one personality can still overwrite each other (as before #254).

@@ -104,6 +104,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   The cutoff is the gate's stale bound: crash orphans past `inference_complete` are never reaped at startup, and without it they could fill the row limit and hide a live turn.
   It filters on the status index (`StatusIn`), the owner foreign key column directly, and selects only the gate's fields, so the common case (no other live turn for the user) is one cheap query; the chat-message lookup runs only for message-keyed candidates.
   `TouchJob` is the turn heartbeat (refreshes `updated_at`).
+  `FinishTurnJobIfActive` finishes a turn job its worker left non-terminal, deciding from the row (complete when the caller saw its reply, the row has a `result_id`, or its status is past `inference_complete`; failed otherwise) with writes conditional on the job still being non-terminal, so it never overwrites a status another instance wrote.
 - **Checkpoint window:** `UpdateChatCheckpointStateAndClearResponseID` takes the `last_checkpoint_at` to store (the agent passes just after the checkpointed reply, #268; zero means now).
   `FirstChatMessageSentAtSince` finds the earliest message in a chat since a time, leaving out given ids, so the agent can tell whether a message arrived mid-turn.
 - **`SetAgentJobOverrides`:** `personality_id` must belong to the job owner; `model_id` must exist in the global model catalog.

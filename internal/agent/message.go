@@ -2924,7 +2924,7 @@ func (a *Agent) checkpointWindowStart(ctx context.Context, userID, chatID uuid.U
 	if agentMsg == nil || agentMsg.SentAt.IsZero() {
 		return time.Now()
 	}
-	if userMsg == nil || userMsg.SentAt.IsZero() {
+	if userMsg == nil || userMsg.SentAt.IsZero() || a.ds == nil {
 		return checkpointWindowStartAfter(time.Time{}, agentMsg.SentAt, nil)
 	}
 	firstOther, err := a.ds.FirstChatMessageSentAtSince(ctx, userID, chatID, userMsg.SentAt, userMsg.ID, agentMsg.ID)

@@ -1251,6 +1251,55 @@ func (d *Datastore) MarkChatJobCancelled(ctx context.Context, userID, jobID uuid
 	return n > 0, nil
 }
 
+// FinishTurnJobIfActive makes a turn job that its worker left non-terminal terminal, deciding from
+// the row, not the worker's copy: complete when it produced its reply (replied, a result_id on the
+// row, or a status past inference_complete), failed with failMsg otherwise. Each write is
+// conditional on the job still being non-terminal, so a status another instance wrote meanwhile
+// (Stop, the reaper) is never overwritten. Returns the status written, or "" when the job was
+// already terminal.
+func (d *Datastore) FinishTurnJobIfActive(ctx context.Context, userID, jobID uuid.UUID, replied bool, failMsg string) (models.JobStatus, error) {
+	active := []predicate.Job{
+		job.ID(jobID),
+		job.HasOwnerWith(user.ID(userID)),
+		job.StatusNotIn(job.StatusComplete, job.StatusCancelled, job.StatusFailed),
+	}
+	completeWhere := active
+	if !replied {
+		completeWhere = append(append([]predicate.Job{}, active...), job.Or(
+			job.ResultIDNotNil(),
+			job.StatusIn(job.StatusInferenceComplete, job.StatusExpressionComplete, job.StatusCompactionComplete),
+		))
+	}
+	write := func(where []predicate.Job, status job.Status, errorMsg string) (bool, error) {
+		upd := d.dbClient.Job.Update().Where(where...).SetStatus(status)
+		if errorMsg != "" {
+			upd.SetError(errorMsg)
+		} else {
+			upd.ClearError()
+		}
+		n, err := upd.Save(ctx)
+		if err != nil {
+			d.logger.Error(i18n.T1("update.failed", "Entity", "job status"), zap.Error(err))
+			return false, err
+		}
+		if n > 0 && d.metrics != nil {
+			if row, qerr := d.dbClient.Job.Query().Where(job.ID(jobID)).Select(job.FieldJobType, job.FieldCreatedAt).Only(ctx); qerr == nil {
+				d.recordJobStatusChange(ctx, row.JobType, row.CreatedAt, "", status)
+			}
+		}
+		return n > 0, nil
+	}
+	if ok, err := write(completeWhere, job.StatusComplete, ""); err != nil {
+		return "", err
+	} else if ok {
+		return models.JobStatusComplete, nil
+	}
+	if ok, err := write(active, job.StatusFailed, failMsg); err != nil || !ok {
+		return "", err
+	}
+	return models.JobStatusFailed, nil
+}
+
 // JobStatus returns just a job's status: a cheap single-column read for a running worker that
 // polls for a cancel requested on another API instance.
 func (d *Datastore) JobStatus(ctx context.Context, userID, jobID uuid.UUID) (models.JobStatus, error) {

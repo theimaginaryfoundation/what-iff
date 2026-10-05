@@ -118,3 +118,57 @@ func TestTurnJobsForChat_GateListingAndStop(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, models.JobStatusProcessing, st)
 }
+
+// FinishTurnJobIfActive decides from the row and only writes a job that is still non-terminal, so a
+// worker finishing its own abandoned job never overwrites a status another instance wrote.
+func TestFinishTurnJobIfActive(t *testing.T) {
+	ds, cleanup := newFinalizeChatJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := createJobTestUser(t, ds)
+	chatID := uuid.New()
+	createTestChat(t, ds, chatID, userID)
+	msgID := createJobTestUserMessage(t, ds, chatID)
+
+	for name, tc := range map[string]struct {
+		status      models.JobStatus
+		rowResult   bool
+		replied     bool
+		wantWritten models.JobStatus
+		wantStatus  models.JobStatus
+	}{
+		"no reply fails":              {models.JobStatusProcessing, false, false, models.JobStatusFailed, models.JobStatusFailed},
+		"worker saw its reply":        {models.JobStatusProcessing, false, true, models.JobStatusComplete, models.JobStatusComplete},
+		"row has a result":            {models.JobStatusProcessing, true, false, models.JobStatusComplete, models.JobStatusComplete},
+		"row is past its reply":       {models.JobStatusExpressionComplete, false, false, models.JobStatusComplete, models.JobStatusComplete},
+		"cancelled elsewhere is kept": {models.JobStatusCancelled, false, true, "", models.JobStatusCancelled},
+		"failed elsewhere is kept":    {models.JobStatusFailed, true, true, "", models.JobStatusFailed},
+		"completed elsewhere is kept": {models.JobStatusComplete, false, false, "", models.JobStatusComplete},
+	} {
+		t.Run(name, func(t *testing.T) {
+			j := createActiveChatMessageJob(t, ds, userID, msgID.String(), tc.status)
+			if tc.rowResult {
+				_, err := ds.dbClient.Job.UpdateOneID(j.ID).SetResultID(uuid.New()).Save(ctx)
+				require.NoError(t, err)
+			}
+			written, err := ds.FinishTurnJobIfActive(ctx, userID, j.ID, tc.replied, "turn ended without a final status")
+			require.NoError(t, err)
+			require.Equal(t, tc.wantWritten, written)
+			got, err := ds.GetJob(ctx, userID, j.ID)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantStatus, got.Status)
+			if tc.wantWritten == models.JobStatusFailed {
+				require.Equal(t, "turn ended without a final status", got.Error)
+			}
+		})
+	}
+
+	// Another user's job is never touched.
+	j := createActiveChatMessageJob(t, ds, userID, msgID.String(), models.JobStatusProcessing)
+	written, err := ds.FinishTurnJobIfActive(ctx, uuid.New(), j.ID, false, "x")
+	require.NoError(t, err)
+	require.Empty(t, written)
+	st, err := ds.JobStatus(ctx, userID, j.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.JobStatusProcessing, st)
+}

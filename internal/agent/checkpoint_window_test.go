@@ -112,3 +112,12 @@ func TestCheckpointWindowStart_LooksForMessagesTheSummaryDidNotSee(t *testing.T)
 		require.NoError(t, mock.ExpectationsWereMet())
 	})
 }
+
+func TestCheckpointWindowStart_NoDatastoreSkipsTheLookup(t *testing.T) {
+	t.Parallel()
+	a := &Agent{logger: zap.NewNop()} // no datastore: the lookup must not run, even with a user message time
+	reply := time.Now().Add(-time.Minute)
+	userMsg := &models.ChatMessage{ID: uuid.New(), SentAt: reply.Add(-time.Second)}
+	got := a.checkpointWindowStart(context.Background(), uuid.New(), uuid.New(), userMsg, &models.ChatMessage{ID: uuid.New(), SentAt: reply})
+	require.Equal(t, reply.Add(time.Microsecond), got)
+}

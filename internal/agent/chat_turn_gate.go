@@ -79,6 +79,7 @@ type chatTurnStore interface {
 	CreateJob(ctx context.Context, userID uuid.UUID, job models.Job) (*models.Job, error)
 	UpdateJobStatus(ctx context.Context, userID, id uuid.UUID, status models.JobStatus, errorMsg string) (*models.Job, error)
 	JobStatus(ctx context.Context, userID, jobID uuid.UUID) (models.JobStatus, error)
+	FinishTurnJobIfActive(ctx context.Context, userID, jobID uuid.UUID, replied bool, failMsg string) (models.JobStatus, error)
 	TouchJob(ctx context.Context, userID, id uuid.UUID) error
 	UpdateJobProgress(ctx context.Context, userID, id uuid.UUID, progress string) error
 }
@@ -132,6 +133,8 @@ func (t *chatTurnTracker) waitCh(chatID uuid.UUID) <-chan struct{} {
 }
 
 // wakeChat wakes the waiters queued in chatID (only that chat's).
+// The close and the delete happen under one lock, so a channel is closed at most once however many
+// callers race to wake the chat; a later call finds no entry, or the fresh channel of a later waitCh.
 func (t *chatTurnTracker) wakeChat(chatID uuid.UUID) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -310,8 +313,9 @@ func (a *Agent) awaitUserChatTurn(ctx context.Context, job *models.Job, chatID u
 }
 
 // finishAbandonedTurnJob marks job terminal when its turn ended without doing so: complete when
-// it already produced its reply (ResultID set at inference_complete), failed otherwise. A job the
-// database already shows terminal (e.g. cancelled from another instance) is left alone.
+// it already produced its reply (ResultID set at inference_complete, here or on the row), failed
+// otherwise. The write is conditional on the row still being non-terminal, so a status another
+// instance wrote meanwhile (Stop, the reaper) is left alone.
 func (a *Agent) finishAbandonedTurnJob(job *models.Job) {
 	g := a.chatTurnGate()
 	if g == nil || job == nil || isTerminalJobStatus(job.Status) {
@@ -319,22 +323,17 @@ func (a *Agent) finishAbandonedTurnJob(job *models.Job) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), jobTerminalPersistTimeout)
 	defer cancel()
-	current, err := g.store.JobStatus(ctx, job.UserID, job.ID)
-	if err != nil || isTerminalJobStatus(current) {
-		return
-	}
-	status, msg := models.JobStatusFailed, "turn ended without a final status"
-	if job.ResultID != nil {
-		status, msg = models.JobStatusComplete, ""
-	}
-	updated, err := g.store.UpdateJobStatus(ctx, job.UserID, job.ID, status, msg)
+	status, err := g.store.FinishTurnJobIfActive(ctx, job.UserID, job.ID, job.ResultID != nil, "turn ended without a final status")
 	if err != nil {
 		a.logger.Error("failed to finish chat job left non-terminal", zap.String("job_id", job.ID.String()), zap.Error(err))
 		return
 	}
+	if status == "" {
+		return
+	}
 	a.logger.Warn("chat job ended its turn non-terminal; finished it",
-		zap.String("job_id", job.ID.String()), zap.String("was", string(current)), zap.String("status", string(status)))
-	job.Status = updated.Status
+		zap.String("job_id", job.ID.String()), zap.String("was", string(job.Status)), zap.String("status", string(status)))
+	job.Status = status
 }
 
 // FailInFlightTurns finishes the turn jobs this process is running or queueing, for a shutdown
