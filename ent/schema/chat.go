@@ -65,6 +65,10 @@ func (Chat) Fields() []ent.Field {
 		field.String("import_hash").
 			Optional().
 			Comment("Per-conversation dedup hash (sha256 of conversationID from the export); set on imported chats"),
+		field.Enum("memory_sensitivity_limit").
+			Values("public", "personal", "sensitive").
+			Default("sensitive").
+			Comment("Highest memory sensitivity this chat may read. 'sensitive' (the default) means unrestricted; anything lower makes the chat restricted: it reads only memories at or below the limit, other conversations whose own limit is at or below it, and no account-wide files, jobs or scratchpad."),
 		field.String("rehydration_state").
 			Optional().
 			Comment("Lazy-summarization lifecycle for imported threads: ''/'pending'/'processing'/'ready'/'failed'. Empty means no rehydration needed (e.g. native threads)"),

@@ -53,3 +53,24 @@ func TestNormalizeExtractedMemories(t *testing.T) {
 		t.Errorf("nil input should yield empty slice, got %d entries", len(got))
 	}
 }
+
+func TestExtractedSensitivity_FailsClosedAndNeverPublic(t *testing.T) {
+	for raw, want := range map[models.MemorySensitivity]models.MemorySensitivity{
+		"":               models.MemorySensitivityPersonal,
+		"personal":       models.MemorySensitivityPersonal,
+		"PERSONAL":       models.MemorySensitivityPersonal,
+		"sensitive":      models.MemorySensitivitySensitive,
+		" Sensitive ":    models.MemorySensitivitySensitive,
+		"public":         models.MemorySensitivityPersonal,  // extraction never assigns public
+		"highly-private": models.MemorySensitivitySensitive, // not a level: fail closed
+		"secret":         models.MemorySensitivitySensitive,
+	} {
+		if got := ExtractedSensitivity(raw); got != want {
+			t.Errorf("ExtractedSensitivity(%q) = %q, want %q", raw, got, want)
+		}
+	}
+	out := NormalizeExtractedMemories([]models.ExtractedMemory{{Content: "x", Scope: "User", Sensitivity: "nonsense"}}, 0)
+	if len(out) != 1 || out[0].Sensitivity != models.MemorySensitivitySensitive {
+		t.Errorf("NormalizeExtractedMemories kept %+v, want sensitive", out)
+	}
+}

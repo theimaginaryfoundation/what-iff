@@ -10,6 +10,9 @@ type CollapsedExtractedMemory struct {
 	Scope               string
 	Confidence          models.MemoryConfidence
 	BatchDuplicateCount int
+	// Sensitivity is the most restricted level among the collapsed duplicates (personal or
+	// sensitive). Empty reads as personal.
+	Sensitivity models.MemorySensitivity
 }
 
 var memoryConfidenceRank = map[models.MemoryConfidence]int{
@@ -46,11 +49,13 @@ func CollapseExtractedMemories(mems []models.ExtractedMemory) []CollapsedExtract
 				Scope:               item.Scope,
 				Confidence:          item.Confidence,
 				BatchDuplicateCount: 1,
+				Sensitivity:         item.Sensitivity,
 			}
 			order = append(order, key)
 			continue
 		}
 		existing.BatchDuplicateCount++
+		existing.Sensitivity = models.MostRestricted(existing.Sensitivity, item.Sensitivity)
 		if isConfidenceLower(item.Confidence, existing.Confidence) {
 			existing.Confidence = item.Confidence
 		}

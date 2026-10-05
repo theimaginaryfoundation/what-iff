@@ -3740,6 +3740,8 @@ export interface paths {
                     sort?: "created_desc" | "created_asc" | "updated_desc";
                     /** @description Filter by lifecycle status */
                     status?: "active" | "inactive";
+                    /** @description Filter to memories of exactly this sensitivity (public, personal or sensitive) */
+                    sensitivity?: components["schemas"]["MemorySensitivity"];
                 };
                 header?: never;
                 path?: never;
@@ -5538,6 +5540,7 @@ export interface paths {
                         tags?: string[];
                         /** @description Whether the chat is marked as favorite */
                         is_favorite?: boolean;
+                        memory_sensitivity_limit?: components["schemas"]["MemorySensitivity"];
                         /** @description Optional per-chat TTS autoplay override. Null/omitted means inherit personality default. */
                         tts_autoplay_override?: boolean | null;
                     };
@@ -5930,6 +5933,7 @@ export interface paths {
                         tags?: string[];
                         /** @description Optional favorite flag */
                         is_favorite?: boolean;
+                        memory_sensitivity_limit?: components["schemas"]["MemorySensitivity"];
                         /** @description Optional per-chat TTS autoplay override. Null means inherit personality default. */
                         tts_autoplay_override?: boolean | null;
                     };
@@ -6060,6 +6064,7 @@ export interface paths {
                         is_favorite?: boolean;
                         /** @description When true, hides the thread from default lists; set to false to restore from the archive */
                         archived?: boolean;
+                        memory_sensitivity_limit?: components["schemas"]["MemorySensitivity"];
                         /** @description Optional per-chat TTS autoplay override. Null means inherit personality default. */
                         tts_autoplay_override?: boolean | null;
                     };
@@ -9634,6 +9639,7 @@ export interface components {
          *       ],
          *       "is_favorite": false,
          *       "archived": false,
+         *       "memory_sensitivity_limit": "sensitive",
          *       "created_at": "2024-01-01T00:00:00Z",
          *       "updated_at": "2024-01-01T00:00:00Z"
          *     }
@@ -9662,6 +9668,8 @@ export interface components {
             tts_autoplay_override?: boolean | null;
             /** @description When true, the thread is in the archive and omitted from default list responses */
             archived?: boolean;
+            /** @description Highest memory sensitivity this chat may read; default `sensitive` (unrestricted). The limit governs which data comes into the thread; `disabled_tools` governs which actions the agent can take. Anything lower than `sensitive` makes the chat restricted: it reads only memories (checkpoint summaries included) at or below the limit, reads another conversation only when that conversation's own limit is at or below this one (a public thread reads other public threads), cannot read account-wide files, jobs, skills, other personalities or the personality scratchpad, cannot schedule jobs or run sub-agents as other personalities or with skills, and only folds memories it created. Memories it creates are capped to the limit (an explicit `sensitive` classification is never lowered). A `public` chat is also never given the owner's name and never auto-selects a mood. */
+            memory_sensitivity_limit?: components["schemas"]["MemorySensitivity"];
             /** Format: date-time */
             created_at?: string;
             /** Format: date-time */
@@ -9973,6 +9981,8 @@ export interface components {
             scratchpad_sha?: string;
             /** @description First 12 hex characters of the SHA-256 of the checkpoint summary that was in context. */
             summary_sha?: string;
+            /** @description The chat's memory sensitivity limit when this turn ran. Every memory in the turn is at or below it, and a restricted chat also has no scratchpad. Always present on turns with a manifest. */
+            memory_sensitivity_limit?: components["schemas"]["MemorySensitivity"];
         };
         /** @description One memory retrieved for a turn. */
         ContextMemoryInput: {
@@ -10508,6 +10518,7 @@ export interface components {
          *       "level": "thread",
          *       "type": "Context",
          *       "starred": false,
+         *       "sensitivity": "personal",
          *       "created_at": "2024-01-01T00:00:00Z",
          *       "updated_at": "2024-01-01T00:00:00Z"
          *     }
@@ -10546,6 +10557,7 @@ export interface components {
              * @enum {string}
              */
             status?: "active" | "inactive";
+            sensitivity: components["schemas"]["MemorySensitivity"];
             /**
              * Format: float
              * @description Stored confidence in [0,1]. Create/patch accept coarse buckets (low/medium/high) that map to anchors 0.3/0.6/0.9; other signals may refine the float over time.
@@ -10562,6 +10574,11 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /**
+         * @description How delicate a memory is, ordered least to most restricted: public < personal < sensitive. `public` is safe to use on public surfaces (for example a Discord thread); it is assigned only through this API (or the memory manager), or when a public-limited chat lowers the default level of a memory it creates. An agent tool or memory extraction never marks a memory `public`. `personal` is the default for every existing and new memory; `sensitive` is health, finances, intimate or otherwise delicate material. A chat only reads memories at or below its `memory_sensitivity_limit`. As a chat limit, the same values also classify the conversation itself for cross-thread reads.
+         * @enum {string}
+         */
+        MemorySensitivity: "public" | "personal" | "sensitive";
         MemoryCreateRequest: {
             content: string;
             /** @enum {string} */
@@ -10577,6 +10594,7 @@ export interface components {
             type: "Context";
             /** @default false */
             starred: boolean;
+            sensitivity?: components["schemas"]["MemorySensitivity"];
         };
         MemoryBatchCreateRequest: {
             items: components["schemas"]["MemoryCreateRequest"][];
@@ -10602,7 +10620,7 @@ export interface components {
             ids: string[];
             patch: components["schemas"]["MemoryPatchRequest"];
             /**
-             * @description When true, stop on the first failure. Already-patched rows from earlier ids in the request are kept (per-id transactions). When false, skip missing ids; unexpected errors still fail the request.
+             * @description When true, stop on the first failure. Already-patched rows from earlier ids in the request are kept (per-id transactions). When false, skip missing ids; unexpected errors still fail the request. A patch that sets only `sensitivity` is applied as a single UPDATE in one transaction (owner-scoped; Summary memories are never touched and count as missing); with all_or_none, any missing id rejects the whole batch and nothing changes.
              * @default false
              */
             all_or_none: boolean;
@@ -10626,6 +10644,7 @@ export interface components {
             status?: "active" | "inactive";
             /** @enum {string} */
             confidence?: "low" | "medium" | "high";
+            sensitivity?: components["schemas"]["MemorySensitivity"];
         };
         MemoryMergeEvent: {
             /** Format: uuid */

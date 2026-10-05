@@ -51,6 +51,16 @@ type Chat struct {
 	Source *string `json:"-"`
 	// ImportHash is the per-conversation dedup key used by the import pipeline. Internal-only; not exposed in JSON.
 	ImportHash *string `json:"-"`
+	// MemorySensitivityLimit is the highest memory sensitivity this chat may read.
+	// It is always populated on output; "sensitive" (the default) is unrestricted. Anything
+	// lower makes the chat a sandbox. CreateChat applies it when set; UpdateChat applies it only
+	// when SetMemorySensitivityLimit is true.
+	MemorySensitivityLimit MemorySensitivity `json:"memory_sensitivity_limit"`
+	// SetMemorySensitivityLimit marks MemorySensitivityLimit as an explicit change on UpdateChat.
+	// Internal writers (turn bookkeeping, naming) save a copy of the chat they loaded at the start
+	// of the turn; without this flag they cannot write back a stale limit over a change the user
+	// made while the turn ran. Only the chat HTTP handlers set it.
+	SetMemorySensitivityLimit bool `json:"-"`
 	// RehydrationState tracks lazy summarization of imported threads on unarchive:
 	// "" (none) / "pending" / "processing" / "ready" / "failed". Surfaced read-only so the UI can
 	// show a "preparing thread" affordance while the summary is generated.
@@ -60,6 +70,19 @@ type Chat struct {
 	// IsFirstChat is an internal-only flag set by CreateChat to indicate whether
 	// this row is the user's first chat at creation time.
 	IsFirstChat bool `json:"-"`
+}
+
+// MemoryLimit returns the chat's effective sensitivity limit (unrestricted when unset).
+func (c *Chat) MemoryLimit() MemorySensitivity {
+	if c == nil {
+		return DefaultMemorySensitivityLimit
+	}
+	return c.MemorySensitivityLimit.LimitOrDefault()
+}
+
+// MemoryRestricted reports whether the chat is a restricted sandbox (limit below sensitive).
+func (c *Chat) MemoryRestricted() bool {
+	return c.MemoryLimit().Restricted()
 }
 
 // ChatFilters defines filters for listing chats
@@ -86,6 +109,10 @@ type ChatFilters struct {
 	// HasMessages, when true, excludes empty shells (no chat messages yet). Uses last_message_time
 	// IS NOT NULL — that field is set on first message create.
 	HasMessages *bool `json:"has_messages,omitempty"`
+	// MaxMemorySensitivityLimit, when set to a restricted limit, keeps only chats whose own
+	// memory_sensitivity_limit is at or below it (see ConversationReadableUnder): the
+	// conversations a restricted chat may read. Internal only.
+	MaxMemorySensitivityLimit *MemorySensitivity `json:"-"`
 }
 
 // ChatExport is the user-facing export of a chat

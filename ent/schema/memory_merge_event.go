@@ -26,6 +26,13 @@ type MemoryMergeUndoSnapshot struct {
 	PriorConfidence          float64              `json:"prior_confidence,omitempty"`
 	PriorChainMetadata       *MemoryChainMetadata `json:"prior_chain_metadata,omitempty"`
 	PriorChainMetadataWasNil bool                 `json:"prior_chain_metadata_was_nil"`
+
+	// FoldedSensitivity is set when the fold raised the survivor's sensitivity (it takes the most
+	// restricted level of its group), with PriorSensitivity the level before. Undo restores
+	// PriorSensitivity only while the survivor still holds FoldedSensitivity, so a level the user
+	// set afterwards wins. Both are empty for folds that left the level alone and for legacy rows.
+	PriorSensitivity  string `json:"prior_sensitivity,omitempty"`
+	FoldedSensitivity string `json:"folded_sensitivity,omitempty"`
 }
 
 // UnmarshalJSON accepts confidence buckets written before confidence became numeric.
@@ -34,6 +41,8 @@ func (s *MemoryMergeUndoSnapshot) UnmarshalJSON(data []byte) error {
 		PriorConfidence          json.RawMessage      `json:"prior_confidence"`
 		PriorChainMetadata       *MemoryChainMetadata `json:"prior_chain_metadata,omitempty"`
 		PriorChainMetadataWasNil bool                 `json:"prior_chain_metadata_was_nil"`
+		PriorSensitivity         string               `json:"prior_sensitivity,omitempty"`
+		FoldedSensitivity        string               `json:"folded_sensitivity,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -47,6 +56,8 @@ func (s *MemoryMergeUndoSnapshot) UnmarshalJSON(data []byte) error {
 		PriorConfidence:          confidence,
 		PriorChainMetadata:       raw.PriorChainMetadata,
 		PriorChainMetadataWasNil: raw.PriorChainMetadataWasNil,
+		PriorSensitivity:         raw.PriorSensitivity,
+		FoldedSensitivity:        raw.FoldedSensitivity,
 	}
 	return nil
 }

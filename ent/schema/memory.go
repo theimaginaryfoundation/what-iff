@@ -48,6 +48,10 @@ func (Memory) Fields() []ent.Field {
 			Min(0).
 			Max(1).
 			Comment("Stored confidence in [0,1]. The extraction/merge LLM emits coarse buckets mapped to anchors (low=0.3, medium=0.6, high=0.9); other signals (e.g. the reconfirmation tally) can refine it to finer values."),
+		field.Enum("sensitivity").
+			Values("public", "personal", "sensitive").
+			Default("personal").
+			Comment("How delicate the memory is, ordered public < personal < sensitive. A chat whose memory_sensitivity_limit is below this level never reads the memory. New and existing memories default to personal; public is never assigned automatically."),
 		field.JSON("chain_metadata", &MemoryChainMetadata{}).
 			Optional().
 			Comment("Chain-of-trust metadata for merged memory lineages"),

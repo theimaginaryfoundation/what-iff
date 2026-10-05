@@ -104,8 +104,11 @@ type Memory struct {
 	// Confidence is a stored float in [0,1]. The extraction/merge LLM emits coarse buckets that
 	// map to anchors (see MemoryConfidence.Float); other signals (e.g. the reconfirmation tally)
 	// can refine it to finer values over time.
-	Confidence          float64              `json:"confidence"`
-	Starred             bool                 `json:"starred"`
+	Confidence float64 `json:"confidence"`
+	Starred    bool    `json:"starred"`
+	// Sensitivity is how delicate the memory is (public < personal < sensitive); a chat whose
+	// memory_sensitivity_limit is below it never reads the memory.
+	Sensitivity         MemorySensitivity    `json:"sensitivity"`
 	Scope               string               `json:"-"`
 	ChainMetadata       *MemoryChainMetadata `json:"chain_metadata,omitempty"`
 	PinnedPersonalityID *uuid.UUID           `json:"pinned_personality_id,omitempty"`
@@ -131,6 +134,11 @@ type MemoryFilters struct {
 	MaxDate              *time.Time    `json:"max_date,omitempty"`
 	Scope                *string       `json:"-"`
 	Status               *MemoryStatus `json:"status,omitempty"`
+	// Sensitivity, when set, lists only memories of exactly that sensitivity (the manager filter).
+	Sensitivity *MemorySensitivity `json:"sensitivity,omitempty"`
+	// MaxSensitivity, when set, lists only memories at or below that sensitivity. It is the chat
+	// sandbox gate and is never taken from a request.
+	MaxSensitivity *MemorySensitivity `json:"-"`
 }
 
 type CreateMemoryInput struct {
@@ -141,6 +149,8 @@ type CreateMemoryInput struct {
 	Type                MemoryType       `json:"type"`
 	Starred             bool             `json:"starred"`
 	Confidence          MemoryConfidence `json:"confidence,omitempty"`
+	// Sensitivity is optional; empty means personal.
+	Sensitivity MemorySensitivity `json:"sensitivity,omitempty"`
 }
 
 type BatchCreateMemoryInput struct {
@@ -179,16 +189,17 @@ type BatchPatchMemoryResult struct {
 }
 
 type MemoryPatch struct {
-	Content                *string           `json:"content,omitempty"`
-	Level                  *MemoryLevel      `json:"level,omitempty"`
-	ChatID                 *uuid.UUID        `json:"chat_id,omitempty"`
-	SetChatID              bool              `json:"-"`
-	PinnedPersonalityID    *uuid.UUID        `json:"pinned_personality_id,omitempty"`
-	SetPinnedPersonalityID bool              `json:"-"`
-	Type                   *MemoryType       `json:"type,omitempty"`
-	Starred                *bool             `json:"starred,omitempty"`
-	Status                 *MemoryStatus     `json:"status,omitempty"`
-	Confidence             *MemoryConfidence `json:"confidence,omitempty"`
+	Content                *string            `json:"content,omitempty"`
+	Level                  *MemoryLevel       `json:"level,omitempty"`
+	ChatID                 *uuid.UUID         `json:"chat_id,omitempty"`
+	SetChatID              bool               `json:"-"`
+	PinnedPersonalityID    *uuid.UUID         `json:"pinned_personality_id,omitempty"`
+	SetPinnedPersonalityID bool               `json:"-"`
+	Type                   *MemoryType        `json:"type,omitempty"`
+	Starred                *bool              `json:"starred,omitempty"`
+	Status                 *MemoryStatus      `json:"status,omitempty"`
+	Confidence             *MemoryConfidence  `json:"confidence,omitempty"`
+	Sensitivity            *MemorySensitivity `json:"sensitivity,omitempty"`
 }
 
 // ChatSummaryBackfillCandidate identifies a legacy checkpoint summary that has
@@ -207,6 +218,8 @@ type MemoryRecord struct {
 	ChatID    *uuid.UUID `json:"chat_id,omitempty"`
 	ChatName  *string    `json:"chat_name,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
+	// Sensitivity round-trips through export/import; absent in old exports, which import as personal.
+	Sensitivity MemorySensitivity `json:"sensitivity,omitempty"`
 }
 
 // MemoryImportResult reports import execution stats for a ZIP upload.
