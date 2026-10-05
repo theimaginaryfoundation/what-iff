@@ -696,6 +696,9 @@ func TestRecallFetchImageAttachesToContext(t *testing.T) {
 	if atts[0].FileContent == "" {
 		t.Fatal("expected FileContent to be set on the returned attachment")
 	}
+	if !atts[0].ContextOnly {
+		t.Fatal("a fetched image is for the model to look at, not part of the reply (ContextOnly)")
+	}
 	decoded, decErr := base64.StdEncoding.DecodeString(atts[0].FileContent)
 	if decErr != nil || string(decoded) != string(raw) {
 		t.Fatalf("expected the attachment's FileContent to decode to the source bytes, got %q err=%v", atts[0].FileContent, decErr)

@@ -440,6 +440,7 @@ func (t *RecallTool) fetchImage(ctx context.Context, userID uuid.UUID, fa *model
 	att := *fa
 	att.FileType = contentType
 	att.FileContent = base64.StdEncoding.EncodeToString(data)
+	att.ContextOnly = true // for the model to look at; not part of the reply
 
 	return t.ok(recallResult{
 		Mode: recallModeFetch,

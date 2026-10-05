@@ -36,6 +36,11 @@ type FileAttachment struct {
 	// FileContent is ephemeral base64 image data used only while forwarding a tool result
 	// into a model vision request. Persisted attachment bytes live exclusively in S3.
 	FileContent string `json:"-"`
+	// ContextOnly marks a tool result that is shown to the model but is not a product of the
+	// reply: an existing file a tool fetched for viewing (find_context's fetch mode). The agent
+	// does not save it onto the reply, so it is never re-published with the reply (as a fresh
+	// gallery copy, or to Discord by the relay).
+	ContextOnly bool `json:"-"`
 	// S3Key is the canonical object key for the full-resolution file. Set at
 	// upload time so that renaming the display Name never breaks retrieval.
 	S3Key string `json:"s3_key,omitempty"`

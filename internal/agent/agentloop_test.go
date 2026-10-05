@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
@@ -268,4 +269,30 @@ func TestExecuteToolUses_NotifiesPerToolGeneratedAttachments(t *testing.T) {
 	_, _, attachments := a.executeToolUses(context.Background(), ctx, 0, uses)
 	assert.NotEmpty(t, attachments)
 	assert.Equal(t, []string{"fake_tool"}, seen)
+}
+
+// A file a tool only fetched for the model to look at (find_context's fetch mode) is shown to the
+// model but not saved onto the reply, so it is never re-published with it (gallery, Discord).
+func TestExecuteToolUses_DoesNotSaveContextOnlyAttachmentsOntoTheReply(t *testing.T) {
+	prevExtra := extraToolHandlersForChat
+	t.Cleanup(func() { extraToolHandlersForChat = prevExtra })
+	extraToolHandlersForChat = func(_ *Agent, _ *models.Chat) map[string]ExtraToolHandler {
+		return map[string]ExtraToolHandler{
+			"fake_fetch": func(context.Context, []byte) (string, []*models.FileAttachment, error) {
+				return `{"ok":true}`, []*models.FileAttachment{
+					{Name: "owner-photo.png", FileType: "image/png", FileContent: "aGk=", ContextOnly: true},
+					{Name: "made.png", FileType: "image/png", FileContent: "aGk="},
+				}, nil
+			},
+		}
+	}
+	a := &Agent{logger: zap.NewNop()}
+	chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), PersonalityID: uuid.New()}
+	ctx := offering(&chatContext{chat: chat}, "fake_fetch")
+
+	results, _, attachments := a.executeToolUses(context.Background(), ctx, 0, []provider.ToolUse{{ID: "u1", Name: "fake_fetch", Input: []byte(`{}`)}})
+	require.Len(t, attachments, 1)
+	assert.Equal(t, "made.png", attachments[0].Name)
+	require.Len(t, results, 1)
+	assert.Len(t, results[0].Images, 2, "the model still sees both")
 }
