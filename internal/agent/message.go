@@ -2663,11 +2663,12 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	if n, err := a.OpenAIProvider.CountTokens(chatCtx.chat.Scratchpad); err == nil {
 		estimatedContextTokens += n
 	}
+	budget := resolveContextBudget(chatCtx.chat)
 	decision := decideCheckpoint(checkpointPolicy{
 		MinAssistantMessagesSinceCheckpoint: maxTurnsBeforeCheckpoint(chatCtx),
-		MaxLastInputTokens:                  checkpointMaxLastInputTokens,
-		MaxEstimatedContextTokens:           checkpointMaxEstimatedContextTokens,
-		MinTurnsBetweenCheckpoints:          checkpointMinTurnsBetweenCheckpoints,
+		MaxLastInputTokens:                  budget.MaxLastInputTokens,
+		MaxEstimatedContextTokens:           budget.MaxEstimatedContextTokens,
+		MinTurnsBetweenCheckpoints:          budget.MinTurnsBetweenCheckpoints,
 	}, checkpointInputs{
 		TotalAssistantMessages:          assistantMessageCount,
 		CheckpointAssistantMessageCount: chatCtx.chat.CheckpointUserMessageCount, // Backward-compatible storage field; currently tracks checkpoint message count.

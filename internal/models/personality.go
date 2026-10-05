@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/stcard"
 )
 
 type Personality struct {
@@ -42,6 +43,30 @@ type Personality struct {
 	CreatedAt  time.Time             `json:"created_at"`
 	UpdatedAt  time.Time             `json:"updated_at"`
 	Stats      PersonalityUsageStats `json:"stats"`
+	// CharacterCard is the verbatim `data` object of the character card (SillyTavern) this
+	// personality was imported from. It is a create-time input only: it never appears in API
+	// responses and is never filled when reading a personality (it can be large and the hot paths
+	// that load personalities never need it). Read it with Store.GetPersonalityCard.
+	CharacterCard *PersonalityCard `json:"-"`
+}
+
+// PersonalityCard is the stored passthrough of a SillyTavern character card.
+type PersonalityCard struct {
+	// Data is the card's verbatim `data` object.
+	Data map[string]any
+	// OmittedFields names card fields (scenario, personality) import left out of the system
+	// prompt to fit the length limit; export restores them from Data.
+	OmittedFields []string
+}
+
+// PersonalityCardImportResult is the response of a character-card import.
+type PersonalityCardImportResult struct {
+	Personality Personality `json:"personality"`
+	// LoreFiles are character-book entries the client should upload as file attachments to the
+	// new personality (entries are only returned this way when the book was too big to flatten
+	// into the prompt).
+	LoreFiles []stcard.LoreEntry `json:"lore_files"`
+	Warnings  []string           `json:"warnings"`
 }
 
 type PersonalityThumbnailCircle struct {

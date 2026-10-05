@@ -89,6 +89,11 @@ func (Personality) Edges() []ent.Edge {
 			Annotations(entsql.OnDelete(entsql.SetNull)),
 		// M2M: a personality can have multiple moods as available "moods".
 		edge.To("moods", Mood.Type),
+		// Optional 1:1 passthrough of the character card (SillyTavern) this personality was imported
+		// from. Separate table so hot-path personality reads never load it.
+		edge.To("card", PersonalityCard.Type).
+			Unique().
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}
 }
 

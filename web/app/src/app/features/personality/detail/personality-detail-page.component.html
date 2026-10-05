@@ -73,6 +73,22 @@
           }
           <button
             type="button"
+            class="rounded-lg border border-(--color-border-default) px-3 py-2 text-sm font-medium text-(--color-text-primary) hover:bg-(--color-surface-elevated) disabled:cursor-not-allowed disabled:opacity-60"
+            uiTooltip="Download as a SillyTavern character card (.json)"
+            [disabled]="isExportingCard()"
+            (click)="onExportCard()"
+          >{{ isExportingCard() ? 'Exporting…' : 'Export card' }}</button>
+          @if (personality.cover_image_id) {
+            <button
+              type="button"
+              class="rounded-lg border border-(--color-border-default) px-3 py-2 text-sm font-medium text-(--color-text-primary) hover:bg-(--color-surface-elevated) disabled:cursor-not-allowed disabled:opacity-60"
+              uiTooltip="Download as a SillyTavern PNG card (the cover image with the card embedded)"
+              [disabled]="isExportingCard()"
+              (click)="onExportCard('png')"
+            >Export PNG card</button>
+          }
+          <button
+            type="button"
             class="rounded-lg border border-(--color-border-default) px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-500/10"
             (click)="onDelete()"
           >Delete</button>
