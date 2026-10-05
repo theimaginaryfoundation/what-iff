@@ -425,6 +425,284 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  # Discord relay (docs/adr/0x025-discord-relay.md). Absent when DISCORD_RELAY_ENABLED is false.
+  /discord/bots:
+    get:
+      summary: List Discord bots
+      description: Returns the user's Discord bots. A bot's token is never returned.
+      tags: [Discord]
+      responses:
+        '200':
+          description: Bots retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DiscordBot'
+        '401': { $ref: '#/components/responses/DiscordUnauthorized' }
+        '500': { $ref: '#/components/responses/DiscordServerError' }
+    post:
+      summary: Add a Discord bot
+      description: >
+        Validates a bot token with Discord (the bot user and its application) and stores it,
+        encrypted, for one of the user's personalities. One bot per personality, and a bot can
+        be connected by one account only. Needs TOKEN_ENCRYPTION_SECRET on the server.
+      tags: [Discord]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscordBotCreateRequest'
+      responses:
+        '201':
+          description: Bot added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscordBot'
+        '400': { $ref: '#/components/responses/DiscordBadRequest' }
+        '401': { $ref: '#/components/responses/DiscordUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscordNotFound' }
+        '409': { $ref: '#/components/responses/DiscordConflict' }
+        '502': { $ref: '#/components/responses/DiscordUpstreamError' }
+        '500': { $ref: '#/components/responses/DiscordServerError' }
+
+  /discord/bots/{id}:
+    parameters:
+      - $ref: '#/components/parameters/DiscordBotID'
+    patch:
+      summary: Update a Discord bot
+      description: Replaces the token (it must belong to the same bot), re-reads the bot's name and Message Content setting from Discord, or pauses and resumes the bot.
+      tags: [Discord]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscordBotUpdateRequest'
+      responses:
+        '200':
+          description: Bot updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscordBot'
+        '400': { $ref: '#/components/responses/DiscordBadRequest' }
+        '401': { $ref: '#/components/responses/DiscordUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscordNotFound' }
+        '502': { $ref: '#/components/responses/DiscordUpstreamError' }
+        '500': { $ref: '#/components/responses/DiscordServerError' }
+    delete:
+      summary: Remove a Discord bot
+      description: Removes the bot and, with it, its channel bindings. The relay threads stay.
+      tags: [Discord]
+      responses:
+        '204':
+          description: Bot removed
+        '401': { $ref: '#/components/responses/DiscordUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscordNotFound' }
+        '500': { $ref: '#/components/responses/DiscordServerError' }
+
+  /discord/bots/{id}/sync-profile:
+    parameters:
+      - $ref: '#/components/parameters/DiscordBotID'
+    post:
+      summary: Sync the bot's profile from its personality
+      description: Sets the bot's Discord username (and avatar, when the personality has a portrait) from its personality. Discord allows about two username changes an hour.
+      tags: [Discord]
+      responses:
+        '200':
+          description: Profile synced
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bot:
+                    $ref: '#/components/schemas/DiscordBot'
+                  avatar_synced:
+                    type: boolean
+                required: [bot, avatar_synced]
+        '401': { $ref: '#/components/responses/DiscordUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscordNotFound' }
+        '502': { $ref: '#/components/responses/DiscordUpstreamError' }
+        '500': { $ref: '#/components/responses/DiscordServerError' }
+
+  /discord/bots/{id}/guilds:
+    parameters:
+      - $ref: '#/components/parameters/DiscordBotID'
+    get:
+      summary: List the bot's servers
+      tags: [Discord]
+      responses:
+        '200':
+          description: Servers the bot is in
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DiscordNamedRef'
+        '401': { $ref: '#/components/responses/DiscordUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscordNotFound' }
+        '502': { $ref: '#/components/responses/DiscordUpstreamError' }
+
+  /discord/bots/{id}/guilds/{guildId}/channels:
+    parameters:
+      - $ref: '#/components/parameters/DiscordBotID'
+      - name: guildId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: List a server's text channels
+      tags: [Discord]
+      responses:
+        '200':
+          description: Text and announcement channels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DiscordNamedRef'
+        '401': { $ref: '#/components/responses/DiscordUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscordNotFound' }
+        '502': { $ref: '#/components/responses/DiscordUpstreamError' }
+
+  /discord/bindings:
+    get:
+      summary: List channel bindings
+      tags: [Discord]
+      responses:
+        '200':
+          description: Bindings retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DiscordBinding'
+        '401': { $ref: '#/components/responses/DiscordUnauthorized' }
+        '500': { $ref: '#/components/responses/DiscordServerError' }
+    post:
+      summary: Connect a channel to a relay thread
+      description: >
+        Binds a channel the bot can see to a thread. Without `chat_id` a new relay thread is
+        created for the bot's personality, `sandboxed` (it reads only itself and writes only
+        Chat-scoped memories), with no MCP connectors, and the tools that act beyond the
+        conversation switched off in its `disabled_tools` (create_agent_job, run_subagent,
+        update_scratchpad, web_search, fetch_page, generate_image, plus any a build registers).
+        Binding an existing thread leaves its settings alone; a thread that is not sandboxed
+        is refused unless `allow_unrestricted` is true.
+      tags: [Discord]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscordBindingCreateRequest'
+      responses:
+        '201':
+          description: Channel connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscordBinding'
+        '400': { $ref: '#/components/responses/DiscordBadRequest' }
+        '401': { $ref: '#/components/responses/DiscordUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscordNotFound' }
+        '409': { $ref: '#/components/responses/DiscordConflict' }
+        '500': { $ref: '#/components/responses/DiscordServerError' }
+
+  /discord/bindings/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      summary: Update a channel binding
+      description: Repointing to a thread that is not sandboxed needs `allow_unrestricted`; the acknowledgement is only recorded while the thread is not sandboxed.
+      tags: [Discord]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscordBindingUpdateRequest'
+      responses:
+        '200':
+          description: Binding updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscordBinding'
+        '400': { $ref: '#/components/responses/DiscordBadRequest' }
+        '401': { $ref: '#/components/responses/DiscordUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscordNotFound' }
+        '500': { $ref: '#/components/responses/DiscordServerError' }
+    delete:
+      summary: Disconnect a channel
+      tags: [Discord]
+      responses:
+        '204':
+          description: Channel disconnected
+        '401': { $ref: '#/components/responses/DiscordUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscordNotFound' }
+        '500': { $ref: '#/components/responses/DiscordServerError' }
+
+  /discord/chats/{chatId}:
+    parameters:
+      - $ref: '#/components/parameters/DiscordChatID'
+    get:
+      summary: A thread's Discord state
+      description: The thread's bindings, which of them will post the next reply, and the recent messages that crossed between the thread and Discord.
+      tags: [Discord]
+      responses:
+        '200':
+          description: Discord state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscordChatState'
+        '401': { $ref: '#/components/responses/DiscordUnauthorized' }
+        '500': { $ref: '#/components/responses/DiscordServerError' }
+
+  /discord/chats/{chatId}/pending/{bindingId}:
+    parameters:
+      - $ref: '#/components/parameters/DiscordChatID'
+      - name: bindingId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      summary: Post the next reply to a channel
+      description: Arms the composer toggle. The next reply in the thread is posted to the binding's channel; the request expires after 30 minutes.
+      tags: [Discord]
+      responses:
+        '204':
+          description: Armed
+        '401': { $ref: '#/components/responses/DiscordUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscordNotFound' }
+        '500': { $ref: '#/components/responses/DiscordServerError' }
+    delete:
+      summary: Do not post the next reply
+      tags: [Discord]
+      responses:
+        '204':
+          description: Disarmed
+        '401': { $ref: '#/components/responses/DiscordUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscordNotFound' }
+        '500': { $ref: '#/components/responses/DiscordServerError' }
+
   /webhook-tokens:
     get:
       summary: List webhook API tokens
@@ -2503,6 +2781,11 @@ paths:
           schema:
             type: string
             enum: [active, inactive]
+        - name: provenance
+          in: query
+          description: Filter to memories of this provenance (`external` lists what was learned in Discord relay threads)
+          schema:
+            $ref: '#/components/schemas/MemoryProvenance'
       responses:
         '200':
           description: Memories retrieved successfully
@@ -6684,6 +6967,60 @@ paths:
                 $ref: '#/components/schemas/Error'
 
 components:
+  parameters:
+    DiscordBotID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DiscordChatID:
+      name: chatId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    DiscordBadRequest:
+      description: Invalid request, or Discord rejected the token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    DiscordUnauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    DiscordNotFound:
+      description: Not found (including another account's bot, binding, thread or personality)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    DiscordConflict:
+      description: The personality already has a bot, the bot is already connected, or the channel is already bound for this bot
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    DiscordUpstreamError:
+      description: Discord rejected the request or could not be reached
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    DiscordServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
   securitySchemes:
     bearerAuth:
       type: http
@@ -9026,6 +9363,11 @@ components:
           type: string
           enum: [active, inactive]
           description: Lifecycle status (inactive rows are retired merge sources)
+        provenance:
+          $ref: '#/components/schemas/MemoryProvenance'
+        source_speaker:
+          type: string
+          description: For an external memory, the Discord display name it came from, when known (unverified)
         confidence:
           type: number
           format: float
@@ -9068,6 +9410,7 @@ components:
         - level
         - type
         - starred
+        - provenance
         - created_at
         - updated_at
       example:
@@ -9078,9 +9421,266 @@ components:
         level: "thread"
         type: "Context"
         starred: false
+        provenance: "user"
         created_at: "2024-01-01T00:00:00Z"
         updated_at: "2024-01-01T00:00:00Z"
 
+    MemoryProvenance:
+      type: string
+      enum: [user, external]
+      description: >
+        Where a memory came from. `user` (the default) is the account owner's own
+        conversations or the memory manager. `external` was learned from people outside
+        the account in a Discord relay thread (any thread bound to a Discord channel, sandboxed
+        or not); it is unverified, and is shown to the model as unverified and attributed to its
+        `source_speaker`. A merge of memories is external when any member is. A sandboxed
+        thread writes only Chat-scoped memories, so what it learns stays in that thread. The
+        owner can set `user` to confirm one.
+
+    DiscordNamedRef:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+      required: [id, name]
+
+    DiscordBot:
+      type: object
+      description: A user's own Discord bot, speaking as one of their personalities. The token is never returned.
+      properties:
+        id:
+          type: string
+          format: uuid
+        personality_id:
+          type: string
+          format: uuid
+        application_id:
+          type: string
+        bot_user_id:
+          type: string
+        bot_username:
+          type: string
+        message_content:
+          type: boolean
+          description: Whether the application has the privileged Message Content intent on
+        status:
+          type: string
+          enum: [active, invalid_token, disabled]
+        last_error:
+          type: string
+        invite_url:
+          type: string
+          description: Link that adds the bot to a server with the permissions the relay needs
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, personality_id, application_id, bot_user_id, bot_username, message_content, status, invite_url, created_at, updated_at]
+
+    DiscordBotCreateRequest:
+      type: object
+      properties:
+        personality_id:
+          type: string
+          format: uuid
+        token:
+          type: string
+          description: The bot token from the application's Bot page (a "Bot " prefix is accepted)
+      required: [personality_id, token]
+
+    DiscordBotUpdateRequest:
+      type: object
+      properties:
+        token:
+          type: string
+          description: Replaces the token; it must belong to the same bot
+        refresh:
+          type: boolean
+          description: Re-read the bot's name and Message Content setting from Discord
+        enabled:
+          type: boolean
+          description: Pause (false) or resume (true) the bot
+
+    DiscordBinding:
+      type: object
+      description: One Discord channel, seen by one bot, bound to a relay thread.
+      properties:
+        id:
+          type: string
+          format: uuid
+        bot_id:
+          type: string
+          format: uuid
+        chat_id:
+          type: string
+          format: uuid
+        guild_id:
+          type: string
+        channel_id:
+          type: string
+        guild_name:
+          type: string
+        channel_name:
+          type: string
+        inbound_enabled:
+          type: boolean
+          description: Whether tagging the bot in the channel starts a turn
+        allow_user_ids:
+          type: array
+          items:
+            type: string
+          description: Discord user ids that may tag the bot; empty means anyone not denied
+        deny_user_ids:
+          type: array
+          items:
+            type: string
+          description: Discord user ids that may never tag the bot; deny always wins
+        allow_unrestricted:
+          type: boolean
+          description: The owner's acknowledgement that the bound thread is not sandboxed, so it can read the account. Without it the relay answers only sandboxed threads.
+        chat_sandboxed:
+          type: boolean
+          description: Whether the bound thread is sandboxed right now (computed; absent when the thread could not be read)
+        status:
+          type: string
+          enum: [active, broken]
+        last_error:
+          type: string
+        last_activity_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, bot_id, chat_id, guild_id, channel_id, guild_name, channel_name, inbound_enabled, allow_user_ids, deny_user_ids, allow_unrestricted, status, created_at, updated_at]
+
+    DiscordBindingCreateRequest:
+      type: object
+      properties:
+        bot_id:
+          type: string
+          format: uuid
+        guild_id:
+          type: string
+        guild_name:
+          type: string
+        channel_id:
+          type: string
+        channel_name:
+          type: string
+        chat_id:
+          type: string
+          format: uuid
+          description: Bind an existing thread; omit to create a new relay thread
+        inbound_enabled:
+          type: boolean
+          default: true
+        allow_user_ids:
+          type: array
+          items:
+            type: string
+        deny_user_ids:
+          type: array
+          items:
+            type: string
+        allow_unrestricted:
+          type: boolean
+          description: Acknowledge binding an existing thread that is not sandboxed
+      required: [bot_id, guild_id, channel_id]
+
+    DiscordBindingUpdateRequest:
+      type: object
+      properties:
+        chat_id:
+          type: string
+          format: uuid
+        inbound_enabled:
+          type: boolean
+        allow_user_ids:
+          type: array
+          items:
+            type: string
+        deny_user_ids:
+          type: array
+          items:
+            type: string
+        channel_name:
+          type: string
+        guild_name:
+          type: string
+        allow_unrestricted:
+          type: boolean
+        reactivate:
+          type: boolean
+          description: Clear a broken status after fixing the bot's access
+
+    DiscordMessageLink:
+      type: object
+      description: One message that crossed between a relay thread and its channel.
+      properties:
+        id:
+          type: string
+          format: uuid
+        binding_id:
+          type: string
+          format: uuid
+        direction:
+          type: string
+          enum: [inbound, outbound]
+        chat_message_id:
+          type: string
+          format: uuid
+        discord_message_id:
+          type: string
+        discord_channel_id:
+          type: string
+        posted_message_ids:
+          type: array
+          items:
+            type: string
+        author_id:
+          type: string
+        author_name:
+          type: string
+        reply_to_link_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [received, pending, sent, failed]
+        error:
+          type: string
+        attempts:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+      required: [id, binding_id, direction, discord_channel_id, posted_message_ids, status, attempts, created_at]
+
+    DiscordChatState:
+      type: object
+      properties:
+        bindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscordBinding'
+        pending_binding_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscordMessageLink'
+      required: [bindings, pending_binding_ids, links]
     MemoryCreateRequest:
       type: object
       properties:
@@ -9216,6 +9816,8 @@ components:
         confidence:
           type: string
           enum: [low, medium, high]
+        provenance:
+          $ref: '#/components/schemas/MemoryProvenance'
 
     MemoryMergeEvent:
       type: object
@@ -9839,6 +10441,8 @@ tags:
       paths are lower-case, `/` nests, and `""` is the top level.
   - name: Memory Management
     description: User memory storage and retrieval operations
+  - name: Discord
+    description: The Discord relay - personalities answering in Discord channels as their own bots
   - name: Personality Management
     description: Custom AI personality creation and management
   - name: Ritual Management
