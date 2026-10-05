@@ -17,7 +17,7 @@ import (
 )
 
 // Queries that object-storage cleanup needs (storage.ReleaseAttachmentObjects and
-// storage.SweepUserOrphans). Attachment rows are deleted by ent cascades that never see the
+// storage.PurgeUserObjects). Attachment rows are deleted by ent cascades that never see the
 // object store, so callers read the affected rows first with the List*ObjectRefs methods, delete,
 // and then release the keys no remaining row references.
 
@@ -72,7 +72,7 @@ func (d *Datastore) ListPersonalityFileAttachmentObjectRefs(ctx context.Context,
 }
 
 // ListUserFileAttachmentObjectRefs returns every attachment row the user owns. Used by account
-// deletion and the orphan sweep (storage.SweepRefs).
+// deletion.
 func (d *Datastore) ListUserFileAttachmentObjectRefs(ctx context.Context, userID uuid.UUID) ([]models.FileAttachment, error) {
 	return d.listFileAttachmentObjectRefs(ctx, userID)
 }

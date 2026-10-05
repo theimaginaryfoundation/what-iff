@@ -143,7 +143,7 @@ func (h *Handler) DeleteFileAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The row is gone, so the stored object goes too unless a reference copy still points at it.
-	// Best effort: the delete has happened, and the orphan sweep catches anything left behind.
+	// Best effort: the delete has happened; an object that cannot be removed is left orphaned.
 	// WithoutCancel so a client hanging up does not abandon the cleanup halfway.
 	storage.ReleaseAttachmentObjects(context.WithoutCancel(r.Context()), h.logger, h.agent.FileStore(), h.ds, userID,
 		[]models.FileAttachment{*fileAttachment})

@@ -19,7 +19,7 @@ HTTP API for **file attachments** metadata and download flows at `/api/file-atta
 - **Delete is reference counted.**
   `CreateFileAttachmentReference` copies share the source's `s3_key` and provider `FileID`.
   `DELETE /file-attachment/{id}` deletes the provider file only when no other row carries the `FileID`, then the row, then releases the stored object and thumbnail via `storage.ReleaseAttachmentObjects` (skipped while another row references the key).
-  The object step is best effort and never fails the request; the orphan sweep is the backstop.
+  The object step is best effort and never fails the request; an object it cannot remove is left orphaned.
 - **Download fallback uses the chat id.**
   For rows without `s3_key` the derived key comes from `FileKeyForAttachment(..., ChatID, PersonalityID)`; `ChatID` is resolved by the datastore through the chat message (issue #253).
 

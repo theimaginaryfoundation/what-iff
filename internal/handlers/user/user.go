@@ -306,7 +306,7 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Best effort: the account is gone either way, and the orphan sweep can be pointed at the id.
+	// Best effort: the account is gone either way; anything not removed is left orphaned.
 	storage.PurgeUserObjects(context.WithoutCancel(r.Context()), h.logger, h.fileStore, h.store, userID, attachments)
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, map[string]string{"message": "User account deleted successfully"})

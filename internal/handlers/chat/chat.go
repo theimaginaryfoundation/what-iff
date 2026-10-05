@@ -793,8 +793,8 @@ func (h *Handler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The cascade below deletes the chat's attachment rows without touching the object store, so
-	// read them first and release their objects afterwards. A failed read only means the orphan
-	// sweep has to clean up later; it must not block the delete.
+	// read them first and release their objects afterwards. A failed read only leaves the
+	// objects orphaned; it must not block the delete.
 	attachments, err := h.ds.ListChatFileAttachmentObjectRefs(r.Context(), userID, chatID)
 	if err != nil {
 		h.logger.Warn("failed to list chat attachments for object cleanup",

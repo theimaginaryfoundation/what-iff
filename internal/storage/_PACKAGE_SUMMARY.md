@@ -14,10 +14,6 @@
     Best effort: failures are logged and counted, never returned.
   - `PurgeUserObjects` removes the whole `users/{id}/` prefix and the account's export bundles under `exports/{id}/` (`UserExportPrefix`; `accountexport` writes there via `ExportBundleRoot`) after account deletion.
     It falls back to releasing the known rows when the store cannot list `users/{id}/`.
-  - `SweepUserOrphans` is the idempotent backstop: it lists `users/{id}/`, treats each remaining row's `s3_key`, legacy keys and thumbnail as referenced, double-checks the rest with `ReferencedFileAttachmentKeys`, and deletes unreferenced objects older than a grace period (or only reports them in dry-run mode).
-    It is an allow-list: only the attachment layouts (`images/`, `images/thumbs/`, `chats/{id}/`, `personalities/{id}/`, top-level `{id}[_name]`) are candidates.
-    Anything else under `users/{id}/` (agent `workspace/`, future features) is counted as skipped and never touched.
-    Run it with `cmd/sweep-orphan-files` (dry run unless `-yes`).
 - **`Instrument`** (`instrumented.go`): decorator recording `whatiff.dependency.duration` (dependency `s3` or `local_fs`, operation `put_object`/`get_object`/`delete_object`/`list_objects`) through `telemetry.Global()`; `internal/server` wraps the store at construction.
 
 ## Dependencies
@@ -42,7 +38,7 @@
 
 - `filestore_test.go` — behavior with mocks or localstack-style setups (see file).
 - `instrumented_test.go` — dependency metrics, the not-found contract, and optional-interface preservation.
-- `attachment_cleanup_test.go` — release reference counting and legacy keys, account purge, and the sweep's dry run, grace period, exclusions and idempotence against the local store.
+- `attachment_cleanup_test.go` — release reference counting and legacy keys, account purge, against the local store.
 
 ## Related documentation
 
