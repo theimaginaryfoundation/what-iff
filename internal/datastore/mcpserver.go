@@ -961,7 +961,9 @@ func (d *Datastore) ListChatMCPLoadedTools(ctx context.Context, userID, chatID u
 	return out, nil
 }
 
-// SetChatMCPLoadedTools replaces the loaded MCP tool set for one chat+connector.
+// SetChatMCPLoadedTools replaces the loaded MCP tool set for one chat+connector. The connector
+// only has to belong to the user: it may be attached to the chat or reach it through a skill, and
+// the agent decides which connectors are in scope for a turn.
 func (d *Datastore) SetChatMCPLoadedTools(ctx context.Context, userID, chatID, mcpServerID uuid.UUID, fullToolNames []string) error {
 	tx, err := d.dbClient.Tx(ctx)
 	if err != nil {
@@ -987,18 +989,17 @@ func (d *Datastore) SetChatMCPLoadedTools(ctx context.Context, userID, chatID, m
 		return ErrChatNotFound
 	}
 
-	serverAttached, err := tx.MCPServer.Query().
+	serverOwned, err := tx.MCPServer.Query().
 		Where(
 			entmcp.ID(mcpServerID),
 			entmcp.HasOwnerWith(user.ID(userID)),
-			entmcp.HasChatsWith(entchat.ID(chatID)),
 		).
 		Exist(ctx)
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
-	if !serverAttached {
+	if !serverOwned {
 		tx.Rollback()
 		return ErrMCPServerNotFound
 	}
