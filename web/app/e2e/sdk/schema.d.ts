@@ -3895,7 +3895,7 @@ export interface paths {
         put?: never;
         /**
          * Undo a memory merge event
-         * @description Reverts one merge log entry (restores prior chain metadata or deletes a created survivor).
+         * @description Reverts one merge log entry. Undoing a fold_live restores the survivor's prior confidence, chain metadata and, when the fold rewrote it, its content and embedding, and returns every absorbed memory to its prior status. Undoing a link withdraws the cross-reference; undoing a legacy create deletes the created survivor.
          */
         post: {
             parameters: {

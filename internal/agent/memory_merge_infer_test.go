@@ -222,6 +222,62 @@ func TestPlanMemoryCompaction_CreateNeedsEmbedding(t *testing.T) {
 	require.Empty(t, plan.Links)
 }
 
+// A fold whose canonical phrasing differs from the survivor's content needs an embedding of the
+// canonical content so the datastore can rewrite and re-embed the survivor (#249). A difference in
+// case or whitespace alone does not.
+func TestPlanMemoryCompaction_SurvivorRewriteNeedsEmbedding(t *testing.T) {
+	survivorID := uuid.New()
+	absorbedID := uuid.New()
+	candidates := []memoryMergeCandidate{
+		{Content: "Likes tea", Scope: "User", Confidence: models.MemoryConfidenceMedium, MemoryID: &survivorID},
+		{Content: "Drinks oolong most mornings", Scope: "User", Confidence: models.MemoryConfidenceHigh, MemoryID: &absorbedID},
+	}
+	cases := []struct {
+		canonical string
+		want      bool
+	}{
+		{canonical: "Likes tea, especially oolong in the morning", want: true},
+		{canonical: "  likes   TEA ", want: false},
+	}
+	for _, tc := range cases {
+		plan := planMemoryCompaction([]models.MemoryMergeGroupProposal{{
+			MemberIndices:    []int{0, 1},
+			Relation:         models.MemoryMergeRelationMerge,
+			CanonicalContent: tc.canonical,
+			Scope:            "User",
+			Confidence:       models.MemoryConfidenceHigh,
+		}}, candidates)
+		require.Len(t, plan.Folds, 1)
+		require.Equal(t, survivorID, *plan.Folds[0].SurvivorID)
+		require.Equal(t, tc.want, plan.Folds[0].NeedsEmbedding, tc.canonical)
+	}
+}
+
+// The datastore never rewords a starred survivor, so the planner does not pay for an embedding of
+// the canonical content when it can see the survivor is starred.
+func TestPlanMemoryCompaction_StarredSurvivorSkipsEmbedding(t *testing.T) {
+	survivorID := uuid.New()
+	absorbedID := uuid.New()
+	live := []*models.Memory{
+		{ID: survivorID, Content: "Likes tea", Scope: "User", Confidence: 0.6, Starred: true},
+		{ID: absorbedID, Content: "Drinks oolong most mornings", Scope: "User", Confidence: 0.6},
+	}
+	candidates := buildMemoryMergeCandidates(nil, live, nil)
+	require.Len(t, candidates, 2)
+	require.True(t, candidates[0].Starred)
+
+	plan := planMemoryCompaction([]models.MemoryMergeGroupProposal{{
+		MemberIndices:    []int{0, 1},
+		Relation:         models.MemoryMergeRelationMerge,
+		CanonicalContent: "Likes tea, especially oolong in the morning",
+		Scope:            "User",
+		Confidence:       models.MemoryConfidenceHigh,
+	}}, candidates)
+	require.Len(t, plan.Folds, 1)
+	require.Equal(t, survivorID, *plan.Folds[0].SurvivorID)
+	require.False(t, plan.Folds[0].NeedsEmbedding)
+}
+
 // Singleton new extractions still plan as folds so PersistMemoryMergeGroup can create the row and
 // attach it to compaction.created_memories (no merge event).
 func TestStandaloneNewExtractionStillPlansAsFold(t *testing.T) {

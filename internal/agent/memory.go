@@ -295,13 +295,20 @@ func (a *Agent) applyMemoryCompactionPlan(
 		var embedding []float32
 		if fold.NeedsEmbedding {
 			vec, err := a.memoryTool.CreateEmbedding(ctx, fold.Group.CanonicalContent)
-			if err != nil {
+			switch {
+			case err != nil && fold.SurvivorID == nil:
 				a.logger.Error("failed to create embedding for merged memory group", zap.Error(err))
 				continue
+			case err != nil:
+				// A survivor fold still consolidates without the embedding; it just keeps the
+				// survivor's wording, since content and embedding must change together.
+				a.logger.Warn("failed to embed canonical content; folding without rewriting the survivor", zap.Error(err))
+			default:
+				embedding = vec
 			}
-			embedding = vec
 		}
-		// PersistMemoryMergeGroup: folds into an existing survivor emit fold_live merge events;
+		// PersistMemoryMergeGroup: folds into an existing survivor emit fold_live merge events (and
+		// adopt the canonical phrasing when embedding is set and the survivor is not starred);
 		// new-only groups (no survivor) create the row and attach it to compaction.created_memories
 		// with no merge event — collapsing brand-new extractions does not change existing agent state.
 		if _, err := a.ds.PersistMemoryMergeGroup(
