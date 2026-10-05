@@ -33,6 +33,8 @@ type ConversationInput struct {
 	Tags                       []string
 	IsFavorite                 bool
 	IsAutoMood                 bool
+	// MemorySensitivityLimit is the chat's memory sensitivity limit; empty is the unrestricted default.
+	MemorySensitivityLimit models.MemorySensitivity
 }
 
 // MessageInput is one user/assistant message. Non-chat roles (system/tool) are filtered upstream.
@@ -56,6 +58,8 @@ type exportConversation struct {
 	WhatiffTags                     []string            `json:"whatiff_tags,omitempty"`
 	WhatiffIsFavorite               bool                `json:"whatiff_is_favorite,omitempty"`
 	WhatiffIsAutoMood               bool                `json:"whatiff_is_auto_mood"`
+	// Omitted when unrestricted, so exports from before the limit existed and unrestricted chats look the same.
+	WhatiffMemorySensitivityLimit models.MemorySensitivity `json:"whatiff_memory_sensitivity_limit,omitempty"`
 }
 
 type exportChatMessage struct {
@@ -105,6 +109,7 @@ type ParsedConversation struct {
 	WhatiffTags                     []string
 	WhatiffIsFavorite               bool
 	WhatiffIsAutoMood               bool
+	WhatiffMemorySensitivityLimit   models.MemorySensitivity
 }
 
 // ParsedMessage is one decoded message; Sender is "human" or "assistant".
@@ -139,9 +144,18 @@ func ParseConversations(data []byte) ([]ParsedConversation, error) {
 			WhatiffTags:                     c.WhatiffTags,
 			WhatiffIsFavorite:               c.WhatiffIsFavorite,
 			WhatiffIsAutoMood:               c.WhatiffIsAutoMood,
+			WhatiffMemorySensitivityLimit:   c.WhatiffMemorySensitivityLimit,
 		})
 	}
 	return out, nil
+}
+
+// exportedSensitivityLimit drops the unrestricted default so it is not written to the bundle.
+func exportedSensitivityLimit(l models.MemorySensitivity) models.MemorySensitivity {
+	if !l.Restricted() {
+		return ""
+	}
+	return l
 }
 
 // BuildConversationsJSON renders convs to the Anthropic conversations.json bytes. Exported so the
@@ -186,6 +200,7 @@ func BuildConversationsJSON(convs []ConversationInput) ([]byte, error) {
 			WhatiffTags:                     c.Tags,
 			WhatiffIsFavorite:               c.IsFavorite,
 			WhatiffIsAutoMood:               c.IsAutoMood,
+			WhatiffMemorySensitivityLimit:   exportedSensitivityLimit(c.MemorySensitivityLimit),
 		})
 	}
 

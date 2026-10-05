@@ -109,6 +109,15 @@ func (h *Handler) ListMemories(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if sensitivityStr := strings.TrimSpace(queryParams.Get("sensitivity")); sensitivityStr != "" {
+		sensitivity, err := parseSensitivityValue(sensitivityStr)
+		if err != nil {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid sensitivity value", err)
+			return
+		}
+		filters.Sensitivity = &sensitivity
+	}
+
 	if searchQuery != "" {
 		filters.Query = &searchQuery
 	}

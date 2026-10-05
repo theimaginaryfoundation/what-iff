@@ -35,6 +35,8 @@ type chatUpdateRequest struct {
 	DisabledTools *[]string `json:"disabled_tools,omitempty"`
 	Tags          *[]string `json:"tags,omitempty"`
 	IsFavorite    *bool     `json:"is_favorite,omitempty"`
+	// MemorySensitivityLimit, when set, changes the chat's memory sensitivity limit. Omit to keep it.
+	MemorySensitivityLimit *string `json:"memory_sensitivity_limit,omitempty"`
 }
 
 type chatPatchRequest struct {
@@ -54,6 +56,9 @@ type chatPatchRequest struct {
 	ClearActiveMood bool `json:"clear_active_mood,omitempty"`
 	// Archived hides the thread from default lists or restores it when set to false.
 	Archived *bool `json:"archived,omitempty"`
+	// MemorySensitivityLimit changes the highest memory sensitivity this chat may read
+	// (public, personal or sensitive). Lowering it takes effect on the next turn.
+	MemorySensitivityLimit *string `json:"memory_sensitivity_limit,omitempty"`
 }
 
 type markChatReadResponse struct {
@@ -90,6 +95,14 @@ func (h *Handler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Tags = normalizedTags
+	if req.MemorySensitivityLimit != "" {
+		limit, ok := models.ParseMemorySensitivity(string(req.MemorySensitivityLimit))
+		if !ok {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "memory_sensitivity_limit must be public, personal, or sensitive", nil)
+			return
+		}
+		req.MemorySensitivityLimit = limit
+	}
 
 	// Create chat
 	chat, err := h.ds.CreateChat(r.Context(), userID, req)
@@ -513,6 +526,15 @@ func (h *Handler) UpdateChat(w http.ResponseWriter, r *http.Request) {
 		// Shallow copy of *existing aliases IsFavorite; nil means "omit" for datastore.
 		updated.IsFavorite = nil
 	}
+	if req.MemorySensitivityLimit != nil {
+		limit, ok := models.ParseMemorySensitivity(*req.MemorySensitivityLimit)
+		if !ok {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "memory_sensitivity_limit must be public, personal, or sensitive", nil)
+			return
+		}
+		updated.MemorySensitivityLimit = limit
+		updated.SetMemorySensitivityLimit = true
+	}
 
 	// Update chat
 	chat, err := h.ds.UpdateChat(r.Context(), userID, updated)
@@ -571,7 +593,7 @@ func (h *Handler) PatchChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Must include at least one field to patch.
-	if req.Name == nil && req.LastMessageTime == nil && req.ModelID == nil && req.PersonalityID == nil && req.DisabledTools == nil && req.Tags == nil && req.IsFavorite == nil && req.ActiveMoodID == nil && req.IsAutoMood == nil && !req.ClearActiveMood && req.Archived == nil {
+	if req.Name == nil && req.LastMessageTime == nil && req.ModelID == nil && req.PersonalityID == nil && req.DisabledTools == nil && req.Tags == nil && req.IsFavorite == nil && req.ActiveMoodID == nil && req.IsAutoMood == nil && !req.ClearActiveMood && req.Archived == nil && req.MemorySensitivityLimit == nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "No fields to update", nil)
 		return
 	}
@@ -651,6 +673,15 @@ func (h *Handler) PatchChat(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Archived != nil {
 		updated.Archived = req.Archived
+	}
+	if req.MemorySensitivityLimit != nil {
+		limit, ok := models.ParseMemorySensitivity(*req.MemorySensitivityLimit)
+		if !ok {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "memory_sensitivity_limit must be public, personal, or sensitive", nil)
+			return
+		}
+		updated.MemorySensitivityLimit = limit
+		updated.SetMemorySensitivityLimit = true
 	}
 
 	chat, err := h.ds.UpdateChat(r.Context(), userID, updated)

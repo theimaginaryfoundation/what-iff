@@ -51,3 +51,38 @@ func TestConversationsRoundTripWhatiffContinuationState(t *testing.T) {
 		t.Fatalf("continuation state was not preserved: %#v", got)
 	}
 }
+
+func TestConversationsRoundTripMemorySensitivityLimit(t *testing.T) {
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	msg := []MessageInput{{Origin: models.MessageOriginUser, Text: "hi", SentAt: now}}
+	data, err := BuildConversationsJSON([]ConversationInput{
+		{ID: uuid.New(), Title: "public thread", CreatedAt: now, Messages: msg, MemorySensitivityLimit: models.MemorySensitivityPublic},
+		{ID: uuid.New(), Title: "personal thread", CreatedAt: now.Add(time.Second), Messages: msg, MemorySensitivityLimit: models.MemorySensitivityPersonal},
+		{ID: uuid.New(), Title: "open thread", CreatedAt: now.Add(2 * time.Second), Messages: msg, MemorySensitivityLimit: models.MemorySensitivitySensitive},
+		{ID: uuid.New(), Title: "legacy thread", CreatedAt: now.Add(3 * time.Second), Messages: msg},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseConversations(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]models.MemorySensitivity{}
+	for _, c := range parsed {
+		got[c.Name] = c.WhatiffMemorySensitivityLimit
+	}
+	// Restricted limits round-trip; the unrestricted default is not written, and an export from
+	// before the field existed parses to empty (= unrestricted on import).
+	want := map[string]models.MemorySensitivity{
+		"public thread":   models.MemorySensitivityPublic,
+		"personal thread": models.MemorySensitivityPersonal,
+		"open thread":     "",
+		"legacy thread":   "",
+	}
+	for name, limit := range want {
+		if got[name] != limit {
+			t.Errorf("%s: limit = %q, want %q", name, got[name], limit)
+		}
+	}
+}

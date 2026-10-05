@@ -23,6 +23,7 @@ type createMemoryRequest struct {
 	Type                models.MemoryType       `json:"type"`
 	Starred             bool                    `json:"starred"`
 	Confidence          models.MemoryConfidence `json:"confidence"`
+	Sensitivity         string                  `json:"sensitivity"`
 }
 
 type createMemoriesBatchRequest struct {
@@ -80,7 +81,16 @@ func toCreateMemoryInput(req createMemoryRequest) (models.CreateMemoryInput, err
 		return models.CreateMemoryInput{}, fmt.Errorf("invalid confidence")
 	}
 
+	var sensitivity models.MemorySensitivity
+	if req.Sensitivity != "" {
+		sensitivity, err = parseSensitivityValue(req.Sensitivity)
+		if err != nil {
+			return models.CreateMemoryInput{}, err
+		}
+	}
+
 	return models.CreateMemoryInput{
+		Sensitivity:         sensitivity,
 		Content:             req.Content,
 		Level:               req.Level,
 		ChatID:              chatID,
