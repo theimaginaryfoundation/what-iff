@@ -11,6 +11,16 @@ import (
 	"go.uber.org/zap"
 )
 
+// --- isDefaultChatName ---
+
+func TestIsDefaultChatName(t *testing.T) {
+	t.Parallel()
+	require.True(t, isDefaultChatName("New thread"))
+	require.True(t, isDefaultChatName("New Chat"), "legacy clients still send the old placeholder")
+	require.False(t, isDefaultChatName("Trip planning"))
+	require.False(t, isDefaultChatName(""))
+}
+
 // --- mockChatName ---
 
 func TestMockChatName(t *testing.T) {

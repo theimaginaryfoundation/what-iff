@@ -8,7 +8,7 @@ import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { ChatService } from '../../core/services/chat.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { FileAttachment } from '../../core/models/file-attachment.model';
-import { Chat } from '../../core/models/chat.model';
+import { Chat, DEFAULT_THREAD_NAME } from '../../core/models/chat.model';
 
 @Component({
   selector: 'app-image-gallery',
@@ -180,7 +180,7 @@ export class ImageGalleryComponent implements OnInit {
   openNewChat(image: FileAttachment, event: Event): void {
     event.stopPropagation();
     // Create a new thread so we land on a blank slate with the image pre-loaded.
-    this.chatService.createChat({ name: 'New Chat' }).subscribe({
+    this.chatService.createChat({ name: DEFAULT_THREAD_NAME }).subscribe({
       next: (chat) => {
         this.router.navigate(['/chat'], { queryParams: { chatId: chat.id, galleryImageId: image.id } });
       },

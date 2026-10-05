@@ -25,6 +25,7 @@ import { apiErrorMessage } from '../../../core/utils/api-error.helpers';
 import { PersonalityViewService } from '../../../core/services/personality-view.service';
 import { ImageGalleryService } from '../../../core/services/image-gallery.service';
 import { UserPreferencesService } from '../../../core/services/user-preferences.service';
+import { DEFAULT_THREAD_NAME } from '../../../core/models/chat.model';
 import { UserPreferences } from '../../../core/models/user.model';
 import { NULL_PERSONALITY_ID } from '../../../core/constants/app.constants';
 import { PersonaAccentScopeComponent } from '../picker/persona-accent-scope.component';
@@ -337,7 +338,7 @@ export class PersonalityDetailPageComponent implements OnInit {
     if (!personality) return;
     try {
       const chat = await firstValueFrom(this.chatService.createChat({
-        name: 'New Chat',
+        name: DEFAULT_THREAD_NAME,
         personality_id: personality.id,
       }));
       this.chatService.setLastChatId(chat.id);

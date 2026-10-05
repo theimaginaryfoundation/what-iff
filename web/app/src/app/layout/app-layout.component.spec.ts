@@ -177,7 +177,7 @@ describe('AppLayoutComponent', () => {
         vi.mocked(nav.setCollapsed).mockClear();
         vi.spyOn(chatService, 'createChat').mockReturnValue(of({
             id: 'ba83002b-fa33-4bff-a13a-6399376fc798',
-            name: 'New Chat',
+            name: 'New thread',
             personality_id: 'personality-1',
         } as any));
 
@@ -196,7 +196,7 @@ describe('AppLayoutComponent', () => {
         vi.mocked(nav.setCollapsed).mockClear();
         vi.spyOn(chatService, 'createChat').mockReturnValue(of({
             id: 'ba83002b-fa33-4bff-a13a-6399376fc798',
-            name: 'New Chat',
+            name: 'New thread',
             personality_id: 'personality-1',
         } as any));
 
