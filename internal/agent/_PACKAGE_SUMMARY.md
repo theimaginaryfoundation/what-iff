@@ -16,6 +16,12 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
 - **Maintenance prompts:** Chat naming, personality generation, conversation summaries, memory extraction, scratchpad summarize/update (often **manual** `ResponseNewParams` — see architecture doc).
   **Archival** checkpoint scratchpad update and memory extraction use fixed small models (`archivalOpenAIModel` / `archivalClaudeModel` in `archival_models.go`); **checkpoint conversation summary always uses `archivalOpenAIModel` (`gpt-5-mini`)** for both OpenAI and Claude chats via unified `summarizeConversationForCheckpoint` (OpenAI threads `PreviousResponseID`; Claude renders explicit input items from inference `ModelContext`).
   Persona `archival_model` and custom memory read/write prompts are deprecated and ignored; optional `scratchpad_update_prompt` is still used for checkpoint scratchpad updates.
+- **Background backfills** (started from `internal/server`): `StartSummaryMemoryBackfill` (`message.go`) copies legacy checkpoint summaries into Summary memories once at boot.
+  `StartMemoryEmbeddingBackfill` (`memory_embedding_backfill.go`) embeds active non-Summary memories that have no Embedding row, via `datastore.BackfillMemoryEmbeddings` and the memory tool's batch embeddings call.
+  It runs once, at startup, on the server lifecycle context, and never on a timer: memories are embedded when they are saved, so it only catches up older rows and any save-time failure since the last restart.
+  The pass runs only on the instance that wins the Postgres advisory lock `MemoryEmbeddingBackfillLockKey` (default 80920033); other instances, and databases without advisory locks, skip it quietly.
+  It does not start at all under mock/local LLM backends (`nonVendorLLM`), where embeddings have no provider.
+  Both backfills are idempotent and only log failures; a pass stops early when the provider is unreachable (e.g. the deny-network client under mock/local backends).
 - **Rituals:** User and system rituals, image ritual flow, registry of built-in system rituals.
 - **Jobs:** Running scheduled/async agent work (`agentjob_run.go`, `agentjob_schedule.go`) and tools that create jobs.
 - **Thread rehydration (`thread_rehydration.go`):** Lazy summarization of **imported** threads.

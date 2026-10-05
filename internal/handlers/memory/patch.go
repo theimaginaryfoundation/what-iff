@@ -137,7 +137,7 @@ func (h *Handler) PatchMemory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updated, err := h.ds.UpdateMemory(r.Context(), userID, memoryID, patch)
+	updated, err := h.store.UpdateMemory(r.Context(), userID, memoryID, patch)
 	if err == datastore.ErrMemoryNotFound {
 		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Memory not found", err)
 		return
@@ -150,6 +150,11 @@ func (h *Handler) PatchMemory(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("failed to patch memory", zap.String("user_id", userID.String()), zap.String("memory_id", memoryID.String()), zap.Error(err))
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Failed to patch memory", err)
 		return
+	}
+	// Only a content patch can invalidate the embedding (UpdateMemory drops it
+	// when the content actually changes); embedMemories re-embeds only then.
+	if patch.Content != nil {
+		h.embedMemories(r.Context(), userID, []uuid.UUID{updated.ID})
 	}
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, updated)

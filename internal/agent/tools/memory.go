@@ -33,3 +33,8 @@ func NewVectorStoreMemoryTool(ds *datastore.Datastore, oaiClient *openai.Client,
 func (t *VectorStoreMemoryTool) CreateEmbedding(ctx context.Context, input string) ([]float32, error) {
 	return embedding.CreateEmbedding(ctx, t.oaiClient, input)
 }
+
+// CreateEmbeddings embeds a batch of inputs in one call, preserving input order.
+func (t *VectorStoreMemoryTool) CreateEmbeddings(ctx context.Context, inputs []string) ([][]float32, error) {
+	return embedding.CreateEmbeddings(ctx, t.oaiClient, inputs)
+}

@@ -25,24 +25,32 @@ const (
 // Handler handles memory-related API requests
 type Handler struct {
 	ds            *datastore.Datastore
+	store         memoryWriteStore
 	logger        *zap.Logger
 	exportLimiter *exportRateLimiter
 	oaiClient     *openai.Client
+	// embedTexts, when set, replaces the OpenAI embeddings call (tests).
+	embedTexts func(ctx context.Context, inputs []string) ([][]float32, error)
 }
 
-var errMemoryImportUnavailable = errors.New("memory import unavailable: OpenAI API key is not configured")
+var (
+	errMemoryImportUnavailable = errors.New("memory import unavailable: OpenAI API key is not configured")
+	errEmbeddingCountMismatch  = errors.New("embedding provider returned a different number of vectors than inputs")
+)
 
 // NewHandler creates a new memory handler instance. httpClient overrides the
 // SDK's default HTTP client when non-nil; under MOCK_LLM the server passes the
-// deny-network client so import embeddings cannot reach the provider.
+// deny-network client so import and create/edit embeddings cannot reach the
+// provider (they fail, are logged, and the save still succeeds).
 func NewHandler(ds *datastore.Datastore, logger *zap.Logger, openAIKey string, httpClient *http.Client) *Handler {
 	h := &Handler{
 		ds:            ds,
+		store:         ds,
 		logger:        logger,
 		exportLimiter: newExportRateLimiter(exportRateLimit, exportRateWindow),
 	}
 	if strings.TrimSpace(openAIKey) == "" {
-		logger.Warn("memory import disabled: OpenAI API key is not configured")
+		logger.Warn("memory import and create/edit embeddings disabled: OpenAI API key is not configured")
 		return h
 	}
 
@@ -78,6 +86,16 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 }
 
 func (h *Handler) createEmbedding(ctx context.Context, input string) ([]float32, error) {
+	if h.embedTexts != nil {
+		vectors, err := h.embedTexts(ctx, []string{input})
+		if err != nil {
+			return nil, err
+		}
+		if len(vectors) != 1 {
+			return nil, errEmbeddingCountMismatch
+		}
+		return vectors[0], nil
+	}
 	if h.oaiClient == nil {
 		return nil, errMemoryImportUnavailable
 	}
@@ -85,6 +103,9 @@ func (h *Handler) createEmbedding(ctx context.Context, input string) ([]float32,
 }
 
 func (h *Handler) createEmbeddings(ctx context.Context, inputs []string) ([][]float32, error) {
+	if h.embedTexts != nil {
+		return h.embedTexts(ctx, inputs)
+	}
 	if h.oaiClient == nil {
 		return nil, errMemoryImportUnavailable
 	}
