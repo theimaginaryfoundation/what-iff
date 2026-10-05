@@ -63,6 +63,34 @@ func FolderIsWithin(path, folder string) bool {
 	return folder == "" || path == folder || strings.HasPrefix(path, folder+folderSeparator)
 }
 
+// ExpressionFolderRoot is the gallery folder that generated expression images are filed under, so
+// they do not crowd the top level of the gallery.
+const ExpressionFolderRoot = "expressions"
+
+// ExpressionFolder is the folder a personality's generated expression images are filed in:
+// "expressions/<name>". The name is always one folder level (a "/" or "\" in it becomes "-"), so
+// any personality name gives a valid path. Personalities that share a name share a folder; the
+// label is only a convenience, so that is fine.
+func ExpressionFolder(personalityName string) string {
+	name := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, strings.NewReplacer("/", "-", `\`, "-").Replace(personalityName))
+	if runes := []rune(strings.TrimSpace(name)); len(runes) > MaxFolderSegmentRunes {
+		name = string(runes[:MaxFolderSegmentRunes])
+	}
+	if name = strings.TrimSpace(name); name == "" || name == "." || name == ".." {
+		name = "unnamed"
+	}
+	folder, err := NormalizeFolder(ExpressionFolderRoot + folderSeparator + name)
+	if err != nil {
+		return ExpressionFolderRoot
+	}
+	return folder
+}
+
 // FolderCount is how many gallery images sit directly in a folder.
 type FolderCount struct {
 	Path  string `json:"path"`

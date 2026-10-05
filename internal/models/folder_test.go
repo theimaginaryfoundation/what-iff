@@ -53,3 +53,31 @@ func TestFolderIsWithin(t *testing.T) {
 	assert.False(t, FolderIsWithin("chart", "charts"))
 	assert.False(t, FolderIsWithin("", "charts"))
 }
+
+func TestExpressionFolder(t *testing.T) {
+	for name, want := range map[string]string{
+		"Aster":                  "expressions/aster",
+		"  Aster Vale  ":         "expressions/aster vale",
+		"AC/DC":                  "expressions/ac-dc",
+		`Back\slash`:             "expressions/back-slash",
+		"":                       "expressions/unnamed",
+		"   ":                    "expressions/unnamed",
+		".":                      "expressions/unnamed",
+		"..":                     "expressions/unnamed",
+		"/":                      "expressions/-",
+		"Zoë ✨":                  "expressions/zoë ✨",
+		"line\nbreak\x00":        "expressions/linebreak",
+		strings.Repeat("a", 100): "expressions/" + strings.Repeat("a", MaxFolderSegmentRunes),
+	} {
+		got := ExpressionFolder(name)
+		assert.Equal(t, want, got, "%q", name)
+		normalized, err := NormalizeFolder(got)
+		require.NoError(t, err, "%q must give a valid folder", name)
+		assert.Equal(t, got, normalized, "%q is already canonical", name)
+	}
+}
+
+func TestExpressionFolderGroupsPersonalitiesThatShareAName(t *testing.T) {
+	assert.Equal(t, ExpressionFolder("Aster"), ExpressionFolder("  ASTER "))
+	assert.NotEqual(t, ExpressionFolder("Aster"), ExpressionFolder("Briar"))
+}

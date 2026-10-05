@@ -157,7 +157,7 @@ func TestUploadExpressionCellAttachment_EmptyPNG(t *testing.T) {
 	ctx := context.Background()
 	uid, pid := uuid.New(), uuid.New()
 	a := &Agent{}
-	id, err := a.uploadExpressionCellAttachment(ctx, uid, pid, "happy", nil)
+	id, err := a.uploadExpressionCellAttachment(ctx, uid, pid, "expressions/aster", "happy", nil)
 	require.ErrorContains(t, err, "empty cell png")
 	require.Equal(t, uuid.Nil, id)
 }
