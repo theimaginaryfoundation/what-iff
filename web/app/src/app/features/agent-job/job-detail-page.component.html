@@ -67,8 +67,13 @@
           </h1>
           @if (!isCreateMode()) {
             <p class="mt-1 text-sm text-text-secondary">
-              Status: <span tabindex="0" [uiTooltip]="statusDescription(currentJob.status)">{{ statusLabel(currentJob.status) }}</span>
+              Status: <span tabindex="0" [uiTooltip]="statusDescription(currentJob)">{{ statusLabel(currentJob) }}</span>
             </p>
+            @if (scheduleFailureReason(currentJob); as reason) {
+              <p class="mt-2 rounded-lg border border-danger/40 bg-danger/10 p-2 text-xs text-danger" role="alert">
+                Paused: couldn't schedule the next run. {{ reason }}
+              </p>
+            }
           }
 
           <div class="mt-4">

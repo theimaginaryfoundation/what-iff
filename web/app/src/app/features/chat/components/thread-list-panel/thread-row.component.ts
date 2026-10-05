@@ -15,7 +15,7 @@ import { ContextPanelService } from '../../services/context-panel.service';
 import { RouterLink } from '@angular/router';
 import { ThreadJobSummary, jobDisplayName } from '../../helpers/thread-jobs.helpers';
 import { ThreadAutomation } from '../../../../core/services/thread-automation-source';
-import { statusDescription, statusLabel, statusTone } from '../../../agent-job/helpers/job-status.helpers';
+import { jobStatusDescription, jobStatusLabel, jobStatusTone, scheduleFailureReason, statusLabel } from '../../../agent-job/helpers/job-status.helpers';
 
 @Component({
   selector: 'app-thread-row',
@@ -579,16 +579,18 @@ export class ThreadRowComponent {
   });
   readonly jobTone = computed(() => {
     const summary = this.jobs();
-    return summary ? statusTone(summary.primary.status) : 'neutral';
+    return summary ? jobStatusTone(summary.primary) : 'neutral';
   });
   readonly jobStatusText = computed(() => {
     const summary = this.jobs();
-    return summary ? statusLabel(summary.primary.status) : '';
+    return summary ? jobStatusLabel(summary.primary) : '';
   });
   readonly jobStatusHint = computed(() => {
     const job = this.jobs()?.primary;
     if (!job) return '';
-    const description = statusDescription(job.status);
+    const description = jobStatusDescription(job);
+    // The schedule-failure description already carries the reason.
+    if (scheduleFailureReason(job) !== null) return description;
     return job.last_error ? `${description}. Last error: ${job.last_error}` : description;
   });
   /** Next run for jobs that will still run; otherwise when it last ran. */

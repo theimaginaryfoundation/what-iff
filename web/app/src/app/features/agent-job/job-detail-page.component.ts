@@ -25,7 +25,7 @@ import { PersonalityService } from '../../core/services/personality.service';
 import { RitualService } from '../../core/services/ritual.service';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
-import { isTerminalStatus, statusDescription, statusLabel } from './helpers/job-status.helpers';
+import { isTerminalStatus, jobStatusDescription, jobStatusLabel, scheduleFailureReason } from './helpers/job-status.helpers';
 import { JobFormComponent } from './components/job-form.component';
 import { JobRunHistoryComponent } from './components/job-run-history.component';
 
@@ -67,8 +67,9 @@ export class JobDetailPageComponent implements OnInit, OnDestroy {
   readonly ritualSearch = signal('');
   readonly ritualLoading = signal(false);
   readonly isCreateMode = signal(false);
-  readonly statusLabel = statusLabel;
-  readonly statusDescription = statusDescription;
+  readonly statusLabel = jobStatusLabel;
+  readonly statusDescription = jobStatusDescription;
+  readonly scheduleFailureReason = scheduleFailureReason;
 
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('id');
