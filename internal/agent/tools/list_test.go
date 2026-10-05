@@ -558,3 +558,54 @@ func TestListFilesPersonalityScopeWithoutPersonality(t *testing.T) {
 		t.Fatalf("expected empty result + note when no active personality, got %+v", res)
 	}
 }
+
+func TestListFilesByFolderPrefixShowsEachFilesFolder(t *testing.T) {
+	store := &fakeListStore{files: []*models.FileAttachment{
+		{ID: uuid.New(), Name: "hrv.png", FileType: "image/png", Folder: "charts/oura"},
+		{ID: uuid.New(), Name: "loose.png", FileType: "image/png"},
+	}}
+	tool := newTestListTool(store)
+
+	out, err := tool.List(context.Background(), listTestChat(), []byte(`{"kind":"files","file_type":"image","folder":" Charts / "}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	res := decodeList(t, out)
+
+	if store.lastFileFilters.FolderPrefix == nil || *store.lastFileFilters.FolderPrefix != "charts" {
+		t.Fatalf("expected a normalized folder prefix 'charts', got %+v", store.lastFileFilters.FolderPrefix)
+	}
+	if store.lastFileFilters.Folder != nil {
+		t.Fatalf("the agent filter is a prefix, not an exact folder: %+v", store.lastFileFilters.Folder)
+	}
+	if res.Items[0].Folder != "charts/oura" || res.Items[1].Folder != "" {
+		t.Fatalf("expected each row to show its folder, got %+v", res.Items)
+	}
+}
+
+func TestListFilesWithoutAFolderOrWithTheTopLevelHasNoFolderFilter(t *testing.T) {
+	for _, args := range []string{`{"kind":"files"}`, `{"kind":"files","folder":""}`, `{"kind":"files","folder":"/"}`, `{"kind":"files","folder":"  "}`} {
+		store := &fakeListStore{}
+		tool := newTestListTool(store)
+		if _, err := tool.List(context.Background(), listTestChat(), []byte(args)); err != nil {
+			t.Fatalf("%s: unexpected error: %v", args, err)
+		}
+		if store.lastFileFilters.FolderPrefix != nil || store.lastFileFilters.Folder != nil {
+			t.Fatalf("%s: expected no folder filter, got %+v / %+v", args, store.lastFileFilters.FolderPrefix, store.lastFileFilters.Folder)
+		}
+	}
+}
+
+func TestListFilesRejectsAnInvalidFolderWithoutQuerying(t *testing.T) {
+	store := &fakeListStore{}
+	tool := newTestListTool(store)
+
+	out, err := tool.List(context.Background(), listTestChat(), []byte(`{"kind":"files","folder":"../etc"}`))
+	if err != nil {
+		t.Fatalf("a bad argument is reported to the model, not returned as an error: %v", err)
+	}
+	res := decodeList(t, out)
+	if res.Error == "" || store.lastPageNum != 0 {
+		t.Fatalf("expected an error result and no query, got %+v (page %d)", res, store.lastPageNum)
+	}
+}

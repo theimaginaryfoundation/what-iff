@@ -60,7 +60,8 @@ Notes:
 - Default count is 1 unless the user asks for variations/options.
 - Quality controls cost and detail. Choose the level appropriate to the request; higher quality yields more detail.
 - Use aspect_ratio to match the subject: square for icons/avatars/logos, landscape for scenes/banners, portrait for characters/posters. Defaults to square.
-- To create multiple variations, either set count > 1 or call this tool multiple times with different prompts.`
+- To create multiple variations, either set count > 1 or call this tool multiple times with different prompts.
+- Use folder to file the images in a gallery folder (e.g. "charts/oura") instead of leaving them at the top level of the gallery. Folders are created as you use them. Use it for recurring output you do not want cluttering the gallery.`
 
 const CreateAgentJobToolDescription = `Schedule a future reminder / follow-up / check-in / task for the current user.
 
@@ -189,6 +190,10 @@ var GenerateImageToolSpec = FunctionToolSpec{
 		"filename_prefix": map[string]interface{}{
 			"type":        "string",
 			"description": "Optional prefix to use for image filenames (e.g., 'logo_concept').",
+		},
+		"folder": map[string]interface{}{
+			"type":        "string",
+			"description": "Optional gallery folder to file the images in, e.g. 'charts' or 'charts/oura' ('/' nests; case-insensitive). Omit to leave them at the top level.",
 		},
 	},
 	Required: []string{"prompt"},

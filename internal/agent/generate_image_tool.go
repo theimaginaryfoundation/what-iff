@@ -20,6 +20,7 @@ type generateImageToolArgs struct {
 	Quality        *string `json:"quality,omitempty"`
 	AspectRatio    *string `json:"aspect_ratio,omitempty"`
 	FilenamePrefix *string `json:"filename_prefix,omitempty"`
+	Folder         *string `json:"folder,omitempty"`
 }
 
 type generateImageToolImage struct {
@@ -32,6 +33,7 @@ type generateImageToolResult struct {
 	Prompt      string                   `json:"prompt,omitempty"`
 	Quality     string                   `json:"quality,omitempty"`
 	AspectRatio string                   `json:"aspect_ratio,omitempty"`
+	Folder      string                   `json:"folder,omitempty"`
 	Count       int                      `json:"count,omitempty"`
 	Images      []generateImageToolImage `json:"images,omitempty"`
 	Error       string                   `json:"error,omitempty"`
@@ -73,6 +75,18 @@ func parseGenerateImageQuality(raw *string) (provider.ImageQuality, error) {
 	default:
 		return provider.ImageQualityLow, fmt.Errorf("invalid quality %q (expected low|medium|high)", q)
 	}
+}
+
+// parseGenerateImageFolder normalizes the optional gallery folder; nil or blank is the top level.
+func parseGenerateImageFolder(raw *string) (string, error) {
+	if raw == nil {
+		return "", nil
+	}
+	folder, err := models.NormalizeFolder(*raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid folder: %w", err)
+	}
+	return folder, nil
 }
 
 func parseGenerateImageAspectRatio(raw *string) (provider.ImageAspectRatio, error) {
@@ -149,6 +163,19 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 		})
 		if merr != nil {
 			a.logger.Error("failed to marshal generate_image invalid-aspect-ratio result", zap.Error(merr))
+			return "", nil, merr
+		}
+		return out, nil, nil
+	}
+
+	folder, fErr := parseGenerateImageFolder(toolArgs.Folder)
+	if fErr != nil {
+		out, merr := marshalGenerateImageToolResult(generateImageToolResult{
+			Success: false,
+			Error:   fErr.Error(),
+		})
+		if merr != nil {
+			a.logger.Error("failed to marshal generate_image invalid-folder result", zap.Error(merr))
 			return "", nil, merr
 		}
 		return out, nil, nil
@@ -274,6 +301,7 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 			Name:        name,
 			FileType:    "image/png",
 			FileContent: b64s[i],
+			Folder:      folder,
 			// ChatMessageID intentionally omitted: it will be set when the assistant message is persisted.
 		})
 		imagesMeta = append(imagesMeta, generateImageToolImage{
@@ -300,6 +328,7 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 		Prompt:      prompt,
 		Quality:     string(quality),
 		AspectRatio: string(aspectRatio),
+		Folder:      folder,
 		Count:       count,
 		Images:      imagesMeta,
 		Error:       toolErrText,
