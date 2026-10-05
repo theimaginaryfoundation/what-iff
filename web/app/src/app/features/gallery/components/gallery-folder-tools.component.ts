@@ -27,6 +27,7 @@ export class GalleryFolderToolsComponent {
   readonly createError = signal<string | null>(null);
   readonly movingImages = signal(false);
   readonly submitting = signal(false);
+  readonly actionMenuOpen = signal(false);
   /** The breadcrumb step something is being dragged over, to highlight it. */
   readonly dropHover = signal<string | null>(null);
 
@@ -60,6 +61,16 @@ export class GalleryFolderToolsComponent {
 
   toggleSelectionMode(): void {
     this.view.setSelectionMode(!this.view.selectionMode());
+  }
+
+  /** Closes the action menu shortly after focus leaves it (the delay lets a menu item's mousedown land first). */
+  closeActionMenuSoon(): void {
+    setTimeout(() => this.actionMenuOpen.set(false), 150);
+  }
+
+  moveSelectionFromMenu(): void {
+    this.actionMenuOpen.set(false);
+    this.openMoveImages();
   }
 
   openMoveImages(): void {

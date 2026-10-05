@@ -76,6 +76,24 @@ describe('GalleryFolderToolsComponent', () => {
       expect(view.currentFolder()).toBe('charts');
     });
 
+    it('toggles between Show all and Show folders, so the label always says what the click does', () => {
+      expect(buttons()).toContain('Show all');
+      expect(buttons()).not.toContain('Show folders');
+
+      button('Show all').click();
+      fixture.detectChanges();
+
+      expect(view.showAll()).toBe(true);
+      expect(buttons()).toContain('Show folders');
+      expect(buttons()).not.toContain('Show all');
+
+      button('Show folders').click();
+      fixture.detectChanges();
+
+      expect(view.showAll()).toBe(false);
+      expect(buttons()).toContain('Show all');
+    });
+
     it('says so, and hides New folder, when searching or showing everything', () => {
       view.setFilters({ query: 'hrv' });
       fixture.detectChanges();
@@ -128,24 +146,108 @@ describe('GalleryFolderToolsComponent', () => {
   });
 
   describe('selecting and moving images', () => {
-    it('shows the selection bar only in select mode, and cannot move nothing', () => {
-      expect(el().querySelector('[aria-label="Selected images"]')).toBeNull();
+    const bar = () => el().querySelector('[aria-label="Bulk actions"]') as HTMLElement | null;
+    const selectAll = () => el().querySelector('.folder-tools__select-all-box') as HTMLInputElement;
+    const selectAllLabel = () => el().querySelector('.folder-tools__select-all')?.textContent?.trim();
+    const actionButton = () => button('Choose action ▾');
+
+    it('shows the bar only in select mode, and cannot choose an action with nothing selected', () => {
+      expect(bar()).toBeNull();
 
       button('Select').click();
       fixture.detectChanges();
 
-      expect(el().querySelector('[aria-label="Selected images"]')).not.toBeNull();
+      expect(bar()).not.toBeNull();
       expect(el().textContent).toContain('0 selected');
-      expect(button('Move to folder…').disabled).toBe(true);
+      expect(el().textContent).toContain('Select mode: click an image to pick it');
+      expect(actionButton().disabled).toBe(true);
+      expect(button('Clear ×').disabled).toBe(true);
     });
 
-    it('selects everything shown and counts it', () => {
-      button('Select').click();
-      fixture.detectChanges(); // the selection bar appears
-      button('Select all shown').click();
+    it('has a select-all that becomes Unselect all, so nothing has to be unclicked by hand', () => {
+      view.setSelectionMode(true);
       fixture.detectChanges();
+      expect(selectAllLabel()).toBe('Select all');
+      expect(selectAll().checked).toBe(false);
+
+      selectAll().click();
+      fixture.detectChanges();
+
       expect(el().textContent).toContain('2 selected');
-      expect(button('Move to folder…').disabled).toBe(false);
+      expect(selectAllLabel()).toBe('Unselect all');
+      expect(selectAll().checked).toBe(true);
+      expect(actionButton().disabled).toBe(false);
+      expect(el().textContent).not.toContain('click an image to pick it');
+
+      selectAll().click();
+      fixture.detectChanges();
+
+      expect(el().textContent).toContain('0 selected');
+      expect(selectAllLabel()).toBe('Select all');
+    });
+
+    it('shows a partly selected list as indeterminate, and selects the rest from there', () => {
+      view.setSelectionMode(true);
+      view.toggleSelected('a');
+      fixture.detectChanges();
+
+      expect(selectAll().indeterminate).toBe(true);
+      expect(selectAllLabel()).toBe('Select all');
+
+      selectAll().click();
+      fixture.detectChanges();
+
+      expect(view.selectedCount()).toBe(2);
+    });
+
+    it('clears the selection with Clear, and leaves select mode with Done', () => {
+      view.setSelectionMode(true);
+      view.selectAllShown();
+      fixture.detectChanges();
+
+      button('Clear ×').click();
+      fixture.detectChanges();
+      expect(view.selectedCount()).toBe(0);
+      expect(view.selectionMode()).toBe(true);
+
+      button('Done').click();
+      fixture.detectChanges();
+      expect(view.selectionMode()).toBe(false);
+      expect(bar()).toBeNull();
+    });
+
+    it('moves the selection from the Choose action menu', () => {
+      view.setSelectionMode(true);
+      view.selectAllShown();
+      fixture.detectChanges();
+      expect(el().querySelector('[role="listbox"][aria-label="Bulk actions"]')).toBeNull();
+
+      actionButton().click();
+      fixture.detectChanges();
+      expect(actionButton().getAttribute('aria-expanded')).toBe('true');
+
+      el()
+        .querySelector('[role="option"]')
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      fixture.detectChanges();
+
+      expect(component.movingImages()).toBe(true);
+      expect(component.actionMenuOpen()).toBe(false);
+      expect(el().querySelector('[role="listbox"][aria-label="Bulk actions"]')).toBeNull();
+    });
+
+    it('closes the action menu on Escape', () => {
+      view.setSelectionMode(true);
+      view.selectAllShown();
+      fixture.detectChanges();
+      actionButton().click();
+      fixture.detectChanges();
+
+      el()
+        .querySelector('.folder-tools__bulk-action')
+        ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+      expect(component.actionMenuOpen()).toBe(false);
     });
 
     it('moves the selected images to the chosen folder, then closes the dialog and leaves select mode alone', async () => {

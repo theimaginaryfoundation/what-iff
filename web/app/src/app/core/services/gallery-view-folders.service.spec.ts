@@ -301,6 +301,40 @@ describe('GalleryViewService folders', () => {
       expect(service.selectedCount()).toBe(0);
     });
 
+    it('knows whether none, some or all of what is shown is selected', () => {
+      service.loadInitial();
+      expect(service.selectionState()).toBe('none');
+
+      service.toggleSelected('a');
+      expect(service.selectionState()).toBe('some');
+
+      service.toggleSelected('b');
+      expect(service.selectionState()).toBe('all');
+
+      service.clearSelection();
+      expect(service.selectionState()).toBe('none');
+    });
+
+    it('is never "all" when nothing is shown', () => {
+      api.listImages.mockReturnValue(of(page([])));
+      service.loadInitial();
+      expect(service.selectionState()).toBe('none');
+    });
+
+    it('toggles select-all: selects what is shown, then clears when it all is selected', () => {
+      service.loadInitial();
+
+      service.toggleSelectAll();
+      expect(service.selectedCount()).toBe(2);
+
+      service.toggleSelectAll();
+      expect(service.selectedCount()).toBe(0);
+
+      service.toggleSelected('a'); // some selected: the next toggle selects the rest
+      service.toggleSelectAll();
+      expect(service.selectedCount()).toBe(2);
+    });
+
     it('clears the selection when another folder is opened', () => {
       service.loadInitial();
       service.toggleSelected('a');

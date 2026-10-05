@@ -43,11 +43,10 @@
       <button
         type="button"
         class="folder-tools__button"
-        [attr.aria-pressed]="view.showAll()"
         [class.folder-tools__button--active]="view.showAll()"
         (click)="view.setShowAll(!view.showAll())"
       >
-        Show all images
+        {{ view.showAll() ? "Show folders" : "Show all" }}
       </button>
     </div>
   </div>
@@ -79,21 +78,48 @@
   }
 
   @if (view.selectionMode()) {
-    <div class="folder-tools__selection" role="region" aria-label="Selected images">
-      <span class="folder-tools__count" role="status">
-        {{ view.selectedCount() }} selected
-        <span class="folder-tools__mode-hint">· Select mode: click an image to pick it</span>
-      </span>
-      <button type="button" class="folder-tools__button" (click)="view.selectAllShown()">Select all shown</button>
+    <div class="folder-tools__bulk-bar" role="region" aria-label="Bulk actions">
+      <label class="folder-tools__select-all">
+        <input
+          type="checkbox"
+          class="folder-tools__select-all-box"
+          [checked]="view.selectionState() === 'all'"
+          [indeterminate]="view.selectionState() === 'some'"
+          (change)="view.toggleSelectAll()"
+        />
+        {{ view.selectionState() === "all" ? "Unselect all" : "Select all" }}
+      </label>
+      <span class="folder-tools__bulk-count" role="status" aria-live="polite">{{ view.selectedCount() }} selected</span>
+      @if (view.selectedCount() === 0) {
+        <span class="folder-tools__bulk-hint">Select mode: click an image to pick it</span>
+      }
+      <div class="folder-tools__bulk-action" (focusout)="closeActionMenuSoon()" (keydown.escape)="actionMenuOpen.set(false)">
+        <button
+          type="button"
+          class="folder-tools__bulk-action-btn"
+          aria-haspopup="listbox"
+          [attr.aria-expanded]="actionMenuOpen()"
+          [disabled]="view.selectedCount() === 0"
+          (click)="actionMenuOpen.set(!actionMenuOpen())"
+        >
+          Choose action <span aria-hidden="true">▾</span>
+        </button>
+        @if (actionMenuOpen()) {
+          <div class="folder-tools__bulk-menu" role="listbox" aria-label="Bulk actions">
+            <button type="button" role="option" (mousedown)="moveSelectionFromMenu()">Move to folder…</button>
+          </div>
+        }
+      </div>
       <button
         type="button"
-        class="folder-tools__button folder-tools__button--primary"
+        class="folder-tools__bulk-clear"
         [disabled]="view.selectedCount() === 0"
-        (click)="openMoveImages()"
+        (click)="view.clearSelection()"
+        aria-label="Clear selection"
       >
-        Move to folder…
+        Clear <span aria-hidden="true">×</span>
       </button>
-      <button type="button" class="folder-tools__button" (click)="view.setSelectionMode(false)">Done</button>
+      <button type="button" class="folder-tools__bulk-done" (click)="view.setSelectionMode(false)">Done</button>
     </div>
   }
 

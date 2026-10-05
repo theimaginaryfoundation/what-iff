@@ -100,6 +100,16 @@ export class GalleryViewService {
   );
   readonly breadcrumbs = computed(() => breadcrumbsFor(this.currentFolder()));
   readonly selectedCount = computed(() => this.selectedIds().size);
+  /** Whether none, some or all of the images shown are selected (drives the select-all checkbox). */
+  readonly selectionState = computed<'none' | 'some' | 'all'>(() => {
+    const shown = this.filteredImages();
+    const selected = this.selectedIds();
+    const picked = shown.filter(image => selected.has(image.id)).length;
+    if (picked === 0) {
+      return 'none';
+    }
+    return picked === shown.length ? 'all' : 'some';
+  });
   readonly selectedImage = computed(() => this.filteredImages().find(i => i.id === this.selectedImageId()) ?? null);
   readonly hasMore = computed(() => this.images().length < this.totalCount());
   readonly availableSources = computed<GallerySourceFilter[]>(() => {
@@ -450,6 +460,15 @@ export class GalleryViewService {
 
   selectAllShown(): void {
     this.selectedIds.set(new Set(this.filteredImages().map(image => image.id)));
+  }
+
+  /** Select every image shown, or clear the selection when they all already are. */
+  toggleSelectAll(): void {
+    if (this.selectionState() === 'all') {
+      this.clearSelection();
+    } else {
+      this.selectAllShown();
+    }
   }
 
   clearSelection(): void {
