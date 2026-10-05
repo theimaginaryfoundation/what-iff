@@ -129,6 +129,7 @@ labelling gap worth fixing.
 |---|---|---|---|
 | `whatiff.chat.turn.stage.duration` | histogram, s | slow | `stage`, `call_path` (user_chat, agent_job) |
 | `whatiff.chat.checkpoints` | counter | — | `reason` (turn_count, last_input_tokens, estimated_context_tokens) |
+| `whatiff.chat.checkpoints.skipped` | counter | — | `reason` (as above); due but not started because one was already running for the chat |
 | `whatiff.chat.checkpoint.context_tokens` | histogram, {token} | tokens | |
 | `whatiff.chat.checkpoint.messages` | histogram | counts | |
 | `whatiff.chat.context_items.persist_failures` | counter | — | `operation` (create, update) |

@@ -195,11 +195,11 @@ describe('MessageBubbleComponent', () => {
     });
 
     it('shows the queued-behind-an-earlier-turn status instead of the dots', () => {
-        fixture.componentRef.setInput('message', { ...pendingAssistantMessage(), pending_status: 'Waiting on summarizer…' });
+        fixture.componentRef.setInput('message', { ...pendingAssistantMessage(), pending_status: 'Waiting for the previous reply…' });
         fixture.componentRef.setInput('displayContent', '');
         fixture.detectChanges();
 
-        expect(fixture.nativeElement.querySelector('.bubble__pending-status')?.textContent).toContain('Waiting on summarizer…');
+        expect(fixture.nativeElement.querySelector('.bubble__pending-status')?.textContent).toContain('Waiting for the previous reply…');
         expect(fixture.nativeElement.querySelector('.bubble__pending-dots')).toBeNull();
     });
 

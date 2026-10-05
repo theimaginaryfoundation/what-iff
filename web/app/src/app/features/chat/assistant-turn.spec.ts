@@ -31,9 +31,7 @@ describe('parseChatTurnWaiting', () => {
     expect(parseChatTurnWaiting(JSON.stringify({ tool_calls: [], waiting_on: 'nonsense' }))).toBeNull();
   });
 
-  it('labels each phase', () => {
-    expect(chatTurnWaitingLabel('summarizer')).toBe('Waiting on summarizer…');
-    expect(chatTurnWaitingLabel('wrap_up')).toBe('Finishing the previous turn…');
+  it('labels the wait', () => {
     expect(chatTurnWaitingLabel('reply')).toBe('Waiting for the previous reply…');
   });
 });

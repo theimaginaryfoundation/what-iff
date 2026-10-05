@@ -348,6 +348,13 @@ func (a *Agent) handleEphemeralPrompt(
 		return nil, fmt.Errorf("failed to update chat metadata: %w", err)
 	}
 
+	// The reply and the chat's response chain are saved, so a turn queued behind this one may start;
+	// the expression pick and checkpoint below overlap it. A tracked job opens the gate through its
+	// own status (advanceJobInferenceComplete). A scheduled run has no job row, so its queue ticket
+	// is ended here.
+	if trackingJob == nil {
+		endTurn(nil)
+	}
 	if err := a.advanceJobInferenceComplete(ctx, trackingJob, agentMessage.ID); err != nil {
 		return nil, fmt.Errorf("failed to advance agent job after inference: %w", err)
 	}

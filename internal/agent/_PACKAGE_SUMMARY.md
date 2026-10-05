@@ -32,24 +32,28 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
   **`WaitForThreadRehydration`** is the inference gate: `handleUserMessage`/`handleEphemeralPrompt` call it to stall a turn (bounded by `rehydrationWaitTimeout`, graceful degrade on timeout) until an in-flight summary settles.
 - **Per-chat turn serialization (`chat_turn_gate.go`, #254):** turns in one chat run one at a time, in job order, across API instances.
   `handleUserMessage` and `handleEphemeralPrompt` call the gate (`awaitUserChatTurn` / `beginEphemeralChatTurn`) after the job is marked processing and before the rehydration gate and `prepareChatContext`, so a queued turn builds its context on the earlier turn's reply.
-  It is job-ordered single-flight: a turn waits until no older `chat_message`/`agent_job_run` job in its chat is unfinished (`ListActiveTurnJobsForChat`, ordered by `created_at` then id at microsecond precision).
-  The gate opens when the earlier turn's job is terminal, not at `inference_complete`: the earlier turn's expression pick and, above all, its checkpoint (scratchpad, memories, summary window) work on the chat state the next turn reads, so the next turn waits for them (`blocksLaterTurns`).
-  That wait is the expression pick in the common case, and minutes only when a checkpoint runs; the web client still unlocks its composer at `inference_complete`, and a message sent then queues.
-  `hasReplied` (past `inference_complete`, not terminal) is separate: it decides that shutdown completes rather than fails a turn.
-  Because post-processing holds the next turn, each step has a budget: the expression pick `expressionPickTimeout` (2m), chat naming `chatNameTimeout` (1m), the checkpoint `checkpointTimeout` (5m); a step that runs out loses only itself, and a lost checkpoint is redone by the next one.
+  It is job-ordered single-flight: a turn waits until no older `chat_message`/`agent_job_run` job in its chat is pending or processing (`ListPendingTurnJobsForChat`, ordered by `created_at` then id at microsecond precision).
+  The gate opens at `inference_complete`, when the reply is saved, not when the earlier turn ends: its expression pick, checkpoint and memory work then overlap the next turn (`blocksLaterTurns`).
+  That is safe because a turn builds its context from the saved checkpoint summary plus every message since the window start, and a checkpoint moves the window only to just after the reply it summarized (`checkpointWindowStart`): a turn that runs mid-checkpoint sees the old summary and all the intermediate turns.
+  Each in-flight turn is tracked with a `replied` flag, set when it leaves pending/processing, so shutdown completes rather than fails a turn that already saved its reply.
+  A turn's own post-processing steps have budgets: the expression pick `expressionPickTimeout` (2m), chat naming `chatNameTimeout` (1m), the checkpoint `checkpointTimeout` (5m); a step that runs out loses only itself, and a lost checkpoint is redone by the next one.
   Waiting polls with backoff (250ms to 2s); a turn in this process finishing (`noteTurnJobStatus`, from the job phase helpers, or the turn's release) wakes that chat's waiters at once (`chatTurnTracker`, keyed per chat).
   Nothing is held while a turn runs: no advisory lock or pinned connection.
-  Every queued or running turn heartbeats its job (`TouchJob`, every 30s) until it is released, after its checkpoint.
-  An unfinished job without a write for `chatTurnStaleAfter` (2m) is treated as dead and does not block; the listing filters on that cutoff in SQL, so abandoned jobs never crowd live ones out of its row limit.
-  A turn that queues longer than `chatTurnWaitTimeout` (10m, enough for a few long turns with checkpoints; queued turns heartbeat too, so it need not stay below the stale bound) fails with `ErrChatTurnWaitTimeout` instead of running concurrently.
+  Every queued or running turn heartbeats its job (`TouchJob`, every 30s) until it is released, after its post-processing.
+  A pending or processing job without a write for `chatTurnStaleAfter` (2m) is treated as dead and does not block.
+  A turn that queues longer than `chatTurnWaitTimeout` (10m, enough for a few long replies; queued turns heartbeat too, so it need not stay below the stale bound) fails with `ErrChatTurnWaitTimeout` instead of running concurrently.
   A queued turn whose job was cancelled meanwhile (Stop on another instance) does not run (`errQueuedTurnCancelled`), and a cancelled queued chat turn is marked cancelled.
-  A scheduled run has no job row, so `beginEphemeralChatTurn` creates an `agent_job_run` ticket job (reference = chat id) to hold its place and finishes it with the run's outcome.
+  A scheduled run has no job row, so `beginEphemeralChatTurn` creates an `agent_job_run` ticket job (reference = chat id) to hold its place and ends it as soon as the run's reply is saved (`end` is idempotent, so the run's deferred end is a no-op).
   `handleUserMessage` owns its job's status, so its release also finishes a job the turn left non-terminal (a lost final status write): complete if it saved a reply (per the worker or the row), else failed, via the conditional `FinishTurnJobIfActive` so a status Stop or the reaper wrote meanwhile is kept.
   On shutdown, `FailInFlightTurns` (called by `server.Shutdown`) finishes this process's in-flight turn jobs: complete if past their reply, else failed.
   `finalizeChat` renames a new chat without writing `response_id`, so the rename never touches the response chain.
-  The gate serializes turns within a chat only: the scratchpad belongs to the personality, so checkpoints in two chats of one personality can still overwrite each other (as before #254).
+  While a queued turn waits it records `waiting_on: reply` on its job's progress, which the web client shows in place of the typing dots; it is cleared when the turn starts.
+  Only one checkpoint runs per chat at a time: `claimCheckpoint` takes `chats.checkpoint_started_at` with one conditional update (`ClaimChatCheckpoint`) before the pass and releases it after (`ReleaseChatCheckpoint`).
+  A turn whose end-of-turn check finds a checkpoint already running skips it (`whatiff.chat.checkpoints.skipped`) and carries on with the saved summary; the check runs again at the end of the next turn.
+  A claim older than `checkpointClaimStaleAfter` (10m, twice the checkpoint budget) is taken over, so a worker that died mid-checkpoint does not stop the chat's checkpoints for good.
+  The gate serializes turns within a chat only: the scratchpad belongs to the personality, and a checkpoint's scratchpad write can still overwrite, or be overwritten by, the `update_scratchpad` tool in the next turn or a checkpoint in another chat of the same personality.
 - **Checkpoint history window (#268):** `persistCheckpointSummary` stores `last_checkpoint_at` from `checkpointWindowStart`: just after the checkpointed reply, not when the checkpoint finished.
-  So a message sent while the checkpoint ran (the next user message, queued behind the turn) stays in the live history instead of hiding behind a summary that never saw it.
+  So a message sent while the checkpoint ran (the next user message, or a whole next turn) stays in the live history instead of hiding behind a summary that never saw it.
   If another message was saved during the turn itself (`datastore.FirstChatMessageSentAtSince`), the window starts just before the turn's user message instead, so both stay live.
 - **Post-processing:** Checkpoint policy, message sync helpers.
 
@@ -179,7 +183,8 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 - `message_context_builder_expression_test.go` — prior-turn expression snapshot selection for continuity text.
 - `conversation_summary_test.go`, `scratchpad_test.go`, `memory_test.go`, `postprocessing_policy_test.go` — maintenance prompts and checkpoints.
 - `thread_rehydration_test.go` — imported-thread split at n-5 turns, assistant counting, char-budget chunking, and transcript rendering.
-- `chat_turn_gate_test.go` — turn gate on an in-memory `chatTurnStore` (`agentTestHooks.ChatTurnStore`): waits until the older turn is terminal (through `inference_complete` and its checkpoint), terminal/stale/newer/other-chat jobs don't block, heartbeats, timeout, cancel (context and job cancelled while queued), per-chat wake, job-order serialization through the checkpoint, shutdown finishing, scheduled-run tickets.
+- `chat_turn_gate_test.go` — turn gate on an in-memory `chatTurnStore` (`agentTestHooks.ChatTurnStore`): waits until the older turn has replied (a turn past `inference_complete` does not block), terminal/stale/newer/other-chat jobs don't block, heartbeats, timeout, cancel (context and job cancelled while queued), per-chat wake, job-order serialization, the waiting note, shutdown finishing, scheduled-run tickets (including ending one at its reply).
+- `checkpoint_claim_test.go` — the per-chat checkpoint claim: skipped while another runs or when the claim fails, released even if the turn's context ended.
 - `checkpoint_window_test.go` — the post-checkpoint history window start (#268): after the reply, before the user message when another message arrived mid-turn, and the fallbacks.
 - `message_test.go`, `message_timezone_test.go` — attachment labels, memories, tool-call context, human-readable `[sys:…]` timezone stamps (weekday + local offset).
 - `mcp_tools_test.go` — MCP tool wiring (OpenAI + Claude MCP config mapping).

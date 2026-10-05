@@ -2621,6 +2621,33 @@ func maxTurnsBeforeCheckpoint(chatCtx *chatContext) int {
 	return checkpointMaxAssistantMessagesSinceSummary
 }
 
+// claimCheckpoint takes the chat's checkpoint claim for a due checkpoint, so only one runs per chat
+// at a time. The next turn no longer waits for a running checkpoint, so its own end-of-turn check
+// can fire while the pass is still going; it would summarize the same turns again and race the
+// pass's writes. A turn that does not get the claim just carries on with the saved summary, and the
+// check runs again at the end of the next turn. ok is false when the checkpoint must not run; call
+// release when it is over.
+func (a *Agent) claimCheckpoint(ctx context.Context, userID, chatID uuid.UUID, decision checkpointDecision) (release func(), ok bool) {
+	claimedAt, claimed, err := a.ds.ClaimChatCheckpoint(ctx, userID, chatID, checkpointClaimStaleAfter)
+	if err != nil {
+		a.logger.Warn("failed to claim the chat checkpoint; skipping it this turn",
+			zap.String("chat_id", chatID.String()), zap.Error(err))
+		return nil, false
+	}
+	if !claimed {
+		a.metrics().Add(ctx, telemetry.ChatCheckpointsSkipped, 1, telemetry.AttrReason.String(decision.Trigger))
+		a.logger.Info("checkpoint already running for this chat; skipping",
+			zap.String("chat_id", chatID.String()), zap.String("reason", decision.Reason))
+		return nil, false
+	}
+	return func() {
+		// Detached: the turn's context may already be cancelled, and the claim must not outlive it.
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), jobTerminalPersistTimeout)
+		defer cancel()
+		_ = a.ds.ReleaseChatCheckpoint(releaseCtx, userID, chatID, claimedAt)
+	}, true
+}
+
 func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, chatMessage, agentMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext, actionType string, qd metering.Decision, skipUsageRecording bool) {
 	if !skipUsageRecording {
 		// Record usage event (fire-and-forget, never blocks normal flow).
@@ -2697,6 +2724,11 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 	if !decision.ShouldCheckpoint {
 		return
 	}
+	releaseCheckpoint, ok := a.claimCheckpoint(ctx, userID, chatMessage.ChatID, decision)
+	if !ok {
+		return
+	}
+	defer releaseCheckpoint()
 	a.metrics().Add(ctx, telemetry.ChatCheckpoints, 1, telemetry.AttrReason.String(decision.Trigger))
 	a.metrics().Record(ctx, telemetry.ChatCheckpointContextTokens, float64(estimatedContextTokens))
 	a.metrics().Record(ctx, telemetry.ChatCheckpointMessages, float64(chatCtx.chat.CheckpointUserMessageCount))
@@ -2709,8 +2741,8 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 		zap.Int("last_input_tokens", lastInputTokens),
 		zap.Int("estimated_context_tokens", estimatedContextTokens),
 	)
-	// The checkpoint holds the chat's next turn (chat_turn_gate.go), so it is bounded: a provider
-	// that hangs costs this checkpoint, which the next one redoes, not the thread.
+	// The checkpoint is bounded: a provider that hangs costs this checkpoint (and the claim above),
+	// which the next one redoes, not the thread.
 	checkpointCtx, cancelCheckpoint := context.WithTimeout(ctx, checkpointTimeout)
 	defer cancelCheckpoint()
 	// Only genuine OpenAI (Responses API) chats can thread checkpoints off a

@@ -455,15 +455,8 @@ export function parseChatTurnWaiting(progress: string | undefined): ChatTurnWait
 }
 
 /** The placeholder text for a turn queued behind an earlier one. */
-export function chatTurnWaitingLabel(waiting: ChatTurnWaiting): string {
-  switch (waiting) {
-    case 'summarizer':
-      return 'Waiting on summarizer…';
-    case 'wrap_up':
-      return 'Finishing the previous turn…';
-    default:
-      return 'Waiting for the previous reply…';
-  }
+export function chatTurnWaitingLabel(_waiting: ChatTurnWaiting): string {
+  return 'Waiting for the previous reply…';
 }
 
 function isTerminalJobStatus(status: Job['status']): boolean {

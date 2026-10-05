@@ -68,6 +68,9 @@ var (
 	expressionPickTimeout = 2 * time.Minute
 	chatNameTimeout       = time.Minute
 	checkpointTimeout     = 5 * time.Minute
+	// checkpointClaimStaleAfter is how long a chat's checkpoint claim blocks later checkpoints before
+	// it is taken over: twice the budget a live checkpoint has, so only one whose worker died.
+	checkpointClaimStaleAfter = 2 * checkpointTimeout
 )
 
 // turnStageTurnQueueWait times a turn that actually queued behind an earlier one, so its count is
@@ -367,7 +370,8 @@ func (a *Agent) failChatTurnWait(ctx context.Context, job *models.Job, cause err
 // beginEphemeralChatTurn takes this agent-job/webhook turn's place in its chat's queue and waits
 // for it. A tracked turn (async webhook) queues as its own job, whose status the caller owns. An
 // untracked one (a scheduled run) has no job row, so a ticket job is created to hold its place
-// and is finished by end. end must be called with the turn's outcome once the turn is over.
+// and is finished by end. end must be called with the turn's outcome once the turn is over. A
+// ticket turn may end early, as soon as its reply is saved, and end is then a no-op the second time.
 func (a *Agent) beginEphemeralChatTurn(ctx context.Context, userID, chatID uuid.UUID, trackingJob *models.Job) (end func(error), err error) {
 	if trackingJob != nil {
 		release, err := a.awaitChatTurn(ctx, trackingJob, chatID)
@@ -412,9 +416,14 @@ func (a *Agent) beginEphemeralChatTurn(ctx context.Context, userID, chatID uuid.
 	if _, uerr := g.store.UpdateJobStatus(ctx, userID, ticket.ID, models.JobStatusProcessing, ""); uerr != nil {
 		a.logger.Warn("failed to mark turn ticket job processing", zap.String("job_id", ticket.ID.String()), zap.Error(uerr))
 	}
+	// The ticket can be ended early, once the reply is saved (see handleEphemeralPrompt), so a
+	// second call from the turn's deferred cleanup must do nothing.
+	var once sync.Once
 	return func(outcome error) {
-		finish(outcome)
-		release()
+		once.Do(func() {
+			finish(outcome)
+			release()
+		})
 	}, nil
 }
 

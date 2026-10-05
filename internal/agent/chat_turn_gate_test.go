@@ -632,6 +632,35 @@ func TestBeginEphemeralChatTurn_UntrackedTurnHoldsATicket(t *testing.T) {
 	}
 }
 
+// A scheduled run has no job row to advance, so it ends its ticket as soon as its reply is saved:
+// the next turn then starts while this run's checkpoint is still going, and the deferred end the
+// run also makes does nothing.
+func TestBeginEphemeralChatTurn_TicketEndedAtTheReplyFreesTheChat(t *testing.T) {
+	t.Parallel()
+	store := newFakeChatTurnStore()
+	a := &Agent{logger: zap.NewNop()}
+	a.testHooks.ChatTurnStore = store
+	userID, chatID := uuid.New(), uuid.New()
+
+	end, err := a.beginEphemeralChatTurn(context.Background(), userID, chatID, nil)
+	require.NoError(t, err)
+	live, err := store.ListPendingTurnJobsForChat(context.Background(), userID, chatID, uuid.Nil)
+	require.NoError(t, err)
+	require.Len(t, live, 1)
+	ticket := live[0]
+
+	next := store.add(userID, chatID, models.JobStatusProcessing, time.Now().Add(time.Second))
+	done := waitAsync(testTurnGate(store, 5*time.Second), context.Background(), next, chatID)
+	requireStillWaiting(t, done)
+
+	end(nil) // the reply is saved
+	requireProceeds(t, done)
+	require.Equal(t, models.JobStatusComplete, store.status(ticket.ID))
+
+	end(errors.New("the run failed later")) // deferred cleanup: no effect on the finished ticket
+	require.Equal(t, models.JobStatusComplete, store.status(ticket.ID))
+}
+
 func TestBeginEphemeralChatTurn_UntrackedTurnQueuesBehindLiveTurn(t *testing.T) {
 	t.Parallel()
 	store := newFakeChatTurnStore()

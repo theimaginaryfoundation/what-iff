@@ -164,11 +164,11 @@ describe('appendPendingAssistantGroup', () => {
         const queued = pendingAssistantPlaceholderMessage({
             chatId: 'chat-1',
             draftText: '',
-            pendingStatus: 'Waiting on summarizer…',
+            pendingStatus: 'Waiting for the previous reply…',
             generationPersonality: 'Kai',
             thinkingImageUrl: null,
         });
-        expect(queued.pending_status).toBe('Waiting on summarizer…');
+        expect(queued.pending_status).toBe('Waiting for the previous reply…');
         expect(pending.pending_status).toBeUndefined();
 
         const extended = appendPendingAssistantGroup([], pending);

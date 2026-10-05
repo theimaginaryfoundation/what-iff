@@ -44,8 +44,8 @@ export interface ChatTurnProgress {
   waiting_on?: ChatTurnWaiting;
 }
 
-/** Phase of the earlier turn a queued turn is waiting on (the server's turn gate). */
-export const CHAT_TURN_WAITING_STATES = ['reply', 'wrap_up', 'summarizer'] as const;
+/** What a queued turn is waiting on (the server's turn gate): an earlier turn's reply. */
+export const CHAT_TURN_WAITING_STATES = ['reply'] as const;
 export type ChatTurnWaiting = (typeof CHAT_TURN_WAITING_STATES)[number];
 
 /** One tool call in {@link ChatTurnProgress}; input/output are truncated previews. */

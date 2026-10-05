@@ -9740,7 +9740,7 @@ export interface components {
              *     `error`, `input`/`output` are truncated previews, and `output`/`finished_at` are set once the
              *     call finishes. It is display-only; the saved assistant message's `tool_calls` are authoritative.
              *     While the turn is queued behind an earlier turn in its chat the payload also carries
-             *     `waiting_on` (`reply`, `wrap_up` or `summarizer`), absent once the turn runs.
+             *     `waiting_on` (`reply`), absent once the turn runs.
              */
             progress?: string;
             /** Format: date-time */
