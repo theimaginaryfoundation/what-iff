@@ -32,21 +32,24 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
   **`WaitForThreadRehydration`** is the inference gate: `handleUserMessage`/`handleEphemeralPrompt` call it to stall a turn (bounded by `rehydrationWaitTimeout`, graceful degrade on timeout) until an in-flight summary settles.
 - **Per-chat turn serialization (`chat_turn_gate.go`, #254):** turns in one chat run one at a time, in job order, across API instances.
   `handleUserMessage` and `handleEphemeralPrompt` call the gate (`awaitUserChatTurn` / `beginEphemeralChatTurn`) after the job is marked processing and before the rehydration gate and `prepareChatContext`, so a queued turn builds its context on the earlier turn's reply.
-  It is job-ordered single-flight: a turn waits until no older `chat_message`/`agent_job_run` job in its chat is still pending or processing (`ListPendingTurnJobsForChat`, ordered by `created_at` then id at microsecond precision).
-  The gate opens at `inference_complete`, when the reply and response chain are saved (`persistInferencePhase` writes the chat before the job) and when the web client unlocks its composer; the earlier turn's expression and checkpoint overlap the next turn, whose scratchpad write is conditional.
-  Waiting polls with backoff (250ms to 2s); a turn in this process reaching `inference_complete` (`noteTurnJobStatus`, from the job phase helpers) wakes that chat's waiters at once (`chatTurnTracker`, keyed per chat).
+  It is job-ordered single-flight: a turn waits until no older `chat_message`/`agent_job_run` job in its chat is unfinished (`ListActiveTurnJobsForChat`, ordered by `created_at` then id at microsecond precision).
+  The gate opens when the earlier turn's job is terminal, not at `inference_complete`: the earlier turn's expression pick and, above all, its checkpoint (scratchpad, memories, summary window) work on the chat state the next turn reads, so the next turn waits for them (`blocksLaterTurns`).
+  That wait is the expression pick in the common case, and minutes only when a checkpoint runs; the web client still unlocks its composer at `inference_complete`, and a message sent then queues.
+  `hasReplied` (past `inference_complete`, not terminal) is separate: it decides that shutdown completes rather than fails a turn.
+  Waiting polls with backoff (250ms to 2s); a turn in this process finishing (`noteTurnJobStatus`, from the job phase helpers, or the turn's release) wakes that chat's waiters at once (`chatTurnTracker`, keyed per chat).
   Nothing is held while a turn runs: no advisory lock or pinned connection.
-  Every queued or running turn heartbeats its job (`TouchJob`, every 30s), and a pending/processing job without a write for `chatTurnStaleAfter` (2m) is treated as dead and does not block.
-  A turn that queues longer than `chatTurnWaitTimeout` (10m; queued turns heartbeat too, so it need not stay below the stale bound) fails with `ErrChatTurnWaitTimeout` instead of running concurrently.
+  Every queued or running turn heartbeats its job (`TouchJob`, every 30s) until it is released, after its checkpoint.
+  An unfinished job without a write for `chatTurnStaleAfter` (2m) is treated as dead and does not block; the listing filters on that cutoff in SQL, so abandoned jobs never crowd live ones out of its row limit.
+  A turn that queues longer than `chatTurnWaitTimeout` (10m, enough for a few long turns with checkpoints; queued turns heartbeat too, so it need not stay below the stale bound) fails with `ErrChatTurnWaitTimeout` instead of running concurrently.
   A queued turn whose job was cancelled meanwhile (Stop on another instance) does not run (`errQueuedTurnCancelled`), and a cancelled queued chat turn is marked cancelled.
   A scheduled run has no job row, so `beginEphemeralChatTurn` creates an `agent_job_run` ticket job (reference = chat id) to hold its place and finishes it with the run's outcome.
   `handleUserMessage` owns its job's status, so its release also finishes a job the turn left non-terminal (a lost final status write): complete if it saved a reply, else failed.
   On shutdown, `FailInFlightTurns` (called by `server.Shutdown`) finishes this process's in-flight turn jobs: complete if past their reply, else failed.
-  `finalizeChat` renames a new chat without writing `response_id`, which the next turn may already have moved on.
-- **Scratchpad optimistic concurrency (`scratchpad_commit.go`, #254):** a checkpoint's scratchpad write is conditional on the revision its turn read (`Chat.ScratchpadRevision`).
-  On `datastore.ErrScratchpadConflict`, `commitScratchpadUpdate` reloads the personality and regenerates the update once against the latest scratchpad, writing conditionally on that revision; a second conflict skips the update (logged) rather than overwrite it.
-  On that retry the latest scratchpad becomes the turn's previous scratchpad (`adoptScratchpadUpdate`; on the Claude path the context's scratchpad segment is swapped, on the OpenAI path `concurrentScratchpadNote` says it replaces the earlier one), so the memory delta holds only this conversation's changes.
-  The `update_scratchpad` tool and user edits write unconditionally but bump the revision; the tool also records the new scratchpad and revision on the turn's chat, so the turn's own checkpoint does not conflict with it.
+  `finalizeChat` renames a new chat without writing `response_id`, so the rename never touches the response chain.
+  The gate serializes turns within a chat only: the scratchpad belongs to the personality, so checkpoints in two chats of one personality can still overwrite each other (as before #254).
+- **Checkpoint history window (#268):** `persistCheckpointSummary` stores `last_checkpoint_at` from `checkpointWindowStart`: just after the checkpointed reply, not when the checkpoint finished.
+  So a message sent while the checkpoint ran (the next user message, queued behind the turn) stays in the live history instead of hiding behind a summary that never saw it.
+  If another message was saved during the turn itself (`datastore.FirstChatMessageSentAtSince`), the window starts just before the turn's user message instead, so both stay live.
 - **Post-processing:** Checkpoint policy, message sync helpers.
 
 ## Key types and entry points
@@ -175,8 +178,8 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 - `message_context_builder_expression_test.go` — prior-turn expression snapshot selection for continuity text.
 - `conversation_summary_test.go`, `scratchpad_test.go`, `memory_test.go`, `postprocessing_policy_test.go` — maintenance prompts and checkpoints.
 - `thread_rehydration_test.go` — imported-thread split at n-5 turns, assistant counting, char-budget chunking, and transcript rendering.
-- `chat_turn_gate_test.go` — turn gate on an in-memory `chatTurnStore` (`agentTestHooks.ChatTurnStore`): waits until the older turn reaches `inference_complete`, replied/terminal/stale/newer/other-chat jobs don't block, heartbeats, timeout, cancel (context and job cancelled while queued), per-chat wake, job-order serialization, shutdown finishing, scheduled-run tickets.
-- `scratchpad_commit_test.go` — conditional scratchpad write: stale revision regenerates against the latest, a second conflict skips, and a forced interleave of two checkpoints keeps both updates.
+- `chat_turn_gate_test.go` — turn gate on an in-memory `chatTurnStore` (`agentTestHooks.ChatTurnStore`): waits until the older turn is terminal (through `inference_complete` and its checkpoint), terminal/stale/newer/other-chat jobs don't block, heartbeats, timeout, cancel (context and job cancelled while queued), per-chat wake, job-order serialization through the checkpoint, shutdown finishing, scheduled-run tickets.
+- `checkpoint_window_test.go` — the post-checkpoint history window start (#268): after the reply, before the user message when another message arrived mid-turn, and the fallbacks.
 - `message_test.go`, `message_timezone_test.go` — attachment labels, memories, tool-call context, human-readable `[sys:…]` timezone stamps (weekday + local offset).
 - `mcp_tools_test.go` — MCP tool wiring (OpenAI + Claude MCP config mapping).
 - `processtoolcall_test.go` — catalog-derived tool list and dispatch handler registration (including `list_models`, `list_personalities`, `run_subagent`).

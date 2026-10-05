@@ -19,9 +19,10 @@ type Chat struct {
 	// It is used by the checkpoint decision policy (postprocessing_policy.go) to determine *when* to
 	// trigger the next checkpoint based on message cadence.
 	CheckpointUserMessageCount int `json:"-"`
-	// LastCheckpointAt is the wall-clock time at which the last checkpoint was written. It is used as
-	// a DB range cursor to scope history fetches to the current checkpoint period (messages with
-	// sent_at >= LastCheckpointAt). Both this and CheckpointUserMessageCount are always written
+	// LastCheckpointAt is where the live history window starts after the last checkpoint: just after
+	// the last message its summary covers (not when the checkpoint finished; see
+	// agent.checkpointWindowStart). It is used as a DB range cursor to scope history fetches to the
+	// current checkpoint period (messages with sent_at >= LastCheckpointAt). Both this and CheckpointUserMessageCount are always written
 	// atomically in UpdateChatCheckpointStateAndClearResponseID — they represent the same event and
 	// will never drift relative to each other.
 	LastCheckpointAt *time.Time `json:"-"`

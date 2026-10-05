@@ -42,10 +42,6 @@ func (a *Agent) persistInferencePhase(ctx context.Context, chatJob *models.Job, 
 	if agentMessage == nil {
 		return fmt.Errorf("persistInferencePhase: agentMessage is nil")
 	}
-	// Chat continuity (response_id) is saved BEFORE the job reaches inference_complete: that
-	// status releases the chat's next turn (chat_turn_gate.go), which must see this response chain.
-	a.persistUserTurnAndChatAfterInference(ctx, chatJob.UserID, chatMessage, chat, chatCtx, result, persistUserTurnUpdate)
-
 	toSave := *chatJob
 	toSave.Status = models.JobStatusInferenceComplete
 	toSave.ResultID = &agentMessage.ID
@@ -58,6 +54,8 @@ func (a *Agent) persistInferencePhase(ctx context.Context, chatJob *models.Job, 
 	}
 	*chatJob = *updated
 	a.noteTurnJobStatus(chatJob)
+
+	a.persistUserTurnAndChatAfterInference(ctx, chatJob.UserID, chatMessage, chat, chatCtx, result, persistUserTurnUpdate)
 
 	if err := a.ds.SetChatMessageLastError(ctx, chatJob.UserID, chatMessage.ID, nil); err != nil {
 		a.logger.Warn("failed to clear user message last_error_message after inference", zap.Error(err))

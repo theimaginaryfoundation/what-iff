@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
@@ -59,7 +60,7 @@ func TestUpdateChatCheckpointStateAndClearResponseID_Success(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	err := ds.UpdateChatCheckpointStateAndClearResponseID(context.Background(), userID, chatID, "checkpoint-summary", 42)
+	err := ds.UpdateChatCheckpointStateAndClearResponseID(context.Background(), userID, chatID, "checkpoint-summary", 42, time.Time{})
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -76,7 +77,7 @@ func TestUpdateChatCheckpointStateAndClearResponseID_NotFoundOrUnauthorized(t *t
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectRollback()
 
-	err := ds.UpdateChatCheckpointStateAndClearResponseID(context.Background(), userID, chatID, "checkpoint-summary", 42)
+	err := ds.UpdateChatCheckpointStateAndClearResponseID(context.Background(), userID, chatID, "checkpoint-summary", 42, time.Time{})
 	require.True(t, errors.Is(err, ErrChatNotFound), "expected ErrChatNotFound, got %v", err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -93,7 +94,7 @@ func TestUpdateChatCheckpointStateAndClearResponseID_UpdateFails_Rollback(t *tes
 		WillReturnError(errors.New("db error"))
 	mock.ExpectRollback()
 
-	err := ds.UpdateChatCheckpointStateAndClearResponseID(context.Background(), userID, chatID, "checkpoint-summary", 42)
+	err := ds.UpdateChatCheckpointStateAndClearResponseID(context.Background(), userID, chatID, "checkpoint-summary", 42, time.Time{})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "db error")
 	require.NoError(t, mock.ExpectationsWereMet())
