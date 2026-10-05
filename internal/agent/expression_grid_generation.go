@@ -148,8 +148,9 @@ func (a *Agent) GenerateDefaultExpressionGrid(ctx context.Context, userID, perso
 		return nil, err
 	}
 
+	folder := models.ExpressionFolder(person.Name)
 	for i, key := range ExpressionGridKeys {
-		imgID, err := a.uploadExpressionCellAttachment(ctx, userID, personalityID, key, cells[i])
+		imgID, err := a.uploadExpressionCellAttachment(ctx, userID, personalityID, folder, key, cells[i])
 		if err != nil {
 			return nil, fmt.Errorf("expression %q: %w", key, err)
 		}
@@ -330,7 +331,9 @@ func (a *Agent) inferExpressionGridLikeness(ctx context.Context, systemPrompt st
 
 // uploadExpressionCellAttachment persists one grid cell image in S3 (not file_content) as a
 // personality-pinned gallery attachment and returns its ID. It does not assign the expression slot.
-func (a *Agent) uploadExpressionCellAttachment(ctx context.Context, userID, personalityID uuid.UUID, expressionKey string, pngBytes []byte) (uuid.UUID, error) {
+// The image is filed in folder (see models.ExpressionFolder) so generated expressions do not crowd
+// the top level of the gallery.
+func (a *Agent) uploadExpressionCellAttachment(ctx context.Context, userID, personalityID uuid.UUID, folder, expressionKey string, pngBytes []byte) (uuid.UUID, error) {
 	if len(pngBytes) == 0 {
 		return uuid.Nil, fmt.Errorf("empty cell png")
 	}
@@ -340,6 +343,7 @@ func (a *Agent) uploadExpressionCellAttachment(ctx context.Context, userID, pers
 		Name:          name,
 		FileType:      "image/png",
 		PersonalityID: &personalityID,
+		Folder:        folder,
 	})
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("create file attachment: %w", err)

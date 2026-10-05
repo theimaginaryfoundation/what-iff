@@ -287,3 +287,63 @@ func TestGenerateImageTool_PartialFailureReportsCountsInResult(t *testing.T) {
 	require.Equal(t, 2, result.Count)
 	require.Contains(t, result.Error, "some requests failed")
 }
+
+func TestParseGenerateImageFolder(t *testing.T) {
+	t.Parallel()
+	mixed := "  Charts / Oura "
+	empty := ""
+	bad := "../up"
+
+	got, err := parseGenerateImageFolder(nil)
+	require.NoError(t, err)
+	require.Equal(t, "", got, "nil leaves the image at the top level")
+
+	got, err = parseGenerateImageFolder(&empty)
+	require.NoError(t, err)
+	require.Equal(t, "", got)
+
+	got, err = parseGenerateImageFolder(&mixed)
+	require.NoError(t, err)
+	require.Equal(t, "charts/oura", got)
+
+	_, err = parseGenerateImageFolder(&bad)
+	require.ErrorIs(t, err, models.ErrInvalidFolder)
+}
+
+func TestGenerateImageTool_InvalidFolderReturnsErrorResult(t *testing.T) {
+	t.Parallel()
+	a := &Agent{logger: zap.NewNop()}
+	badFolder := "a/../b"
+	args, err := json.Marshal(generateImageToolArgs{Prompt: "a cat", Folder: &badFolder})
+	require.NoError(t, err)
+	out, atts, err := a.generateImageTool(context.Background(), &models.Chat{}, args)
+	require.NoError(t, err)
+	require.Nil(t, atts, "no image is generated (or paid for) with a folder the gallery would refuse")
+	var result generateImageToolResult
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.False(t, result.Success)
+	require.Contains(t, result.Error, "invalid folder")
+}
+
+func TestGenerateImageTool_FilesTheImagesInTheRequestedFolder(t *testing.T) {
+	t.Parallel()
+	srv := imagesGenerateJSONServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(imagesSuccessBody("aGVsbG8=")))
+	})
+	defer srv.Close()
+
+	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
+	folder := "Daily Graphs/Oura"
+	args, err := json.Marshal(generateImageToolArgs{Prompt: "a chart", Folder: &folder})
+	require.NoError(t, err)
+
+	out, atts, err := a.generateImageTool(context.Background(), &models.Chat{UserID: uuid.New(), ID: uuid.New()}, args)
+	require.NoError(t, err)
+	require.Len(t, atts, 1)
+	require.Equal(t, "daily graphs/oura", atts[0].Folder, "the attachment carries the folder to be saved with")
+
+	var result generateImageToolResult
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.Equal(t, "daily graphs/oura", result.Folder, "the model is told where the images went")
+}

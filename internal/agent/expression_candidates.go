@@ -187,9 +187,10 @@ func (a *Agent) GenerateExpressionCandidates(ctx context.Context, userID, person
 		return nil, err
 	}
 
+	folder := models.ExpressionFolder(person.Name)
 	out := make([]ExpressionCandidate, 0, len(keys))
 	for i, key := range keys {
-		imgID, err := a.uploadExpressionCellAttachment(ctx, userID, personalityID, key, cells[i])
+		imgID, err := a.uploadExpressionCellAttachment(ctx, userID, personalityID, folder, key, cells[i])
 		if err != nil {
 			a.deleteExpressionCandidates(ctx, userID, out)
 			return nil, fmt.Errorf("expression %q: %w", key, err)

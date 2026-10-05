@@ -16,4 +16,7 @@ type Store interface {
 	UpdateFileAttachmentName(ctx context.Context, userID, id uuid.UUID, name string) (*models.FileAttachment, error)
 	CreateFileAttachmentReference(ctx context.Context, userID, srcID uuid.UUID) (*models.FileAttachment, error)
 	SetFileAttachmentS3Key(ctx context.Context, userID, id uuid.UUID, s3Key string) error
+	ListImageFolders(ctx context.Context, userID uuid.UUID) ([]models.FolderCount, error)
+	MoveFileAttachmentsToFolder(ctx context.Context, userID uuid.UUID, ids []uuid.UUID, folder string) (int, error)
+	MoveImageFolder(ctx context.Context, userID uuid.UUID, from, to string) (int, error)
 }

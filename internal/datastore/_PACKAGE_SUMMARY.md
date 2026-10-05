@@ -22,7 +22,11 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
       `BackfillMemoryEmbeddings` walks `ListMemoriesMissingEmbedding` (active, non-Summary, no Embedding row; keyset-paged) and is idempotent; Summary embeddings stay owned by `UpsertChatSummaryMemory`.
       Rows that fail to embed are logged by ID and passed over, so they cannot stall the rows behind them; when a whole page fails, a probe input decides between bad input (skip) and an unavailable provider (stop).
     `memory_merge.go`'s `ListMemoryMergeEvents` takes a `models.MemoryMergeEventFilters` (query/survivor-memory/date-range/exclude-reverted) for both the merge-audit HTTP endpoint and `find_context`'s `mode=lifecycle_events`.
-  - Files: `fileattachment.go`, `filechunk.go` (chunk storage + search).
+  - Files: `fileattachment.go`, `fileattachment_folders.go`, `filechunk.go` (chunk storage + search).
+    **Gallery folders** are a normalized path string on `file_attachments.folder` (a label; the `s3_key` never changes), indexed with the owner.
+    `FileAttachmentFilters.Folder` matches one folder exactly and `FolderPrefix` matches a folder and everything beneath it (the trailing `/` keeps `charts` from matching `charts-old`).
+    `fileattachment_folders.go` holds `ListImageFolders` (images directly in each folder), `MoveFileAttachmentsToFolder` and `MoveImageFolder` (a rename that carries every folder beneath it).
+    Those act only on the owner's gallery images, so reference copies are excluded, and an id naming a copy moves the original it shares an object with.
     `toFileAttachmentModel` derives **`Source`** (`generated`/`imported`, empty when the chat-message edge was not loaded): linked message origin decides (Assistant ⇒ generated, User ⇒ imported); unlinked rows are generated only for the pipelines' fixed names (`expression-*.png`, `personality-portrait.png`).
     **`FileAttachmentFilters.ExcludeReferenceCopies`** (image gallery) drops `CreateFileAttachmentReference` clones in SQL — keeps the earliest row per `(owner, s3_key)`, backed by an `(s3_key, owner)` index — so counts/pagination and classification follow the original row.
   - Personalities & rituals: `personality.go`, `personality_gen_flow.go`, `ritual.go`, `system_ritual_binding.go`.

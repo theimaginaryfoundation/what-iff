@@ -49,7 +49,7 @@ const ListDescription = `List your available resources. Pick a kind:
 - models — chat models you can run (id, name, provider, tool support).
 - personalities — personalities you can switch to or run as a subagent.
 - skills — skills you can attach to a subagent or scheduled job (id, name, description).
-- files — your uploaded files, most-recent first. Filter with file_type (e.g. "image", "pdf") and scope ("personality" docs, "conversation" attachments, or "all"). Images dominate most libraries, so pass file_type to cut through them.
+- files — your uploaded files, most-recent first. Filter with file_type (e.g. "image", "pdf"), scope ("personality" docs, "conversation" attachments, or "all") and folder. Images dominate most libraries, so pass file_type to cut through them. Gallery images can be filed in folders (e.g. "charts/oura"); folder lists that folder and everything beneath it, and each row shows its folder.
 - conversations — your past conversations, including archived imports, that have messages, most-recent first (id, name). Pass an id to find_context (mode="conversation"/"origin") to read one.
 - jobs — your scheduled jobs (id, name, status, next_runtime for still-active ones). Active by default; set include_completed=true to also see finished/failed one-offs.
 - mcp_servers — MCP servers connected to the current conversation, with discoverable MCP tools and currently loaded tools for this chat.
@@ -74,6 +74,10 @@ var ListToolSpec = FunctionToolSpec{
 		"file_type": map[string]interface{}{
 			"type":        "string",
 			"description": "files only: substring match on MIME type, e.g. 'image', 'pdf', 'text'. Use to include or skip image-heavy libraries.",
+		},
+		"folder": map[string]interface{}{
+			"type":        "string",
+			"description": "files only: list only files in this gallery folder or any folder beneath it, e.g. 'charts' also finds 'charts/oura' but not 'charts-old'. Case-insensitive; '/' separates folders. Omit to list every folder.",
 		},
 		"scope": map[string]interface{}{
 			"type":        "string",
@@ -142,6 +146,7 @@ type listArgs struct {
 	Filter           string `json:"filter,omitempty"`
 	FileType         string `json:"file_type,omitempty"`
 	Scope            string `json:"scope,omitempty"`
+	Folder           string `json:"folder,omitempty"`
 	IncludeCompleted bool   `json:"include_completed,omitempty"`
 	Limit            int    `json:"limit,omitempty"`
 	Page             int    `json:"page,omitempty"`
@@ -156,6 +161,7 @@ type listItem struct {
 	Provider     string   `json:"provider,omitempty"`      // models
 	ToolSupport  *bool    `json:"tool_support,omitempty"`  // models
 	FileType     string   `json:"file_type,omitempty"`     // files
+	Folder       string   `json:"folder,omitempty"`        // files (gallery images that are filed in a folder)
 	Status       string   `json:"status,omitempty"`        // jobs, mcp_servers
 	StatusDetail string   `json:"status_detail,omitempty"` // mcp_servers
 	MCPTools     []string `json:"tools,omitempty"`         // mcp_servers

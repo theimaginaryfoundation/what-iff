@@ -9041,6 +9041,223 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/image-gallery/folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List gallery folders
+         * @description Lists every folder that holds at least one of the user's gallery images, with the number of images directly in it, sorted by path. The top level is implied and not listed. Parent folders that hold no image of their own are not listed; derive them from the paths. To list one folder's images, use `GET /image-gallery?folder=<path>` (an empty value is the top level; leaving `folder` out lists every image).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The user's gallery folders */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            folders: components["schemas"]["GalleryFolder"][];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/image-gallery/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move gallery images into a folder
+         * @description Files the given images in a folder, creating the folder if it does not exist. An id may name an image or a chat-reuse copy of it; a copy moves the original. Ids that are not the caller's gallery images are skipped. Only the label changes; stored files are untouched.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        ids: string[];
+                        /**
+                         * @description Destination folder path; empty for the top level. Normalized (trimmed, lower-cased, empty segments dropped).
+                         * @example charts/oura
+                         */
+                        folder: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description How many images were moved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GalleryMoveResult"];
+                    };
+                };
+                /** @description No ids, too many ids, or an invalid folder path (empty `.`/`..` segments, control characters, a segment over 64 characters, deeper than 8 levels, or longer than 255 characters) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/image-gallery/folders/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rename or move a gallery folder
+         * @description Renames the folder `from` to `to`, carrying every folder beneath it along: moving `charts` to `archive/charts` turns `charts/oura` into `archive/charts/oura`. If `to` already exists the two merge. `to` may be empty, which moves the contents up to the top level.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * @description Folder to move. Must not be the top level.
+                         * @example charts
+                         */
+                        from: string;
+                        /**
+                         * @description New path for it. Must not be inside `from`.
+                         * @example archive/charts
+                         */
+                        to: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description How many images changed folder */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GalleryMoveResult"];
+                    };
+                };
+                /** @description An invalid path, `from` is the top level, or `to` is inside `from` */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/search": {
         parameters: {
             query?: never;
@@ -10129,6 +10346,27 @@ export interface components {
         };
         /**
          * @example {
+         *       "path": "charts/oura",
+         *       "count": 12
+         *     }
+         */
+        GalleryFolder: {
+            /** @description Lower-case folder path, e.g. `charts/oura` */
+            path: string;
+            /** @description Gallery images directly in this folder (not in folders beneath it) */
+            count: number;
+        };
+        /**
+         * @example {
+         *       "moved": 7
+         *     }
+         */
+        GalleryMoveResult: {
+            /** @description Number of images whose folder changed */
+            moved: number;
+        };
+        /**
+         * @example {
          *       "id": "123e4567-e89b-12d3-a456-426614174000",
          *       "user_id": "123e4567-e89b-12d3-a456-426614174001",
          *       "file_id": "file-abc123xyz",
@@ -10169,6 +10407,8 @@ export interface components {
              * @description ID of the chat message this attachment belongs to (optional)
              */
             chat_message_id?: string;
+            /** @description Gallery folder the image is filed in, a lower-case path such as `charts/oura`. Omitted for files at the top level. It is a label only: moving an image changes this field, not where the file is stored. */
+            folder?: string;
             /** @description Personalities associated with this attachment via direct ownership and expression image links. */
             personalities?: components["schemas"]["FileAttachmentPersonality"][];
             /**

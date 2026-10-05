@@ -1,12 +1,30 @@
-<article class="tile group" role="listitem">
-  <button
-    type="button"
-    class="tile__delete"
-    [attr.aria-label]="'Delete image ' + tile().name"
-    uiTooltip="Delete this image"
-    (click)="$event.stopPropagation(); delete.emit(tile().id)">
-    ×
-  </button>
+<article
+  class="tile group"
+  role="listitem"
+  draggable="true"
+  [class.tile--selected]="selected()"
+  (dragstart)="onDragStart($event)"
+  (dragend)="dragEnd.emit()">
+  @if (selectable()) {
+    <button
+      type="button"
+      class="tile__check"
+      role="checkbox"
+      [attr.aria-checked]="selected()"
+      [attr.aria-label]="'Select image ' + tile().name"
+      (click)="$event.stopPropagation(); toggleSelect.emit(tile().id)">
+      <span class="tile__check-mark"></span>
+    </button>
+  } @else {
+    <button
+      type="button"
+      class="tile__delete"
+      [attr.aria-label]="'Delete image ' + tile().name"
+      uiTooltip="Delete this image"
+      (click)="$event.stopPropagation(); delete.emit(tile().id)">
+      ×
+    </button>
+  }
 
   @if (tile().thumbnailUrl | authImage | async; as src) {
     <button
@@ -17,14 +35,14 @@
       truncatedOnly
       [truncationTarget]="overlayTitle"
       placement="bottom"
-      (click)="open.emit(tile().id)">
-      <img [src]="src" [alt]="tile().name" class="tile__image" loading="lazy" />
+      (click)="selectable() ? toggleSelect.emit(tile().id) : open.emit(tile().id)">
+      <img [src]="src" [alt]="tile().name" class="tile__image" loading="lazy" draggable="false" />
     </button>
   } @else {
     <button
       type="button"
       class="tile__button tile__button--empty"
-      (click)="open.emit(tile().id)">
+      (click)="selectable() ? toggleSelect.emit(tile().id) : open.emit(tile().id)">
       Preview unavailable
     </button>
   }
@@ -32,4 +50,7 @@
   <div class="tile__overlay">
     <p #overlayTitle class="tile__overlay-title">{{ tile().name }}</p>
   </div>
+  @if (showFolder() && tile().folder) {
+    <span class="tile__folder" [attr.title]="'In folder ' + tile().folder">{{ tile().folder }}</span>
+  }
 </article>

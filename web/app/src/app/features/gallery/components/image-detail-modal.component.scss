@@ -181,3 +181,37 @@
     background: var(--color-surface-muted);
   }
 }
+
+.image-detail-modal__folder {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.625rem;
+}
+
+.image-detail-modal__folder-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A text link, not a button: it is a quiet way to change a detail, not an action of the dialog. */
+.image-detail-modal__folder-move {
+  background: transparent;
+  border: 0;
+  color: var(--color-accent);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.image-detail-modal__folder-move:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.image-detail-modal__folder-move:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

@@ -42,6 +42,7 @@ func toFileAttachmentModel(e *ent.FileAttachment) *models.FileAttachment {
 		FileType:    e.FileType,
 		Description: e.Description,
 		S3Key:       e.S3Key,
+		Folder:      e.Folder,
 		CreatedAt:   e.CreatedAt,
 	}
 
@@ -190,6 +191,17 @@ func (d *Datastore) CreateFileAttachment(ctx context.Context, userID uuid.UUID, 
 
 	if fileAttachment.S3Key != "" {
 		create.SetS3Key(fileAttachment.S3Key)
+	}
+
+	if fileAttachment.Folder != "" {
+		folder, ferr := models.NormalizeFolder(fileAttachment.Folder)
+		if ferr != nil {
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, ferr
+		}
+		create.SetFolder(folder)
 	}
 
 	if fileAttachment.FileID != nil {
@@ -445,6 +457,18 @@ func (d *Datastore) ListFileAttachments(ctx context.Context, userID uuid.UUID, p
 		query = query.Where(entfileattachment.And(predicates...))
 	}
 
+	if filters.Folder != nil {
+		query = query.Where(entfileattachment.FolderEQ(*filters.Folder))
+	}
+	if filters.FolderPrefix != nil && *filters.FolderPrefix != "" {
+		// The folder itself or anything beneath it; the trailing slash keeps "charts" from
+		// matching "charts-old".
+		query = query.Where(entfileattachment.Or(
+			entfileattachment.FolderEQ(*filters.FolderPrefix),
+			entfileattachment.FolderHasPrefix(*filters.FolderPrefix+"/"),
+		))
+	}
+
 	if filters.ExcludeReferenceCopies {
 		query = query.Where(excludeReferenceCopies())
 	}
@@ -489,6 +513,7 @@ func (d *Datastore) ListFileAttachments(ctx context.Context, userID uuid.UUID, p
 		entfileattachment.FieldDescription,
 		entfileattachment.FieldFileID,
 		entfileattachment.FieldS3Key,
+		entfileattachment.FieldFolder,
 		entfileattachment.FieldCreatedAt,
 	).All(ctx)
 	if err != nil {

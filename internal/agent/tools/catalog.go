@@ -23,6 +23,7 @@ var functionToolCatalog = []FunctionToolDefinition{
 	{Spec: ListMoodsToolSpec, AgentDefault: true, MoodOnly: true, UserToggleable: false},
 	{Spec: ChangeMoodToolSpec, AgentDefault: true, MoodOnly: true, UserToggleable: false},
 	{Spec: RunSubagentToolSpec, HumanDescription: "Run a focused sub-agent with an optional personality, model, or skills and return its result.", UserGuide: "Hands one task to a helper, optionally with a different personality, model or skills, and brings back the answer. The helper sees only the task, not this thread. Good for a second opinion, or heavy research a smaller, cheaper model can do.", AgentDefault: true, UserToggleable: true},
+	{Spec: MoveFilesToolSpec, HumanDescription: "Sort gallery images into folders, or back to the top level.", UserGuide: "Moves images into gallery folders such as \"charts\", or back out. Ask it to tidy recurring images, for example \"put the charts you made this week in a charts folder\". Only the label changes.", AgentDefault: true, UserToggleable: true},
 	{Spec: GenerateImageToolSpec, HumanDescription: "Create an image from a written description.", UserGuide: "Creates up to 4 images at a time. Choose square, landscape or portrait, and low, medium or high quality (higher quality costs more). Ask for a few options or a specific style.", AgentDefault: true, UserToggleable: true},
 	{Spec: CreateAgentJobToolSpec, HumanDescription: "Create a one-time or recurring task using natural-language timing. Run it in the current or a new thread, optionally with a different model or skills.", UserGuide: "Schedules a one-time or repeating task in plain language (\"in 2 hours\", \"every weekday at 8am\"). It can post in this thread or its own, with a chosen model or skills. Manage jobs under Config > Jobs.", AgentDefault: true, UserToggleable: true},
 	{Spec: LoadMCPToolsToolSpec, HumanDescription: "Load MCP tools from one connector into this chat. Loaded MCP tools persist across turns until unloaded.", AgentDefault: true, UserToggleable: false},
@@ -89,6 +90,7 @@ var (
 	UpdateScratchpadTool = OpenAIToolUnionParam(UpdateScratchpadToolSpec)
 	CreateMemoryTool     = OpenAIToolUnionParam(CreateMemoryToolSpec)
 	ListToolParam        = OpenAIToolUnionParam(ListToolSpec)
+	MoveFilesToolParam   = OpenAIToolUnionParam(MoveFilesToolSpec)
 	ListMoodsTool        = OpenAIToolUnionParam(ListMoodsToolSpec)
 	ChangeMoodTool       = OpenAIToolUnionParam(ChangeMoodToolSpec)
 	RunSubagentTool      = OpenAIToolUnionParam(RunSubagentToolSpec)

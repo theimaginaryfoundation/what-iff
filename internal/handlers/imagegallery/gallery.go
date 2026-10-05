@@ -41,6 +41,17 @@ func (h *Handler) ListImages(w http.ResponseWriter, r *http.Request) {
 	if name := strings.TrimSpace(r.URL.Query().Get("name")); name != "" {
 		filters.Name = &name
 	}
+	// folder narrows to one folder's own images ("" is the top level); leave it out to list
+	// every image, as before. It is a presence check, not a value check, because the top level
+	// is the empty path.
+	if raw, present := r.URL.Query()["folder"]; present && len(raw) > 0 {
+		folder, folderErr := models.NormalizeFolder(raw[0])
+		if folderErr != nil {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, folderErrorMessage(folderErr), folderErr)
+			return
+		}
+		filters.Folder = &folder
+	}
 	if personalityIDRaw := strings.TrimSpace(r.URL.Query().Get("personality_id")); personalityIDRaw != "" {
 		personalityID, parseErr := uuid.Parse(personalityIDRaw)
 		if parseErr != nil {

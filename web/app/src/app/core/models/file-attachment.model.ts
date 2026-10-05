@@ -10,6 +10,8 @@ export interface FileAttachment {
    *  Sent back to the backend so the agent can resolve image bytes via the correct key. */
   s3_key?: string;
   chat_message_id?: string;
+  /** Gallery folder path such as "charts/oura"; absent at the top level. A label only. */
+  folder?: string;
   personality_id?: string;
   personalities?: FileAttachmentPersonalityRef[];
   created_at: string;

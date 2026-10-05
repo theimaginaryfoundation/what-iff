@@ -1,0 +1,154 @@
+<div class="folder-tools">
+  <div class="folder-tools__row">
+    @if (view.browsingFolders()) {
+      <nav class="folder-tools__crumbs" aria-label="Folder path">
+        @for (crumb of crumbs(); track crumb.path; let last = $last) {
+          @if (crumb.current) {
+            <span class="folder-tools__crumb folder-tools__crumb--current" aria-current="page">{{ crumb.label }}</span>
+          } @else {
+            <button
+              type="button"
+              class="folder-tools__crumb"
+              [class.folder-tools__crumb--drop]="dropHover() === crumb.path"
+              (click)="view.openFolder(crumb.path)"
+              (dragover)="onCrumbDragOver($event, crumb.path)"
+              (dragleave)="onCrumbDragLeave(crumb.path)"
+              (drop)="onCrumbDrop($event, crumb.path)"
+            >
+              {{ crumb.label }}
+            </button>
+            <span class="folder-tools__sep" aria-hidden="true">›</span>
+          }
+        }
+      </nav>
+    } @else {
+      <p class="folder-tools__note">
+        {{ view.showAll() ? "Showing every image, in all folders." : "Searching every folder." }}
+      </p>
+    }
+
+    <div class="folder-tools__actions">
+      @if (view.browsingFolders()) {
+        <button type="button" class="folder-tools__button" (click)="startCreating()">New folder</button>
+      }
+      <button
+        type="button"
+        class="folder-tools__button"
+        [attr.aria-pressed]="view.selectionMode()"
+        [class.folder-tools__button--active]="view.selectionMode()"
+        (click)="toggleSelectionMode()"
+      >
+        Select
+      </button>
+      <button
+        type="button"
+        class="folder-tools__button"
+        [class.folder-tools__button--active]="view.showAll()"
+        (click)="view.setShowAll(!view.showAll())"
+      >
+        {{ view.showAll() ? "Show folders" : "Show all" }}
+      </button>
+    </div>
+  </div>
+
+  @if (creating()) {
+    <form class="folder-tools__new" (ngSubmit)="createFolder()">
+      <label class="folder-tools__new-label" for="gallery-new-folder">
+        New folder{{ view.currentFolder() ? " in " + view.currentFolder() : "" }}
+      </label>
+      <input
+        id="gallery-new-folder"
+        name="folder-name"
+        type="text"
+        class="folder-tools__input"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="charts"
+        [ngModel]="newName()"
+        (ngModelChange)="newName.set($event)"
+      />
+      <button type="submit" class="folder-tools__button folder-tools__button--primary">Create</button>
+      <button type="button" class="folder-tools__button" (click)="cancelCreating()">Cancel</button>
+      @if (createError(); as problem) {
+        <p class="folder-tools__error" role="alert">{{ problem }}</p>
+      } @else {
+        <p class="folder-tools__hint">A folder shows up for good once an image is moved into it.</p>
+      }
+    </form>
+  }
+
+  @if (view.selectionMode()) {
+    <div class="folder-tools__bulk-bar" role="region" aria-label="Bulk actions">
+      <label class="folder-tools__select-all">
+        <input
+          type="checkbox"
+          class="folder-tools__select-all-box"
+          [checked]="view.selectionState() === 'all'"
+          [indeterminate]="view.selectionState() === 'some'"
+          (change)="view.toggleSelectAll()"
+        />
+        {{ view.selectionState() === "all" ? "Unselect all" : "Select all" }}
+      </label>
+      <span class="folder-tools__bulk-count" role="status" aria-live="polite">{{ view.selectedCount() }} selected</span>
+      @if (view.selectedCount() === 0) {
+        <span class="folder-tools__bulk-hint">Select mode: click an image to pick it</span>
+      }
+      <div class="folder-tools__bulk-action" (focusout)="closeActionMenuSoon()" (keydown.escape)="actionMenuOpen.set(false)">
+        <button
+          type="button"
+          class="folder-tools__bulk-action-btn"
+          aria-haspopup="listbox"
+          [attr.aria-expanded]="actionMenuOpen()"
+          [disabled]="view.selectedCount() === 0"
+          (click)="actionMenuOpen.set(!actionMenuOpen())"
+        >
+          Choose action <span aria-hidden="true">▾</span>
+        </button>
+        @if (actionMenuOpen()) {
+          <div class="folder-tools__bulk-menu" role="listbox" aria-label="Bulk actions">
+            <button type="button" role="option" (mousedown)="moveSelectionFromMenu()">Move to folder…</button>
+          </div>
+        }
+      </div>
+      <button
+        type="button"
+        class="folder-tools__bulk-clear"
+        [disabled]="view.selectedCount() === 0"
+        (click)="view.clearSelection()"
+        aria-label="Clear selection"
+      >
+        Clear <span aria-hidden="true">×</span>
+      </button>
+      <button type="button" class="folder-tools__bulk-done" (click)="view.setSelectionMode(false)">Done</button>
+    </div>
+  }
+
+  @if (view.folderError(); as message) {
+    @if (!moveOpen() && view.folderEditing() === null) {
+      <p class="folder-tools__error" role="alert">{{ message }}</p>
+    }
+  }
+</div>
+
+<app-gallery-move-modal
+  mode="images"
+  [open]="moveOpen()"
+  [imageCount]="moveIds().length"
+  [folders]="destinations()"
+  [currentFolder]="view.browsingFolders() ? view.currentFolder() : ''"
+  [submitting]="submitting()"
+  [serverError]="view.folderError()"
+  (close)="closeMoveImages()"
+  (submitPath)="submitMoveImages($event)"
+/>
+
+<app-gallery-move-modal
+  mode="folder"
+  [open]="view.folderEditing() !== null"
+  [folderPath]="view.folderEditing() ?? ''"
+  [folders]="destinations()"
+  [submitting]="submitting()"
+  [serverError]="view.folderError()"
+  (close)="view.stopEditingFolder()"
+  (submitPath)="submitMoveFolder($event)"
+/>

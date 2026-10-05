@@ -47,7 +47,7 @@ describe('GalleryViewService', () => {
 
         service.loadInitial();
 
-        expect(galleryApi.listImages).toHaveBeenCalledWith(1, service.pageSize, { name: '', personalityId: undefined, globalOnly: false });
+        expect(galleryApi.listImages).toHaveBeenCalledWith(1, service.pageSize, { name: '', personalityId: undefined, globalOnly: false, folder: '' });
         expect(service.images().length).toBe(1);
         expect(service.totalCount()).toBe(1);
     });
@@ -74,7 +74,7 @@ describe('GalleryViewService', () => {
 
         service.selectGlobalAssociations();
 
-        expect(galleryApi.listImages).toHaveBeenCalledWith(1, service.pageSize, { name: '', personalityId: undefined, globalOnly: true });
+        expect(galleryApi.listImages).toHaveBeenCalledWith(1, service.pageSize, { name: '', personalityId: undefined, globalOnly: true, folder: '' });
         expect(service.associationFilterMode()).toBe('global');
     });
 
@@ -185,7 +185,7 @@ describe('GalleryViewService', () => {
             expect(service.currentPage()).toBe(1);
 
             service.loadNextPage();
-            expect(galleryApi.listImages).toHaveBeenLastCalledWith(2, service.pageSize, { name: '', personalityId: undefined, globalOnly: false });
+            expect(galleryApi.listImages).toHaveBeenLastCalledWith(2, service.pageSize, { name: '', personalityId: undefined, globalOnly: false, folder: '' });
         });
 
         it('keeps the newest reload when overlapping reloads resolve out of order', () => {

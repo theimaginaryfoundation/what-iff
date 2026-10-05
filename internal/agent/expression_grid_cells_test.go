@@ -301,9 +301,19 @@ func TestGenerateExpressionCandidates_ImageStyleNone(t *testing.T) {
 // expectCreatePersonalityAttachment mocks CreateFileAttachment for a personality-pinned image
 // (user check, insert, relationship reload, expression-usage lookup) returning attID.
 func expectCreatePersonalityAttachment(mock sqlmock.Sqlmock, uid, pid, attID uuid.UUID) {
+	expectCreatePersonalityAttachmentWithInsert(mock, uid, pid, attID, nil)
+}
+
+// expectCreatePersonalityAttachmentWithInsert is expectCreatePersonalityAttachment that also checks
+// the INSERT's arguments (name, file_type, folder, created_at, user, personality, id) when given.
+func expectCreatePersonalityAttachmentWithInsert(mock sqlmock.Sqlmock, uid, pid, attID uuid.UUID, insertArgs []driver.Value) {
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT .* FROM `users`").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uid.String()))
-	mock.ExpectExec("INSERT INTO `file_attachments`").WillReturnResult(sqlmock.NewResult(1, 1))
+	insert := mock.ExpectExec("INSERT INTO `file_attachments`")
+	if insertArgs != nil {
+		insert = insert.WithArgs(insertArgs...)
+	}
+	insert.WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery("SELECT .* FROM `file_attachments`").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at", "name", "file_type", "user_file_attachments", "personality_file_attachments"}).
 			AddRow(attID.String(), time.Now(), time.Now(), "expression.png", "image/png", uid.String(), pid.String()))
@@ -319,13 +329,16 @@ func TestUploadExpressionCellAttachment_StoresImageAndThumbnail(t *testing.T) {
 	defer cleanup()
 
 	uid, pid, attID := uuid.New(), uuid.New(), uuid.New()
-	expectCreatePersonalityAttachment(mock, uid, pid, attID)
+	// The cell is filed in the personality's expressions folder, not left at the top of the gallery.
+	any := sqlmock.AnyArg()
+	expectCreatePersonalityAttachmentWithInsert(mock, uid, pid, attID,
+		[]driver.Value{"expression-smug.png", "image/png", "expressions/aster", any, any, any, any})
 	mock.ExpectExec("UPDATE `file_attachments`").WillReturnResult(sqlmock.NewResult(0, 1))
 
 	store := newRecordingFileStore()
 	a := &Agent{ds: ds, logger: zap.NewNop(), fileStore: store}
 	raw, _ := base64.StdEncoding.DecodeString(gridPNGBase64(t, 30))
-	id, err := a.uploadExpressionCellAttachment(context.Background(), uid, pid, "smug", raw)
+	id, err := a.uploadExpressionCellAttachment(context.Background(), uid, pid, "expressions/aster", "smug", raw)
 	require.NoError(t, err)
 	require.Equal(t, attID, id)
 	require.Contains(t, store.objects, storage.FileKeyForPersonality(uid, pid, attID, "expression-smug.png"))

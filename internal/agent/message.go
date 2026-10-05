@@ -112,6 +112,7 @@ type Agent struct {
 	scratchpadTool *tools.ScratchpadTool
 	recallTool     *tools.RecallTool
 	listTool       *tools.ListTool
+	moveFilesTool  *tools.MoveFilesTool
 	chunkPipeline  *filechunker.FileChunkPipeline
 	fileStore      storage.FileStore
 	// expressionPortraitThumbCache caches thumbnails loaded for expression continuity in message context (bounded).
@@ -273,6 +274,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		memoryTool:                   tools.NewVectorStoreMemoryTool(ds, &oaiClient, logger),
 		scratchpadTool:               tools.NewScratchpadTool(ds, logger),
 		listTool:                     tools.NewListTool(ds, logger),
+		moveFilesTool:                tools.NewMoveFilesTool(ds, logger),
 		mcpClient:                    mcpclient.New(nil, logger),
 		chunkPipeline:                newChunkPipelineForMode(cfg.LLMBackend != "vendor", &oaiClient, ds, logger),
 		fileStore:                    fileStore,
@@ -2480,6 +2482,7 @@ func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID,
 		created, err := a.ds.CreateFileAttachment(ctx, userID, models.FileAttachment{
 			Name:          name,
 			FileType:      fileType,
+			Folder:        a0.Folder, // already normalized by the tool that set it
 			ChatMessageID: &agentMessage.ID,
 		})
 		if err != nil {

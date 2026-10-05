@@ -94,8 +94,23 @@
       <span class="gallery-page__results-summary" role="status">{{ tiles().length }} of {{ sourceCounts().all }} shown</span>
     </div>
 
+    <app-gallery-folder-tools />
+
     <app-gallery-grid
       [tiles]="tiles()"
+      [folderTiles]="view.folderTiles()"
+      [selectable]="view.selectionMode()"
+      [selectedIds]="view.selectedIds()"
+      [showFolders]="!view.browsingFolders()"
+      [emptyMessage]="emptyMessage()"
+      [drag]="view.drag()"
+      (dragImage)="view.beginImageDrag($event)"
+      (dragFolder)="view.beginFolderDrag($event)"
+      (dragEnd)="view.endDrag()"
+      (dropOnFolder)="onDropOnFolder($event)"
+      (openFolder)="view.openFolder($event)"
+      (editFolder)="view.startEditingFolder($event)"
+      (toggleSelect)="view.toggleSelected($event)"
       [loading]="view.isLoading()"
       [loadingMore]="view.isLoadingMore()"
       [hasMore]="view.hasMore()"
@@ -147,6 +162,7 @@
   (delete)="onDelete($event)"
   (assign)="onRequestAssign($event)"
   (rename)="onRename($event)"
+  (moveToFolder)="onMoveToFolder($event)"
   (addToThread)="onAddToThread($event)"
   (startNewChat)="onStartNewChat($event)" />
 

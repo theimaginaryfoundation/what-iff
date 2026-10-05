@@ -64,6 +64,7 @@ func toolContextPolicyFor(toolName string) toolContextPolicy {
 		// Retrieval / listing results: stable enough to persist without expiry.
 		return toolContextPolicy{persist: true, ttlTurns: noTTL}
 	case tools.CreateMemoryToolSpec.Name,
+		tools.MoveFilesToolSpec.Name,
 		tools.UpdateScratchpadToolSpec.Name,
 		tools.ChangeMoodToolSpec.Name,
 		tools.CreateAgentJobToolSpec.Name:

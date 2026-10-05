@@ -1,0 +1,65 @@
+<ui-modal [open]="open()" labelledBy="gallery-move-title" size="md" (dismiss)="close.emit()">
+  <div modal-header class="gallery-move__header">
+    <div>
+      <h2 id="gallery-move-title" class="gallery-move__title">{{ title() }}</h2>
+      <p class="gallery-move__subtitle">{{ hint() }}</p>
+    </div>
+  </div>
+
+  <div class="gallery-move__body">
+    <ul class="gallery-move__list" role="listbox" aria-label="Folders">
+      @for (destination of destinations(); track destination.folder) {
+        <li>
+          <button
+            type="button"
+            role="option"
+            class="gallery-move__option"
+            [class.gallery-move__option--active]="isPicked(destination)"
+            [attr.aria-selected]="isPicked(destination)"
+            (click)="pick(destination)"
+          >
+            <span class="gallery-move__option-icon" aria-hidden="true">{{ destination.folder === "" ? "⌂" : "▸" }}</span>
+            <span class="gallery-move__option-label">{{ destination.label }}</span>
+          </button>
+        </li>
+      }
+    </ul>
+
+    <div class="gallery-move__field">
+      <label class="gallery-move__label" for="gallery-move-path">
+        {{ isFolderMode() ? "New path" : "Or type a folder path" }}
+      </label>
+      <input
+        id="gallery-move-path"
+        type="text"
+        class="gallery-move__input"
+        autocomplete="off"
+        spellcheck="false"
+        [placeholder]="isFolderMode() ? 'archive/charts' : 'charts/oura'"
+        [ngModel]="path()"
+        (ngModelChange)="path.set($event)"
+        (keydown.enter)="submit()"
+      />
+      @if (pathError(); as problem) {
+        <p class="gallery-move__error" role="alert">{{ problem }}</p>
+      } @else if (resultingPath() !== null && resultingPath() !== path().trim()) {
+        <p class="gallery-move__preview">
+          Will be saved as <strong>{{ resultingPath() || "the top level" }}</strong>
+        </p>
+      }
+    </div>
+
+    @if (serverError(); as message) {
+      <p class="gallery-move__error" role="alert">{{ message }}</p>
+    }
+  </div>
+
+  <div modal-footer class="gallery-move__footer">
+    <button type="button" class="gallery-move__button gallery-move__button--secondary" [disabled]="submitting()" (click)="close.emit()">
+      Cancel
+    </button>
+    <button type="button" class="gallery-move__button gallery-move__button--primary" [disabled]="!canSubmit()" (click)="submit()">
+      {{ submitLabel() }}
+    </button>
+  </div>
+</ui-modal>

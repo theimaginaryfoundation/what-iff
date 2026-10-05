@@ -8,6 +8,7 @@ import (
 
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"go.uber.org/zap"
 )
@@ -34,6 +35,16 @@ func (h *Handler) ImportImage(w http.ResponseWriter, r *http.Request) {
 	fileAttachment.Name = normalizeImportedName(originalName, strings.TrimSpace(r.FormValue("title")))
 	if description := strings.TrimSpace(r.FormValue("description")); description != "" {
 		fileAttachment.Description = &description
+	}
+
+	if rawFolder := r.FormValue("folder"); strings.TrimSpace(rawFolder) != "" {
+		folder, folderErr := models.NormalizeFolder(rawFolder)
+		if folderErr != nil {
+			handlerutils.AbandonFileAttachmentUpload(r.Context(), h.logger, h.agent.OpenAIProvider, fileAttachment, tempFilePath)
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, folderErrorMessage(folderErr), folderErr)
+			return
+		}
+		fileAttachment.Folder = folder
 	}
 
 	createdAttachment, err := h.ds.CreateFileAttachment(r.Context(), userID, fileAttachment)

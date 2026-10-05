@@ -92,6 +92,15 @@ func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs)
 	if f, ok := validateNonEmptyString(a.Filter); ok {
 		filters.Name = &f
 	}
+	if raw, ok := validateNonEmptyString(a.Folder); ok {
+		folder, err := models.NormalizeFolder(raw)
+		if err != nil {
+			return t.fail(listKindFiles, fmt.Sprintf("invalid folder: %v", err))
+		}
+		if folder != "" { // "/" or "" would mean the top level, which is "no folder filter" here
+			filters.FolderPrefix = &folder
+		}
+	}
 
 	switch normalizeFileScope(a.Scope) {
 	case listFileScopePersonality:
@@ -119,6 +128,7 @@ func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs)
 			ID:       fa.ID.String(),
 			Name:     fa.Name,
 			FileType: fa.FileType,
+			Folder:   fa.Folder,
 		})
 	}
 	meta := listPageMeta{Page: pageNum, Limit: limit, TotalCount: page.TotalCount}
