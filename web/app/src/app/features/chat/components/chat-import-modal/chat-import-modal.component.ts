@@ -3,7 +3,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, effect, inject,
 import { NgTemplateOutlet } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EmptyError, Subject, firstValueFrom, forkJoin, timer } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+import { switchMap, takeUntil } from 'rxjs/operators';
 
 import { ChatService } from '../../../../core/services/chat.service';
 import { JobService } from '../../../../core/services/job.service';
@@ -103,7 +103,7 @@ function parseImportCount(value: unknown): number | null {
                 </p>
               } @else {
                 <p class="import__hint">
-                  Find them under the <strong>Archived</strong> tab. Restoring a thread prepares it for chat automatically.
+                  Find them under the <strong>Archived</strong> tab. Opening a restored thread prepares it for chat automatically.
                 </p>
               }
             </div>
@@ -622,8 +622,10 @@ export class ChatImportModalComponent implements OnInit {
   }
 
   /**
-   * Unarchives each selected thread, which triggers the backend rehydration job (summary + window
-   * pointer + seeded memories). Threads land in the active list, ready to resume.
+   * Unarchives each selected thread and then opens it: the backend starts the rehydration job
+   * (summary + window pointer + seeded memories) when an imported thread is first opened, not when it
+   * is unarchived, so these few picked threads are opened here to be prepared right away.
+   * Threads land in the active list, ready to resume.
    */
   prepareSelected(): void {
     const ids = Array.from(this.selectedIds());
@@ -632,7 +634,7 @@ export class ChatImportModalComponent implements OnInit {
       return;
     }
     this.stage.set('preparing');
-    forkJoin(ids.map(id => this.chatService.patchChat(id, { archived: false })))
+    forkJoin(ids.map(id => this.chatService.patchChat(id, { archived: false }).pipe(switchMap(chat => this.chatService.getChat(chat.id)))))
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {

@@ -20,7 +20,7 @@ export interface Chat {
   /**
    * Lazy-summarization lifecycle for imported threads:
    * '' (none) | 'pending' | 'processing' | 'ready' | 'failed'. Set when an imported thread is
-   * restored (unarchived) and its summary is generated in the background.
+   * opened for the first time after being restored (unarchived); its summary is then generated in the background.
    */
   rehydration_state?: string;
   created_at: string;

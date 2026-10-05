@@ -186,6 +186,7 @@ export class ChatSessionService implements OnDestroy {
         next: chat => {
           if (!this.isActiveThread(requestedThreadId)) return;
           this._thread.set(chat);
+          this.threadList.rememberOpenedThread(chat);
           this.chatService.setLastChatId(chat.id);
         },
         error: error => {
@@ -258,6 +259,7 @@ export class ChatSessionService implements OnDestroy {
         next: chat => {
           if (!this.isActiveThread(threadId)) return;
           this._thread.set(chat);
+          this.threadList.rememberOpenedThread(chat);
         },
         error: () => {
           // Best-effort: keep showing current thread if the refetch fails.

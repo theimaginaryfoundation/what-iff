@@ -50,7 +50,7 @@ describe('ChatSessionService — returning to a thread with a running turn', () 
                         patchChat: vi.fn(),
                     },
                 },
-                { provide: ThreadListService, useValue: { clearUnreadForThread: vi.fn() } },
+                { provide: ThreadListService, useValue: { clearUnreadForThread: vi.fn(), rememberOpenedThread: vi.fn() } },
                 { provide: DraftMessageService, useValue: { getDraft: vi.fn(() => null), saveDraft: vi.fn(), clearDraft: vi.fn() } },
                 { provide: ChatSendGate, useValue: { refresh: vi.fn() } },
                 {

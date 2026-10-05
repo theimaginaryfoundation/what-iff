@@ -314,6 +314,14 @@ func (h *Handler) GetChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Lazy rehydration: opening an imported thread that was restored from the archive is the signal
+	// that the user means to talk in it, so summarize it now (and seed memories) rather than when it
+	// was unarchived, which would run for every thread of a bulk restore. The first turn waits for
+	// the summary (see WaitForThreadRehydration). Archived threads open read-only and never start it.
+	if h.agent != nil && needsRehydration(chat) && h.agent.EnqueueThreadRehydration(r.Context(), userID, chatID) {
+		chat.RehydrationState = models.RehydrationStatePending
+	}
+
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, chat)
 }
 
@@ -676,35 +684,24 @@ func (h *Handler) PatchChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Lazy rehydration: when an imported thread is restored (unarchived) for the first time, kick off
-	// background summarization so it has a checkpoint summary + recent-turn window before the user
-	// resumes it. Guarded so it only fires once (empty checkpoint summary) and only for imports.
-	if h.agent != nil && isUnarchiveTransition(existing, req.Archived) && needsRehydration(existing) {
-		h.agent.EnqueueThreadRehydration(r.Context(), userID, chatID)
-	}
-
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, chat)
 }
 
-// isUnarchiveTransition reports whether this PATCH flips the chat from archived to active.
-func isUnarchiveTransition(existing *models.Chat, requested *bool) bool {
-	if requested == nil || *requested {
-		return false // not setting archived=false
-	}
-	return existing.Archived != nil && *existing.Archived
-}
-
-// needsRehydration reports whether an imported thread still needs its one-time lazy summary.
-func needsRehydration(existing *models.Chat) bool {
-	if existing.Source == nil || *existing.Source == "" {
+// needsRehydration reports whether an imported thread still needs its one-time lazy summary: it is
+// unarchived, was imported, has no checkpoint yet and is not already being summarized or done.
+// The atomic claim in the datastore is authoritative; this just spares plain threads the write.
+func needsRehydration(chat *models.Chat) bool {
+	if chat.Source == nil || *chat.Source == "" {
 		return false
 	}
-	// Already summarized (checkpoint present) or already in-flight/terminal — skip.
-	switch existing.RehydrationState {
-	case models.RehydrationStateProcessing, models.RehydrationStateReady:
+	if chat.Archived != nil && *chat.Archived {
 		return false
 	}
-	return existing.CheckpointSummary == ""
+	switch chat.RehydrationState {
+	case models.RehydrationStatePending, models.RehydrationStateProcessing, models.RehydrationStateReady:
+		return false
+	}
+	return chat.CheckpointSummary == ""
 }
 
 // MarkChatRead marks all unread assistant messages in a chat as read.

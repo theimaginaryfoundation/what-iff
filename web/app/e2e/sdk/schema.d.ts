@@ -5364,7 +5364,8 @@ export interface paths {
          *     **Roles:** Only user/human and assistant messages are imported. System and tool messages are dropped.
          *
          *     **Archive:** All imported threads are created in archived state (`archived=true`). Their
-         *     `rehydration_state` is summarized lazily when the user restores (unarchives) the thread.
+         *     `rehydration_state` is summarized lazily the first time the user opens the thread after restoring
+         *     (unarchiving) it, so a bulk restore does not summarize every thread.
          *
          *     **Error reporting:** Per-conversation parse and persistence failures are non-fatal and logged
          *     server-side; aggregate counts are reflected in the job's `progress`.
@@ -5849,7 +5850,9 @@ export interface paths {
         };
         /**
          * Get chat by ID
-         * @description Returns a specific chat by its ID
+         * @description Returns a specific chat by its ID.
+         *     Opening an imported thread that was restored from the archive for the first time also starts its
+         *     one-time summary in the background (`rehydration_state` is then `pending`); archived threads never do.
          */
         get: {
             parameters: {

@@ -96,6 +96,7 @@ describe('AppSidebarComponent', () => {
             ]),
             filteredThreads: signal([{ id: 'thread-1', name: 'Thread 1', is_favorite: true }]),
             recentOpenedIds: signal<string[]>([]),
+            openedThreadsOutsideList: signal<Array<Record<string, unknown>>>([]),
             pinnedThreads: signal([
                 { id: 'thread-1', name: 'Thread 1', is_favorite: true, personality_id: 'persona-1' },
             ]),
@@ -275,6 +276,20 @@ describe('AppSidebarComponent', () => {
         const fixture = create();
         expect(fixture.nativeElement.textContent).toContain('Recent Threads');
         expect(fixture.nativeElement.textContent).toContain('Recent One');
+    });
+
+    it('lists an opened archived thread that is not in the loaded list under recent threads', () => {
+        threadsStub.filteredThreads.set([
+            { id: 'thread-2', name: 'Recent One', is_favorite: false, personality_id: 'persona-1' },
+        ]);
+        threadsStub.openedThreadsOutsideList.set([
+            { id: 'thread-9', name: 'Archived Chat', archived: true, personality_id: 'persona-1' },
+        ]);
+        threadsStub.recentOpenedIds.set(['thread-9', 'thread-2']);
+        const fixture = create();
+        const text = fixture.nativeElement.textContent as string;
+        expect(text).toContain('Archived Chat');
+        expect(text.indexOf('Archived Chat')).toBeLessThan(text.indexOf('Recent One'));
     });
 
     it('shows personality search input and opens dropdown on focus', () => {

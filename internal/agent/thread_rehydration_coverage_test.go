@@ -180,11 +180,11 @@ func TestEnqueueThreadRehydration_MissingUserInContextIsNoOp(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
 	require.NotPanics(t, func() {
-		a.EnqueueThreadRehydration(context.Background(), uuid.New(), uuid.New())
+		require.False(t, a.EnqueueThreadRehydration(context.Background(), uuid.New(), uuid.New()))
 	})
 }
 
-func TestEnqueueThreadRehydration_SetStateFailsReturnsWithoutCreatingJob(t *testing.T) {
+func TestEnqueueThreadRehydration_ClaimFailsReturnsWithoutCreatingJob(t *testing.T) {
 	t.Parallel()
 	ds, mock, cleanup := newTestDatastore(t)
 	defer cleanup()
@@ -193,9 +193,22 @@ func TestEnqueueThreadRehydration_SetStateFailsReturnsWithoutCreatingJob(t *test
 
 	a := newTestAgent(ds)
 	userID := uuid.New()
-	require.NotPanics(t, func() {
-		a.EnqueueThreadRehydration(ctxWithUser(userID), userID, uuid.New())
-	})
+	require.False(t, a.EnqueueThreadRehydration(ctxWithUser(userID), userID, uuid.New()))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// A thread that is archived, not imported, already summarized or already in flight is not claimed:
+// no job runs, which is what keeps repeated opens and bulk unarchives from costing anything.
+func TestEnqueueThreadRehydration_NotClaimedStartsNoJob(t *testing.T) {
+	t.Parallel()
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	mock.ExpectExec("UPDATE .*chats.*").WillReturnResult(sqlmock.NewResult(0, 0))
+
+	a := newTestAgent(ds)
+	userID := uuid.New()
+	require.False(t, a.EnqueueThreadRehydration(ctxWithUser(userID), userID, uuid.New()))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

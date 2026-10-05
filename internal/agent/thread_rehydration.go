@@ -22,7 +22,7 @@ import (
 
 const (
 	// JobTypeThreadRehydration is the Job.job_type for lazy summarization of an imported thread
-	// triggered when the user unarchives (restores) it.
+	// triggered when the user first opens it after it was restored from the archive.
 	JobTypeThreadRehydration = "thread_rehydration"
 
 	// rehydrationKeepTurns is how many trailing user turns stay live (loaded verbatim) after
@@ -109,20 +109,27 @@ func isRehydrationInFlight(state string) bool {
 	return state == models.RehydrationStatePending || state == models.RehydrationStateProcessing
 }
 
-// EnqueueThreadRehydration marks an imported thread as pending rehydration and runs summarization in
-// the background. It is safe to call on the request goroutine: it detaches the context so the work
-// outlives the HTTP response. Callers should only invoke this for imported threads that have not yet
-// been rehydrated (source set, empty checkpoint summary).
-func (a *Agent) EnqueueThreadRehydration(ctx context.Context, userID, chatID uuid.UUID) {
+// EnqueueThreadRehydration claims an imported thread for its one-time summary (state pending) and
+// runs summarization in the background, reporting whether it started one. It is meant to run when
+// the user opens the thread, not when it is unarchived: bulk unarchiving a hundred threads must not
+// start a hundred summaries for threads that will mostly never be opened. The claim is atomic and
+// only succeeds for an unarchived imported thread without a summary that is not already in flight
+// or done, so repeated opens are no-ops. It is safe to call on the request goroutine: it detaches
+// the context so the work outlives the HTTP response.
+func (a *Agent) EnqueueThreadRehydration(ctx context.Context, userID, chatID uuid.UUID) bool {
 	detachedCtx, ok := middleware.CopyUserToIDContext(ctx, context.Background())
 	if !ok {
 		a.logger.Error("thread rehydration: missing user in context", zap.String("chat_id", chatID.String()))
-		return
+		return false
 	}
 
-	if err := a.ds.SetChatRehydrationState(detachedCtx, userID, chatID, models.RehydrationStatePending); err != nil {
-		a.logger.Error("thread rehydration: failed to mark pending", zap.String("chat_id", chatID.String()), zap.Error(err))
-		return
+	claimed, err := a.ds.ClaimChatRehydration(detachedCtx, userID, chatID)
+	if err != nil {
+		a.logger.Error("thread rehydration: failed to claim", zap.String("chat_id", chatID.String()), zap.Error(err))
+		return false
+	}
+	if !claimed {
+		return false
 	}
 
 	job, err := a.ds.CreateJob(detachedCtx, userID, models.Job{
@@ -132,8 +139,11 @@ func (a *Agent) EnqueueThreadRehydration(ctx context.Context, userID, chatID uui
 	})
 	if err != nil {
 		a.logger.Error("thread rehydration: failed to create job", zap.String("chat_id", chatID.String()), zap.Error(err))
-		// Leave state pending; the gate falls back gracefully after timeout.
-		return
+		// Release the claim so the next open retries; left pending, nothing would ever run it.
+		if serr := a.ds.SetChatRehydrationState(detachedCtx, userID, chatID, models.RehydrationStateFailed); serr != nil {
+			a.logger.Error("thread rehydration: failed to mark failed after job error", zap.String("chat_id", chatID.String()), zap.Error(serr))
+		}
+		return false
 	}
 
 	go func() {
@@ -142,6 +152,7 @@ func (a *Agent) EnqueueThreadRehydration(ctx context.Context, userID, chatID uui
 		defer func() { finish(outcome) }()
 		outcome = a.runThreadRehydration(detachedCtx, userID, chatID, job.ID)
 	}()
+	return true
 }
 
 // runThreadRehydration executes the summarization and persists the checkpoint + window pointer.

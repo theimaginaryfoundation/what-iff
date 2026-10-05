@@ -67,7 +67,8 @@ describe('ChatSessionService', () => {
             markChatRead: vi.fn().mockName("ChatService.markChatRead")
         } as unknown as ChatServiceMock;
         threadList = {
-            clearUnreadForThread: vi.fn().mockName("ThreadListService.clearUnreadForThread")
+            clearUnreadForThread: vi.fn().mockName("ThreadListService.clearUnreadForThread"),
+            rememberOpenedThread: vi.fn().mockName("ThreadListService.rememberOpenedThread")
         } as unknown as ThreadListServiceMock;
         messageService = {
             clearMessages: vi.fn().mockName("MessageService.clearMessages"),
