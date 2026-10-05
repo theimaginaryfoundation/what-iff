@@ -437,7 +437,6 @@ func (a *Agent) extractMemoriesFromTranscript(ctx context.Context, userID uuid.U
 		Model:            archivalOpenAIModel,
 		SafetyIdentifier: openai.String(userID.String()),
 		MaxOutputTokens:  openai.Int(importMemoryExtractMaxTokens),
-		ServiceTier:      responses.ResponseNewParamsServiceTierFlex,
 		Instructions:     openai.String(importMemoryExtractionInstructions),
 		Input: responses.ResponseNewParamsInputUnion{
 			OfString: openai.String(transcript),
@@ -476,7 +475,6 @@ func (a *Agent) summarizeText(ctx context.Context, userID uuid.UUID, instruction
 			Model:            archivalOpenAIModel,
 			SafetyIdentifier: openai.String(userID.String()),
 			MaxOutputTokens:  openai.Int(int64(maxTokens)),
-			ServiceTier:      responses.ResponseNewParamsServiceTierFlex,
 			Instructions:     openai.String(instructions),
 			Input: responses.ResponseNewParamsInputUnion{
 				OfString: openai.String(input),
