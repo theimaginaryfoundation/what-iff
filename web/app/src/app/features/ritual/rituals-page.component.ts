@@ -7,6 +7,7 @@ import { firstValueFrom } from 'rxjs';
 import { Ritual, RitualSort } from '../../core/models/ritual.model';
 import { Personality } from '../../core/models/personality.model';
 import { PersonalityService } from '../../core/services/personality.service';
+import { MCPServerService } from '../../core/services/mcp-server.service';
 import { RitualViewService } from '../../core/services/ritual-view.service';
 import { RitualService } from '../../core/services/ritual.service';
 import { ChatService } from '../../core/services/chat.service';
@@ -53,6 +54,7 @@ export class RitualsPageComponent implements OnInit {
   private readonly view = inject(RitualViewService);
   private readonly ritualService = inject(RitualService);
   private readonly personalityService = inject(PersonalityService);
+  private readonly mcpServerService = inject(MCPServerService);
   private readonly chatService = inject(ChatService);
   private readonly draftMessageService = inject(DraftMessageService);
   private readonly route = inject(ActivatedRoute);
@@ -61,6 +63,7 @@ export class RitualsPageComponent implements OnInit {
 
   readonly personalities = signal<RitualSelectOption[]>([]);
   readonly personalityRecords = signal<Personality[]>([]);
+  readonly mcpServers = signal<RitualSelectOption[]>([]);
   readonly filters = this.view.filters;
   readonly loading = this.view.loading;
   readonly error = this.view.error;
@@ -130,6 +133,11 @@ export class RitualsPageComponent implements OnInit {
         this.personalityRecords.set([]);
         this.personalities.set([]);
       },
+    });
+
+    this.mcpServerService.listMCPServers(1, 200).subscribe({
+      next: result => this.mcpServers.set((result.results ?? []).map(server => ({ id: server.id, label: server.name }))),
+      error: () => this.mcpServers.set([]),
     });
 
     this.route.queryParams.subscribe(params => {

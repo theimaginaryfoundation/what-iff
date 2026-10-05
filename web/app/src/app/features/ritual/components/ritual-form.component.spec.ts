@@ -2,7 +2,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { Ritual } from '../../../core/models/ritual.model';
-import { RitualFormComponent } from './ritual-form.component';
+import { RitualFormComponent, RitualFormSave } from './ritual-form.component';
 
 describe('RitualFormComponent', () => {
     let fixture: ComponentFixture<RitualFormComponent>;
@@ -88,6 +88,107 @@ describe('RitualFormComponent', () => {
         fixture.componentRef.setInput('creating', false);
         fixture.detectChanges();
         expect(saveButton.textContent).toContain('Save Changes');
+    });
+
+    describe('connectors (MCP servers)', () => {
+        const servers = [
+            { id: 'mcp-1', label: 'Grafana' },
+            { id: 'mcp-2', label: 'Oura' },
+        ];
+
+        function checkboxes(): HTMLInputElement[] {
+            return Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
+        }
+
+        function lastSave(): { value?: RitualFormSave } {
+            const captured: { value?: RitualFormSave } = {};
+            fixture.componentInstance.save.subscribe(value => (captured.value = value));
+            return captured;
+        }
+
+        it('lists connectors and checks the ones already linked to the skill', () => {
+            fixture.componentRef.setInput('ritual', { ...ritual, mcp_server_ids: ['mcp-2'] });
+            fixture.componentRef.setInput('mcpServers', servers);
+            fixture.detectChanges();
+
+            const boxes = checkboxes();
+            expect(boxes.length).toBe(2);
+            expect(boxes.map(box => box.checked)).toEqual([false, true]);
+            expect((fixture.nativeElement as HTMLElement).textContent).toContain('Grafana');
+        });
+
+        it('points at the Tools page when there are no connectors', () => {
+            fixture.detectChanges();
+            expect(checkboxes().length).toBe(0);
+            expect((fixture.nativeElement as HTMLElement).textContent).toContain('Add one on the Tools page');
+        });
+
+        it('sends the selection on save after toggling', () => {
+            fixture.componentRef.setInput('ritual', { ...ritual, mcp_server_ids: ['mcp-2'] });
+            fixture.componentRef.setInput('mcpServers', servers);
+            fixture.detectChanges();
+            const saved = lastSave();
+
+            const boxes = checkboxes();
+            boxes[0].checked = true;
+            boxes[0].dispatchEvent(new Event('change'));
+            boxes[1].checked = false;
+            boxes[1].dispatchEvent(new Event('change'));
+            fixture.detectChanges();
+            expect(fixture.componentInstance.hasUnsavedEdits()).toBe(true);
+
+            fixture.componentInstance.submit();
+            expect(saved.value?.mcp_server_ids).toEqual(['mcp-1']);
+        });
+
+        it('can clear every connector (sends an empty list)', () => {
+            fixture.componentRef.setInput('ritual', { ...ritual, mcp_server_ids: ['mcp-1'] });
+            fixture.componentRef.setInput('mcpServers', servers);
+            fixture.detectChanges();
+            const saved = lastSave();
+
+            fixture.componentInstance.toggleMcp('mcp-1', false);
+            fixture.componentInstance.submit();
+            expect(saved.value?.mcp_server_ids).toEqual([]);
+        });
+
+        it('omits mcp_server_ids when the selection is untouched so Tools-page links are not overwritten', () => {
+            fixture.componentRef.setInput('ritual', { ...ritual, mcp_server_ids: ['mcp-1'] });
+            fixture.componentRef.setInput('mcpServers', servers);
+            fixture.detectChanges();
+            const saved = lastSave();
+
+            fixture.componentInstance.name.set('Renamed');
+            fixture.componentInstance.submit();
+            expect(saved.value?.name).toBe('Renamed');
+            expect(saved.value && 'mcp_server_ids' in saved.value).toBe(false);
+        });
+
+        it('keeps linked ids that are not in the loaded list when toggling others', () => {
+            fixture.componentRef.setInput('ritual', { ...ritual, mcp_server_ids: ['hidden-id'] });
+            fixture.componentRef.setInput('mcpServers', servers);
+            fixture.detectChanges();
+            const saved = lastSave();
+
+            fixture.componentInstance.toggleMcp('mcp-1', true);
+            fixture.componentInstance.submit();
+            expect(saved.value?.mcp_server_ids).toEqual(['hidden-id', 'mcp-1']);
+        });
+
+        it('always sends the selection when creating', () => {
+            fixture.componentRef.setInput('creating', true);
+            fixture.componentRef.setInput('mcpServers', servers);
+            fixture.detectChanges();
+            const saved = lastSave();
+
+            const component = fixture.componentInstance;
+            component.name.set('New skill');
+            component.description.set('A useful skill');
+            component.content.set('Do the useful thing');
+            component.toggleMcp('mcp-2', true);
+            component.submit();
+            expect(saved.value?.mcp_server_ids).toEqual(['mcp-2']);
+        });
     });
 
     // Skipped: [disabled]="isSystem()" never applies on the name/description/
