@@ -3,6 +3,7 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
 
 import { AuthImagePipe } from '../../../core/pipes/auth-image.pipe';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
+import { setGalleryDragData } from '../helpers/gallery-dnd.helpers';
 import { GalleryTileVm } from '../helpers/gallery-vm.helpers';
 
 @Component({
@@ -22,8 +23,18 @@ export class GalleryTileComponent {
   /** Show the folder the image is in (flat and search views, where folders are mixed together). */
   readonly showFolder = input(false);
 
+  /** An image started to be dragged (to a folder tile or breadcrumb step). */
+  readonly dragImage = output<string>();
+  readonly dragEnd = output<void>();
   readonly toggleSelect = output<string>();
   readonly open = output<string>();
   readonly delete = output<string>();
   readonly assign = output<string>();
+
+  onDragStart(event: DragEvent): void {
+    // What is moved is decided by the gallery view (a selected image takes the whole selection);
+    // the data set here is only what browsers need to start a drag.
+    setGalleryDragData(event, { kind: 'images', ids: [this.tile().id] });
+    this.dragImage.emit(this.tile().id);
+  }
 }

@@ -6,7 +6,17 @@
           @if (crumb.current) {
             <span class="folder-tools__crumb folder-tools__crumb--current" aria-current="page">{{ crumb.label }}</span>
           } @else {
-            <button type="button" class="folder-tools__crumb" (click)="view.openFolder(crumb.path)">{{ crumb.label }}</button>
+            <button
+              type="button"
+              class="folder-tools__crumb"
+              [class.folder-tools__crumb--drop]="dropHover() === crumb.path"
+              (click)="view.openFolder(crumb.path)"
+              (dragover)="onCrumbDragOver($event, crumb.path)"
+              (dragleave)="onCrumbDragLeave(crumb.path)"
+              (drop)="onCrumbDrop($event, crumb.path)"
+            >
+              {{ crumb.label }}
+            </button>
             <span class="folder-tools__sep" aria-hidden="true">›</span>
           }
         }
@@ -70,7 +80,10 @@
 
   @if (view.selectionMode()) {
     <div class="folder-tools__selection" role="region" aria-label="Selected images">
-      <span class="folder-tools__count" role="status"> {{ view.selectedCount() }} selected </span>
+      <span class="folder-tools__count" role="status">
+        {{ view.selectedCount() }} selected
+        <span class="folder-tools__mode-hint">· Select mode: click an image to pick it</span>
+      </span>
       <button type="button" class="folder-tools__button" (click)="view.selectAllShown()">Select all shown</button>
       <button
         type="button"
@@ -85,7 +98,7 @@
   }
 
   @if (view.folderError(); as message) {
-    @if (!movingImages() && view.folderEditing() === null) {
+    @if (!moveOpen() && view.folderEditing() === null) {
       <p class="folder-tools__error" role="alert">{{ message }}</p>
     }
   }
@@ -93,8 +106,8 @@
 
 <app-gallery-move-modal
   mode="images"
-  [open]="movingImages()"
-  [imageCount]="view.selectedCount()"
+  [open]="moveOpen()"
+  [imageCount]="moveIds().length"
   [folders]="destinations()"
   [currentFolder]="view.browsingFolders() ? view.currentFolder() : ''"
   [submitting]="submitting()"

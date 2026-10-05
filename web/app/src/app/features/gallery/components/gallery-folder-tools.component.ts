@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { FormsModule } from '@angular/forms';
 
 import { GalleryViewService } from '../../../core/services/gallery-view.service';
+import { isGalleryDrag } from '../helpers/gallery-dnd.helpers';
 import { moveDestinations } from '../helpers/gallery-folder.helpers';
 import { GalleryMoveModalComponent } from './gallery-move-modal.component';
 
@@ -26,7 +27,12 @@ export class GalleryFolderToolsComponent {
   readonly createError = signal<string | null>(null);
   readonly movingImages = signal(false);
   readonly submitting = signal(false);
+  /** The breadcrumb step something is being dragged over, to highlight it. */
+  readonly dropHover = signal<string | null>(null);
 
+  /** The images the move dialog is for: the one asked for from the popup, else the selection. */
+  readonly moveIds = computed<readonly string[]>(() => this.view.moveRequest() ?? [...this.view.selectedIds()]);
+  readonly moveOpen = computed(() => this.movingImages() || this.view.moveRequest() !== null);
   readonly destinations = computed(() => moveDestinations(this.view.folders(), this.view.pendingFolders()));
   /** The last crumb is where you are, so it is not a link. */
   readonly crumbs = computed(() => {
@@ -66,15 +72,15 @@ export class GalleryFolderToolsComponent {
 
   closeMoveImages(): void {
     this.movingImages.set(false);
-    this.view.folderError.set(null);
+    this.view.clearMoveRequest();
   }
 
   async submitMoveImages(path: string): Promise<void> {
     this.submitting.set(true);
-    const moved = await this.view.moveImages([...this.view.selectedIds()], path);
+    const moved = await this.view.moveImages(this.moveIds(), path);
     this.submitting.set(false);
     if (moved) {
-      this.movingImages.set(false);
+      this.closeMoveImages();
     }
   }
 
@@ -89,5 +95,36 @@ export class GalleryFolderToolsComponent {
     if (moved) {
       this.view.stopEditingFolder();
     }
+  }
+
+  /** Whether a breadcrumb step takes what is being dragged: any step except the folder you are in. */
+  acceptsDropOnCrumb(path: string): boolean {
+    return path !== this.view.currentFolder() && this.view.acceptsDrop(path);
+  }
+
+  onCrumbDragOver(event: DragEvent, path: string): void {
+    if (!isGalleryDrag(event) || !this.acceptsDropOnCrumb(path)) {
+      return;
+    }
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    this.dropHover.set(path);
+  }
+
+  onCrumbDragLeave(path: string): void {
+    if (this.dropHover() === path) {
+      this.dropHover.set(null);
+    }
+  }
+
+  onCrumbDrop(event: DragEvent, path: string): void {
+    this.dropHover.set(null);
+    if (!this.acceptsDropOnCrumb(path)) {
+      return;
+    }
+    event.preventDefault();
+    void this.view.dropOn(path);
   }
 }

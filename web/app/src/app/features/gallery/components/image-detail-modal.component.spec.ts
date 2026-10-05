@@ -54,6 +54,41 @@ describe('ImageDetailModalComponent', () => {
         fixture.detectChanges();
     });
 
+    describe('folder', () => {
+        const folderRow = () => document.querySelector('.image-detail-modal__folder') as HTMLElement;
+
+        it('says where the image is, and calls the top level the top level', () => {
+            expect(component.folderName()).toBe('Top level');
+            expect(folderRow().textContent).toContain('Top level');
+
+            fixture.componentRef.setInput('image', { ...sampleTile, folder: 'charts/oura' });
+            fixture.detectChanges();
+
+            expect(component.folderName()).toBe('charts / oura');
+            expect(folderRow().textContent).toContain('charts / oura');
+        });
+
+        it('offers Move to… as a link that asks to move this image', () => {
+            const spy = vi.spyOn(component.moveToFolder, 'emit').mockReturnValue(undefined);
+            const link = folderRow().querySelector('.image-detail-modal__folder-move') as HTMLButtonElement;
+
+            expect(link.textContent?.trim()).toBe('Move to…');
+            link.click();
+
+            expect(spy).toHaveBeenCalledWith('img-1');
+        });
+
+        it('does nothing when there is no image', () => {
+            const spy = vi.spyOn(component.moveToFolder, 'emit').mockReturnValue(undefined);
+            fixture.componentRef.setInput('image', null);
+            fixture.detectChanges();
+
+            component.requestMove();
+
+            expect(spy).not.toHaveBeenCalled();
+        });
+    });
+
     it('emits next when right arrow is pressed while open', () => {
         const spy = vi.spyOn(component.next, 'emit').mockReturnValue(undefined);
 

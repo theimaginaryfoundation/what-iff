@@ -71,3 +71,9 @@
 .folder:focus-within .folder__menu {
   opacity: 1;
 }
+
+.folder--drop .folder__open {
+  background: color-mix(in srgb, var(--color-accent) 22%, var(--color-surface-base));
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+  color: var(--color-accent);
+}

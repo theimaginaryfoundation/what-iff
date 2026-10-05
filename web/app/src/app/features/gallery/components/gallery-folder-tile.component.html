@@ -1,4 +1,14 @@
-<article class="folder" role="listitem">
+<article
+  class="folder"
+  role="listitem"
+  draggable="true"
+  [class.folder--drop]="dropHover()"
+  (dragstart)="onDragStart($event)"
+  (dragend)="dragEnd.emit()"
+  (dragover)="onDragOver($event)"
+  (dragleave)="onDragLeave($event)"
+  (drop)="onDrop($event)"
+>
   <button
     type="button"
     class="folder__menu"

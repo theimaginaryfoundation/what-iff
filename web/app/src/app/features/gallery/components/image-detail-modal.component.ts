@@ -26,6 +26,7 @@ import {
   galleryDisplayBaseName,
   galleryFilenameFromBaseName,
 } from '../helpers/gallery-filename.helpers';
+import { folderLabel } from '../helpers/gallery-folder.helpers';
 import { GalleryTileVm } from '../helpers/gallery-vm.helpers';
 
 @Component({
@@ -56,6 +57,8 @@ export class ImageDetailModalComponent {
   readonly rename = output<{ id: string; name: string }>();
   readonly addToThread = output<{ imageId: string; chatId: string }>();
   readonly startNewChat = output<string>();
+  /** Asks to file this image in a folder; the page closes the popup and opens the move dialog. */
+  readonly moveToFolder = output<string>();
 
   readonly isRenaming = signal(false);
   readonly renameDraft = signal('');
@@ -63,6 +66,11 @@ export class ImageDetailModalComponent {
   readonly recentThreads = signal<Chat[]>([]);
   readonly threadsLoading = signal(false);
   readonly threadsLoadError = signal(false);
+
+  readonly folderName = computed(() => {
+    const folder = this.image()?.folder ?? '';
+    return folder === '' ? 'Top level' : folderLabel(folder);
+  });
 
   readonly displayTitle = computed(() => {
     const image = this.image();
@@ -218,5 +226,12 @@ export class ImageDetailModalComponent {
     this.recentThreads.set([]);
     this.threadsLoading.set(false);
     this.threadsLoadError.set(false);
+  }
+
+  requestMove(): void {
+    const image = this.image();
+    if (image) {
+      this.moveToFolder.emit(image.id);
+    }
   }
 }

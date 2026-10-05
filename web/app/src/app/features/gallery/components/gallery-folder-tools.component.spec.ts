@@ -183,6 +183,116 @@ describe('GalleryFolderToolsComponent', () => {
     });
   });
 
+  describe('dropping on the path', () => {
+    /** A drag event carrying just what the gallery reads. */
+    const dragEvent = (type: string): Event => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'dataTransfer', { value: { types: ['application/x-whatiff-gallery'], dropEffect: '' } });
+      return event;
+    };
+    const crumb = (label: string) =>
+      Array.from(el().querySelectorAll('.folder-tools__crumb')).find(c => c.textContent?.trim() === label) as HTMLElement;
+
+    beforeEach(() => {
+      view.openFolder('charts/oura');
+      fixture.detectChanges();
+    });
+
+    it('takes images dropped on an earlier step of the path, and highlights it while over', () => {
+      view.beginImageDrag('a');
+      const over = dragEvent('dragover');
+
+      crumb('charts').dispatchEvent(over);
+      fixture.detectChanges();
+
+      expect(over.defaultPrevented).toBe(true);
+      expect(crumb('charts').classList).toContain('folder-tools__crumb--drop');
+
+      crumb('charts').dispatchEvent(dragEvent('dragleave'));
+      fixture.detectChanges();
+      expect(crumb('charts').classList).not.toContain('folder-tools__crumb--drop');
+    });
+
+    it('moves the dragged images to that step when they are dropped', async () => {
+      view.beginImageDrag('a');
+
+      crumb('Gallery').dispatchEvent(dragEvent('drop'));
+      await flush(fixture);
+
+      expect(api.moveImages).toHaveBeenCalledWith(['a'], '');
+    });
+
+    it('moves a dragged folder up to a step, keeping its name', async () => {
+      view.beginFolderDrag('charts/oura/hrv');
+
+      crumb('charts').dispatchEvent(dragEvent('drop'));
+      await flush(fixture);
+
+      expect(api.moveFolder).toHaveBeenCalledWith('charts/oura/hrv', 'charts/hrv');
+    });
+
+    it('does not take a drop on the folder you are already in, which is not a step you can drop on', () => {
+      view.beginImageDrag('a');
+      const over = dragEvent('dragover');
+
+      expect(component.acceptsDropOnCrumb('charts/oura')).toBe(false);
+      el().querySelector('.folder-tools__crumb--current')?.dispatchEvent(over);
+
+      expect(over.defaultPrevented).toBe(false);
+    });
+
+    it('ignores a drop when nothing from the gallery is being dragged', async () => {
+      crumb('charts').dispatchEvent(dragEvent('dragover'));
+      crumb('charts').dispatchEvent(dragEvent('drop'));
+      await flush(fixture);
+
+      expect(api.moveImages).not.toHaveBeenCalled();
+      expect(api.moveFolder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('moving one image from its popup', () => {
+    it('opens the move dialog for just that image, without any selection', () => {
+      view.requestMove(['b']);
+      fixture.detectChanges();
+
+      expect(component.moveOpen()).toBe(true);
+      expect(component.moveIds()).toEqual(['b']);
+      expect(view.selectedCount()).toBe(0);
+    });
+
+    it('moves that image and closes the dialog', async () => {
+      view.requestMove(['b']);
+
+      await component.submitMoveImages('charts/oura');
+      await flush(fixture);
+
+      expect(api.moveImages).toHaveBeenCalledWith(['b'], 'charts/oura');
+      expect(view.moveRequest()).toBeNull();
+      expect(component.moveOpen()).toBe(false);
+    });
+
+    it('closes without moving when cancelled, and goes back to using the selection', () => {
+      view.requestMove(['b']);
+      component.closeMoveImages();
+      expect(view.moveRequest()).toBeNull();
+
+      view.setSelectionMode(true);
+      view.toggleSelected('a');
+      expect(component.moveIds()).toEqual(['a']);
+    });
+
+    it('keeps the dialog open when the move fails', async () => {
+      api.moveImages.mockReturnValue(throwError(() => ({ error: { error: 'nope' } })));
+      view.requestMove(['b']);
+
+      await component.submitMoveImages('x');
+
+      expect(component.moveOpen()).toBe(true);
+      expect(view.folderError()).toBe('nope');
+    });
+  });
+
   describe('renaming or moving a folder', () => {
     it('moves it and closes the dialog', async () => {
       view.startEditingFolder('charts');

@@ -23,8 +23,12 @@
     @for (folder of folderTiles(); track folder.path) {
       <app-gallery-folder-tile
         [folder]="folder"
+        [acceptsDrop]="acceptsDrop(folder.path)"
         (open)="openFolder.emit($event)"
-        (edit)="editFolder.emit($event)" />
+        (edit)="editFolder.emit($event)"
+        (dropped)="dropOnFolder.emit($event)"
+        (dragFolder)="dragFolder.emit($event)"
+        (dragEnd)="dragEnd.emit()" />
     }
     @for (tile of tiles(); track tile.id) {
       <app-gallery-tile
@@ -34,6 +38,8 @@
         [selected]="selectedIds().has(tile.id)"
         [showFolder]="showFolders()"
         (toggleSelect)="toggleSelect.emit($event)"
+        (dragImage)="dragImage.emit($event)"
+        (dragEnd)="dragEnd.emit()"
         (open)="openImage.emit($event)"
         (delete)="deleteImage.emit($event)"
         (assign)="assignImage.emit($event)" />

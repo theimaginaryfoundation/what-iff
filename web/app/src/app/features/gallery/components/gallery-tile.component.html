@@ -1,4 +1,10 @@
-<article class="tile group" role="listitem" [class.tile--selected]="selected()">
+<article
+  class="tile group"
+  role="listitem"
+  draggable="true"
+  [class.tile--selected]="selected()"
+  (dragstart)="onDragStart($event)"
+  (dragend)="dragEnd.emit()">
   @if (selectable()) {
     <button
       type="button"
@@ -30,7 +36,7 @@
       [truncationTarget]="overlayTitle"
       placement="bottom"
       (click)="selectable() ? toggleSelect.emit(tile().id) : open.emit(tile().id)">
-      <img [src]="src" [alt]="tile().name" class="tile__image" loading="lazy" />
+      <img [src]="src" [alt]="tile().name" class="tile__image" loading="lazy" draggable="false" />
     </button>
   } @else {
     <button

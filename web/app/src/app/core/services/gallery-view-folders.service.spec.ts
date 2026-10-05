@@ -198,6 +198,93 @@ describe('GalleryViewService folders', () => {
     });
   });
 
+  describe('asking to move images from outside select mode', () => {
+    it('remembers the request until it is cleared, and an empty request is no request', () => {
+      service.requestMove(['a', 'b']);
+      expect(service.moveRequest()).toEqual(['a', 'b']);
+
+      service.clearMoveRequest();
+      expect(service.moveRequest()).toBeNull();
+
+      service.requestMove([]);
+      expect(service.moveRequest()).toBeNull();
+    });
+
+    it('clears a stale error when a new request is made', () => {
+      service.folderError.set('old');
+      service.requestMove(['a']);
+      expect(service.folderError()).toBeNull();
+    });
+  });
+
+  describe('drag and drop', () => {
+    beforeEach(() => service.loadInitial());
+
+    it('drags one image, or the whole selection when the dragged image is part of it', () => {
+      service.beginImageDrag('a');
+      expect(service.drag()).toEqual({ kind: 'images', ids: ['a'] });
+
+      service.setSelectionMode(true);
+      service.toggleSelected('a');
+      service.toggleSelected('b');
+      service.beginImageDrag('a');
+      expect(service.drag()).toEqual({ kind: 'images', ids: ['a', 'b'] });
+
+      service.toggleSelected('a');
+      service.beginImageDrag('a'); // no longer selected: just this one
+      expect(service.drag()).toEqual({ kind: 'images', ids: ['a'] });
+    });
+
+    it('moves the dragged images into the folder dropped on, and the drag is over', async () => {
+      service.beginImageDrag('a');
+
+      expect(service.acceptsDrop('charts')).toBe(true);
+      const ok = await service.dropOn('charts');
+
+      expect(ok).toBe(true);
+      expect(api.moveImages).toHaveBeenCalledWith(['a'], 'charts');
+      expect(service.drag()).toBeNull();
+      expect(service.acceptsDrop('charts')).toBe(false);
+    });
+
+    it('can drop images on the top level', async () => {
+      service.beginImageDrag('a');
+      await service.dropOn('');
+      expect(api.moveImages).toHaveBeenCalledWith(['a'], '');
+    });
+
+    it('moves a dragged folder into another, keeping its name', async () => {
+      service.beginFolderDrag('charts/oura');
+
+      expect(service.acceptsDrop('art')).toBe(true);
+      await service.dropOn('art');
+
+      expect(api.moveFolder).toHaveBeenCalledWith('charts/oura', 'art/oura');
+    });
+
+    it('refuses to drop a folder on itself or inside itself, and does not call the API', async () => {
+      service.beginFolderDrag('charts');
+      expect(service.acceptsDrop('charts')).toBe(false);
+      expect(service.acceptsDrop('charts/oura')).toBe(false);
+
+      expect(await service.dropOn('charts/oura')).toBe(false);
+      expect(api.moveFolder).not.toHaveBeenCalled();
+      expect(service.drag()).toBeNull();
+    });
+
+    it('does nothing for a drop when nothing is being dragged', async () => {
+      expect(await service.dropOn('charts')).toBe(false);
+      expect(api.moveImages).not.toHaveBeenCalled();
+      expect(api.moveFolder).not.toHaveBeenCalled();
+    });
+
+    it('ends the drag when it is cancelled', () => {
+      service.beginImageDrag('a');
+      service.endDrag();
+      expect(service.drag()).toBeNull();
+    });
+  });
+
   describe('selection', () => {
     it('toggles ids, selects everything shown, and clears with the mode', () => {
       service.loadInitial();

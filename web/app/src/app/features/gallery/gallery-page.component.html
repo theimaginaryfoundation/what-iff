@@ -103,6 +103,11 @@
       [selectedIds]="view.selectedIds()"
       [showFolders]="!view.browsingFolders()"
       [emptyMessage]="emptyMessage()"
+      [drag]="view.drag()"
+      (dragImage)="view.beginImageDrag($event)"
+      (dragFolder)="view.beginFolderDrag($event)"
+      (dragEnd)="view.endDrag()"
+      (dropOnFolder)="onDropOnFolder($event)"
       (openFolder)="view.openFolder($event)"
       (editFolder)="view.startEditingFolder($event)"
       (toggleSelect)="view.toggleSelected($event)"
@@ -157,6 +162,7 @@
   (delete)="onDelete($event)"
   (assign)="onRequestAssign($event)"
   (rename)="onRename($event)"
+  (moveToFolder)="onMoveToFolder($event)"
   (addToThread)="onAddToThread($event)"
   (startNewChat)="onStartNewChat($event)" />
 

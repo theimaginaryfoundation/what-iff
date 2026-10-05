@@ -1,12 +1,14 @@
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, OnInit, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
+import { EMPTY, catchError } from 'rxjs';
 
 import { ChatService } from '../../core/services/chat.service';
 import { FileAttachmentService } from '../../core/services/file-attachment.service';
 import { GalleryViewService } from '../../core/services/gallery-view.service';
 import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { PersonalityService } from '../../core/services/personality.service';
+import { PersonalityMediaJobService } from '../../core/services/personality-media-job.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { Personality, PersonalityExpression, buildPersonalityUpdateRequest } from '../../core/models/personality.model';
 import { environment } from '../../../environments/environment';
@@ -21,6 +23,7 @@ import { GalleryGridComponent } from './components/gallery-grid.component';
 import { ImageDetailModalComponent } from './components/image-detail-modal.component';
 import { PersonalityExpressionsManagerComponent } from '../personality/detail/personality-expressions-manager.component';
 import { PersonalityMediaJobBannerComponent } from '../personality/components/personality-media-job-banner.component';
+import { mediaJobFinished$ } from './helpers/gallery-job-refresh.helpers';
 import { sourceForImage } from './helpers/image-source.helpers';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
@@ -55,6 +58,7 @@ export class GalleryPageComponent implements OnInit {
   private readonly personalityService = inject(PersonalityService);
   private readonly fileAttachmentService = inject(FileAttachmentService);
   private readonly confirmationService = inject(ConfirmationService);
+  private readonly mediaJobs = inject(PersonalityMediaJobService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
@@ -164,6 +168,7 @@ export class GalleryPageComponent implements OnInit {
     this.view.loadInitial();
     this.view.loadFolders();
     this.loadPersonalities();
+    this.refreshWhenImageJobsFinish();
     this.route.queryParamMap
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(params => {
@@ -189,7 +194,14 @@ export class GalleryPageComponent implements OnInit {
   }
 
   setMode(mode: GalleryMode): void {
+    const returningToGallery = mode === 'gallery' && this.mode() === 'expressions';
     this.mode.set(mode);
+    if (returningToGallery) {
+      // Expressions generated or assigned in the manager are new images (and folders) the list loaded
+      // earlier does not have.
+      this.view.refresh();
+      this.view.loadFolders();
+    }
     this.view.setMode(mode);
     if (mode === 'expressions') {
       this.view.disableGlobalAssociations();
@@ -298,6 +310,17 @@ export class GalleryPageComponent implements OnInit {
         });
       },
     });
+  }
+
+  /** Something dragged was dropped on a folder tile; a refusal shows in the folder error banner. */
+  onDropOnFolder(folderPath: string): void {
+    void this.view.dropOn(folderPath);
+  }
+
+  /** From the image popup: close it and open the same move dialog select mode uses. */
+  onMoveToFolder(imageId: string): void {
+    this.onCloseDetail();
+    this.view.requestMove([imageId]);
   }
 
   onAddToThread(payload: { imageId: string; chatId: string }): void {
@@ -417,6 +440,26 @@ export class GalleryPageComponent implements OnInit {
   onAssigned(): void {
     this.assignOpen.set(false);
     this.assignImageId.set(null);
+  }
+
+  /**
+   * Images made by a background job (expression grids, portraits) appear when it finishes, even if
+   * the job was started on another page and is still running when the gallery opens.
+   */
+  private refreshWhenImageJobsFinish(): void {
+    this.mediaJobs
+      .refreshActiveJob()
+      .pipe(
+        catchError(() => EMPTY),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe();
+    mediaJobFinished$(this.mediaJobs)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.view.refresh();
+        this.view.loadFolders();
+      });
   }
 
   private loadPersonalities(): void {

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 
+import { canDropOn, GalleryDrag } from '../helpers/gallery-dnd.helpers';
 import { FolderTileVm } from '../helpers/gallery-folder.helpers';
 import { GalleryTileVm } from '../helpers/gallery-vm.helpers';
 import { GalleryFolderTileComponent } from './gallery-folder-tile.component';
@@ -29,6 +30,13 @@ export class GalleryGridComponent {
   /** What to say when there is nothing to show. */
   readonly emptyMessage = input('No images match these filters yet.');
 
+  /** What is being dragged, so folder tiles know whether they accept it. */
+  readonly drag = input<GalleryDrag | null>(null);
+
+  readonly dragImage = output<string>();
+  readonly dragFolder = output<string>();
+  readonly dragEnd = output<void>();
+  readonly dropOnFolder = output<string>();
   readonly openFolder = output<string>();
   readonly editFolder = output<string>();
   readonly toggleSelect = output<string>();
@@ -37,4 +45,8 @@ export class GalleryGridComponent {
   readonly assignImage = output<string>();
   readonly retry = output<void>();
   readonly loadMore = output<void>();
+
+  acceptsDrop(folderPath: string): boolean {
+    return canDropOn(this.drag(), folderPath);
+  }
 }

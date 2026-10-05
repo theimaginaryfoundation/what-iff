@@ -19,6 +19,7 @@ import {
   normalizeFolderPath,
   folderPathError,
 } from '../../features/gallery/helpers/gallery-folder.helpers';
+import { canDropOn, folderPathAfterDrop, GalleryDrag } from '../../features/gallery/helpers/gallery-dnd.helpers';
 
 export type GalleryAssociationFilterMode = 'all' | 'global' | 'personality';
 export type GalleryMode = 'gallery' | 'expressions';
@@ -55,6 +56,10 @@ export class GalleryViewService {
   readonly folderError = signal<string | null>(null);
   /** The folder whose rename / move dialog is open, if any. */
   readonly folderEditing = signal<string | null>(null);
+  /** What is being dragged right now (images or a folder), so drop targets can tell if they accept it. */
+  readonly drag = signal<GalleryDrag | null>(null);
+  /** Images a "Move to…" was asked for outside select mode (from the image popup), if any. */
+  readonly moveRequest = signal<readonly string[] | null>(null);
 
   /**
    * The single in-flight list request (first page or load-more). A reload cancels
@@ -282,6 +287,17 @@ export class GalleryViewService {
     this.loadInitial();
   }
 
+  /** Asks for the move dialog for these images, without needing them to be selected. */
+  requestMove(ids: readonly string[]): void {
+    this.folderError.set(null);
+    this.moveRequest.set(ids.length > 0 ? [...ids] : null);
+  }
+
+  clearMoveRequest(): void {
+    this.moveRequest.set(null);
+    this.folderError.set(null);
+  }
+
   startEditingFolder(path: string): void {
     this.folderError.set(null);
     this.folderEditing.set(path);
@@ -376,6 +392,41 @@ export class GalleryViewService {
     this.loadFolders();
     this.loadInitial();
     return true;
+  }
+
+  // --- drag and drop --------------------------------------------------------------------------
+
+  /**
+   * Starts dragging an image. Dragging one that is part of the selection takes the whole selection
+   * with it; dragging any other takes just that image.
+   */
+  beginImageDrag(imageId: string): void {
+    const selected = this.selectedIds();
+    this.drag.set({ kind: 'images', ids: selected.has(imageId) ? [...selected] : [imageId] });
+  }
+
+  beginFolderDrag(path: string): void {
+    this.drag.set({ kind: 'folder', path });
+  }
+
+  endDrag(): void {
+    this.drag.set(null);
+  }
+
+  acceptsDrop(target: string): boolean {
+    return canDropOn(this.drag(), target);
+  }
+
+  /** Drops what is being dragged on a folder ("" is the top level). Resolves true when it moved. */
+  async dropOn(target: string): Promise<boolean> {
+    const drag = this.drag();
+    this.endDrag();
+    if (!canDropOn(drag, target)) {
+      return false;
+    }
+    return drag?.kind === 'folder'
+      ? this.moveFolder(drag.path, folderPathAfterDrop(drag.path, target))
+      : this.moveImages(drag?.kind === 'images' ? drag.ids : [], target);
   }
 
   // --- selection ------------------------------------------------------------------------------
