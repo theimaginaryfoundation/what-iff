@@ -15,10 +15,10 @@ func TestClaimChatRehydration_ClaimsOnlyAQualifyingThread(t *testing.T) {
 
 	// The conditions live in the UPDATE itself, so the claim is atomic: unarchived, imported, no
 	// summary yet, and not pending/processing/ready.
-	mock.ExpectExec("UPDATE .chats. SET .updated_at. = \\?, .rehydration_state. = \\? WHERE " +
-		".*NOT .chats.\\..archived..*" +
-		".chats.\\..source. IS NOT NULL.*.chats.\\..source. <> \\?.*" +
-		".chats.\\..checkpoint_summary. IS NULL OR .chats.\\..checkpoint_summary. = \\?.*" +
+	mock.ExpectExec("UPDATE .chats. SET .updated_at. = \\?, .rehydration_state. = \\? WHERE "+
+		".*NOT .chats.\\..archived..*"+
+		".chats.\\..source. IS NOT NULL.*.chats.\\..source. <> \\?.*"+
+		".chats.\\..checkpoint_summary. IS NULL OR .chats.\\..checkpoint_summary. = \\?.*"+
 		".chats.\\..rehydration_state. IS NULL OR .chats.\\..rehydration_state. IN \\(\\?, \\?\\)").
 		WithArgs(sqlmock.AnyArg(), "pending", sqlmock.AnyArg(), sqlmock.AnyArg(), "", "", "", "failed").
 		WillReturnResult(sqlmock.NewResult(0, 1))
