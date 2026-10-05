@@ -83,18 +83,58 @@ func (d *Datastore) SetChatRehydrationState(ctx context.Context, userID, chatID 
 	return nil
 }
 
+// ChatRehydrationInfo is what the turn gate reads about a chat in one query.
+type ChatRehydrationInfo struct {
+	// State is the rehydration lifecycle state ("" / pending / processing / ready / failed).
+	State string
+	// Imported is true for a chat created by a conversation import (source set).
+	Imported bool
+	// Summarized is true once the chat has a checkpoint summary.
+	Summarized bool
+}
+
+// NeedsRehydration reports whether the chat is an imported one that still lacks its one-time
+// summary and is not already being summarized or done ("failed" qualifies, so it is retried).
+func (i ChatRehydrationInfo) NeedsRehydration() bool {
+	if !i.Imported || i.Summarized {
+		return false
+	}
+	return i.State == models.RehydrationStateNone || i.State == models.RehydrationStateFailed
+}
+
+// GetChatRehydrationInfo returns the rehydration state of a chat with whether it was imported and
+// already has a summary (cheap; no edges). Returns ErrChatNotFound when the chat does not exist or
+// is not owned by the user.
+func (d *Datastore) GetChatRehydrationInfo(ctx context.Context, userID, chatID uuid.UUID) (ChatRehydrationInfo, error) {
+	row, err := d.dbClient.Chat.Query().
+		Where(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))).
+		Select(entchat.FieldRehydrationState, entchat.FieldSource, entchat.FieldCheckpointSummary).
+		Only(ctx)
+	if ent.IsNotFound(err) {
+		return ChatRehydrationInfo{}, ErrChatNotFound
+	}
+	if err != nil {
+		return ChatRehydrationInfo{}, err
+	}
+	return ChatRehydrationInfo{
+		State:      row.RehydrationState,
+		Imported:   row.Source != "",
+		Summarized: row.CheckpointSummary != "",
+	}, nil
+}
+
 // ClaimChatRehydration atomically moves an imported thread that still needs its one-time summary
-// to "pending" and reports whether this caller won the claim. A thread qualifies when it is
-// unarchived, was imported (source set), has no checkpoint summary and is not already pending,
-// processing or ready ("failed" qualifies, so a later open retries). The conditional update
-// makes concurrent opens (two tabs, a refetch on focus) start the summary job exactly once.
+// to "pending" and reports whether this caller won the claim. A thread qualifies when it was
+// imported (source set), has no checkpoint summary and is not already pending, processing or ready
+// ("failed" qualifies, so a later attempt retries); unless includeArchived is set it must also be
+// unarchived. The conditional update makes concurrent attempts (two tabs, a refetch on focus, a
+// turn racing an open) start the summary job exactly once.
 // Ownership is enforced in the WHERE clause; a chat that does not qualify is not an error.
-func (d *Datastore) ClaimChatRehydration(ctx context.Context, userID, chatID uuid.UUID) (bool, error) {
-	claimed, err := d.dbClient.Chat.Update().
+func (d *Datastore) ClaimChatRehydration(ctx context.Context, userID, chatID uuid.UUID, includeArchived bool) (bool, error) {
+	update := d.dbClient.Chat.Update().
 		Where(
 			entchat.ID(chatID),
 			entchat.HasOwnerWith(user.ID(userID)),
-			entchat.Archived(false),
 			entchat.SourceNotNil(),
 			entchat.SourceNEQ(""),
 			entchat.Or(entchat.CheckpointSummaryIsNil(), entchat.CheckpointSummary("")),
@@ -102,9 +142,11 @@ func (d *Datastore) ClaimChatRehydration(ctx context.Context, userID, chatID uui
 				entchat.RehydrationStateIsNil(),
 				entchat.RehydrationStateIn(models.RehydrationStateNone, models.RehydrationStateFailed),
 			),
-		).
-		SetRehydrationState(models.RehydrationStatePending).
-		Save(ctx)
+		)
+	if !includeArchived {
+		update = update.Where(entchat.Archived(false))
+	}
+	claimed, err := update.SetRehydrationState(models.RehydrationStatePending).Save(ctx)
 	if err != nil {
 		d.logger.Error("failed to claim chat rehydration", zap.String("chat_id", chatID.String()), zap.Error(err))
 		return false, err

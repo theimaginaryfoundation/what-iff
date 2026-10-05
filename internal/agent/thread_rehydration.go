@@ -22,7 +22,7 @@ import (
 
 const (
 	// JobTypeThreadRehydration is the Job.job_type for lazy summarization of an imported thread
-	// triggered when the user first opens it after it was restored from the archive.
+	// triggered when the user first opens or prepares it, or a turn arrives, after it was restored from the archive.
 	JobTypeThreadRehydration = "thread_rehydration"
 
 	// rehydrationKeepTurns is how many trailing user turns stay live (loaded verbatim) after
@@ -59,11 +59,26 @@ const (
 // (native threads, already-ready imports). This is the "stall the inference job" gate: it lets a user
 // send a message immediately after restoring a thread while the summary finishes, instead of blocking
 // the UI. On timeout it returns and the caller proceeds with whatever context exists (degraded).
+//
+// It also starts the summary for an imported thread that has none yet, so a turn that arrives without
+// the thread ever being opened (webhook, API, scheduled job, a thread that was unarchived in bulk)
+// still runs on the summary + recent window rather than the full history. A turn into an archived
+// thread counts as intent too.
 func (a *Agent) WaitForThreadRehydration(ctx context.Context, userID, chatID uuid.UUID) {
-	state, err := a.ds.GetChatRehydrationState(ctx, userID, chatID)
+	info, err := a.ds.GetChatRehydrationInfo(ctx, userID, chatID)
 	if err != nil {
 		a.logger.Warn("rehydration gate: failed to read state", zap.String("chat_id", chatID.String()), zap.Error(err))
 		return
+	}
+	state := info.State
+	if info.NeedsRehydration() {
+		if a.EnqueueThreadRehydration(ctx, userID, chatID, true) {
+			state = models.RehydrationStatePending
+		} else if state, err = a.ds.GetChatRehydrationState(ctx, userID, chatID); err != nil {
+			// Another caller may have claimed it first, so the state has moved on.
+			a.logger.Warn("rehydration gate: failed to re-read state", zap.String("chat_id", chatID.String()), zap.Error(err))
+			return
+		}
 	}
 	if !isRehydrationInFlight(state) {
 		return
@@ -110,20 +125,18 @@ func isRehydrationInFlight(state string) bool {
 }
 
 // EnqueueThreadRehydration claims an imported thread for its one-time summary (state pending) and
-// runs summarization in the background, reporting whether it started one. It is meant to run when
-// the user opens the thread, not when it is unarchived: bulk unarchiving a hundred threads must not
-// start a hundred summaries for threads that will mostly never be opened. The claim is atomic and
-// only succeeds for an unarchived imported thread without a summary that is not already in flight
-// or done, so repeated opens are no-ops. It is safe to call on the request goroutine: it detaches
-// the context so the work outlives the HTTP response.
-func (a *Agent) EnqueueThreadRehydration(ctx context.Context, userID, chatID uuid.UUID) bool {
-	detachedCtx, ok := middleware.CopyUserToIDContext(ctx, context.Background())
-	if !ok {
-		a.logger.Error("thread rehydration: missing user in context", zap.String("chat_id", chatID.String()))
-		return false
-	}
+// runs summarization in the background, reporting whether it started one. Callers run it on a signal
+// of intent to talk in the thread (opening it, preparing it, a turn arriving), not when it is
+// unarchived: bulk unarchiving a hundred threads must not start a hundred summaries for threads that
+// will mostly never be used. The claim is atomic and only succeeds for an imported thread without a
+// summary that is not already in flight or done, so repeats are no-ops. includeArchived lets a turn
+// into an archived thread start it; opening one never does. It is safe to call on the request
+// goroutine: it detaches the context so the work outlives the HTTP response.
+func (a *Agent) EnqueueThreadRehydration(ctx context.Context, userID, chatID uuid.UUID, includeArchived bool) bool {
+	// The caller's user is authoritative: a turn's context may not carry it.
+	detachedCtx, _ := middleware.CopyUserToIDContext(context.WithValue(ctx, middleware.UserIDKey, userID), context.Background())
 
-	claimed, err := a.ds.ClaimChatRehydration(detachedCtx, userID, chatID)
+	claimed, err := a.ds.ClaimChatRehydration(detachedCtx, userID, chatID, includeArchived)
 	if err != nil {
 		a.logger.Error("thread rehydration: failed to claim", zap.String("chat_id", chatID.String()), zap.Error(err))
 		return false

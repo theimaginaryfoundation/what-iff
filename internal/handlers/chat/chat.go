@@ -318,9 +318,7 @@ func (h *Handler) GetChat(w http.ResponseWriter, r *http.Request) {
 	// that the user means to talk in it, so summarize it now (and seed memories) rather than when it
 	// was unarchived, which would run for every thread of a bulk restore. The first turn waits for
 	// the summary (see WaitForThreadRehydration). Archived threads open read-only and never start it.
-	if h.agent != nil && needsRehydration(chat) && h.agent.EnqueueThreadRehydration(r.Context(), userID, chatID) {
-		chat.RehydrationState = models.RehydrationStatePending
-	}
+	h.startRehydrationIfNeeded(r.Context(), userID, chat)
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, chat)
 }
@@ -684,6 +682,46 @@ func (h *Handler) PatchChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, chat)
+}
+
+// startRehydrationIfNeeded starts the one-time summary for an unarchived imported thread that has
+// none, and reflects that on chat so the response shows it as pending.
+func (h *Handler) startRehydrationIfNeeded(ctx context.Context, userID uuid.UUID, chat *models.Chat) {
+	if h.agent != nil && needsRehydration(chat) && h.agent.EnqueueThreadRehydration(ctx, userID, chat.ID, false) {
+		chat.RehydrationState = models.RehydrationStatePending
+	}
+}
+
+// RehydrateChat starts the one-time summary (and memory seeding) for an imported thread right away,
+// for callers that already know the user wants it ready, like the post-import "prepare" picker.
+// It is a no-op for a thread that is archived, not imported, or already summarized or in flight.
+func (h *Handler) RehydrateChat(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		handlerutils.RespondWithError(w, h.logger, http.StatusUnauthorized, handlerutils.CodeNotSet, "Unauthorized", nil)
+		return
+	}
+	chatID, err := uuid.Parse(mux.Vars(r)["id"])
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid chat ID", err)
+		return
+	}
+
+	chat, err := h.ds.GetChat(r.Context(), userID, chatID)
+	if ent.IsNotFound(err) || err == datastore.ErrChatNotFound {
+		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Chat not found", err)
+		return
+	} else if err != nil {
+		h.logger.Error("failed to get chat for rehydration",
+			zap.String("user_id", userID.String()),
+			zap.String("chat_id", chatID.String()),
+			zap.Error(err))
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to get chat", err)
+		return
+	}
+
+	h.startRehydrationIfNeeded(r.Context(), userID, chat)
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, chat)
 }
 

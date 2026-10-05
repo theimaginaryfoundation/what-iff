@@ -28,6 +28,7 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
 - **Export (`export.go`):** the streamed ZIP's byte count is recorded on `whatiff.file.size` (operation `chat_export`); latency is left to the HTTP server metric.
 - **Lazy rehydration trigger (`GetChat`):** When an unarchived imported thread (`source` set, no checkpoint yet) is opened, the handler calls `agent.EnqueueThreadRehydration` to summarize it **and seed long-term memories** in the background (see `internal/agent`).
   Unarchiving alone does not start it, so a bulk restore costs nothing until a thread is opened; archived threads open read-only and never start it.
+  `POST /chat/{id}/rehydrate` (`RehydrateChat`) starts it explicitly for the post-import picker.
   The claim is atomic, so repeated opens start one job.
   The frontend's post-import picker reuses this path: selecting threads simply PATCHes `archived=false` on each, so no dedicated "prepare" endpoint exists.
 - **Resuming a running turn:** `GET /chat/{chatId}/active-job` (`GetActiveChatJob`) returns the newest non-terminal `chat_message` job for any user turn in the chat, plus the `message_id` it answers (204 when idle).

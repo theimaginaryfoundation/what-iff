@@ -3958,6 +3958,8 @@ paths:
         Returns a specific chat by its ID.
         Opening an imported thread that was restored from the archive for the first time also starts its
         one-time summary in the background (`rehydration_state` is then `pending`); archived threads never do.
+        A message sent into an imported thread that has no summary starts it too, whether or not the thread
+        was opened.
       tags: [Chat Management]
       parameters:
         - name: id
@@ -4335,6 +4337,51 @@ paths:
                   updated_count:
                     type: integer
                     description: Number of messages updated from unread to read
+        '400':
+          description: Invalid chat ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Chat not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chat/{id}/rehydrate:
+    post:
+      summary: Start an imported chat's one-time summary now
+      description: |
+        Starts the background summary (and long-term memory seeding) for an imported chat right away, for
+        callers that already know the user wants it ready, such as the post-import "prepare" picker.
+        Otherwise it starts when the chat is first opened after being restored from the archive, or when a
+        message is sent into it.
+        It does nothing for a chat that is archived, was not imported, or already has a summary or one in
+        progress. Returns the chat, with `rehydration_state` `pending` when this call started the summary.
+      tags: [Chat Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Chat ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Chat returned; the summary was started if it was needed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Chat'
         '400':
           description: Invalid chat ID
           content:

@@ -622,9 +622,9 @@ export class ChatImportModalComponent implements OnInit {
   }
 
   /**
-   * Unarchives each selected thread and then opens it: the backend starts the rehydration job
-   * (summary + window pointer + seeded memories) when an imported thread is first opened, not when it
-   * is unarchived, so these few picked threads are opened here to be prepared right away.
+   * Unarchives each selected thread and starts its rehydration job (summary + window pointer + seeded
+   * memories) right away: the user picked these few threads to prepare, which is the intent that
+   * unarchiving alone no longer implies (it starts when a thread is first opened or messaged).
    * Threads land in the active list, ready to resume.
    */
   prepareSelected(): void {
@@ -634,7 +634,7 @@ export class ChatImportModalComponent implements OnInit {
       return;
     }
     this.stage.set('preparing');
-    forkJoin(ids.map(id => this.chatService.patchChat(id, { archived: false }).pipe(switchMap(chat => this.chatService.getChat(chat.id)))))
+    forkJoin(ids.map(id => this.chatService.patchChat(id, { archived: false }).pipe(switchMap(chat => this.chatService.rehydrateChat(chat.id)))))
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {

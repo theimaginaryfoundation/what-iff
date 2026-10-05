@@ -66,6 +66,26 @@ describe('ChatService', () => {
         });
     });
 
+    it('starts an imported thread\'s summary with a POST to the rehydrate endpoint', () => {
+        let state: string | undefined;
+        service.rehydrateChat('chat-1').subscribe(chat => {
+            state = chat.rehydration_state;
+        });
+
+        const req = httpMock.expectOne(`${environment.apiUrl}/chat/chat-1/rehydrate`);
+        expect(req.request.method).toBe('POST');
+        req.flush({
+            id: 'chat-1',
+            user_id: 'user-1',
+            name: 'Imported',
+            rehydration_state: 'pending',
+            created_at: '2026-06-23T00:00:00Z',
+            updated_at: '2026-06-23T00:00:00Z',
+        });
+
+        expect(state).toBe('pending');
+    });
+
     describe('markAllChatsRead', () => {
         function seedActiveChatWithUnread(): void {
             service.createChat({ name: 'Unread chat' }).subscribe();

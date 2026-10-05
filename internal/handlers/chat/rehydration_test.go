@@ -1,9 +1,18 @@
 package chat
 
 import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/gorilla/mux"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"go.uber.org/zap"
 )
 
 func TestNeedsRehydration(t *testing.T) {
@@ -32,6 +41,67 @@ func TestNeedsRehydration(t *testing.T) {
 			t.Parallel()
 			if got := needsRehydration(&tc.chat); got != tc.want {
 				t.Fatalf("needsRehydration = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func rehydrateRequest(t *testing.T, store *fakeStore, userID uuid.UUID, id string, authed bool) *httptest.ResponseRecorder {
+	t.Helper()
+	h := NewHandler(store, zap.NewNop(), nil, HandlerConfig{})
+	router := mux.NewRouter()
+	h.RegisterRoutes(router)
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/"+id+"/rehydrate", nil)
+	if authed {
+		req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, userID))
+	}
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	return w
+}
+
+func TestRehydrateChat_ReturnsTheChat(t *testing.T) {
+	t.Parallel()
+	userID, chatID := uuid.New(), uuid.New()
+	store := &fakeStore{getChatFn: func(_ context.Context, uid, id uuid.UUID) (*models.Chat, error) {
+		if uid != userID || id != chatID {
+			t.Fatalf("unexpected lookup %s/%s", uid, id)
+		}
+		return &models.Chat{ID: id, Name: "Imported"}, nil
+	}}
+
+	// No agent is configured in this handler, so nothing starts; the chat comes back as it is.
+	if w := rehydrateRequest(t, store, userID, chatID.String(), true); w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestRehydrateChat_Errors(t *testing.T) {
+	t.Parallel()
+	userID := uuid.New()
+	notFound := &fakeStore{getChatFn: func(context.Context, uuid.UUID, uuid.UUID) (*models.Chat, error) {
+		return nil, datastore.ErrChatNotFound
+	}}
+	broken := &fakeStore{getChatFn: func(context.Context, uuid.UUID, uuid.UUID) (*models.Chat, error) {
+		return nil, errors.New("boom")
+	}}
+
+	for name, tc := range map[string]struct {
+		store  *fakeStore
+		id     string
+		authed bool
+		want   int
+	}{
+		"unauthorized":    {notFound, uuid.NewString(), false, http.StatusUnauthorized},
+		"invalid chat id": {notFound, "not-a-uuid", true, http.StatusBadRequest},
+		"chat not found":  {notFound, uuid.NewString(), true, http.StatusNotFound},
+		"store failure":   {broken, uuid.NewString(), true, http.StatusInternalServerError},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if w := rehydrateRequest(t, tc.store, userID, tc.id, tc.authed); w.Code != tc.want {
+				t.Fatalf("status = %d, want %d", w.Code, tc.want)
 			}
 		})
 	}
