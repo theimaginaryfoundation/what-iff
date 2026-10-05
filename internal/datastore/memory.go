@@ -20,6 +20,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/embedding"
 	"github.com/theimaginaryfoundation/what-iff/ent/memory"
 	entpersonality "github.com/theimaginaryfoundation/what-iff/ent/personality"
+	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
 	entschema "github.com/theimaginaryfoundation/what-iff/ent/schema"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
@@ -86,16 +87,17 @@ func toMemoryModel(e *ent.Memory) *models.Memory {
 	}
 
 	memoryModel := &models.Memory{
-		ID:         e.ID,
-		Content:    e.Content,
-		Level:      memoryLevelForEntity(e),
-		Type:       models.MemoryType(e.Type),
-		Status:     status,
-		Confidence: models.ClampConfidence(e.Confidence),
-		Starred:    e.Starred,
-		Scope:      string(e.Scope),
-		CreatedAt:  e.CreatedAt,
-		UpdatedAt:  e.UpdatedAt,
+		ID:          e.ID,
+		Content:     e.Content,
+		Level:       memoryLevelForEntity(e),
+		Type:        models.MemoryType(e.Type),
+		Status:      status,
+		Confidence:  models.ClampConfidence(e.Confidence),
+		Starred:     e.Starred,
+		Sensitivity: models.MemorySensitivity(e.Sensitivity).OrDefault(),
+		Scope:       string(e.Scope),
+		CreatedAt:   e.CreatedAt,
+		UpdatedAt:   e.UpdatedAt,
 	}
 	if e.ChainMetadata != nil {
 		memoryModel.ChainMetadata = chainMetadataToModel(e.ChainMetadata)
@@ -191,6 +193,7 @@ func (d *Datastore) CreateMemory(ctx context.Context, userID uuid.UUID, mem mode
 		SetStatus(normalizeMemoryStatus(mem.Status)).
 		SetConfidence(models.ClampConfidence(mem.Confidence)).
 		SetStarred(mem.Starred).
+		SetSensitivity(memory.Sensitivity(mem.Sensitivity.OrDefault())).
 		SetCreatedAt(time.Now()).
 		SetUpdatedAt(time.Now())
 
@@ -352,6 +355,9 @@ func (d *Datastore) createMemoryFromLevelInput(ctx context.Context, tx *ent.Tx, 
 	if strings.TrimSpace(input.Content) == "" {
 		return nil, fmt.Errorf("%w: memory content is required", ErrInvalidRequestBody)
 	}
+	if input.Sensitivity != "" && !input.Sensitivity.Valid() {
+		return nil, fmt.Errorf("%w: invalid sensitivity: %s", ErrInvalidRequestBody, input.Sensitivity)
+	}
 	if err := validateLevelInput(input); err != nil {
 		return nil, err
 	}
@@ -396,6 +402,7 @@ func (d *Datastore) createMemoryFromLevelInput(ctx context.Context, tx *ent.Tx, 
 		SetStatus(memory.StatusActive).
 		SetConfidence(input.Confidence.Float()).
 		SetStarred(input.Starred).
+		SetSensitivity(memory.Sensitivity(input.Sensitivity.OrDefault())).
 		SetOwnerID(userID).
 		SetCreatedAt(time.Now()).
 		SetUpdatedAt(time.Now())
@@ -552,6 +559,19 @@ func (d *Datastore) UpdateMemory(ctx context.Context, userID, memoryID uuid.UUID
 		nextConfidence = *patch.Confidence
 	}
 
+	nextSensitivity := models.MemorySensitivity(existing.Sensitivity).OrDefault()
+	if patch.Sensitivity != nil {
+		if !patch.Sensitivity.Valid() {
+			tx.Rollback()
+			return nil, fmt.Errorf("%w: invalid sensitivity: %s", ErrInvalidRequestBody, *patch.Sensitivity)
+		}
+		if existing.Scope == memory.ScopeSummary {
+			tx.Rollback()
+			return nil, fmt.Errorf("%w: summary memories have no sensitivity", ErrInvalidRequestBody)
+		}
+		nextSensitivity = *patch.Sensitivity
+	}
+
 	currentLevel := memoryLevelForEntity(existing)
 	nextLevel := currentLevel
 	if patch.Level != nil {
@@ -626,6 +646,7 @@ func (d *Datastore) UpdateMemory(ctx context.Context, userID, memoryID uuid.UUID
 		SetStatus(normalizeMemoryStatus(nextStatus)).
 		SetConfidence(nextConfidence.Float()).
 		SetStarred(nextStarred).
+		SetSensitivity(memory.Sensitivity(nextSensitivity)).
 		SetUpdatedAt(time.Now())
 
 	if nextChatID != nil && *nextChatID != uuid.Nil {
@@ -664,6 +685,11 @@ func (d *Datastore) UpdateMemory(ctx context.Context, userID, memoryID uuid.UUID
 // UpsertChatSummaryMemory creates or updates the singleton Summary memory for a chat.
 // Summary memories are internal checkpoint state and are intentionally separate
 // from user/tool-created Chat memories.
+//
+// A summary carries its own sensitivity level so restricted chats can be gated by level alone
+// (summarySensitivity): the default level capped by the chat's limit (personal for an ordinary
+// thread, public for a public thread). An update never lowers the stored level, because the
+// summary is cumulative and still carries what was said before the limit was lowered.
 func (d *Datastore) UpsertChatSummaryMemory(ctx context.Context, userID, chatID uuid.UUID, summary string, embeddingVector []float32) error {
 	if strings.TrimSpace(summary) == "" {
 		return fmt.Errorf("summary memory content cannot be empty")
@@ -682,18 +708,19 @@ func (d *Datastore) UpsertChatSummaryMemory(ctx context.Context, userID, chatID 
 		}
 	}()
 
-	chatExists, err := tx.Chat.Query().
+	chatRow, err := tx.Chat.Query().
 		Where(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))).
-		Exist(ctx)
+		Select(entchat.FieldMemorySensitivityLimit).
+		Only(ctx)
 	if err != nil {
-		d.logger.Error(i18n.T1("query.failed", "Entity", "chat"), zap.Error(err))
 		tx.Rollback()
+		if ent.IsNotFound(err) {
+			return ErrChatNotFound
+		}
+		d.logger.Error(i18n.T1("query.failed", "Entity", "chat"), zap.Error(err))
 		return err
 	}
-	if !chatExists {
-		tx.Rollback()
-		return ErrChatNotFound
-	}
+	level := summarySensitivity(models.MemorySensitivity(chatRow.MemorySensitivityLimit))
 
 	summaryMemory, err := tx.Memory.Query().
 		Where(
@@ -715,6 +742,7 @@ func (d *Datastore) UpsertChatSummaryMemory(ctx context.Context, userID, chatID 
 			SetScope(memory.ScopeSummary).
 			SetStatus(memory.StatusActive).
 			SetConfidence(0.9).
+			SetSensitivity(memory.Sensitivity(level)).
 			SetOwnerID(userID).
 			SetChatID(chatID).
 			SetCreatedAt(time.Now()).
@@ -729,6 +757,7 @@ func (d *Datastore) UpsertChatSummaryMemory(ctx context.Context, userID, chatID 
 			SetContent(summary).
 			SetStatus(memory.StatusActive).
 			SetConfidence(0.9).
+			SetSensitivity(memory.Sensitivity(models.MostRestricted(models.MemorySensitivity(summaryMemory.Sensitivity), level))).
 			Save(ctx)
 		if err != nil {
 			d.logger.Error(i18n.T1("update.failed", "Entity", "summary memory"), zap.Error(err))
@@ -904,6 +933,8 @@ func (d *Datastore) ListMemories(ctx context.Context, userID uuid.UUID, pageNum,
 	if filters.Starred != nil {
 		query = query.Where(memory.StarredEQ(*filters.Starred))
 	}
+
+	query = applyMemorySensitivityFilters(query, filters)
 
 	if filters.PinnedPersonalityID != nil {
 		if *filters.PinnedPersonalityID == uuid.Nil {
@@ -1130,6 +1161,9 @@ func (d *Datastore) PatchMemoriesBatch(ctx context.Context, userID uuid.UUID, in
 	if len(input.IDs) > models.MaxMemoryBatchIDs {
 		return nil, fmt.Errorf("%w: at most %d memory ids per batch", ErrInvalidRequestBody, models.MaxMemoryBatchIDs)
 	}
+	if isSensitivityOnlyPatch(input.Patch) {
+		return d.patchMemoriesSensitivityBatch(ctx, userID, input.IDs, *input.Patch.Sensitivity, input.AllOrNone)
+	}
 	if patchChangesThreadScope(input.Patch) {
 		hasThreadMemory, err := d.dbClient.Memory.Query().
 			Where(
@@ -1278,7 +1312,7 @@ func (d *Datastore) GetMemoryByIDPrefix(ctx context.Context, userID uuid.UUID, p
 		if rerr := tx.Rollback(); rerr != nil {
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 		}
-		return nil, fmt.Errorf("memory ID prefix %q is ambiguous; pass the full UUID", prefix)
+		return nil, fmt.Errorf("%w (%q); pass the full UUID", ErrMemoryIDPrefixAmbiguous, prefix)
 	}
 	if err := tx.Commit(); err != nil {
 		d.logger.Error(i18n.T("tx.commit_failed"), zap.Error(err))
@@ -1758,6 +1792,7 @@ func (d *Datastore) importPreparedMemories(ctx context.Context, userID uuid.UUID
 			SetScope(p.candidate.scope).
 			SetStatus(memory.StatusActive).
 			SetConfidence(models.DefaultMemoryConfidence).
+			SetSensitivity(memory.Sensitivity(p.candidate.record.Sensitivity.OrDefault())).
 			SetOwnerID(userID).
 			SetCreatedAt(p.candidate.record.CreatedAt)
 		if p.candidate.chatID != nil {
@@ -2297,9 +2332,10 @@ func (d *Datastore) ExportMemories(ctx context.Context, userID uuid.UUID, w io.W
 // The Chat edge must be preloaded (WithChat) for ChatID and ChatName to populate.
 func toMemoryRecord(m *ent.Memory) models.MemoryRecord {
 	rec := models.MemoryRecord{
-		ID:        m.ID,
-		Content:   m.Content,
-		CreatedAt: m.CreatedAt,
+		ID:          m.ID,
+		Content:     m.Content,
+		CreatedAt:   m.CreatedAt,
+		Sensitivity: models.MemorySensitivity(m.Sensitivity).OrDefault(),
 	}
 
 	if m.Scope == memory.ScopeChat && m.Edges.Chat != nil {
@@ -2312,7 +2348,12 @@ func toMemoryRecord(m *ent.Memory) models.MemoryRecord {
 	return rec
 }
 
-func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.UUID, queryEmbedding []float32, activePersonalityID uuid.UUID) ([]*models.Memory, error) {
+// GetRelatedMemories returns the active memories nearest queryEmbedding that the asking chat may
+// use: its own Chat-scoped memories plus User-scoped ones visible to the active personality.
+// maxSensitivity is the chat's memory sensitivity limit and is applied in the WHERE clause, so a
+// restricted chat still gets a full set of permitted matches (never a post-filtered top-5).
+// Empty means unrestricted.
+func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.UUID, queryEmbedding []float32, activePersonalityID uuid.UUID, maxSensitivity models.MemorySensitivity) ([]*models.Memory, error) {
 
 	// Start transaction
 	tx, err := d.dbClient.Tx(ctx)
@@ -2358,17 +2399,19 @@ func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.
 		)
 	}
 
+	memoryPreds := []predicate.Memory{
+		memory.HasOwnerWith(user.ID(userId)),
+		memory.StatusEQ(memory.StatusActive),
+		memory.Or(
+			chatScopedPredicate,
+			userScopedPredicate,
+		),
+	}
+	if p := memorySensitivityAtMost(maxSensitivity); p != nil {
+		memoryPreds = append(memoryPreds, p)
+	}
 	dbEmbeddings, err := tx.Embedding.Query().
-		Where(
-			embedding.HasMemoryWith(
-				memory.HasOwnerWith(user.ID(userId)),
-				memory.StatusEQ(memory.StatusActive),
-				memory.Or(
-					chatScopedPredicate,
-					userScopedPredicate,
-				),
-			),
-		).
+		Where(embedding.HasMemoryWith(memoryPreds...)).
 		Where(func(s *sql.Selector) {
 			// Use string formatting to embed vector and threshold directly in SQL
 			s.Where(sql.ExprP(fmt.Sprintf("embedding <-> '%s' <= %f", vectorStr, MemoryRelevanceThreshold)))
@@ -2417,7 +2460,11 @@ func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.
 // by vector distance to queryEmbedding. GetRelatedMemories intentionally excludes Summary-scope
 // rows (they are internal checkpoint state, not facts); this is the counterpart recall's
 // source_type=summaries search uses instead. limit is clamped to [1, 20], defaulting to 5.
-func (d *Datastore) GetRelatedSummaryMemories(ctx context.Context, userID uuid.UUID, queryEmbedding []float32, limit int) ([]*models.Memory, error) {
+//
+// maxSensitivity is the asking chat's memory sensitivity limit, applied in the WHERE clause like
+// GetRelatedMemories (empty or sensitive is unrestricted). A summary carries its own level (see
+// UpsertChatSummaryMemory), so a restricted chat finds only summaries at or below its limit.
+func (d *Datastore) GetRelatedSummaryMemories(ctx context.Context, userID uuid.UUID, queryEmbedding []float32, limit int, maxSensitivity models.MemorySensitivity) ([]*models.Memory, error) {
 	if limit <= 0 {
 		limit = 5
 	}
@@ -2429,14 +2476,16 @@ func (d *Datastore) GetRelatedSummaryMemories(ctx context.Context, userID uuid.U
 	// Format vector as PostgreSQL array literal to avoid parameter binding issues
 	vectorStr := embVec.String()
 
+	summaryPreds := []predicate.Memory{
+		memory.HasOwnerWith(user.ID(userID)),
+		memory.StatusEQ(memory.StatusActive),
+		memory.ScopeEQ(memory.ScopeSummary),
+	}
+	if p := memorySensitivityAtMost(maxSensitivity); p != nil {
+		summaryPreds = append(summaryPreds, p)
+	}
 	dbEmbeddings, err := d.dbClient.Embedding.Query().
-		Where(
-			embedding.HasMemoryWith(
-				memory.HasOwnerWith(user.ID(userID)),
-				memory.StatusEQ(memory.StatusActive),
-				memory.ScopeEQ(memory.ScopeSummary),
-			),
-		).
+		Where(embedding.HasMemoryWith(summaryPreds...)).
 		Where(func(s *sql.Selector) {
 			// Use string formatting to embed vector and threshold directly in SQL
 			s.Where(sql.ExprP(fmt.Sprintf("embedding <-> '%s' <= %f", vectorStr, MemoryRelevanceThreshold)))

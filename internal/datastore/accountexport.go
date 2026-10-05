@@ -126,6 +126,7 @@ func (d *Datastore) ExportConversationInputs(ctx context.Context, userID uuid.UU
 			Tags:                       c.Tags,
 			IsFavorite:                 c.IsFavorite,
 			IsAutoMood:                 c.IsAutoMood,
+			MemorySensitivityLimit:     models.MemorySensitivity(c.MemorySensitivityLimit),
 		})
 	}
 

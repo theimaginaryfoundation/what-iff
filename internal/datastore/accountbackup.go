@@ -382,6 +382,7 @@ func (d *Datastore) importBackupChats(ctx context.Context, targetUserID uuid.UUI
 			SetCheckpointUserMessageCount(rec.CheckpointUserMessageCount).
 			SetDisabledTools(append([]string(nil), rec.DisabledTools...)).
 			SetIsAutoMood(rec.IsAutoMood).
+			SetMemorySensitivityLimit(entchat.MemorySensitivityLimit(rec.MemorySensitivityLimit.LimitOrDefault())).
 			SetResponseID("").
 			SetCreatedAt(rec.CreatedAt).
 			SetUpdatedAt(rec.UpdatedAt)

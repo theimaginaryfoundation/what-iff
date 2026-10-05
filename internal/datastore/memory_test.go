@@ -987,6 +987,7 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 			chat_model uuid,
 			chat_personality uuid,
 			chat_active_mood uuid,
+			memory_sensitivity_limit text NOT NULL DEFAULT 'sensitive',
 			user_chats uuid NOT NULL
 		)`,
 		`CREATE TABLE personalities (
@@ -1015,6 +1016,7 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 			type text NOT NULL DEFAULT 'Context',
 			status text NOT NULL DEFAULT 'active',
 			confidence real NOT NULL DEFAULT 0.6,
+			sensitivity text NOT NULL DEFAULT 'personal',
 			chain_metadata json,
 			link_group_id uuid,
 			starred bool NOT NULL DEFAULT false,
