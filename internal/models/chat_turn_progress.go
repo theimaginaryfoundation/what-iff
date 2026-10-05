@@ -21,17 +21,12 @@ type ChatTurnProgress struct {
 	WaitingOn ChatTurnWaiting `json:"waiting_on,omitempty"`
 }
 
-// ChatTurnWaiting is the phase of the earlier turn that a queued turn is waiting on.
+// ChatTurnWaiting is what a queued turn is waiting on.
 type ChatTurnWaiting string
 
 const (
-	// ChatTurnWaitingReply: the earlier turn is still generating its reply.
+	// ChatTurnWaitingReply: an earlier turn in the chat is still generating its reply.
 	ChatTurnWaitingReply ChatTurnWaiting = "reply"
-	// ChatTurnWaitingWrapUp: the earlier turn has replied and is picking its expression.
-	ChatTurnWaitingWrapUp ChatTurnWaiting = "wrap_up"
-	// ChatTurnWaitingSummarizer: the earlier turn is in its post-reply summarizing work
-	// (checkpoint, memories).
-	ChatTurnWaitingSummarizer ChatTurnWaiting = "summarizer"
 )
 
 // ChatTurnToolCall is one tool call in ChatTurnProgress. Input and Output are truncated

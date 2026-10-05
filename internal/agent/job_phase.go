@@ -53,9 +53,10 @@ func (a *Agent) persistInferencePhase(ctx context.Context, chatJob *models.Job, 
 		return fmt.Errorf("failed to clear job draft deltas: %w", err)
 	}
 	*chatJob = *updated
-	a.noteTurnJobStatus(chatJob)
 
 	a.persistUserTurnAndChatAfterInference(ctx, chatJob.UserID, chatMessage, chat, chatCtx, result, persistUserTurnUpdate)
+	// Only now wake the turns queued behind this one: the chat's response chain is saved.
+	a.noteTurnJobStatus(chatJob)
 
 	if err := a.ds.SetChatMessageLastError(ctx, chatJob.UserID, chatMessage.ID, nil); err != nil {
 		a.logger.Warn("failed to clear user message last_error_message after inference", zap.Error(err))

@@ -1084,29 +1084,21 @@ func ownedByUser(userID uuid.UUID) predicate.Job {
 	})
 }
 
-// ListActiveTurnJobsForChat returns the turn jobs in chatID that are not terminal yet (pending,
-// processing, or past their reply with post-processing still running) and were updated at or
-// after updatedSince, oldest first (created_at, then id), leaving out excludeJobID. These are the
-// turns a new turn in the chat queues behind (the agent's turn gate polls this; it reads only and
-// takes no lock). Live turns heartbeat their job, so updatedSince (now minus the gate's stale
-// bound) drops the abandoned rows a crash leaves behind; without it they could fill the row limit
-// and hide a live turn. A zero updatedSince does not filter. The status filter keeps the read on
-// the status index, since few jobs are ever unfinished, and in the common case (no other live
+// ListPendingTurnJobsForChat returns the turn jobs in chatID that have not reached
+// inference_complete yet (pending or processing), oldest first (created_at, then id), leaving out
+// excludeJobID. These are the turns a new turn in the chat queues behind (the agent's turn gate
+// polls this; it reads only and takes no lock). The status filter keeps the read on the status
+// index, since few jobs are ever pending or processing, and in the common case (no other live
 // turn for the user) it is a single query. Only the fields the gate needs are populated:
 // ID, UserID, JobType, Reference, Status, CreatedAt and UpdatedAt.
-func (d *Datastore) ListActiveTurnJobsForChat(ctx context.Context, userID, chatID, excludeJobID uuid.UUID, updatedSince time.Time) ([]*models.Job, error) {
-	where := []predicate.Job{
-		// Every non-terminal status, listed (not NOT IN) so the read stays on the status index.
-		job.StatusIn(job.StatusPending, job.StatusProcessing, job.StatusInferenceComplete, job.StatusExpressionComplete, job.StatusCompactionComplete),
-		job.JobTypeIn(turnJobTypes...),
-		ownedByUser(userID),
-		job.IDNEQ(excludeJobID),
-	}
-	if !updatedSince.IsZero() {
-		where = append(where, job.UpdatedAtGTE(updatedSince))
-	}
+func (d *Datastore) ListPendingTurnJobsForChat(ctx context.Context, userID, chatID, excludeJobID uuid.UUID) ([]*models.Job, error) {
 	jobs, err := d.dbClient.Job.Query().
-		Where(where...).
+		Where(
+			job.StatusIn(job.StatusPending, job.StatusProcessing),
+			job.JobTypeIn(turnJobTypes...),
+			ownedByUser(userID),
+			job.IDNEQ(excludeJobID),
+		).
 		Order(job.ByCreatedAt(), job.ByID()).
 		Limit(turnJobScanLimit).
 		Select(job.FieldID, job.FieldCreatedAt, job.FieldUpdatedAt, job.FieldJobType, job.FieldReference, job.FieldStatus).

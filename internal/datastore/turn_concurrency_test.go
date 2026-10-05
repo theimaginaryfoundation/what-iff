@@ -41,11 +41,6 @@ func TestTurnJobsForChat_GateListingAndStop(t *testing.T) {
 	createJob("chat_message", turnA1.String(), models.JobStatusFailed)
 	createJob("agent_job_run", chatA.String(), models.JobStatusCancelled)
 	replied := createJob("chat_message", turnA1.String(), models.JobStatusInferenceComplete)
-	checkpointing := createJob("chat_message", turnA1.String(), models.JobStatusExpressionComplete)
-	// Abandoned by a crash mid-checkpoint: unfinished, but no heartbeat for an hour.
-	abandoned := createJob("chat_message", turnA1.String(), models.JobStatusExpressionComplete)
-	_, err := ds.dbClient.Job.UpdateOneID(abandoned.ID).SetUpdatedAt(time.Now().Add(-time.Hour)).Save(ctx)
-	require.NoError(t, err)
 	webhook := createJob("agent_job_run", chatA.String(), models.JobStatusProcessing)
 	syncRun := createJob("agent_job_run", turnA2.String(), models.JobStatusPending)
 	self := createJob("chat_message", turnA2.String(), models.JobStatusPending)
@@ -56,30 +51,23 @@ func TestTurnJobsForChat_GateListingAndStop(t *testing.T) {
 	createJob("thread_rehydration", chatA.String(), models.JobStatusProcessing)
 	createJob("chat_message", "not-a-uuid", models.JobStatusProcessing)
 
-	// The gate's listing: unfinished turns in the chat (before or after their reply), oldest first,
-	// whether keyed by chat or by message, leaving out the asking job. With a cutoff, jobs not
-	// updated since then (no heartbeat) are left out.
-	listIDs := func(updatedSince time.Time) []uuid.UUID {
-		t.Helper()
-		got, err := ds.ListActiveTurnJobsForChat(ctx, userID, chatA, self.ID, updatedSince)
-		require.NoError(t, err)
-		ids := make([]uuid.UUID, 0, len(got))
-		for _, j := range got {
-			ids = append(ids, j.ID)
-			require.Equal(t, userID, j.UserID)
-			require.False(t, j.CreatedAt.IsZero())
-			require.False(t, j.UpdatedAt.IsZero())
-		}
-		return ids
+	// The gate's listing: turns in the chat still before their reply, oldest first, whether keyed
+	// by chat or by message, leaving out the asking job.
+	got, err := ds.ListPendingTurnJobsForChat(ctx, userID, chatA, self.ID)
+	require.NoError(t, err)
+	ids := make([]uuid.UUID, 0, len(got))
+	for _, j := range got {
+		ids = append(ids, j.ID)
+		require.Equal(t, userID, j.UserID)
+		require.False(t, j.CreatedAt.IsZero())
+		require.False(t, j.UpdatedAt.IsZero())
 	}
-	require.Equal(t, []uuid.UUID{replied.ID, checkpointing.ID, webhook.ID, syncRun.ID}, listIDs(time.Now().Add(-2*time.Minute)),
-		"unfinished, recently updated turns in the chat; a turn past its reply still blocks until it finishes")
-	require.Equal(t, []uuid.UUID{replied.ID, checkpointing.ID, abandoned.ID, webhook.ID, syncRun.ID}, listIDs(time.Time{}),
-		"a zero cutoff does not filter on updated_at")
+	require.Equal(t, []uuid.UUID{webhook.ID, syncRun.ID}, ids,
+		"pending/processing turns in the chat; a turn past inference_complete no longer blocks")
 
 	// Another user never sees them.
 	stranger := createJobTestUser(t, ds)
-	got, err := ds.ListActiveTurnJobsForChat(ctx, stranger, chatA, uuid.Nil, time.Time{})
+	got, err = ds.ListPendingTurnJobsForChat(ctx, stranger, chatA, uuid.Nil)
 	require.NoError(t, err)
 	require.Empty(t, got)
 
@@ -100,7 +88,7 @@ func TestTurnJobsForChat_GateListingAndStop(t *testing.T) {
 	// resolvable to their chat by chat or message reference, and cancellable.
 	stopIDs, err := ds.ListActiveChatJobIDsForChat(ctx, userID, chatA)
 	require.NoError(t, err)
-	require.Equal(t, []uuid.UUID{self.ID, syncRun.ID, webhook.ID, abandoned.ID, checkpointing.ID, replied.ID}, stopIDs)
+	require.Equal(t, []uuid.UUID{self.ID, syncRun.ID, webhook.ID, replied.ID}, stopIDs)
 	for _, id := range []uuid.UUID{webhook.ID, syncRun.ID} {
 		chatID, err := ds.ChatIDForChatJob(ctx, userID, id)
 		require.NoError(t, err)
