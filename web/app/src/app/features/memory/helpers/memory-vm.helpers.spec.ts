@@ -155,3 +155,17 @@ describe('memory-vm.helpers', () => {
         expect(associationLabel(neither)).toBe('Global');
     });
 });
+
+describe('memory-vm.helpers provenance', () => {
+    it('carries an external memory and its speaker onto the card vm', () => {
+        const vm = toMemoryCardVm(makeMemory({ provenance: 'external', source_speaker: 'alice' }));
+        expect(vm.provenance).toBe('external');
+        expect(vm.sourceSpeaker).toBe('alice');
+    });
+
+    it('treats a missing provenance as yours, with no speaker', () => {
+        const vm = toMemoryCardVm(makeMemory({ source_speaker: 'alice' }));
+        expect(vm.provenance).toBe('user');
+        expect(vm.sourceSpeaker).toBeNull();
+    });
+});

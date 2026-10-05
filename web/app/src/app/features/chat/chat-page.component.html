@@ -204,6 +204,7 @@
             (loadOlder)="session.loadOlderMessages()"
           />
           <app-chat-send-outlet />
+          <app-discord-composer-toggle />
           <app-chat-composer
             [draft]="session.draft()"
             [attachments]="pendingAttachments()"

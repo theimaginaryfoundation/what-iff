@@ -12,6 +12,8 @@ function makeVm(partial: Partial<MemoryCardVm> = {}): MemoryCardVm {
     level: 'thread',
     levelLabel: 'Thread',
     status: 'active',
+    provenance: 'user',
+    sourceSpeaker: null,
     starred: false,
     chatName: 'Thread A',
     chatId: 'c-1',
@@ -462,5 +464,29 @@ describe('MemoryCardComponent', () => {
     fixture.detectChanges();
 
     expect(fixture.nativeElement.querySelector('.memory-card__star')).toBeTruthy();
+  });
+});
+
+describe('MemoryCardComponent provenance badge', () => {
+  async function render(partial: Partial<MemoryCardVm>): Promise<HTMLElement> {
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      imports: [MemoryCardComponent],
+      providers: [provideZonelessChangeDetection()],
+    }).compileComponents();
+    const fixture = TestBed.createComponent(MemoryCardComponent);
+    fixture.componentRef.setInput('memory', makeVm(partial));
+    fixture.detectChanges();
+    return fixture.nativeElement as HTMLElement;
+  }
+
+  it('marks a memory learned in a public Discord thread as External, with its speaker', async () => {
+    const host = await render({ provenance: 'external', sourceSpeaker: 'alice' });
+    expect(host.querySelector('.provenance-badge')?.textContent?.trim()).toBe('External · alice');
+  });
+
+  it('shows nothing for your own memories', async () => {
+    const host = await render({});
+    expect(host.querySelector('.provenance-badge')).toBeNull();
   });
 });

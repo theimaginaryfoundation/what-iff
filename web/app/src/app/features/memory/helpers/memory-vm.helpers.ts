@@ -1,4 +1,4 @@
-import { Memory, MemoryMergeType } from '../../../core/models/memory.model';
+import { Memory, MemoryMergeType, MemoryProvenance } from '../../../core/models/memory.model';
 
 /** Label for memories with no pinned personality, used in filters, move menus and pickers. */
 export const GLOBAL_SCOPE_LABEL = 'Global (every personality)';
@@ -16,6 +16,10 @@ export interface MemoryCardVm {
   level: Memory['level'];
   levelLabel: string;
   status: Memory['status'];
+  /** `external`: learned from other people in a Discord relay thread (unverified). */
+  provenance: MemoryProvenance;
+  /** Who an external memory came from, when known. */
+  sourceSpeaker: string | null;
   starred: boolean;
   chatName: string | null;
   chatId: string | null;
@@ -48,6 +52,8 @@ export function toMemoryCardVm(
     level: memory.level,
     levelLabel: levelBadgeText(memory.level),
     status: memory.status,
+    provenance: memory.provenance === 'external' ? 'external' : 'user',
+    sourceSpeaker: memory.provenance === 'external' ? (memory.source_speaker ?? null) : null,
     starred: memory.starred,
     chatName: memory.chat_name ?? null,
     chatId: memory.chat_id ?? null,

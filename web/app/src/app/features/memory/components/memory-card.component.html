@@ -35,6 +35,7 @@
       <div class="memory-card__identity">
         <span class="memory-card__name">{{ association() }}</span>
         <span class="memory-card__level" [attr.data-level]="memory().level" [uiTooltip]="levelHint()">{{ memory().levelLabel }}</span>
+        <app-memory-provenance-badge [provenance]="memory().provenance" [speaker]="memory().sourceSpeaker" />
         @if (memory().starred) {
           <ui-star-icon
             [size]="12"

@@ -1,3 +1,9 @@
+/**
+ * Where a memory came from: `user` (yours: your own threads or the memory manager) or `external`
+ * (learned from other people in a Discord relay thread, and unverified).
+ */
+export type MemoryProvenance = 'user' | 'external';
+
 export interface Memory {
   id: string;
   chat_id?: string;
@@ -6,6 +12,10 @@ export interface Memory {
   level: 'global' | 'personality' | 'thread' | 'summary';
   type: 'Context';
   status: 'active' | 'inactive';
+  /** The backend always sends it (default `user`); optional so older payloads and fixtures still type-check. */
+  provenance?: MemoryProvenance;
+  /** For an external memory, the Discord display name it came from, when known (unverified). */
+  source_speaker?: string | null;
   // Stored confidence is a float in [0,1] (LLM buckets map to anchors 0.3/0.6/0.9; other signals
   // can refine it). Create/patch still accept the coarse buckets below.
   confidence: number;
@@ -36,6 +46,7 @@ export interface MemoryFilters {
   global_only?: boolean;
   query?: string;
   status?: 'active' | 'inactive';
+  provenance?: MemoryProvenance;
   sort?: MemorySort;
   min_date?: string;
   max_date?: string;

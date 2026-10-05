@@ -2,6 +2,7 @@
   <header class="focus-panel__header">
     <div class="focus-panel__tags">
       <span class="focus-panel__level" [attr.data-level]="memory().level" [uiTooltip]="levelHint()">{{ memory().levelLabel }}</span>
+      <app-memory-provenance-badge [provenance]="memory().provenance" [speaker]="memory().sourceSpeaker" />
       @if (memory().starred) {
         <span class="focus-panel__starred">Starred</span>
       }

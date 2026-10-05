@@ -16,6 +16,7 @@ import {
   normalizeDateRange,
   GLOBAL_PERSONALITY_FILTER,
   MemoryViewFilters,
+  MemoryProvenanceFilter,
   MemoryStatusFilter,
 } from './helpers/memory-filter.helpers';
 import { MemoryPersonalityOption } from './components/memory-form.component';
@@ -81,6 +82,11 @@ export class MemoriesListTabComponent implements OnInit {
   readonly allSelected = this.view.allSelected;
   readonly globalPersonalityFilter = GLOBAL_PERSONALITY_FILTER;
   readonly globalScopeLabel = GLOBAL_SCOPE_LABEL;
+  readonly provenanceFilterHint = computed(() =>
+    this.filters().provenance === 'external'
+      ? 'Memories learned from other people in public Discord threads (unverified)'
+      : 'Filter by where memories came from: yours, or learned from other people in public Discord threads',
+  );
   readonly deleting = this.view.deleting;
   readonly mutating = this.view.mutating;
 
@@ -189,6 +195,11 @@ export class MemoriesListTabComponent implements OnInit {
 
   setSort(sort: MemorySort): void {
     this.onFilterChanged({ sort });
+  }
+
+  setProvenanceFilter(provenance: MemoryProvenanceFilter): void {
+    this.clearSelection();
+    this.onFilterChanged({ provenance });
   }
 
   onSearchSubmit(): void {

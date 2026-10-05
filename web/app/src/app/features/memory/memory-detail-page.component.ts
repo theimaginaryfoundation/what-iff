@@ -8,12 +8,22 @@ import { PersonalityService } from '../../core/services/personality.service';
 import { MemoryFormComponent, MemoryPersonalityOption } from './components/memory-form.component';
 import { DeleteMemoryModalComponent } from './components/delete-memory-modal.component';
 import { CONFIDENCE_HINT, levelBadgeText, levelDescription, VERIFIED_HINT } from './helpers/memory-vm.helpers';
+import { MemoryProvenanceBadgeComponent } from './components/memory-provenance-badge.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 
 @Component({
   selector: 'app-memory-detail-page',
   standalone: true,
-  imports: [CommonModule, DatePipe, PercentPipe, MemoryFormComponent, DeleteMemoryModalComponent, RouterLink, TooltipDirective],
+  imports: [
+    CommonModule,
+    DatePipe,
+    PercentPipe,
+    MemoryFormComponent,
+    MemoryProvenanceBadgeComponent,
+    DeleteMemoryModalComponent,
+    RouterLink,
+    TooltipDirective,
+  ],
   templateUrl: './memory-detail-page.component.html',
   styleUrl: './memory-detail-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
