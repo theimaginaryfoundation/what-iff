@@ -3,7 +3,8 @@
 ## Role
 
 Extension seam for features that react to a **finished assistant reply**, whichever path produced it (interactive turn, webhook user or background mode, scheduled agent job).
-The core registers nothing; with no hook linked, firing is a no-op that starts no goroutine.
+The core agent registers nothing; with no hook linked, firing is a no-op that starts no goroutine.
+The Discord relay (`internal/discordplugin`, linked by default) registers one to mirror replies to Discord, and removes it again when `DISCORD_RELAY_ENABLED` is false.
 
 ## Responsibilities
 
@@ -16,6 +17,7 @@ The core registers nothing; with no hook linked, firing is a no-op that starts n
 ## Dependencies
 
 - **Inbound:** `internal/agent` fires it (`fireReplyHook` in `reply_hook.go`) at the end of `runUserChatPostInferencePhases` and `handleEphemeralPrompt`, after the job reaches `complete`.
+  `internal/discordplugin` registers a hook.
 - **Outbound:** `internal/telemetry` (for `CallPath`), `zap`.
 
 ## Non-obvious decisions

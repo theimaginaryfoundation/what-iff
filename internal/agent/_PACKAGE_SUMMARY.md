@@ -194,6 +194,13 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   `create_agent_job` is neither offered nor accepted in a sandboxed chat (the job would run in a new chat that is not sandboxed).
   Auto mood selection does not run in a sandboxed chat (`autoMoodSelectionSkipped`); its `change_mood` picks only its own personality's modes, refuses `model_override`, and mood rituals are not loaded.
   In every chat, dispatch refuses a tool the model was not offered that turn (`setOfferedTools`, recorded on every generation path including the sub-agent loops).
+- **Memory provenance (Discord relay threads):** `memory_provenance.go`.
+  `prepareChatContext` records `chatContext.memoryProvenance` (`memoryProvenanceForChat`: external for any chat bound to a Discord channel, sandboxed or not, `datastore.IsExternalRelayChat`; a failed lookup in a sandboxed chat reads as external) and the trigger message id.
+  `create_memory` writes with `createMemoryOrigin` (the Discord author of the message being answered, read when the tool runs; the tool's `speaker` argument overrides it).
+  Checkpoint extraction in such a thread uses the `ExtractedRelayMemory` schema (a `speaker` per memory) and `relayMemoryExtractionNote` (the speakers are Discord users labelled by name, not the owner); `stampExtractedProvenance` marks every extracted memory external, and the merge plan carries the new members' combined origin (`memoryFoldPlan.NewOrigin`, link members' `Origin`) to the datastore.
+  Scope is chosen exactly as in any chat (a sandboxed relay thread always writes Chat scope); provenance only records where a memory came from, and the shared formatter shows it to the model as unverified.
+- **Discord relay tool (`discord_post_tool.go`):** `post_to_discord` registers through the extension seams (`tools.AdditionalFunctionToolCatalog`, `extraToolHandlersForChat`, `additionalDisabledToolsForChat`, `additionalDeveloperContextForChat`), wrapping whatever another build already set there.
+  It is offered only when the chat's persona has a bot with an active binding (hidden otherwise), marks the reply for posting rather than sending text, and in a sandboxed chat reaches only that thread's own channel.
 
 ## Testing
 
