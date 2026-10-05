@@ -1,5 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
+import { provideHttpClient, withXhr } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { Router } from '@angular/router';
 import { provideMarkdown } from 'ngx-markdown';
 
@@ -14,7 +16,7 @@ describe('MessageBubbleComponent', () => {
     beforeEach(async () => {
         await TestBed.configureTestingModule({
             imports: [MessageBubbleComponent],
-            providers: [provideZonelessChangeDetection(), provideMarkdown()],
+            providers: [provideZonelessChangeDetection(), provideHttpClient(withXhr()), provideHttpClientTesting(), provideMarkdown()],
         }).compileComponents();
 
         fixture = TestBed.createComponent(MessageBubbleComponent);
@@ -63,6 +65,39 @@ describe('MessageBubbleComponent', () => {
             fixture.detectChanges();
             expect(fixture.nativeElement.querySelector('.bubble__thread-refs')).toBeNull();
             expect(fixture.componentInstance.bodyContent()).toBe('[Referenced thread "x"] not really');
+        });
+    });
+
+    describe('image attachment fidelity', () => {
+        const attachments = [{
+            id: 'img-1',
+            user_id: 'u1',
+            name: 'photo.png',
+            file_type: 'image/png',
+            created_at: '2024-01-01T00:00:00Z',
+        }];
+
+        it('loads the full-resolution image in user turns, not the 256px thumbnail', () => {
+            const httpMock = TestBed.inject(HttpTestingController);
+            fixture.componentRef.setInput('message', { ...message('User'), attachments });
+            fixture.detectChanges();
+
+            httpMock.expectNone(req => req.urlWithParams.includes('/image-gallery/img-1?size=thumbnail'));
+            httpMock.expectOne(req => req.urlWithParams.includes('/image-gallery/img-1?size=full'))
+                .flush(new Blob(['x'], { type: 'image/png' }));
+            expect(fixture.nativeElement.querySelector('.message-images--full')).toBeTruthy();
+            httpMock.verify();
+        });
+
+        it('keeps thumbnails for assistant messages', () => {
+            const httpMock = TestBed.inject(HttpTestingController);
+            fixture.componentRef.setInput('message', { ...message('Assistant'), attachments });
+            fixture.detectChanges();
+
+            httpMock.expectOne(req => req.urlWithParams.includes('/image-gallery/img-1?size=thumbnail'))
+                .flush(new Blob(['x'], { type: 'image/png' }));
+            expect(fixture.nativeElement.querySelector('.message-images--full')).toBeNull();
+            httpMock.verify();
         });
     });
 

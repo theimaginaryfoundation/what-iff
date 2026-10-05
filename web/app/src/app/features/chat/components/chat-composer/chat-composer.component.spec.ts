@@ -267,8 +267,144 @@ describe('ChatComposerComponent', () => {
         it('leaves chips plain for vision models', () => {
             const [imageChip] = chips('m-vision', [image]);
             expect(isNoVision(imageChip)).toBe(false);
-            expect(imageChip.hasAttribute('tabindex')).toBe(false);
             expect(imageChip.querySelector('ui-eye-off-icon')).toBeNull();
+        });
+    });
+
+    describe('image chip preview', () => {
+        const image = { file: new File(['x'], 'cat.png', { type: 'image/png' }), isUploading: false, clientKey: 'k-img' };
+        const uploaded = {
+            attachment: { id: 'att-1', user_id: 'u', name: 'dog.png', file_type: 'image/png', created_at: '' },
+            isUploading: false,
+            clientKey: 'k-up',
+        };
+        const text = { file: new File(['x'], 'notes.txt', { type: 'text/plain' }), isUploading: false, clientKey: 'k-txt' };
+        const originalCreate = URL.createObjectURL;
+        const originalRevoke = URL.revokeObjectURL;
+        let revoke: ReturnType<typeof vi.fn>;
+
+        beforeEach(() => {
+            revoke = vi.fn();
+            URL.createObjectURL = vi.fn(() => 'blob:cat');
+            URL.revokeObjectURL = revoke as unknown as typeof URL.revokeObjectURL;
+            fixture.componentRef.setInput('attachments', [image, uploaded, text]);
+            fixture.detectChanges();
+        });
+
+        afterEach(() => {
+            URL.createObjectURL = originalCreate;
+            URL.revokeObjectURL = originalRevoke;
+        });
+
+        const chip = (i: number): HTMLElement => fixture.nativeElement.querySelectorAll('.composer__attachment')[i];
+        const preview = (): HTMLElement | null => fixture.nativeElement.querySelector('app-attachment-preview');
+        const pointer = (type: string, pointerType: string): Event =>
+            Object.assign(new MouseEvent(type, { bubbles: true }), { pointerType });
+
+        it('makes image chips focusable with an accessible name, and leaves non-images alone', () => {
+            expect(chip(0).getAttribute('tabindex')).toBe('0');
+            expect(chip(0).getAttribute('role')).toBe('group');
+            expect(chip(0).getAttribute('aria-label')).toBe('Image attachment cat.png');
+            expect(chip(2).hasAttribute('tabindex')).toBe(false);
+            expect(preview()).toBeNull();
+        });
+
+        it('shows the picked file on mouse hover and hides it on leave', () => {
+            chip(0).dispatchEvent(pointer('pointerenter', 'mouse'));
+            fixture.detectChanges();
+
+            const popover = preview()!;
+            expect(popover).toBeTruthy();
+            expect(popover.getAttribute('role')).toBe('tooltip');
+            expect(popover.id).toBe('composer-attachment-preview');
+            expect(chip(0).getAttribute('aria-details')).toBe(popover.id);
+            const img = popover.querySelector('img') as HTMLImageElement;
+            expect(img.getAttribute('alt')).toBe('Preview of cat.png');
+            expect(img.getAttribute('src')).toBe('blob:cat');
+
+            chip(0).dispatchEvent(pointer('pointerleave', 'mouse'));
+            fixture.detectChanges();
+            expect(preview()).toBeNull();
+            expect(revoke).toHaveBeenCalledWith('blob:cat');
+        });
+
+        it('uses the server thumbnail for an uploaded attachment with no local file', () => {
+            chip(1).dispatchEvent(pointer('pointerenter', 'mouse'));
+            fixture.detectChanges();
+
+            expect(preview()).toBeTruthy();
+            expect(imageGallery.getImageUrl).toHaveBeenCalledWith('att-1', 'thumbnail');
+        });
+
+        it('opens on keyboard focus and closes on blur or Escape', () => {
+            // jsdom doesn't track focus-visible; a keyboard focus is what makes it match.
+            vi.spyOn(chip(0), 'matches').mockReturnValue(true);
+            chip(0).dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+            fixture.detectChanges();
+            expect(preview()).toBeTruthy();
+
+            chip(0).dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+            fixture.detectChanges();
+            expect(preview()).toBeNull();
+
+            chip(0).dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+            fixture.detectChanges();
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+            fixture.detectChanges();
+            expect(preview()).toBeNull();
+
+            // Enter brings it back for a chip that still has focus.
+            chip(0).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+            fixture.detectChanges();
+            expect(preview()).toBeTruthy();
+        });
+
+        it('does not open on the focus that a tap causes (the tap itself toggles)', () => {
+            vi.spyOn(chip(0), 'matches').mockReturnValue(false);
+            chip(0).dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+            fixture.detectChanges();
+            expect(preview()).toBeNull();
+        });
+
+        it('toggles on tap where there is no hover, and a tap elsewhere closes it', () => {
+            chip(0).dispatchEvent(pointer('click', 'touch'));
+            fixture.detectChanges();
+            expect(preview()).toBeTruthy();
+
+            chip(0).dispatchEvent(pointer('click', 'touch'));
+            fixture.detectChanges();
+            expect(preview()).toBeNull();
+
+            chip(0).dispatchEvent(pointer('click', 'touch'));
+            fixture.detectChanges();
+            document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+            fixture.detectChanges();
+            expect(preview()).toBeNull();
+        });
+
+        it('does not treat a tap on the remove button as a preview toggle', () => {
+            const removed = vi.fn();
+            fixture.componentInstance.attachmentRemoved.subscribe(removed);
+            (chip(0).querySelector('.composer__attachment-remove') as HTMLElement).dispatchEvent(pointer('click', 'touch'));
+            fixture.detectChanges();
+
+            expect(removed).toHaveBeenCalledWith('k-img');
+            expect(preview()).toBeNull();
+        });
+
+        it('keeps the preview inside the viewport', () => {
+            vi.spyOn(chip(0), 'getBoundingClientRect').mockReturnValue({
+                left: window.innerWidth - 20, right: window.innerWidth, top: 400, bottom: 424, width: 20, height: 24, x: 0, y: 0, toJSON: () => ({}),
+            });
+            chip(0).dispatchEvent(pointer('pointerenter', 'mouse'));
+            fixture.detectChanges();
+
+            const popover = preview()!;
+            const left = parseFloat(popover.style.left);
+            const width = parseFloat(popover.style.width);
+            expect(left).toBeGreaterThanOrEqual(0);
+            expect(left + width).toBeLessThanOrEqual(window.innerWidth);
+            expect(parseFloat(popover.style.top)).toBeLessThan(400); // above the chip
         });
     });
 
