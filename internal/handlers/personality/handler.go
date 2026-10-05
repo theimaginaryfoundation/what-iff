@@ -25,29 +25,23 @@ type Handler struct {
 	logger           *zap.Logger
 	agent            *agent.Agent
 	personalityAgent PersonalityAgent
-	// files overrides agent.FileStore() for object cleanup; tests set it, nil uses the agent's.
-	files storage.FileStore
-}
-
-// objectStore is the file store attachment objects live in, or nil when none is configured.
-func (h *Handler) objectStore() storage.FileStore {
-	if h.files != nil {
-		return h.files
-	}
-	if h.agent != nil {
-		return h.agent.FileStore()
-	}
-	return nil
+	// fileStore holds attachment objects: it reads cover images for PNG card export and deletes a
+	// deleted personality's files. nil when there is no agent (tests set it).
+	fileStore storage.FileStore
 }
 
 // NewHandler creates a new Handler instance
 func NewHandler(ds Store, logger *zap.Logger, agent *agent.Agent) *Handler {
-	return &Handler{
+	h := &Handler{
 		ds:               ds,
 		logger:           logger,
 		agent:            agent,
 		personalityAgent: agent,
 	}
+	if agent != nil {
+		h.fileStore = agent.FileStore()
+	}
+	return h
 }
 
 // RegisterRoutes registers all personality-related routes
@@ -57,6 +51,7 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	personalityRouter.HandleFunc("", h.ListPersonalities).Methods("GET")
 	personalityRouter.HandleFunc("", h.CreatePersonality).Methods("POST")
 	personalityRouter.HandleFunc("/prompt-defaults", h.GetPromptDefaults).Methods("GET")
+	personalityRouter.HandleFunc("/import/sillytavern", h.ImportCharacterCard).Methods("POST")
 
 	// Personality generation flow — registered before /{id} to avoid catch-all collision.
 	personalityRouter.HandleFunc("/generate", h.GetOrCreateFlow).Methods("GET")
@@ -77,6 +72,7 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	personalityRouter.HandleFunc("/{id}/expressions/generate-candidates", h.GenerateExpressionCandidates).Methods("POST")
 	personalityRouter.HandleFunc("/{id}/expressions/{expression_key}", h.UpsertExpression).Methods("PUT")
 	personalityRouter.HandleFunc("/{id}/expressions/{expression_key}", h.DeleteExpression).Methods("DELETE")
+	personalityRouter.HandleFunc("/{id}/export/sillytavern", h.ExportCharacterCard).Methods("GET")
 	personalityRouter.HandleFunc("/{id}/prompt-changes", h.ListPersonalityPromptChanges).Methods("GET")
 	personalityRouter.HandleFunc("/{id}/prompt-changes/{change_id}/revert", h.RevertPersonalityPromptChange).Methods("POST")
 	personalityRouter.HandleFunc("/{id}", h.GetPersonality).Methods("GET")

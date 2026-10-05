@@ -158,6 +158,9 @@ func (h *Handler) buildAccountZip(ctx context.Context, userID uuid.UUID, userEma
 	if err := exporter.WritePersonalities(tree, personas); err != nil {
 		return nil, nil, err
 	}
+	if err := exporter.WriteSillyTavernCards(tree, personas, username); err != nil {
+		return nil, nil, err
+	}
 
 	// Memories ride as a nested memories.zip in the existing memory-export format, so they re-import
 	// through the same ds.ImportMemories path (embedding regeneration included).

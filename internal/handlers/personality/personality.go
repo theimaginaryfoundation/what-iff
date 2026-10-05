@@ -33,15 +33,7 @@ func (h *Handler) CreatePersonality(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// We keep this non-fatal so personality creation never fails due to a preferences/listing hiccup.
-	isFirstPersonality := false
-	if page, err := h.ds.ListPersonalities(r.Context(), userID, 1, 1, models.PersonalityFilters{}); err == nil {
-		isFirstPersonality = page.TotalCount == 0
-	} else {
-		h.logger.Warn("failed to check personality count before create; skipping auto-default behavior",
-			zap.String("user_id", userID.String()),
-			zap.Error(err))
-	}
+	isFirstPersonality := h.hasNoPersonalities(r.Context(), userID)
 
 	// Parse request body
 	var req models.Personality
@@ -83,27 +75,48 @@ func (h *Handler) CreatePersonality(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If this is the first personality, automatically set it as the user's default.
-	if isFirstPersonality && personality != nil {
-		prefs, err := h.ds.GetUserPreferences(r.Context(), userID)
-		if err != nil {
-			h.logger.Warn("failed to fetch user preferences for auto-default personality",
-				zap.String("user_id", userID.String()),
-				zap.String("personality_id", personality.ID.String()),
-				zap.Error(err))
-		} else {
-			prefs.DefaultPersonalityID = personality.ID
-			if _, err := h.ds.UpdateUserPreferences(r.Context(), userID, *prefs); err != nil {
-				h.logger.Warn("failed to update user preferences for auto-default personality",
-					zap.String("user_id", userID.String()),
-					zap.String("personality_id", personality.ID.String()),
-					zap.Error(err))
-			}
-		}
+	if isFirstPersonality {
+		h.makeDefault(r.Context(), userID, personality)
 	}
 
 	handlerutils.RefreshResponseWriteDeadline(w, 60*time.Second)
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusCreated, personality)
+}
+
+// hasNoPersonalities reports whether the user has no personalities yet. It is deliberately
+// non-fatal: a listing hiccup reads as "not first", so creation never fails on it.
+func (h *Handler) hasNoPersonalities(ctx context.Context, userID uuid.UUID) bool {
+	page, err := h.ds.ListPersonalities(ctx, userID, 1, 1, models.PersonalityFilters{})
+	if err != nil {
+		h.logger.Warn("failed to check personality count before create; skipping auto-default behavior",
+			zap.String("user_id", userID.String()),
+			zap.Error(err))
+		return false
+	}
+	return page.TotalCount == 0
+}
+
+// makeDefault sets p as the user's default personality, logging (not failing) on error. Used when
+// the personality just created is the user's first.
+func (h *Handler) makeDefault(ctx context.Context, userID uuid.UUID, p *models.Personality) {
+	if p == nil {
+		return
+	}
+	prefs, err := h.ds.GetUserPreferences(ctx, userID)
+	if err != nil {
+		h.logger.Warn("failed to fetch user preferences for auto-default personality",
+			zap.String("user_id", userID.String()),
+			zap.String("personality_id", p.ID.String()),
+			zap.Error(err))
+		return
+	}
+	prefs.DefaultPersonalityID = p.ID
+	if _, err := h.ds.UpdateUserPreferences(ctx, userID, *prefs); err != nil {
+		h.logger.Warn("failed to update user preferences for auto-default personality",
+			zap.String("user_id", userID.String()),
+			zap.String("personality_id", p.ID.String()),
+			zap.Error(err))
+	}
 }
 
 // ListPersonalities returns a paginated list of personalities for the authenticated user
@@ -370,7 +383,7 @@ func (h *Handler) DeletePersonality(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	storage.ReleaseAttachmentObjects(context.WithoutCancel(r.Context()), h.logger, h.objectStore(), h.ds, userID, attachments)
+	storage.ReleaseAttachmentObjects(context.WithoutCancel(r.Context()), h.logger, h.fileStore, h.ds, userID, attachments)
 
 	w.WriteHeader(http.StatusNoContent)
 }

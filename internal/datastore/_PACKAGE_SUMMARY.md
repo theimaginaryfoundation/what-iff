@@ -18,12 +18,16 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     **`GetMemory`** permits an owner to inspect inactive (archived/merge-retired) rows for Memory Manager detail/history, while `GetMemoryByIDPrefix` resolves only active rows by an 8–32 digit hex UUID prefix (used by `find_context` `related`/`origin` short `memory:df3e519d` hops), translating it into an indexed UUID range rather than formatting every row.
     `GetRelatedMemories` excludes `Scope=Summary` rows (checkpoint state, not facts); `GetRelatedSummaryMemories` is the Summary-only counterpart used by `find_context`'s `source_type=summaries`.
     **`ListMemories`** also excludes `Scope=Summary` unless `level=summary` is requested (Memory Manager Summaries tab).
+    `memory_embedding.go` keeps API-written memories recallable: `UpdateMemory` drops a non-Summary memory's embedding in the same transaction when a content patch changes its (trimmed) text, `OwnedMemoriesMissingEmbedding` finds what a save left unembedded, and `SetMemoryEmbedding` writes one row keyed by the memory ID (upsert, so racing writers cannot duplicate it) only while the memory still holds the embedded text, checked under a `FOR UPDATE` row lock (`lockRowForUpdate`; omitted on SQLite, which has no row locks).
+      `BackfillMemoryEmbeddings` walks `ListMemoriesMissingEmbedding` (active, non-Summary, no Embedding row; keyset-paged) and is idempotent; Summary embeddings stay owned by `UpsertChatSummaryMemory`.
+      Rows that fail to embed are logged by ID and passed over, so they cannot stall the rows behind them; when a whole page fails, a probe input decides between bad input (skip) and an unavailable provider (stop).
     `memory_merge.go`'s `ListMemoryMergeEvents` takes a `models.MemoryMergeEventFilters` (query/survivor-memory/date-range/exclude-reverted) for both the merge-audit HTTP endpoint and `find_context`'s `mode=lifecycle_events`.
   - Files: `fileattachment.go`, `filechunk.go` (chunk storage + search).
     `toFileAttachmentModel` derives **`Source`** (`generated`/`imported`, empty when the chat-message edge was not loaded): linked message origin decides (Assistant ⇒ generated, User ⇒ imported); unlinked rows are generated only for the pipelines' fixed names (`expression-*.png`, `personality-portrait.png`).
     `fileattachment_objects.go` backs object-store cleanup: `List{Chat,Personality,User}FileAttachmentObjectRefs` read the rows a cascade is about to delete, `ReferencedFileAttachmentKeys` reports which keys any remaining row (of any owner) still uses, and `FileAttachmentProviderFileShared` guards the provider file reference copies share.
     **`FileAttachmentFilters.ExcludeReferenceCopies`** (image gallery) drops `CreateFileAttachmentReference` clones in SQL — keeps the earliest row per `(owner, s3_key)`, backed by an `(s3_key, owner)` index — so counts/pagination and classification follow the original row.
   - Personalities & rituals: `personality.go`, `personality_gen_flow.go`, `ritual.go`, `system_ritual_binding.go`.
+    `personality_card.go` holds the imported SillyTavern card blob in its own `PersonalityCard` table (`GetPersonalityCard`); it is deliberately not loaded by `GetPersonality`/`ListPersonalities`, which sit on hot paths, and `CreatePersonality` writes it in the same transaction from `models.Personality.CharacterCard`.
   - Jobs: `job.go` (CRUD + **`UpdateJobProgress`** — a single scoped UPDATE for the opaque `progress` JSON, safe to call frequently from long-running jobs; **`FindLatestActiveChatJob`** finds a chat's running turn by matching recent non-terminal `chat_message` job references against that chat's messages, and **`FindLatestActiveChatMessageJob`** uses `First` so a stranded duplicate job never makes the lookup fail), `agentjob.go`, `scheduler_lock.go` (distributed scheduler lock).
   - Usage: `usagestats.go`.
     Quota-bucket types live in `internal/models` (`billing.go`, `quotabucket.go`); the quota-enforcement logic itself (free-tier limits, trial grants, subscription reconciliation) is in a private extension, not this tree.
@@ -108,6 +112,16 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   A new User-scoped memory is pinned to the active personality when that personality has `auto_pin_memories` on.
   Chat-scoped memories, no active personality (e.g. rehydration passes `uuid.Nil`), auto-pin off, or a failed personality lookup leave it unpinned.
   An explicit `PinnedPersonalityID` on `CreateMemory` wins; folds and links never repin existing memories, and toggling the setting never repins old ones.
+- **Memory folds (`memory_merge.go`):** a `fold_live` into an existing survivor adopts the merger's canonical content and re-embeds the survivor in the same transaction, using the embedding the caller passes to `PersistMemoryMergeGroup` (the datastore never calls the embedding API).
+  The survivor row is locked for the transaction (`lockRowsForUpdate`: `FOR UPDATE` on Postgres only, since SQLite rejects it) so a concurrent edit or star is not overwritten.
+  A survivor that had no embedding gets one keyed by its memory ID with an on-conflict upsert, so a racing writer cannot leave two rows.
+  A survivor that already has more than one embedding row (a data bug) fails the fold or undo with `errDuplicateMemoryEmbedding` and rolls back, rather than snapshotting one row while overwriting all of them.
+  `decideSurvivorRewrite` is the rule: no rewrite when the content only differs in case/whitespace, when the survivor is **starred** (the user's "keep this" signal), or when no embedding was supplied.
+  Absorbed memories are set inactive but keep their embeddings; recall only searches `status=active`, so they are invisible until an undo reactivates them.
+  The undo snapshot records the survivor's prior content and embedding plus each absorbed memory's prior status, so `UndoMemoryMergeEvent` restores every row exactly.
+  Undo restores the survivor's content and embedding only while it still holds the fold's text (`event.Content`); a later edit or fold wins, and the rest of the fold is still undone.
+  Legacy events (snapshot `Version` 0) take the absorbed set from `source_members` in the survivor's scope (the old fold never absorbed cross-scope members), reactivating only rows still inactive.
+  Their embeddings were hard-deleted by the old fold, so undo logs that they need a re-embed backfill.
 - **Memory scope versus source chat:** `Memory.Scope` controls retrieval scope (`User`, `Chat`, or `Summary`); the optional `chat` edge records a memory's source conversation and is valid for User-scoped Global and Personality memories too.
   Moves preserve that provenance edge.
   `PatchMemoriesBatch` rejects changes to actual Chat-scoped Thread memories before individual updates begin, preventing a mixed bulk Move from partially moving User memories.
@@ -133,8 +147,10 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 
 - `chat_checkpoint_test.go`, `chatmessage_test.go`, `chatmessage_mark_read_test.go` — message and checkpoint behavior.
 - `memory_test.go`, `memory2_test.go`, `filechunk_test.go` — retrieval (including **`ListMemories`** excluding Summary unless `level=summary`), ZIP export/import helpers, full import count/persist coverage, and chunks.
+- `memory_embedding_test.go` — stale-embedding drop on content edits (not for Summary), missing-embedding queries, the `SetMemoryEmbedding` content guard and replace, non-content patches on untrimmed legacy rows, the dialect-gated row lock, and backfill batching, per-item retry, skipping a page of bad input, and early stop.
 - `memory_import_metrics_test.go` — memory import stage timings and item counts, including a failed embed stage.
-- `compaction_event_test.go`, `memory_merge_test.go` — SQLite harness mirrors ent FK semantics (`memory_merge_events.compaction_event_id` → `compaction_events` ON DELETE SET NULL); compaction tests cover content-addressed snapshots, merge grouping, page-size cap, and FK null-on-delete.
+- `compaction_event_test.go`, `memory_merge_test.go`, `memory_merge_fold_test.go` — SQLite harness mirrors ent FK semantics (`memory_merge_events.compaction_event_id` → `compaction_events` ON DELETE SET NULL); compaction tests cover content-addressed snapshots, merge grouping, page-size cap, and FK null-on-delete.
+  `memory_merge_fold_test.go` covers the fold rewrite rule (same content, rewrite, starred) and exact fold undo, including legacy events.
   `TestAutoPin_AppliesToEveryMemoryCreationPath` covers the auto-pin rule on each creation path.
 - `accountbackup_test.go` — backup JSONL parsing edge cases such as large records and optional sections.
 - `accountexport_test.go` — conversation export’s timestamp/ID cursor covers a batch boundary where all messages share a timestamp.

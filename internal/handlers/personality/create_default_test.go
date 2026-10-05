@@ -22,6 +22,9 @@ type fakeStore struct {
 	createPersonalityFn                  func(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
 	getPersonalityFn                     func(ctx context.Context, userID, id uuid.UUID) (*models.Personality, error)
 	getPersonalityUsageStatsFn           func(ctx context.Context, userID, personalityID uuid.UUID) (models.PersonalityUsageStats, error)
+	getPersonalityCardFn                 func(ctx context.Context, userID, personalityID uuid.UUID) (*models.PersonalityCard, error)
+	getFileAttachmentFn                  func(ctx context.Context, userID, id uuid.UUID) (*models.FileAttachment, error)
+	getUserByIDFn                        func(ctx context.Context, userID uuid.UUID) (*models.UserResponse, error)
 	updatePersonalityFn                  func(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
 	listExpressionsFn                    func(ctx context.Context, userID, personalityID uuid.UUID) ([]models.PersonalityExpression, error)
 	upsertExpressionFn                   func(ctx context.Context, userID, personalityID uuid.UUID, key string, req models.UpdatePersonalityExpressionRequest) (*models.PersonalityExpression, error)
@@ -59,6 +62,24 @@ func (f *fakeStore) GetPersonalityUsageStats(ctx context.Context, userID, person
 		return f.getPersonalityUsageStatsFn(ctx, userID, personalityID)
 	}
 	return models.PersonalityUsageStats{}, nil
+}
+func (f *fakeStore) GetFileAttachment(ctx context.Context, userID, id uuid.UUID) (*models.FileAttachment, error) {
+	if f.getFileAttachmentFn != nil {
+		return f.getFileAttachmentFn(ctx, userID, id)
+	}
+	return nil, errors.New("not implemented")
+}
+func (f *fakeStore) GetPersonalityCard(ctx context.Context, userID, personalityID uuid.UUID) (*models.PersonalityCard, error) {
+	if f.getPersonalityCardFn != nil {
+		return f.getPersonalityCardFn(ctx, userID, personalityID)
+	}
+	return nil, nil
+}
+func (f *fakeStore) GetUserByID(ctx context.Context, userID uuid.UUID) (*models.UserResponse, error) {
+	if f.getUserByIDFn != nil {
+		return f.getUserByIDFn(ctx, userID)
+	}
+	return &models.UserResponse{ID: userID, Username: "tester"}, nil
 }
 func (f *fakeStore) UpdatePersonality(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error) {
 	if f.updatePersonalityFn != nil {

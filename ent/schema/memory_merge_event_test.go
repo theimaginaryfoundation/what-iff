@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,4 +50,30 @@ func TestMemoryMergeUndoSnapshotUnmarshalJSON(t *testing.T) {
 			require.Equal(t, tt.wantConfidence, snapshot.PriorConfidence)
 		})
 	}
+}
+
+// The fold-rewrite / exact-undo fields round-trip through the custom UnmarshalJSON, and a legacy
+// row (only the original three keys) decodes with every new field at its zero value.
+func TestMemoryMergeUndoSnapshotRoundTripsUndoFields(t *testing.T) {
+	absorbedID := uuid.New()
+	in := MemoryMergeUndoSnapshot{
+		PriorConfidence:          0.45,
+		PriorChainMetadataWasNil: true,
+		Version:                  MemoryMergeUndoSnapshotVersion,
+		CanonicalContent:         "Prefers dark mode in every editor",
+		ContentRewritten:         true,
+		PriorContent:             "Prefers dark mode",
+		PriorEmbedding:           []float32{0.125, -1, 3.5e-7},
+		AbsorbedMembers:          []MemoryMergeAbsorbedMember{{MemoryID: absorbedID, PriorStatus: "active"}},
+	}
+	data, err := json.Marshal(in)
+	require.NoError(t, err)
+
+	var out MemoryMergeUndoSnapshot
+	require.NoError(t, json.Unmarshal(data, &out))
+	require.Equal(t, in, out)
+
+	var legacy MemoryMergeUndoSnapshot
+	require.NoError(t, json.Unmarshal([]byte(`{"prior_confidence":"high","prior_chain_metadata_was_nil":true}`), &legacy))
+	require.Equal(t, MemoryMergeUndoSnapshot{PriorConfidence: 0.9, PriorChainMetadataWasNil: true}, legacy)
 }

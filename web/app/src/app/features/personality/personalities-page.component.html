@@ -23,6 +23,22 @@
       </button>
       <button
         type="button"
+        class="inline-flex items-center gap-1.5 rounded-lg border border-(--btn-secondary-border) bg-(--btn-secondary) px-3.5 py-[0.4375rem] text-[0.8125rem] font-semibold text-(--btn-secondary-text) hover:bg-(--color-surface-input) focus:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent) disabled:cursor-not-allowed disabled:opacity-60"
+        [disabled]="isImportingCard()"
+        (click)="cardFileInput.click()"
+      >
+        {{ isImportingCard() ? 'Importing…' : 'Import card' }}
+      </button>
+      <input
+        #cardFileInput
+        class="sr-only"
+        type="file"
+        accept=".json,application/json,.png,image/png"
+        aria-label="SillyTavern character card file (JSON or PNG)"
+        (change)="onCardFileChosen($event)"
+      />
+      <button
+        type="button"
         class="inline-flex items-center gap-1.5 rounded-lg bg-(--cta) px-3.5 py-[0.4375rem] text-[0.8125rem] font-semibold text-(--cta-text) hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)"
         (click)="navigateGenerate()"
       >

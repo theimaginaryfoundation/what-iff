@@ -1628,6 +1628,58 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /personality/import/sillytavern:
+    post:
+      summary: Import a SillyTavern character card
+      description: |
+        Creates a personality from a SillyTavern `chara_card_v2` (or `chara_card_v3`) JSON document sent as the request body.
+        The card's `system_prompt`, `description`, `personality` and `scenario` are flattened into the personality's system prompt under
+        `### [Description]` / `### [Personality]` / `### [Scenario]` headers (a card with only a `system_prompt` gets no headers).
+        A character book of 5 or fewer enabled entries is flattened under `### [Lore]`; a larger one is returned in `lore_files` for the
+        client to upload as file attachments to the new personality.
+        Greetings, `mes_example`, `post_history_instructions`, tags, extensions and any unknown fields are not applied to behavior; the
+        card's whole `data` object is stored verbatim so exporting the personality returns it intact.
+        The personality name is made unique (`Name (2)`) if the user already has one with that name.
+        If the flattened prompt would exceed the system prompt limit, the card's `scenario` and then `personality` fields are left out of the prompt (they stay with the card and come back on export) and a warning says so; if it is still too long the import is refused with `system_prompt_too_long`.
+        The body may also be a SillyTavern PNG card (`image/png` with the card embedded as a `chara`/`ccv3` text chunk).
+        The server does not store the picture; the client attaches it as the personality's cover image.
+      tags: [Personality Management]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SillyTavernCard'
+          image/png:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '201':
+          description: Personality created from the card
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalityCardImportResult'
+        '400':
+          description: Not a character card (including a PNG with no embedded card, or invalid JSON), unsupported spec, no prompt content, or the flattened prompt exceeds the system prompt limit even after dropping `scenario` and `personality` (`system_prompt_too_long`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Card exceeds the 8 MB size limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /personality/generate:
     get:
       summary: Get or create personality generation flow
@@ -1888,6 +1940,70 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /personality/{id}/export/sillytavern:
+    get:
+      summary: Export a personality as a SillyTavern character card
+      description: |
+        Downloads the personality as a `chara_card_v2` JSON document.
+        When the personality was imported from a card, the stored `data` object is the base (so creator, tags, greetings and extensions
+        survive) and the current name and system prompt are laid over it.
+        A system prompt containing the structural `### [Description]` / `### [Personality]` / `### [Scenario]` headers is split back into
+        those card fields; if the headers are absent or were edited the whole prompt exports as `system_prompt`.
+        `creator` is the owner's username unless the imported card already named an author.
+        With `format=png` the card is embedded in the personality's cover image instead (the SillyTavern PNG card format); a personality with no cover image gets a 400.
+      tags: [Personality Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Personality ID
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          required: false
+          description: '`json` (default) returns the card document; `png` returns the cover image with the card embedded.'
+          schema:
+            type: string
+            enum: [json, png]
+            default: json
+      responses:
+        '200':
+          description: Character card
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SillyTavernCard'
+            image/png:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              description: Attachment header with the sanitized personality name as filename
+              schema:
+                type: string
+                example: 'attachment; filename="Vera Calder.json"'
+        '400':
+          description: Invalid personality ID, or `format=png` for a personality with no cover image
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Personality not found
           content:
             application/json:
               schema:
@@ -2488,7 +2604,7 @@ paths:
     post:
       summary: Undo a memory merge event
       description: >
-        Reverts one merge log entry (restores prior chain metadata or deletes a created survivor).
+        Reverts one merge log entry. Undoing a fold_live restores the survivor's prior confidence, chain metadata and, when the fold rewrote it, its content and embedding, and returns every absorbed memory to its prior status. Undoing a link withdraws the cross-reference; undoing a legacy create deletes the created survivor.
       tags: [Memory Management]
       parameters:
         - name: id
@@ -7576,7 +7692,65 @@ components:
           type: string
           format: date-time
           description: When the snapshot was captured.
+        inputs:
+          allOf:
+            - $ref: '#/components/schemas/ContextInputs'
+          nullable: true
+          description: >-
+            What this context was built from, by reference (IDs and short hashes, never content).
+            Absent on snapshots captured before it existed.
       required: [segments, total_tokens, budget_tokens, captured_at]
+
+    ContextInputs:
+      type: object
+      description: >-
+        Input manifest for one assistant turn: references to the memories, mode, scratchpad and
+        checkpoint summary the model context was built from, so "why was this loaded?" can be
+        answered after the fact.
+      properties:
+        memories:
+          type: array
+          description: Memories retrieved for this turn, in load order.
+          items:
+            $ref: '#/components/schemas/ContextMemoryInput'
+        replayed_memory_ids:
+          type: array
+          description: Memories carried into this turn from earlier turns' context.
+          items:
+            type: string
+            format: uuid
+        memory_enrichment_failed:
+          type: boolean
+          description: True when automatic memory loading failed for this turn.
+        mood_id:
+          type: string
+          format: uuid
+          description: The active mode (mood) when one shaped the turn.
+        scratchpad_sha:
+          type: string
+          description: First 12 hex characters of the SHA-256 of the scratchpad that was in context.
+        summary_sha:
+          type: string
+          description: First 12 hex characters of the SHA-256 of the checkpoint summary that was in context.
+
+    ContextMemoryInput:
+      type: object
+      description: One memory retrieved for a turn.
+      properties:
+        id:
+          type: string
+          format: uuid
+        scope:
+          type: string
+          description: Memory scope (User, Chat).
+        stage:
+          type: string
+          enum: [prefetch, tool]
+          description: prefetch = loaded automatically for the turn; tool = pulled in by the agent during the turn.
+        relevance:
+          type: number
+          description: Retrieval similarity in [0,1], when the memory came from vector search.
+      required: [id, stage]
 
     ChatMessageResponse:
       type: object
@@ -8070,6 +8244,71 @@ components:
       required:
         - chat_count
         - last_used_at
+
+    SillyTavernCard:
+      type: object
+      description: A SillyTavern character card envelope (`chara_card_v2`; `chara_card_v3` is also accepted on import).
+      properties:
+        spec:
+          type: string
+          enum: [chara_card_v2, chara_card_v3]
+        spec_version:
+          type: string
+          example: '2.0'
+        data:
+          type: object
+          additionalProperties: true
+          description: |
+            The card data. Fields we do not model (greetings, tags, extensions, character_book, ...) are preserved verbatim.
+            Typical keys: name, description, personality, scenario, first_mes, mes_example, creator_notes, system_prompt,
+            post_history_instructions, alternate_greetings, tags, creator, character_version, extensions, character_book.
+      required:
+        - spec
+        - spec_version
+        - data
+
+    PersonalityCardLoreFile:
+      type: object
+      description: A character-book entry to upload as a file attachment to the imported personality.
+      properties:
+        name:
+          type: string
+          description: Entry display name (its comment, else its keywords).
+        file_name:
+          type: string
+          description: Safe, unique file name (`.md`) to upload the entry under.
+        keys:
+          type: array
+          items:
+            type: string
+          description: The entry's trigger keywords; useful as the attachment description.
+        content:
+          type: string
+      required:
+        - name
+        - file_name
+        - keys
+        - content
+
+    PersonalityCardImportResult:
+      type: object
+      properties:
+        personality:
+          $ref: '#/components/schemas/Personality'
+        lore_files:
+          type: array
+          items:
+            $ref: '#/components/schemas/PersonalityCardLoreFile'
+          description: Character-book entries too numerous to flatten into the prompt; the client uploads each via `POST /personality/{id}/file-attachment`.
+        warnings:
+          type: array
+          items:
+            type: string
+          description: Non-fatal notes about the import (disabled entries skipped, fields dropped to fit the prompt limit, unexpected spec_version, ...).
+      required:
+        - personality
+        - lore_files
+        - warnings
 
     PersonalityExpression:
       type: object

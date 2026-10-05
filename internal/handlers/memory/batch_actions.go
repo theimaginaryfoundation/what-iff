@@ -212,7 +212,7 @@ func (h *Handler) PatchMemoriesBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.ds.PatchMemoriesBatch(r.Context(), userID, models.BatchPatchMemoryInput{
+	result, err := h.store.PatchMemoriesBatch(r.Context(), userID, models.BatchPatchMemoryInput{
 		IDs:       ids,
 		Patch:     patch,
 		AllOrNone: req.AllOrNone,
@@ -229,6 +229,9 @@ func (h *Handler) PatchMemoriesBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		handlerutils.RespondWithError(w, h.logger, status, handlerutils.CodeNotSet, message, err)
 		return
+	}
+	if patch.Content != nil {
+		h.embedMemories(r.Context(), userID, memoryIDs(result.Results))
 	}
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, result)

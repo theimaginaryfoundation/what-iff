@@ -16,6 +16,12 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
 - **Maintenance prompts:** Chat naming, personality generation, conversation summaries, memory extraction, scratchpad summarize/update (often **manual** `ResponseNewParams` — see architecture doc).
   **Archival** checkpoint scratchpad update and memory extraction use fixed small models (`archivalOpenAIModel` / `archivalClaudeModel` in `archival_models.go`); **checkpoint conversation summary always uses `archivalOpenAIModel` (`gpt-5-mini`)** for both OpenAI and Claude chats via unified `summarizeConversationForCheckpoint` (OpenAI threads `PreviousResponseID`; Claude renders explicit input items from inference `ModelContext`).
   Persona `archival_model` and custom memory read/write prompts are deprecated and ignored; optional `scratchpad_update_prompt` is still used for checkpoint scratchpad updates.
+- **Background backfills** (started from `internal/server`): `StartSummaryMemoryBackfill` (`message.go`) copies legacy checkpoint summaries into Summary memories once at boot.
+  `StartMemoryEmbeddingBackfill` (`memory_embedding_backfill.go`) embeds active non-Summary memories that have no Embedding row, via `datastore.BackfillMemoryEmbeddings` and the memory tool's batch embeddings call.
+  It runs once, at startup, on the server lifecycle context, and never on a timer: memories are embedded when they are saved, so it only catches up older rows and any save-time failure since the last restart.
+  The pass runs only on the instance that wins the Postgres advisory lock `MemoryEmbeddingBackfillLockKey` (default 80920033); other instances, and databases without advisory locks, skip it quietly.
+  It does not start at all under mock/local LLM backends (`nonVendorLLM`), where embeddings have no provider.
+  Both backfills are idempotent and only log failures; a pass stops early when the provider is unreachable (e.g. the deny-network client under mock/local backends).
 - **Rituals:** User and system rituals, image ritual flow, registry of built-in system rituals.
 - **Jobs:** Running scheduled/async agent work (`agentjob_run.go`, `agentjob_schedule.go`) and tools that create jobs.
 - **Thread rehydration (`thread_rehydration.go`):** Lazy summarization of **imported** threads.
@@ -68,6 +74,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   Cancellation follows the analogous `FinalizeCancelledChatJobWithPartial` path.
 - **Context X-ray capture:** `generateAssistantForMessage` (`message.go`) is a thin wrapper: it runs telemetry + `dispatchAssistantGeneration` (the provider branch), then on success calls **`persistContextBreakdown`** — one funnel so every provider path (mock/local/image-ritual/OpenAI/Claude/Gemini/Chat-Completions) captures the same per-turn snapshot.
   **`buildContextBreakdown`** maps `ModelContext.SegmentBreakdown` into `models.ContextBreakdown` (segment/token rows, the checkpoint policy's `checkpointMaxLastInputTokens` display budget, model+provider), and the value is persisted on the assistant message via `datastore.SetChatMessageContextBreakdown` (best-effort: logged, never fails the turn) **and** set in-memory.
+  It also attaches **`Inputs`** (`context_inputs.go`): the turn's input manifest of memory IDs with their stage (`prefetch` vs `tool`) and relevance, memories replayed from earlier turns, the active mood, and short SHA-256 prefixes of the scratchpad and summary, references only and never content.
   Read back by the frontend "Context" panel tab.
   Estimates are cl100k text-token estimates, exclude image-token usage, and are not billed usage.
   It is deliberately **not** stored as a `ChatMessageContextItem` — `appendMergedAdditionalContext` re-injects every non-MEMORY item type back into the model context, which would feed the breakdown JSON back to the model; a dedicated `chat_message.context_breakdown` column avoids that.
@@ -110,6 +117,10 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   **`checkpointArchivalContext`** appends the just-completed assistant reply before cloning (inference `ModelContext` predates that turn; OpenAI gets it via `PreviousResponseID`).
   The summarizer uses the **pristine** original `ModelContext` plus explicit `AssistantReply` through unified `summarizeConversationForCheckpoint` (gpt-5-mini, same prompt as OpenAI); it must not reuse the scratchpad clone.
   OpenAI summarizer threads off assistant `ResponseID`; Claude has no OpenAI thread ID.
+- **Checkpoint memory merge embeddings:** `planFoldGroup` (`memory_merge_infer.go`) sets `NeedsEmbedding` when there is no survivor or when the canonical content differs from the survivor's, and `applyMemoryCompactionPlan` (`memory.go`) embeds the canonical content before `PersistMemoryMergeGroup`.
+  The datastore then decides whether the survivor is rewritten (never when starred).
+  Candidates carry `Starred` from the turn's loaded memories, so the planner skips that embedding for a survivor it can see is starred.
+  If that embedding fails, a survivor fold still runs and keeps the survivor's wording; only a new-row fold is skipped.
 - **Compaction throttle:** `decideCheckpoint` (`postprocessing_policy.go`) gates the **token-based** triggers behind `MinTurnsBetweenCheckpoints` (`checkpointMinTurnsBetweenCheckpoints` = 5) so a burst of tool-heavy turns (agent job runs with large web-search/tool results) cannot force compaction every turn.
   The scheduled turn-count trigger (`MinAssistantMessagesSinceCheckpoint`) is exempt.
 - **Inference `call_path`:** New top-level flows that call the model should use **`Agent.withCallPath(ctx, path)`** (or ensure nested calls set `telemetry.WithCallPath`) so provider token metrics are labeled; see architecture doc.

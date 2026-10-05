@@ -38,7 +38,7 @@ func TestDeletePersonality_ReleasesAttachmentObjects(t *testing.T) {
 		},
 	}
 	h := NewHandler(store, zap.NewNop(), nil)
-	h.files = fs
+	h.fileStore = fs
 
 	req := httptest.NewRequest(http.MethodDelete, "/personality/"+personalityID.String(), nil)
 	req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, userID))
