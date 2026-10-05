@@ -98,6 +98,10 @@ func (User) Edges() []ent.Edge {
 			Annotations(entsql.OnDelete(entsql.Cascade)),
 		edge.To("safety_violation_events", SafetyViolationEvent.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),
+		// Discord relay bots. Cascade so deleting a user removes their bots, and through
+		// them their bindings and message links. See ent/schema/discord.go.
+		edge.To("discord_bots", DiscordBot.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}, userPrivateEdges()...)
 }
 

@@ -1017,6 +1017,8 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 			type text NOT NULL DEFAULT 'Context',
 			status text NOT NULL DEFAULT 'active',
 			confidence real NOT NULL DEFAULT 0.6,
+			provenance text NOT NULL DEFAULT 'user',
+			source_speaker text,
 			chain_metadata json,
 			link_group_id uuid,
 			starred bool NOT NULL DEFAULT false,
@@ -1036,6 +1038,9 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 		_, err := db.Exec(stmt)
 		require.NoError(t, err)
 	}
+	// A summary's provenance depends on whether its chat is a Discord relay thread
+	// (externalRelayChat), so every schema with chats and memories has the relay tables too.
+	createDiscordTestTables(t, db)
 }
 
 func buildZipReaderForTest(t *testing.T, entries map[string]string) *zip.Reader {

@@ -34,6 +34,7 @@ var sandboxedToolSurface = map[string]struct {
 	agenttools.WebSearchFunctionToolSpec.Name: {true, "default off; no account data read (offered only when a backend is configured)"},
 	agenttools.FetchPageToolSpec.Name:         {true, "default off; no account data read (offered only when a backend is configured)"},
 	agenttools.RecallToolSpec.Name:            {true, "only this conversation's memories and summary"},
+	discordPostToolName:                       {true, "a sandboxed chat may only post to its own bound channel (discordChannelsFor); other channels are refused"},
 }
 
 // conditionalSandboxedTools are classified tools that are only offered when some deployment
@@ -42,6 +43,7 @@ var sandboxedToolSurface = map[string]struct {
 var conditionalSandboxedTools = map[string]struct{}{
 	agenttools.WebSearchFunctionToolSpec.Name: {},
 	agenttools.FetchPageToolSpec.Name:         {},
+	discordPostToolName:                       {}, // only where the persona's bot has a connected channel
 }
 
 func sortedNames(set map[string]struct{}) []string {
