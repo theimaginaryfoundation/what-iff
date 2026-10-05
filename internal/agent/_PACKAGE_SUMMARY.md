@@ -161,7 +161,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   `turn_queue_wait` (per-chat turn gate) is likewise recorded only when a turn queued behind an earlier one.
   Quota-gate rejections count `whatiff.quota.rejections` by `call_path`.
   Each tool call is timed on `whatiff.agent.tool.duration`; `toolMetricName` keeps the `tool` label bounded (catalog function tools by name, `mcp__*` as `mcp`, anything else, including made-up names, as `other`).
-- **Delegated subagent path:** `run_subagent` uses a minimal context builder (`base+personality system prompt`, optional scratchpad, provided message only), explicitly excludes history/checkpoint/memory segments, and calls providers directly to avoid post-turn side effects.
+- **Delegated subagent path:** `run_subagent` uses a minimal context builder (`base+personality system prompt`, optional scratchpad, provided message only), explicitly excludes history/checkpoint/memory segments, and calls providers directly to avoid post-turn side effects. The target model's provider and `tool_support`/`vision_support` come from its models-table row (seed catalog fallback), the same data chat turns gate on. Routing: Anthropic/z.ai via the Messages API (`ZAIProvider` for GLM), Gemini/Mistral/DeepSeek/Qwen/Xiaomi via the shared Chat Completions helpers (`runSubagentChatCompletions`: `buildOpenAIChatCompletionsParams`, `openAIChatCompletionFunctionTools`, `openAIChatCompletionsAdapter`), everything else via OpenAI Responses. Only the requested skills' MCP tools are exposed; if the model is not `tool_support` and skills would add tools, the call fails with a specific error rather than dropping or force-sending them. Missing API keys and provider API errors are surfaced verbatim (provider-labelled) in the tool result.
 - **Metering boundary:** The agent gates each billable turn through
   `metering.Meter.Check` and returns its opaque `Decision` to `Record` after
   completion. It owns neither quota math nor billing behavior: a private
@@ -190,6 +190,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 - `mcp_tools_test.go` — MCP tool wiring (OpenAI + Claude MCP config mapping).
 - `processtoolcall_test.go` — catalog-derived tool list and dispatch handler registration (including `list_models`, `list_personalities`, `run_subagent`).
 - `subagent_tools_test.go` — minimal subagent context composition and argument validation behavior.
+- `subagent_providers_test.go` — subagent routing to Chat Completions providers (Qwen et al.) and z.ai against fake endpoints: tool-support gate, text-only rendering, missing-key and provider-error diagnostics.
 - `testsupport_test.go` — shared datastore and agent constructors for unit tests.
 - `rituals_test.go`, `system_rituals_test.go` — ritual registry and system IDs.
 - `tools_test.go` — native web-search registration and logical-toggle coverage.
