@@ -164,7 +164,7 @@ func TestGetMemories_GetUserByIDErrorIsReturned(t *testing.T) {
 	mock.ExpectQuery("SELECT .*").WillReturnError(errCoverageTestSentinel)
 
 	a := newTestAgent(ds)
-	_, _, err := a.getMemories(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hello")
+	_, _, err := a.getMemories(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hello", false)
 	require.Error(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -195,7 +195,7 @@ func TestApplyMemoryCompactionPlan_EmptyPlanIsNoOp(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
 	require.NotPanics(t, func() {
-		a.applyMemoryCompactionPlan(context.Background(), uuid.New(), uuid.New(), uuid.New(), memoryCompactionPlan{}, nil)
+		a.applyMemoryCompactionPlan(context.Background(), uuid.New(), uuid.New(), uuid.New(), memoryCompactionPlan{}, nil, false)
 	})
 }
 
@@ -212,7 +212,7 @@ func TestApplyMemoryCompactionPlan_LinkWithTooFewMembersIsSkipped(t *testing.T) 
 		},
 	}
 	require.NotPanics(t, func() {
-		a.applyMemoryCompactionPlan(context.Background(), uuid.New(), uuid.New(), uuid.New(), plan, nil)
+		a.applyMemoryCompactionPlan(context.Background(), uuid.New(), uuid.New(), uuid.New(), plan, nil, false)
 	})
 	require.NoError(t, mock.ExpectationsWereMet())
 }

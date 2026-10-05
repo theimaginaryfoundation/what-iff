@@ -82,8 +82,11 @@ type ImportConversation struct {
 	Tags                       []string
 	IsFavorite                 bool
 	IsAutoMood                 bool
-	AccountExport              bool
-	RestoreReady               bool
+	// Sandboxed restores the chat's sandbox flag from an account export; absent (an export from
+	// before the flag existed) leaves the chat unsandboxed.
+	Sandboxed     bool
+	AccountExport bool
+	RestoreReady  bool
 }
 
 // MaxImportTitleLen is the maximum number of runes from a conversation title included in

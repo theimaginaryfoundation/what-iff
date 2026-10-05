@@ -112,6 +112,8 @@ type listStore interface {
 	ListPersonalities(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.PersonalityFilters) (*models.PaginatedResponse, error)
 	ListRituals(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.RitualFilters) (*models.PaginatedResponse, error)
 	ListFileAttachments(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.FileAttachmentFilters) (*models.PaginatedResponse, error)
+	// ListFileAttachmentsInChatScope backs a sandboxed chat's file listing (its own uploads).
+	ListFileAttachmentsInChatScope(ctx context.Context, userID, chatID uuid.UUID, personalityID *uuid.UUID, limit int) ([]*models.FileAttachment, error)
 	ListChats(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.ChatFilters) (*models.PaginatedResponse, error)
 	ListAgentJobs(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.AgentJobFilters) (*models.PaginatedResponse, error)
 	ListChatMCPServers(ctx context.Context, userID, chatID uuid.UUID) ([]*models.MCPServer, error)
@@ -200,6 +202,9 @@ func (t *ListTool) List(ctx context.Context, chat *models.Chat, args []byte) (st
 	}
 
 	kind := strings.ToLower(strings.TrimSpace(a.Kind))
+	if what, blocked := sandboxedListKind(chat, kind); blocked {
+		return t.fail(kind, sandboxedNote(what))
+	}
 	switch kind {
 	case listKindModels:
 		return t.listModels(ctx)
@@ -220,6 +225,27 @@ func (t *ListTool) List(ctx context.Context, chat *models.Chat, args []byte) (st
 	default:
 		return t.fail(kind, fmt.Sprintf("unknown kind %q; expected one of: models, personalities, skills, files, conversations, jobs, mcp_servers", a.Kind))
 	}
+}
+
+// sandboxedListKind reports whether a sandboxed chat may not list this kind, and what to call it
+// in the refusal. Jobs, skills, personalities and conversations are account content outside the
+// sandbox. Files are listed (listSandboxFiles shows only this conversation's own uploads). Models
+// and MCP servers are not account content.
+func sandboxedListKind(chat *models.Chat, kind string) (what string, blocked bool) {
+	if !chat.IsSandboxed() {
+		return "", false
+	}
+	switch kind {
+	case listKindJobs:
+		return "Listing scheduled jobs", true
+	case listKindSkills:
+		return "Listing your skills", true
+	case listKindPersonalities:
+		return "Listing your other personalities", true
+	case listKindConversations:
+		return "Listing other conversations", true
+	}
+	return "", false
 }
 
 func (t *ListTool) fail(kind, msg string) (string, error) {

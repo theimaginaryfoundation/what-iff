@@ -84,6 +84,12 @@ func (t *MoveFilesTool) Move(ctx context.Context, chat *models.Chat, args []byte
 		return marshalToolResult(moveFilesResult{Error: msg}, moveFilesToolName)
 	}
 
+	// The gallery is the owner's account-wide image library, outside a sandbox. The tool is not
+	// offered there; this refuses a call the model makes anyway.
+	if chat.IsSandboxed() {
+		return fail(sandboxedNote("Sorting gallery images"))
+	}
+
 	var a moveFilesArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return fail(fmt.Sprintf("invalid arguments: %v", err))

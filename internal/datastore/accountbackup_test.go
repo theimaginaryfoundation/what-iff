@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
 	"strings"
 	"testing"
 	"time"
@@ -970,4 +971,35 @@ func TestReadBackupJSONLRituals(t *testing.T) {
 	require.Equal(t, rec.ID, got[0].ID)
 	require.Equal(t, rec.Name, got[0].Name)
 	require.Equal(t, rec.PersonalityID, got[0].PersonalityID)
+}
+
+// A backup restores a chat's sandbox flag; a backup from before the flag existed restores it false.
+func TestAdminImportAccountBackup_RestoresChatSandboxFlag(t *testing.T) {
+	ds, cleanup := newAccountBackupTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := uuid.New()
+	createAccountBackupTestUser(t, ds, userID)
+	createAccountBackupTestModelAndPreference(t, ds, userID)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	sandboxedID, ordinaryID := uuid.New(), uuid.New()
+	zr := buildZipReaderForTest(t, map[string]string{
+		"manifest.json": `{"format_version":1}`,
+		"chats.jsonl": accountBackupJSONL(t,
+			models.AccountBackupChat{ID: sandboxedID, Name: "sandboxed", CreatedAt: now, UpdatedAt: now, Sandboxed: true},
+			models.AccountBackupChat{ID: ordinaryID, Name: "ordinary", CreatedAt: now, UpdatedAt: now},
+		),
+	})
+	result, err := ds.AdminImportAccountBackup(ctx, userID, zr, nil)
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Sections["chats"].Created)
+
+	// Select just the column: the shared test schema predates some chat columns.
+	for id, want := range map[uuid.UUID]bool{sandboxedID: true, ordinaryID: false} {
+		got, err := ds.dbClient.Chat.Query().Where(entchat.ID(id)).Select(entchat.FieldSandboxed).Bools(ctx)
+		require.NoError(t, err)
+		require.Equal(t, []bool{want}, got)
+	}
 }

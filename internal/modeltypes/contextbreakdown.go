@@ -70,6 +70,9 @@ type ContextInputs struct {
 	// were in context (first 12 hex characters of their SHA-256).
 	ScratchpadSHA string `json:"scratchpad_sha,omitempty"`
 	SummarySHA    string `json:"summary_sha,omitempty"`
+	// Sandboxed is true when the chat was a sandbox when the turn ran: its context holds only
+	// memories created in the chat and no scratchpad.
+	Sandboxed bool `json:"sandboxed,omitempty"`
 }
 
 // ContextMemoryInput is one retrieved memory: which one, how it got here, and how relevant the

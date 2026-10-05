@@ -58,6 +58,7 @@ func toChatModel(e *ent.Chat) *models.Chat {
 		chatModel.ImportHash = &h
 	}
 	chatModel.RehydrationState = e.RehydrationState
+	chatModel.Sandboxed = e.Sandboxed
 
 	if e.ResponseID != "" {
 		chatModel.ResponseID = &e.ResponseID
@@ -84,7 +85,11 @@ func toChatModel(e *ent.Chat) *models.Chat {
 		chatModel.PersonalityID = e.Edges.Personality.ID
 		chatModel.PersonalityName = e.Edges.Personality.Name
 		chatModel.SystemPrompt = e.Edges.Personality.SystemPrompt
-		chatModel.Scratchpad = e.Edges.Personality.Scratchpad
+		// The personality scratchpad is shared by all of its conversations, so a sandboxed chat is
+		// never handed it: this is the one place it enters a Chat model.
+		if !chatModel.IsSandboxed() {
+			chatModel.Scratchpad = e.Edges.Personality.Scratchpad
+		}
 		chatModel.PersonalityExpressionsEnabled = e.Edges.Personality.ExpressionsEnabled
 	}
 
@@ -256,7 +261,8 @@ func (d *Datastore) CreateChat(ctx context.Context, userID uuid.UUID, chat model
 		SetModelID(chat.ModelID).
 		SetTags(normalizedTags).
 		SetNillableIsFavorite(chat.IsFavorite).
-		SetIsAutoMood(true)
+		SetIsAutoMood(true).
+		SetSandboxed(chat.Sandboxed)
 
 	if chat.LastMessageTime != nil {
 		create.SetLastMessageTime(*chat.LastMessageTime)
@@ -546,9 +552,24 @@ func (d *Datastore) GetChatContext(ctx context.Context, userID, chatID uuid.UUID
 		return nil, err
 	}
 
+	scratchpad := chat.Scratchpad
+	if chat.IsSandboxed() && chat.PersonalityID != uuid.Nil {
+		// toChatModel keeps the shared personality scratchpad out of a sandboxed chat's model
+		// context, but this is the owner's own view of it (the context panel edits and saves it
+		// back to the personality), so read it directly: showing it blank would let a save wipe it.
+		p, err := d.dbClient.Personality.Query().
+			Where(personality.ID(chat.PersonalityID), personality.HasUserWith(user.ID(userID))).
+			Select(personality.FieldScratchpad).
+			Only(ctx)
+		if err != nil {
+			return nil, err
+		}
+		scratchpad = p.Scratchpad
+	}
+
 	return &models.ChatContext{
 		ChatID:           chat.ID,
-		ActiveScratchpad: chat.Scratchpad,
+		ActiveScratchpad: scratchpad,
 		Summary:          chat.CheckpointSummary,
 	}, nil
 }
@@ -941,6 +962,11 @@ func (d *Datastore) UpdateChat(ctx context.Context, userID uuid.UUID, chat model
 	}
 	update.SetIsAutoMood(chat.IsAutoMood)
 	update.SetNillableArchived(chat.Archived)
+	// Only an explicit change writes the flag (see models.Chat.SetSandboxed): a stale copy saved by
+	// a turn that started before the user changed it must not write the old value back.
+	if chat.SetSandboxed {
+		update.SetSandboxed(chat.Sandboxed)
+	}
 
 	entChat, err := update.Save(ctx)
 	if err != nil {

@@ -61,12 +61,17 @@ func contextInputs(chatCtx *chatContext, modelContext *provider.ModelContext) *m
 	if chatCtx.activeMood != nil {
 		in.MoodID = chatCtx.activeMood.ID.String()
 	}
+	sandboxed := false
 	if chatCtx.chat != nil {
 		in.ScratchpadSHA = shortContentHash(chatCtx.chat.Scratchpad)
 		in.SummarySHA = shortContentHash(chatCtx.chat.CheckpointSummary)
+		sandboxed = chatCtx.chat.IsSandboxed()
+		in.Sandboxed = sandboxed
 	}
 
-	if len(in.Memories) == 0 && len(in.ReplayedMemoryIDs) == 0 && !in.MemoryEnrichmentFailed &&
+	// A manifest is only worth writing when it records something; a sandboxed chat always
+	// records, so that it was a sandbox is on file.
+	if !sandboxed && len(in.Memories) == 0 && len(in.ReplayedMemoryIDs) == 0 && !in.MemoryEnrichmentFailed &&
 		in.MoodID == "" && in.ScratchpadSHA == "" && in.SummarySHA == "" {
 		return nil
 	}

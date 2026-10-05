@@ -304,7 +304,9 @@ func (a *Agent) handleEphemeralPrompt(
 		if err == nil && personality != nil {
 			chatCtx.chat.PersonalityID = personality.ID
 			chatCtx.chat.SystemPrompt = personality.SystemPrompt
-			chatCtx.chat.Scratchpad = personality.Scratchpad
+			if !chatCtx.chat.IsSandboxed() { // see datastore.toChatModel: no scratchpad in a sandboxed chat
+				chatCtx.chat.Scratchpad = personality.Scratchpad
+			}
 		}
 	}
 

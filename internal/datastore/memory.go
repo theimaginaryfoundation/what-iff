@@ -20,6 +20,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/embedding"
 	"github.com/theimaginaryfoundation/what-iff/ent/memory"
 	entpersonality "github.com/theimaginaryfoundation/what-iff/ent/personality"
+	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
 	entschema "github.com/theimaginaryfoundation/what-iff/ent/schema"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
@@ -150,14 +151,22 @@ func (d *Datastore) CreateMemory(ctx context.Context, userID uuid.UUID, mem mode
 
 	// If provided, validate chat ownership before linking.
 	if mem.ChatID != uuid.Nil {
-		chatExists, err := tx.Chat.Query().
+		chatRow, err := tx.Chat.Query().
 			Where(
 				entchat.ID(mem.ChatID),
 				entchat.HasOwnerWith(
 					user.ID(userID),
 				),
 			).
-			Exist(ctx)
+			Select(entchat.FieldSandboxed).
+			Only(ctx)
+		if ent.IsNotFound(err) {
+			d.logger.Error(i18n.T2("memory.chat_not_found_or_unauthorized", "ChatID", mem.ChatID.String(), "UserID", userID.String()))
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, ErrChatNotFound
+		}
 		if err != nil {
 			d.logger.Error(i18n.T1("query.failed", "Entity", "chat"), zap.Error(err))
 			if rerr := tx.Rollback(); rerr != nil {
@@ -165,12 +174,10 @@ func (d *Datastore) CreateMemory(ctx context.Context, userID uuid.UUID, mem mode
 			}
 			return nil, err
 		}
-		if !chatExists {
-			d.logger.Error(i18n.T2("memory.chat_not_found_or_unauthorized", "ChatID", mem.ChatID.String(), "UserID", userID.String()))
-			if rerr := tx.Rollback(); rerr != nil {
-				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
-			}
-			return nil, ErrChatNotFound
+		// Whatever the caller asked for, a memory written from a sandboxed chat is Chat-scoped:
+		// nothing a sandbox learns reaches the owner's account, however the write got here.
+		if chatRow.Sandboxed {
+			mem.Scope = string(memory.ScopeChat)
 		}
 	}
 
@@ -1295,7 +1302,7 @@ func (d *Datastore) GetMemoryByIDPrefix(ctx context.Context, userID uuid.UUID, p
 		if rerr := tx.Rollback(); rerr != nil {
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 		}
-		return nil, fmt.Errorf("memory ID prefix %q is ambiguous; pass the full UUID", prefix)
+		return nil, fmt.Errorf("%w (%q); pass the full UUID", ErrMemoryIDPrefixAmbiguous, prefix)
 	}
 	if err := tx.Commit(); err != nil {
 		d.logger.Error(i18n.T("tx.commit_failed"), zap.Error(err))
@@ -2329,7 +2336,11 @@ func toMemoryRecord(m *ent.Memory) models.MemoryRecord {
 	return rec
 }
 
-func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.UUID, queryEmbedding []float32, activePersonalityID uuid.UUID) ([]*models.Memory, error) {
+// GetRelatedMemories returns the active memories nearest queryEmbedding that the asking chat may
+// use: its own Chat-scoped memories plus User-scoped ones visible to the active personality. A
+// sandboxed chat gets only its own Chat-scoped memories. The scope is applied in the WHERE clause,
+// so a sandbox still gets a full set of its own matches (never a post-filtered top-5).
+func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.UUID, queryEmbedding []float32, activePersonalityID uuid.UUID, sandboxed bool) ([]*models.Memory, error) {
 
 	// Start transaction
 	tx, err := d.dbClient.Tx(ctx)
@@ -2375,15 +2386,16 @@ func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.
 		)
 	}
 
+	readable := memory.Or(chatScopedPredicate, userScopedPredicate)
+	if sandboxed {
+		readable = chatScopedPredicate
+	}
 	dbEmbeddings, err := tx.Embedding.Query().
 		Where(
 			embedding.HasMemoryWith(
 				memory.HasOwnerWith(user.ID(userId)),
 				memory.StatusEQ(memory.StatusActive),
-				memory.Or(
-					chatScopedPredicate,
-					userScopedPredicate,
-				),
+				readable,
 			),
 		).
 		Where(func(s *sql.Selector) {
@@ -2434,7 +2446,10 @@ func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.
 // by vector distance to queryEmbedding. GetRelatedMemories intentionally excludes Summary-scope
 // rows (they are internal checkpoint state, not facts); this is the counterpart recall's
 // source_type=summaries search uses instead. limit is clamped to [1, 20], defaulting to 5.
-func (d *Datastore) GetRelatedSummaryMemories(ctx context.Context, userID uuid.UUID, queryEmbedding []float32, limit int) ([]*models.Memory, error) {
+//
+// onlyChatID, when not uuid.Nil, restricts the search to that chat's own summary: a sandboxed chat
+// reads no other conversation's summary.
+func (d *Datastore) GetRelatedSummaryMemories(ctx context.Context, userID uuid.UUID, queryEmbedding []float32, limit int, onlyChatID uuid.UUID) ([]*models.Memory, error) {
 	if limit <= 0 {
 		limit = 5
 	}
@@ -2446,14 +2461,16 @@ func (d *Datastore) GetRelatedSummaryMemories(ctx context.Context, userID uuid.U
 	// Format vector as PostgreSQL array literal to avoid parameter binding issues
 	vectorStr := embVec.String()
 
+	summaryPreds := []predicate.Memory{
+		memory.HasOwnerWith(user.ID(userID)),
+		memory.StatusEQ(memory.StatusActive),
+		memory.ScopeEQ(memory.ScopeSummary),
+	}
+	if onlyChatID != uuid.Nil {
+		summaryPreds = append(summaryPreds, memory.HasChatWith(entchat.ID(onlyChatID)))
+	}
 	dbEmbeddings, err := d.dbClient.Embedding.Query().
-		Where(
-			embedding.HasMemoryWith(
-				memory.HasOwnerWith(user.ID(userID)),
-				memory.StatusEQ(memory.StatusActive),
-				memory.ScopeEQ(memory.ScopeSummary),
-			),
-		).
+		Where(embedding.HasMemoryWith(summaryPreds...)).
 		Where(func(s *sql.Selector) {
 			// Use string formatting to embed vector and threshold directly in SQL
 			s.Where(sql.ExprP(fmt.Sprintf("embedding <-> '%s' <= %f", vectorStr, MemoryRelevanceThreshold)))

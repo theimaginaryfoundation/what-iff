@@ -617,6 +617,7 @@ func (a *Agent) buildModelContextForChatMessage(ctx context.Context, userID uuid
 		UserPrompt:                 userPrompt,
 		CurrentMessage:             chatMessage,
 		Memories:                   chatCtx.memories,
+		UserNameLine:               chatCtx.userNameLine,
 		LiveMemories:               chatCtx.liveMemories,
 		ActiveMood:                 chatCtx.activeMood,
 		ActiveMoodRituals:          chatCtx.activeMoodRituals,
@@ -817,8 +818,15 @@ type chatContext struct {
 	liveMemories           []*models.Memory
 	prefetchedMemoryCount  int // leading liveMemories from enrichment; the rest came from tools
 	memoryEnrichmentFailed bool
-	model                  string
-	modelProvider          string
+	// userNameLine is this turn's profile line naming the user (the first line of memories on a
+	// chat's first message), recorded explicitly so it can be persisted as its own context item
+	// type instead of being recognised by its text. Empty when the turn has no such line.
+	userNameLine string
+	// offeredTools is the set of function-tool names given to the model for this turn (or this
+	// sub-agent loop); dispatchToolUse refuses any other. See setOfferedTools.
+	offeredTools  map[string]struct{}
+	model         string
+	modelProvider string
 	// modelSubscriptionTier is the model's raw SubscriptionTier string
 	// ("low"/"medium"/"high"/"ultra"), passed to the meter which classifies it for
 	// free-chat gating. Empty means unknown; the meter treats that conservatively.
@@ -920,6 +928,11 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 	doneMood := a.timeTurnStage(ctx, turnStageMood)
 	chatCtx.activeMood = a.resolveActiveMood(ctx, chatJob.UserID, chatCtx, chatMessage.Message, chatMessage.ID)
 	moodRituals := a.loadMoodRituals(ctx, chatJob.UserID, chatCtx.activeMood)
+	if chatCtx.chat != nil && chatCtx.chat.IsSandboxed() {
+		// A mood's rituals carry skill text and linked MCP servers from the owner's account; a
+		// sandboxed conversation keeps the mood's own prompt but none of that.
+		moodRituals = nil
+	}
 	chatCtx.activeMoodRituals = moodRituals
 	doneMood()
 
@@ -1199,6 +1212,12 @@ func (a *Agent) generateAssistantForMessageMock(ctx context.Context, userID uuid
 		return a.handleImageGenerateRitual(ctx, userID, chatMessage, chatCtx, modelContext)
 	}
 
+	// The mock adapter offers no tools to a model, but record the same agent-tool set the real
+	// paths do (no MCP discovery: mock mode is hermetic), so a scripted tool call is gated exactly
+	// like a real model's.
+	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
+	chatCtx.setOfferedTools(policy.offeredAgentToolNames())
+
 	adapter := provider.NewMockAdapter(provider.MockAdapterConfig{
 		Mode:           a.mockLLMMode,
 		EchoText:       chatMessage.Message,
@@ -1300,6 +1319,9 @@ func (a *Agent) openAIResponseParamsForChat(ctx context.Context, chatCtx *chatCo
 		mcpSpecs := a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)
 		mcpTools := tools.OpenAIFunctionTools(mcpSpecs)
 		toolParams = provider.BuildOpenAITools(chatCtx.model, chatTools, agentTools, mcpTools)
+		chatCtx.setOfferedTools(offeredToolNames(append(tools.AgentFunctionToolSpecs(policy.showMoodTools), mcpSpecs...), policy.disabledTools))
+	} else {
+		chatCtx.setOfferedTools(nil) // no tools are offered, so none may run
 	}
 	a.recordToolDefinitionEstimate(modelCtx, toolParams)
 	var include []responses.ResponseIncludable
@@ -1386,6 +1408,7 @@ func (a *Agent) generateAssistantForMessageClaude(ctx context.Context, userID uu
 	if policy.toolsEnabled {
 		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
 	}
+	chatCtx.setOfferedTools(offeredToolNames(specs, policy.disabledTools))
 	claudeFunctionTools := claudeFunctionTools(specs)
 	a.recordToolDefinitionEstimate(modelContext, claudeFunctionTools)
 	webSearchEnabled := nativeAnthropic && policy.nativeWebSearch
@@ -1426,6 +1449,7 @@ func (a *Agent) generateAssistantForMessageGemini(ctx context.Context, userID uu
 	if policy.toolsEnabled {
 		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
 	}
+	chatCtx.setOfferedTools(offeredToolNames(specs, policy.disabledTools))
 	geminiFunctionTools := geminiFunctionTools(specs)
 	a.recordToolDefinitionEstimate(modelContext, geminiFunctionTools)
 	toolNames := make([]string, 0, len(geminiFunctionTools))
@@ -1469,6 +1493,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 	if policy.toolsEnabled {
 		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
 	}
+	chatCtx.setOfferedTools(offeredToolNames(specs, policy.disabledTools))
 	functionTools := openAIChatCompletionFunctionTools(specs)
 	a.recordToolDefinitionEstimate(modelContext, functionTools)
 
@@ -1526,6 +1551,7 @@ func (a *Agent) generateAssistantForMessageOpenAIChatCompletions(ctx context.Con
 	if policy.toolsEnabled {
 		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatMessage.ChatID, policy.ritualIDs)...)
 	}
+	chatCtx.setOfferedTools(offeredToolNames(specs, policy.disabledTools))
 	functionTools := openAIChatCompletionFunctionTools(specs)
 	a.recordToolDefinitionEstimate(modelContext, functionTools)
 
@@ -2022,7 +2048,8 @@ func additionalContextItemsFromChatContext(chatCtx *chatContext) []models.Additi
 			continue
 		}
 		item := models.AdditionalContextItem{Type: models.AdditionalContextTypeMemory, Content: formatted}
-		if strings.HasPrefix(formatted, "The user's name is ") {
+		if chatCtx.isUserNameLine(formatted) {
+			item.Type = models.AdditionalContextTypeUserName
 			out = append(out, item)
 			continue
 		}
@@ -2064,7 +2091,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 	}
 
 	// Get relevant memories.
-	memories, liveMemories, memoryEnrichmentFailed := a.loadTurnMemories(ctx, memoryProgress, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message)
+	memories, liveMemories, memoryEnrichmentFailed := a.loadTurnMemories(ctx, memoryProgress, userID, chatMessage.ChatID, parentChat.PersonalityID, chatMessage.Message, parentChat.IsSandboxed())
 	// Resolve model from the chat's model_id (authoritative). Do not trust model_name
 	// alone — it can be stale, and a missing edge used to fall through to defaultModel
 	// (gpt-5.1) even when the user selected a different provider.
@@ -2076,10 +2103,13 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 	// ExpressionsEnabled comes from the personality edge already eager-loaded by GetChat.
 	expressionsEnabled := parentChat.PersonalityExpressionsEnabled
 
+	userNameLine := a.recognizeUserNameLine(ctx, userID, memories)
+
 	return &chatContext{
 		userID:                 userID,
 		chat:                   parentChat,
 		memories:               memories,
+		userNameLine:           userNameLine,
 		liveMemories:           liveMemories,
 		prefetchedMemoryCount:  len(liveMemories),
 		memoryEnrichmentFailed: memoryEnrichmentFailed,
@@ -2191,7 +2221,7 @@ func (a *Agent) assertUserCanRunChatModel(ctx context.Context, userID uuid.UUID,
 	return fmt.Errorf("experimental model provider %q: %w", modelProvider, datastore.ErrExperimentalModelNotAllowed)
 }
 
-func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string) ([]string, []*models.Memory, error) {
+func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, error) {
 	if a.testHooks.GetMemoriesOverride != nil {
 		formatted, err := a.testHooks.GetMemoriesOverride(ctx, userID, chatID, personalityID, userMessage)
 		return formatted, nil, err
@@ -2200,7 +2230,7 @@ func (a *Agent) getMemoriesForEnrichment(ctx context.Context, userID uuid.UUID, 
 		a.logger.Debug("mock/local mode: skipping memory enrichment", zap.String("chat_id", chatID.String()))
 		return nil, nil, nil
 	}
-	return a.getMemories(ctx, userID, chatID, personalityID, userMessage)
+	return a.getMemories(ctx, userID, chatID, personalityID, userMessage, sandboxed)
 }
 
 // memoryEnrichmentRuns reports whether getMemoriesForEnrichment will actually retrieve memories.
@@ -2215,11 +2245,11 @@ func (a *Agent) memoryEnrichmentRuns() bool {
 // timeline as a "Load Memory" row: running during retrieval, then complete with the memories (or
 // an error). The row is only added when retrieval really runs, so mock/local turns (which skip
 // it) never show one.
-func (a *Agent) loadTurnMemories(ctx context.Context, progress *memoryLoadProgress, userID, chatID, personalityID uuid.UUID, userMessage string) ([]string, []*models.Memory, bool) {
+func (a *Agent) loadTurnMemories(ctx context.Context, progress *memoryLoadProgress, userID, chatID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, bool) {
 	if progress != nil && a.memoryEnrichmentRuns() {
 		progress.Started(ctx)
 	}
-	memories, liveMemories, failed := a.getMemoriesBestEffort(ctx, userID, chatID, personalityID, userMessage)
+	memories, liveMemories, failed := a.getMemoriesBestEffort(ctx, userID, chatID, personalityID, userMessage, sandboxed)
 	if progress != nil {
 		progress.Finished(ctx, memories, failed)
 	}
@@ -2228,9 +2258,9 @@ func (a *Agent) loadTurnMemories(ctx context.Context, progress *memoryLoadProgre
 
 // getMemoriesBestEffort attempts memory enrichment and degrades gracefully on any failure.
 // When it fails, it logs the error and returns an empty memory list along with a failure flag.
-func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string) ([]string, []*models.Memory, bool) {
+func (a *Agent) getMemoriesBestEffort(ctx context.Context, userID uuid.UUID, chatID uuid.UUID, personalityID uuid.UUID, userMessage string, sandboxed bool) ([]string, []*models.Memory, bool) {
 	defer a.timeTurnStage(ctx, turnStageMemoryEnrichment)()
-	memories, liveMemories, err := a.getMemoriesForEnrichment(ctx, userID, chatID, personalityID, userMessage)
+	memories, liveMemories, err := a.getMemoriesForEnrichment(ctx, userID, chatID, personalityID, userMessage, sandboxed)
 	if err != nil {
 		// Note: the underlying memory retrieval path logs errors at the failure site(s).
 		// Keep this at Debug to avoid duplicate error logs while still attaching user/chat context.
@@ -2776,7 +2806,10 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 	var newScratchpadContent string
 	var newScratchpadResponseID *string
 	hasScratchpad := false
-	if chatCtx.chat.PersonalityID != uuid.Nil {
+	// A sandboxed chat never touches the personality-wide scratchpad; memory extraction still
+	// runs, off the turn's own response instead of the scratchpad update's (see checkpointSteps).
+	sandboxed := chatCtx.chat.IsSandboxed()
+	if runScratchpad, _ := checkpointSteps(chatCtx.chat, false); runScratchpad {
 		doneScratchpad := a.timeTurnStage(ctx, turnStageCheckpointScratchpad)
 		newScratchpad, err := a.updateScratchpad(ctx, userID, agentMessage.ResponseID, chatCtx)
 		doneScratchpad()
@@ -2797,7 +2830,10 @@ func (a *Agent) runCheckpointOpenAI(ctx context.Context, userID uuid.UUID, chatM
 	// delta (old vs new) without advancing the user thread pointer. If scratchpad generation
 	// failed, intentionally defer both extraction and roll-forward dedupe to the next checkpoint:
 	// compaction requires that delta, and a later checkpoint safely retries it.
-	if hasScratchpad {
+	if sandboxed {
+		newScratchpadResponseID = agentMessage.ResponseID
+	}
+	if _, runExtraction := checkpointSteps(chatCtx.chat, hasScratchpad); runExtraction {
 		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
 		a.extractMemoriesWithScratchpadDelta(ctx, userID, chatMessage.ChatID, newScratchpadResponseID, inferenceModelContext, chatCtx, compactionEventID)
 		doneMemory()
@@ -2848,8 +2884,12 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	var newScratchpadContent string
 	hasScratchpad := false
 	var scratchpadCtx *provider.ModelContext
-	if chatCtx.chat.PersonalityID != uuid.Nil {
+	runScratchpad, _ := checkpointSteps(chatCtx.chat, false)
+	if runScratchpad || chatCtx.chat.IsSandboxed() {
+		// Sandboxed chats skip the scratchpad step but still extract memories from this context.
 		scratchpadCtx = archivalCtx.Clone()
+	}
+	if runScratchpad {
 		doneScratchpad := a.timeTurnStage(ctx, turnStageCheckpointScratchpad)
 		newScratchpad, err := a.updateScratchpadClaude(ctx, userID, chatCtx, scratchpadCtx)
 		doneScratchpad()
@@ -2869,7 +2909,7 @@ func (a *Agent) runCheckpointClaude(ctx context.Context, userID uuid.UUID, chatM
 	// scratchpad is the just-generated content. If scratchpad generation failed, intentionally
 	// defer both extraction and roll-forward dedupe to the next checkpoint: compaction requires
 	// that delta, and a later checkpoint safely retries it.
-	if hasScratchpad {
+	if _, runExtraction := checkpointSteps(chatCtx.chat, hasScratchpad); runExtraction {
 		doneMemory := a.timeTurnStage(ctx, turnStageCheckpointMemory)
 		if err := a.extractMemoriesWithScratchpadDeltaClaude(ctx, userID, chatMessage.ChatID, scratchpadCtx, modelContext, chatCtx, compactionEventID); err != nil {
 			a.logger.Error("failed to extract memories during Claude checkpoint", zap.Error(err))

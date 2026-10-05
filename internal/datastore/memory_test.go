@@ -988,6 +988,7 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 			chat_model uuid,
 			chat_personality uuid,
 			chat_active_mood uuid,
+			sandboxed boolean NOT NULL DEFAULT false,
 			user_chats uuid NOT NULL
 		)`,
 		`CREATE TABLE personalities (

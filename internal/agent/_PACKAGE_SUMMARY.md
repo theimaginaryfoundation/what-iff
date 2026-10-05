@@ -168,6 +168,21 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   metering implementation may be linked to enforce usage limits and record
   usage, while builds without one fall back to `metering.NoopMeter` (allow
   all, record nothing). See `internal/metering`.
+- **Sandboxed chats:** `sandbox_context.go` assembles context for a chat with `Chat.Sandboxed`; the tool-side rules are in `internal/agent/tools/sandbox.go`.
+  A sandboxed chat is one that strangers can talk in (for example a Discord thread): it cannot read anything outside itself and has a locked-down tool set.
+  `getMemories` retrieves only the chat's own Chat-scoped memories (scoped in SQL) and adds no owner-name line.
+  Because the flag can change mid-thread, `messageContextBuilder.build` re-checks the memory items persisted on earlier messages against the chat's own memories in one `MemoryIDsCreatedInChat` query (an id the chat did not create, an id-less memory line and a failed lookup are all dropped).
+  A persisted `USER_NAME` item is dropped too, so the name is never replayed.
+  A sandboxed chat replays persisted tool results like any chat, so a thread keeps its recent tool output across turns.
+  The scratchpad is never injected (the loader blanks it; the builder, the sub-agent, the agent-job personality override and `update_scratchpad` are guarded too), and `buildTurnToolPolicy` removes `update_scratchpad`, `create_agent_job` and `move_files` from the offered tools whatever the user's `disabled_tools` say.
+  `sandboxed_tool_surface_test.go` classifies every catalog tool as offered or not in a sandboxed chat, so a new tool must be placed deliberately; `conditionalSandboxedTools` lets other builds mark conditionally offered tools.
+  `checkpointSteps` decides the checkpoint plan: a sandboxed chat skips the scratchpad step but still extracts memories, from the turn's own response and without the scratchpad delta.
+  A sandboxed chat's checkpoint merges only memories that chat created (`sandboxedCompactionLiveMemories`, then `datastore.WithChatMemoriesOnly` on the fold and link writes, which also forces Chat scope), so it cannot fold, rewrite or retire the owner's memories.
+  `contextInputs` records `sandboxed` in the X-ray manifest.
+  `run_subagent` in a sandboxed chat refuses another `personality_id` and any `skill_ids`, and its tool loop runs under a chat carrying the parent's sandbox flag.
+  `create_agent_job` is neither offered nor accepted in a sandboxed chat (the job would run in a new chat that is not sandboxed).
+  Auto mood selection does not run in a sandboxed chat (`autoMoodSelectionSkipped`); its `change_mood` picks only its own personality's modes, refuses `model_override`, and mood rituals are not loaded.
+  In every chat, dispatch refuses a tool the model was not offered that turn (`setOfferedTools`, recorded on every generation path including the sub-agent loops).
 
 ## Testing
 

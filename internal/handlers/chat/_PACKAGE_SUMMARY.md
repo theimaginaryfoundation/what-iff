@@ -56,6 +56,8 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
 - **Deleting a chat releases its attachment objects.**
   The ent cascade removes the attachment rows on the chat's messages without touching the object store, so `DeleteChat` reads them first (`ListChatFileAttachmentObjectRefs`) and calls `storage.ReleaseAttachmentObjects` after the delete.
   Keys a reference copy in another chat still uses are kept; failures are logged, never returned.
+- **Sandbox flag:** chat create, `PUT` and `PATCH` accept `sandboxed`.
+  The update paths mark it as an explicit change (`SetSandboxed`), so only a request that names it writes it.
 
 ## Testing
 

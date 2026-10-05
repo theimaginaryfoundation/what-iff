@@ -52,6 +52,11 @@ func (t *VectorStoreMemoryTool) CreateMemoryTool(ctx context.Context, chat *mode
 		memoryArgs.Scope = MemoryScopeChat
 		t.logger.Warn("invalid scope, defaulting to chat scope", zap.String("user_id", chat.UserID.String()), zap.String("chat_id", chat.ID.String()), zap.String("scope", memoryArgs.Scope))
 	}
+	// A sandboxed chat's memories stay inside it: the scope is always Chat, whatever was asked, so
+	// nothing a sandbox learns (or is told) reaches the owner's account.
+	if chat.IsSandboxed() {
+		memoryArgs.Scope = MemoryScopeChat
+	}
 
 	// Create embedding for the memory content
 	embedding, err := t.CreateEmbedding(ctx, trimmedContent)

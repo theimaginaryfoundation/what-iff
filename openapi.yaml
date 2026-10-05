@@ -3777,6 +3777,10 @@ paths:
                 is_favorite:
                   type: boolean
                   description: Whether the chat is marked as favorite
+                sandboxed:
+                  type: boolean
+                  description: >-
+                    Optional sandbox flag; see the `sandboxed` property of the Chat schema.
                 tts_autoplay_override:
                   type: boolean
                   nullable: true
@@ -4034,6 +4038,10 @@ paths:
                 is_favorite:
                   type: boolean
                   description: Optional favorite flag
+                sandboxed:
+                  type: boolean
+                  description: >-
+                    Optional sandbox flag; see the `sandboxed` property of the Chat schema.
                 tts_autoplay_override:
                   type: boolean
                   nullable: true
@@ -4114,6 +4122,10 @@ paths:
                 archived:
                   type: boolean
                   description: When true, hides the thread from default lists; set to false to restore from the archive
+                sandboxed:
+                  type: boolean
+                  description: >-
+                    Optional sandbox flag; see the `sandboxed` property of the Chat schema.
                 tts_autoplay_override:
                   type: boolean
                   nullable: true
@@ -7346,6 +7358,15 @@ components:
         archived:
           type: boolean
           description: When true, the thread is in the archive and omitted from default list responses
+        sandboxed:
+          type: boolean
+          description: >
+            When true the thread is a sandbox: it cannot read anything outside itself and has a locked-down
+            tool set. It reads no memories except those created in the thread, no other conversation,
+            no scratchpad, no account-wide files, jobs, skills or other personalities, and only the files
+            uploaded to the thread. Memories it creates are visible only inside the thread. It cannot
+            update the scratchpad, schedule jobs, or run sub-agents as other personalities or with skills,
+            and it is never given the owner's name or auto-selected moods. Defaults to false.
         created_at:
           type: string
           format: date-time
@@ -7360,6 +7381,7 @@ components:
         tags: ["work", "todo"]
         is_favorite: false
         archived: false
+        sandboxed: false
         created_at: "2024-01-01T00:00:00Z"
         updated_at: "2024-01-01T00:00:00Z"
 
@@ -7924,6 +7946,11 @@ components:
         summary_sha:
           type: string
           description: First 12 hex characters of the SHA-256 of the checkpoint summary that was in context.
+        sandboxed:
+          type: boolean
+          description: >-
+            Whether the chat was a sandbox when this turn ran. A sandboxed turn has only memories created
+            in the chat and no scratchpad. Always present on turns with a manifest.
 
     ContextMemoryInput:
       type: object

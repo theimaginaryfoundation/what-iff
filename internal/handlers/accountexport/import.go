@@ -785,6 +785,7 @@ func toImportConversations(parsed []exporter.ParsedConversation, personalityIDs 
 			Tags:                       c.WhatiffTags,
 			IsFavorite:                 c.WhatiffIsFavorite,
 			IsAutoMood:                 c.WhatiffIsAutoMood,
+			Sandboxed:                  c.WhatiffSandboxed,
 			AccountExport:              true,
 			RestoreReady:               strings.TrimSpace(c.WhatiffCheckpointSummary) != "",
 		})

@@ -5,6 +5,7 @@ import { ContextBreakdownTabComponent } from './tabs/context-breakdown-tab.compo
 import { ContextMemoriesTabComponent } from './tabs/context-memories-tab.component';
 import { ContextScratchpadTabComponent } from './tabs/context-scratchpad-tab.component';
 import { ContextToolsTabComponent } from './tabs/context-tools-tab.component';
+import { ThreadSandboxComponent } from './thread-sandbox.component';
 import {
   BrainIconComponent,
   LayersIconComponent,
@@ -21,6 +22,7 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
     ContextScratchpadTabComponent,
     ContextMemoriesTabComponent,
     ContextToolsTabComponent,
+    ThreadSandboxComponent,
     ContextBreakdownTabComponent,
     XIconComponent,
     NoteIconComponent,
@@ -98,9 +100,11 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
           />
           }
           @case ('memories') {
+          <app-thread-sandbox />
           <app-context-memories-tab
             [chatId]="context.activeChatId()"
             [personalityId]="context.activeChat()?.personality_id ?? null"
+            [sandboxed]="context.activeChat()?.sandboxed === true"
           />
           }
           @case ('tools') {

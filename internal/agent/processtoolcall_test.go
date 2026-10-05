@@ -117,7 +117,7 @@ func TestToolHandlers_ExtraHandlersOverrideDefaults(t *testing.T) {
 	}
 
 	a := &Agent{logger: zap.NewNop()}
-	out, _, err := a.dispatchToolUse(context.Background(), &chatContext{chat: &models.Chat{}}, provider.ToolUse{
+	out, _, err := a.dispatchToolUse(context.Background(), offering(&chatContext{chat: &models.Chat{}}, "list"), provider.ToolUse{
 		ID:    "override-list",
 		Name:  "list",
 		Input: []byte(`{}`),
@@ -136,7 +136,7 @@ func TestDispatchToolUse_CreateAgentJobValidation_NoAttachments(t *testing.T) {
 	ctx := context.Background()
 	out, attachments, callErr := a.dispatchToolUse(
 		ctx,
-		&chatContext{chat: &models.Chat{UserID: uuid.New()}},
+		offering(&chatContext{chat: &models.Chat{UserID: uuid.New()}}, "create_agent_job"),
 		provider.ToolUse{
 			ID:    "tool-create-job",
 			Name:  "create_agent_job",

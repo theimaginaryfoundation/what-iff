@@ -51,6 +51,7 @@ func TestAddLoadedMemories_PersistsForAdditionalContext(t *testing.T) {
 	}
 	chatCtx := &chatContext{
 		memories:     []string{"The user's name is Alice"},
+		userNameLine: "The user's name is Alice",
 		liveMemories: nil,
 	}
 	chatCtx.addLoadedMemories([]*models.Memory{mem})

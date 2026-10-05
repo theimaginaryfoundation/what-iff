@@ -193,6 +193,9 @@ func (d *Datastore) persistImportedConversation(ctx context.Context, tx *ent.Tx,
 		create.SetArchived(!conv.RestoreReady).
 			SetIsAutoMood(conv.IsAutoMood).
 			SetIsFavorite(conv.IsFavorite)
+		if conv.Sandboxed {
+			create.SetSandboxed(true)
+		}
 		if conv.RestoreReady {
 			create.SetRehydrationState(models.RehydrationStateReady)
 			create.SetCheckpointSummary(conv.CheckpointSummary)

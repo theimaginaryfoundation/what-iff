@@ -23,6 +23,12 @@ export interface Chat {
    * opened for the first time after being restored (unarchived); its summary is then generated in the background.
    */
   rehydration_state?: string;
+  /**
+   * When true the thread is sandboxed: it can't read anything outside itself (no memories made
+   * elsewhere, other conversations, scratchpad, or account-wide files/jobs/skills/personalities),
+   * only files uploaded to it, with a locked-down tool set. Absent on older responses = false.
+   */
+  sandboxed?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -52,6 +58,8 @@ export interface CreateChatRequest {
   model_id?: string;
   tags?: string[];
   is_favorite?: boolean;
+  /** Optional. Create the chat sandboxed. */
+  sandboxed?: boolean;
 }
 
 export interface UpdateChatRequest {
@@ -62,6 +70,7 @@ export interface UpdateChatRequest {
   disabled_tools?: string[];
   tags?: string[];
   is_favorite?: boolean;
+  sandboxed?: boolean;
 }
 
 export interface PatchChatRequest {
@@ -79,6 +88,8 @@ export interface PatchChatRequest {
   /** Set to true to explicitly clear the active mood (Auto mood). */
   clear_active_mood?: boolean;
   archived?: boolean;
+  /** Turn the thread's sandbox on or off. */
+  sandboxed?: boolean;
 }
 
 export interface ChatContext {

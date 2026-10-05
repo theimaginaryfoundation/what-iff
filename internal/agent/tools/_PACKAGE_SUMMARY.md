@@ -55,6 +55,13 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
   Provider-facing tool prompts remain unchanged on `FunctionToolSpec.Description`.
 - **Spec parity:** `toolconstants_test.go` asserts OpenAI function tool projection stays aligned with the shared catalog; Claude schema sanitization is tested in `internal/agent/provider`.
 - **Execution location:** Some tools are defined here only as shared schema/registration (`run_subagent`) while execution lives in `internal/agent` to reuse chat/user/provider context safely.
+- **Sandboxed chats:** `sandbox.go` holds the one rule set for a chat with `Chat.Sandboxed`.
+  `memoryReadableBy` (a fetch by id) allows only a Chat-scoped memory or checkpoint summary of this conversation; `conversationReadable` allows only the chat itself; `fileInChatScope` allows only files uploaded to this conversation.
+  Search retrieval is scoped in SQL (`GetRelatedMemories` takes the sandbox flag, `GetRelatedSummaryMemories` the one chat), and `find_context` lifecycle events list only folds of this chat's own memories.
+  `list` refuses jobs, skills, personalities and conversations, and lists only this conversation's own files (`listSandboxFiles`); `update_scratchpad` and `move_files` refuse.
+  `create_memory` always writes a Chat-scoped memory in a sandboxed chat, whatever scope was asked.
+  A hidden memory, an unknown id and an ambiguous id prefix give a sandboxed chat the same `not found` error (`resolveMemory`).
+  Refusals share `sandboxedNote`, so the model gets one consistent message.
 
 ## Testing
 

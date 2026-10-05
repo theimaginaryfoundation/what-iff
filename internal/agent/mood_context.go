@@ -81,6 +81,9 @@ func (a *Agent) resolveActiveMood(ctx context.Context, userID uuid.UUID, chatCtx
 	if !autoPolicy {
 		return nil
 	}
+	if autoMoodSelectionSkipped(chat) {
+		return nil
+	}
 
 	// ── 2. Auto policy mood selection ────────────────────────────────────────
 	if chat.PersonalityID == uuid.Nil {
@@ -102,6 +105,14 @@ func (a *Agent) resolveActiveMood(ctx context.Context, userID uuid.UUID, chatCtx
 		a.persistActiveMood(ctx, userID, chat.ID, selected)
 	}
 	return selected
+}
+
+// autoMoodSelectionSkipped reports whether auto mood selection must not run for chat: a sandboxed
+// chat (for example a thread strangers talk in) never has a mood picked for it automatically, by
+// the selection model or the single-mood shortcut. A mood already in effect (pinned by the user,
+// or selected before the chat was sandboxed) still applies, subject to the sandbox mood rules.
+func autoMoodSelectionSkipped(chat *models.Chat) bool {
+	return chat.IsSandboxed()
 }
 
 func (a *Agent) isFirstUserMessageInChat(ctx context.Context, userID, chatID, currentMessageID uuid.UUID) bool {
@@ -411,9 +422,21 @@ func (a *Agent) changeMoodTool(ctx context.Context, chatCtx *chatContext, args [
 		return string(result), nil
 	}
 
+	// A sandboxed chat is one that strangers can talk in: it cannot override the model (that
+	// would persistently change the owner's thread and spend the owner's credits), and it may only
+	// pick a mode attached to this conversation's own personality (what list_moods shows).
+	if chat.IsSandboxed() && strings.TrimSpace(req.ModelOverride) != "" {
+		result, _ := json.Marshal(changeMoodResult{Success: false, Error: "model_override is not available in this sandboxed conversation"})
+		return string(result), nil
+	}
+
 	mood, err := a.ds.GetMood(ctx, chat.UserID, moodID)
 	if err != nil {
 		result, _ := json.Marshal(changeMoodResult{Success: false, Error: fmt.Sprintf("mode not found: %v", err)})
+		return string(result), nil
+	}
+	if chat.IsSandboxed() && !a.moodAttachedToPersonality(ctx, chat, moodID) {
+		result, _ := json.Marshal(changeMoodResult{Success: false, Error: "mode not found"})
 		return string(result), nil
 	}
 
@@ -461,4 +484,23 @@ func (a *Agent) changeMoodTool(ctx context.Context, chatCtx *chatContext, args [
 		Model:   resultModel,
 	})
 	return string(result), nil
+}
+
+// moodAttachedToPersonality reports whether a mood is attached to the chat's personality, the same
+// set list_moods offers. It fails closed: a lookup error or a chat with no personality is "no".
+func (a *Agent) moodAttachedToPersonality(ctx context.Context, chat *models.Chat, moodID uuid.UUID) bool {
+	if chat == nil || chat.PersonalityID == uuid.Nil {
+		return false
+	}
+	moods, err := a.ds.GetMoodsForPersonality(ctx, chat.UserID, chat.PersonalityID)
+	if err != nil {
+		a.logger.Warn("mood_context: failed to verify mood membership", zap.Error(err))
+		return false
+	}
+	for _, m := range moods {
+		if m.ID == moodID {
+			return true
+		}
+	}
+	return false
 }

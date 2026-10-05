@@ -36,6 +36,8 @@ type chatUpdateRequest struct {
 	DisabledTools *[]string `json:"disabled_tools,omitempty"`
 	Tags          *[]string `json:"tags,omitempty"`
 	IsFavorite    *bool     `json:"is_favorite,omitempty"`
+	// Sandboxed, when set, changes the chat's sandbox flag. Omit to keep it.
+	Sandboxed *bool `json:"sandboxed,omitempty"`
 }
 
 type chatPatchRequest struct {
@@ -55,6 +57,8 @@ type chatPatchRequest struct {
 	ClearActiveMood bool `json:"clear_active_mood,omitempty"`
 	// Archived hides the thread from default lists or restores it when set to false.
 	Archived *bool `json:"archived,omitempty"`
+	// Sandboxed changes the chat's sandbox flag. Turning it on takes effect on the next turn.
+	Sandboxed *bool `json:"sandboxed,omitempty"`
 }
 
 type markChatReadResponse struct {
@@ -520,6 +524,10 @@ func (h *Handler) UpdateChat(w http.ResponseWriter, r *http.Request) {
 		// Shallow copy of *existing aliases IsFavorite; nil means "omit" for datastore.
 		updated.IsFavorite = nil
 	}
+	if req.Sandboxed != nil {
+		updated.Sandboxed = *req.Sandboxed
+		updated.SetSandboxed = true
+	}
 
 	// Update chat
 	chat, err := h.ds.UpdateChat(r.Context(), userID, updated)
@@ -578,7 +586,7 @@ func (h *Handler) PatchChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Must include at least one field to patch.
-	if req.Name == nil && req.LastMessageTime == nil && req.ModelID == nil && req.PersonalityID == nil && req.DisabledTools == nil && req.Tags == nil && req.IsFavorite == nil && req.ActiveMoodID == nil && req.IsAutoMood == nil && !req.ClearActiveMood && req.Archived == nil {
+	if req.Name == nil && req.LastMessageTime == nil && req.ModelID == nil && req.PersonalityID == nil && req.DisabledTools == nil && req.Tags == nil && req.IsFavorite == nil && req.ActiveMoodID == nil && req.IsAutoMood == nil && !req.ClearActiveMood && req.Archived == nil && req.Sandboxed == nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "No fields to update", nil)
 		return
 	}
@@ -658,6 +666,10 @@ func (h *Handler) PatchChat(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Archived != nil {
 		updated.Archived = req.Archived
+	}
+	if req.Sandboxed != nil {
+		updated.Sandboxed = *req.Sandboxed
+		updated.SetSandboxed = true
 	}
 
 	chat, err := h.ds.UpdateChat(r.Context(), userID, updated)

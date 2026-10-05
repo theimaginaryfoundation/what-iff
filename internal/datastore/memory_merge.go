@@ -26,6 +26,47 @@ import (
 	"go.uber.org/zap"
 )
 
+// MergeGroupOption tunes PersistMemoryMergeGroup and PersistMemoryLinkGroup. Options are variadic
+// so existing callers are unchanged.
+type MergeGroupOption func(*mergeGroupOptions)
+
+type mergeGroupOptions struct {
+	chatOnly bool
+}
+
+// WithChatMemoriesOnly confines a merge or link to the asking chat. It is the datastore-level
+// guard for sandboxed chats, whatever the caller's plan says:
+//   - it may not fold, rewrite, retire or relink a memory made elsewhere (the owner's, or another
+//     conversation's): any such member makes the call fail with ErrMemoryOutsideChat before
+//     anything is written;
+//   - anything it creates is Chat-scoped to the asking chat, never User-scoped.
+func WithChatMemoriesOnly() MergeGroupOption {
+	return func(o *mergeGroupOptions) { o.chatOnly = true }
+}
+
+// ensureMemoriesCreatedInChatTx fails with ErrMemoryOutsideChat when any of ids is one of the
+// user's memories that chatID did not create. IDs that do not exist are ignored (the writes that
+// follow treat them as no-ops).
+func ensureMemoriesCreatedInChatTx(ctx context.Context, tx *ent.Tx, userID, chatID uuid.UUID, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	outside, err := tx.Memory.Query().
+		Where(
+			memory.IDIn(ids...),
+			memory.HasOwnerWith(user.ID(userID)),
+			memory.Not(memory.HasChatWith(entchat.ID(chatID))),
+		).
+		Count(ctx)
+	if err != nil {
+		return err
+	}
+	if outside > 0 {
+		return ErrMemoryOutsideChat
+	}
+	return nil
+}
+
 // PersistMemoryMergeGroup writes one merge grouping using only known memory IDs from
 // thread context (no duplicate scans). When survivorMemoryID is set, that row is
 // updated in place; absorbMemoryIDs are soft-retired when consolidating duplicates.
@@ -46,7 +87,12 @@ func (d *Datastore) PersistMemoryMergeGroup(
 	activePersonalityID uuid.UUID,
 	sourceMembers []models.MemoryMergeSourceMember,
 	compactionEventID *uuid.UUID,
+	opts ...MergeGroupOption,
 ) (*models.Memory, error) {
+	var mergeOpts mergeGroupOptions
+	for _, opt := range opts {
+		opt(&mergeOpts)
+	}
 	if strings.TrimSpace(group.CanonicalContent) == "" {
 		return nil, nil
 	}
@@ -67,8 +113,19 @@ func (d *Datastore) PersistMemoryMergeGroup(
 
 	now := time.Now().UTC()
 	targetScope := memory.Scope(group.Scope)
-	if group.Scope != string(memory.ScopeUser) && group.Scope != string(memory.ScopeChat) {
+	if group.Scope != string(memory.ScopeUser) && group.Scope != string(memory.ScopeChat) || mergeOpts.chatOnly {
 		targetScope = memory.ScopeChat
+	}
+	if mergeOpts.chatOnly {
+		var existingIDs []uuid.UUID
+		if survivorMemoryID != nil && *survivorMemoryID != uuid.Nil {
+			existingIDs = append(existingIDs, *survivorMemoryID)
+		}
+		existingIDs = append(existingIDs, absorbMemoryIDs...)
+		if err := ensureMemoriesCreatedInChatTx(ctx, tx, userID, chatID, existingIDs); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
 	}
 	confidence := group.Confidence
 	if confidence == "" {
@@ -174,7 +231,12 @@ func (d *Datastore) PersistMemoryLinkGroup(
 	sourceMembers []models.MemoryMergeSourceMember,
 	compactionEventID *uuid.UUID,
 	activePersonalityID uuid.UUID,
+	opts ...MergeGroupOption,
 ) (*models.MemoryMergeEvent, error) {
+	var linkOpts mergeGroupOptions
+	for _, opt := range opts {
+		opt(&linkOpts)
+	}
 	if len(existingMemberIDs)+len(newMembers) < 2 {
 		// A link needs at least two surfaces to relate.
 		return nil, nil
@@ -194,8 +256,14 @@ func (d *Datastore) PersistMemoryLinkGroup(
 	now := time.Now().UTC()
 	linkGroupID := uuid.New()
 	targetScope := memory.Scope(scope)
-	if scope != string(memory.ScopeUser) && scope != string(memory.ScopeChat) {
+	if scope != string(memory.ScopeUser) && scope != string(memory.ScopeChat) || linkOpts.chatOnly {
 		targetScope = memory.ScopeChat
+	}
+	if linkOpts.chatOnly {
+		if err := ensureMemoriesCreatedInChatTx(ctx, tx, userID, chatID, existingMemberIDs); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
 	}
 
 	// New members follow the same auto-pin rule as any other new memory; existing members keep
@@ -807,6 +875,22 @@ func (d *Datastore) ListMemoryMergeEvents(ctx context.Context, userID uuid.UUID,
 	}
 	if filters.ExcludeReverted {
 		query = query.Where(entmerge.RevertedAtIsNil())
+	}
+	if filters.OnlyChatID != nil {
+		// Only folds whose survivor memory was created in the chat: a link's members can come from
+		// anywhere, so link events are left out. The survivor id is a plain column (no edge), hence
+		// the subquery on the memories table.
+		chatID := *filters.OnlyChatID
+		query = query.Where(
+			entmerge.MergeTypeEQ(entmerge.MergeTypeFoldLive),
+			func(s *sql.Selector) {
+				t := sql.Table(memory.Table)
+				s.Where(sql.In(
+					s.C(entmerge.FieldSurvivorMemoryID),
+					sql.Select(t.C(memory.FieldID)).From(t).Where(sql.EQ(t.C(memory.ChatColumn), chatID)),
+				))
+			},
+		)
 	}
 
 	totalCount, err := query.Clone().Count(ctx)

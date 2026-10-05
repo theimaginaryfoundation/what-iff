@@ -82,9 +82,54 @@ func (t *ListTool) listSkills(ctx context.Context, chat *models.Chat, a listArgs
 	return t.okPaged(listKindSkills, items, listTruncationNote("skills", meta, len(items)), meta)
 }
 
+// listSandboxFiles lists the files uploaded to this conversation: the only files a sandboxed chat
+// can see, whatever scope was asked for. Name and type filters still apply.
+//
+// The scope is one conversation's uploads, and ListFileAttachmentsInChatScope caps it (newest
+// first, at most maxFilesInChatScope rows), so filtering and paging the slice here is bounded and
+// stable for the call; it is not the account-wide library listFiles pages in SQL.
+func (t *ListTool) listSandboxFiles(ctx context.Context, chat *models.Chat, a listArgs, limit, pageNum int) (string, error) {
+	scoped, err := t.store.ListFileAttachmentsInChatScope(ctx, chat.UserID, chat.ID, nil, 0)
+	if err != nil {
+		return t.fail(listKindFiles, fmt.Sprintf("failed to list files: %v", err))
+	}
+	name, _ := validateNonEmptyString(a.Filter)
+	fileType, _ := validateNonEmptyString(a.FileType)
+	matched := make([]*models.FileAttachment, 0, len(scoped))
+	for _, fa := range scoped {
+		if fa == nil {
+			continue
+		}
+		if name != "" && !strings.Contains(strings.ToLower(fa.Name), strings.ToLower(name)) {
+			continue
+		}
+		if fileType != "" && !strings.EqualFold(fa.FileType, fileType) {
+			continue
+		}
+		matched = append(matched, fa)
+	}
+	start := (pageNum - 1) * limit
+	if start > len(matched) {
+		start = len(matched)
+	}
+	end := start + limit
+	if end > len(matched) {
+		end = len(matched)
+	}
+	items := make([]listItem, 0, end-start)
+	for _, fa := range matched[start:end] {
+		items = append(items, listItem{ID: fa.ID.String(), Name: fa.Name, FileType: fa.FileType})
+	}
+	meta := listPageMeta{Page: pageNum, Limit: limit, TotalCount: len(matched)}
+	return t.okPaged(listKindFiles, items, listTruncationNote("files", meta, len(items)), meta)
+}
+
 func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs) (string, error) {
 	limit := clampLimit(a.Limit, listDefaultLimit)
 	pageNum := clampPage(a.Page)
+	if chat.IsSandboxed() {
+		return t.listSandboxFiles(ctx, chat, a, limit, pageNum)
+	}
 	filters := models.FileAttachmentFilters{}
 	if ft, ok := validateNonEmptyString(a.FileType); ok {
 		filters.FileType = &ft

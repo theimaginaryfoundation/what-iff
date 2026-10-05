@@ -78,7 +78,7 @@ func TestRunSubagentTool_UnknownModelReturnsError(t *testing.T) {
 
 func TestCallSubagentModel_ClaudeProviderMissing(t *testing.T) {
 	a := &Agent{}
-	out, err := a.callSubagentModel(context.Background(), uuid.New(), "claude-sonnet-4-6", &provider.ModelContext{}, nil)
+	out, err := a.callSubagentModel(context.Background(), uuid.New(), "claude-sonnet-4-6", &provider.ModelContext{}, nil, false)
 	require.Error(t, err)
 	require.Empty(t, out)
 	require.Contains(t, err.Error(), "ANTHROPIC_API_KEY")

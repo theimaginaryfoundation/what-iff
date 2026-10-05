@@ -35,6 +35,17 @@ func (t *ScratchpadTool) UpdateScratchpadTool(ctx context.Context, chat *models.
 		return marshalToolResult(result, "update_scratchpad")
 	}
 
+	// The scratchpad is shared by every conversation of the personality, so a sandboxed chat
+	// can neither read it nor leave anything in it.
+	if chat.IsSandboxed() {
+		result := updateScratchpadToolResult{
+			PersonalityID: chat.PersonalityID.String(),
+			Success:       false,
+			Error:         sandboxedNote("The scratchpad"),
+		}
+		return marshalToolResult(result, "update_scratchpad")
+	}
+
 	// Validate content is not empty (including whitespace-only)
 	trimmedContent, valid := validateNonEmptyString(updateArgs.Content)
 	if !valid {

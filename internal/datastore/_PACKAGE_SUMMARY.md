@@ -155,6 +155,16 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - For "exists" checks used by writes (chat/job/preferences/overrides), validate against active models only.
 - Do not hard-delete models in normal flows; use soft delete.
 - Seed code should insert missing defaults but must not overwrite metadata on existing active models.
+- **Sandboxed chats:** the SQL side of the sandbox.
+  `GetRelatedMemories` scopes a sandboxed chat to its own Chat-scoped memories in the `WHERE` clause (so it still gets a full set of matches), and `GetRelatedSummaryMemories` takes the one chat whose summary may be searched.
+  `ListMemoryMergeEvents` takes `OnlyChatID` (fold events whose survivor memory was created in that chat; link events are excluded).
+  `MemoryIDsCreatedInChat` re-checks persisted memory ids against the chat's own memories.
+  `toChatModel` blanks the personality scratchpad for a sandboxed chat; `GetChatContext` (the owner's context panel, which saves it back) still reads it.
+  `CreateChat` and `UpdateChat` write `sandboxed`; `UpdateChat` writes it only when `SetSandboxed` is true, so a stale copy saved by a turn cannot un-sandbox a chat.
+  `ListFileAttachmentsInChatScope` returns a conversation's uploads (plus a personality's documents when a personality id is given); a sandboxed chat passes none, so it sees only its own uploads.
+  The account export, account backup and conversation import carry the chat's `sandboxed` flag; absent reads as false.
+  `WithChatMemoriesOnly` confines `PersistMemoryMergeGroup` and `PersistMemoryLinkGroup` to memories the asking chat created (`ErrMemoryOutsideChat`, nothing written) and makes anything they create Chat-scoped.
+  `ErrMemoryIDPrefixAmbiguous` lets a sandboxed chat treat an ambiguous id prefix like a missing memory.
 
 ## Testing
 

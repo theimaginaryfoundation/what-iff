@@ -33,6 +33,8 @@ type ConversationInput struct {
 	Tags                       []string
 	IsFavorite                 bool
 	IsAutoMood                 bool
+	// Sandboxed is the chat's sandbox flag.
+	Sandboxed bool
 }
 
 // MessageInput is one user/assistant message. Non-chat roles (system/tool) are filtered upstream.
@@ -56,6 +58,8 @@ type exportConversation struct {
 	WhatiffTags                     []string            `json:"whatiff_tags,omitempty"`
 	WhatiffIsFavorite               bool                `json:"whatiff_is_favorite,omitempty"`
 	WhatiffIsAutoMood               bool                `json:"whatiff_is_auto_mood"`
+	// Omitted when false, so exports from before the flag existed and ordinary chats look the same.
+	WhatiffSandboxed bool `json:"whatiff_sandboxed,omitempty"`
 }
 
 type exportChatMessage struct {
@@ -105,6 +109,7 @@ type ParsedConversation struct {
 	WhatiffTags                     []string
 	WhatiffIsFavorite               bool
 	WhatiffIsAutoMood               bool
+	WhatiffSandboxed                bool
 }
 
 // ParsedMessage is one decoded message; Sender is "human" or "assistant".
@@ -139,6 +144,7 @@ func ParseConversations(data []byte) ([]ParsedConversation, error) {
 			WhatiffTags:                     c.WhatiffTags,
 			WhatiffIsFavorite:               c.WhatiffIsFavorite,
 			WhatiffIsAutoMood:               c.WhatiffIsAutoMood,
+			WhatiffSandboxed:                c.WhatiffSandboxed,
 		})
 	}
 	return out, nil
@@ -186,6 +192,7 @@ func BuildConversationsJSON(convs []ConversationInput) ([]byte, error) {
 			WhatiffTags:                     c.Tags,
 			WhatiffIsFavorite:               c.IsFavorite,
 			WhatiffIsAutoMood:               c.IsAutoMood,
+			WhatiffSandboxed:                c.Sandboxed,
 		})
 	}
 

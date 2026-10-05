@@ -22,6 +22,74 @@ type ToolConfig struct {
 	NativeWebSearch bool
 }
 
+// sandboxedChatDisabledTools are the function tools a sandboxed chat is never offered, whatever
+// the user's disabled_tools say:
+//
+//   - update_scratchpad writes the personality-wide scratchpad, shared across the owner's chats;
+//   - create_agent_job schedules a job that runs in a new chat that is not sandboxed (or attaches the
+//     owner's skills and their MCP servers), outside this sandbox;
+//   - move_files sorts the owner's account-wide gallery images into folders.
+//
+// The handlers refuse as well (defence in depth), and dispatch enforces the offered set. The
+// sandboxed tool-surface test classifies every catalog tool, so a new tool must be placed on one
+// side of this list deliberately.
+var sandboxedChatDisabledTools = []string{
+	agenttools.UpdateScratchpadToolSpec.Name,
+	agenttools.CreateAgentJobToolSpec.Name,
+	agenttools.MoveFilesToolSpec.Name,
+}
+
+// offeredToolNames is the set of function-tool names the model is actually given: the specs minus
+// the ones the turn policy disables (the same filter the provider adapters apply). Vendor-native
+// tools such as built-in web search are not function tools and never reach dispatch.
+func offeredToolNames(specs []agenttools.FunctionToolSpec, disabled map[string]bool) map[string]struct{} {
+	out := make(map[string]struct{}, len(specs))
+	for _, spec := range specs {
+		if disabled[spec.Name] {
+			continue
+		}
+		out[spec.Name] = struct{}{}
+	}
+	return out
+}
+
+// offeredAgentToolNames is the set of built-in agent function tools the policy offers: the
+// catalog's agent defaults (mood tools only when shown) minus the disabled ones. MCP tools, which
+// are discovered per turn, are added by the caller.
+func (p turnToolPolicy) offeredAgentToolNames() map[string]struct{} {
+	return offeredToolNames(agenttools.AgentFunctionToolSpecs(p.showMoodTools), p.disabledTools)
+}
+
+// setOfferedTools records the tool names offered to the model for this turn or loop. Dispatch
+// refuses any other name (see toolOffered), because a model can emit a tool it was never given.
+// Recording an empty set means "no tools were offered", which refuses every call.
+func (c *chatContext) setOfferedTools(names map[string]struct{}) {
+	if names == nil {
+		names = map[string]struct{}{}
+	}
+	c.offeredTools = names
+}
+
+// toolOffered reports whether the model was offered the named tool. It fails closed: a context
+// that never recorded an offered set offers nothing.
+func (c *chatContext) toolOffered(name string) bool {
+	if c == nil || c.offeredTools == nil {
+		return false
+	}
+	_, ok := c.offeredTools[name]
+	return ok
+}
+
+// toolRitualMood is the mood whose rituals' MCP servers join the turn's tools. A sandboxed chat
+// gets none: its mood rituals (skill text and linked MCP servers from the owner's account) are not
+// loaded (see handleUserMessage), so their servers are not discovered or offered either.
+func toolRitualMood(chatCtx *chatContext) *models.Mood {
+	if chatCtx == nil || chatCtx.chat.IsSandboxed() {
+		return nil
+	}
+	return chatCtx.activeMood
+}
+
 type turnToolPolicy struct {
 	toolsEnabled bool
 	// disabledTools filters the function tools offered to the model. It is not consulted for
@@ -94,11 +162,20 @@ func (a *Agent) buildTurnToolPolicy(ctx context.Context, chatCtx *chatContext, u
 	delete(disabledTools, agenttools.ListMoodsToolSpec.Name)
 	delete(disabledTools, agenttools.ChangeMoodToolSpec.Name)
 
+	// A sandboxed chat never gets tools that write beyond the conversation
+	// (see sandboxedChatDisabledTools). This runs before the tools-enabled early return below so
+	// no later path can offer them.
+	if chatCtx.chat.IsSandboxed() {
+		for _, name := range sandboxedChatDisabledTools {
+			disabledTools[name] = true
+		}
+	}
+
 	policy := turnToolPolicy{
 		toolsEnabled:  chatCtx.chat.ToolsEnabled,
 		disabledTools: disabledTools,
 		showMoodTools: a.shouldExposeMoodTools(ctx, userID, chatCtx.chat),
-		ritualIDs:     mergedRitualIDsForTools(chatMessage, chatCtx.activeMood),
+		ritualIDs:     mergedRitualIDsForTools(chatMessage, toolRitualMood(chatCtx)),
 	}
 	if !policy.toolsEnabled {
 		return policy

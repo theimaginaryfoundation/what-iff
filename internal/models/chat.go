@@ -52,6 +52,16 @@ type Chat struct {
 	Source *string `json:"-"`
 	// ImportHash is the per-conversation dedup key used by the import pipeline. Internal-only; not exposed in JSON.
 	ImportHash *string `json:"-"`
+	// Sandboxed marks the chat as a sandbox: it cannot read anything outside itself (memories other
+	// than those created in it, other conversations, the personality scratchpad, account-wide
+	// files, jobs, skills or personalities) and has a locked-down tool set. CreateChat applies it
+	// when set; UpdateChat applies it only when SetSandboxed is true.
+	Sandboxed bool `json:"sandboxed"`
+	// SetSandboxed marks Sandboxed as an explicit change on UpdateChat. Internal writers (turn
+	// bookkeeping, naming) save a copy of the chat they loaded at the start of the turn; without
+	// this flag they cannot write back a stale value over a change the user made while the turn
+	// ran. Only the chat HTTP handlers set it.
+	SetSandboxed bool `json:"-"`
 	// RehydrationState tracks lazy summarization of imported threads on unarchive:
 	// "" (none) / "pending" / "processing" / "ready" / "failed". Surfaced read-only so the UI can
 	// show a "preparing thread" affordance while the summary is generated.
@@ -61,6 +71,13 @@ type Chat struct {
 	// IsFirstChat is an internal-only flag set by CreateChat to indicate whether
 	// this row is the user's first chat at creation time.
 	IsFirstChat bool `json:"-"`
+}
+
+// IsSandboxed reports whether the chat is a sandbox. Every sandbox rule asks this one accessor
+// (or the helpers built on it), so the boundary can later be redefined, for example as a project,
+// without touching the call sites.
+func (c *Chat) IsSandboxed() bool {
+	return c != nil && c.Sandboxed
 }
 
 // ChatFilters defines filters for listing chats

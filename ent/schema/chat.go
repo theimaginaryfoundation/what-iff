@@ -69,6 +69,9 @@ func (Chat) Fields() []ent.Field {
 		field.String("import_hash").
 			Optional().
 			Comment("Per-conversation dedup hash (sha256 of conversationID from the export); set on imported chats"),
+		field.Bool("sandboxed").
+			Default(false).
+			Comment("When true the chat is a sandbox: it reads nothing outside itself (only memories created in it, no other conversations, scratchpad or account-wide files, jobs, skills or personalities) and has a locked-down tool set."),
 		field.String("rehydration_state").
 			Optional().
 			Comment("Lazy-summarization lifecycle for imported threads: ''/'pending'/'processing'/'ready'/'failed'. Empty means no rehydration needed (e.g. native threads)"),
