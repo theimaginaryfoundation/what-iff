@@ -121,7 +121,9 @@ func (a *Agent) applyExpressionPhase(ctx context.Context, userID uuid.UUID, chat
 	var reasoning string
 	var err error
 	if pid != uuid.Nil {
-		exprID, reasoning, err = a.PickGenerationExpression(ctx, userID, pid, inferenceModelCtx, userTurn, agentMessage.Message)
+		pickCtx, cancelPick := context.WithTimeout(ctx, expressionPickTimeout)
+		exprID, reasoning, err = a.PickGenerationExpression(pickCtx, userID, pid, inferenceModelCtx, userTurn, agentMessage.Message)
+		cancelPick()
 		if err != nil {
 			a.logger.Warn("expression picker failed", zap.Error(err))
 		}

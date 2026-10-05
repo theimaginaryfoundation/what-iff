@@ -272,6 +272,9 @@ func (a *Agent) handleEphemeralPrompt(
 
 	// Rehydration gate: stall if this thread's import summary is still in flight (no-op otherwise).
 	a.WaitForThreadRehydration(ctx, userID, chatID)
+	// The prompt is "sent" when the turn starts, not when it queued: its time is shown to the
+	// model, and a checkpoint treats messages saved after it as unseen (checkpointWindowStart).
+	ephemeralUserMessage.SentAt = time.Now()
 
 	chatCtx, err := a.prepareChatContext(ctx, userID, ephemeralUserMessage, nil)
 	if err != nil {

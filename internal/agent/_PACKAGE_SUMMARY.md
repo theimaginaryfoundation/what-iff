@@ -36,6 +36,7 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
   The gate opens when the earlier turn's job is terminal, not at `inference_complete`: the earlier turn's expression pick and, above all, its checkpoint (scratchpad, memories, summary window) work on the chat state the next turn reads, so the next turn waits for them (`blocksLaterTurns`).
   That wait is the expression pick in the common case, and minutes only when a checkpoint runs; the web client still unlocks its composer at `inference_complete`, and a message sent then queues.
   `hasReplied` (past `inference_complete`, not terminal) is separate: it decides that shutdown completes rather than fails a turn.
+  Because post-processing holds the next turn, each step has a budget: the expression pick `expressionPickTimeout` (2m), chat naming `chatNameTimeout` (1m), the checkpoint `checkpointTimeout` (5m); a step that runs out loses only itself, and a lost checkpoint is redone by the next one.
   Waiting polls with backoff (250ms to 2s); a turn in this process finishing (`noteTurnJobStatus`, from the job phase helpers, or the turn's release) wakes that chat's waiters at once (`chatTurnTracker`, keyed per chat).
   Nothing is held while a turn runs: no advisory lock or pinned connection.
   Every queued or running turn heartbeats its job (`TouchJob`, every 30s) until it is released, after its checkpoint.

@@ -2586,7 +2586,9 @@ func (a *Agent) finalizeChat(ctx context.Context, userID uuid.UUID, chatMessage,
 	// Generate chat name if it's still the default
 	if chatCtx.chat.Name == defaultChatName {
 		doneChatName := a.timeTurnStage(ctx, turnStageChatName)
-		chatName, err := a.generateChatName(ctx, chatMessage.Message)
+		nameCtx, cancelName := context.WithTimeout(ctx, chatNameTimeout)
+		chatName, err := a.generateChatName(nameCtx, chatMessage.Message)
+		cancelName()
 		doneChatName()
 		if err != nil {
 			a.logger.Error("failed to generate chat name", zap.Error(err))
@@ -2707,15 +2709,24 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 		zap.Int("last_input_tokens", lastInputTokens),
 		zap.Int("estimated_context_tokens", estimatedContextTokens),
 	)
+	// The checkpoint holds the chat's next turn (chat_turn_gate.go), so it is bounded: a provider
+	// that hangs costs this checkpoint, which the next one redoes, not the thread.
+	checkpointCtx, cancelCheckpoint := context.WithTimeout(ctx, checkpointTimeout)
+	defer cancelCheckpoint()
 	// Only genuine OpenAI (Responses API) chats can thread checkpoints off a
 	// PreviousResponseID. Anthropic, z.ai (GLM) and Gemini chats all rebuild
 	// context from the DB via the "Claude" checkpoint path, whose summarizer runs
 	// on GPT and whose scratchpad/memory archival runs on the Anthropic provider
 	// (a no-op that logs when ANTHROPIC_API_KEY is unset).
 	if models.UsesAnthropicMessagesAPI(chatCtx.modelProvider, chatCtx.model) || models.UsesOpenAIChatCompletionsAPI(chatCtx.modelProvider, chatCtx.model) {
-		a.runCheckpointClaude(ctx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
+		a.runCheckpointClaude(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
 	} else {
-		a.runCheckpointOpenAI(ctx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
+		a.runCheckpointOpenAI(checkpointCtx, userID, chatMessage, agentMessage, chatCtx, assistantMessageCount, modelContext, decision.Reason)
+	}
+	if errors.Is(checkpointCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		a.logger.Warn("checkpoint ran out of time; the next checkpoint will retry it",
+			zap.String("chat_id", chatMessage.ChatID.String()),
+			zap.Duration("budget", checkpointTimeout))
 	}
 }
 

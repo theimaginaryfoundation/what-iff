@@ -58,6 +58,14 @@ var (
 	// rate low across a long one.
 	chatTurnPollInitial = 250 * time.Millisecond
 	chatTurnPollMax     = 2 * time.Second
+
+	// Post-inference budgets. A turn's post-processing holds the chat's next turn, and a provider
+	// call is bounded only per HTTP attempt (plus retries), so a hung vendor could otherwise hold a
+	// thread for tens of minutes. Each bounds one step; a step that runs out loses only itself (a
+	// lost checkpoint is redone by the next one). Together (8m) they stay under chatTurnWaitTimeout.
+	expressionPickTimeout = 2 * time.Minute
+	chatNameTimeout       = time.Minute
+	checkpointTimeout     = 5 * time.Minute
 )
 
 // turnStageTurnQueueWait times a turn that actually queued behind an earlier one, so its count is

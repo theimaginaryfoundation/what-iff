@@ -54,3 +54,26 @@ func TestExecute_HandsRunOffWithoutHoldingTheWorker(t *testing.T) {
 	}
 	close(store.release)
 }
+
+// panickingJobStore panics in GetAgentJob, standing in for a run that panics mid-turn.
+type panickingJobStore struct {
+	fakeDatastoreProvider
+}
+
+func (s *panickingJobStore) GetAgentJob(context.Context, uuid.UUID, uuid.UUID) (*models.AgentJob, error) {
+	panic("boom")
+}
+
+// A detached run that panics is recovered (quartz no longer runs it, so nothing else would) and
+// clears its overlap guard, so the same agent job can run again.
+func TestExecuteAgentJobDetached_RecoversAPanic(t *testing.T) {
+	m := &Manager{ds: &panickingJobStore{}, logger: zap.NewNop(), inFlight: map[uuid.UUID]bool{}, fingerprints: map[uuid.UUID]string{}}
+	agentJobID := uuid.New()
+
+	require.NotPanics(t, func() {
+		m.executeAgentJobDetached(context.Background(), uuid.New(), agentJobID, executionOptions{})
+	})
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	require.False(t, m.inFlight[agentJobID])
+}

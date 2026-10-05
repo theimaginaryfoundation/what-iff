@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -128,7 +129,7 @@ func (j *agentJobQuartzJob) Execute(ctx context.Context) error {
 	if j.manager == nil {
 		return nil
 	}
-	go j.manager.executeAgentJobWithOptions(context.WithoutCancel(ctx), j.userID, j.agentJobID, executionOptions{
+	go j.manager.executeAgentJobDetached(context.WithoutCancel(ctx), j.userID, j.agentJobID, executionOptions{
 		allowPaused:        false,
 		deferredRetryCount: j.deferredRetryCount,
 		recurrenceHint:     j.recurrenceBucket,
@@ -158,12 +159,29 @@ func (m *Manager) RunAgentJobNow(ctx context.Context, userID, id uuid.UUID) erro
 	}
 
 	execCtx := context.WithoutCancel(ctx)
-	go m.executeAgentJobWithOptions(execCtx, userID, id, executionOptions{
+	go m.executeAgentJobDetached(execCtx, userID, id, executionOptions{
 		allowPaused:        true,
 		deferredRetryCount: 0,
 		recurrenceHint:     recurrenceBucketUnknown,
 	})
 	return nil
+}
+
+// executeAgentJobDetached is executeAgentJobWithOptions for a run on its own goroutine (Execute,
+// RunAgentJobNow). Quartz recovers a panic in a job it runs itself, but nothing would recover one
+// here, and it would take the process down with it; a panicking run is logged instead. (inFlight is
+// cleared by executeAgentJobWithOptions' own defer, so the agent job can run again.)
+func (m *Manager) executeAgentJobDetached(ctx context.Context, userID, agentJobID uuid.UUID, opts executionOptions) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			m.logger.Error("panic recovered in scheduled agent job run",
+				zap.String("agent_job_id", agentJobID.String()),
+				zap.String("user_id", userID.String()),
+				zap.Any("panic", recovered),
+				zap.ByteString("stack_trace", debug.Stack()))
+		}
+	}()
+	m.executeAgentJobWithOptions(ctx, userID, agentJobID, opts)
 }
 
 func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJobID uuid.UUID, opts executionOptions) {
