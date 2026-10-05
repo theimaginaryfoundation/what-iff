@@ -48,6 +48,14 @@ func (Memory) Fields() []ent.Field {
 			Min(0).
 			Max(1).
 			Comment("Stored confidence in [0,1]. The extraction/merge LLM emits coarse buckets mapped to anchors (low=0.3, medium=0.6, high=0.9); other signals (e.g. the reconfirmation tally) can refine it to finer values."),
+		field.Enum("provenance").
+			Values("user", "external").
+			Default("user").
+			Comment("Where the memory came from. 'user' (the default) is the account owner's own conversation or the memory manager; 'external' was learned from people outside the account, in a Discord relay thread, and is unverified."),
+		field.String("source_speaker").
+			Optional().
+			Nillable().
+			Comment("For an external memory, the display name of the Discord user it came from, as labelled in the relay thread; null when unknown or when merged members disagreed."),
 		field.JSON("chain_metadata", &MemoryChainMetadata{}).
 			Optional().
 			Comment("Chain-of-trust metadata for merged memory lineages"),

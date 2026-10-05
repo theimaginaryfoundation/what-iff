@@ -30,7 +30,17 @@ import (
 type MergeGroupOption func(*mergeGroupOptions)
 
 type mergeGroupOptions struct {
-	chatOnly bool
+	chatOnly  bool
+	newOrigin *models.MemoryOrigin
+}
+
+// WithNewMemberOrigin sets the provenance and speaker of the group's new (not yet stored)
+// members, already combined across them (models.MergeOrigins). A new-only group is created with
+// it; a fold into a survivor combines it with the survivor's and the absorbed members' origins
+// (external if any member is, a speaker only when all agree). Omit when the group has no new
+// member.
+func WithNewMemberOrigin(o models.MemoryOrigin) MergeGroupOption {
+	return func(opts *mergeGroupOptions) { opts.newOrigin = &o }
 }
 
 // WithChatMemoriesOnly confines a merge or link to the asking chat. It is the datastore-level
@@ -163,16 +173,26 @@ func (d *Datastore) PersistMemoryMergeGroup(
 			Confidence:          confidence,
 			BatchDuplicateCount: foldedIn,
 		}
+		otherOrigins, err := absorbedMemoryOriginsTx(ctx, tx, userID, existing.ID, absorbMemoryIDs)
+		if err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
 		absorbed, err := retireAbsorbedMemoriesTx(ctx, tx, userID, existing.ID, absorbMemoryIDs, now)
 		if err != nil {
 			_ = tx.Rollback()
 			return nil, err
+		}
+		// The survivor stands for the whole group: it is external when any member is.
+		if mergeOpts.newOrigin != nil {
+			otherOrigins = append(otherOrigins, *mergeOpts.newOrigin)
 		}
 		mem, foldErr := d.foldIntoLiveMemory(ctx, tx, userID, existing, extract, now, foldLiveOptions{
 			sourceMembers:      sourceMembers,
 			compactionEventID:  compactionEventID,
 			canonicalEmbedding: embeddingVector,
 			absorbed:           absorbed,
+			otherOrigins:       otherOrigins,
 		})
 		if foldErr != nil {
 			_ = tx.Rollback()
@@ -189,6 +209,10 @@ func (d *Datastore) PersistMemoryMergeGroup(
 		Scope:               group.Scope,
 		Confidence:          confidence,
 		BatchDuplicateCount: duplicatesFolded,
+	}
+	if mergeOpts.newOrigin != nil {
+		extract.Provenance = mergeOpts.newOrigin.Provenance
+		extract.Speaker = mergeOpts.newOrigin.Speaker
 	}
 	mem, createErr := d.createMergedMemory(ctx, tx, userID, chatID, extract, embeddingVector, activePersonalityID, targetScope, now, compactionEventID)
 	if createErr != nil {
@@ -207,6 +231,9 @@ type LinkGroupNewMember struct {
 	Content    string
 	Confidence models.MemoryConfidence
 	Embedding  []float32
+	// Origin is the new member's provenance and speaker; the zero value is a user memory. Linking
+	// never changes the origin of any existing member.
+	Origin models.MemoryOrigin
 }
 
 // PersistMemoryLinkGroup cross-references related-but-distinct memories — the same topic or event
@@ -287,6 +314,8 @@ func (d *Datastore) PersistMemoryLinkGroup(
 			SetType(memory.TypeContext).
 			SetStatus(memory.StatusActive).
 			SetConfidence(confidence.Float()).
+			SetProvenance(memory.Provenance(nm.Origin.Provenance.OrDefault())).
+			SetNillableSourceSpeaker(nm.Origin.SpeakerPtr()).
 			SetOwnerID(userID).
 			SetLinkGroupID(linkGroupID).
 			SetCreatedAt(now).
@@ -397,6 +426,9 @@ type foldLiveOptions struct {
 	canonicalEmbedding []float32
 	// absorbed are the memories this fold retired (retireAbsorbedMemoriesTx), recorded for undo.
 	absorbed []entschema.MemoryMergeAbsorbedMember
+	// otherOrigins are the origins of the group's other members (absorbed and new); the survivor
+	// is external when any of them is.
+	otherOrigins []models.MemoryOrigin
 }
 
 // survivorRewriteDecision is the outcome of decideSurvivorRewrite; non-rewrite values double as
@@ -502,7 +534,32 @@ func (d *Datastore) foldIntoLiveMemory(
 		AbsorbedMembers:          opts.absorbed,
 	}
 
-	update := tx.Memory.UpdateOneID(existing.ID).
+	// Provenance: the survivor is external when any member of its group is, and keeps a speaker only
+	// when every member names the same one (models.MergeOrigins). No other members, no change.
+	existingOrigin := models.OriginFrom(models.MemoryProvenance(existing.Provenance), existing.SourceSpeaker)
+	foldedOrigin := existingOrigin
+	if len(opts.otherOrigins) > 0 {
+		foldedOrigin = models.MergeOrigins(append([]models.MemoryOrigin{existingOrigin}, opts.otherOrigins...)...)
+	}
+	originChanged := foldedOrigin.Provenance != existingOrigin.Provenance ||
+		!sameSpeaker(foldedOrigin.SpeakerPtr(), existingOrigin.SpeakerPtr())
+	if originChanged {
+		snapshot.OriginChanged = true
+		snapshot.PriorProvenance = string(existingOrigin.Provenance)
+		snapshot.PriorSourceSpeaker = existingOrigin.SpeakerPtr()
+		snapshot.FoldedProvenance = string(foldedOrigin.Provenance)
+	}
+
+	update := tx.Memory.UpdateOneID(existing.ID)
+	if originChanged {
+		update = update.SetProvenance(memory.Provenance(foldedOrigin.Provenance))
+		if speaker := foldedOrigin.SpeakerPtr(); speaker != nil {
+			update = update.SetSourceSpeaker(*speaker)
+		} else {
+			update = update.ClearSourceSpeaker()
+		}
+	}
+	update = update.
 		SetUpdatedAt(now).
 		SetConfidence(mergedConfidence).
 		SetChainMetadata(&entschema.MemoryChainMetadata{
@@ -599,6 +656,38 @@ func replaceMemoryEmbeddingTx(ctx context.Context, tx *ent.Tx, memoryID uuid.UUI
 	return prior, true, nil
 }
 
+// sameSpeaker reports whether two stored speakers are the same (both nil, or equal).
+func sameSpeaker(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+// absorbedMemoryOriginsTx returns the origin (provenance and speaker) of each memory a fold is
+// about to absorb: the user's own rows in ids, never the survivor.
+func absorbedMemoryOriginsTx(ctx context.Context, tx *ent.Tx, userID, survivorID uuid.UUID, ids []uuid.UUID) ([]models.MemoryOrigin, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := tx.Memory.Query().
+		Where(
+			memory.IDIn(ids...),
+			memory.IDNEQ(survivorID),
+			memory.HasOwnerWith(user.ID(userID)),
+		).
+		Select(memory.FieldProvenance, memory.FieldSourceSpeaker).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	origins := make([]models.MemoryOrigin, 0, len(rows))
+	for _, row := range rows {
+		origins = append(origins, models.OriginFrom(models.MemoryProvenance(row.Provenance), row.SourceSpeaker))
+	}
+	return origins, nil
+}
+
 // retireAbsorbedMemoriesTx sets the memories a fold absorbs to inactive and returns each one's
 // prior status for the undo snapshot. Only rows the user owns are touched, and never the survivor.
 //
@@ -683,6 +772,8 @@ func (d *Datastore) createMergedMemory(
 		SetType(memory.TypeContext).
 		SetStatus(memory.StatusActive).
 		SetConfidence(confidence.Float()).
+		SetProvenance(memory.Provenance(extract.Provenance.OrDefault())).
+		SetNillableSourceSpeaker(extract.Origin().SpeakerPtr()).
 		SetOwnerID(userID).
 		SetCreatedAt(now).
 		SetUpdatedAt(now)
@@ -1002,6 +1093,18 @@ func (d *Datastore) undoFoldLiveMerge(ctx context.Context, tx *ent.Tx, userID uu
 	update := tx.Memory.UpdateOneID(entMemory.ID).
 		SetUpdatedAt(now).
 		SetConfidence(snap.PriorConfidence)
+
+	// Put the survivor's provenance and speaker back, unless the user re-labelled the memory since.
+	if snap.OriginChanged && snap.FoldedProvenance != "" &&
+		string(entMemory.Provenance) == snap.FoldedProvenance &&
+		memory.ProvenanceValidator(memory.Provenance(snap.PriorProvenance)) == nil {
+		update = update.SetProvenance(memory.Provenance(snap.PriorProvenance))
+		if snap.PriorSourceSpeaker != nil {
+			update = update.SetSourceSpeaker(*snap.PriorSourceSpeaker)
+		} else {
+			update = update.ClearSourceSpeaker()
+		}
+	}
 
 	if snap.PriorChainMetadataWasNil {
 		update = update.ClearChainMetadata()

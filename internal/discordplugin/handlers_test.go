@@ -30,9 +30,9 @@ type stubStore struct {
 	pendingSet  []uuid.UUID
 	createErr   error
 	personaName string
-	// chatLimits is each chat's Memory access; a chat not listed is a restricted
-	// (public-only) thread, so tests opt IN to unrestricted ones.
-	chatLimits map[uuid.UUID]models.MemorySensitivity
+	// unsandboxed lists the chats that are not sandboxed; a chat not listed is a sandboxed
+	// thread, so tests opt IN to unsandboxed ones.
+	unsandboxed map[uuid.UUID]bool
 	// existing is the stored binding GetDiscordBinding / UpdateDiscordBinding see.
 	existing *models.DiscordBinding
 	patched  []models.DiscordBindingPatch
@@ -82,11 +82,7 @@ func (s *stubStore) CreateDiscordBinding(_ context.Context, _ uuid.UUID, botID u
 }
 
 func (s *stubStore) GetChat(_ context.Context, _ uuid.UUID, id uuid.UUID) (*models.Chat, error) {
-	limit, ok := s.chatLimits[id]
-	if !ok {
-		limit = models.MemorySensitivityPublic
-	}
-	return &models.Chat{ID: id, MemorySensitivityLimit: limit}, nil
+	return &models.Chat{ID: id, Sandboxed: !s.unsandboxed[id]}, nil
 }
 
 func (s *stubStore) GetDiscordBinding(_ context.Context, _ uuid.UUID, id uuid.UUID) (*models.DiscordBinding, error) {
@@ -234,8 +230,8 @@ func TestCreateBindingWithoutAChatCreatesARelayThreadForThePersona(t *testing.T)
 	require.Len(t, store.chats, 1)
 	assert.Equal(t, "Discord · #general", store.chats[0].Name)
 	assert.Equal(t, persona, store.chats[0].PersonalityID)
-	assert.Equal(t, models.MemorySensitivityPublic, store.chats[0].MemorySensitivityLimit,
-		"a new relay thread is a public surface: public memories only, until the user widens it")
+	assert.True(t, store.chats[0].Sandboxed,
+		"a new relay thread is a public surface: sandboxed, until the user switches that off")
 	for _, tool := range []string{"create_agent_job", "run_subagent", "update_scratchpad", "web_search", "fetch_page", "generate_image"} {
 		assert.Contains(t, store.chats[0].DisabledTools, tool, "a new relay thread starts with %s off", tool)
 	}

@@ -346,3 +346,20 @@ func TestMoveFiles_Sandboxed_Refused(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, out, "sandboxed conversation")
 }
+
+// An external memory (learned from people outside the account in a Discord relay thread) is
+// readable by a sandboxed chat only in the thread it came from: a sandbox reads only itself.
+func TestSandbox_ExternalMemoriesStayInTheirRelayThread(t *testing.T) {
+	chat, other := sandboxedChat(), uuid.New()
+	external := func(m *models.Memory) *models.Memory {
+		m.Provenance = models.MemoryProvenanceExternal
+		return m
+	}
+	require.False(t, memoryReadableBy(chat, external(chatMem("another relay thread's", other))))
+	require.True(t, memoryReadableBy(chat, external(chatMem("its own", chat.ID))))
+	// An unsandboxed binding can leave a User-scoped external memory; no sandbox reads it.
+	stray := external(userMem("alice likes tea"))
+	stray.ChatID = other
+	require.False(t, memoryReadableBy(chat, stray))
+	require.True(t, memoryReadableBy(ordinaryChat(), stray), "the owner's ordinary chats see it (marked unverified)")
+}

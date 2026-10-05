@@ -1,6 +1,8 @@
 package memoryutil
 
 import (
+	"strings"
+
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -10,6 +12,17 @@ type CollapsedExtractedMemory struct {
 	Scope               string
 	Confidence          models.MemoryConfidence
 	BatchDuplicateCount int
+	// Speaker is the Discord display name the memory came from (relay-thread extraction only):
+	// kept when every collapsed duplicate names the same speaker, empty otherwise.
+	Speaker string
+	// Provenance is what the row is created with; empty is user. Extraction leaves it empty and
+	// the agent sets it for the whole checkpoint when the chat is a Discord relay thread.
+	Provenance models.MemoryProvenance
+}
+
+// Origin is the provenance and speaker a new row from this extraction is created with.
+func (c CollapsedExtractedMemory) Origin() models.MemoryOrigin {
+	return models.MemoryOrigin{Provenance: c.Provenance.OrDefault(), Speaker: c.Speaker}
 }
 
 var memoryConfidenceRank = map[models.MemoryConfidence]int{
@@ -46,11 +59,15 @@ func CollapseExtractedMemories(mems []models.ExtractedMemory) []CollapsedExtract
 				Scope:               item.Scope,
 				Confidence:          item.Confidence,
 				BatchDuplicateCount: 1,
+				Speaker:             item.Speaker,
 			}
 			order = append(order, key)
 			continue
 		}
 		existing.BatchDuplicateCount++
+		if !strings.EqualFold(existing.Speaker, item.Speaker) {
+			existing.Speaker = "" // duplicates from different speakers: no one speaker stands for it
+		}
 		if isConfidenceLower(item.Confidence, existing.Confidence) {
 			existing.Confidence = item.Confidence
 		}

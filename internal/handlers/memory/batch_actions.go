@@ -113,6 +113,13 @@ func parseBatchPatch(payload map[string]any) (models.MemoryPatch, error) {
 		}
 		patch.Confidence = &confidence
 	}
+	if rawProvenance, exists := fields["provenance"]; exists {
+		provenance, err := parsePatchProvenance(rawProvenance)
+		if err != nil {
+			return patch, err
+		}
+		patch.Provenance = provenance
+	}
 	if rawChatID, exists := fields["chat_id"]; exists {
 		patch.SetChatID = true
 		if string(rawChatID) != "null" {

@@ -830,6 +830,12 @@ type chatContext struct {
 	// chat's first message), recorded explicitly so it can be persisted as its own context item
 	// type instead of being recognised by its text. Empty when the turn has no such line.
 	userNameLine string
+	// memoryProvenance is what memories written from this turn are stored with: external in a
+	// Discord relay thread, user otherwise (memoryProvenanceForChat).
+	memoryProvenance models.MemoryProvenance
+	// triggerMessageID is the saved user message this turn answers (uuid.Nil when there is none);
+	// create_memory attributes an external memory to its Discord author by default.
+	triggerMessageID uuid.UUID
 	// offeredTools is the set of function-tool names given to the model for this turn (or this
 	// sub-agent loop); dispatchToolUse refuses any other. See setOfferedTools.
 	offeredTools  map[string]struct{}
@@ -2132,6 +2138,8 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 		expressionsEnabled:     expressionsEnabled,
 		memoryProgress:         memoryProgress,
 		mcpSessions:            make(map[string]string),
+		memoryProvenance:       a.memoryProvenanceForChat(ctx, userID, parentChat),
+		triggerMessageID:       chatMessage.ID,
 	}, nil
 }
 

@@ -45,22 +45,20 @@ const (
 
 // UnrestrictedWarning is recorded on a binding (its last_error, shown in the app,
 // never posted to Discord) when tags are being dropped because the bound thread
-// is no longer limited to public memories and the binding carries no
-// acknowledgement.
-const UnrestrictedWarning = "Paused: this thread's Memory access is wider than Public, so Discord tags are not answered. " +
-	"Set the thread's Memory access to Public, or acknowledge that anyone allowed to tag the bot may use what the thread can read."
+// is no longer sandboxed and the binding carries no acknowledgement.
+const UnrestrictedWarning = "Paused: this thread is no longer sandboxed, so Discord tags are not answered. " +
+	"Sandbox the thread again, or acknowledge that anyone allowed to tag the bot may use everything the thread can read."
 
 // busyNoticeEvery bounds how often one binding posts NoticeBusy, so a flood of
 // tags cannot make the bot flood the channel back.
 const busyNoticeEvery = time.Minute
 
-// RelayThreadOpenWithoutAcknowledgement reports whether a thread with this memory
-// limit may be driven from Discord without the owner's acknowledgement: only a
-// thread limited to public memories. Anything wider (personal, sensitive or an
-// unknown value read as such) exposes the owner's name, their personal memories or
-// more to whoever may tag the bot.
+// RelayThreadOpenWithoutAcknowledgement reports whether a thread may be driven from
+// Discord without the owner's acknowledgement: only a sandboxed one. Anything else
+// can read the owner's account (their name, memories, other conversations, files,
+// scratchpad) on behalf of whoever may tag the bot.
 func RelayThreadOpenWithoutAcknowledgement(chat *models.Chat) bool {
-	return chat != nil && chat.MemoryLimit() == models.MemorySensitivityPublic
+	return chat.IsSandboxed()
 }
 
 // Service is the relay: it turns tags into turns in the relay thread and posts

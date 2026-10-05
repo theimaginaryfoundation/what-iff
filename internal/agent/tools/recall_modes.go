@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/memoryutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"go.uber.org/zap"
@@ -133,7 +134,7 @@ func (t *RecallTool) gather(ctx context.Context, chat *models.Chat, query, src s
 			if !withinWindow(m.CreatedAt, window) {
 				continue
 			}
-			r.chunks = append(r.chunks, recallChunk{SourceType: "summary", Name: m.ChatName, ConversationID: m.ChatID.String(), Text: m.Content})
+			r.chunks = append(r.chunks, summaryChunk(m, m.ChatID))
 		}
 	}
 
@@ -343,8 +344,19 @@ func (t *RecallTool) fetch(ctx context.Context, chat *models.Chat, a recallArgs)
 func summaryChunkResult(sum *models.Memory, chatID uuid.UUID) recallResult {
 	return recallResult{
 		Mode:   recallModeFetch,
-		Chunks: []recallChunk{{SourceType: "summary", Name: sum.ChatName, ConversationID: chatID.String(), Text: sum.Content}},
+		Chunks: []recallChunk{summaryChunk(sum, chatID)},
 	}
+}
+
+// summaryChunk renders a checkpoint summary as a recall chunk. A Discord relay thread's
+// summary retells what people outside the account said, so it carries the same unverified note an
+// external memory does.
+func summaryChunk(sum *models.Memory, chatID uuid.UUID) recallChunk {
+	c := recallChunk{SourceType: "summary", Name: sum.ChatName, ConversationID: chatID.String(), Text: sum.Content}
+	if sum.Provenance.IsExternal() {
+		c.Provenance = memoryutil.ExternalProvenanceNote(nil)
+	}
+	return c
 }
 
 func (t *RecallTool) fetchBookmark(ctx context.Context, userID, chatID, messageID uuid.UUID) (string, []*models.Memory, []*models.FileAttachment, error) {
@@ -953,11 +965,19 @@ func buildDistillMaterial(r retrieval) (material string, sources []string) {
 		if m == nil {
 			continue
 		}
-		add(memorySourceLabel(m.ID), m.Content)
+		text := m.Content
+		if m.Provenance.IsExternal() {
+			text += " [" + memoryutil.ExternalProvenanceNote(m.SourceSpeaker) + "]"
+		}
+		add(memorySourceLabel(m.ID), text)
 	}
 	for _, c := range r.chunks {
 		label := fmt.Sprintf("%s:%s#%d", c.SourceType, c.Name, c.Index)
-		add(label, c.Text)
+		text := c.Text
+		if c.Provenance != "" {
+			text += " [" + c.Provenance + "]"
+		}
+		add(label, text)
 	}
 	return strings.TrimSpace(b.String()), sources
 }

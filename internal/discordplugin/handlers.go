@@ -365,23 +365,21 @@ func (h *Handler) listBindings(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err, "Failed to list Discord channels")
 		return
 	}
-	h.markPublic(r.Context(), userID, bindings)
+	h.markSandboxed(r.Context(), userID, bindings)
 	handlerutils.RespondWithJSON(w, h.Logger, http.StatusOK, bindings)
 }
 
-// unrestrictedBindMsg is the 400 for binding a thread whose Memory access is wider
-// than Public. A Discord channel is a public surface: whoever the allow list lets
-// tag the bot drives this thread, so a personal thread hands them the owner's name
-// and personal memories, and an unrestricted one the whole account's context.
-const unrestrictedBindMsg = "That thread's Memory access is wider than Public, so anyone allowed to tag the bot " +
-	"could use your personal memories (or, if unrestricted, its full memory, scratchpad and tools). " +
-	"Set the thread's Memory access to Public first, or confirm with allow_unrestricted."
+// unrestrictedBindMsg is the 400 for binding a thread that is not sandboxed. A
+// Discord channel is a public surface: whoever the allow list lets tag the bot
+// drives this thread, so a thread that can read the account hands them the owner's
+// name, memories, other conversations, files and scratchpad.
+const unrestrictedBindMsg = "That thread is not sandboxed, so anyone allowed to tag the bot could use your memories, " +
+	"other conversations, files and scratchpad. Sandbox the thread first, or confirm with allow_unrestricted."
 
 // bindableChat decides whether chatID may be bound to a Discord channel (or a
-// binding repointed to it). A thread limited to public memories always may; a wider
-// one only with the owner's explicit acknowledgement. record is the value to store
-// as the binding's allow_unrestricted: true only for an acknowledged thread wider
-// than public. When ok is false the response has been written.
+// binding repointed to it). A sandboxed thread always may; any other only with the
+// owner's explicit acknowledgement. record is the value to store as the binding's
+// allow_unrestricted: true only for an acknowledged thread that is not sandboxed. When ok is false the response has been written.
 func (h *Handler) bindableChat(w http.ResponseWriter, r *http.Request, userID, chatID uuid.UUID, acknowledged bool) (record, ok bool) {
 	chat, err := h.Store.GetChat(r.Context(), userID, chatID)
 	if err != nil {
@@ -398,9 +396,9 @@ func (h *Handler) bindableChat(w http.ResponseWriter, r *http.Request, userID, c
 	return true, true
 }
 
-// markPublic fills each binding's computed ChatPublic from its thread's current
-// Memory access (the UI shows it; the relay re-checks it on every tag).
-func (h *Handler) markPublic(ctx context.Context, userID uuid.UUID, bindings []models.DiscordBinding) {
+// markSandboxed fills each binding's computed ChatSandboxed from its thread's current
+// sandbox state (the UI shows it; the relay re-checks it on every tag).
+func (h *Handler) markSandboxed(ctx context.Context, userID uuid.UUID, bindings []models.DiscordBinding) {
 	seen := map[uuid.UUID]*bool{}
 	for i := range bindings {
 		id := bindings[i].ChatID
@@ -412,7 +410,7 @@ func (h *Handler) markPublic(ctx context.Context, userID uuid.UUID, bindings []m
 			}
 			seen[id] = v
 		}
-		bindings[i].ChatPublic = v
+		bindings[i].ChatSandboxed = v
 	}
 }
 
@@ -460,17 +458,17 @@ func (h *Handler) createBinding(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		personaID := creds.PersonalityID
-		// A relay thread is a public surface: it may only use memories marked public, and
-		// (as a restricted thread) never sees the personality's scratchpad or the user's
-		// other conversations. The tools that act beyond the conversation start switched
-		// off (discordrelay.RelayThreadDisabledTools), and no MCP connector is attached
-		// (CreateChat attaches none; only the app's create route adds the default ones).
-		// The user can widen any of this in the thread's settings.
+		// A relay thread is a public surface, so it is created sandboxed: it reads only itself
+		// (never the account's memories, the personality's scratchpad or other conversations)
+		// and writes only Chat-scoped memories. The tools that act beyond the conversation
+		// start switched off (discordrelay.RelayThreadDisabledTools), and no MCP connector is
+		// attached (CreateChat attaches none; only the app's create route adds the default
+		// ones). The user can switch any of this off in the thread's settings.
 		chat, err := h.Store.CreateChat(r.Context(), userID, models.Chat{
-			Name:                   relayThreadName(req.ChannelName),
-			PersonalityID:          personaID,
-			MemorySensitivityLimit: models.MemorySensitivityPublic,
-			DisabledTools:          discordrelay.RelayThreadDisabledTools(),
+			Name:          relayThreadName(req.ChannelName),
+			PersonalityID: personaID,
+			Sandboxed:     true,
+			DisabledTools: discordrelay.RelayThreadDisabledTools(),
 		})
 		if err != nil {
 			h.fail(w, err, "Failed to create the relay thread")
@@ -510,8 +508,8 @@ func (h *Handler) createBinding(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) markOne(ctx context.Context, userID uuid.UUID, b *models.DiscordBinding) {
 	bs := []models.DiscordBinding{*b}
-	h.markPublic(ctx, userID, bs)
-	b.ChatPublic = bs[0].ChatPublic
+	h.markSandboxed(ctx, userID, bs)
+	b.ChatSandboxed = bs[0].ChatSandboxed
 }
 
 func relayThreadName(channel string) string {
@@ -640,7 +638,7 @@ func (h *Handler) chatState(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err, "Failed to load Discord state")
 		return
 	}
-	h.markPublic(r.Context(), userID, bindings)
+	h.markSandboxed(r.Context(), userID, bindings)
 	state := ChatState{Bindings: bindings, PendingBinding: []uuid.UUID{}, Links: []models.DiscordMessageLink{}}
 	if len(bindings) > 0 {
 		if state.PendingBinding, err = h.Store.ListDiscordPendingPosts(r.Context(), userID, chatID); err != nil {

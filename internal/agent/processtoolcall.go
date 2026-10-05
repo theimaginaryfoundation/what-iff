@@ -58,7 +58,7 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 			return out, nil, err
 		},
 		tools.CreateMemoryToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
-			out, err := a.memoryTool.CreateMemoryTool(ctx, chatCtx.chat, input)
+			out, err := a.memoryTool.CreateMemoryToolWithOrigin(ctx, chatCtx.chat, a.createMemoryOrigin(ctx, chatCtx), input)
 			return out, nil, err
 		},
 		tools.ListToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {

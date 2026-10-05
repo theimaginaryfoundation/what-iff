@@ -240,6 +240,9 @@ type recallChunk struct {
 	// ConversationID is set on "summary" chunks: the conversation the summary was checkpointed
 	// from, so the model can hop straight into conversation/fetch mode for the full source.
 	ConversationID string `json:"conversation_id,omitempty"`
+	// Provenance is set on a summary of a Discord relay thread: what it retells came from
+	// people outside the account and is unverified (memoryutil.ExternalProvenanceNote).
+	Provenance string `json:"provenance,omitempty"`
 }
 
 type recallMessage struct {

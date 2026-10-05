@@ -121,11 +121,10 @@ func init() {
 }
 
 // discordChannelsFor lists the channels the chat can post to: none without a
-// persona, or an active bot with bindings. An unrestricted chat (the
-// owner's own conversation) may reach every channel its persona's bot is bound
-// to. A RESTRICTED chat (Memory access below "sensitive", which every relay thread
-// is by default) is a sandbox for whoever can tag the bot, so it may reach only
-// the channel(s) bound to this very thread: it must not learn the names of, or
+// persona, or an active bot with bindings. An ordinary chat (the owner's own
+// conversation) may reach every channel its persona's bot is bound to. A SANDBOXED
+// chat (which every relay thread is by default) is a sandbox for whoever can tag
+// the bot, so it may reach only the channel(s) bound to this very thread: it must not learn the names of, or
 // post into, the owner's other servers and channels.
 func discordChannelsFor(ctx context.Context, store discordToolStore, chat *models.Chat) []models.DiscordBinding {
 	if store == nil || chat == nil || chat.PersonalityID == uuid.Nil {
@@ -136,8 +135,8 @@ func discordChannelsFor(ctx context.Context, store discordToolStore, chat *model
 		return nil
 	}
 	// A relay thread (any chat a binding points at) is driven by people outside the account
-	// too, so, like a restricted chat, it reaches only its own channel(s).
-	ownOnly := chat.MemoryRestricted()
+	// too, so, like a sandboxed chat, it reaches only its own channel(s).
+	ownOnly := chat.IsSandboxed()
 	for _, b := range bindings {
 		if b.ChatID == chat.ID {
 			ownOnly = true
@@ -244,8 +243,8 @@ func discordPost(ctx context.Context, store discordToolStore, chat *models.Chat,
 	}
 	switch len(match) {
 	case 0:
-		if chat.MemoryRestricted() {
-			return "", fmt.Errorf("this is a restricted thread, so it can only post to its own Discord channel (%s); %q is not available", strings.Join(ls, ", "), args.Channel)
+		if chat.IsSandboxed() {
+			return "", fmt.Errorf("this is a sandboxed thread, so it can only post to its own Discord channel (%s); %q is not available", strings.Join(ls, ", "), args.Channel)
 		}
 		return "", fmt.Errorf("unknown channel %q; use one of: %s", args.Channel, strings.Join(ls, ", "))
 	case 1:

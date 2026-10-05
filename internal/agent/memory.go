@@ -25,7 +25,13 @@ var memoryExtractionSchema = provider.GenerateSchema[models.ExtractedMemoryRespo
 // memoryExtractionSchemaMapForClaude returns the memory extraction JSON Schema as
 // map[string]any for anthropic.JSONOutputFormatParam.Schema (same shape as OpenAI).
 func memoryExtractionSchemaMapForClaude() map[string]any {
-	b, err := json.Marshal(memoryExtractionSchema)
+	return extractionSchemaCopy(memoryExtractionSchema)
+}
+
+// extractionSchemaCopy deep-copies an extraction schema, so a provider request can never mutate the
+// shared value.
+func extractionSchemaCopy(schema map[string]interface{}) map[string]any {
+	b, err := json.Marshal(schema)
 	if err != nil {
 		panic("memory extraction schema: " + err.Error())
 	}
@@ -78,7 +84,7 @@ func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID u
 		Input: responses.ResponseNewParamsInputUnion{
 			OfInputItemList: []responses.ResponseInputItemUnionParam{
 				responses.ResponseInputItemParamOfMessage(
-					fmt.Sprintf("%s\n\nDO NOT extract memories that would be duplicative of the following memories:\n\n %s", memoryExtractionDeveloperMessageFor(chatCtx), strings.Join(chatCtx.memories, "\n\n")), provider.RoleDeveloper),
+					fmt.Sprintf("%s\n\nDO NOT extract memories that would be duplicative of the following memories:\n\n %s", memoryExtractionDeveloperNote(chatCtx), strings.Join(chatCtx.memories, "\n\n")), provider.RoleDeveloper),
 				responses.ResponseInputItemParamOfMessage(prompt, provider.RoleUser),
 			},
 		},
@@ -86,7 +92,7 @@ func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID u
 			Format: responses.ResponseFormatTextConfigUnionParam{
 				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
 					Name:        "MemoryExtraction",
-					Schema:      memoryExtractionSchema,
+					Schema:      memoryExtractionSchemaFor(chatCtx),
 					Strict:      openai.Bool(true),
 					Description: openai.String("Memory Extraction JSON"),
 					Type:        "json_schema",
@@ -101,15 +107,14 @@ func (a *Agent) extractMemoriesWithScratchpadDelta(ctx context.Context, userID u
 		return
 	}
 
-	extractedMemories := models.ExtractedMemoryResponse{}
-	err = json.Unmarshal([]byte(resp.OutputText()), &extractedMemories)
+	extracted, err := decodeExtractedMemories(chatCtx, []byte(resp.OutputText()))
 	if err != nil {
 		a.logger.Error("failed to unmarshal extracted memories", zap.Error(err))
 		return
 	}
 
-	a.logger.Info("extracted memories (scratchpad delta)", zap.Any("count", len(extractedMemories.Memories)))
-	a.compactMemoriesFromCheckpoint(ctx, userID, chatID, chatCtx.chat.PersonalityID, inferenceModelContext, chatCtx, extractedMemories.Memories, compactionEventID)
+	a.logger.Info("extracted memories (scratchpad delta)", zap.Any("count", len(extracted)))
+	a.compactMemoriesFromCheckpoint(ctx, userID, chatID, chatCtx.chat.PersonalityID, inferenceModelContext, chatCtx, extracted, compactionEventID)
 }
 
 // extractMemoriesWithScratchpadDeltaClaude extracts long-term memories for Claude-model
@@ -124,7 +129,7 @@ func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, us
 	prompt := memoryWritePromptText()
 
 	dedupNote := fmt.Sprintf("%s\n\nDO NOT extract memories that would be duplicative of the following memories:\n\n %s",
-		memoryExtractionDeveloperMessageFor(chatCtx), strings.Join(chatCtx.memories, "\n\n"))
+		memoryExtractionDeveloperNote(chatCtx), strings.Join(chatCtx.memories, "\n\n"))
 
 	modelContext.Append(provider.SegmentKindUserMessage, provider.RoleUser, prompt, false)
 	modelContext.Append(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, dedupNote, false)
@@ -135,7 +140,7 @@ func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, us
 	params.OutputConfig = anthropic.OutputConfigParam{
 		Format: anthropic.JSONOutputFormatParam{
 			Type:   constant.JSONSchema("").Default(),
-			Schema: memoryExtractionSchemaMapForClaude(),
+			Schema: extractionSchemaCopy(memoryExtractionSchemaFor(chatCtx)),
 		},
 	}
 	msg, err := a.ClaudeProvider.Call(telemetry.WithCallPath(ctx, telemetry.CallPathMemory), params)
@@ -143,14 +148,14 @@ func (a *Agent) extractMemoriesWithScratchpadDeltaClaude(ctx context.Context, us
 		a.logger.Error("Claude memory extraction failed", zap.Error(err))
 		return fmt.Errorf("Claude memory extraction failed: %w", err)
 	}
-	extractedMemories := models.ExtractedMemoryResponse{}
-	if err := provider.UnmarshalClaudeTextJSON(msg, &extractedMemories); err != nil {
+	extracted, err := decodeExtractedMemories(chatCtx, []byte(provider.ExtractClaudeText(msg)))
+	if err != nil {
 		a.logger.Error("failed to unmarshal Claude memory extraction", zap.Error(err))
 		return fmt.Errorf("failed to unmarshal Claude memory extraction: %w", err)
 	}
 
-	a.logger.Info("extracted memories (Claude scratchpad delta)", zap.Int("count", len(extractedMemories.Memories)))
-	a.compactMemoriesFromCheckpoint(ctx, userID, chatID, chatCtx.chat.PersonalityID, inferenceModelContext, chatCtx, extractedMemories.Memories, compactionEventID)
+	a.logger.Info("extracted memories (Claude scratchpad delta)", zap.Int("count", len(extracted)))
+	a.compactMemoriesFromCheckpoint(ctx, userID, chatID, chatCtx.chat.PersonalityID, inferenceModelContext, chatCtx, extracted, compactionEventID)
 
 	return nil
 }
@@ -306,7 +311,7 @@ func (a *Agent) compactMemoriesFromCheckpoint(
 		liveMemories = sandboxedCompactionLiveMemories(chatID, liveMemories)
 		inferenceModelContext = nil // its memory refs are the owner's wider memories; none are ours to fold
 	}
-	collapsed := memoryutil.CollapseExtractedMemories(memories)
+	collapsed := stampExtractedProvenance(memoryutil.CollapseExtractedMemories(memories), chatCtx.externalMemoryChat())
 
 	// DO NOT bail when nothing was freshly extracted. A checkpoint that only
 	// loaded already-stored duplicates (e.g. a cluster surfaced via prefetch/find_context)
@@ -351,13 +356,23 @@ func sandboxedCompactionLiveMemories(chatID uuid.UUID, live []*models.Memory) []
 	return own
 }
 
-// mergeOptions are the datastore options for a fold or link group: a sandboxed chat's is confined
-// to memories that chat created (datastore.WithChatMemoriesOnly).
+// mergeOptions are the datastore options for a link group: a sandboxed chat's is confined to
+// memories that chat created (datastore.WithChatMemoriesOnly).
 func mergeOptions(sandboxed bool) []datastore.MergeGroupOption {
 	if sandboxed {
 		return []datastore.MergeGroupOption{datastore.WithChatMemoriesOnly()}
 	}
 	return nil
+}
+
+// foldMemberOptions is mergeOptions plus the new members' combined origin. A group with no new
+// member passes no origin, leaving the stored members' origins to decide the survivor's.
+func foldMemberOptions(fold memoryFoldPlan, sandboxed bool) []datastore.MergeGroupOption {
+	opts := mergeOptions(sandboxed)
+	if fold.NewOrigin != nil {
+		opts = append(opts, datastore.WithNewMemberOrigin(*fold.NewOrigin))
+	}
+	return opts
 }
 
 // applyMemoryCompactionPlan embeds where needed and writes fold/link plans to the datastore.
@@ -420,6 +435,7 @@ func (a *Agent) applyMemoryCompactionPlan(
 				Content:    member.Content,
 				Confidence: member.Confidence,
 				Embedding:  vec,
+				Origin:     member.Origin,
 			})
 		}
 		if len(link.ExistingIDs)+len(newMembers) < 2 {

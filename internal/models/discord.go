@@ -88,9 +88,9 @@ type DiscordBinding struct {
 	// reads more than public memories (its Memory access is personal or sensitive).
 	// Without it the relay answers only threads limited to public memories.
 	AllowUnrestricted bool `json:"allow_unrestricted"`
-	// ChatPublic is whether the bound thread is limited to public memories right now.
+	// ChatSandboxed is whether the bound thread is sandboxed right now.
 	// Computed by the API on read, never stored; nil when the thread could not be loaded.
-	ChatPublic     *bool                `json:"chat_public,omitempty"`
+	ChatSandboxed  *bool                `json:"chat_sandboxed,omitempty"`
 	Status         DiscordBindingStatus `json:"status"`
 	LastError      *string              `json:"last_error,omitempty"`
 	LastActivityAt *time.Time           `json:"last_activity_at,omitempty"`

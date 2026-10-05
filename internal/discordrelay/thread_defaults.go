@@ -8,9 +8,8 @@ import (
 )
 
 // A relay thread the server creates for a new binding is a public surface: whoever
-// the allow list lets tag the bot drives it. Besides starting at a public memory
-// limit (which keeps the owner's personal data out, see models.MemorySensitivity),
-// it starts with the tools that act beyond the conversation switched off in its
+// the allow list lets tag the bot drives it. Besides starting sandboxed (which keeps
+// the owner's account out, see models.Chat.Sandboxed), it starts with the tools that act beyond the conversation switched off in its
 // disabled_tools, so the owner turns each one on deliberately in the thread's
 // settings. Binding an existing thread leaves its settings alone.
 //
@@ -18,7 +17,7 @@ import (
 // tools registers the ones that should also start off with
 // RegisterRelayThreadDisabledTool, from an init().
 var relayThreadDisabledToolDefaults = []string{
-	agenttools.CreateAgentJobToolSpec.Name,   // schedules work in a new, unrestricted chat
+	agenttools.CreateAgentJobToolSpec.Name,   // schedules work in a new chat that is not sandboxed
 	agenttools.RunSubagentToolSpec.Name,      // spends the owner's credits on further model calls
 	agenttools.UpdateScratchpadToolSpec.Name, // the scratchpad is shared with the persona's other chats
 	agenttools.ToolNameWebSearch,             // reaches the open web (and the vendor's native search)

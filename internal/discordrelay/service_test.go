@@ -186,7 +186,7 @@ func (f *fakeStore) GetChat(_ context.Context, _ uuid.UUID, id uuid.UUID) (*mode
 		cp := *c
 		return &cp, nil
 	}
-	return &models.Chat{ID: id, MemorySensitivityLimit: models.MemorySensitivityPublic}, nil
+	return &models.Chat{ID: id, Sandboxed: true}, nil
 }
 
 func (f *fakeStore) SetDiscordBotStatus(_ context.Context, id uuid.UUID, st models.DiscordBotStatus, _ string) error {
@@ -589,12 +589,12 @@ func TestAReplyThatFinishesBeforeItsWaiterStillReleasesTheQueue(t *testing.T) {
 	}
 }
 
-// --- bound-thread restriction (fail closed) ---
+// --- bound-thread sandbox (fail closed) ---
 
-func (h *harness) setChatLimit(l models.MemorySensitivity) {
+func (h *harness) setSandboxed(sandboxed bool) {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
-	h.store.chats[h.target.Binding.ChatID] = &models.Chat{ID: h.target.Binding.ChatID, MemorySensitivityLimit: l}
+	h.store.chats[h.target.Binding.ChatID] = &models.Chat{ID: h.target.Binding.ChatID, Sandboxed: sandboxed}
 }
 
 func (h *harness) noTurnStarted(t *testing.T) {
@@ -603,62 +603,54 @@ func (h *harness) noTurnStarted(t *testing.T) {
 	assert.Empty(t, h.discord.allPosts(), "nothing may be posted to Discord, not even a notice")
 }
 
-func TestPublicThreadsAreAnswered(t *testing.T) {
+func TestSandboxedThreadsAreAnswered(t *testing.T) {
 	h := newHarness(t)
-	h.setChatLimit(models.MemorySensitivityPublic)
+	h.setSandboxed(true)
 	h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, h.tag("m1"))
 	h.reply(t, 0, "hi")
 	assert.Len(t, h.turns.started(), 1)
 }
 
-// Anything wider than public (a personal thread gets the owner's name and personal
-// memories) needs the owner's acknowledgement.
-func TestAThreadWiderThanPublicWithoutAcknowledgementIsDroppedAndFlagged(t *testing.T) {
-	for name, limit := range map[string]models.MemorySensitivity{
-		"personal":  models.MemorySensitivityPersonal,
-		"sensitive": models.MemorySensitivitySensitive,
-		"unset":     "", // a chat with no limit is unrestricted
-	} {
-		t.Run(name, func(t *testing.T) {
-			h := newHarness(t)
-			h.setChatLimit(limit)
-			h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, h.tag("m1"))
-			h.noTurnStarted(t)
-			assert.Equal(t, UnrestrictedWarning, h.store.bindError[h.target.Binding.ID], "reason is recorded on the binding")
-			assert.Equal(t, models.DiscordBindingActive, h.store.bindStatus[h.target.Binding.ID], "status stays active; only the tag is dropped")
-			h.store.mu.Lock()
-			assert.Empty(t, h.store.links, "no inbound link recorded")
-			h.store.mu.Unlock()
-		})
-	}
+// A thread that is not sandboxed can read the owner's account (their name, memories,
+// other conversations, files), so it needs the owner's acknowledgement.
+func TestAnUnsandboxedThreadWithoutAcknowledgementIsDroppedAndFlagged(t *testing.T) {
+	h := newHarness(t)
+	h.setSandboxed(false)
+	h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, h.tag("m1"))
+	h.noTurnStarted(t)
+	assert.Equal(t, UnrestrictedWarning, h.store.bindError[h.target.Binding.ID], "reason is recorded on the binding")
+	assert.Equal(t, models.DiscordBindingActive, h.store.bindStatus[h.target.Binding.ID], "status stays active; only the tag is dropped")
+	h.store.mu.Lock()
+	assert.Empty(t, h.store.links, "no inbound link recorded")
+	h.store.mu.Unlock()
 }
 
-func TestAnAcknowledgedUnrestrictedThreadIsAnswered(t *testing.T) {
+func TestAnAcknowledgedUnsandboxedThreadIsAnswered(t *testing.T) {
 	h := newHarness(t)
-	h.setChatLimit(models.MemorySensitivitySensitive)
+	h.setSandboxed(false)
 	h.target.Binding.AllowUnrestricted = true
 	h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, h.tag("m1"))
 	h.reply(t, 0, "hi")
 	assert.Len(t, h.turns.started(), 1)
 }
 
-func TestRaisingTheLimitAfterBindingStopsTheRelayUntilAcknowledged(t *testing.T) {
+func TestUnsandboxingAfterBindingStopsTheRelayUntilAcknowledged(t *testing.T) {
 	h := newHarness(t)
-	h.setChatLimit(models.MemorySensitivityPublic)
+	h.setSandboxed(true)
 	h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, h.tag("m1"))
 	h.reply(t, 0, "hi")
 	require.Len(t, h.turns.started(), 1)
 
-	// The owner raises the thread's Memory access in the app.
-	h.setChatLimit(models.MemorySensitivitySensitive)
+	// The owner switches the thread's sandbox off in the app.
+	h.setSandboxed(false)
 	h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, h.tag("m2"))
 	time.Sleep(50 * time.Millisecond)
 	assert.Len(t, h.turns.started(), 1, "the second tag is not answered")
 	assert.Len(t, h.discord.allPosts(), 1, "and nothing but the first reply was posted")
 	assert.Equal(t, UnrestrictedWarning, h.store.bindError[h.target.Binding.ID])
 
-	// Limiting it to public again resumes answering and clears the warning.
-	h.setChatLimit(models.MemorySensitivityPublic)
+	// Sandboxing it again resumes answering and clears the warning.
+	h.setSandboxed(true)
 	h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, h.tag("m3"))
 	h.reply(t, 1, "back")
 	assert.Len(t, h.turns.started(), 2)
@@ -674,7 +666,7 @@ func TestAnUnreadableThreadFailsClosed(t *testing.T) {
 
 func TestAQueuedTagIsRecheckedWhenItsTurnComes(t *testing.T) {
 	h := newHarness(t)
-	h.setChatLimit(models.MemorySensitivitySensitive) // raised while the tag waited in the queue
+	h.setSandboxed(false) // raised while the tag waited in the queue
 	h.svc.runInbound(h.ctx, inboundWork{target: *h.target, msg: h.tag("m1")})
 	h.noTurnStarted(t)
 	h.store.mu.Lock()
@@ -682,7 +674,7 @@ func TestAQueuedTagIsRecheckedWhenItsTurnComes(t *testing.T) {
 	h.store.mu.Unlock()
 }
 
-func TestWithAnEmptyAllowListAStrangerGetsAnswered_ButOnlyFromARestrictedThread(t *testing.T) {
+func TestWithAnEmptyAllowListAStrangerGetsAnswered_ButOnlyFromASandboxedThread(t *testing.T) {
 	h := newHarness(t)
 	require.Empty(t, h.target.Binding.AllowUserIDs, "the default binding has an empty allow list")
 
@@ -692,9 +684,9 @@ func TestWithAnEmptyAllowListAStrangerGetsAnswered_ButOnlyFromARestrictedThread(
 	h.reply(t, 0, "hello stranger")
 	assert.Len(t, h.turns.started(), 1, "empty allow list = anyone may tag, by design")
 
-	// The thread restriction is what protects the account: raise it and the same
-	// stranger is no longer served.
-	h.setChatLimit(models.MemorySensitivitySensitive)
+	// The sandbox is what protects the account: switch it off and the same stranger is
+	// no longer served.
+	h.setSandboxed(false)
 	stranger2 := h.tag("m2")
 	stranger2.AuthorID = "888888"
 	h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, stranger2)
@@ -702,16 +694,16 @@ func TestWithAnEmptyAllowListAStrangerGetsAnswered_ButOnlyFromARestrictedThread(
 	assert.Len(t, h.turns.started(), 1)
 }
 
-func TestAStaleAcknowledgementIsWithdrawnWhenTheThreadIsRestrictedAgain(t *testing.T) {
+func TestAStaleAcknowledgementIsWithdrawnWhenTheThreadIsSandboxedAgain(t *testing.T) {
 	h := newHarness(t)
-	h.setChatLimit(models.MemorySensitivityPublic)
-	h.target.Binding.AllowUnrestricted = true // acknowledged back when the thread was unrestricted
+	h.setSandboxed(true)
+	h.target.Binding.AllowUnrestricted = true // acknowledged back when the thread was not sandboxed
 	h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, h.tag("m1"))
 	h.reply(t, 0, "hi")
-	assert.Len(t, h.turns.started(), 1, "a restricted thread is answered")
+	assert.Len(t, h.turns.started(), 1, "a sandboxed thread is answered")
 	h.store.mu.Lock()
 	require.NotEmpty(t, h.store.withdrawn,
-		"the acknowledgement is withdrawn, so raising the limit later pauses the binding instead of re-opening it")
+		"the acknowledgement is withdrawn, so unsandboxing later pauses the binding instead of re-opening it")
 	for _, id := range h.store.withdrawn {
 		assert.Equal(t, h.target.Binding.ID, id, "only this binding's acknowledgement is touched")
 	}

@@ -115,16 +115,16 @@ func TestDiscordDeveloperContextListsChannelsAndExplainsTheRelayThread(t *testin
 	assert.NotContains(t, other, "This thread is the relay")
 }
 
-// --- restricted threads reach only their own bound channel ---
+// --- sandboxed threads reach only their own bound channel ---
 
-func restrictedChat() *models.Chat {
+func sandboxedChat() *models.Chat {
 	c := testChat()
-	c.MemorySensitivityLimit = models.MemorySensitivityPublic
+	c.Sandboxed = true
 	return c
 }
 
-func TestARestrictedThreadCanPostOnlyToItsOwnChannel(t *testing.T) {
-	chat := restrictedChat()
+func TestASandboxedThreadCanPostOnlyToItsOwnChannel(t *testing.T) {
+	chat := sandboxedChat()
 	own, other := binding("Home", "general"), binding("Work", "secret-ops")
 	own.ChatID = chat.ID
 	store := &fakeDiscordToolStore{bindings: []models.DiscordBinding{own, other}}
@@ -145,8 +145,8 @@ func TestARestrictedThreadCanPostOnlyToItsOwnChannel(t *testing.T) {
 	}
 }
 
-func TestARestrictedThreadDoesNotLearnOtherChannelNames(t *testing.T) {
-	chat := restrictedChat()
+func TestASandboxedThreadDoesNotLearnOtherChannelNames(t *testing.T) {
+	chat := sandboxedChat()
 	own, other := binding("Home", "general"), binding("Work", "secret-ops")
 	own.ChatID = chat.ID
 	store := &fakeDiscordToolStore{bindings: []models.DiscordBinding{own, other}}
@@ -161,8 +161,8 @@ func TestARestrictedThreadDoesNotLearnOtherChannelNames(t *testing.T) {
 	assert.NotContains(t, dev, "Work")
 }
 
-func TestARestrictedThreadWithNoChannelOfItsOwnHasNoPostTool(t *testing.T) {
-	chat := restrictedChat()
+func TestASandboxedThreadWithNoChannelOfItsOwnHasNoPostTool(t *testing.T) {
+	chat := sandboxedChat()
 	store := &fakeDiscordToolStore{bindings: []models.DiscordBinding{binding("Home", "general")}}
 	withDiscordToolStore(t, store)
 
