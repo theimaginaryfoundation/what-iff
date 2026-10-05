@@ -15,7 +15,7 @@ import (
 )
 
 // fakeChatTurnStore is an in-memory chatTurnStore: it keeps turn jobs per chat and lists the
-// pending/processing ones oldest first, as the datastore does.
+// unfinished ones updated since the cutoff, oldest first, as the datastore does.
 type fakeChatTurnStore struct {
 	mu        sync.Mutex
 	jobs      map[uuid.UUID]*models.Job
@@ -60,7 +60,7 @@ func (f *fakeChatTurnStore) touchCount(id uuid.UUID) int {
 	return f.touches[id]
 }
 
-func (f *fakeChatTurnStore) ListPendingTurnJobsForChat(_ context.Context, userID, chatID, excludeJobID uuid.UUID) ([]*models.Job, error) {
+func (f *fakeChatTurnStore) ListActiveTurnJobsForChat(_ context.Context, userID, chatID, excludeJobID uuid.UUID, updatedSince time.Time) ([]*models.Job, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.listCalls++
@@ -72,6 +72,9 @@ func (f *fakeChatTurnStore) ListPendingTurnJobsForChat(_ context.Context, userID
 	var out []*models.Job
 	for id, j := range f.jobs {
 		if id == excludeJobID || f.chatOf[id] != chatID || j.UserID != userID || !blocksLaterTurns(j.Status) {
+			continue
+		}
+		if !updatedSince.IsZero() && j.UpdatedAt.Before(updatedSince) {
 			continue
 		}
 		cp := *j
@@ -184,11 +187,11 @@ func requireProceeds(t *testing.T, done <-chan waitResult) waitResult {
 	}
 }
 
-func TestChatTurnGate_SecondTurnWaitsUntilFirstHasReplied(t *testing.T) {
+func TestChatTurnGate_SecondTurnWaitsUntilFirstHasFinished(t *testing.T) {
 	t.Parallel()
-	// inference_complete is enough: the reply and response chain are saved by then, and the
-	// earlier turn's post-processing overlaps the next turn.
-	for _, released := range []models.JobStatus{models.JobStatusInferenceComplete, models.JobStatusComplete, models.JobStatusFailed, models.JobStatusCancelled} {
+	// Replying is not enough: the earlier turn's expression pick and checkpoint run after
+	// inference_complete, on the chat state the next turn reads. Only a terminal job lets it go.
+	for _, released := range []models.JobStatus{models.JobStatusComplete, models.JobStatusFailed, models.JobStatusCancelled} {
 		t.Run(string(released), func(t *testing.T) {
 			t.Parallel()
 			store := newFakeChatTurnStore()
@@ -200,8 +203,15 @@ func TestChatTurnGate_SecondTurnWaitsUntilFirstHasReplied(t *testing.T) {
 
 			done := waitAsync(g, context.Background(), second, chatID)
 			requireStillWaiting(t, done)
-			store.setStatus(first.ID, models.JobStatusProcessing)
-			requireStillWaiting(t, done)
+			for _, phase := range []models.JobStatus{
+				models.JobStatusProcessing,
+				models.JobStatusInferenceComplete,  // replied; expression pick running
+				models.JobStatusExpressionComplete, // checkpoint running
+				models.JobStatusCompactionComplete,
+			} {
+				store.setStatus(first.ID, phase)
+				requireStillWaiting(t, done)
+			}
 
 			store.setStatus(first.ID, released)
 			r := requireProceeds(t, done)
@@ -216,10 +226,10 @@ func TestChatTurnGate_ProceedsAtOnceWithoutEarlierTurns(t *testing.T) {
 	store := newFakeChatTurnStore()
 	userID, chatA, chatB := uuid.New(), uuid.New(), uuid.New()
 	now := time.Now()
-	// A live turn in another chat, a NEWER live turn in the same chat, and an older turn already
-	// past its reply never block.
-	store.add(userID, chatB, models.JobStatusProcessing, now.Add(-time.Minute))
-	store.add(userID, chatA, models.JobStatusCompactionComplete, now.Add(-time.Minute))
+	// A live turn in another chat (even mid-checkpoint), a NEWER live turn in the same chat, and an
+	// older finished turn never block.
+	store.add(userID, chatB, models.JobStatusExpressionComplete, now.Add(-time.Minute))
+	store.add(userID, chatA, models.JobStatusComplete, now.Add(-time.Minute))
 	self := store.add(userID, chatA, models.JobStatusPending, now.Add(-time.Second))
 	store.add(userID, chatA, models.JobStatusPending, now)
 	g := testTurnGate(store, time.Minute)
@@ -250,8 +260,10 @@ func TestChatTurnGate_StaleEarlierTurnDoesNotBlockButHeartbeatingOneDoes(t *test
 	store := newFakeChatTurnStore()
 	userID, chatID := uuid.New(), uuid.New()
 	now := time.Now()
-	// Left "processing" by an instance that died: no heartbeat for longer than the stale bound.
+	// Left unfinished by an instance that died: no heartbeat for longer than the stale bound, one
+	// before its reply and one mid-checkpoint (the startup reaper only fails the first kind).
 	dead := store.add(userID, chatID, models.JobStatusProcessing, now.Add(-chatTurnStaleAfter-time.Minute))
+	store.add(userID, chatID, models.JobStatusExpressionComplete, now.Add(-chatTurnStaleAfter-time.Hour))
 	self := store.add(userID, chatID, models.JobStatusPending, now)
 	g := testTurnGate(store, time.Minute)
 
@@ -263,7 +275,7 @@ func TestChatTurnGate_StaleEarlierTurnDoesNotBlockButHeartbeatingOneDoes(t *test
 	require.NoError(t, store.TouchJob(context.Background(), userID, dead.ID))
 	done := waitAsync(g, context.Background(), self, chatID)
 	requireStillWaiting(t, done)
-	store.setStatus(dead.ID, models.JobStatusInferenceComplete)
+	store.setStatus(dead.ID, models.JobStatusComplete)
 	require.NoError(t, requireProceeds(t, done).err)
 }
 
@@ -342,7 +354,7 @@ func TestChatTurnGate_JobCancelledWhileQueuedDoesNotRun(t *testing.T) {
 	}()
 	time.Sleep(30 * time.Millisecond)
 	store.setStatus(self.ID, models.JobStatusCancelled)
-	store.setStatus(first.ID, models.JobStatusInferenceComplete)
+	store.setStatus(first.ID, models.JobStatusComplete)
 
 	select {
 	case r := <-done:
@@ -367,16 +379,17 @@ func TestChatTurnGate_WakeIsPerChat(t *testing.T) {
 
 	done := waitAsync(g, context.Background(), second, chatA)
 	requireStillWaiting(t, done)
-	store.setStatus(first.ID, models.JobStatusInferenceComplete)
+	store.setStatus(first.ID, models.JobStatusComplete)
 	g.tracker.wakeChat(chatB)
 	requireStillWaiting(t, done)
 	g.tracker.wakeChat(chatA)
 	require.NoError(t, requireProceeds(t, done).err)
 }
 
-// A turn reaching inference_complete in this process (noteTurnJobStatus, called from the job phase
-// helpers) wakes the turns queued behind it at once.
-func TestNoteTurnJobStatus_WakesQueuedTurnAtInferenceComplete(t *testing.T) {
+// A turn's status changes in this process (noteTurnJobStatus, called from the job phase helpers):
+// past inference_complete it is marked replied, and only once it is terminal are the turns queued
+// behind it woken.
+func TestNoteTurnJobStatus_MarksRepliedThenWakesQueuedTurnWhenFinished(t *testing.T) {
 	t.Parallel()
 	store := newFakeChatTurnStore()
 	a := &Agent{logger: zap.NewNop()}
@@ -394,10 +407,18 @@ func TestNoteTurnJobStatus_WakesQueuedTurnAtInferenceComplete(t *testing.T) {
 	a.noteTurnJobStatus(&models.Job{ID: first.ID, Status: models.JobStatusProcessing})
 	requireStillWaiting(t, done)
 
-	store.setStatus(first.ID, models.JobStatusInferenceComplete)
-	a.noteTurnJobStatus(&models.Job{ID: first.ID, Status: models.JobStatusInferenceComplete})
+	require.False(t, a.turns.snapshot()[first.ID].replied)
+
+	for _, phase := range []models.JobStatus{models.JobStatusInferenceComplete, models.JobStatusExpressionComplete} {
+		store.setStatus(first.ID, phase)
+		a.noteTurnJobStatus(&models.Job{ID: first.ID, Status: phase})
+		requireStillWaiting(t, done)
+		require.True(t, a.turns.snapshot()[first.ID].replied)
+	}
+
+	store.setStatus(first.ID, models.JobStatusComplete)
+	a.noteTurnJobStatus(&models.Job{ID: first.ID, Status: models.JobStatusComplete})
 	require.NoError(t, requireProceeds(t, done).err)
-	require.True(t, a.turns.snapshot()[first.ID].replied)
 }
 
 func TestChatTurnGate_HeartbeatsWhileQueuedAndRunning(t *testing.T) {
@@ -419,7 +440,7 @@ func TestChatTurnGate_HeartbeatsWhileQueuedAndRunning(t *testing.T) {
 	}()
 	require.Eventually(t, func() bool { return store.touchCount(self.ID) > 0 }, 2*time.Second, 5*time.Millisecond,
 		"a queued turn heartbeats")
-	store.setStatus(first.ID, models.JobStatusInferenceComplete)
+	store.setStatus(first.ID, models.JobStatusComplete)
 	release := <-acquired
 	before := store.touchCount(self.ID)
 	require.Eventually(t, func() bool { return store.touchCount(self.ID) > before }, 2*time.Second, 5*time.Millisecond,
@@ -451,16 +472,19 @@ func TestBlockingTurnJobs_OrderAndFilters(t *testing.T) {
 	tieLow := &models.Job{ID: lowID, CreatedAt: at, UpdatedAt: now, Status: models.JobStatusPending}
 	newer := &models.Job{ID: uuid.New(), CreatedAt: at.Add(time.Second), UpdatedAt: now, Status: models.JobStatusProcessing}
 	olderReplied := &models.Job{ID: uuid.New(), CreatedAt: at.Add(-time.Hour), UpdatedAt: now, Status: models.JobStatusInferenceComplete}
+	olderCheckpointing := &models.Job{ID: uuid.New(), CreatedAt: at.Add(-time.Hour), UpdatedAt: now, Status: models.JobStatusExpressionComplete}
 	olderFailed := &models.Job{ID: uuid.New(), CreatedAt: at.Add(-time.Hour), UpdatedAt: now, Status: models.JobStatusFailed}
+	olderDone := &models.Job{ID: uuid.New(), CreatedAt: at.Add(-time.Hour), UpdatedAt: now, Status: models.JobStatusComplete}
 	olderStale := &models.Job{ID: uuid.New(), CreatedAt: at.Add(-time.Hour), UpdatedAt: now.Add(-chatTurnStaleAfter - time.Second), Status: models.JobStatusProcessing}
 
-	got := g.blockingTurnJobs([]*models.Job{olderStale, olderFailed, olderReplied, older, tieLow, self, newer}, self, now)
-	require.Equal(t, []*models.Job{older, tieLow}, got,
-		"older live jobs before their reply block (ties by id); replied, terminal, stale and newer ones don't")
+	got := g.blockingTurnJobs([]*models.Job{olderStale, olderFailed, olderDone, olderReplied, olderCheckpointing, older, tieLow, self, newer}, self, now)
+	require.Equal(t, []*models.Job{olderReplied, olderCheckpointing, older, tieLow}, got,
+		"older unfinished jobs block, replied or not (ties by id); terminal, stale and newer ones don't")
 }
 
 // TestAwaitChatTurn_SerializesTurnsInJobOrder runs two turns on one chat through the Agent's gate,
-// starting the newer one first: it runs only after the older turn has replied.
+// starting the newer one first: it runs only after the older turn has replied AND finished its
+// checkpoint.
 func TestAwaitChatTurn_SerializesTurnsInJobOrder(t *testing.T) {
 	t.Parallel()
 	store := newFakeChatTurnStore()
@@ -488,6 +512,15 @@ func TestAwaitChatTurn_SerializesTurnsInJobOrder(t *testing.T) {
 		mu.Unlock()
 		store.setStatus(job.ID, models.JobStatusInferenceComplete)
 		a.noteTurnJobStatus(&models.Job{ID: job.ID, Status: models.JobStatusInferenceComplete})
+		// Post-processing: the checkpoint runs while the job is at expression_complete.
+		store.setStatus(job.ID, models.JobStatusExpressionComplete)
+		a.noteTurnJobStatus(&models.Job{ID: job.ID, Status: models.JobStatusExpressionComplete})
+		time.Sleep(work)
+		mu.Lock()
+		order = append(order, name+":checkpointed")
+		mu.Unlock()
+		store.setStatus(job.ID, models.JobStatusComplete)
+		a.noteTurnJobStatus(&models.Job{ID: job.ID, Status: models.JobStatusComplete})
 		return nil
 	}
 
@@ -500,7 +533,10 @@ func TestAwaitChatTurn_SerializesTurnsInJobOrder(t *testing.T) {
 	wg.Wait()
 
 	require.NoError(t, errors.Join(errs...))
-	require.Equal(t, []string{"first:start", "first:replied", "second:start", "second:replied"}, order)
+	require.Equal(t, []string{
+		"first:start", "first:replied", "first:checkpointed",
+		"second:start", "second:replied", "second:checkpointed",
+	}, order)
 	require.Empty(t, a.turns.snapshot(), "released turns are no longer tracked")
 }
 
@@ -552,15 +588,20 @@ func TestFailInFlightTurns_FinishesThisProcesssTurnJobs(t *testing.T) {
 	now := time.Now()
 	running := store.add(userID, chatID, models.JobStatusProcessing, now)
 	replied := store.add(userID, chatID, models.JobStatusCompactionComplete, now)
+	checkpointing := store.add(userID, chatID, models.JobStatusExpressionComplete, now)
+	justReplied := store.add(userID, chatID, models.JobStatusInferenceComplete, now)
 	stopped := store.add(userID, chatID, models.JobStatusCancelled, now)
 	elsewhere := store.add(userID, chatID, models.JobStatusProcessing, now) // another instance's
-	for _, j := range []*models.Job{running, replied, stopped} {
+	for _, j := range []*models.Job{running, replied, checkpointing, justReplied, stopped} {
 		a.turns.add(j.ID, userID, chatID)
 	}
 
 	a.FailInFlightTurns(context.Background())
 	require.Equal(t, models.JobStatusFailed, store.status(running.ID))
-	require.Equal(t, models.JobStatusComplete, store.status(replied.ID), "a turn past its reply completes")
+	for _, j := range []*models.Job{replied, checkpointing, justReplied} {
+		// None was marked replied in the tracker; the stored status alone says the reply is saved.
+		require.Equal(t, models.JobStatusComplete, store.status(j.ID), "a turn past its reply completes (%s)", j.Status)
+	}
 	require.Equal(t, models.JobStatusCancelled, store.status(stopped.ID), "terminal jobs are left alone")
 	require.Equal(t, models.JobStatusProcessing, store.status(elsewhere.ID), "only this process's turns")
 }
@@ -584,7 +625,7 @@ func TestBeginEphemeralChatTurn_UntrackedTurnHoldsATicket(t *testing.T) {
 
 			end, err := a.beginEphemeralChatTurn(context.Background(), userID, chatID, nil)
 			require.NoError(t, err)
-			live, err := store.ListPendingTurnJobsForChat(context.Background(), userID, chatID, uuid.Nil)
+			live, err := store.ListActiveTurnJobsForChat(context.Background(), userID, chatID, uuid.Nil, time.Time{})
 			require.NoError(t, err)
 			require.Len(t, live, 1, "the ticket holds the turn's place in the chat")
 			ticket := live[0]
@@ -618,7 +659,15 @@ func TestBeginEphemeralChatTurn_UntrackedTurnQueuesBehindLiveTurn(t *testing.T) 
 		t.Fatal("scheduled turn started while a turn was running in its chat")
 	case <-time.After(50 * time.Millisecond):
 	}
-	store.setStatus(running.ID, models.JobStatusInferenceComplete)
+	// Still queued while the running turn checkpoints.
+	store.setStatus(running.ID, models.JobStatusExpressionComplete)
+	a.turns.wakeChat(chatID)
+	select {
+	case <-started:
+		t.Fatal("scheduled turn started while the earlier turn was checkpointing")
+	case <-time.After(50 * time.Millisecond):
+	}
+	store.setStatus(running.ID, models.JobStatusComplete)
 	a.turns.wakeChat(chatID)
 	select {
 	case end := <-started:
@@ -640,7 +689,35 @@ func TestBeginEphemeralChatTurn_TrackedTurnQueuesAsItsOwnJob(t *testing.T) {
 	require.NoError(t, err)
 	end(errors.New("ignored: the caller owns the tracking job's status"))
 	require.Equal(t, models.JobStatusProcessing, store.status(tracking.ID))
-	live, err := store.ListPendingTurnJobsForChat(context.Background(), userID, chatID, uuid.Nil)
+	live, err := store.ListActiveTurnJobsForChat(context.Background(), userID, chatID, uuid.Nil, time.Time{})
 	require.NoError(t, err)
 	require.Len(t, live, 1, "no ticket is created for a tracked turn")
+}
+
+// The gate asks the store only for jobs updated within the stale bound, so a crash's abandoned rows
+// never fill the listing's row limit; with staleness off it asks for everything.
+func TestChatTurnGate_LiveSince(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	g := testTurnGate(nil, time.Minute)
+	require.Equal(t, now.Add(-chatTurnStaleAfter), g.liveSince(now))
+	g.staleAfter = 0
+	require.True(t, g.liveSince(now).IsZero())
+}
+
+func TestHasReplied(t *testing.T) {
+	t.Parallel()
+	for status, want := range map[models.JobStatus]bool{
+		models.JobStatusPending:            false,
+		models.JobStatusProcessing:         false,
+		models.JobStatusInferenceComplete:  true,
+		models.JobStatusExpressionComplete: true,
+		models.JobStatusCompactionComplete: true,
+		models.JobStatusComplete:           false,
+		models.JobStatusFailed:             false,
+		models.JobStatusCancelled:          false,
+	} {
+		require.Equal(t, want, hasReplied(status), status)
+		require.Equal(t, !isTerminalJobStatus(status), blocksLaterTurns(status), status)
+	}
 }

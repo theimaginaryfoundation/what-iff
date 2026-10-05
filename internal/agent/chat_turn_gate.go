@@ -16,16 +16,19 @@ import (
 //
 // Every turn in a chat (a chat_message job, or an agent_job_run job from a webhook or the
 // scheduler) waits, before it builds its context, until no OLDER turn job in the same chat is
-// still pending or processing. Jobs are ordered by (created_at, id) as stored, so every API
-// instance agrees on the order without coordinating: this is job-ordered single-flight. Nothing
-// is held while a turn runs (no advisory lock, no pinned connection — a turn can take minutes and
-// the pool is shared); waiting is a short indexed read polled with backoff, and a turn in this
-// process reaching its reply wakes that chat's local waiters at once.
+// still unfinished. Jobs are ordered by (created_at, id) as stored, so every API instance agrees
+// on the order without coordinating: this is job-ordered single-flight. Nothing is held while a
+// turn runs (no advisory lock, no pinned connection — a turn can take minutes and the pool is
+// shared); waiting is a short indexed read polled with backoff, and a turn in this process
+// finishing wakes that chat's local waiters at once.
 //
-// The gate opens at inference_complete, not at the end of the turn: that is when the reply and the
-// chat's response chain are saved (persistInferencePhase writes the chat first) and when the web
-// client unlocks its composer. The earlier turn's expression, checkpoint and memory work then
-// overlaps the next turn; the checkpoint's scratchpad write is conditional (scratchpad_commit.go).
+// The gate opens when the earlier turn's job is terminal, not at inference_complete. The turn's
+// post-processing (expression pick, chat naming and, above all, the checkpoint, which rewrites the
+// scratchpad, extracts memories and moves the summary window) works on the same chat state the
+// next turn reads. Waiting for it means the next turn builds its context on the finished
+// checkpoint and never races its writes. The wait is usually a few seconds (the expression pick);
+// it is minutes only when a checkpoint actually runs. The web client still unlocks its composer at
+// inference_complete; a message sent then simply queues.
 //
 // Every live turn heartbeats its job row (chatTurnHeartbeatInterval), queued or running, so a job
 // whose worker died stops blocking after chatTurnStaleAfter. On shutdown the process finishes its
@@ -43,12 +46,13 @@ var errQueuedTurnCancelled = fmt.Errorf("turn cancelled while queued: %w", conte
 var (
 	// chatTurnHeartbeatInterval is how often a live turn refreshes its job's updated_at.
 	chatTurnHeartbeatInterval = 30 * time.Second
-	// chatTurnStaleAfter is how long a pending/processing job may go without a write before the
-	// gate treats its worker as dead: four missed heartbeats.
+	// chatTurnStaleAfter is how long an unfinished turn job may go without a write before the gate
+	// treats its worker as dead: four missed heartbeats.
 	chatTurnStaleAfter = 2 * time.Minute
 	// chatTurnWaitTimeout bounds how long a turn queues behind live earlier turns (a dead one stops
 	// blocking after chatTurnStaleAfter). Queued turns heartbeat too, so this need not stay below
-	// the stale bound; it only has to cover a few long inferences ahead in the queue.
+	// the stale bound; it only has to cover a few long turns ahead in the queue, checkpoints
+	// included.
 	chatTurnWaitTimeout = 10 * time.Minute
 	// Poll backoff while queued: starts fast for the common short wait, caps to keep the read
 	// rate low across a long one.
@@ -62,16 +66,28 @@ const turnStageTurnQueueWait = "turn_queue_wait"
 
 // chatTurnStore is the slice of the datastore the turn gate uses.
 type chatTurnStore interface {
-	ListPendingTurnJobsForChat(ctx context.Context, userID, chatID, excludeJobID uuid.UUID) ([]*models.Job, error)
+	ListActiveTurnJobsForChat(ctx context.Context, userID, chatID, excludeJobID uuid.UUID, updatedSince time.Time) ([]*models.Job, error)
 	CreateJob(ctx context.Context, userID uuid.UUID, job models.Job) (*models.Job, error)
 	UpdateJobStatus(ctx context.Context, userID, id uuid.UUID, status models.JobStatus, errorMsg string) (*models.Job, error)
 	JobStatus(ctx context.Context, userID, jobID uuid.UUID) (models.JobStatus, error)
 	TouchJob(ctx context.Context, userID, id uuid.UUID) error
 }
 
-// blocksLaterTurns reports whether a turn job in this status holds up later turns in its chat.
+// blocksLaterTurns reports whether a turn job in this status holds up later turns in its chat:
+// every status until the job is terminal, so the turn's post-processing (checkpoint included)
+// finishes before the next turn starts.
 func blocksLaterTurns(s models.JobStatus) bool {
-	return s == models.JobStatusPending || s == models.JobStatusProcessing
+	return !isTerminalJobStatus(s)
+}
+
+// hasReplied reports whether a turn job in this status has saved its reply: past
+// inference_complete but not terminal yet (expression and checkpoint work may still be running).
+func hasReplied(s models.JobStatus) bool {
+	switch s {
+	case models.JobStatusInferenceComplete, models.JobStatusExpressionComplete, models.JobStatusCompactionComplete:
+		return true
+	}
+	return false
 }
 
 // chatTurnTracker is this process's view of its live turns: per-chat wake channels for queued
@@ -84,7 +100,8 @@ type chatTurnTracker struct {
 
 type inFlightTurn struct {
 	userID, chatID uuid.UUID
-	// replied is set once the job is past inference_complete (its reply is saved).
+	// replied is set once the job is past inference_complete (its reply is saved), so a shutdown
+	// completes it rather than failing it.
 	replied bool
 }
 
@@ -188,7 +205,7 @@ func (a *Agent) chatTurnGate() *chatTurnGate {
 	}
 }
 
-// awaitChatTurn blocks until no earlier turn in chatID is still before its reply. From the start
+// awaitChatTurn blocks until no earlier turn in chatID is unfinished. From the start
 // of the wait until release, job is tracked as in flight and heartbeats. release must be called
 // once the turn is over; it also wakes turns queued in this chat.
 func (a *Agent) awaitChatTurn(ctx context.Context, job *models.Job, chatID uuid.UUID) (release func(), err error) {
@@ -250,15 +267,21 @@ func (g *chatTurnGate) heartbeat(ctx context.Context, job *models.Job) {
 	}
 }
 
-// noteTurnJobStatus is called after a turn job's status changes. Once the job no longer blocks
-// later turns (it reached inference_complete or beyond), it wakes the turns queued in its chat in
-// this process instead of leaving them to their next poll.
+// noteTurnJobStatus is called after a turn job's status changes. Past inference_complete it records
+// that the turn has replied (so FailInFlightTurns completes rather than fails it). Once the job is
+// terminal it also wakes the turns queued in its chat in this process instead of leaving them to
+// their next poll; the turn's release wakes them too.
 func (a *Agent) noteTurnJobStatus(job *models.Job) {
-	if job == nil || blocksLaterTurns(job.Status) {
+	if job == nil {
 		return
 	}
-	if chatID, ok := a.turns.markReplied(job.ID); ok {
-		a.turns.wakeChat(chatID)
+	switch {
+	case !blocksLaterTurns(job.Status):
+		if chatID, ok := a.turns.markReplied(job.ID); ok {
+			a.turns.wakeChat(chatID)
+		}
+	case hasReplied(job.Status):
+		a.turns.markReplied(job.ID)
 	}
 }
 
@@ -321,7 +344,7 @@ func (a *Agent) FailInFlightTurns(ctx context.Context) {
 			continue
 		}
 		status, msg := models.JobStatusFailed, "Interrupted by a server shutdown"
-		if turn.replied || !blocksLaterTurns(current) {
+		if turn.replied || hasReplied(current) {
 			status, msg = models.JobStatusComplete, ""
 		}
 		if _, err := g.store.UpdateJobStatus(ctx, turn.userID, jobID, status, msg); err != nil {
@@ -404,8 +427,8 @@ func (a *Agent) beginEphemeralChatTurn(ctx context.Context, userID, chatID uuid.
 	}, nil
 }
 
-// wait polls until no earlier live turn remains in chatID, returning how long it queued (zero
-// when it never had to).
+// wait polls until no earlier unfinished turn remains in chatID, returning how long it queued
+// (zero when it never had to).
 func (g *chatTurnGate) wait(ctx context.Context, self *models.Job, chatID uuid.UUID) (time.Duration, error) {
 	start := time.Now()
 	deadline := start.Add(g.timeout)
@@ -417,7 +440,7 @@ func (g *chatTurnGate) wait(ctx context.Context, self *models.Job, chatID uuid.U
 			return queuedFor(queued, start), err
 		}
 		wake := g.tracker.waitCh(chatID)
-		jobs, err := g.store.ListPendingTurnJobsForChat(ctx, self.UserID, chatID, self.ID)
+		jobs, err := g.store.ListActiveTurnJobsForChat(ctx, self.UserID, chatID, self.ID, g.liveSince(time.Now()))
 		if err != nil {
 			if ctx.Err() != nil {
 				return queuedFor(queued, start), ctx.Err()
@@ -430,7 +453,7 @@ func (g *chatTurnGate) wait(ctx context.Context, self *models.Job, chatID uuid.U
 			blockers := g.blockingTurnJobs(jobs, self, time.Now())
 			if len(blockers) == 0 {
 				if queued {
-					g.logger.Info("chat turn gate: earlier turns replied; proceeding",
+					g.logger.Info("chat turn gate: earlier turns finished; proceeding",
 						zap.String("job_id", self.ID.String()), zap.String("chat_id", chatID.String()),
 						zap.Duration("waited", time.Since(start)))
 				}
@@ -465,6 +488,17 @@ func (g *chatTurnGate) wait(ctx context.Context, self *models.Job, chatID uuid.U
 	}
 }
 
+// liveSince is the oldest updated_at a live turn job can have at now: one older has missed every
+// heartbeat for staleAfter, so its worker is gone. The listing filters on it, so abandoned jobs a
+// crash left behind (they pile up past inference_complete, where the startup reaper does not look)
+// never crowd live ones out of its row limit. Zero (no filter) when staleness is off.
+func (g *chatTurnGate) liveSince(now time.Time) time.Time {
+	if g.staleAfter <= 0 {
+		return time.Time{}
+	}
+	return now.Add(-g.staleAfter)
+}
+
 func queuedFor(queued bool, start time.Time) time.Duration {
 	if !queued {
 		return 0
@@ -472,8 +506,8 @@ func queuedFor(queued bool, start time.Time) time.Duration {
 	return time.Since(start)
 }
 
-// blockingTurnJobs returns the jobs in jobs that self must wait for: still before their reply,
-// ordered before self, and not stale.
+// blockingTurnJobs returns the jobs in jobs that self must wait for: unfinished, ordered before
+// self, and not stale.
 func (g *chatTurnGate) blockingTurnJobs(jobs []*models.Job, self *models.Job, now time.Time) []*models.Job {
 	var out []*models.Job
 	for _, j := range jobs {
