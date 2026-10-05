@@ -144,6 +144,21 @@ export function buildPersonalityUpdateRequest(
   };
 }
 
+/** A character-book entry the importer could not flatten into the prompt; upload it as a file. */
+export interface PersonalityCardLoreFile {
+  name: string;
+  file_name: string;
+  keys: string[];
+  content: string;
+}
+
+/** Response of importing a SillyTavern character card. */
+export interface PersonalityCardImportResult {
+  personality: Personality;
+  lore_files: PersonalityCardLoreFile[];
+  warnings: string[];
+}
+
 export interface PaginatedPersonalityResponse {
   results: Personality[];
   total_count: number;

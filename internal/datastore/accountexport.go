@@ -162,6 +162,7 @@ func (d *Datastore) ImportedChatIDsByHash(ctx context.Context, userID uuid.UUID,
 func (d *Datastore) ExportPersonalityInputs(ctx context.Context, userID uuid.UUID) ([]exporter.PersonalityInput, error) {
 	rows, err := d.dbClient.Personality.Query().
 		Where(personality.HasUserWith(user.ID(userID))).
+		WithCard().
 		Order(ent.Asc(personality.FieldCreatedAt), ent.Asc(personality.FieldID)).
 		All(ctx)
 	if err != nil {
@@ -169,7 +170,7 @@ func (d *Datastore) ExportPersonalityInputs(ctx context.Context, userID uuid.UUI
 	}
 	out := make([]exporter.PersonalityInput, 0, len(rows))
 	for _, p := range rows {
-		out = append(out, exporter.PersonalityInput{
+		in := exporter.PersonalityInput{
 			ID:              p.ID,
 			Name:            p.Name,
 			SystemPrompt:    p.SystemPrompt,
@@ -177,7 +178,12 @@ func (d *Datastore) ExportPersonalityInputs(ctx context.Context, userID uuid.UUI
 			AutoPinMemories: p.AutoPinMemories,
 			CreatedAt:       p.CreatedAt,
 			UpdatedAt:       p.UpdatedAt,
-		})
+		}
+		if p.Edges.Card != nil {
+			in.CharacterCard = p.Edges.Card.Data
+			in.OmittedCardFields = p.Edges.Card.OmittedFields
+		}
+		out = append(out, in)
 	}
 	return out, nil
 }

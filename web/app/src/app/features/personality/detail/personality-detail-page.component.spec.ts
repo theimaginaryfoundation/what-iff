@@ -4,12 +4,13 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient, withXhr } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ActivatedRoute, Router } from '@angular/router';
-import { BehaviorSubject, of } from 'rxjs';
+import { BehaviorSubject, of, throwError } from 'rxjs';
 
 import { ChatService } from '../../../core/services/chat.service';
 import { ConfirmationService } from '../../../core/services/confirmation.service';
 import { FileAttachmentService } from '../../../core/services/file-attachment.service';
 import { PersonalityService } from '../../../core/services/personality.service';
+import { PersonalityCardService } from '../../../core/services/personality-card.service';
 import { UserPreferencesService } from '../../../core/services/user-preferences.service';
 import { Chat } from '../../../core/models/chat.model';
 import { Personality } from '../../../core/models/personality.model';
@@ -194,6 +195,51 @@ describe('PersonalityDetailPageComponent', () => {
         expect(request.auto_pin_memories).toBe(true);
         expect(request.name).toBe('Vera Calder');
         expect(request.scratchpad).toBe('Scratchpad body');
+    });
+
+    it('exports the saved personality as a character card from the header button', () => {
+        const exportCard = vi.spyOn(TestBed.inject(PersonalityCardService), 'exportCard').mockReturnValue(of(undefined));
+        fixture.detectChanges();
+
+        const button = Array.from<HTMLButtonElement>(fixture.nativeElement.querySelectorAll('button'))
+            .find(b => b.textContent?.trim() === 'Export card');
+        expect(button).toBeTruthy();
+        button!.click();
+
+        expect(exportCard).toHaveBeenCalledWith(expect.objectContaining({ id: 'p-1' }), 'json');
+        expect(fixture.componentInstance.isExportingCard()).toBe(false);
+    });
+
+    it('offers the PNG card only when the personality has a cover image', () => {
+        const exportCard = vi.spyOn(TestBed.inject(PersonalityCardService), 'exportCard').mockReturnValue(of(undefined));
+        const labels = () => Array.from<HTMLButtonElement>(fixture.nativeElement.querySelectorAll('button')).map(b => b.textContent?.trim());
+
+        vi.mocked(TestBed.inject(PersonalityService).getPersonality).mockReturnValue(of(makePersonality({ cover_image_id: null })));
+        fixture.detectChanges();
+        expect(labels()).not.toContain('Export PNG card');
+        expect(labels()).toContain('Export card');
+
+        // A cover image is what a PNG card is made of.
+        const withCover = TestBed.createComponent(PersonalityDetailPageComponent);
+        vi.mocked(TestBed.inject(PersonalityService).getPersonality).mockReturnValue(of(makePersonality({ cover_image_id: 'c-1' })));
+        withCover.detectChanges();
+        const button = Array.from<HTMLButtonElement>(withCover.nativeElement.querySelectorAll('button'))
+            .find(b => b.textContent?.trim() === 'Export PNG card');
+        expect(button).toBeTruthy();
+        button!.click();
+
+        expect(exportCard).toHaveBeenCalledWith(expect.objectContaining({ id: 'p-1' }), 'png');
+    });
+
+    it('tells the user when a character card export fails', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        vi.spyOn(TestBed.inject(PersonalityCardService), 'exportCard').mockReturnValue(throwError(() => new Error('boom')));
+        fixture.detectChanges();
+
+        fixture.componentInstance.onExportCard();
+        await vi.waitFor(() => expect(TestBed.inject(ConfirmationService).alert).toHaveBeenCalledWith(expect.objectContaining({ type: 'danger' })));
+
+        expect(fixture.componentInstance.isExportingCard()).toBe(false);
     });
 
     it('persists the in-progress draft only on an explicit Save changes', () => {
