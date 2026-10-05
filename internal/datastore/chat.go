@@ -554,9 +554,24 @@ func (d *Datastore) GetChatContext(ctx context.Context, userID, chatID uuid.UUID
 		return nil, err
 	}
 
+	scratchpad := chat.Scratchpad
+	if chat.MemoryRestricted() && chat.PersonalityID != uuid.Nil {
+		// toChatModel keeps the shared personality scratchpad out of a restricted chat's model
+		// context, but this is the owner's own view of it (the context panel edits and saves it
+		// back to the personality), so read it directly: showing it blank would let a save wipe it.
+		p, err := d.dbClient.Personality.Query().
+			Where(personality.ID(chat.PersonalityID), personality.HasUserWith(user.ID(userID))).
+			Select(personality.FieldScratchpad).
+			Only(ctx)
+		if err != nil {
+			return nil, err
+		}
+		scratchpad = p.Scratchpad
+	}
+
 	return &models.ChatContext{
 		ChatID:           chat.ID,
-		ActiveScratchpad: chat.Scratchpad,
+		ActiveScratchpad: scratchpad,
 		Summary:          chat.CheckpointSummary,
 	}, nil
 }

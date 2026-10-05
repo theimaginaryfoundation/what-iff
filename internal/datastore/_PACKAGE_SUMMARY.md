@@ -134,11 +134,11 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   `UpsertChatSummaryMemory` gives a checkpoint summary its own level (`summarySensitivity`: the default capped by the chat's limit) and never lowers it on update.
   `MemoryIDsWithinSensitivity` re-checks persisted ids against the current limit.
   `PatchMemoriesBatch` applies a sensitivity-only patch as one owner-scoped `UPDATE` in one transaction (`patchMemoriesSensitivityBatch`); Summary-scope memories are excluded and count as not found (with `all_or_none`, any such id rejects the batch).
-  Folding gives the survivor the most restricted sensitivity of the group and records `PriorSensitivity` / `FoldedSensitivity` in the undo snapshot; undo restores it unless the user changed it since.
-  `toChatModel` blanks the personality scratchpad for a restricted chat.
+  Folding gives the survivor the most restricted sensitivity of the group (a new member raises it only when classified `sensitive`, so a memory the user marked `public` is not pulled back to the personal default) and records `PriorSensitivity` / `FoldedSensitivity` in the undo snapshot; undo restores it unless the user changed it since.
+  `toChatModel` blanks the personality scratchpad for a restricted chat; `GetChatContext` (the owner's context panel, which saves it back) still reads it.
   `ListFileAttachmentsInChatScope` returns a conversation's uploads plus its personality's documents, the file scope a restricted chat is held to.
   Memory export/import and the account export carry `sensitivity` and the chat's limit; absent values read as personal and unrestricted, while a non-empty value that is not a level fails closed (memory `sensitive`, chat limit `public`; see `importedChatMemoryLimit`).
-  `WithChatMemoriesOnly` confines `PersistMemoryMergeGroup` and `PersistMemoryLinkGroup` to memories the asking chat created (`ErrMemoryOutsideChat`, nothing written); scope is left to the caller; restricted chats' checkpoints pass it.
+  `WithChatMemoriesOnly` confines `PersistMemoryMergeGroup` and `PersistMemoryLinkGroup` to memories the asking chat created (`ErrMemoryOutsideChat`, nothing written); scope is left to the caller, and new memories of any scope record the asking chat as their source so it can fold them later; restricted chats' checkpoints pass it.
   `ErrMemoryIDPrefixAmbiguous` lets a restricted chat treat an ambiguous id prefix like a missing memory.
 
 ## Testing

@@ -304,7 +304,7 @@ func (t *RecallTool) fetch(ctx context.Context, chat *models.Chat, a recallArgs)
 		// and none is needed.
 		// Try memory first.
 		// A restricted chat treats anything outside its sandbox exactly like a missing id.
-		if mem, err := t.store.GetMemory(ctx, chat.UserID, id); err == nil && mem != nil && memoryReadableBy(chat, mem) {
+		if mem, err := t.store.GetMemory(ctx, chat.UserID, id); err == nil && mem != nil && memoryReadableBy(ctx, t.store, chat, mem) {
 			return t.ok(recallResult{
 				Mode:     recallModeFetch,
 				Memories: formatMemories([]*models.Memory{mem}),
@@ -316,7 +316,7 @@ func (t *RecallTool) fetch(ctx context.Context, chat *models.Chat, a recallArgs)
 		}
 		// Then a conversation's checkpoint summary, treating the ID as a chat ID. A summary is a
 		// memory with its own level, so the level check is the gate.
-		if sum, err := t.store.GetChatSummaryMemory(ctx, chat.UserID, id); err == nil && sum != nil && memoryReadableBy(chat, sum) {
+		if sum, err := t.store.GetChatSummaryMemory(ctx, chat.UserID, id); err == nil && sum != nil && memoryReadableBy(ctx, t.store, chat, sum) {
 			return t.ok(summaryChunkResult(sum, id), []*models.Memory{sum}, nil)
 		}
 		return t.fail(recallModeFetch, fmt.Sprintf("no memory, file, or conversation summary found for id %q", target))
@@ -390,7 +390,7 @@ func (t *RecallTool) fetchSummary(ctx context.Context, chat *models.Chat, chatID
 	if err != nil {
 		return t.fail(recallModeFetch, err.Error())
 	}
-	if sum == nil || !memoryReadableBy(chat, sum) {
+	if sum == nil || !memoryReadableBy(ctx, t.store, chat, sum) {
 		return t.ok(recallResult{Mode: recallModeFetch, Note: fmt.Sprintf("No checkpoint summary found for conversation %s.", chatID)}, nil, nil)
 	}
 	return t.ok(summaryChunkResult(sum, chatID), []*models.Memory{sum}, nil)
@@ -673,7 +673,7 @@ func (t *RecallTool) conversation(ctx context.Context, chat *models.Chat, a reca
 	}
 	if sum, err := t.store.GetChatSummaryMemory(ctx, chat.UserID, chatID); err != nil {
 		t.logger.Warn("recall: conversation summary lookup failed", zap.Error(err))
-	} else if sum != nil && memoryReadableBy(chat, sum) {
+	} else if sum != nil && memoryReadableBy(ctx, t.store, chat, sum) {
 		conv.Summary = sum.Content
 	}
 
@@ -859,6 +859,9 @@ func (t *RecallTool) lifecycleEvents(ctx context.Context, chat *models.Chat, a r
 		if !ok || ev == nil {
 			continue
 		}
+		if chat.MemoryRestricted() && !t.lifecycleSurvivorReadable(ctx, chat, ev.SurvivorMemoryID) {
+			continue // the store filtered by level; scope and pins are checked like a fetch by id
+		}
 		item := toRecallLifecycleEvent(ev)
 		if chat.MemoryRestricted() {
 			// Pre-merge member previews are a historical snapshot whose sensitivity can differ
@@ -883,6 +886,16 @@ func (t *RecallTool) lifecycleEvents(ctx context.Context, chat *models.Chat, a r
 		res.Note = "More lifecycle events available — pass next_page_token for the next page."
 	}
 	return t.ok(res, nil, nil)
+}
+
+// lifecycleSurvivorReadable reports whether a restricted chat may see a merge event, judged by its
+// survivor memory exactly like a fetch by id (memoryReadableBy). A failed lookup hides the event.
+func (t *RecallTool) lifecycleSurvivorReadable(ctx context.Context, chat *models.Chat, survivorID uuid.UUID) bool {
+	mem, err := t.store.GetMemory(ctx, chat.UserID, survivorID)
+	if err != nil || mem == nil {
+		return false
+	}
+	return memoryReadableBy(ctx, t.store, chat, mem)
 }
 
 // toRecallLifecycleEvent projects a models.MemoryMergeEvent into the agent-facing shape, dropping

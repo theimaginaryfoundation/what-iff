@@ -66,8 +66,27 @@ func TestSandbox_ChatPredicates(t *testing.T) {
 
 	// Summaries are memories with their own level: no special case beyond the level.
 	otherSummary := &models.Memory{Level: models.MemoryLevelSummary, ChatID: uuid.New(), Sensitivity: models.MemorySensitivityPersonal}
-	require.True(t, memoryReadableBy(chat, otherSummary))
-	require.False(t, memoryReadableBy(public, otherSummary))
+	require.True(t, memoryReadableBy(ctx, store, chat, otherSummary))
+	require.False(t, memoryReadableBy(ctx, store, public, otherSummary))
+
+	// By id, a restricted chat reads what retrieval would hand it: another conversation's Chat memory
+	// only when that conversation is readable, and no User memory pinned to another personality.
+	store.chatLimitErr = nil
+	chatMem := func(chatID uuid.UUID) *models.Memory {
+		return &models.Memory{Scope: MemoryScopeChat, Level: models.MemoryLevelThread, ChatID: chatID, Sensitivity: models.MemorySensitivityPublic}
+	}
+	require.True(t, memoryReadableBy(ctx, store, chat, chatMem(chat.ID)))
+	require.True(t, memoryReadableBy(ctx, store, chat, chatMem(pubPeer)))
+	require.False(t, memoryReadableBy(ctx, store, chat, chatMem(sensPeer)))
+	require.False(t, memoryReadableBy(ctx, store, chat, chatMem(uuid.Nil)), "a Chat memory with no known chat fails closed")
+	otherPersona := uuid.New()
+	pinned := &models.Memory{Scope: MemoryScopeUser, Level: models.MemoryLevelPersonality, PinnedPersonalityID: &otherPersona, Sensitivity: models.MemorySensitivityPublic}
+	require.False(t, memoryReadableBy(ctx, store, chat, pinned))
+	pinned.PinnedPersonalityID = &chat.PersonalityID
+	require.True(t, memoryReadableBy(ctx, store, chat, pinned))
+	require.True(t, memoryReadableBy(ctx, store, chat, &models.Memory{Level: models.MemoryLevelGlobal, Sensitivity: models.MemorySensitivityPublic}), "scope from Level when Scope is unset")
+	require.False(t, memoryReadableBy(ctx, store, chat, &models.Memory{Sensitivity: models.MemorySensitivityPublic}), "an unknown scope fails closed")
+	require.True(t, memoryReadableBy(ctx, store, restrictedChat(""), chatMem(sensPeer)), "an unrestricted chat reads everything it owns")
 
 	require.Equal(t, models.MemorySensitivityPublic, cappedMemorySensitivity(restrictedChat(models.MemorySensitivityPublic), ""))
 	require.Equal(t, models.MemorySensitivitySensitive, cappedMemorySensitivity(restrictedChat(models.MemorySensitivityPublic), "sensitive"), "an explicit sensitive is never lowered by the cap")
@@ -265,20 +284,30 @@ func TestRecall_Restricted_OtherConversationsByLimit(t *testing.T) {
 
 func TestRecall_Restricted_LifecycleEvents(t *testing.T) {
 	member := models.MemoryMergeSourceMember{Content: "a pre-merge member that was sensitive"}
-	store := &fakeRecallStore{mergeEvents: []*models.MemoryMergeEvent{{
-		ID: uuid.New(), SurvivorMemoryID: uuid.New(), MergeType: models.MemoryMergeTypeFoldLive, Content: "survivor",
-		SourceMembers: []models.MemoryMergeSourceMember{member}, CreatedAt: time.Now(),
-	}}}
+	survivor := mem("survivor", models.MemorySensitivityPersonal)
+	otherChatSurvivor := &models.Memory{ID: uuid.New(), Content: "another chat's note", Scope: MemoryScopeChat, Level: models.MemoryLevelThread, ChatID: uuid.New(), Sensitivity: models.MemorySensitivityPublic}
+	event := func(survivorID uuid.UUID, content string) *models.MemoryMergeEvent {
+		return &models.MemoryMergeEvent{
+			ID: uuid.New(), SurvivorMemoryID: survivorID, MergeType: models.MemoryMergeTypeFoldLive, Content: content,
+			SourceMembers: []models.MemoryMergeSourceMember{member}, CreatedAt: time.Now(),
+		}
+	}
+	store := &fakeRecallStore{
+		mergeEvents: []*models.MemoryMergeEvent{event(survivor.ID, "survivor"), event(otherChatSurvivor.ID, "another chat's note"), event(uuid.New(), "gone")},
+		memoryByID:  map[uuid.UUID]*models.Memory{survivor.ID: survivor, otherChatSurvivor.ID: otherChatSurvivor},
+	}
 	rt := newTestRecallTool(store)
 
 	res := recallJSON(t, rt, restrictedChat(models.MemorySensitivityPersonal), `{"mode":"lifecycle_events"}`)
 	require.NotNil(t, store.lastMergeFilters.MaxSensitivity, "the limit reaches the event query")
 	require.Equal(t, models.MemorySensitivityPersonal, *store.lastMergeFilters.MaxSensitivity)
-	require.Len(t, res.LifecycleEvents, 1)
+	require.Len(t, res.LifecycleEvents, 1, "events whose survivor the chat cannot fetch (another conversation's, or missing) are dropped")
+	require.Equal(t, survivor.ID.String(), res.LifecycleEvents[0].SurvivorMemoryID)
 	require.Empty(t, res.LifecycleEvents[0].SourceMembers, "pre-merge previews are withheld from a restricted chat")
 
 	res = recallJSON(t, rt, restrictedChat(""), `{"mode":"lifecycle_events"}`)
 	require.Nil(t, store.lastMergeFilters.MaxSensitivity)
+	require.Len(t, res.LifecycleEvents, 3)
 	require.Len(t, res.LifecycleEvents[0].SourceMembers, 1)
 }
 

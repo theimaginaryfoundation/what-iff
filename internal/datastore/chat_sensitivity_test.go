@@ -175,3 +175,26 @@ func TestUpsertChatSummaryMemory_SensitivityFollowsTheChatLimit(t *testing.T) {
 	require.NoError(t, ds.UpsertChatSummaryMemory(ctx, userID, public, "public summary 2", []float32{0.2}))
 	require.Equal(t, models.MemorySensitivityPersonal, level(public))
 }
+
+// The owner's context panel shows (and saves back) the personality scratchpad even for a
+// restricted chat; only the model context leaves it out.
+func TestGetChatContext_RestrictedChatStillShowsTheOwnerTheScratchpad(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+	userID := uuid.New()
+	createTestUser(t, ds, userID)
+	personalityID := uuid.New()
+	createTestPersonality(t, ds, personalityID, userID)
+	require.NoError(t, ds.dbClient.Personality.UpdateOneID(personalityID).SetScratchpad("owner notes").Exec(ctx))
+	chatID := uuid.New()
+	createTestChat(t, ds, chatID, userID)
+	require.NoError(t, ds.dbClient.Chat.UpdateOneID(chatID).SetPersonalityID(personalityID).SetMemorySensitivityLimit(entchat.MemorySensitivityLimitPublic).Exec(ctx))
+
+	chat, err := ds.GetChat(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Empty(t, chat.Scratchpad, "the model-facing chat has none")
+	cc, err := ds.GetChatContext(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Equal(t, "owner notes", cc.ActiveScratchpad)
+}

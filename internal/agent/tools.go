@@ -78,6 +78,16 @@ func (c *chatContext) toolOffered(name string) bool {
 	return ok
 }
 
+// toolRitualMood is the mood whose rituals' MCP servers join the turn's tools. A restricted chat
+// gets none: its mood rituals (skill text and linked MCP servers from the owner's account) are not
+// loaded (see handleUserMessage), so their servers are not discovered or offered either.
+func toolRitualMood(chatCtx *chatContext) *models.Mood {
+	if chatCtx == nil || chatCtx.chat.MemoryRestricted() {
+		return nil
+	}
+	return chatCtx.activeMood
+}
+
 type turnToolPolicy struct {
 	toolsEnabled bool
 	// disabledTools filters the function tools offered to the model. It is not consulted for
@@ -163,7 +173,7 @@ func (a *Agent) buildTurnToolPolicy(ctx context.Context, chatCtx *chatContext, u
 		toolsEnabled:  chatCtx.chat.ToolsEnabled,
 		disabledTools: disabledTools,
 		showMoodTools: a.shouldExposeMoodTools(ctx, userID, chatCtx.chat),
-		ritualIDs:     mergedRitualIDsForTools(chatMessage, chatCtx.activeMood),
+		ritualIDs:     mergedRitualIDsForTools(chatMessage, toolRitualMood(chatCtx)),
 	}
 	if !policy.toolsEnabled {
 		return policy

@@ -15,8 +15,8 @@ import (
 // account data asks this file, not the chat's raw limit, so the rules live in one place:
 //
 //   - memories (checkpoint summaries included, which carry their own level) are read at or below
-//     the chat's limit (SQL filters in the datastore; the single-row checks here cover lookups by
-//     ID);
+//     the chat's limit (SQL filters in the datastore; memoryReadableBy covers lookups by ID, where
+//     another conversation's Chat memory also needs that conversation to be readable);
 //   - a thread's limit is also its own classification: another conversation (its messages,
 //     bookmarks, a memory's origin) is readable only when that conversation's own limit is at or
 //     below this chat's (a public thread reads other public threads), failing closed on lookup
@@ -34,16 +34,57 @@ func restrictedNote(chat *models.Chat, what string) string {
 		what, chat.MemoryLimit())
 }
 
-// memoryReadableBy reports whether chat may read m: its sensitivity is at or below the chat's
-// limit. An unrestricted chat reads everything it owns.
-func memoryReadableBy(chat *models.Chat, m *models.Memory) bool {
+// memoryReadableBy reports whether chat may read m, looked up by id. An unrestricted chat reads
+// everything it owns. A restricted chat additionally needs m's sensitivity at or below its limit
+// and, mirroring what retrieval (GetRelatedMemories) would ever hand it:
+//
+//   - a Chat-scoped memory only from this conversation, or from one it may read
+//     (conversationReadable);
+//   - a User-scoped memory only when it is not pinned to another personality;
+//   - a checkpoint summary by its level alone (summaries carry their own level).
+//
+// Anything else (an unknown scope) is refused.
+func memoryReadableBy(ctx context.Context, store chatLimitLookup, chat *models.Chat, m *models.Memory) bool {
 	if m == nil {
 		return false
 	}
 	if !chat.MemoryRestricted() {
 		return true
 	}
-	return m.Sensitivity.AllowedUnder(chat.MemoryLimit())
+	if !m.Sensitivity.AllowedUnder(chat.MemoryLimit()) {
+		return false
+	}
+	switch memoryScopeOf(m) {
+	case MemoryScopeUser:
+		return m.PinnedPersonalityID == nil || (chat.PersonalityID != uuid.Nil && *m.PinnedPersonalityID == chat.PersonalityID)
+	case MemoryScopeChat:
+		return m.ChatID == chat.ID || conversationReadable(ctx, store, chat, m.ChatID)
+	case memoryScopeSummary:
+		return true
+	default:
+		return false
+	}
+}
+
+// memoryScopeSummary is the checkpoint-summary memory scope.
+const memoryScopeSummary = "Summary"
+
+// memoryScopeOf is m's scope ("User", "Chat" or "Summary"), from Scope when the loader set it and
+// from Level otherwise.
+func memoryScopeOf(m *models.Memory) string {
+	switch m.Scope {
+	case MemoryScopeUser, MemoryScopeChat, memoryScopeSummary:
+		return m.Scope
+	}
+	switch m.Level {
+	case models.MemoryLevelGlobal, models.MemoryLevelPersonality:
+		return MemoryScopeUser
+	case models.MemoryLevelThread:
+		return MemoryScopeChat
+	case models.MemoryLevelSummary:
+		return memoryScopeSummary
+	}
+	return ""
 }
 
 // chatLimitLookup returns the stored memory sensitivity limit of one of the user's chats.

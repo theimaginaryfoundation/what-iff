@@ -70,7 +70,7 @@ func (t *RecallTool) resolveMemory(ctx context.Context, chat *models.Chat, targe
 			}
 			return nil, err
 		}
-		if mem == nil || !memoryReadableBy(chat, mem) {
+		if mem == nil || !memoryReadableBy(ctx, t.store, chat, mem) {
 			return nil, notFound()
 		}
 		return mem, nil
@@ -88,7 +88,7 @@ func (t *RecallTool) resolveMemory(ctx context.Context, chat *models.Chat, targe
 		}
 		return nil, err
 	}
-	if mem == nil || !memoryReadableBy(chat, mem) {
+	if mem == nil || !memoryReadableBy(ctx, t.store, chat, mem) {
 		return nil, notFound()
 	}
 	return mem, nil

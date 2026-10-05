@@ -396,6 +396,13 @@ func (a *Agent) extractAndStoreImportedMemories(ctx context.Context, userID, cha
 	}
 
 	memories := memoryutil.NormalizeExtractedMemories(extracted, importMemoryMaxPerThread)
+	// An account-export import restores the thread's memory sensitivity limit, so what it learns is
+	// capped like any chat's (models.CapToLimit). If the lookup fails the default level is kept,
+	// which a restricted thread simply cannot read: the safe direction.
+	chatLimit, limitErr := a.ds.GetChatMemorySensitivityLimit(ctx, userID, chatID)
+	if limitErr != nil {
+		chatLimit = ""
+	}
 
 	stored := 0
 	for _, mem := range memories {
@@ -412,8 +419,8 @@ func (a *Agent) extractAndStoreImportedMemories(ctx context.Context, userID, cha
 			Scope:      mem.Scope,
 			Confidence: mem.Confidence.Float(),
 			Status:     models.MemoryStatusActive,
-			// Normalized to personal or sensitive; an imported thread has no sensitivity limit.
-			Sensitivity: mem.Sensitivity,
+			// Normalized to personal or sensitive, then capped by the thread's limit.
+			Sensitivity: models.CapToLimit(mem.Sensitivity, chatLimit),
 		}, embedding, uuid.Nil); err != nil {
 			a.logger.Warn("imported memory extraction: create memory failed",
 				zap.String("chat_id", chatID.String()), zap.Error(err))

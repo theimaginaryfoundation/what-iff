@@ -68,8 +68,10 @@ func ensureMemoriesCreatedInChatTx(ctx context.Context, tx *ent.Tx, userID, chat
 
 // WithNewMemberSensitivity sets the sensitivity of the group's new (not yet stored) members: the
 // most restricted level among them, already capped by the asking chat's limit. A new-only group
-// is created at this level; a fold into a survivor takes the most restricted of this, the
-// survivor and the absorbed members. Omit when the group has no new member.
+// is created at this level. A fold into a survivor is raised by it only when it is sensitive
+// (see newMemberFoldRaise): a new member's personal or public level is just the unclassified
+// default, which must not pull a memory the user marked public back to personal. Omit when the
+// group has no new member.
 func WithNewMemberSensitivity(s models.MemorySensitivity) MergeGroupOption {
 	return func(o *mergeGroupOptions) { o.newSensitivity = s }
 }
@@ -168,7 +170,7 @@ func (d *Datastore) PersistMemoryMergeGroup(
 			return nil, err
 		}
 		// The survivor stands for the whole group, so it takes the most restricted level in it.
-		otherSensitivity := mostRestrictedPresent(absorbedSensitivity, mergeOpts.newSensitivity)
+		otherSensitivity := mostRestrictedPresent(absorbedSensitivity, newMemberFoldRaise(mergeOpts.newSensitivity))
 		mem, foldErr := d.foldIntoLiveMemory(ctx, tx, userID, existing, extract, now, sourceMembers, compactionEventID, otherSensitivity)
 		if foldErr != nil {
 			_ = tx.Rollback()
@@ -308,7 +310,9 @@ func (d *Datastore) PersistMemoryLinkGroup(
 			SetLinkGroupID(linkGroupID).
 			SetCreatedAt(now).
 			SetUpdatedAt(now)
-		if targetScope == memory.ScopeChat {
+		if targetScope == memory.ScopeChat || chatID != uuid.Nil {
+			// A Chat memory belongs to the chat; any other records it as its source conversation
+			// (as create_memory does), so a restricted chat can still fold what it created.
 			create = create.SetChatID(chatID)
 		}
 		if pinnedPersonalityID != nil {
@@ -439,7 +443,7 @@ func (d *Datastore) MergeLiveExtractedMemory(
 
 	if liveMatch != nil {
 		sourceMembers := sourceMembersForLiveFold(liveMatch, extract)
-		mem, mergeErr := d.foldIntoLiveMemory(ctx, tx, userID, liveMatch, extract, now, sourceMembers, nil, mostRestrictedPresent(extract.Sensitivity))
+		mem, mergeErr := d.foldIntoLiveMemory(ctx, tx, userID, liveMatch, extract, now, sourceMembers, nil, newMemberFoldRaise(extract.Sensitivity))
 		if mergeErr != nil {
 			_ = tx.Rollback()
 			return nil, mergeErr
@@ -627,6 +631,16 @@ func mostRestrictedPresent(levels ...models.MemorySensitivity) models.MemorySens
 	return out
 }
 
+// newMemberFoldRaise is the level a new (extracted, not yet stored) member raises a fold's survivor
+// to: sensitive when it was classified sensitive, otherwise nothing. Extraction never says public,
+// so its personal is the unclassified default, and a capped default is no classification either.
+func newMemberFoldRaise(s models.MemorySensitivity) models.MemorySensitivity {
+	if s.OrDefault() == models.MemorySensitivitySensitive {
+		return models.MemorySensitivitySensitive
+	}
+	return ""
+}
+
 // absorbedMemoriesSensitivityTx returns the most restricted sensitivity among the memories a fold
 // is about to absorb ("" when none): the user's own rows in ids, never the survivor.
 func absorbedMemoriesSensitivityTx(ctx context.Context, tx *ent.Tx, userID, survivorID uuid.UUID, ids []uuid.UUID) (models.MemorySensitivity, error) {
@@ -698,7 +712,9 @@ func (d *Datastore) createMergedMemory(
 		})
 	}
 
-	if targetScope == memory.ScopeChat {
+	if targetScope == memory.ScopeChat || chatID != uuid.Nil {
+		// A Chat memory belongs to the chat; any other records it as its source conversation (as
+		// create_memory does), so a restricted chat can still fold what it created.
 		create = create.SetChatID(chatID)
 	}
 	if pinned := d.autoPinPersonalityIDTx(ctx, tx, targetScope, activePersonalityID); pinned != nil {

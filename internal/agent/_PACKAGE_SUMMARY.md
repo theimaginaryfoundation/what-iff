@@ -146,7 +146,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   The agent loop enforces the offered tool set at dispatch: `chatContext.offeredTools` is recorded wherever tools are built (`setOfferedTools`), and `dispatchToolUse` refuses any other name, for the main loop and the sub-agent loop alike.
   `run_subagent` in a restricted chat refuses another `personality_id` and any `skill_ids` (so no skill text or linked MCP server is attached), and its tool loop runs under a chat carrying the parent's limit (`subagentToolContext`).
   `create_agent_job` is neither offered nor accepted in a restricted chat (the job would run in a new unrestricted chat); a job that already targets a restricted chat runs through `prepareChatContext` and stays restricted.
-  Auto mood selection does not run in a `public` chat (`autoMoodSelectionSkipped`); a restricted chat's `change_mood` picks only its own personality's modes, refuses `model_override`, and mood rituals are not loaded.
+  Auto mood selection does not run in a `public` chat (`autoMoodSelectionSkipped`); a restricted chat's `change_mood` picks only its own personality's modes, refuses `model_override`, and mood rituals are not loaded and their MCP servers are not offered (`toolRitualMood`).
   MCP servers are configured per chat and are not gated.
 
 ## Testing

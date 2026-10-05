@@ -162,6 +162,13 @@ func TestPersistMemoryMergeGroup_ChatMemoriesOnly_NewMemoryKeepsItsScope(t *test
 	require.NoError(t, err)
 	require.Equal(t, entmemory.ScopeUser, row.Scope)
 	require.Equal(t, entmemory.SensitivityPublic, row.Sensitivity)
+	source, err := row.QueryChat().OnlyID(ctx)
+	require.NoError(t, err, "a User memory records the chat it came from")
+	require.Equal(t, chatID, source)
+	// ... so the same restricted chat can fold it on a later checkpoint.
+	_, err = ds.PersistMemoryMergeGroup(ctx, userID, chatID, chatOnlyGroup("Prefers metric units", "User"), 2,
+		&mem.ID, nil, nil, uuid.Nil, nil, nil, WithChatMemoriesOnly())
+	require.NoError(t, err)
 
 	// A Chat-scoped one is created in the asking chat.
 	mem, err = ds.PersistMemoryMergeGroup(ctx, userID, chatID, chatOnlyGroup("Mallory runs the Discord server", "Chat"), 1,

@@ -151,3 +151,18 @@ func TestRestrictedChat_DispatchRefusesCreateAgentJobAndTheHandlerDoesToo(t *tes
 	require.Contains(t, res.Error, "restricted conversation")
 	require.Empty(t, res.AgentJobID)
 }
+
+// A restricted chat's active mood contributes no ritual ids to the turn's tools, so the MCP
+// servers linked to the mood's skills are neither discovered nor offered there.
+func TestRestrictedChat_MoodRitualMCPServersAreNotOffered(t *testing.T) {
+	a := &Agent{logger: zap.NewNop()}
+	moodRitual := uuid.New()
+	mood := &models.Mood{ID: uuid.New(), RitualIDs: []uuid.UUID{moodRitual}}
+	policyFor := func(limit models.MemorySensitivity) turnToolPolicy {
+		chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), ToolsEnabled: true, MemorySensitivityLimit: limit}
+		return a.buildTurnToolPolicy(context.Background(), &chatContext{chat: chat, activeMood: mood}, chat.UserID, &models.ChatMessage{})
+	}
+	require.Contains(t, policyFor("").ritualIDs, moodRitual, "an unrestricted chat loads its mood's skill servers")
+	require.NotContains(t, policyFor(models.MemorySensitivityPersonal).ritualIDs, moodRitual)
+	require.NotContains(t, policyFor(models.MemorySensitivityPublic).ritualIDs, moodRitual)
+}

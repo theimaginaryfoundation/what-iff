@@ -399,6 +399,15 @@ func TestPersistMemoryMergeGroup_NewMemberSensitivity(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, sSensitive, sensitivityOf(t, ds, survivor))
 
+	// A new member at the unclassified default (personal, as extraction gives in an ordinary chat)
+	// does not pull a survivor the user marked public back to personal.
+	survivorPub := insertFoldTestMemory(t, ds, userID, foldTestMemory{content: "Likes jazz", confidence: 0.6})
+	setSensitivity(t, ds, survivorPub, sPublic)
+	_, err = ds.PersistMemoryMergeGroup(ctx, userID, chatID, foldTestGroup("Likes jazz"), 2, &survivorPub, nil, nil, uuid.Nil, nil, nil,
+		WithNewMemberSensitivity(sPersonal))
+	require.NoError(t, err)
+	require.Equal(t, sPublic, sensitivityOf(t, ds, survivorPub))
+
 	// ... but a group with no new member and no sensitive member does not touch the level (a
 	// public survivor is not silently raised to the personal default).
 	survivor2 := insertFoldTestMemory(t, ds, userID, foldTestMemory{content: "Has a bird", confidence: 0.6})
