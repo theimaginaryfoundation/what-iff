@@ -139,6 +139,12 @@ func (t *ListTool) listConversations(ctx context.Context, chat *models.Chat, a l
 	if f, ok := validateNonEmptyString(a.Filter); ok {
 		filters.Query = &f
 	}
+	if chat.MemoryRestricted() {
+		// A restricted chat may read only conversations whose own limit is at or below its own
+		// (models.ConversationReadableUnder), so it lists only those.
+		chatLimit := chat.MemoryLimit()
+		filters.MaxMemorySensitivityLimit = &chatLimit
+	}
 	page, err := t.store.ListChats(ctx, chat.UserID, pageNum, limit, filters)
 	if err != nil {
 		return t.fail(listKindConversations, fmt.Sprintf("failed to list conversations: %v", err))

@@ -157,12 +157,15 @@ var RecallToolSpec = FunctionToolSpec{
 // recallStore is the narrow datastore surface recall needs. *datastore.Datastore satisfies it;
 // tests inject a fake. Keeping the surface explicit documents recall's blast radius.
 type recallStore interface {
-	GetRelatedMemories(ctx context.Context, userID, chatID uuid.UUID, queryEmbedding []float32, activePersonalityID uuid.UUID) ([]*models.Memory, error)
+	// GetRelatedMemories takes the asking chat's memory sensitivity limit and filters in SQL.
+	GetRelatedMemories(ctx context.Context, userID, chatID uuid.UUID, queryEmbedding []float32, activePersonalityID uuid.UUID, maxSensitivity models.MemorySensitivity) ([]*models.Memory, error)
 	GetMemory(ctx context.Context, userID, id uuid.UUID) (*models.Memory, error)
 	GetMemoryByIDPrefix(ctx context.Context, userID uuid.UUID, prefix string) (*models.Memory, error)
 	GetRelatedFileChunks(ctx context.Context, userID uuid.UUID, personalityID *uuid.UUID, chatID *uuid.UUID, queryEmbedding []float32, limit int) ([]datastore.FileChunkResult, error)
 	ListFileChunksForAttachment(ctx context.Context, fileAttachmentID uuid.UUID, limit int) ([]datastore.FileChunkResult, error)
 	ListFileAttachments(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.FileAttachmentFilters) (*models.PaginatedResponse, error)
+	// ListFileAttachmentsInChatScope is the conversation + personality file scope a restricted chat is held to.
+	ListFileAttachmentsInChatScope(ctx context.Context, userID, chatID uuid.UUID, personalityID *uuid.UUID, limit int) ([]*models.FileAttachment, error)
 	GetFileAttachment(ctx context.Context, userID, id uuid.UUID) (*models.FileAttachment, error)
 	GetChatMessage(ctx context.Context, userID, id uuid.UUID) (*models.ChatMessage, error)
 	ListChatMessages(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
@@ -173,7 +176,10 @@ type recallStore interface {
 	// GetChatSummaryMemory and GetRelatedSummaryMemories back source_type=summaries search, fetch
 	// by conversation ID, and the conversation-mode summary attach (see ADR 0x017).
 	GetChatSummaryMemory(ctx context.Context, userID, chatID uuid.UUID) (*models.Memory, error)
-	GetRelatedSummaryMemories(ctx context.Context, userID uuid.UUID, queryEmbedding []float32, limit int) ([]*models.Memory, error)
+	// GetRelatedSummaryMemories takes the asking chat's memory sensitivity limit and filters in SQL.
+	GetRelatedSummaryMemories(ctx context.Context, userID uuid.UUID, queryEmbedding []float32, limit int, maxSensitivity models.MemorySensitivity) ([]*models.Memory, error)
+	// GetChatMemorySensitivityLimit backs the restricted-chat check on reading another conversation.
+	GetChatMemorySensitivityLimit(ctx context.Context, userID, chatID uuid.UUID) (models.MemorySensitivity, error)
 	// ListMemoryMergeEvents backs mode=lifecycle_events.
 	ListMemoryMergeEvents(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.MemoryMergeEventFilters) (*models.PaginatedResponse, error)
 }

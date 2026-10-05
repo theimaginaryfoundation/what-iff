@@ -73,6 +73,10 @@ type memoryMergeCandidate struct {
 	Confidence models.MemoryConfidence
 	MemoryID   *uuid.UUID
 	IsNew      bool
+	// Sensitivity is set for new (extracted) candidates only: the level the extraction model gave
+	// (personal or sensitive), before the chat's limit caps it at persist time. Stored memories
+	// keep their own level in the database, which the datastore reads when it folds them.
+	Sensitivity models.MemorySensitivity
 }
 
 func dedupeContextMemoryRefs(refs []provider.ContextMemoryRef) []models.ContextMemoryRef {
@@ -207,17 +211,19 @@ func buildMemoryMergeCandidates(modelContext *provider.ModelContext, liveMemorie
 			continue
 		}
 		candidates = append(candidates, memoryMergeCandidate{
-			Content:    item.Content,
-			Scope:      scope,
-			Confidence: item.Confidence,
-			IsNew:      true,
+			Content:     item.Content,
+			Scope:       scope,
+			Confidence:  item.Confidence,
+			IsNew:       true,
+			Sensitivity: item.Sensitivity,
 		})
 		for dup := 1; dup < item.BatchDuplicateCount; dup++ {
 			candidates = append(candidates, memoryMergeCandidate{
-				Content:    item.Content,
-				Scope:      scope,
-				Confidence: item.Confidence,
-				IsNew:      true,
+				Content:     item.Content,
+				Scope:       scope,
+				Confidence:  item.Confidence,
+				IsNew:       true,
+				Sensitivity: item.Sensitivity,
 			})
 		}
 	}
@@ -555,6 +561,9 @@ func sourceMembersForGroup(group models.MemoryMergeGroupProposal, candidates []m
 type memoryCompactionPlan struct {
 	Folds []memoryFoldPlan
 	Links []memoryLinkPlan
+	// SensitivityLimit is the asking chat's memory sensitivity limit; applying the plan caps the
+	// new memories it creates by it. Empty is unrestricted.
+	SensitivityLimit models.MemorySensitivity
 }
 
 // memoryFoldPlan is one consolidate/create action ready for PersistMemoryMergeGroup.
@@ -565,12 +574,16 @@ type memoryFoldPlan struct {
 	DuplicatesFolded int
 	NeedsEmbedding   bool
 	SourceMembers    []models.MemoryMergeSourceMember
+	// NewSensitivity is the most restricted level among the group's new members; empty when the
+	// group has none. The chat's limit caps it when the plan is applied.
+	NewSensitivity models.MemorySensitivity
 }
 
 // memoryLinkNewMemberPlan is a freshly-extracted surface in a link cluster (embedding deferred).
 type memoryLinkNewMemberPlan struct {
-	Content    string
-	Confidence models.MemoryConfidence
+	Content     string
+	Confidence  models.MemoryConfidence
+	Sensitivity models.MemorySensitivity
 }
 
 // memoryLinkPlan is one cross-reference action ready for PersistMemoryLinkGroup.
@@ -622,7 +635,25 @@ func planFoldGroup(group models.MemoryMergeGroupProposal, candidates []memoryMer
 		DuplicatesFolded: duplicatesFolded,
 		NeedsEmbedding:   survivorID == nil,
 		SourceMembers:    sourceMembersForGroup(group, candidates),
+		NewSensitivity:   newMemberSensitivity(group, candidates),
 	}, true
+}
+
+// newMemberSensitivity is the most restricted level among a group's new members, or "" when the
+// group has none (so an all-stored group is never given a level of its own).
+func newMemberSensitivity(group models.MemoryMergeGroupProposal, candidates []memoryMergeCandidate) models.MemorySensitivity {
+	var out models.MemorySensitivity
+	for _, idx := range group.MemberIndices {
+		if idx < 0 || idx >= len(candidates) || !candidates[idx].IsNew {
+			continue
+		}
+		if out == "" {
+			out = candidates[idx].Sensitivity.OrDefault()
+			continue
+		}
+		out = models.MostRestricted(out, candidates[idx].Sensitivity)
+	}
+	return out
 }
 
 // planLinkGroup returns ok=false (drop / no-op) when the group has fewer than two valid,
@@ -647,8 +678,9 @@ func planLinkGroup(group models.MemoryMergeGroupProposal, candidates []memoryMer
 			continue
 		}
 		newMembers = append(newMembers, memoryLinkNewMemberPlan{
-			Content:    c.Content,
-			Confidence: c.Confidence,
+			Content:     c.Content,
+			Confidence:  c.Confidence,
+			Sensitivity: c.Sensitivity,
 		})
 	}
 	if len(existingIDs)+len(newMembers) < 2 {

@@ -176,6 +176,10 @@ type fakeRecallStore struct {
 	summaryByChatID  map[uuid.UUID]*models.Memory
 	relatedSummaries []*models.Memory
 	mergeEvents      []*models.MemoryMergeEvent
+	// chatLimits are other conversations' stored memory sensitivity limits; a chat missing here
+	// is not found (GetChatMemorySensitivityLimit errors), as is every chat when chatLimitErr is set.
+	chatLimits   map[uuid.UUID]models.MemorySensitivity
+	chatLimitErr error
 
 	// captured inputs for assertions
 	lastMsgChatID      uuid.UUID
@@ -189,6 +193,10 @@ type fakeRecallStore struct {
 	lastMergeFilters   models.MemoryMergeEventFilters
 	lastMergePageNum   int
 	lastMergePageSize  int
+	lastRelatedLimit   models.MemorySensitivity
+	lastSummaryMax     models.MemorySensitivity
+	chatLimitCalls     int
+	scopeCalls         int
 }
 
 type recallImageStore struct{ content []byte }
@@ -199,8 +207,25 @@ func (s recallImageStore) DownloadFile(context.Context, string) ([]byte, error) 
 }
 func (s recallImageStore) DeleteFile(context.Context, string) error { return nil }
 
-func (f *fakeRecallStore) GetRelatedMemories(_ context.Context, _, _ uuid.UUID, _ []float32, _ uuid.UUID) ([]*models.Memory, error) {
-	return f.relatedMemories, nil
+func (f *fakeRecallStore) GetRelatedMemories(_ context.Context, _, _ uuid.UUID, _ []float32, _ uuid.UUID, limit models.MemorySensitivity) ([]*models.Memory, error) {
+	f.lastRelatedLimit = limit
+	out := make([]*models.Memory, 0, len(f.relatedMemories))
+	for _, m := range f.relatedMemories { // mirror the SQL filter the real store applies
+		if m.Sensitivity.AllowedUnder(limit) {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+func (f *fakeRecallStore) ListFileAttachmentsInChatScope(_ context.Context, _, chatID uuid.UUID, personalityID *uuid.UUID, _ int) ([]*models.FileAttachment, error) {
+	f.scopeCalls++
+	var out []*models.FileAttachment
+	for _, fa := range f.fileList {
+		if (fa.ChatID != nil && *fa.ChatID == chatID) || (personalityID != nil && fa.PersonalityID != nil && *fa.PersonalityID == *personalityID) {
+			out = append(out, fa)
+		}
+	}
+	return out, nil
 }
 func (f *fakeRecallStore) GetMemory(_ context.Context, _, id uuid.UUID) (*models.Memory, error) {
 	if m, ok := f.memoryByID[id]; ok {
@@ -215,7 +240,7 @@ func (f *fakeRecallStore) GetMemoryByIDPrefix(_ context.Context, _ uuid.UUID, pr
 		compact := strings.ReplaceAll(id.String(), "-", "")
 		if strings.HasPrefix(compact, prefix) {
 			if match != nil {
-				return nil, fmt.Errorf("memory ID prefix %q is ambiguous; pass the full UUID", prefix)
+				return nil, fmt.Errorf("%w (%q); pass the full UUID", datastore.ErrMemoryIDPrefixAmbiguous, prefix)
 			}
 			match = m
 		}
@@ -329,9 +354,26 @@ func (f *fakeRecallStore) GetChatSummaryMemory(_ context.Context, _, chatID uuid
 	}
 	return nil, nil
 }
-func (f *fakeRecallStore) GetRelatedSummaryMemories(_ context.Context, _ uuid.UUID, _ []float32, limit int) ([]*models.Memory, error) {
+func (f *fakeRecallStore) GetRelatedSummaryMemories(_ context.Context, _ uuid.UUID, _ []float32, limit int, maxSensitivity models.MemorySensitivity) ([]*models.Memory, error) {
 	f.lastSummaryLimit = limit
-	return f.relatedSummaries, nil
+	f.lastSummaryMax = maxSensitivity
+	out := make([]*models.Memory, 0, len(f.relatedSummaries))
+	for _, m := range f.relatedSummaries { // mirror the SQL filter the real store applies
+		if m.Sensitivity.AllowedUnder(maxSensitivity) {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+func (f *fakeRecallStore) GetChatMemorySensitivityLimit(_ context.Context, _, chatID uuid.UUID) (models.MemorySensitivity, error) {
+	f.chatLimitCalls++
+	if f.chatLimitErr != nil {
+		return "", f.chatLimitErr
+	}
+	if l, ok := f.chatLimits[chatID]; ok {
+		return l, nil
+	}
+	return "", datastore.ErrChatNotFound
 }
 func (f *fakeRecallStore) ListMemoryMergeEvents(_ context.Context, _ uuid.UUID, pageNum, pageSize int, filters models.MemoryMergeEventFilters) (*models.PaginatedResponse, error) {
 	f.lastMergePageNum = pageNum

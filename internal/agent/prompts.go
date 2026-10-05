@@ -71,6 +71,10 @@ For each extracted memory, include a confidence value:
 - high: very likely true and durable over time
 - medium: probably true, but may drift/change
 - low: uncertain, speculative, or likely short-lived
+
+For each extracted memory, also include a sensitivity value (never use "public"):
+- sensitive: health, finances, intimate or otherwise delicate material about the user or people close to them
+- personal: everything else
 `
 const memoryExtractionPrompt = `Please extract useful memories from the recent conversation.
 
@@ -213,4 +217,8 @@ You are reading a complete imported conversation as a role-tagged transcript. **
 For each extracted memory, include a confidence value:
 - high: very likely true and durable over time
 - medium: probably true, but may drift/change
-- low: uncertain, speculative, or likely short-lived`
+- low: uncertain, speculative, or likely short-lived
+
+For each extracted memory, also include a sensitivity value (never use "public"):
+- sensitive: health, finances, intimate or otherwise delicate material about the user or people close to them
+- personal: everything else`

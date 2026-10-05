@@ -487,7 +487,7 @@ func TestGetMemoriesBestEffort_DegradesOnError(t *testing.T) {
 		},
 	}
 
-	memories, liveMemories, failed := a.getMemoriesBestEffort(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hi")
+	memories, liveMemories, failed := a.getMemoriesBestEffort(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hi", "")
 	assert.True(t, failed)
 	assert.Equal(t, []string{}, memories)
 	assert.Nil(t, liveMemories)
@@ -505,7 +505,7 @@ func TestGetMemoriesBestEffort_PassesThroughOnSuccess(t *testing.T) {
 		},
 	}
 
-	memories, liveMemories, failed := a.getMemoriesBestEffort(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hi")
+	memories, liveMemories, failed := a.getMemoriesBestEffort(context.Background(), uuid.New(), uuid.New(), uuid.New(), "hi", "")
 	assert.False(t, failed)
 	assert.Equal(t, []string{"m1"}, memories)
 	assert.Nil(t, liveMemories)

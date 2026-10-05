@@ -30,7 +30,15 @@ func getAgentToolsList(disabledTools map[string]bool, includeMoodTools bool) []r
 // dispatchToolUse routes a provider-agnostic ToolUse to the appropriate tool
 // implementation. Both the OpenAI and Claude paths converge here since tool
 // inputs are normalized to json.RawMessage before reaching this function.
+//
+// A call is refused unless the model was offered that tool for this turn (or sub-agent loop): the
+// set is recorded when the tools are built (chatContext.setOfferedTools). A model can emit a tool
+// name it was never given, such as one the chat policy hides, so being offered, not merely having
+// a handler, is what authorises a call.
 func (a *Agent) dispatchToolUse(ctx context.Context, chatCtx *chatContext, use provider.ToolUse) (string, []*models.FileAttachment, error) {
+	if !chatCtx.toolOffered(use.Name) {
+		return "", nil, fmt.Errorf("tool %q is not available in this conversation", use.Name)
+	}
 	handler, ok := a.toolHandlers(chatCtx)[use.Name]
 	if !ok {
 		if strings.HasPrefix(use.Name, "mcp__") {

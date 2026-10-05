@@ -412,6 +412,8 @@ func (a *Agent) extractAndStoreImportedMemories(ctx context.Context, userID, cha
 			Scope:      mem.Scope,
 			Confidence: mem.Confidence.Float(),
 			Status:     models.MemoryStatusActive,
+			// Normalized to personal or sensitive; an imported thread has no sensitivity limit.
+			Sensitivity: mem.Sensitivity,
 		}, embedding, uuid.Nil); err != nil {
 			a.logger.Warn("imported memory extraction: create memory failed",
 				zap.String("chat_id", chatID.String()), zap.Error(err))

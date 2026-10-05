@@ -149,6 +149,7 @@ func newMCPLifecycleAgentFixture(t *testing.T, serverURL string) (*Agent, *chatC
 			source text,
 			import_hash text,
 			rehydration_state text,
+			memory_sensitivity_limit text NOT NULL DEFAULT 'sensitive',
 			user_chats uuid NOT NULL
 		)`,
 		`CREATE TABLE mcp_servers (

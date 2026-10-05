@@ -194,6 +194,9 @@ func (t *ListTool) List(ctx context.Context, chat *models.Chat, args []byte) (st
 	}
 
 	kind := strings.ToLower(strings.TrimSpace(a.Kind))
+	if what, blocked := restrictedListKind(chat, kind, a); blocked {
+		return t.fail(kind, restrictedNote(chat, what))
+	}
 	switch kind {
 	case listKindModels:
 		return t.listModels(ctx)
@@ -214,6 +217,30 @@ func (t *ListTool) List(ctx context.Context, chat *models.Chat, args []byte) (st
 	default:
 		return t.fail(kind, fmt.Sprintf("unknown kind %q; expected one of: models, personalities, skills, files, conversations, jobs, mcp_servers", a.Kind))
 	}
+}
+
+// restrictedListKind reports whether a restricted chat may not list this kind, and what to call it
+// in the refusal. Jobs, skills and personalities are account-wide, and so are uploaded files unless
+// the listing is limited to this personality's documents. Conversations are listed, but only those
+// whose own limit is at or below this chat's (see listConversations). Models and MCP servers are
+// not account content.
+func restrictedListKind(chat *models.Chat, kind string, a listArgs) (what string, blocked bool) {
+	if !chat.MemoryRestricted() {
+		return "", false
+	}
+	switch kind {
+	case listKindJobs:
+		return "Listing scheduled jobs", true
+	case listKindSkills:
+		return "Listing your skills", true
+	case listKindPersonalities:
+		return "Listing your other personalities", true
+	case listKindFiles:
+		if normalizeFileScope(a.Scope) != listFileScopePersonality {
+			return "Listing your account-wide files (use scope=personality for this personality's documents)", true
+		}
+	}
+	return "", false
 }
 
 func (t *ListTool) fail(kind, msg string) (string, error) {

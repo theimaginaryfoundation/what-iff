@@ -207,7 +207,7 @@ func TestExecuteToolUseWithRecovery_RecoversPanics(t *testing.T) {
 		Input: args,
 	}
 
-	result, attachments := a.executeToolUseWithRecovery(ctx, &chatContext{}, use)
+	result, attachments := a.executeToolUseWithRecovery(ctx, offering(&chatContext{}, "create_agent_job"), use)
 	assert.True(t, result.IsErr)
 	assert.Contains(t, result.Output, `tool "create_agent_job" encountered an internal error`)
 	assert.Contains(t, result.Output, "panic-tool-id")
@@ -263,7 +263,7 @@ func TestExecuteToolUses_NotifiesPerToolGeneratedAttachments(t *testing.T) {
 	uses := []provider.ToolUse{
 		{ID: "u1", Name: "fake_tool", Input: []byte(`{}`)},
 	}
-	ctx := &chatContext{chat: chat}
+	ctx := offering(&chatContext{chat: chat}, "fake_tool")
 
 	_, _, attachments := a.executeToolUses(context.Background(), ctx, 0, uses)
 	assert.NotEmpty(t, attachments)
