@@ -32,6 +32,7 @@ import { PersonaCoverComponent } from '../picker/persona-cover.component';
 import { toPersonalityDetailVm } from '../helpers/personality-vm.helpers';
 import { personalityCoverUrl } from '../helpers/cover-image.helpers';
 import { PersonalitySystemPromptEditorComponent, SystemPromptValue } from './personality-system-prompt-editor.component';
+import { PersonalityPromptHistoryComponent } from './personality-prompt-history.component';
 import { PersonalityAttachmentsListComponent } from './personality-attachments-list.component';
 import { PersonalityExpressionsManagerComponent } from './personality-expressions-manager.component';
 import { PersonalityMediaJobBannerComponent } from '../components/personality-media-job-banner.component';
@@ -53,6 +54,7 @@ import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
     PersonaAccentScopeComponent,
     PersonaCoverComponent,
     PersonalitySystemPromptEditorComponent,
+    PersonalityPromptHistoryComponent,
     PersonalityAttachmentsListComponent,
     PersonalityExpressionsManagerComponent,
     PersonalityMediaJobBannerComponent,
@@ -265,6 +267,23 @@ export class PersonalityDetailPageComponent implements OnInit {
           type: 'danger',
         });
       },
+    });
+  }
+
+  /**
+   * A restore from the prompt history changed the prompt server-side. Reload
+   * it and update only the draft's prompt, so unsaved edits to other fields
+   * (name, scratchpad) survive.
+   */
+  onPromptRestored(): void {
+    const personality = this.personality();
+    if (!personality) return;
+    this.personalityService.getPersonality(personality.id).subscribe({
+      next: updated => {
+        this.view.setPersonality(updated);
+        this.editorSession.update('system_prompt', updated.system_prompt);
+      },
+      error: err => console.error('Failed to reload personality after prompt restore', err),
     });
   }
 
