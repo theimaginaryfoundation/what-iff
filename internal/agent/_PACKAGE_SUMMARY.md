@@ -129,6 +129,25 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   metering implementation may be linked to enforce usage limits and record
   usage, while builds without one fall back to `metering.NoopMeter` (allow
   all, record nothing). See `internal/metering`.
+- **Restricted chats (memory sensitivity):** `sandbox_context.go` assembles context for a chat whose `memory_sensitivity_limit` is below `sensitive`; the tool-side rules are in `internal/agent/tools/sandbox.go`.
+  The limit governs which data comes into a thread; `disabled_tools` govern which actions the agent can take.
+  Memory prefetch passes the limit into the retrieval SQL (`getMemories`).
+  Because the limit can change mid-thread, `messageContextBuilder.build` re-checks the memory items persisted on earlier messages against the current limit in one `MemoryIDsWithinSensitivity` query (an item with no id, or a failed lookup, is dropped).
+  The first-message line naming the user is profile data, not a memory, and is persisted as its own `USER_NAME` context item type (`chatContext.userNameLine` records the server-built line; `recognizeUserNameLine` matches it by identity, never by a text prefix), so a memory that merely starts with the same words is not kept and legacy untyped items fail closed.
+  A `public` chat never gets that line, neither fresh (`initialTurnContextLines`) nor replayed (`userNameLineAllowed`).
+  A restricted chat replays no persisted tool result at all (`withoutPersistedToolResults`), whatever the tool, because a tool call records nothing about the limit it ran under or what it touched.
+  The scratchpad is never injected (the loader blanks it; the builder, the sub-agent, the agent-job personality override and `update_scratchpad` are guarded too), and `buildTurnToolPolicy` removes `restrictedChatDisabledTools` (`update_scratchpad`, `create_agent_job`) before the tools-enabled early return.
+  `restricted_tool_surface_test.go` classifies every catalog tool as offered or not in a restricted chat, so a new tool must be placed deliberately; `conditionalRestrictedTools` lets other builds mark tools that are only offered under a deployment condition.
+  `checkpointSteps` decides the checkpoint plan: a restricted chat skips the scratchpad step but still extracts memories, from the turn's own response and without the scratchpad delta.
+  Extraction emits `sensitivity` (`personal` or `sensitive` only, strict schema).
+  `models.CapToLimit` lowers only the default (personal) level to the chat's limit; an explicit `sensitive` is never lowered, and scope is chosen as in any chat.
+  A fold's survivor takes the most restricted level of its group (`WithNewMemberSensitivity`), and `contextInputs` records the limit in the X-ray manifest.
+  A restricted chat's checkpoint merges only memories that chat created (`restrictedCompactionLiveMemories`, then `datastore.WithChatMemoriesOnly` on the fold and link writes), so it cannot fold, rewrite or retire the owner's memories.
+  The agent loop enforces the offered tool set at dispatch: `chatContext.offeredTools` is recorded wherever tools are built (`setOfferedTools`), and `dispatchToolUse` refuses any other name, for the main loop and the sub-agent loop alike.
+  `run_subagent` in a restricted chat refuses another `personality_id` and any `skill_ids` (so no skill text or linked MCP server is attached), and its tool loop runs under a chat carrying the parent's limit (`subagentToolContext`).
+  `create_agent_job` is neither offered nor accepted in a restricted chat (the job would run in a new unrestricted chat); a job that already targets a restricted chat runs through `prepareChatContext` and stays restricted.
+  Auto mood selection does not run in a `public` chat (`autoMoodSelectionSkipped`); a restricted chat's `change_mood` picks only its own personality's modes, refuses `model_override`, and mood rituals are not loaded.
+  MCP servers are configured per chat and are not gated.
 
 ## Testing
 

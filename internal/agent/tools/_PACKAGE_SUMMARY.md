@@ -50,6 +50,13 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
   Provider-facing tool prompts remain unchanged on `FunctionToolSpec.Description`.
 - **Spec parity:** `toolconstants_test.go` asserts OpenAI function tool projection stays aligned with the shared catalog; Claude schema sanitization is tested in `internal/agent/provider`.
 - **Execution location:** Some tools are defined here only as shared schema/registration (`run_subagent`) while execution lives in `internal/agent` to reuse chat/user/provider context safely.
+- **Restricted chats (memory sensitivity):** `sandbox.go` holds the one rule set for a chat whose `memory_sensitivity_limit` is below `sensitive`.
+  `memoryReadableBy` (the level only; checkpoint summaries carry their own level), `conversationReadable`, `fileInChatScope` and `cappedMemorySensitivity` are the predicates every tool asks; `restrictedNote` is the shared refusal text.
+  A thread's limit is also its own classification: `conversationReadable` lets a restricted chat read another conversation only when that conversation's own limit is at or below its own (`GetChatMemorySensitivityLimit`), and refuses on any lookup error or unknown limit.
+  `find_context` passes the limit into `GetRelatedMemories` and `GetRelatedSummaryMemories` (SQL), resolves a hidden memory like a missing one (`resolveMemory`), applies `conversationReadable` in `conversation`, `bookmarks`, `origin` and `fetch bookmark:`, gates summaries by their level, scopes file lookups to the chat and personality, and filters `lifecycle_events` to fold events within the limit without their pre-merge member previews.
+  `list` refuses jobs, skills, personalities and account-wide files, and lists only conversations at or below the chat's limit (`ChatFilters.MaxMemorySensitivityLimit`); `update_scratchpad` refuses.
+  `create_memory` takes an optional `sensitivity` of `personal` or `sensitive` only (an agent can never mark a memory `public`); the default level is capped by the chat's limit and an explicit `sensitive` is kept, and scope is the agent's choice as in any chat.
+  A hidden memory, an unknown id and an ambiguous id prefix give a restricted chat the same `not found` error (`resolveMemory`).
 
 ## Testing
 

@@ -39,6 +39,14 @@
   Generic codes are status-derived defaults and explicitly *not* stable branch targets, so a call site may narrow from a generic to a specific code freely.
   `ErrorResponse.Code` deliberately omits `omitempty`, so a missing code shows up as `""` rather than disappearing.
 - **`ErrorResponse.Error` is deprecated** and duplicates `Message`. It exists only until the frontend reads `Message`/`Code`; it should not gain new meaning.
+- **Memory sensitivity:** `sensitivity.go` defines `MemorySensitivity` (`public` < `personal` < `sensitive`) and its helpers (`AllowedUnder`, `Restricted`, `MostRestricted`, `CapToLimit`, `ConversationReadableUnder`, `SensitivitiesUpTo`, `ParseMemorySensitivity`).
+  `Memory.Sensitivity` and `Chat.MemorySensitivityLimit` carry it; `Chat.MemoryRestricted()` is true below `sensitive`.
+  A chat's limit is also its own classification: `ConversationReadableUnder` lets a restricted chat read another conversation only when that conversation's limit is at or below its own.
+  An empty memory level reads as personal and an empty chat limit as unrestricted, so a missing value (an old export, a legacy row) never silently restricts a chat or exposes a memory as public.
+  A non-empty value that is not a level (corrupt data, wrong case) fails closed: a memory reads as `sensitive`, a chat limit as `public`, and another conversation with such a limit is not readable.
+  `CapToLimit` lowers only the default level to a chat's limit; an explicit `sensitive` is never lowered.
+  `public` is assignable only through the memory manager API or that cap, never by an agent tool or extraction.
+  `AdditionalContextTypeUserName` tags the first-message user-name profile line, which has no memory id.
 
 ## Testing
 

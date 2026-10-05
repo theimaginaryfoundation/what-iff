@@ -50,6 +50,8 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
   Our S3 bucket is never read by the OpenAI vision path.
   Therefore image uploads go exclusively to `storage.FileKeyForImage` (used by Claude and the gallery); non-image files go to `storage.FileKeyForChat` (used by the pgvector chunk pipeline).
   No dual-write to both paths is needed for images.
+- **Memory sensitivity limit:** `memory_sensitivity_limit` is accepted by create, PUT and PATCH (validated, normalized, 400 on an unknown value) and returned on every chat; omitting it on an update keeps the stored limit.
+  Lowering it takes effect on the next turn.
 
 ## Testing
 

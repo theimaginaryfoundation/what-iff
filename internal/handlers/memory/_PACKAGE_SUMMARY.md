@@ -19,6 +19,8 @@ HTTP API for **semantic memories** — CRUD, search, plus export/import portabil
 
 - Search parameters and filters must stay aligned with `internal/datastore/memory.go` and OpenAPI.
 - `NewHandler` takes an optional `*http.Client` for its OpenAI embeddings client; under a non-vendor `LLM_BACKEND` (mock/local) the server passes the deny-network client so import embeddings cannot reach the provider (ADR 0x018).
+- **Sensitivity:** create, `PATCH /memory/{id}`, `POST /memory/batch/patch` and the `GET /memory?sensitivity=` filter accept `public`, `personal` or `sensitive` (`sensitivity.go`); invalid values are a 400.
+  A batch patch that sets only `sensitivity` is applied by the datastore as one UPDATE for all ids.
 
 ## Testing
 
