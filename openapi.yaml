@@ -5621,6 +5621,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /mcp-servers/oauth/config:
+    get:
+      summary: Get connector OAuth settings
+      description: >-
+        Returns the redirect_uri this server sends to OAuth providers (MCP_OAUTH_REDIRECT_URL, or the
+        localhost default). Users register this exact value with the provider, so it differs between the
+        hosted service and self-hosted installs.
+      tags: [MCP Integrations]
+      responses:
+        '200':
+          description: Connector OAuth settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPServerOAuthConfigResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /mcp-servers/oauth/callback:
     get:
       summary: OAuth callback for connector authentication
@@ -7644,6 +7666,16 @@ components:
           format: uri
       required:
         - authorization_url
+
+    MCPServerOAuthConfigResponse:
+      type: object
+      properties:
+        redirect_uri:
+          type: string
+          format: uri
+          description: Callback URL to register with the OAuth provider.
+      required:
+        - redirect_uri
 
     # Chat Message Schemas
     MessageOrigin:

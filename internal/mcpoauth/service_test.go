@@ -261,6 +261,12 @@ func TestNew_InvalidRedirectURLFallsBackToDefaultCallback(t *testing.T) {
 	authURL, err := svc.StartAuth(context.Background(), store.server.UserID, store.server.ID, "")
 	require.NoError(t, err)
 	require.Contains(t, authURL, url.QueryEscape(defaultOAuthCallbackURL))
+	require.Equal(t, defaultOAuthCallbackURL, svc.CallbackURL())
+}
+
+func TestCallbackURL_ReportsConfiguredRedirect(t *testing.T) {
+	svc := New(&fakeStore{}, nil, nil, Config{RedirectURL: "https://api.example.com/api/mcp-servers/oauth/callback"})
+	require.Equal(t, "https://api.example.com/api/mcp-servers/oauth/callback", svc.CallbackURL())
 }
 
 func TestTokenRequest_HTTPErrorIncludesProviderDescription(t *testing.T) {

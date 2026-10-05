@@ -67,6 +67,7 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 		mcpRouter.HandleFunc("", h.CreateMCPServer).Methods("POST")
 		mcpRouter.HandleFunc("", h.ListMCPServers).Methods("GET")
 		mcpRouter.HandleFunc("/test-connection", h.TestMCPServerConnection).Methods("POST")
+		mcpRouter.HandleFunc("/oauth/config", h.GetMCPServerOAuthConfig).Methods("GET")
 		mcpRouter.HandleFunc("/{id}/oauth/start", h.StartMCPServerOAuth).Methods("POST")
 		mcpRouter.HandleFunc("/{id}", h.GetMCPServer).Methods("GET")
 		mcpRouter.HandleFunc("/{id}", h.UpdateMCPServer).Methods("PUT")
@@ -503,6 +504,25 @@ type startMCPServerOAuthRequest struct {
 
 type startMCPServerOAuthResponse struct {
 	AuthorizationURL string `json:"authorization_url"`
+}
+
+type mcpServerOAuthConfigResponse struct {
+	RedirectURI string `json:"redirect_uri"`
+}
+
+// GetMCPServerOAuthConfig reports the redirect_uri users must register with an
+// OAuth provider. It comes from server config, so self-hosted installs show
+// their own callback rather than the hosted one.
+func (h *Handler) GetMCPServerOAuthConfig(w http.ResponseWriter, r *http.Request) {
+	if _, ok := middleware.GetUserIDFromContext(r.Context()); !ok {
+		handlerutils.RespondWithError(w, h.logger, http.StatusUnauthorized, handlerutils.CodeNotSet, "Unauthorized", nil)
+		return
+	}
+	if h.oauth == nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "OAuth service unavailable", nil)
+		return
+	}
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, mcpServerOAuthConfigResponse{RedirectURI: h.oauth.CallbackURL()})
 }
 
 func (h *Handler) StartMCPServerOAuth(w http.ResponseWriter, r *http.Request) {

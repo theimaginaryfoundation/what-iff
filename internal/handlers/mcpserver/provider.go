@@ -20,4 +20,7 @@ type Provider interface {
 type OAuthService interface {
 	StartAuth(ctx context.Context, userID, connectorID uuid.UUID, redirectAfter string) (string, error)
 	HandleCallback(ctx context.Context, state, code, oauthErr, oauthErrDesc string) (redirectURL, message string, success bool, err error)
+	// CallbackURL is the redirect_uri sent to OAuth providers. Users register it
+	// with the provider, so the UI shows it; it differs per deployment.
+	CallbackURL() string
 }
