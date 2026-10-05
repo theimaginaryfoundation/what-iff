@@ -36,6 +36,8 @@ const (
 )
 
 type executionOptions struct {
+	// manual marks a "Run now" request (RunAgentJobNow) rather than a scheduled firing.
+	manual             bool
 	allowPaused        bool
 	deferredRetryCount int
 	recurrenceHint     recurrenceBucket
@@ -120,6 +122,21 @@ func deriveStatusAndErrorText(job *models.AgentJob, runErr error, scheduleErrTex
 	return statusUpdate, errText
 }
 
+// applyOneOffRunOutcome adjusts the status and next_run_at recorded after a run of a one-off
+// (`at`) job. A scheduled firing is the job's only run, so it has no next run and (via
+// deriveStatusAndErrorText) ends Complete or Failed. A manual "Run now" is an extra run: it leaves
+// the status alone and keeps the stored next_run_at, so the job still fires at its scheduled time.
+// Recurring jobs are unaffected.
+func applyOneOffRunOutcome(job *models.AgentJob, opts executionOptions, statusUpdate *models.AgentJobStatus, nextRunAt *time.Time) (*models.AgentJobStatus, *time.Time) {
+	if job == nil || job.ScheduleType != models.AgentJobScheduleTypeAt {
+		return statusUpdate, nextRunAt
+	}
+	if opts.manual {
+		return nil, job.NextRunAt
+	}
+	return statusUpdate, nil
+}
+
 // Execute hands the run off to its own goroutine and returns at once. A run can queue behind a
 // busy turn in its chat (the agent's per-chat turn gate) for minutes, and holding one of the
 // scheduler's schedulerWorkerLimit workers for that would stall every user's scheduled jobs.
@@ -160,6 +177,7 @@ func (m *Manager) RunAgentJobNow(ctx context.Context, userID, id uuid.UUID) erro
 
 	execCtx := context.WithoutCancel(ctx)
 	go m.executeAgentJobDetached(execCtx, userID, id, executionOptions{
+		manual:             true,
 		allowPaused:        true,
 		deferredRetryCount: 0,
 		recurrenceHint:     recurrenceBucketUnknown,
@@ -253,10 +271,7 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 		recordRun(ctx, runOutcomeChatResolveFailed)
 		statusUpdate, errText := deriveStatusAndErrorText(job, chatErr, scheduleErrText)
 
-		// One-off jobs do not have a next run.
-		if job.ScheduleType == models.AgentJobScheduleTypeAt {
-			nextRunAt = nil
-		}
+		statusUpdate, nextRunAt = applyOneOffRunOutcome(job, opts, statusUpdate, nextRunAt)
 		m.recordAgentJobRunAttempt(ctx, userID, agentJobID, runAt, nextRunAt, errText, statusUpdate)
 
 		// If we paused the job due to schedule misconfiguration, stop the in-memory schedule immediately.
@@ -317,10 +332,7 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 		})
 	}
 
-	// One-off jobs do not have a next run.
-	if job.ScheduleType == models.AgentJobScheduleTypeAt {
-		nextRunAt = nil
-	}
+	statusUpdate, nextRunAt = applyOneOffRunOutcome(job, opts, statusUpdate, nextRunAt)
 
 	m.recordAgentJobRunAttempt(ctx, userID, agentJobID, runAt, nextRunAt, errText, statusUpdate)
 

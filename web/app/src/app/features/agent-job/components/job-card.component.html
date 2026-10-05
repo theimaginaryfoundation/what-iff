@@ -65,7 +65,7 @@
         class="rounded-lg border border-border-base px-2.5 py-1.5 text-xs text-text-secondary disabled:opacity-50"
         [disabled]="runningNow()"
         [attr.aria-disabled]="runningNow()"
-        [uiTooltip]="job().scheduleTypeLabel === 'Recurring' ? 'Run once now; the schedule stays the same' : 'Run it now instead; the job then counts as done'"
+        uiTooltip="Run once now; the schedule stays the same"
         (click)="runNow.emit(job().id)">
         {{ runningNow() ? 'Running…' : 'Run now' }}
       </button>

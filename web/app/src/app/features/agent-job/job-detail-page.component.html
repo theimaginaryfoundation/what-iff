@@ -25,7 +25,7 @@
             class="rounded-lg border border-border-base px-3 py-2 text-xs text-text-secondary"
             [disabled]="runningNow()"
             [attr.aria-disabled]="runningNow()"
-            [uiTooltip]="current.schedule_type === 'cron' ? 'Run once now; the schedule stays the same' : 'Run it now instead; the job then counts as done'"
+            uiTooltip="Run once now; the schedule stays the same"
             (click)="runNow()">
             {{ runningNow() ? 'Running…' : 'Run now' }}
           </button>

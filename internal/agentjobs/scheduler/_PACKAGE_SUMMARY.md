@@ -23,6 +23,7 @@
   `whatiff.scheduler.lateness` is start time minus the job's stored `next_run_at`, for regular firings only (manual runs and deferred retries have no planned time).
   The manager isn't handed a `*telemetry.Metrics`, so it records through `telemetry.Global()`.
   Scheduled runs create no `jobs` row, so they don't appear in the job-lifecycle metrics.
+- **Manual "Run now" is an extra run:** `RunAgentJobNow` sets `executionOptions.manual`. For a one-off (`at`) job a manual run does not move it to `complete`/`failed` and keeps its stored `next_run_at` (`applyOneOffRunOutcome`), so the job still fires at its scheduled time. It still bumps `run_count`/`last_run_at` and records `last_error`. Recurring jobs behave as before.
 - **MVP note:** `Config.EnableAgentJobsScheduler` gates whether the scheduler runs at all.
 
 ## Testing
