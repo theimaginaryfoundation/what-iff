@@ -1,6 +1,7 @@
 package fileattachment
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -114,18 +115,24 @@ func (h *Handler) DeleteFileAttachment(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid attachment ID", err)
 		return
 	}
-	//TODO: Fix this to properly delete with the new file store + S3 integration.
 	fileAttachment, err := h.ds.GetFileAttachment(r.Context(), userID, id)
 	if err != nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "File attachment not found", err)
 		return
 	}
 
-	if fileAttachment.FileID != nil {
-		err = h.agent.DeleteProviderFileAttachment(r.Context(), *fileAttachment.FileID)
+	// Reference copies clone the provider FileID; only the last row to go deletes the file.
+	if fileAttachment.FileID != nil && *fileAttachment.FileID != "" {
+		shared, err := h.ds.FileAttachmentProviderFileShared(r.Context(), id, *fileAttachment.FileID)
 		if err != nil {
 			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Error deleting file attachment", err)
 			return
+		}
+		if !shared {
+			if err := h.agent.DeleteProviderFileAttachment(r.Context(), *fileAttachment.FileID); err != nil {
+				handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Error deleting file attachment", err)
+				return
+			}
 		}
 	}
 
@@ -134,6 +141,12 @@ func (h *Handler) DeleteFileAttachment(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Error deleting file attachment", err)
 		return
 	}
+
+	// The row is gone, so the stored object goes too unless a reference copy still points at it.
+	// Best effort: the delete has happened; an object that cannot be removed is left orphaned.
+	// WithoutCancel so a client hanging up does not abandon the cleanup halfway.
+	storage.ReleaseAttachmentObjects(context.WithoutCancel(r.Context()), h.logger, h.agent.FileStore(), h.ds, userID,
+		[]models.FileAttachment{*fileAttachment})
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, nil)
 }
@@ -173,12 +186,14 @@ func (h *Handler) GetFileAttachmentContent(w http.ResponseWriter, r *http.Reques
 	if k := strings.TrimSpace(attachment.S3Key); k != "" {
 		keys = append(keys, k)
 	}
+	// Legacy rows without s3_key: derive the key. FileKeyForAttachment takes the CHAT id (the
+	// datastore resolves it through the chat message), not the chat message id.
 	keys = append(keys, storage.FileKeyForAttachment(
 		userID,
 		attachment.ID,
 		attachment.Name,
 		attachment.FileType,
-		attachment.ChatMessageID,
+		attachment.ChatID,
 		attachment.PersonalityID,
 	))
 

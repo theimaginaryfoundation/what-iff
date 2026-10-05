@@ -7,6 +7,13 @@
 ## Responsibilities
 
 - **`FileStore`** (`filestore.go`): constructor from bucket name, region, logger; methods used by `internal/agent` and handlers for attachment pipelines.
+- **Attachment object cleanup** (`attachment_cleanup.go`):
+  ent cascades delete attachment rows without touching the store, so callers read the affected rows first and release them after the delete.
+  - `ReleaseAttachmentObjects` deletes a deleted row's object (its `s3_key`, or the legacy derived keys when empty) only when `AttachmentKeyRefs` reports no remaining row references it, plus the row's own thumbnail.
+    It first confirms the rows are actually gone (`ExistingFileAttachmentIDs`), so a cascade that did not fire never strips a surviving row.
+    Best effort: failures are logged and counted, never returned.
+  - `PurgeUserObjects` removes the whole `users/{id}/` prefix and the account's export bundles under `exports/{id}/` (`UserExportPrefix`; `accountexport` writes there via `ExportBundleRoot`) after account deletion.
+    It falls back to releasing the known rows when the store cannot list `users/{id}/`.
 - **`Instrument`** (`instrumented.go`): decorator recording `whatiff.dependency.duration` (dependency `s3` or `local_fs`, operation `put_object`/`get_object`/`delete_object`/`list_objects`) through `telemetry.Global()`; `internal/server` wraps the store at construction.
 
 ## Dependencies
@@ -31,6 +38,7 @@
 
 - `filestore_test.go` — behavior with mocks or localstack-style setups (see file).
 - `instrumented_test.go` — dependency metrics, the not-found contract, and optional-interface preservation.
+- `attachment_cleanup_test.go` — release reference counting and legacy keys, account purge, against the local store.
 
 ## Related documentation
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 )
 
 // Store defines the datastore operations required by the personality handlers.
@@ -24,6 +25,11 @@ type Store interface {
 	GetPersonalityUsageStats(ctx context.Context, userID, personalityID uuid.UUID) (models.PersonalityUsageStats, error)
 	UpdatePersonality(ctx context.Context, userID uuid.UUID, personality models.Personality) (*models.Personality, error)
 	DeletePersonality(ctx context.Context, userID, id uuid.UUID) error
+	// ListPersonalityFileAttachmentObjectRefs and ReferencedFileAttachmentKeys let
+	// DeletePersonality remove the stored objects of the attachments its cascade deletes
+	// (storage.ReleaseAttachmentObjects).
+	ListPersonalityFileAttachmentObjectRefs(ctx context.Context, userID, personalityID uuid.UUID) ([]models.FileAttachment, error)
+	storage.AttachmentKeyRefs
 	ListPersonalityExpressions(ctx context.Context, userID, personalityID uuid.UUID) ([]models.PersonalityExpression, error)
 	UpsertPersonalityExpression(ctx context.Context, userID, personalityID uuid.UUID, key string, req models.UpdatePersonalityExpressionRequest) (*models.PersonalityExpression, error)
 	DeletePersonalityExpression(ctx context.Context, userID, personalityID uuid.UUID, key string) error

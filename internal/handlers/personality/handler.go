@@ -25,7 +25,8 @@ type Handler struct {
 	logger           *zap.Logger
 	agent            *agent.Agent
 	personalityAgent PersonalityAgent
-	// fileStore reads cover images for PNG card export; nil when there is no agent (tests).
+	// fileStore holds attachment objects: it reads cover images for PNG card export and deletes a
+	// deleted personality's files. nil when there is no agent (tests set it).
 	fileStore storage.FileStore
 }
 

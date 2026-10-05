@@ -32,6 +32,10 @@ type fakeStore struct {
 	getModelByNameFn          func(ctx context.Context, name string) (*models.Model, error)
 	isFirstChatFn             func(ctx context.Context, userID, chatID uuid.UUID) (bool, error)
 	countAllMessagesFn        func(ctx context.Context, userID uuid.UUID, cap int) (int, error)
+	deleteChatFn              func(ctx context.Context, userID, id uuid.UUID) error
+	listChatAttachmentRefsFn  func(ctx context.Context, userID, chatID uuid.UUID) ([]models.FileAttachment, error)
+	referencedKeysFn          func(ctx context.Context, keys []string) (map[string]bool, error)
+	existingIDsFn             func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error)
 	createFileAttachmentFn    func(ctx context.Context, userID uuid.UUID, fileAttachment models.FileAttachment) (*models.FileAttachment, error)
 }
 
@@ -51,7 +55,28 @@ func (f *fakeStore) UpdateChat(ctx context.Context, userID uuid.UUID, chat model
 	return f.updateChatFn(ctx, userID, chat)
 }
 func (f *fakeStore) DeleteChat(ctx context.Context, userID, id uuid.UUID) error {
+	if f.deleteChatFn != nil {
+		return f.deleteChatFn(ctx, userID, id)
+	}
 	return errors.New("not implemented")
+}
+func (f *fakeStore) ListChatFileAttachmentObjectRefs(ctx context.Context, userID, chatID uuid.UUID) ([]models.FileAttachment, error) {
+	if f.listChatAttachmentRefsFn != nil {
+		return f.listChatAttachmentRefsFn(ctx, userID, chatID)
+	}
+	return nil, nil
+}
+func (f *fakeStore) ExistingFileAttachmentIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
+	if f.existingIDsFn != nil {
+		return f.existingIDsFn(ctx, ids)
+	}
+	return map[uuid.UUID]bool{}, nil
+}
+func (f *fakeStore) ReferencedFileAttachmentKeys(ctx context.Context, keys []string) (map[string]bool, error) {
+	if f.referencedKeysFn != nil {
+		return f.referencedKeysFn(ctx, keys)
+	}
+	return map[string]bool{}, nil
 }
 func (f *fakeStore) ListChatMessages(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error) {
 	return nil, errors.New("not implemented")

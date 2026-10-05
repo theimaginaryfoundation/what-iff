@@ -8,6 +8,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"go.uber.org/zap"
 )
 
@@ -41,6 +42,19 @@ type Handler struct {
 	cfg          HandlerConfig
 	// importTimeout bounds one background chat import (chatImportJobTimeout; tests shorten it).
 	importTimeout time.Duration
+	// files overrides agent.FileStore() for object cleanup; tests set it, nil uses the agent's.
+	files storage.FileStore
+}
+
+// objectStore is the file store attachment objects live in, or nil when none is configured.
+func (h *Handler) objectStore() storage.FileStore {
+	if h.files != nil {
+		return h.files
+	}
+	if h.agent != nil {
+		return h.agent.FileStore()
+	}
+	return nil
 }
 
 // NewHandler creates a new assistant handler instance

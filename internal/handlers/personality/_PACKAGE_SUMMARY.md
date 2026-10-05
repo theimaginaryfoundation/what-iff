@@ -26,6 +26,8 @@ HTTP API for **personalities** — CRUD, defaults, file attachments, and persona
 - **Usage stats on single-personality responses:** `ListPersonalities` fills `stats` (thread count / last used) in the datastore, but `GetPersonality`/`UpdatePersonality` return zeroed `stats` (they sit on hot agent paths).
   `GET`/`PUT /personality/{id}` therefore call `attachUsageStats` (`Store.GetPersonalityUsageStats`) so the stand-alone page matches the list card (#129).
   A stats error is logged and the personality is still returned.
+- **Deleting a personality releases its attachment objects.**
+  `DeletePersonality` reads the personality's attachment rows before the cascade and calls `storage.ReleaseAttachmentObjects` after it (reference counted, best effort).
 
 ## Testing
 
