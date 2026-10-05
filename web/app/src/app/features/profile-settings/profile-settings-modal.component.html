@@ -64,6 +64,38 @@
             <input type="text" formControlName="last_name" autocomplete="family-name" />
           </label>
           <label class="profile-settings__field">
+            <span>Timezone</span>
+            <input
+              type="text"
+              formControlName="timezone"
+              list="profile-settings-timezones"
+              autocomplete="off"
+              placeholder="e.g. America/New_York"
+              aria-describedby="profile-settings-timezone-help"
+              (input)="timezoneSuggested.set(false)" />
+            <datalist id="profile-settings-timezones">
+              @for (tz of timezones; track tz) {
+                <option [value]="tz"></option>
+              }
+            </datalist>
+            <small id="profile-settings-timezone-help">
+              @if (timezoneSuggested()) {
+                Detected from your browser and not saved yet. Click Save Changes to keep it.
+              } @else {
+                Scheduled jobs read times like "every weekday at 8" in this timezone.
+              }
+            </small>
+            @if (profileForm.controls.timezone.invalid && profileForm.controls.timezone.touched) {
+              <small class="profile-settings__timezone-error" role="alert">
+                @if (profileForm.controls.timezone.hasError('timezone')) {
+                  Enter a valid IANA timezone, e.g. Europe/London.
+                } @else {
+                  Timezone must be no more than 64 characters.
+                }
+              </small>
+            }
+          </label>
+          <label class="profile-settings__field">
             <span>Theme</span>
             <select [value]="themeMode()" [disabled]="loadingAction()" (change)="onThemeModeChange($any($event.target).value)">
               <option value="system">Use system setting</option>

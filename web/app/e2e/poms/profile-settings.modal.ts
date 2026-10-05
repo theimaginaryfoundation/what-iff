@@ -16,6 +16,7 @@ export class ProfileSettingsModal {
     this.firstNameInput = this.page.getByLabel('First Name');
     this.lastNameInput = this.page.getByLabel('Last Name');
     this.themeSelect = this.page.getByLabel('Theme');
+    this.timezoneInput = this.page.getByLabel('Timezone');
     this.htmlElement = this.page.locator('html');
     this.profileSavedMessage = this.page.getByText('Profile updated.');
     this.passwordUpdatedMessage = this.page.getByText('Password updated.');
@@ -41,6 +42,8 @@ export class ProfileSettingsModal {
   readonly lastNameInput: Locator;
 
   readonly themeSelect: Locator;
+
+  readonly timezoneInput: Locator;
 
   /**
    * `<html>` itself — `ThemeService`/`applyThemeAttribute()` set

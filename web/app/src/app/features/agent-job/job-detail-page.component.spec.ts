@@ -7,6 +7,7 @@ import { NEVER, of, throwError } from 'rxjs';
 import { AgentJob } from '../../core/models/agent-job.model';
 import { Ritual } from '../../core/models/ritual.model';
 import { AgentJobService } from '../../core/services/agent-job.service';
+import { AuthService } from '../../core/services/auth.service';
 import { ChatService } from '../../core/services/chat.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { ModelService } from '../../core/services/model.service';
@@ -21,6 +22,7 @@ describe('JobDetailPageComponent', () => {
     let modelService: Pick<MockedObject<ModelService>, 'getModels'>;
     let personalityService: Pick<MockedObject<PersonalityService>, 'listPersonalities'>;
     let ritualService: Pick<MockedObject<RitualService>, 'listRituals'>;
+    let authService: { getUserProfile: ReturnType<typeof vi.fn> };
     let router: { navigate: ReturnType<typeof vi.fn> };
     let route: {
         snapshot: {
@@ -86,6 +88,9 @@ describe('JobDetailPageComponent', () => {
         const confirmation = {
             confirm: vi.fn().mockName("ConfirmationService.confirm")
         };
+        authService = {
+            getUserProfile: vi.fn().mockName("AuthService.getUserProfile").mockReturnValue(of({ id: 'user-1', username: 'u', email: 'u@example.com', created_at: '', updated_at: '' }))
+        };
         router = {
             navigate: vi.fn().mockName("Router.navigate")
         };
@@ -107,6 +112,7 @@ describe('JobDetailPageComponent', () => {
                 { provide: PersonalityService, useValue: personalityService },
                 { provide: RitualService, useValue: ritualService },
                 { provide: ConfirmationService, useValue: confirmation },
+                { provide: AuthService, useValue: authService },
                 { provide: Router, useValue: router },
                 { provide: ActivatedRoute, useValue: route },
             ],
@@ -187,5 +193,62 @@ describe('JobDetailPageComponent', () => {
         expect(host.textContent).not.toContain('Run now');
         expect(host.querySelector('app-job-form')).not.toBeNull();
         expect(host.querySelector('app-job-run-history')).toBeNull();
+    });
+
+    describe('create-mode timezone default', () => {
+        const formTimezone = (): string =>
+            (fixture.nativeElement.querySelector('input[name="timezone"]') as HTMLInputElement).value;
+
+        const mockBrowserTimezone = (timeZone: string | undefined): void => {
+            vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({ timeZone } as unknown as Intl.ResolvedDateTimeFormatOptions);
+        };
+
+        beforeEach(() => {
+            route.snapshot.paramMap.get.mockReturnValue('new');
+        });
+
+        afterEach(() => {
+            vi.restoreAllMocks();
+        });
+
+        it("defaults to the user's saved timezone", async () => {
+            authService.getUserProfile.mockReturnValue(of({ id: 'user-1', timezone: 'Asia/Tokyo' }));
+            fixture.detectChanges();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            expect(fixture.componentInstance.job()?.timezone).toBe('Asia/Tokyo');
+            expect(formTimezone()).toBe('Asia/Tokyo');
+        });
+
+        it('falls back to the browser timezone when none is saved', async () => {
+            mockBrowserTimezone('Europe/Berlin');
+            fixture.detectChanges();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            expect(fixture.componentInstance.job()?.timezone).toBe('Europe/Berlin');
+            expect(formTimezone()).toBe('Europe/Berlin');
+        });
+
+        it('falls back to the browser timezone when the profile cannot be loaded', async () => {
+            mockBrowserTimezone('Europe/Berlin');
+            authService.getUserProfile.mockReturnValue(throwError(() => new Error('offline')));
+            fixture.detectChanges();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            expect(fixture.componentInstance.job()?.timezone).toBe('Europe/Berlin');
+        });
+
+        it('falls back to UTC when neither is available', async () => {
+            mockBrowserTimezone(undefined);
+            fixture.detectChanges();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            expect(fixture.componentInstance.job()?.timezone).toBe('UTC');
+            expect(formTimezone()).toBe('UTC');
+        });
     });
 });

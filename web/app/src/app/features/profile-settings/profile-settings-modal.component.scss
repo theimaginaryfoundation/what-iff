@@ -166,6 +166,10 @@ small {
   }
 }
 
+.profile-settings__timezone-error {
+  color: var(--danger);
+}
+
 .profile-settings__sr-only {
   clip: rect(0, 0, 0, 0);
   border: 0;

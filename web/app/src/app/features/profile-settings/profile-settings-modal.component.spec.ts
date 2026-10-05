@@ -2,7 +2,7 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { Router } from '@angular/router';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 
 import { ProfileSettingsModalComponent } from './profile-settings-modal.component';
 import { ProfileSettingsModalService } from './profile-settings-modal.service';
@@ -22,6 +22,13 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     listPersonalities: ReturnType<typeof vi.fn>;
   };
   let router: { navigate: ReturnType<typeof vi.fn> };
+  let authService: {
+    getUserProfile: ReturnType<typeof vi.fn>;
+    updateProfile: ReturnType<typeof vi.fn>;
+    updatePassword: ReturnType<typeof vi.fn>;
+    logoutPreferred: ReturnType<typeof vi.fn>;
+  };
+  let user: Record<string, unknown>;
 
   async function openAndWaitForProfile(fixture: ReturnType<typeof TestBed.createComponent<ProfileSettingsModalComponent>>): Promise<void> {
     const component = fixture.componentInstance;
@@ -32,14 +39,14 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
   }
 
   beforeEach(async () => {
-    const user = {
+    user = {
       id: 'user-1',
       username: 'testuser',
       email: 'testuser@example.com',
       created_at: '2024-01-01T00:00:00Z',
       updated_at: '2024-01-01T00:00:00Z',
     };
-    const authService = {
+    authService = {
       getUserProfile: vi.fn().mockReturnValue(of(user)),
       updateProfile: vi.fn().mockReturnValue(of(user)),
       updatePassword: vi.fn().mockReturnValue(of({ message: 'ok' }) as any),
@@ -206,5 +213,95 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
 
     button.click();
     expect(router.navigate).toHaveBeenCalledWith(['/data']);
+  });
+
+  describe('timezone', () => {
+    const timezoneInput = (fixture: ReturnType<typeof TestBed.createComponent<ProfileSettingsModalComponent>>) =>
+      fixture.nativeElement.querySelector('input[formControlName="timezone"]') as HTMLInputElement;
+
+    const mockBrowserTimezone = (timeZone: string): void => {
+      vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({ timeZone } as unknown as Intl.ResolvedDateTimeFormatOptions);
+    };
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('shows the saved timezone and does not flag it as a suggestion', async () => {
+      user['timezone'] = 'America/Chicago';
+      const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+      await openAndWaitForProfile(fixture);
+
+      expect(timezoneInput(fixture).value).toBe('America/Chicago');
+      expect(fixture.componentInstance.timezoneSuggested()).toBe(false);
+      expect(fixture.nativeElement.textContent).not.toContain('Detected from your browser');
+    });
+
+    it('suggests the browser timezone when none is saved, without persisting it', async () => {
+      mockBrowserTimezone('Europe/Berlin');
+      const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+      await openAndWaitForProfile(fixture);
+
+      expect(timezoneInput(fixture).value).toBe('Europe/Berlin');
+      expect(fixture.componentInstance.timezoneSuggested()).toBe(true);
+      expect(fixture.nativeElement.textContent).toContain('Detected from your browser and not saved yet');
+      expect(authService.updateProfile).not.toHaveBeenCalled();
+    });
+
+    it('saves the timezone through the profile API on Save Changes', async () => {
+      user['timezone'] = 'America/Chicago';
+      const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+      const component = fixture.componentInstance;
+      await openAndWaitForProfile(fixture);
+
+      component.profileForm.patchValue({ timezone: ' Asia/Tokyo ' });
+      await component.saveProfile();
+
+      expect(authService.updateProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'testuser@example.com', timezone: 'Asia/Tokyo' }),
+      );
+      expect(component.message()?.type).toBe('success');
+      expect(component.timezoneSuggested()).toBe(false);
+    });
+
+    it('persists the suggested browser timezone on explicit save', async () => {
+      mockBrowserTimezone('Europe/Berlin');
+      const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+      const component = fixture.componentInstance;
+      await openAndWaitForProfile(fixture);
+
+      await component.saveProfile();
+
+      expect(authService.updateProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ timezone: 'Europe/Berlin' }),
+      );
+    });
+
+    it('rejects an unknown timezone without calling the API', async () => {
+      user['timezone'] = 'America/Chicago';
+      const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+      const component = fixture.componentInstance;
+      await openAndWaitForProfile(fixture);
+
+      component.profileForm.patchValue({ timezone: 'Mars/Olympus_Mons' });
+      await component.saveProfile();
+      fixture.detectChanges();
+
+      expect(component.profileForm.controls.timezone.hasError('timezone')).toBe(true);
+      expect(authService.updateProfile).not.toHaveBeenCalled();
+      expect(fixture.nativeElement.textContent).toContain('Enter a valid IANA timezone');
+    });
+
+    it('surfaces the server error when saving fails', async () => {
+      user['timezone'] = 'America/Chicago';
+      authService.updateProfile.mockReturnValue(throwError(() => ({ error: { error: 'Invalid timezone' } })));
+      const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+      const component = fixture.componentInstance;
+      await openAndWaitForProfile(fixture);
+
+      await component.saveProfile();
+
+      expect(component.message()).toEqual({ type: 'error', text: 'Invalid timezone' });
+    });
   });
 });
