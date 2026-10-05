@@ -1,0 +1,32 @@
+<article class="folder" role="listitem">
+  <button
+    type="button"
+    class="folder__menu"
+    [attr.aria-label]="'Rename or move folder ' + folder().name"
+    uiTooltip="Rename or move this folder"
+    (click)="$event.stopPropagation(); edit.emit(folder().path)"
+  >
+    ⋯
+  </button>
+  <button
+    type="button"
+    class="folder__open"
+    [attr.aria-label]="'Open folder ' + folder().name + ', ' + countLabel(folder().count)"
+    (click)="open.emit(folder().path)"
+  >
+    <svg
+      class="folder__icon"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+    </svg>
+    <span class="folder__name">{{ folder().name }}</span>
+    <span class="folder__count">{{ countLabel(folder().count) }}</span>
+  </button>
+</article>

@@ -17,6 +17,7 @@ const sampleTile: GalleryTileVm = {
     personalityNames: [],
     source: 'uploaded',
     sourceLabel: 'Imported',
+    folder: '',
     thumbnailUrl: '/thumb',
     fullUrl: '/full',
 };

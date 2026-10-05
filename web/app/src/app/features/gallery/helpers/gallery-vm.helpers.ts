@@ -20,6 +20,8 @@ export interface GalleryTileVm {
   personalityNames: string[];
   source: GalleryImageSource;
   sourceLabel: string;
+  /** The folder the image is filed in; "" at the top level. */
+  folder: string;
   thumbnailUrl: string;
   fullUrl: string;
 }
@@ -63,6 +65,7 @@ export function toGalleryTileVm(
     personalityNames: personalityNameList,
     source,
     sourceLabel: formatSource(source),
+    folder: image.folder ?? '',
     thumbnailUrl: getImageUrl(image.id, 'thumbnail'),
     fullUrl: getImageUrl(image.id, 'full'),
   };

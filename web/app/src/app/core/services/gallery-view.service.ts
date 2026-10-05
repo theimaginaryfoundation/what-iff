@@ -1,5 +1,5 @@
 import { computed, Injectable, signal, inject } from '@angular/core';
-import { Subscription } from 'rxjs';
+import { firstValueFrom, Subscription } from 'rxjs';
 import { finalize } from 'rxjs/operators';
 
 import { FileAttachment } from '../models/file-attachment.model';
@@ -11,6 +11,14 @@ import {
   GallerySourceFilter,
 } from '../../features/gallery/helpers/gallery-vm.helpers';
 import { sourceForImage } from '../../features/gallery/helpers/image-source.helpers';
+import {
+  breadcrumbsFor,
+  childFolderTiles,
+  GalleryFolder,
+  isWithinFolder,
+  normalizeFolderPath,
+  folderPathError,
+} from '../../features/gallery/helpers/gallery-folder.helpers';
 
 export type GalleryAssociationFilterMode = 'all' | 'global' | 'personality';
 export type GalleryMode = 'gallery' | 'expressions';
@@ -32,6 +40,21 @@ export class GalleryViewService {
   readonly associationFilterMode = signal<GalleryAssociationFilterMode>('all');
   readonly selectedPersonalityIds = signal<string[]>([]);
   readonly importRequestTick = signal(0);
+
+  /** Folders that hold images (all levels), as the server lists them. */
+  readonly folders = signal<GalleryFolder[]>([]);
+  /** The folder being viewed; "" is the top level. */
+  readonly currentFolder = signal('');
+  /** Folders created in this session that are still empty. A folder only exists on the server once it holds an image. */
+  readonly pendingFolders = signal<string[]>([]);
+  /** Flat view of every image regardless of folder (the pre-folders gallery). */
+  readonly showAll = signal(false);
+  readonly selectionMode = signal(false);
+  readonly selectedIds = signal<ReadonlySet<string>>(new Set());
+  /** A failed move or rename, shown without replacing the grid. */
+  readonly folderError = signal<string | null>(null);
+  /** The folder whose rename / move dialog is open, if any. */
+  readonly folderEditing = signal<string | null>(null);
 
   /**
    * The single in-flight list request (first page or load-more). A reload cancels
@@ -62,6 +85,16 @@ export class GalleryViewService {
       return (image.personalities ?? []).some(personality => selectedSet.has(personality.id));
     });
   });
+  /**
+   * Whether the grid is showing one folder. Searching looks across every folder, and "show all" is
+   * the flat view, so both ignore the folder being viewed.
+   */
+  readonly browsingFolders = computed(() => !this.showAll() && this.filters().query.trim() === '');
+  readonly folderTiles = computed(() =>
+    this.browsingFolders() ? childFolderTiles(this.folders(), this.currentFolder(), this.pendingFolders()) : [],
+  );
+  readonly breadcrumbs = computed(() => breadcrumbsFor(this.currentFolder()));
+  readonly selectedCount = computed(() => this.selectedIds().size);
   readonly selectedImage = computed(() => this.filteredImages().find(i => i.id === this.selectedImageId()) ?? null);
   readonly hasMore = computed(() => this.images().length < this.totalCount());
   readonly availableSources = computed<GallerySourceFilter[]>(() => {
@@ -82,7 +115,12 @@ export class GalleryViewService {
     const associationMode = this.associationFilterMode();
     const personalityId = activeFilters.personalityId === 'all' ? undefined : activeFilters.personalityId;
     this.inflight = this.galleryService
-      .listImages(1, this.pageSize, { name: activeFilters.query, personalityId, globalOnly: associationMode === 'global' })
+      .listImages(1, this.pageSize, {
+        name: activeFilters.query,
+        personalityId,
+        globalOnly: associationMode === 'global',
+        folder: this.activeFolder(),
+      })
       .pipe(finalize(() => this.isLoading.set(false)))
       .subscribe({
         next: response => {
@@ -107,7 +145,12 @@ export class GalleryViewService {
     const personalityId = activeFilters.personalityId === 'all' ? undefined : activeFilters.personalityId;
     this.isLoadingMore.set(true);
     this.inflight = this.galleryService
-      .listImages(nextPage, this.pageSize, { name: activeFilters.query, personalityId, globalOnly: associationMode === 'global' })
+      .listImages(nextPage, this.pageSize, {
+        name: activeFilters.query,
+        personalityId,
+        globalOnly: associationMode === 'global',
+        folder: this.activeFolder(),
+      })
       .pipe(finalize(() => this.isLoadingMore.set(false)))
       .subscribe({
         next: response => {
@@ -212,6 +255,156 @@ export class GalleryViewService {
     }
   }
 
+  // --- folders --------------------------------------------------------------------------------
+
+  /** The folder to ask the server for: undefined (every image) unless viewing one. */
+  private activeFolder(): string | undefined {
+    return this.browsingFolders() ? this.currentFolder() : undefined;
+  }
+
+  loadFolders(): void {
+    this.galleryService.listFolders().subscribe({
+      next: folders => {
+        this.folders.set(folders);
+        // A folder that now holds an image (or has one beneath it) is real; stop tracking it as pending.
+        this.pendingFolders.update(pending => pending.filter(path => !folders.some(folder => isWithinFolder(folder.path, path))));
+      },
+      // The tiles keep showing what they had; the images themselves load separately.
+      error: () => undefined,
+    });
+  }
+
+  openFolder(path: string): void {
+    this.showAll.set(false);
+    this.currentFolder.set(path);
+    this.clearSelection();
+    this.folderError.set(null);
+    this.loadInitial();
+  }
+
+  startEditingFolder(path: string): void {
+    this.folderError.set(null);
+    this.folderEditing.set(path);
+  }
+
+  stopEditingFolder(): void {
+    this.folderEditing.set(null);
+    this.folderError.set(null);
+  }
+
+  setShowAll(showAll: boolean): void {
+    this.showAll.set(showAll);
+    this.clearSelection();
+    this.loadInitial();
+  }
+
+  /**
+   * Starts a folder under the one being viewed and opens it. It lives in this session only until an
+   * image is moved into it. Returns why it could not be made, or null.
+   */
+  createFolder(rawName: string): string | null {
+    const name = rawName.trim();
+    if (name === '') {
+      return 'Give the folder a name';
+    }
+    const base = this.currentFolder();
+    const candidate = base === '' ? name : `${base}/${name}`;
+    const problem = folderPathError(candidate);
+    if (problem) {
+      return problem;
+    }
+    const path = normalizeFolderPath(candidate) ?? '';
+    this.pendingFolders.update(pending => (pending.includes(path) ? pending : [...pending, path]));
+    this.openFolder(path);
+    return null;
+  }
+
+  /** Files images in a folder ("" is the top level). Resolves true when the move went through. */
+  async moveImages(ids: readonly string[], rawFolder: string): Promise<boolean> {
+    const folder = normalizeFolderPath(rawFolder);
+    if (folder === null) {
+      this.folderError.set(folderPathError(rawFolder) ?? 'That folder name is not allowed');
+      return false;
+    }
+    this.folderError.set(null);
+    try {
+      await firstValueFrom(this.galleryService.moveImages(ids, folder));
+    } catch (error) {
+      this.folderError.set(describeFolderError(error, 'Could not move the images.'));
+      return false;
+    }
+    const moved = new Set(ids);
+    if (this.browsingFolders()) {
+      // The moved images leave this folder's grid, unless they were moved into it.
+      if (folder !== this.currentFolder()) {
+        const before = this.images().length;
+        this.images.update(rows => rows.filter(row => !moved.has(row.id)));
+        this.totalCount.update(total => Math.max(0, total - (before - this.images().length)));
+      }
+    } else {
+      this.images.update(rows => rows.map(row => (moved.has(row.id) ? { ...row, folder: folder || undefined } : row)));
+    }
+    this.clearSelection();
+    this.loadFolders();
+    return true;
+  }
+
+  /** Renames a folder, carrying everything beneath it. Resolves true when it went through. */
+  async moveFolder(from: string, rawTo: string): Promise<boolean> {
+    const to = normalizeFolderPath(rawTo);
+    if (to === null) {
+      this.folderError.set(folderPathError(rawTo) ?? 'That folder name is not allowed');
+      return false;
+    }
+    if (to === from) {
+      return true;
+    }
+    if (isWithinFolder(to, from)) {
+      this.folderError.set('A folder cannot be moved into itself');
+      return false;
+    }
+    this.folderError.set(null);
+    try {
+      await firstValueFrom(this.galleryService.moveFolder(from, to));
+    } catch (error) {
+      this.folderError.set(describeFolderError(error, 'Could not move the folder.'));
+      return false;
+    }
+    const rewrite = (path: string) => (isWithinFolder(path, from) ? `${to}${path.slice(from.length)}`.replace(/^\//, '') : path);
+    this.pendingFolders.update(pending => pending.map(rewrite));
+    this.currentFolder.update(rewrite);
+    this.loadFolders();
+    this.loadInitial();
+    return true;
+  }
+
+  // --- selection ------------------------------------------------------------------------------
+
+  setSelectionMode(on: boolean): void {
+    this.selectionMode.set(on);
+    if (!on) {
+      this.selectedIds.set(new Set());
+    }
+  }
+
+  toggleSelected(id: string): void {
+    this.selectedIds.update(current => {
+      const next = new Set(current);
+      if (!next.delete(id)) {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  selectAllShown(): void {
+    this.selectedIds.set(new Set(this.filteredImages().map(image => image.id)));
+  }
+
+  clearSelection(): void {
+    this.selectedIds.set(new Set());
+  }
+
   private cancelInflight(): void {
     this.inflight?.unsubscribe();
     this.inflight = null;
@@ -233,4 +426,10 @@ export class GalleryViewService {
 function hasPersonalityAssociation(image: FileAttachment): boolean {
   if (image.personality_id) return true;
   return (image.personalities ?? []).length > 0;
+}
+
+/** The server's message for a refused move (it says why), else a plain fallback. */
+function describeFolderError(error: unknown, fallback: string): string {
+  const message = (error as { error?: { error?: unknown } } | null)?.error?.error;
+  return typeof message === 'string' && message.trim() !== '' ? message : fallback;
 }

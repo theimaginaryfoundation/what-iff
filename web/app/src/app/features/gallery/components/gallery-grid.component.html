@@ -1,4 +1,4 @@
-@if (loading() && tiles().length === 0) {
+@if (loading() && tiles().length === 0 && folderTiles().length === 0) {
   <div class="gallery-grid" role="status" aria-label="Loading gallery">
     @for (slot of [1,2,3,4,5,6,7,8,9,10]; track slot) {
       <div class="h-[7.8125rem] animate-pulse rounded-lg border border-border-base bg-surface-card"></div>
@@ -14,16 +14,26 @@
       Try again
     </button>
   </div>
-} @else if (tiles().length === 0) {
+} @else if (tiles().length === 0 && folderTiles().length === 0) {
   <div class="rounded-2xl border border-border-base bg-surface-card p-10 text-center">
-    <p class="text-sm text-text-secondary">No images match these filters yet.</p>
+    <p class="text-sm text-text-secondary">{{ emptyMessage() }}</p>
   </div>
 } @else {
   <div class="gallery-grid" role="list" aria-label="Gallery images">
+    @for (folder of folderTiles(); track folder.path) {
+      <app-gallery-folder-tile
+        [folder]="folder"
+        (open)="openFolder.emit($event)"
+        (edit)="editFolder.emit($event)" />
+    }
     @for (tile of tiles(); track tile.id) {
       <app-gallery-tile
         [tile]="tile"
         [assignmentEnabled]="assignmentEnabled()"
+        [selectable]="selectable()"
+        [selected]="selectedIds().has(tile.id)"
+        [showFolder]="showFolders()"
+        (toggleSelect)="toggleSelect.emit($event)"
         (open)="openImage.emit($event)"
         (delete)="deleteImage.emit($event)"
         (assign)="assignImage.emit($event)" />

@@ -94,8 +94,18 @@
       <span class="gallery-page__results-summary" role="status">{{ tiles().length }} of {{ sourceCounts().all }} shown</span>
     </div>
 
+    <app-gallery-folder-tools />
+
     <app-gallery-grid
       [tiles]="tiles()"
+      [folderTiles]="view.folderTiles()"
+      [selectable]="view.selectionMode()"
+      [selectedIds]="view.selectedIds()"
+      [showFolders]="!view.browsingFolders()"
+      [emptyMessage]="emptyMessage()"
+      (openFolder)="view.openFolder($event)"
+      (editFolder)="view.startEditingFolder($event)"
+      (toggleSelect)="view.toggleSelected($event)"
       [loading]="view.isLoading()"
       [loadingMore]="view.isLoadingMore()"
       [hasMore]="view.hasMore()"

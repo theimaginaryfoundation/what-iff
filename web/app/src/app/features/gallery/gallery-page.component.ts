@@ -16,6 +16,7 @@ import {
   GalleryFileImportRequest, GalleryImportModalComponent, GalleryImportPersonalityOption,
 } from './components/gallery-import-modal.component';
 import { GalleryPersonalityOption } from './components/gallery-filter-bar.component';
+import { GalleryFolderToolsComponent } from './components/gallery-folder-tools.component';
 import { GalleryGridComponent } from './components/gallery-grid.component';
 import { ImageDetailModalComponent } from './components/image-detail-modal.component';
 import { PersonalityExpressionsManagerComponent } from '../personality/detail/personality-expressions-manager.component';
@@ -34,6 +35,7 @@ type GallerySort = 'created' | 'last_used';
   standalone: true,
   imports: [
     GalleryGridComponent,
+    GalleryFolderToolsComponent,
     ImageDetailModalComponent,
     GalleryImportModalComponent,
     AssignAsExpressionFlowComponent,
@@ -95,6 +97,13 @@ export class GalleryPageComponent implements OnInit {
       return (dateA - dateB) * direction;
     });
   });
+  /** What an empty grid says: a new folder is a prompt to fill it, not a failed search. */
+  readonly emptyMessage = computed(() => {
+    if (this.view.browsingFolders() && this.view.currentFolder() !== '') {
+      return 'This folder is empty. Use Select to pick images, then Move to folder to file them here.';
+    }
+    return 'No images match these filters yet.';
+  });
   readonly tiles = computed(() => {
     const namesById = this.personalityNames();
     return this.sortedImages().map(image =>
@@ -153,6 +162,7 @@ export class GalleryPageComponent implements OnInit {
   ngOnInit(): void {
     this.view.setMode(this.mode());
     this.view.loadInitial();
+    this.view.loadFolders();
     this.loadPersonalities();
     this.route.queryParamMap
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -351,7 +361,12 @@ export class GalleryPageComponent implements OnInit {
   onImportFile(request: GalleryFileImportRequest): void {
     this.importSubmitting.set(true);
     const import$ = request.scope === 'global'
-      ? this.galleryService.importImage(request.file, { title: request.title, description: request.description })
+      ? this.galleryService.importImage(request.file, {
+          title: request.title,
+          description: request.description,
+          // An import lands in the folder being viewed, so it is where you expect it.
+          folder: this.view.browsingFolders() ? this.view.currentFolder() : '',
+        })
       : request.personalityId
         ? this.fileAttachmentService.uploadPersonalityFileAttachment(
             request.personalityId,
@@ -373,6 +388,7 @@ export class GalleryPageComponent implements OnInit {
         this.importSubmitting.set(false);
         this.importOpen.set(false);
         this.view.upsertImage(uploaded);
+        this.view.loadFolders();
       },
       error: async () => {
         this.importSubmitting.set(false);

@@ -16,7 +16,13 @@ import { GalleryTileVm } from '../helpers/gallery-vm.helpers';
 export class GalleryTileComponent {
   readonly tile = input.required<GalleryTileVm>();
   readonly assignmentEnabled = input(false);
+  /** Selection mode: a click picks the image instead of opening it. */
+  readonly selectable = input(false);
+  readonly selected = input(false);
+  /** Show the folder the image is in (flat and search views, where folders are mixed together). */
+  readonly showFolder = input(false);
 
+  readonly toggleSelect = output<string>();
   readonly open = output<string>();
   readonly delete = output<string>();
   readonly assign = output<string>();
