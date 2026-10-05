@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -79,6 +80,7 @@ type chatTurnStore interface {
 	UpdateJobStatus(ctx context.Context, userID, id uuid.UUID, status models.JobStatus, errorMsg string) (*models.Job, error)
 	JobStatus(ctx context.Context, userID, jobID uuid.UUID) (models.JobStatus, error)
 	TouchJob(ctx context.Context, userID, id uuid.UUID) error
+	UpdateJobProgress(ctx context.Context, userID, id uuid.UUID, progress string) error
 }
 
 // blocksLaterTurns reports whether a turn job in this status holds up later turns in its chat:
@@ -442,6 +444,7 @@ func (g *chatTurnGate) wait(ctx context.Context, self *models.Job, chatID uuid.U
 	deadline := start.Add(g.timeout)
 	delay := g.pollInitial
 	queued := false
+	var shown models.ChatTurnWaiting // what the queued turn's progress currently says it waits on
 	var lastErr error
 	for {
 		if err := ctx.Err(); err != nil {
@@ -460,6 +463,9 @@ func (g *chatTurnGate) wait(ctx context.Context, self *models.Job, chatID uuid.U
 			lastErr = nil
 			blockers := g.blockingTurnJobs(jobs, self, time.Now())
 			if len(blockers) == 0 {
+				if shown != "" {
+					g.showWaiting(ctx, self, "")
+				}
 				if queued {
 					g.logger.Info("chat turn gate: earlier turns finished; proceeding",
 						zap.String("job_id", self.ID.String()), zap.String("chat_id", chatID.String()),
@@ -472,6 +478,10 @@ func (g *chatTurnGate) wait(ctx context.Context, self *models.Job, chatID uuid.U
 				g.logger.Info("chat turn gate: queued behind earlier turns in this chat",
 					zap.String("job_id", self.ID.String()), zap.String("chat_id", chatID.String()),
 					zap.Int("ahead", len(blockers)), zap.String("next_job_id", blockers[0].ID.String()))
+			}
+			if next := waitingOnTurn(blockers[0].Status); next != shown {
+				shown = next
+				g.showWaiting(ctx, self, next)
 			}
 		}
 		if !time.Now().Before(deadline) {
@@ -493,6 +503,35 @@ func (g *chatTurnGate) wait(ctx context.Context, self *models.Job, chatID uuid.U
 		case <-timer.C:
 		}
 		delay = min(delay*2, g.pollMax)
+	}
+}
+
+// waitingOnTurn is the phase a turn queued behind a job in status s is waiting on. Any status not
+// listed (pending, processing) means the earlier turn is still generating its reply.
+func waitingOnTurn(s models.JobStatus) models.ChatTurnWaiting {
+	switch s {
+	case models.JobStatusInferenceComplete:
+		return models.ChatTurnWaitingWrapUp
+	case models.JobStatusExpressionComplete, models.JobStatusCompactionComplete:
+		return models.ChatTurnWaitingSummarizer
+	}
+	return models.ChatTurnWaitingReply
+}
+
+// showWaiting records on self's job what it is queued behind (empty clears it), so a polling
+// client can say why there is no reply yet. Best-effort and bounded: it is cosmetic and must
+// never hold up or fail the turn. The turn has not started yet, so its progress holds nothing
+// else to overwrite.
+func (g *chatTurnGate) showWaiting(ctx context.Context, self *models.Job, waiting models.ChatTurnWaiting) {
+	raw, err := json.Marshal(models.ChatTurnProgress{ToolCalls: []models.ChatTurnToolCall{}, WaitingOn: waiting})
+	if err != nil {
+		return
+	}
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), toolProgressPersistTimeout)
+	defer cancel()
+	if err := g.store.UpdateJobProgress(writeCtx, self.UserID, self.ID, string(raw)); err != nil {
+		g.logger.Warn("chat turn gate: failed to record what the turn waits on",
+			zap.String("job_id", self.ID.String()), zap.Error(err))
 	}
 }
 

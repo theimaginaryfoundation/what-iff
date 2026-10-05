@@ -138,6 +138,8 @@ export function pendingAssistantPlaceholderMessage(opts: {
   draftText: string;
   /** Live model reasoning streamed so far (GLM, MiMo); empty when none. */
   draftReasoning?: string;
+  /** Why the reply has not started (queued behind an earlier turn); shown instead of the dots. */
+  pendingStatus?: string;
   generationPersonality: string;
   thinkingImageUrl: string | null;
 }): ChatMessage {
@@ -146,6 +148,7 @@ export function pendingAssistantPlaceholderMessage(opts: {
     chat_id: opts.chatId,
     message: opts.draftText,
     model_reasoning: opts.draftReasoning || undefined,
+    pending_status: opts.pendingStatus,
     origin: 'Assistant',
     sent_at: CHAT_PENDING_ASSISTANT_PLACEHOLDER_SENT_AT,
     generation_personality: opts.generationPersonality,

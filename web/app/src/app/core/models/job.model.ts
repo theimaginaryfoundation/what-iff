@@ -40,7 +40,13 @@ export interface Job {
 /** Decoded shape of {@link Job.progress} for `chat_message` jobs: the live tool-call timeline. */
 export interface ChatTurnProgress {
   tool_calls: ChatTurnToolCall[];
+  /** Set while the turn is queued behind an earlier turn in its chat: the phase it waits on. */
+  waiting_on?: ChatTurnWaiting;
 }
+
+/** Phase of the earlier turn a queued turn is waiting on (the server's turn gate). */
+export const CHAT_TURN_WAITING_STATES = ['reply', 'wrap_up', 'summarizer'] as const;
+export type ChatTurnWaiting = (typeof CHAT_TURN_WAITING_STATES)[number];
 
 /** One tool call in {@link ChatTurnProgress}; input/output are truncated previews. */
 export interface ChatTurnToolCall {

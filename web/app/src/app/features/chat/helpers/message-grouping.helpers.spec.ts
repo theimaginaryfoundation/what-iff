@@ -161,6 +161,16 @@ describe('appendPendingAssistantGroup', () => {
         });
         expect(thinking.model_reasoning).toBe('Weighing options');
 
+        const queued = pendingAssistantPlaceholderMessage({
+            chatId: 'chat-1',
+            draftText: '',
+            pendingStatus: 'Waiting on summarizer…',
+            generationPersonality: 'Kai',
+            thinkingImageUrl: null,
+        });
+        expect(queued.pending_status).toBe('Waiting on summarizer…');
+        expect(pending.pending_status).toBeUndefined();
+
         const extended = appendPendingAssistantGroup([], pending);
         expect(extended.length).toBe(1);
         expect(extended[0].kind).toBe('message-group');

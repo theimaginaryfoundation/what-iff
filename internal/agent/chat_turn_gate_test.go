@@ -23,10 +23,11 @@ type fakeChatTurnStore struct {
 	listErrs  []error // returned (and consumed) by the next List calls, in order
 	listCalls int
 	touches   map[uuid.UUID]int
+	progress  map[uuid.UUID][]string // progress payloads written per job, in order
 }
 
 func newFakeChatTurnStore() *fakeChatTurnStore {
-	return &fakeChatTurnStore{jobs: map[uuid.UUID]*models.Job{}, chatOf: map[uuid.UUID]uuid.UUID{}, touches: map[uuid.UUID]int{}}
+	return &fakeChatTurnStore{jobs: map[uuid.UUID]*models.Job{}, chatOf: map[uuid.UUID]uuid.UUID{}, touches: map[uuid.UUID]int{}, progress: map[uuid.UUID][]string{}}
 }
 
 // add registers a turn job in chatID created at createdAt (UpdatedAt too) and returns a copy.
@@ -107,6 +108,19 @@ func (f *fakeChatTurnStore) TouchJob(_ context.Context, _, id uuid.UUID) error {
 	}
 	f.touches[id]++
 	return nil
+}
+
+func (f *fakeChatTurnStore) UpdateJobProgress(_ context.Context, _, id uuid.UUID, progress string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.progress[id] = append(f.progress[id], progress)
+	return nil
+}
+
+func (f *fakeChatTurnStore) progressWrites(id uuid.UUID) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.progress[id])
 }
 
 func (f *fakeChatTurnStore) CreateJob(_ context.Context, userID uuid.UUID, job models.Job) (*models.Job, error) {
@@ -720,4 +734,46 @@ func TestHasReplied(t *testing.T) {
 		require.Equal(t, want, hasReplied(status), status)
 		require.Equal(t, !isTerminalJobStatus(status), blocksLaterTurns(status), status)
 	}
+}
+
+func TestChatTurnGate_ShowsWhatTheQueuedTurnWaitsOn(t *testing.T) {
+	t.Parallel()
+	store := newFakeChatTurnStore()
+	userID, chatID := uuid.New(), uuid.New()
+	now := time.Now()
+	first := store.add(userID, chatID, models.JobStatusProcessing, now.Add(-time.Second))
+	second := store.add(userID, chatID, models.JobStatusProcessing, now)
+	g := testTurnGate(store, 5*time.Second)
+
+	done := waitAsync(g, context.Background(), second, chatID)
+	// Move the earlier turn on only once the gate has written what it waits on, so the test
+	// does not depend on poll timing.
+	requireWrites := func(n int) {
+		t.Helper()
+		require.Eventually(t, func() bool { return len(store.progressWrites(second.ID)) >= n }, 2*time.Second, time.Millisecond)
+	}
+	requireWrites(1)
+	store.setStatus(first.ID, models.JobStatusInferenceComplete)
+	requireWrites(2)
+	store.setStatus(first.ID, models.JobStatusExpressionComplete)
+	requireWrites(3)
+	store.setStatus(first.ID, models.JobStatusComplete)
+	requireProceeds(t, done)
+
+	// Each phase is written once as it changes, and the note is cleared when the turn goes.
+	require.Equal(t, []string{
+		`{"tool_calls":[],"waiting_on":"reply"}`,
+		`{"tool_calls":[],"waiting_on":"wrap_up"}`,
+		`{"tool_calls":[],"waiting_on":"summarizer"}`,
+		`{"tool_calls":[]}`,
+	}, store.progressWrites(second.ID))
+}
+
+func TestChatTurnGate_WritesNoProgressWhenNotQueued(t *testing.T) {
+	t.Parallel()
+	store := newFakeChatTurnStore()
+	job := store.add(uuid.New(), uuid.New(), models.JobStatusProcessing, time.Now())
+	_, err := testTurnGate(store, time.Second).wait(context.Background(), job, store.chatOf[job.ID])
+	require.NoError(t, err)
+	require.Empty(t, store.progressWrites(job.ID))
 }

@@ -51,6 +51,7 @@ import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { BrainIconComponent, ChevDownIconComponent, EditIconComponent, FileIconComponent, LayersIconComponent, NoteIconComponent, WrenchIconComponent, XIconComponent } from '../../shared/ui/icons/icons';
 import { thumbnailCircleToCirclePreviewTransform } from '../../shared/ui/avatar/avatar-thumbnail.helpers';
 import { personalityAccent, personalityAccentSurface } from '../personality/helpers/personality-vm.helpers';
+import { chatTurnWaitingLabel } from './assistant-turn';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from './chat.constants';
 import { HOTKEY_RITUALS_LIMIT, HOTKEY_SEQUENCE_TIMEOUT } from '../../core/constants/app.constants';
 import { parseHotkey, normalizeKey } from '../../core/utils/hotkey.utils';
@@ -120,10 +121,12 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     ) {
       const name =
         this.selectedPersonalityName()?.trim() || this.session.thread()?.personality_name?.trim() || 'Assistant';
+      const waiting = this.session.waitingOn();
       const pending = pendingAssistantPlaceholderMessage({
         chatId: threadId,
         draftText: this.session.pendingAssistantDraftText(),
         draftReasoning: this.session.pendingAssistantDraftReasoning(),
+        pendingStatus: waiting ? chatTurnWaitingLabel(waiting) : undefined,
         generationPersonality: name,
         thinkingImageUrl: this.selectedPersonality()?.expressions_enabled === false
           ? null

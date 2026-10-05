@@ -55,9 +55,13 @@ import { MessageContentComponent } from '../message-content/message-content.comp
       }
       <div class="bubble__body">
         @if (showPendingDots()) {
-          <span class="bubble__pending-dots" aria-hidden="true">
-            <span></span><span></span><span></span>
-          </span>
+          @if (message().pending_status; as status) {
+            <span class="bubble__pending-status" role="status" aria-live="polite">{{ status }}</span>
+          } @else {
+            <span class="bubble__pending-dots" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </span>
+          }
         } @else {
           <app-message-content
             [content]="bodyContent()"
@@ -410,6 +414,11 @@ import { MessageContentComponent } from '../message-content/message-content.comp
     .bubble:hover .bubble__meta,
     .bubble:focus-within .bubble__meta {
       opacity: 1;
+    }
+
+    .bubble__pending-status {
+      color: var(--color-text-muted);
+      font-style: italic;
     }
 
     .bubble__pending-dots {
