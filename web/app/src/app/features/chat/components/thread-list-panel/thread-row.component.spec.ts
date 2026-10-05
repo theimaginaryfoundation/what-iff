@@ -89,6 +89,15 @@ describe('ThreadRowComponent', () => {
         expect(ids).toEqual(['a']);
     });
 
+    it('does not emit deleteThread on Shift+F10 (the context-menu key)', () => {
+        const ids: string[] = [];
+        component.deleteThread.subscribe(t => ids.push(t.id));
+
+        const main = fixture.nativeElement.querySelector('.thread-row__main') as HTMLButtonElement;
+        main.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true }));
+        expect(ids).toEqual([]);
+    });
+
     it('renders delete in archived view', () => {
         fixture.componentRef.setInput('isArchivedView', true);
         fixture.detectChanges();

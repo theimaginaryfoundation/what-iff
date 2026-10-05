@@ -90,7 +90,6 @@ import { statusDescription, statusLabel, statusTone } from '../../../agent-job/h
               class="thread-row__main"
               (click)="select.emit(thread().id)"
               (dblclick)="editing.set(true)"
-              (keydown.shift.f10)="deleteThread.emit(thread())"
               [attr.aria-label]="'Open thread ' + thread().name + unreadAriaSuffix()"
             >
               <!-- Full name on hover only when cut off; on the span so it doesn't stack with the badge tooltip. -->
