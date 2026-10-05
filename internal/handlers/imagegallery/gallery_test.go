@@ -48,6 +48,18 @@ func (s fakeGalleryStore) SetFileAttachmentS3Key(context.Context, uuid.UUID, uui
 	return nil
 }
 
+func (s fakeGalleryStore) ListImageFolders(context.Context, uuid.UUID) ([]models.FolderCount, error) {
+	return nil, nil
+}
+
+func (s fakeGalleryStore) MoveFileAttachmentsToFolder(context.Context, uuid.UUID, []uuid.UUID, string) (int, error) {
+	return 0, nil
+}
+
+func (s fakeGalleryStore) MoveImageFolder(context.Context, uuid.UUID, string, string) (int, error) {
+	return 0, nil
+}
+
 // fakeGalleryFileStore returns fixed bytes for any key.
 type fakeGalleryFileStore struct {
 	content []byte

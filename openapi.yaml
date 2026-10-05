@@ -6217,6 +6217,145 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /image-gallery/folders:
+    get:
+      summary: List gallery folders
+      description: >-
+        Lists every folder that holds at least one of the user's gallery images, with the number
+        of images directly in it, sorted by path. The top level is implied and not listed. Parent
+        folders that hold no image of their own are not listed; derive them from the paths.
+        To list one folder's images, use `GET /image-gallery?folder=<path>` (an empty value is the
+        top level; leaving `folder` out lists every image).
+      tags: [Image Gallery]
+      responses:
+        '200':
+          description: The user's gallery folders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  folders:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GalleryFolder'
+                required: [folders]
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /image-gallery/move:
+    post:
+      summary: Move gallery images into a folder
+      description: >-
+        Files the given images in a folder, creating the folder if it does not exist. An id may
+        name an image or a chat-reuse copy of it; a copy moves the original. Ids that are not the
+        caller's gallery images are skipped. Only the label changes; stored files are untouched.
+      tags: [Image Gallery]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: string
+                    format: uuid
+                folder:
+                  type: string
+                  description: Destination folder path; empty for the top level. Normalized (trimmed, lower-cased, empty segments dropped).
+                  example: "charts/oura"
+              required: [ids, folder]
+      responses:
+        '200':
+          description: How many images were moved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GalleryMoveResult'
+        '400':
+          description: No ids, too many ids, or an invalid folder path (empty `.`/`..` segments, control characters, a segment over 64 characters, deeper than 8 levels, or longer than 255 characters)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /image-gallery/folders/move:
+    post:
+      summary: Rename or move a gallery folder
+      description: >-
+        Renames the folder `from` to `to`, carrying every folder beneath it along: moving `charts`
+        to `archive/charts` turns `charts/oura` into `archive/charts/oura`. If `to` already exists
+        the two merge. `to` may be empty, which moves the contents up to the top level.
+      tags: [Image Gallery]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                from:
+                  type: string
+                  description: Folder to move. Must not be the top level.
+                  example: "charts"
+                to:
+                  type: string
+                  description: New path for it. Must not be inside `from`.
+                  example: "archive/charts"
+              required: [from, to]
+      responses:
+        '200':
+          description: How many images changed folder
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GalleryMoveResult'
+        '400':
+          description: An invalid path, `from` is the top level, or `to` is inside `from`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /search:
     get:
       summary: Cross-resource command palette search
@@ -7893,6 +8032,28 @@ components:
         - mode
 
     # File Attachment Schemas
+    GalleryFolder:
+      type: object
+      properties:
+        path:
+          type: string
+          description: Lower-case folder path, e.g. `charts/oura`
+        count:
+          type: integer
+          description: Gallery images directly in this folder (not in folders beneath it)
+      required: [path, count]
+      example:
+        path: "charts/oura"
+        count: 12
+    GalleryMoveResult:
+      type: object
+      properties:
+        moved:
+          type: integer
+          description: Number of images whose folder changed
+      required: [moved]
+      example:
+        moved: 7
     FileAttachment:
       type: object
       properties:
@@ -7920,6 +8081,12 @@ components:
           type: string
           format: uuid
           description: ID of the chat message this attachment belongs to (optional)
+        folder:
+          type: string
+          description: >-
+            Gallery folder the image is filed in, a lower-case path such as `charts/oura`.
+            Omitted for files at the top level. It is a label only: moving an image changes
+            this field, not where the file is stored.
         personalities:
           type: array
           description: Personalities associated with this attachment via direct ownership and expression image links.
@@ -9287,6 +9454,10 @@ tags:
     description: Remote MCP server configuration and chat associations (premium plan required)
   - name: File Attachments
     description: File upload and attachment management for chats
+  - name: Image Gallery
+    description: >-
+      Organizing gallery images into folders. A folder exists while it holds an image;
+      paths are lower-case, `/` nests, and `""` is the top level.
   - name: Memory Management
     description: User memory storage and retrieval operations
   - name: Personality Management

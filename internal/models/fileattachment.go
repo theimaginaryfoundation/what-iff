@@ -38,7 +38,9 @@ type FileAttachment struct {
 	FileContent string `json:"-"`
 	// S3Key is the canonical object key for the full-resolution file. Set at
 	// upload time so that renaming the display Name never breaks retrieval.
-	S3Key         string     `json:"s3_key,omitempty"`
+	S3Key string `json:"s3_key,omitempty"`
+	// Folder is the gallery folder path ("" = top level). See NormalizeFolder.
+	Folder        string     `json:"folder,omitempty"`
 	ChatMessageID *uuid.UUID `json:"chat_message_id,omitempty"`
 	// ChatID is populated when the attachment is fetched with the chat edge
 	// loaded (GetFileAttachment). Used by the gallery to fall back to
@@ -75,9 +77,14 @@ type FileAttachmentFilters struct {
 	// PersonalityExpression. Use DocsOnly=true when you only want to count or
 	// manage user-uploaded documents and must not penalise expression images
 	// against upload-slot limits.
-	DocsOnly *bool      `json:"docs_only,omitempty"`
-	MinDate  *time.Time `json:"min_date,omitempty"`
-	MaxDate  *time.Time `json:"max_date,omitempty"`
+	DocsOnly *bool `json:"docs_only,omitempty"`
+	// Folder matches files directly in that folder (a normalized path; "" is the top level).
+	Folder *string `json:"folder,omitempty"`
+	// FolderPrefix matches that folder and everything beneath it ("charts" matches "charts" and
+	// "charts/oura", not "charts-old"). A normalized path; "" matches everything.
+	FolderPrefix *string    `json:"folder_prefix,omitempty"`
+	MinDate      *time.Time `json:"min_date,omitempty"`
+	MaxDate      *time.Time `json:"max_date,omitempty"`
 	// ExcludeReferenceCopies drops lightweight reference rows (see
 	// CreateFileAttachmentReference) that share a non-empty s3_key with an older
 	// row owned by the same user, so each stored object is listed once, via its

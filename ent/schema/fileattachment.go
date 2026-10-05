@@ -39,6 +39,10 @@ func (FileAttachment) Fields() []ent.Field {
 		field.String("s3_key").
 			Optional().
 			Comment("Canonical S3 object key for the full-resolution file; set at upload time to decouple display name from storage path."),
+		field.String("folder").
+			Default("").
+			MaxLen(255).
+			Comment("Gallery folder path, e.g. \"charts/oura\"; \"\" is the top level. A label only: the S3 key is unaffected by moves."),
 		field.Time("created_at").
 			Immutable().
 			Default(time.Now),
@@ -73,5 +77,7 @@ func (FileAttachment) Indexes() []ent.Index {
 		// Backs the gallery's reference-copy exclusion, a correlated
 		// (owner, s3_key) lookup per listed row.
 		index.Fields("s3_key").Edges("owner"),
+		// Backs gallery folder navigation and the agent's folder-prefix listing.
+		index.Fields("folder").Edges("owner"),
 	}
 }

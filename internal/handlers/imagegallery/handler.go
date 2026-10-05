@@ -30,6 +30,10 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	gallery := router.PathPrefix("/image-gallery").Subrouter()
 	gallery.HandleFunc("", h.ListImages).Methods("GET")
 	gallery.HandleFunc("/import", h.ImportImage).Methods("POST")
+	// Registered before /{id}, which would otherwise take "folders" for an image id.
+	gallery.HandleFunc("/folders", h.ListFolders).Methods("GET")
+	gallery.HandleFunc("/folders/move", h.MoveFolder).Methods("POST")
+	gallery.HandleFunc("/move", h.MoveImages).Methods("POST")
 	gallery.HandleFunc("/{id}", h.GetImageContent).Methods("GET")
 	gallery.HandleFunc("/{id}", h.DeleteImage).Methods("DELETE")
 	gallery.HandleFunc("/{id}", h.RenameImage).Methods("PATCH")
