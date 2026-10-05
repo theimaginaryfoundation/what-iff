@@ -92,6 +92,10 @@ func (User) Edges() []ent.Edge {
 			Annotations(entsql.OnDelete(entsql.Cascade)),
 		edge.To("webhook_tokens", WebhookToken.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),
+		edge.To("workspace_files", WorkspaceFile.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
+		edge.To("entities", Entity.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 		edge.To("system_ritual_bindings", SystemRitualBinding.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),
 		edge.To("personality_gen_flows", PersonalityGenFlow.Type).
