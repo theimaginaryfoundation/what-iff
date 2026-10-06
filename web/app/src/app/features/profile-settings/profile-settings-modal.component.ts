@@ -65,8 +65,11 @@ export class ProfileSettingsModalComponent {
   readonly models = signal<readonly Model[]>([]);
   readonly personalities = signal<readonly Personality[]>([]);
   readonly themeMode = signal<ThemeMode>('system');
-  /** IANA names offered as suggestions in the Timezone field. */
-  readonly timezones = listTimezones();
+  /**
+   * IANA names offered in the Timezone select. A saved value the browser doesn't list is added on
+   * load so the select can still show it.
+   */
+  readonly timezones = signal<readonly string[]>(listTimezones());
   /**
    * True while the Timezone field shows the browser-detected zone because none is
    * saved yet. Nothing is persisted until the user clicks Save Changes.
@@ -218,11 +221,15 @@ export class ProfileSettingsModalComponent {
       this.personalities.set(personalities);
       // With no saved timezone, suggest the browser's; it is only stored on an explicit save.
       const suggestedTimezone = user.timezone ? '' : detectBrowserTimezone();
+      const shownTimezone = user.timezone || suggestedTimezone;
+      if (shownTimezone && !this.timezones().includes(shownTimezone)) {
+        this.timezones.update((list) => [...list, shownTimezone].sort());
+      }
       this.profileForm.patchValue({
         email: user.email || '',
         first_name: user.first_name || '',
         last_name: user.last_name || '',
-        timezone: user.timezone || suggestedTimezone,
+        timezone: shownTimezone,
       });
       this.timezoneSuggested.set(Boolean(suggestedTimezone));
       this.themeMode.set(this.themeService.mode());

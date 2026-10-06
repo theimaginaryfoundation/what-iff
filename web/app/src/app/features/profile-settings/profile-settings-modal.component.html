@@ -65,19 +65,15 @@
           </label>
           <label class="profile-settings__field">
             <span>Timezone</span>
-            <input
-              type="text"
+            <select
               formControlName="timezone"
-              list="profile-settings-timezones"
-              autocomplete="off"
-              placeholder="e.g. America/New_York"
               aria-describedby="profile-settings-timezone-help"
-              (input)="timezoneSuggested.set(false)" />
-            <datalist id="profile-settings-timezones">
-              @for (tz of timezones; track tz) {
-                <option [value]="tz"></option>
+              (change)="timezoneSuggested.set(false)">
+              <option value="">Select a timezone</option>
+              @for (tz of timezones(); track tz) {
+                <option [value]="tz">{{ tz }}</option>
               }
-            </datalist>
+            </select>
             <small id="profile-settings-timezone-help">
               @if (timezoneSuggested()) {
                 Detected from your browser and not saved yet. Click Save Changes to keep it.

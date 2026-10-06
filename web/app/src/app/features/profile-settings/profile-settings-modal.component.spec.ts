@@ -217,7 +217,7 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
 
   describe('timezone', () => {
     const timezoneInput = (fixture: ReturnType<typeof TestBed.createComponent<ProfileSettingsModalComponent>>) =>
-      fixture.nativeElement.querySelector('input[formControlName="timezone"]') as HTMLInputElement;
+      fixture.nativeElement.querySelector('select[formControlName="timezone"]') as HTMLSelectElement;
 
     const mockBrowserTimezone = (timeZone: string): void => {
       vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({ timeZone } as unknown as Intl.ResolvedDateTimeFormatOptions);
@@ -235,6 +235,19 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
       expect(timezoneInput(fixture).value).toBe('America/Chicago');
       expect(fixture.componentInstance.timezoneSuggested()).toBe(false);
       expect(fixture.nativeElement.textContent).not.toContain('Detected from your browser');
+    });
+
+    it('offers every zone in a select and keeps a saved zone the browser does not list', async () => {
+      user['timezone'] = 'Legacy/Zone';
+      const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+      await openAndWaitForProfile(fixture);
+
+      const select = timezoneInput(fixture);
+      const values = Array.from(select.options).map((option) => option.value);
+      expect(values).toContain('America/New_York');
+      expect(values).toContain('UTC');
+      expect(values).toContain('Legacy/Zone');
+      expect(select.value).toBe('Legacy/Zone');
     });
 
     it('suggests the browser timezone when none is saved, without persisting it', async () => {
