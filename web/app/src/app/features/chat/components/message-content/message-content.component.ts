@@ -30,7 +30,7 @@ import { MessageImageAttachmentsComponent } from './message-image-attachments.co
     }
 
     @if (imageAttachments().length) {
-      <app-message-image-attachments [attachments]="imageAttachments()" />
+      <app-message-image-attachments [attachments]="imageAttachments()" [size]="imageSize()" />
     }
 
     @if (nonImageAttachments().length) {
@@ -96,6 +96,8 @@ export class MessageContentComponent {
   readonly content = input('');
   readonly attachments = input<readonly FileAttachment[]>([]);
   readonly preserveLineBreaks = input(false);
+  /** Variant used for image attachments; user turns pass 'full' so the picture isn't an upscaled thumbnail. */
+  readonly imageSize = input<'thumbnail' | 'full'>('thumbnail');
   readonly images = computed(() => extractImages(this.content()));
   readonly imageAttachments = computed(() => this.attachments().filter(isImageAttachment));
   readonly nonImageAttachments = computed(() => this.attachments().filter(attachment => !isImageAttachment(attachment)));

@@ -52,6 +52,7 @@ import {
   emojiCharFromData,
   searchEmojiShortcodes,
 } from '../../helpers/emoji-shortcode.helpers';
+import { AttachmentPreviewComponent } from './attachment-preview.component';
 import { ModelPickerComponent } from '../model-picker/model-picker.component';
 import { ThreadPickerPopoverComponent } from '../thread-picker-popover/thread-picker-popover.component';
 import { ThreadRefChipsComponent } from '../thread-ref-chips/thread-ref-chips.component';
@@ -83,6 +84,8 @@ const COMPOSER_MOBILE_BREAKPOINT = 767;
 const COMPOSER_EXPANDED_VIEWPORT_RATIO = 0.75;
 const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
 
+let nextPreviewId = 0;
+
 @Component({
   selector: 'app-chat-composer',
   standalone: true,
@@ -95,6 +98,7 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
     ModelPickerComponent,
     ThreadPickerPopoverComponent,
     ThreadRefChipsComponent,
+    AttachmentPreviewComponent,
     EmojiAutocompleteMenuComponent,
     SlashMenuComponent,
     BoltIconComponent,
@@ -171,13 +175,28 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
         <div class="composer__attachments" aria-label="Pending attachments">
           @for (attachment of attachments(); track pendingAttachmentKey(attachment)) {
             @let notSeen = selectedModelLacksVision() && isPendingImageAttachment(attachment);
+            @let previewable = isPendingImageAttachment(attachment);
+            @let chipKey = pendingAttachmentKey(attachment);
+            @let chipName = attachment.attachment?.name ?? attachment.file?.name ?? 'image';
             <span
+              #chip
               class="composer__attachment"
               [class.composer__attachment--error]="attachment.uploadError"
               [class.composer__attachment--no-vision]="notSeen"
+              [class.composer__attachment--previewable]="previewable"
               [uiTooltip]="notSeen ? noVisionTooltip : ''"
+              placement="bottom"
               [disabledOnTouch]="false"
-              [attr.tabindex]="notSeen ? 0 : null"
+              [attr.tabindex]="notSeen || previewable ? 0 : null"
+              [attr.role]="previewable ? 'group' : null"
+              [attr.aria-label]="previewable ? 'Image attachment ' + chipName : null"
+              [attr.aria-details]="previewable && previewKey() === chipKey ? previewDomId : null"
+              (pointerenter)="onChipPointerEnter($event, chipKey, previewable)"
+              (pointerleave)="onChipPointerLeave($event, chipKey)"
+              (focusin)="onChipFocusIn($event, chipKey, previewable)"
+              (focusout)="onChipFocusOut($event, chipKey)"
+              (click)="onChipClick($event, chipKey, previewable)"
+              (keydown)="onChipKeydown($event, chipKey, previewable)"
             >
               @if (notSeen) {
                 <ui-eye-off-icon class="composer__attachment-no-vision-icon" [size]="12" aria-hidden="true" />
@@ -197,6 +216,14 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
                 (click)="removeAttachment(pendingAttachmentKey(attachment))"
               >×</button>
             </span>
+            @if (previewable && previewKey() === chipKey) {
+              <app-attachment-preview
+                [item]="attachment"
+                [anchor]="chip"
+                [previewId]="previewDomId"
+                [name]="chipName"
+              />
+            }
           }
         </div>
       }
@@ -752,6 +779,15 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
       padding: 0.25rem 0.35rem 0.25rem 0.5rem;
     }
 
+    .composer__attachment--previewable {
+      cursor: default;
+    }
+
+    .composer__attachment--previewable:focus-visible {
+      outline: 2px solid var(--color-accent);
+      outline-offset: 2px;
+    }
+
     .composer__attachment-name {
       max-width: 14rem;
       overflow: hidden;
@@ -1298,6 +1334,13 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
 })
 export class ChatComposerComponent {
   readonly pendingAttachmentKey = pendingAttachmentKey;
+  /**
+   * DOM id of this composer's (single) open attachment preview, referenced by the chip's
+   * aria-details. Unique per composer instance so a second composer on the page can't collide.
+   */
+  readonly previewDomId = `composer-attachment-preview-${++nextPreviewId}`;
+  /** Key of the image chip whose preview is open (hover, keyboard focus, or tap), if any. */
+  readonly previewKey = signal<string | null>(null);
 
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly destroyRef = inject(DestroyRef);
@@ -2077,6 +2120,77 @@ export class ChatComposerComponent {
       if (allowed.length > 0) {
         this.filesSelected.emit(allowed);
       }
+    }
+  }
+
+  // Image chip preview. Opens on mouse hover, keyboard focus, or a tap (hover doesn't exist on
+  // touch); Escape, tapping elsewhere, or leaving the chip closes it.
+
+  onChipPointerEnter(event: PointerEvent, key: string, previewable: boolean): void {
+    if (previewable && event.pointerType === 'mouse') {
+      this.previewKey.set(key);
+    }
+  }
+
+  onChipPointerLeave(event: PointerEvent, key: string): void {
+    if (event.pointerType === 'mouse') {
+      this.closePreview(key);
+    }
+  }
+
+  onChipFocusIn(event: FocusEvent, key: string, previewable: boolean): void {
+    // Only keyboard focus opens it. A tap also focuses the chip, and the tap handler toggles it, so
+    // opening here too would make every tap open then immediately close the preview.
+    if (previewable && this.isKeyboardFocus(event.target)) {
+      this.previewKey.set(key);
+    }
+  }
+
+  onChipFocusOut(event: FocusEvent, key: string): void {
+    const chip = event.currentTarget as HTMLElement;
+    if (!chip.contains(event.relatedTarget as Node | null)) {
+      this.closePreview(key);
+    }
+  }
+
+  onChipClick(event: MouseEvent, key: string, previewable: boolean): void {
+    // A mouse already has hover. Taps (touch/pen) toggle; the remove button keeps its own click.
+    if (!previewable || (event as PointerEvent).pointerType === 'mouse') return;
+    if ((event.target as HTMLElement).closest('.composer__attachment-remove')) return;
+    this.previewKey.update(open => (open === key ? null : key));
+  }
+
+  onChipKeydown(event: KeyboardEvent, key: string, previewable: boolean): void {
+    // Enter/Space re-opens a preview that Escape dismissed while the chip still has focus.
+    if (!previewable || event.target !== event.currentTarget) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      this.previewKey.update(open => (open === key ? null : key));
+    }
+  }
+
+  @HostListener('document:keydown.escape')
+  @HostListener('window:resize')
+  dismissPreview(): void {
+    this.previewKey.set(null);
+  }
+
+  @HostListener('document:pointerdown', ['$event'])
+  onDocumentPointerDown(event: PointerEvent): void {
+    if (this.previewKey() && !(event.target as HTMLElement | null)?.closest?.('.composer__attachment--previewable')) {
+      this.previewKey.set(null);
+    }
+  }
+
+  private closePreview(key: string): void {
+    this.previewKey.update(open => (open === key ? null : open));
+  }
+
+  private isKeyboardFocus(target: EventTarget | null): boolean {
+    try {
+      return (target as HTMLElement).matches(':focus-visible');
+    } catch {
+      return true; // engines without :focus-visible: show it rather than hide the only access path
     }
   }
 
