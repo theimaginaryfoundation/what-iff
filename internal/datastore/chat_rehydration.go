@@ -176,3 +176,21 @@ func (d *Datastore) SetImportedThreadRehydrated(ctx context.Context, userID, cha
 	}
 	return nil
 }
+
+// GetChatPersonalityID returns the id of the personality assigned to a chat, or uuid.Nil when none
+// is assigned (cheap; no edges beyond the lookup). Imported-thread memory seeding reads it at
+// rehydration time to apply the personality's auto-pin rule. A chat that does not exist or is not
+// owned by the user also yields uuid.Nil: callers go on to write through ownership-checked methods.
+func (d *Datastore) GetChatPersonalityID(ctx context.Context, userID, chatID uuid.UUID) (uuid.UUID, error) {
+	id, err := d.dbClient.Chat.Query().
+		Where(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))).
+		QueryPersonality().
+		OnlyID(ctx)
+	if ent.IsNotFound(err) {
+		return uuid.Nil, nil
+	}
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return id, nil
+}
