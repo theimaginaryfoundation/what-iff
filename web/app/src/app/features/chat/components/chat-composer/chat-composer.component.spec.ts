@@ -316,7 +316,7 @@ describe('ChatComposerComponent', () => {
             const popover = preview()!;
             expect(popover).toBeTruthy();
             expect(popover.getAttribute('role')).toBe('tooltip');
-            expect(popover.id).toBe('composer-attachment-preview');
+            expect(popover.id).toMatch(/^composer-attachment-preview-\d+$/);
             expect(chip(0).getAttribute('aria-details')).toBe(popover.id);
             const img = popover.querySelector('img') as HTMLImageElement;
             expect(img.getAttribute('alt')).toBe('Preview of cat.png');

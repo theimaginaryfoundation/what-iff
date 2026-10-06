@@ -84,6 +84,8 @@ const COMPOSER_MOBILE_BREAKPOINT = 767;
 const COMPOSER_EXPANDED_VIEWPORT_RATIO = 0.75;
 const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
 
+let nextPreviewId = 0;
+
 @Component({
   selector: 'app-chat-composer',
   standalone: true,
@@ -1332,8 +1334,11 @@ const CHAT_LENGTH_HINT_THRESHOLD = 10_000;
 })
 export class ChatComposerComponent {
   readonly pendingAttachmentKey = pendingAttachmentKey;
-  /** DOM id of the (single) open attachment preview, referenced by the chip's aria-details. */
-  readonly previewDomId = 'composer-attachment-preview';
+  /**
+   * DOM id of this composer's (single) open attachment preview, referenced by the chip's
+   * aria-details. Unique per composer instance so a second composer on the page can't collide.
+   */
+  readonly previewDomId = `composer-attachment-preview-${++nextPreviewId}`;
   /** Key of the image chip whose preview is open (hover, keyboard focus, or tap), if any. */
   readonly previewKey = signal<string | null>(null);
 
