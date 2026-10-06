@@ -69,6 +69,30 @@
   </div>
 
   <div>
+    <span class="ritual-form__label" [id]="hintId('mcp-label')">Connectors (optional)</span>
+    @if (mcpServers().length > 0) {
+      <div class="ritual-form__checklist" role="group" [attr.aria-labelledby]="hintId('mcp-label')" [attr.aria-describedby]="hintId('mcp')">
+        @for (server of mcpServers(); track server.id) {
+          <label class="ritual-form__check">
+            <input
+              type="checkbox"
+              [checked]="isMcpSelected(server.id)"
+              [disabled]="isSystem()"
+              (change)="toggleMcp(server.id, $any($event.target).checked)" />
+            <span>{{ server.label }}</span>
+          </label>
+        }
+      </div>
+    } @else {
+      <p class="ritual-form__hint">No connectors to pick from yet. Add one on the Tools page.</p>
+    }
+    <p class="ritual-form__hint" [id]="hintId('mcp')">
+      Turned on for the turn when this skill is called, in addition to the connectors already enabled for the thread. You can
+      also link skills from a connector on the Tools page.
+    </p>
+  </div>
+
+  <div>
     <label class="ritual-form__label">
       Hotkey (optional)
       <app-hotkey-input

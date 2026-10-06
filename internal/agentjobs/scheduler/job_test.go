@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,5 +56,34 @@ func TestComputeNextRunAt_CronUTC(t *testing.T) {
 	}
 	if !next.After(after) {
 		t.Fatalf("expected next > after (%s), got %s", after.Format(time.RFC3339), next.Format(time.RFC3339))
+	}
+}
+
+func TestDeriveStatusAndErrorText_RecurringScheduleFailurePausesWithMarker(t *testing.T) {
+	bad := "not a cron"
+	job := models.AgentJob{
+		ScheduleType: models.AgentJobScheduleTypeCron,
+		Schedule:     &bad,
+		Timezone:     "UTC",
+		Status:       models.AgentJobStatusActive,
+	}
+	_, nextErr := computeNextRunAt(job, time.Now().UTC())
+	if nextErr == nil {
+		t.Fatal("expected an invalid cron schedule to fail computeNextRunAt")
+	}
+	scheduleErrText := ScheduleErrorMarker + " " + nextErr.Error()
+
+	status, errText := deriveStatusAndErrorText(&job, nil, scheduleErrText)
+	if status == nil || *status != models.AgentJobStatusPaused {
+		t.Fatalf("expected recurring job to be paused, got %v", status)
+	}
+	if !strings.HasPrefix(errText, ScheduleErrorMarker) || !strings.Contains(errText, nextErr.Error()) {
+		t.Fatalf("expected last_error to start with the marker and carry the reason, got %q", errText)
+	}
+
+	// A run error is kept ahead of the schedule error; the marker must stay findable.
+	_, errText = deriveStatusAndErrorText(&job, errors.New("agent blew up"), scheduleErrText)
+	if !strings.HasPrefix(errText, "agent blew up") || !strings.Contains(errText, ScheduleErrorMarker) {
+		t.Fatalf("expected run error followed by the marked schedule error, got %q", errText)
 	}
 }

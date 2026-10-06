@@ -53,6 +53,9 @@ func (a *Agent) getSubagentMCPFunctionToolSpecs(ctx context.Context, userID uuid
 // changes are effective on the next agent-loop iteration without waiting for a new turn.
 func (a *Agent) prepareTurnMCPToolSpecs(ctx context.Context, chatCtx *chatContext, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) []agenttools.FunctionToolSpec {
 	servers := a.getChatMCPServers(ctx, userID, chatID, ritualIDs)
+	if chatCtx != nil {
+		chatCtx.mcpRitualIDs = ritualIDs
+	}
 	loadedByServer := map[uuid.UUID][]string{}
 	if a.ds != nil {
 		loaded, err := a.ds.ListChatMCPLoadedTools(ctx, userID, chatID)
@@ -75,14 +78,40 @@ func (a *Agent) prepareTurnMCPToolSpecs(ctx context.Context, chatCtx *chatContex
 	return specs
 }
 
+// getChatMCPServers returns the connectors in scope for a turn, logging and returning nil when
+// the thread's own connectors cannot be read.
 func (a *Agent) getChatMCPServers(ctx context.Context, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) []*models.MCPServer {
-	servers, err := a.ds.ListChatMCPServers(ctx, userID, chatID)
+	servers, err := a.resolveChatMCPServers(ctx, userID, chatID, ritualIDs)
 	if err != nil {
 		a.logger.Warn("failed to load chat mcp servers for tool registration",
 			zap.String("user_id", userID.String()),
 			zap.String("chat_id", chatID.String()),
 			zap.Error(err))
 		return nil
+	}
+	return servers
+}
+
+// mcpServersInScope is the single answer to "which connectors may this turn use": the cache
+// prepareTurnMCPToolSpecs filled for the turn, or (cache miss) a fresh resolve over the same
+// thread-attached + active-skill sources. list(kind="mcp_servers"), load/unload_mcp_tools and
+// dispatchMCPToolUse all use it so a connector that is registered is also findable, loadable
+// and callable.
+func (a *Agent) mcpServersInScope(ctx context.Context, chatCtx *chatContext) ([]*models.MCPServer, error) {
+	if len(chatCtx.mcpServers) > 0 {
+		return chatCtx.mcpServers, nil
+	}
+	return a.resolveChatMCPServers(ctx, chatCtx.userID, chatCtx.chat.ID, chatCtx.mcpRitualIDs)
+}
+
+// resolveChatMCPServers merges the thread-attached connectors with those linked to the given
+// skills/rituals (the active Mode's skill, a /skill call, or an agent job's skills). A failure
+// to read the skills' connectors is logged and skipped; a failure to read the thread's own is
+// returned.
+func (a *Agent) resolveChatMCPServers(ctx context.Context, userID, chatID uuid.UUID, ritualIDs []uuid.UUID) ([]*models.MCPServer, error) {
+	servers, err := a.ds.ListChatMCPServers(ctx, userID, chatID)
+	if err != nil {
+		return nil, err
 	}
 	if len(ritualIDs) > 0 {
 		ritualServers, err := a.ds.ListRitualMCPServers(ctx, userID, ritualIDs)
@@ -112,7 +141,7 @@ func (a *Agent) getChatMCPServers(ctx context.Context, userID, chatID uuid.UUID,
 		}
 	}
 
-	return servers
+	return servers, nil
 }
 
 func (a *Agent) discoverMCPFunctionToolSpecs(ctx context.Context, userID uuid.UUID, servers []*models.MCPServer, sessions mcpclient.SessionState) []agenttools.FunctionToolSpec {

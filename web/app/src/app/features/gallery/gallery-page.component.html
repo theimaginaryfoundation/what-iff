@@ -82,13 +82,6 @@
           [class.gallery-page__segmented-button--active]="sort() === 'created'"
           (click)="setSort('created')"
         >Created {{ sort() === 'created' ? (sortDescending() ? '▼' : '▲') : '' }}</button>
-        <button
-          type="button"
-          [uiTooltip]="sortTooltip('last_used')"
-          [attr.aria-pressed]="sort() === 'last_used'"
-          [class.gallery-page__segmented-button--active]="sort() === 'last_used'"
-          (click)="setSort('last_used')"
-        >Last used {{ sort() === 'last_used' ? (sortDescending() ? '▼' : '▲') : '' }}</button>
       </div>
 
       <span class="gallery-page__results-summary" role="status">{{ tiles().length }} of {{ sourceCounts().all }} shown</span>
