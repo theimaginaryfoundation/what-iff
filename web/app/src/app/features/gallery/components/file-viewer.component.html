@@ -98,9 +98,9 @@
         <span class="file-viewer__notice" role="status">Showing the first 1 MB. Download the file to see all of it.</span>
       } @else if (kind() === 'markdown' && markdownTooBig()) {
         <span class="file-viewer__notice" role="status">Too long to format, so it is shown as raw text.</span>
-      } @else if (showRendered() && (csv()?.truncatedRows ?? 0) > 0) {
+      } @else if (showRendered() && csv()?.truncated) {
         <span class="file-viewer__notice" role="status">
-          Showing the first {{ csv()!.rows.length }} rows; {{ csv()!.truncatedRows }} more are in the raw view or the download.
+          Showing the first {{ csv()!.rows.length }} rows; the rest are in the raw view and the download.
         </span>
       }
     </div>

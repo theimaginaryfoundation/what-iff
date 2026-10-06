@@ -113,6 +113,7 @@ export function decodeTextPreview(bytes: Uint8Array, maxBytes = MAX_TEXT_PREVIEW
   const sample = text.slice(0, 8192);
   let replacements = 0;
   for (const ch of sample) {
+    // By design a NUL byte means binary: the text the viewer shows (UTF-8 text, code, CSV) never has one.
     if (ch === '\u0000') return { text: '', truncated, binary: true };
     if (ch === '�') replacements += 1;
   }
@@ -124,31 +125,32 @@ export function decodeTextPreview(bytes: Uint8Array, maxBytes = MAX_TEXT_PREVIEW
 export interface CsvTable {
   header: string[];
   rows: string[][];
-  /** Rows dropped past MAX_CSV_TABLE_ROWS. */
-  truncatedRows: number;
+  /** There were more rows than MAX_CSV_TABLE_ROWS; parsing stopped at the cap. */
+  truncated: boolean;
 }
 
 /**
  * Parses CSV/TSV text (RFC 4180: quoted fields, doubled quotes, line breaks inside quotes, CRLF or
  * LF). The first row is the header. Ragged rows are padded to the widest row so the table lines up.
+ * Parsing stops at the first row past the cap: the table never shows more, and the raw view has the rest.
  */
 export function parseCsv(text: string, delimiter: ',' | '\t' = ',', maxRows = MAX_CSV_TABLE_ROWS): CsvTable {
   const records: string[][] = [];
   let record: string[] = [];
   let field = '';
   let quoted = false;
-  let dropped = 0;
+  let truncated = false;
   const pushRecord = () => {
     record.push(field);
     field = '';
     // A blank line is not a row.
     if (!(record.length === 1 && record[0] === '')) {
       if (records.length <= maxRows) records.push(record);
-      else dropped += 1;
+      else truncated = true;
     }
     record = [];
   };
-  for (let i = 0; i < text.length; i += 1) {
+  for (let i = 0; i < text.length && !truncated; i += 1) {
     const ch = text[i];
     if (quoted) {
       if (ch === '"') {
@@ -173,10 +175,10 @@ export function parseCsv(text: string, delimiter: ',' | '\t' = ',', maxRows = MA
       field += ch;
     }
   }
-  if (field !== '' || record.length > 0) pushRecord();
+  if (!truncated && (field !== '' || record.length > 0)) pushRecord();
 
   const [header = [], ...rows] = records;
   const width = records.reduce((max, row) => Math.max(max, row.length), 0);
   const pad = (row: string[]) => (row.length < width ? [...row, ...Array<string>(width - row.length).fill('')] : row);
-  return { header: pad(header), rows: rows.map(pad), truncatedRows: dropped };
+  return { header: pad(header), rows: rows.map(pad), truncated };
 }

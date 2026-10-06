@@ -96,7 +96,7 @@ describe('file-preview.helpers', () => {
       expect(parseCsv('name,age\nAda,36\nAlan,41\n')).toEqual({
         header: ['name', 'age'],
         rows: [['Ada', '36'], ['Alan', '41']],
-        truncatedRows: 0,
+        truncated: false,
       });
     });
 
@@ -115,10 +115,11 @@ describe('file-preview.helpers', () => {
       expect(parseCsv('a\tb\n1,5\t2', '\t').rows).toEqual([['1,5', '2']]);
     });
 
-    it('stops after the row cap and counts what it dropped', () => {
+    it('stops parsing after the row cap and says it did', () => {
       const table = parseCsv('h\n1\n2\n3\n4', ',', 2);
       expect(table.rows).toEqual([['1'], ['2']]);
-      expect(table.truncatedRows).toBe(2);
+      expect(table.truncated).toBe(true);
+      expect(parseCsv('h\n1\n2', ',', 2).truncated).toBe(false);
     });
   });
 });

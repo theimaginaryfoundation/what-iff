@@ -14,7 +14,7 @@ import {
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
 import { MarkdownModule } from 'ngx-markdown';
-import { Observable, of } from 'rxjs';
+import { Observable, of, take } from 'rxjs';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { ConfirmationService } from '../../../core/services/confirmation.service';
@@ -168,7 +168,7 @@ export class FileViewerComponent {
     const file = this.file();
     this.downloading.set(true);
     const blob$: Observable<Blob> = this.blob ? of(this.blob) : this.files.downloadFileAttachment(file.id);
-    blob$.subscribe({
+    blob$.pipe(take(1)).subscribe({
       next: blob => {
         this.downloading.set(false);
         saveBlobAsFile(blob, file.name || `file-${file.id}`);
