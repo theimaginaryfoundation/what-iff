@@ -31,6 +31,7 @@ type fakeFolderStore struct {
 	moveCount   int
 	moveErr     error
 	listFilters int
+	folderKind  models.GalleryKind
 }
 
 func (f *fakeFolderStore) ListFileAttachments(_ context.Context, _ uuid.UUID, _, _ int, filters models.FileAttachmentFilters) (*models.PaginatedResponse, error) {
@@ -39,7 +40,8 @@ func (f *fakeFolderStore) ListFileAttachments(_ context.Context, _ uuid.UUID, _,
 	return &models.PaginatedResponse{Results: []any{}, Page: 1}, nil
 }
 
-func (f *fakeFolderStore) ListImageFolders(context.Context, uuid.UUID) ([]models.FolderCount, error) {
+func (f *fakeFolderStore) ListGalleryFolders(_ context.Context, _ uuid.UUID, kind models.GalleryKind) ([]models.FolderCount, error) {
+	f.folderKind = kind
 	return f.folders, nil
 }
 
@@ -48,7 +50,7 @@ func (f *fakeFolderStore) MoveFileAttachmentsToFolder(_ context.Context, _ uuid.
 	return len(ids), f.moveErr
 }
 
-func (f *fakeFolderStore) MoveImageFolder(_ context.Context, _ uuid.UUID, from, to string) (int, error) {
+func (f *fakeFolderStore) MoveGalleryFolder(_ context.Context, _ uuid.UUID, from, to string) (int, error) {
 	f.moveFrom, f.moveTo = from, to
 	return f.moveCount, f.moveErr
 }

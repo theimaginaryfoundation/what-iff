@@ -25,8 +25,10 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   - Files: `fileattachment.go`, `fileattachment_folders.go`, `filechunk.go` (chunk storage + search).
     **Gallery folders** are a normalized path string on `file_attachments.folder` (a label; the `s3_key` never changes), indexed with the owner.
     `FileAttachmentFilters.Folder` matches one folder exactly and `FolderPrefix` matches a folder and everything beneath it (the trailing `/` keeps `charts` from matching `charts-old`).
-    `fileattachment_folders.go` holds `ListImageFolders` (images directly in each folder), `MoveFileAttachmentsToFolder` and `MoveImageFolder` (a rename that carries every folder beneath it).
-    Those act only on the owner's gallery images, so reference copies are excluded, and an id naming a copy moves the original it shares an object with.
+    `fileattachment_folders.go` holds `ListGalleryFolders` (files of one `models.GalleryKind` directly in each folder), `MoveFileAttachmentsToFolder` and `MoveGalleryFolder` (a rename that carries every folder beneath it).
+    Images and every other file (chat uploads, code-interpreter output, personality documents) share one folder tree; moves act on any kind.
+    Those act only on the owner's gallery files, so reference copies are excluded, and an id naming a copy moves the original it shares an object with.
+    `FileAttachmentFilters.Kind` narrows a list to images (`image/*`) or to every other file; empty or `all` does not narrow.
     `toFileAttachmentModel` derives **`Source`** (`generated`/`imported`, empty when the chat-message edge was not loaded): linked message origin decides (Assistant ⇒ generated, User ⇒ imported); unlinked rows are generated only for the pipelines' fixed names (`expression-*.png`, `personality-portrait.png`).
     `fileattachment_objects.go` backs object-store cleanup: `List{Chat,Personality,User}FileAttachmentObjectRefs` read the rows a cascade is about to delete, `ReferencedFileAttachmentKeys` reports which keys any remaining row (of any owner) still uses, and `FileAttachmentProviderFileShared` guards the provider file reference copies share.
     **`FileAttachmentFilters.ExcludeReferenceCopies`** (image gallery) drops `CreateFileAttachmentReference` clones in SQL — keeps the earliest row per `(owner, s3_key)`, backed by an `(s3_key, owner)` index — so counts/pagination and classification follow the original row.

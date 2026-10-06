@@ -15,9 +15,10 @@ import (
 	"go.uber.org/zap"
 )
 
-// ListImages returns a paginated list of image attachments for the authenticated user.
-// file_content is deliberately excluded from the list response; clients fetch bytes
-// via GetImageContent.
+// ListImages returns a paginated list of the authenticated user's gallery files. kind picks images
+// (the default), every other file ("files") or both ("all"). file_content is deliberately excluded
+// from the list response; clients fetch image bytes via GetImageContent and other files' bytes via
+// GET /file-attachment/{id}.
 func (h *Handler) ListImages(w http.ResponseWriter, r *http.Request) {
 	userID, ok := middleware.GetUserIDFromContext(r.Context())
 	if !ok {
@@ -28,12 +29,16 @@ func (h *Handler) ListImages(w http.ResponseWriter, r *http.Request) {
 	page := handlerutils.ParseIntParam(r.URL.Query().Get("page"), 1)
 	limit := handlerutils.ParseIntParam(r.URL.Query().Get("limit"), 20)
 
-	imageType := models.ImageMIMEPrefix
+	kind, err := models.ParseGalleryKind(r.URL.Query().Get("kind"))
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), err)
+		return
+	}
 	// Reference copies (one per chat reuse of a gallery image) are excluded in SQL
 	// so each stored image is listed once via its original row. Listing the copy
 	// instead made an image's Generated/Imported class flip after reuse, and
 	// per-page dedupe below cannot see duplicates split across pages.
-	filters := models.FileAttachmentFilters{FileType: &imageType, ExcludeReferenceCopies: true}
+	filters := models.FileAttachmentFilters{Kind: kind, ExcludeReferenceCopies: true}
 
 	// Optional filename search. Trimmed to avoid whitespace-only filters silently
 	// returning the full library. Used both by the gallery view's search box and by
@@ -119,6 +124,33 @@ func dedupeGalleryImages(rows []any) []any {
 		out = append(out, row)
 	}
 	return out
+}
+
+// GetFileInfo returns one gallery file's metadata (any kind), the same shape the list returns, so
+// a link to a file opens its viewer even when the file is not on a page the client has loaded.
+func (h *Handler) GetFileInfo(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		handlerutils.RespondWithError(w, h.logger, http.StatusUnauthorized, handlerutils.CodeNotSet, "Unauthorized", nil)
+		return
+	}
+
+	id, err := uuid.Parse(mux.Vars(r)["id"])
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid file ID", err)
+		return
+	}
+
+	attachment, err := h.ds.GetFileAttachment(r.Context(), userID, id)
+	if err != nil {
+		if errors.Is(err, datastore.ErrFileAttachmentNotFound) {
+			handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "File not found", nil)
+		} else {
+			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to fetch file", err)
+		}
+		return
+	}
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, attachment)
 }
 
 // GetImageContent proxies image bytes for a single attachment. Query param:

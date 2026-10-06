@@ -68,8 +68,7 @@ func TestListImages_ForwardsNameFilter(t *testing.T) {
 				require.Nil(t, fake.gotFilters.Name)
 			}
 
-			require.NotNil(t, fake.gotFilters.FileType)
-			require.Equal(t, models.ImageMIMEPrefix, *fake.gotFilters.FileType)
+			require.Equal(t, models.GalleryKindImages, fake.gotFilters.Kind, "no kind lists images, as before")
 		})
 	}
 }
