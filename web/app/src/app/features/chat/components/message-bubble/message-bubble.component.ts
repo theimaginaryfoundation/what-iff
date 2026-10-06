@@ -67,7 +67,7 @@ import { MessageContentComponent } from '../message-content/message-content.comp
             [content]="bodyContent()"
             [attachments]="message().attachments ?? []"
             [preserveLineBreaks]="message().origin === 'User'"
-            [imageSize]="message().origin === 'User' ? 'full' : 'thumbnail'"
+            imageSize="full"
           />
         }
       </div>

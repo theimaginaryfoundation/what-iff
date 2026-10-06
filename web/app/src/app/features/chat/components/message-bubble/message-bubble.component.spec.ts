@@ -89,14 +89,15 @@ describe('MessageBubbleComponent', () => {
             httpMock.verify();
         });
 
-        it('keeps thumbnails for assistant messages', () => {
+        it('loads the full-resolution image in assistant turns too, not the 256px thumbnail', () => {
             const httpMock = TestBed.inject(HttpTestingController);
             fixture.componentRef.setInput('message', { ...message('Assistant'), attachments });
             fixture.detectChanges();
 
-            httpMock.expectOne(req => req.urlWithParams.includes('/image-gallery/img-1?size=thumbnail'))
+            httpMock.expectNone(req => req.urlWithParams.includes('/image-gallery/img-1?size=thumbnail'));
+            httpMock.expectOne(req => req.urlWithParams.includes('/image-gallery/img-1?size=full'))
                 .flush(new Blob(['x'], { type: 'image/png' }));
-            expect(fixture.nativeElement.querySelector('.message-images--full')).toBeNull();
+            expect(fixture.nativeElement.querySelector('.message-images--full')).toBeTruthy();
             httpMock.verify();
         });
     });
