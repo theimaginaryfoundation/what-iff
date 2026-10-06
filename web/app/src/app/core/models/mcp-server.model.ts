@@ -87,3 +87,8 @@ export interface StartMCPServerOAuthResponse {
   authorization_url: string;
 }
 
+export interface MCPServerOAuthConfigResponse {
+  /** The redirect_uri this server sends to OAuth providers; differs per deployment. */
+  redirect_uri: string;
+}
+

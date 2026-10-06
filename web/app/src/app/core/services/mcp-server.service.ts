@@ -13,7 +13,8 @@ import {
   TestMCPServerConnectionRequest,
   TestMCPServerConnectionResponse,
   StartMCPServerOAuthRequest,
-  StartMCPServerOAuthResponse
+  StartMCPServerOAuthResponse,
+  MCPServerOAuthConfigResponse
 } from '../models/mcp-server.model';
 
 @Injectable({
@@ -54,6 +55,11 @@ export class MCPServerService {
 
   startOAuth(id: string, request?: StartMCPServerOAuthRequest): Observable<StartMCPServerOAuthResponse> {
     return this.http.post<StartMCPServerOAuthResponse>(`${this.apiUrl}/${id}/oauth/start`, request || {})
+      .pipe(catchError(this.handleError));
+  }
+
+  getOAuthConfig(): Observable<MCPServerOAuthConfigResponse> {
+    return this.http.get<MCPServerOAuthConfigResponse>(`${this.apiUrl}/oauth/config`)
       .pipe(catchError(this.handleError));
   }
 
