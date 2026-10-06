@@ -2,7 +2,7 @@ import type { MockedObject } from "vitest";
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient, withXhr } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { NEVER, Subject, of, throwError } from 'rxjs';
 
 import { PersonalityExpressionsManagerComponent } from './personality-expressions-manager.component';
@@ -136,6 +136,109 @@ describe('PersonalityExpressionsManagerComponent', () => {
     it('derives slot image URLs from the gallery image id', () => {
         const happy = component.slots().find(s => s.expressionKey === 'happy')!;
         expect(component.slotImageUrl(happy)).toBe('/api/image-gallery/img-1?size=thumbnail');
+    });
+
+    describe('larger image viewer', () => {
+        const FULL_URL = '/api/image-gallery/img-1?size=full';
+
+        function expandButton(): HTMLButtonElement | null {
+            return fixture.nativeElement.querySelector('button[aria-label="View happy larger"]');
+        }
+
+        function dialog(): HTMLElement | null {
+            return fixture.nativeElement.querySelector('[role="dialog"]');
+        }
+
+        beforeEach(() => {
+            if (!URL.createObjectURL) {
+                (URL as unknown as { createObjectURL: (b: Blob) => string }).createObjectURL = () => 'blob:full';
+            }
+        });
+
+        it('renders a native, keyboard-reachable expand button only for slots with an image', () => {
+            const btn = expandButton()!;
+            expect(btn).toBeTruthy();
+            // A real <button type="button"> is focusable and activates on Enter/Space without extra key handlers.
+            expect(btn.tagName).toBe('BUTTON');
+            expect(btn.type).toBe('button');
+            expect(btn.getAttribute('tabindex')).toBeNull();
+            expect(btn.getAttribute('aria-haspopup')).toBe('dialog');
+
+            fixture.componentRef.setInput('expressions', [makeExpression({ expression_key: 'empty', image_id: null })]);
+            fixture.detectChanges();
+            expect(fixture.nativeElement.querySelector('button[aria-label="View empty larger"]')).toBeNull();
+        });
+
+        it('opens a labelled dialog with the full-size image and expression alt text', () => {
+            expect(dialog()).toBeNull();
+            expandButton()!.click();
+            fixture.detectChanges();
+
+            const dlg = dialog()!;
+            expect(dlg).toBeTruthy();
+            expect(dlg.getAttribute('aria-modal')).toBe('true');
+            expect(document.getElementById(dlg.getAttribute('aria-labelledby')!)?.textContent).toContain('happy');
+
+            const http = TestBed.inject(HttpTestingController);
+            http.expectOne(r => r.url.endsWith(FULL_URL)).flush(new Blob(['x']));
+            fixture.detectChanges();
+
+            const img = dlg.querySelector('img.expression-viewer__image') as HTMLImageElement;
+            expect(img).toBeTruthy();
+            expect(img.getAttribute('alt')).toBe('Happy');
+        });
+
+        it('falls back to the expression key for alt text when there is no label', () => {
+            fixture.componentRef.setInput('expressions', [makeExpression({ expression_key: 'calm', image_id: 'img-2' })]);
+            fixture.detectChanges();
+            (fixture.nativeElement.querySelector('button[aria-label="View calm larger"]') as HTMLButtonElement).click();
+            fixture.detectChanges();
+            TestBed.inject(HttpTestingController).expectOne(r => r.url.endsWith('/api/image-gallery/img-2?size=full')).flush(new Blob(['x']));
+            fixture.detectChanges();
+            expect(dialog()!.querySelector('img')!.getAttribute('alt')).toBe('calm');
+        });
+
+        it('closes with the Escape key and restores focus to the expand button', () => {
+            const btn = expandButton()!;
+            btn.focus();
+            btn.click();
+            fixture.detectChanges();
+            expect(component.viewer()?.key).toBe('happy');
+
+            const backdrop = fixture.nativeElement.querySelector('.ui-modal') as HTMLElement;
+            backdrop.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            fixture.detectChanges();
+
+            expect(component.viewer()).toBeNull();
+            expect(dialog()).toBeNull();
+            expect(document.activeElement).toBe(btn);
+        });
+
+        it('closes with the visible close button', () => {
+            expandButton()!.click();
+            fixture.detectChanges();
+            (dialog()!.querySelector('button[aria-label="Close"]') as HTMLButtonElement).click();
+            fixture.detectChanges();
+            expect(dialog()).toBeNull();
+        });
+
+        it('closes on backdrop click', () => {
+            expandButton()!.click();
+            fixture.detectChanges();
+            (fixture.nativeElement.querySelector('.ui-modal') as HTMLElement).click();
+            fixture.detectChanges();
+            expect(dialog()).toBeNull();
+        });
+
+        it('closes itself if the expression loses its image while open', () => {
+            expandButton()!.click();
+            fixture.detectChanges();
+            expect(component.viewer()).not.toBeNull();
+            fixture.componentRef.setInput('expressions', [makeExpression({ expression_key: 'happy', image_id: null })]);
+            fixture.detectChanges();
+            expect(component.viewer()).toBeNull();
+            expect(dialog()).toBeNull();
+        });
     });
 
     it('opens the Generate modal from the Generate button', () => {

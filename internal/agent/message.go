@@ -843,8 +843,12 @@ type chatContext struct {
 	// memoryProgress is the memory-load row already shown in that timeline; the tool recorder
 	// starts from it so its snapshots keep the row. Nil when retrieval showed nothing.
 	memoryProgress *memoryLoadProgress
-	// mcpServers caches chat/ritual connectors for this turn's dynamic mcp__ tool dispatch.
+	// mcpServers caches the connectors in scope for this turn (thread-attached plus the active
+	// skills' connectors) for the list/load/unload tools and dynamic mcp__ tool dispatch.
 	mcpServers []*models.MCPServer
+	// mcpRitualIDs are the skill/ritual IDs whose connectors are in scope this turn, so a late
+	// resolve (cache miss) reaches the same connectors prepareTurnMCPToolSpecs registered.
+	mcpRitualIDs []uuid.UUID
 	// loadedMCPTools tracks the per-connector set of loaded MCP full tool names for this chat.
 	loadedMCPTools map[uuid.UUID]map[string]struct{}
 	// mcpSessions stores MCP session ids for this single conversation turn.
