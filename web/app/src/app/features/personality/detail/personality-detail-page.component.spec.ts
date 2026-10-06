@@ -73,7 +73,7 @@ describe('PersonalityDetailPageComponent', () => {
         chatService.createChat.mockReturnValue(of({
             id: 'chat-1',
             user_id: 'u-1',
-            name: 'New Chat',
+            name: 'New thread',
             personality_id: 'p-1',
             created_at: '',
             updated_at: '',
@@ -154,7 +154,7 @@ describe('PersonalityDetailPageComponent', () => {
         await fixture.componentInstance.onUseInNewChat();
 
         expect(chatService.createChat).toHaveBeenCalledWith({
-            name: 'New Chat',
+            name: 'New thread',
             personality_id: 'p-1',
         });
         expect(chatService.setLastChatId).toHaveBeenCalledWith('chat-1');

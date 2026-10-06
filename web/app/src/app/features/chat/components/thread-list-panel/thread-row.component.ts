@@ -92,12 +92,19 @@ import { statusDescription, statusLabel, statusTone } from '../../../agent-job/h
               (dblclick)="editing.set(true)"
               [attr.aria-label]="'Open thread ' + thread().name + unreadAriaSuffix()"
             >
-              <!-- Full name on hover only when cut off; on the span so it doesn't stack with the badge tooltip. -->
+              <!-- Full name on hover only when cut off. -->
               <span class="thread-row__name" [uiTooltip]="thread().name" truncatedOnly>{{ thread().name }}</span>
-              @if (thread().unread_count && thread().unread_count! > 0) {
-                <span class="thread-row__badge" [uiTooltip]="unreadLabel()">{{ thread().unread_count }}</span>
-              }
             </button>
+            @if (thread().unread_count && thread().unread_count! > 0) {
+              <!-- A sibling of the open button (not nested in it) so it is focusable and clickable on its own. -->
+              <button
+                type="button"
+                class="thread-row__badge"
+                [uiTooltip]="unreadLabel()"
+                [attr.aria-label]="unreadLabel() + ', open thread'"
+                (click)="select.emit(thread().id)"
+              >{{ thread().unread_count }}</button>
+            }
             <button
               type="button"
               class="thread-row__context"
@@ -295,12 +302,21 @@ import { statusDescription, statusLabel, statusTone } from '../../../agent-job/h
 
     .thread-row__badge {
       background: var(--color-accent);
+      border: 0;
       border-radius: 999px;
       color: white;
+      cursor: pointer;
+      flex: 0 0 auto;
+      font: inherit;
       font-size: 0.75rem;
       min-width: 1.25rem;
       padding: 0 0.375rem;
       text-align: center;
+    }
+
+    .thread-row__badge:hover,
+    .thread-row__badge:focus-visible {
+      filter: brightness(0.92);
     }
 
     .thread-row__tags {

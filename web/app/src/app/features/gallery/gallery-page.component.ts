@@ -10,6 +10,7 @@ import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { PersonalityMediaJobService } from '../../core/services/personality-media-job.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
+import { DEFAULT_THREAD_NAME } from '../../core/models/chat.model';
 import { Personality, PersonalityExpression, buildPersonalityUpdateRequest } from '../../core/models/personality.model';
 import { environment } from '../../../environments/environment';
 import { GalleryFilters, toGalleryTileVm } from './helpers/gallery-vm.helpers';
@@ -325,7 +326,7 @@ export class GalleryPageComponent implements OnInit {
 
   onStartNewChat(imageId: string): void {
     this.onCloseDetail();
-    this.chatService.createChat({ name: 'New Chat' }).subscribe({
+    this.chatService.createChat({ name: DEFAULT_THREAD_NAME }).subscribe({
       next: chat => {
         void this.router.navigate(['/chat', chat.id], {
           queryParams: { galleryImageId: imageId },

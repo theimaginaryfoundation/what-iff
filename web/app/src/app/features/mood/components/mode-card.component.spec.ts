@@ -90,4 +90,17 @@ describe('ModeCardComponent', () => {
     expect(emittedMoodId).toBe('mode-1');
     expect(emittedPersonalityId).toBe('p2');
   });
+
+  it('shows a single add-personality affordance when no personalities are attached', () => {
+    const fixture = TestBed.createComponent(ModeCardComponent);
+    fixture.componentRef.setInput('card', { ...makeCard(), personalities: [] });
+    fixture.componentRef.setInput('isAssociationPickerOpen', false);
+    fixture.componentRef.setInput('associationPickerQuery', '');
+    fixture.componentRef.setInput('associationDropdownOpen', false);
+    fixture.componentRef.setInput('associationOptions', []);
+
+    fixture.detectChanges();
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text.match(/Add personality/g)).toHaveLength(1);
+  });
 });

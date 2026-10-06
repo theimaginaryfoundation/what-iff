@@ -139,11 +139,9 @@ export class ModeEditModalPage {
 
   /**
    * Associates a mode card (in the grid, not the edit modal) with a
-   * personality via its inline `app-mode-association-picker`. Scoped to the
-   * button role (its accessible name is actually "+ Add personality", the
-   * leading "+" glyph included) to avoid matching the `@empty`-state
-   * `<span>` placeholder, which shares the same "Add personality" text but
-   * isn't a button.
+   * personality via its inline `app-mode-association-picker`. The accessible
+   * name of the add button is actually "+ Add personality" (leading "+" glyph
+   * included); the substring match on "Add personality" covers it.
    */
   async addPersonality(modeName: string, personalityName: string): Promise<void> {
     // Same mobile off-canvas sidebar issue as openEdit() — see closeMobileSidebarIfOpen().
