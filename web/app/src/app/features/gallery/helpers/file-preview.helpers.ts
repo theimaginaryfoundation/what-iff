@@ -101,8 +101,10 @@ export interface DecodedText {
 }
 
 /**
- * Decodes the start of a file as UTF-8 for the viewer. A byte-order mark is dropped. Bytes that
- * are clearly not text are flagged rather than shown as a wall of replacement characters.
+ * Decodes the start of a file as UTF-8 for the viewer. The cap is in bytes and is applied to the
+ * bytes before decoding; a multi-byte character split by the cut decodes as one replacement
+ * character at the end. A byte-order mark is dropped. Bytes that are clearly not text are flagged
+ * rather than shown as a wall of replacement characters.
  */
 export function decodeTextPreview(bytes: Uint8Array, maxBytes = MAX_TEXT_PREVIEW_BYTES): DecodedText {
   const truncated = bytes.length > maxBytes;

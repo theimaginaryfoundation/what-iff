@@ -110,6 +110,7 @@ export class FileViewerComponent {
   readonly decoded = signal<DecodedText | null>(null);
   /** An object URL for a PDF or image being shown, revoked when the file changes. */
   readonly objectUrl = signal<string | null>(null);
+  /** Only ever an object URL this component made from the file's own bytes, never a URL from data. */
   readonly safeObjectUrl = computed<SafeResourceUrl | null>(() => {
     const url = this.objectUrl();
     return url ? this.sanitizer.bypassSecurityTrustResourceUrl(url) : null;
@@ -135,6 +136,8 @@ export class FileViewerComponent {
   private readonly contentKey = computed(() => `${this.file().id}|${this.kind()}`);
 
   constructor() {
+    // contentKey is the only dependency: the bytes are refetched when the file or its preview kind
+    // changes, not when its folder or name does. Everything else is read untracked.
     effect(onCleanup => {
       this.contentKey();
       const file = untracked(this.file);
@@ -159,6 +162,9 @@ export class FileViewerComponent {
   }
 
   download(): void {
+    if (this.downloading()) {
+      return;
+    }
     const file = this.file();
     this.downloading.set(true);
     const blob$: Observable<Blob> = this.blob ? of(this.blob) : this.files.downloadFileAttachment(file.id);

@@ -143,6 +143,21 @@ describe('FileViewerComponent', () => {
     expect(saved).toEqual(['notes.txt']);
   });
 
+  it('ignores a second download click while one is in flight', async () => {
+    const pending = new Subject<Blob>();
+    const saved = watchSaves();
+    await show(file({ name: 'bundle.zip', file_type: 'application/zip' }));
+    download.mockReturnValue(pending);
+
+    fixture.componentInstance.download();
+    fixture.componentInstance.download();
+    expect(download).toHaveBeenCalledTimes(1);
+
+    pending.next(new Blob(['PK']));
+    expect(saved).toEqual(['bundle.zip']);
+    expect(fixture.componentInstance.downloading()).toBe(false);
+  });
+
   it('says so when a "text" file is really binary', async () => {
     download.mockReturnValue(of(new Blob([new Uint8Array([0x00, 0x01, 0x02, 0x00])])));
     const el = await show(file({ name: 'data.json', file_type: 'application/json' }));
