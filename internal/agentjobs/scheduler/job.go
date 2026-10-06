@@ -70,7 +70,7 @@ func (m *Manager) resolveAgentJobChat(ctx context.Context, userID, agentJobID uu
 		return job.ChatID, job, nil
 	}
 
-	chatName := "[JOB]: New Chat"
+	chatName := "[JOB]: New thread"
 	if job.Title != nil && strings.TrimSpace(*job.Title) != "" {
 		chatName = "[JOB]: " + strings.TrimSpace(*job.Title)
 	}

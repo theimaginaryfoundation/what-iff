@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
@@ -181,15 +182,45 @@ func buildSubagentModelContext(systemPrompt, scratchpad, message string) *provid
 	return modelContext
 }
 
-func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelName string, modelContext *provider.ModelContext, ritualIDs []uuid.UUID) (*subagentCallResult, error) {
-	modelProvider := ""
+// subagentModelCapabilities is what the models table (falling back to the seed
+// catalog) says the subagent's target model can do. It is the same ToolSupport /
+// VisionSupport data a normal chat turn is gated on (chat.ToolsEnabled,
+// chatContext.modelVisionSupport), so a subagent never asks a model for more than
+// a chat with that model would.
+type subagentModelCapabilities struct {
+	Provider      string
+	ToolSupport   bool
+	VisionSupport bool
+}
+
+func (a *Agent) subagentModelCapabilities(ctx context.Context, modelName string) subagentModelCapabilities {
 	if a.ds != nil {
 		if m, err := a.ds.GetModelByName(ctx, modelName); err == nil && m != nil {
-			modelProvider = m.Provider
+			return subagentModelCapabilities{Provider: m.Provider, ToolSupport: m.ToolSupport, VisionSupport: m.VisionSupport}
 		}
 	}
+	// No row: use the seed catalog, and otherwise assume the pre-existing behaviour
+	// (tools allowed) since we have no capability data that says otherwise.
+	if cfg := models.CatalogModel(modelName); cfg != nil {
+		return subagentModelCapabilities{Provider: string(cfg.Provider), ToolSupport: cfg.ToolSupport, VisionSupport: cfg.VisionSupport}
+	}
+	return subagentModelCapabilities{ToolSupport: true}
+}
+
+// errSubagentToolsUnsupported reports that the selected skills would hand the
+// subagent MCP tools but the target model is not flagged tool-capable. Failing
+// loudly beats silently dropping the tools (the skill would run without the
+// capability it exists for) or sending tools the model cannot call.
+func errSubagentToolsUnsupported(provider models.ModelProvider, modelName string, toolCount int) error {
+	return fmt.Errorf("%s model %q does not support tool calling, but the selected skills provide %d MCP tool(s); "+
+		"choose a tool-capable model or run the subagent without skill_ids", provider, modelName, toolCount)
+}
+
+func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelName string, modelContext *provider.ModelContext, ritualIDs []uuid.UUID) (*subagentCallResult, error) {
+	caps := a.subagentModelCapabilities(ctx, modelName)
+	modelProvider := caps.Provider
 	if models.UsesOpenAIChatCompletionsAPI(modelProvider, modelName) {
-		return nil, fmt.Errorf("%s subagent calls are not yet supported", models.ProviderForModel(modelProvider, modelName))
+		return a.callSubagentChatCompletions(ctx, userID, caps, modelName, modelContext, ritualIDs)
 	}
 
 	if models.UsesAnthropicMessagesAPI(modelProvider, modelName) {
@@ -206,6 +237,9 @@ func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelNa
 		}
 		claudeParams := modelContext.BuildClaudeParams(modelName)
 		mcpSpecs, mcpServers := a.getSubagentMCPFunctionToolSpecs(ctx, userID, ritualIDs)
+		if len(mcpSpecs) > 0 && !caps.ToolSupport {
+			return nil, errSubagentToolsUnsupported(models.ProviderForModel(modelProvider, modelName), modelName, len(mcpSpecs))
+		}
 		if len(mcpSpecs) > 0 {
 			adapter := provider.NewClaudeAdapter(claudeProvider, claudeParams, claudeFunctionTools(mcpSpecs), false, nil, nil)
 			toolCtx := &chatContext{
@@ -238,6 +272,9 @@ func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelNa
 	}
 
 	mcpTools := a.getSubagentMCPTools(ctx, userID, ritualIDs, modelName)
+	if len(mcpTools) > 0 && !caps.ToolSupport {
+		return nil, errSubagentToolsUnsupported(models.ProviderForModel(modelProvider, modelName), modelName, len(mcpTools))
+	}
 	params := modelContext.BuildOpenAIResponseParams(provider.OpenAIResponseParamsOptions{
 		Model:             modelName,
 		SafetyUserID:      userID.String(),
@@ -263,6 +300,70 @@ func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelNa
 	}
 	if final == nil {
 		return nil, fmt.Errorf("OpenAI subagent call returned no final response")
+	}
+	return &subagentCallResult{
+		Output:      strings.TrimSpace(final.Text),
+		InputTokens: final.InputTokens,
+	}, nil
+}
+
+// callSubagentChatCompletions runs a subagent turn on an OpenAI-compatible Chat
+// Completions provider (Gemini, Mistral, DeepSeek, Qwen, Xiaomi MiMo). It reuses the
+// chat-turn building blocks (request rendering, function-tool conversion, adapter
+// selection and the missing-API-key errors) so these providers behave the same here
+// as in a normal turn. Like the other subagent paths it only exposes the MCP tools of
+// the requested skills, never the chat's own tools, and it renders no images (the
+// subagent message carries none; visionRenderContext still guards the request).
+func (a *Agent) callSubagentChatCompletions(ctx context.Context, userID uuid.UUID, caps subagentModelCapabilities, modelName string, modelContext *provider.ModelContext, ritualIDs []uuid.UUID) (*subagentCallResult, error) {
+	mcpSpecs, mcpServers := a.getSubagentMCPFunctionToolSpecs(ctx, userID, ritualIDs)
+	return a.runSubagentChatCompletions(ctx, userID, caps, modelName, modelContext, mcpSpecs, mcpServers)
+}
+
+// runSubagentChatCompletions is callSubagentChatCompletions after the skills' MCP
+// tools have been discovered; the split keeps the capability gate and provider
+// routing testable without a live MCP server.
+func (a *Agent) runSubagentChatCompletions(ctx context.Context, userID uuid.UUID, caps subagentModelCapabilities, modelName string, modelContext *provider.ModelContext, mcpSpecs []agenttools.FunctionToolSpec, mcpServers []*models.MCPServer) (*subagentCallResult, error) {
+	providerName := models.ProviderForModel(caps.Provider, modelName)
+	renderCtx := &chatContext{model: modelName, modelProvider: caps.Provider, modelVisionSupport: caps.VisionSupport}
+	params := buildOpenAIChatCompletionsParams(renderCtx, modelContext)
+
+	if len(mcpSpecs) > 0 && !caps.ToolSupport {
+		return nil, errSubagentToolsUnsupported(providerName, modelName, len(mcpSpecs))
+	}
+	functionTools := openAIChatCompletionFunctionTools(mcpSpecs)
+
+	var (
+		adapter provider.AgentAdapter
+		err     error
+		sv      models.SafetyViolationProvider
+	)
+	if models.IsGeminiModel(caps.Provider, modelName) {
+		if a.GeminiProvider == nil {
+			return nil, fmt.Errorf("Gemini model %q requested but GEMINI_API_KEY is not configured", modelName)
+		}
+		adapter = provider.NewGeminiAdapter(a.GeminiProvider, params, functionTools, nil, a.logger)
+		sv = models.SafetyViolationProviderGoogle
+	} else {
+		adapter, err = a.openAIChatCompletionsAdapter(renderCtx, params, functionTools, nil)
+		if err != nil {
+			return nil, err
+		}
+		sv = models.SafetyViolationProvider(providerName)
+	}
+
+	toolCtx := &chatContext{
+		userID:        userID,
+		chat:          &models.Chat{ID: uuid.New(), UserID: userID, ToolsEnabled: caps.ToolSupport},
+		mcpServers:    mcpServers,
+		model:         modelName,
+		modelProvider: caps.Provider,
+	}
+	final, _, _, err := a.handleAgentLoop(ctx, toolCtx, adapter)
+	if err != nil {
+		return nil, provider.WrapSafetyViolationError(sv, fmt.Errorf("%s subagent call failed: %w", providerName, err))
+	}
+	if final == nil {
+		return nil, fmt.Errorf("%s subagent call returned no final response", providerName)
 	}
 	return &subagentCallResult{
 		Output:      strings.TrimSpace(final.Text),

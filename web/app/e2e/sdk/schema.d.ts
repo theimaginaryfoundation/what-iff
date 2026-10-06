@@ -8123,6 +8123,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/mcp-servers/oauth/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get connector OAuth settings
+         * @description Returns the redirect_uri this server sends to OAuth providers (MCP_OAUTH_REDIRECT_URL, or the localhost default). Users register this exact value with the provider, so it differs between the hosted service and self-hosted installs.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Connector OAuth settings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MCPServerOAuthConfigResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mcp-servers/oauth/callback": {
         parameters: {
             query?: never;
@@ -10139,6 +10187,13 @@ export interface components {
         StartMCPServerOAuthResponse: {
             /** Format: uri */
             authorization_url: string;
+        };
+        MCPServerOAuthConfigResponse: {
+            /**
+             * Format: uri
+             * @description Callback URL to register with the OAuth provider.
+             */
+            redirect_uri: string;
         };
         /**
          * @example User

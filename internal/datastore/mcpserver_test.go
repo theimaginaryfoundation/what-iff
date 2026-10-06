@@ -780,6 +780,31 @@ func TestSetChatMCPLoadedTools_NormalizesAndClearsInvalidValues(t *testing.T) {
 	require.Empty(t, loaded[server.ID])
 }
 
+// A connector that reaches the chat through a skill (not attached to the thread) can hold loaded
+// tool state, but only for the user's own connectors.
+func TestSetChatMCPLoadedTools_AllowsOwnedUnattachedConnectorOnly(t *testing.T) {
+	ds, cleanup := newMCPServerTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createMCPServerTestUser(t, ds)
+	otherUserID := createMCPServerTestUser(t, ds)
+	modelID := createMCPServerTestModel(t, ds)
+	chatID := createMCPServerTestChat(t, ds, userID, modelID)
+	own, err := ds.CreateMCPServer(ctx, userID, baseMCPServerModel())
+	require.NoError(t, err)
+	foreign, err := ds.CreateMCPServer(ctx, otherUserID, baseMCPServerModel())
+	require.NoError(t, err)
+
+	require.NoError(t, ds.SetChatMCPLoadedTools(ctx, userID, chatID, own.ID, []string{"mcp__x__a"}))
+	loaded, err := ds.ListChatMCPLoadedTools(ctx, userID, chatID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"mcp__x__a"}, loaded[own.ID])
+
+	err = ds.SetChatMCPLoadedTools(ctx, userID, chatID, foreign.ID, []string{"mcp__x__a"})
+	require.ErrorIs(t, err, ErrMCPServerNotFound)
+}
+
 func TestSaveMCPServerOAuthTokens_RefreshTokenOnlyPreservesStatus(t *testing.T) {
 	ds, cleanup := newMCPServerTestDatastore(t)
 	defer cleanup()

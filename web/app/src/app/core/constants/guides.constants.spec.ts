@@ -8,6 +8,7 @@ describe('guideUrl', () => {
     expect(guideUrl('gettingStarted', docs)).toBe('https://whatiff.chat/guides/getting-started.html');
     expect(guideUrl('continuity', docs)).toBe('https://whatiff.chat/guides/building-continuity.html');
     expect(guideUrl('webhooks', docs)).toBe('https://whatiff.chat/guides/webhooks.html');
+    expect(guideUrl('connectors', docs)).toBe('https://whatiff.chat/guides/mcp-connectors.html');
   });
 
   it('follows a docs site hosted under a path', () => {
