@@ -18,7 +18,9 @@ const sampleTile: GalleryTileVm = {
     source: 'uploaded',
     sourceLabel: 'Imported',
     folder: '',
-    thumbnailUrl: '/thumb',
+    isFile: false,
+  badge: '',
+  thumbnailUrl: '/thumb',
     fullUrl: '/full',
 };
 

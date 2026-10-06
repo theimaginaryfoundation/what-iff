@@ -9,6 +9,8 @@ import {
   SimpleChanges,
 } from '@angular/core';
 
+import { RouterLink } from '@angular/router';
+
 import { ConfirmationService } from '../../../core/services/confirmation.service';
 import { FileAttachment, PendingFileAttachment } from '../../../core/models/file-attachment.model';
 import { FileAttachmentService } from '../../../core/services/file-attachment.service';
@@ -31,7 +33,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 @Component({
   selector: 'app-personality-attachments-list',
   standalone: true,
-  imports: [HelpHintComponent, TooltipDirective],
+  imports: [RouterLink, HelpHintComponent, TooltipDirective],
   template: `
     <section
       [class]="containerClass()"
@@ -89,13 +91,22 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
                 >{{ attachment.name }}</p>
                 <p class="text-xs text-(--color-text-secondary)">{{ attachment.file_type || 'file' }}</p>
               </div>
-              <button
-                type="button"
-                class="rounded-lg p-1.5 text-(--color-text-secondary) outline-none hover:bg-red-500/10 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-red-500"
-                [attr.aria-label]="'Delete ' + attachment.name"
-                uiTooltip="Delete this file"
-                (click)="onDelete(attachment)"
-              >✕</button>
+              <div class="flex shrink-0 items-center gap-1">
+                <a
+                  class="rounded-lg border border-border-base px-2 py-1 text-xs text-(--color-text-primary) outline-none hover:bg-(--color-surface-elevated) focus-visible:ring-2 focus-visible:ring-(--color-accent)"
+                  routerLink="/gallery"
+                  [queryParams]="{ file: attachment.id }"
+                  [attr.aria-label]="'View ' + attachment.name"
+                  uiTooltip="Read this file in the gallery"
+                >View</a>
+                <button
+                  type="button"
+                  class="rounded-lg p-1.5 text-(--color-text-secondary) outline-none hover:bg-red-500/10 hover:text-red-600 focus-visible:ring-2 focus-visible:ring-red-500"
+                  [attr.aria-label]="'Delete ' + attachment.name"
+                  uiTooltip="Delete this file"
+                  (click)="onDelete(attachment)"
+                >✕</button>
+              </div>
             </li>
           }
           @for (item of pending(); track $index) {

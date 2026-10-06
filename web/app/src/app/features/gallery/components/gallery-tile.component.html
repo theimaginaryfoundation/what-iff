@@ -3,6 +3,7 @@
   role="listitem"
   draggable="true"
   [class.tile--selected]="selected()"
+  [class.tile--file]="tile().isFile"
   (dragstart)="onDragStart($event)"
   (dragend)="dragEnd.emit()">
   @if (selectable()) {
@@ -11,7 +12,7 @@
       class="tile__check"
       role="checkbox"
       [attr.aria-checked]="selected()"
-      [attr.aria-label]="'Select image ' + tile().name"
+      [attr.aria-label]="'Select ' + noun() + ' ' + tile().name"
       (click)="$event.stopPropagation(); toggleSelect.emit(tile().id)">
       <span class="tile__check-mark"></span>
     </button>
@@ -19,14 +20,32 @@
     <button
       type="button"
       class="tile__delete"
-      [attr.aria-label]="'Delete image ' + tile().name"
-      uiTooltip="Delete this image"
+      [attr.aria-label]="'Delete ' + noun() + ' ' + tile().name"
+      [uiTooltip]="'Delete this ' + noun()"
       (click)="$event.stopPropagation(); delete.emit(tile().id)">
       ×
     </button>
   }
 
-  @if (tile().thumbnailUrl | authImage | async; as src) {
+  @if (tile().isFile) {
+    <button
+      type="button"
+      class="tile__button tile__file"
+      [attr.aria-label]="'Open file ' + tile().name + (tile().personalityName ? ' for ' + tile().personalityName : '')"
+      [uiTooltip]="tile().name"
+      truncatedOnly
+      [truncationTarget]="fileName"
+      placement="bottom"
+      (click)="selectable() ? toggleSelect.emit(tile().id) : open.emit(tile().id)">
+      <span class="tile__file-sheet" aria-hidden="true">
+        <span class="tile__file-badge">{{ tile().badge }}</span>
+      </span>
+      <span #fileName class="tile__file-name">{{ tile().name }}</span>
+      @if (tile().personalityName) {
+        <span class="tile__file-meta">{{ tile().personalityName }}</span>
+      }
+    </button>
+  } @else if (tile().thumbnailUrl | authImage | async; as src) {
     <button
       type="button"
       class="tile__button"

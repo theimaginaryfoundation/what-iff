@@ -47,7 +47,7 @@ describe('GalleryViewService', () => {
 
         service.loadInitial();
 
-        expect(galleryApi.listImages).toHaveBeenCalledWith(1, service.pageSize, { name: '', personalityId: undefined, globalOnly: false, folder: '' });
+        expect(galleryApi.listImages).toHaveBeenCalledWith(1, service.pageSize, { name: '', personalityId: undefined, globalOnly: false, folder: '', kind: 'all' });
         expect(service.images().length).toBe(1);
         expect(service.totalCount()).toBe(1);
     });
@@ -62,7 +62,7 @@ describe('GalleryViewService', () => {
         service.setFilters({ query: 'sun' });
 
         expect(service.filters().query).toBe('sun');
-        expect(galleryApi.listImages).toHaveBeenCalledWith(1, service.pageSize, { name: 'sun', personalityId: undefined, globalOnly: false });
+        expect(galleryApi.listImages).toHaveBeenCalledWith(1, service.pageSize, { name: 'sun', personalityId: undefined, globalOnly: false, kind: 'all' });
     });
 
     it('uses global_only API filter when global mode is selected', () => {
@@ -74,7 +74,7 @@ describe('GalleryViewService', () => {
 
         service.selectGlobalAssociations();
 
-        expect(galleryApi.listImages).toHaveBeenCalledWith(1, service.pageSize, { name: '', personalityId: undefined, globalOnly: true, folder: '' });
+        expect(galleryApi.listImages).toHaveBeenCalledWith(1, service.pageSize, { name: '', personalityId: undefined, globalOnly: true, folder: '', kind: 'all' });
         expect(service.associationFilterMode()).toBe('global');
     });
 
@@ -83,7 +83,7 @@ describe('GalleryViewService', () => {
 
         service.loadInitial();
 
-        expect(service.error()).toBe('Failed to load gallery images.');
+        expect(service.error()).toBe('Failed to load the gallery.');
     });
     describe('source filter consistency (#141)', () => {
         const generated = (id: string) => makeAttachment({ id, source: 'generated', chat_message_id: `msg-${id}` });
@@ -153,7 +153,7 @@ describe('GalleryViewService', () => {
             service.loadInitial();
             service.setFilters({ source: 'generated' });
             service.setFilters({ query: 'sun' });
-            expect(galleryApi.listImages).toHaveBeenLastCalledWith(1, service.pageSize, { name: 'sun', personalityId: undefined, globalOnly: false });
+            expect(galleryApi.listImages).toHaveBeenLastCalledWith(1, service.pageSize, { name: 'sun', personalityId: undefined, globalOnly: false, kind: 'all' });
             expect(service.filters().source).toBe('generated');
         });
 
@@ -185,7 +185,7 @@ describe('GalleryViewService', () => {
             expect(service.currentPage()).toBe(1);
 
             service.loadNextPage();
-            expect(galleryApi.listImages).toHaveBeenLastCalledWith(2, service.pageSize, { name: '', personalityId: undefined, globalOnly: false, folder: '' });
+            expect(galleryApi.listImages).toHaveBeenLastCalledWith(2, service.pageSize, { name: '', personalityId: undefined, globalOnly: false, folder: '', kind: 'all' });
         });
 
         it('keeps the newest reload when overlapping reloads resolve out of order', () => {

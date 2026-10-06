@@ -81,5 +81,10 @@ export class FileAttachmentService {
   deleteFileAttachment(attachmentId: string): Observable<any> {
     return this.http.delete(`${this.apiUrl}/file-attachment/${attachmentId}`);
   }
+
+  /** The attachment's bytes, for viewing or saving in the browser. */
+  downloadFileAttachment(attachmentId: string): Observable<Blob> {
+    return this.http.get(`${this.apiUrl}/file-attachment/${attachmentId}`, { responseType: 'blob' });
+  }
 }
 

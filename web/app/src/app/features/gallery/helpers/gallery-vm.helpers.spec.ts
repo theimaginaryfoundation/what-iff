@@ -20,6 +20,18 @@ describe('gallery-vm.helpers', () => {
         expect(vm.personalityName).toBe('Aster');
         expect(vm.personalityNames).toEqual(['Aster']);
         expect(vm.thumbnailUrl).toContain('size=thumbnail');
+        expect(vm.isFile).toBe(false);
+    });
+
+    it('maps a document to a file tile with a type badge and no image URLs', () => {
+        const getImageUrl = vi.fn(() => '/never');
+        const vm = toGalleryTileVm(makeAttachment({ name: 'notes.md', file_type: 'text/markdown' }), getImageUrl, {});
+        expect(vm.isFile).toBe(true);
+        expect(vm.badge).toBe('MD');
+        expect(vm.thumbnailUrl).toBe('');
+        expect(vm.fullUrl).toBe('');
+        expect(getImageUrl).not.toHaveBeenCalled();
+        expect(toGalleryTileVm(makeAttachment({ name: '', file_type: 'application/pdf' }), getImageUrl, {}).name).toBe('Untitled file');
     });
 
     it('filters by personality without applying local query filtering', () => {

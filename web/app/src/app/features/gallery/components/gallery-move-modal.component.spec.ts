@@ -29,10 +29,10 @@ describe('GalleryMoveModalComponent', () => {
     beforeEach(() => set({ open: true, mode: 'images', imageCount: 3, folders: ['art', 'charts', 'charts/oura'], currentFolder: 'art' }));
 
     it('titles itself with how many images are moving and starts at the folder they are in', () => {
-      expect(component.title()).toBe('Move 3 images');
+      expect(component.title()).toBe('Move 3 items');
       expect(component.path()).toBe('art');
       set({ imageCount: 1 });
-      expect(component.title()).toBe('Move 1 image');
+      expect(component.title()).toBe('Move 1 item');
     });
 
     it('lists the top level and every folder to pick from', () => {

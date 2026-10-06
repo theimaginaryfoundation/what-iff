@@ -16,6 +16,8 @@ function tile(id: string, folder = ''): GalleryTileVm {
     source: 'uploaded',
     sourceLabel: 'Imported',
     folder,
+    isFile: false,
+    badge: '',
     thumbnailUrl: `/thumb/${id}`,
     fullUrl: `/full/${id}`,
   };
@@ -54,9 +56,9 @@ describe('GalleryGridComponent folders', () => {
     const cells = Array.from(el().querySelectorAll('[role="listitem"]'));
     expect(cells.length).toBe(3);
     expect(cells[0].textContent).toContain('charts');
-    expect(cells[0].textContent).toContain('7 images');
-    expect(cells[1].textContent).toContain('1 image');
-    expect(cells[1].textContent).not.toContain('1 images');
+    expect(cells[0].textContent).toContain('7 items');
+    expect(cells[1].textContent).toContain('1 item');
+    expect(cells[1].textContent).not.toContain('1 items');
     expect(cells[2].querySelector('.tile__button')).not.toBeNull();
   });
 

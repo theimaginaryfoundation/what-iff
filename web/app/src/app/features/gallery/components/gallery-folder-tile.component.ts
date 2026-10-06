@@ -29,7 +29,7 @@ export class GalleryFolderTileComponent {
   readonly dropHover = signal(false);
 
   countLabel(count: number): string {
-    return count === 1 ? '1 image' : `${count} images`;
+    return count === 1 ? '1 item' : `${count} items`;
   }
 
   onDragStart(event: DragEvent): void {

@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
+import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
@@ -31,6 +32,7 @@ describe('PersonalityAttachmentsListComponent', () => {
       imports: [PersonalityAttachmentsListComponent],
       providers: [
         provideZonelessChangeDetection(),
+        provideRouter([]),
         {
           provide: FileAttachmentService,
           useValue: {
@@ -57,5 +59,15 @@ describe('PersonalityAttachmentsListComponent', () => {
     expect(listFileAttachments).toHaveBeenCalledWith(1, 40, { personality_id: 'p-1', docs_only: true });
     expect(fixture.nativeElement.textContent).toContain('lore.md');
     expect(fixture.componentInstance.remaining()).toBe(39);
+  });
+
+  it('links each doc to the gallery file viewer, so its contents can be read (#43)', async () => {
+    fixture.componentRef.setInput('personalityId', 'p-1');
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const view = (fixture.nativeElement as HTMLElement).querySelector<HTMLAnchorElement>('a[aria-label="View lore.md"]');
+    expect(view).not.toBeNull();
+    expect(view!.getAttribute('href')).toBe('/gallery?file=doc-1');
   });
 });

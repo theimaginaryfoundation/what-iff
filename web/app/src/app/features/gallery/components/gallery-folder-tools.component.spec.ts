@@ -103,7 +103,7 @@ describe('GalleryFolderToolsComponent', () => {
       view.setFilters({ query: '' });
       view.setShowAll(true);
       fixture.detectChanges();
-      expect(el().textContent).toContain('Showing every image');
+      expect(el().textContent).toContain('Showing everything');
       expect(el().querySelector('nav')).toBeNull();
     });
   });
@@ -159,7 +159,7 @@ describe('GalleryFolderToolsComponent', () => {
 
       expect(bar()).not.toBeNull();
       expect(el().textContent).toContain('0 selected');
-      expect(el().textContent).toContain('Select mode: click an image to pick it');
+      expect(el().textContent).toContain('Select mode: click an image or file to pick it');
       expect(actionButton().disabled).toBe(true);
       expect(button('Clear ×').disabled).toBe(true);
     });
@@ -177,7 +177,7 @@ describe('GalleryFolderToolsComponent', () => {
       expect(selectAllLabel()).toBe('Unselect all');
       expect(selectAll().checked).toBe(true);
       expect(actionButton().disabled).toBe(false);
-      expect(el().textContent).not.toContain('click an image to pick it');
+      expect(el().textContent).not.toContain('click an image or file to pick it');
 
       selectAll().click();
       fixture.detectChanges();
