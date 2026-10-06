@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -112,4 +113,40 @@ func TestChatRehydrationInfo_NeedsRehydration(t *testing.T) {
 			require.Equal(t, tc.want, tc.info.NeedsRehydration())
 		})
 	}
+}
+
+func TestGetChatPersonalityID(t *testing.T) {
+	ds, mock, cleanup := newMockDatastore(t)
+	defer cleanup()
+
+	personalityID := uuid.New()
+	mock.ExpectQuery("SELECT .* FROM .personalities.").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(personalityID))
+
+	got, err := ds.GetChatPersonalityID(context.Background(), uuid.New(), uuid.New())
+	require.NoError(t, err)
+	require.Equal(t, personalityID, got)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// A chat with no personality (or one the user does not own) is not an error: it just has none.
+func TestGetChatPersonalityID_NoneAssigned(t *testing.T) {
+	ds, mock, cleanup := newMockDatastore(t)
+	defer cleanup()
+
+	mock.ExpectQuery("SELECT .* FROM .personalities.").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	got, err := ds.GetChatPersonalityID(context.Background(), uuid.New(), uuid.New())
+	require.NoError(t, err)
+	require.Equal(t, uuid.Nil, got)
+}
+
+func TestGetChatPersonalityID_ReturnsQueryError(t *testing.T) {
+	ds, mock, cleanup := newMockDatastore(t)
+	defer cleanup()
+
+	mock.ExpectQuery("SELECT .* FROM .personalities.").WillReturnError(sql.ErrConnDone)
+
+	_, err := ds.GetChatPersonalityID(context.Background(), uuid.New(), uuid.New())
+	require.ErrorIs(t, err, sql.ErrConnDone)
 }

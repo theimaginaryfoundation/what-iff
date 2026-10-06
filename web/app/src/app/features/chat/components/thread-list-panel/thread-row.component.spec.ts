@@ -89,6 +89,15 @@ describe('ThreadRowComponent', () => {
         expect(ids).toEqual(['a']);
     });
 
+    it('does not emit deleteThread on Shift+F10 (the context-menu key)', () => {
+        const ids: string[] = [];
+        component.deleteThread.subscribe(t => ids.push(t.id));
+
+        const main = fixture.nativeElement.querySelector('.thread-row__main') as HTMLButtonElement;
+        main.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true }));
+        expect(ids).toEqual([]);
+    });
+
     it('renders delete in archived view', () => {
         fixture.componentRef.setInput('isArchivedView', true);
         fixture.detectChanges();
@@ -127,6 +136,27 @@ describe('ThreadRowComponent', () => {
 
         const badge = fixture.nativeElement.querySelector('.thread-row__badge') as HTMLElement;
         expect(badge?.textContent?.trim()).toBe('4');
+    });
+
+    it('renders the unread badge as its own button outside the open-thread button', () => {
+        fixture.componentRef.setInput('thread', makeChat({ id: 'a', name: 'Alpha', unread_count: 4 }));
+        fixture.detectChanges();
+
+        const badge = fixture.nativeElement.querySelector('.thread-row__badge') as HTMLButtonElement;
+        expect(badge.tagName).toBe('BUTTON');
+        expect(badge.closest('.thread-row__main')).toBeNull();
+        expect(badge.getAttribute('aria-label')).toBe('4 unread replies, open thread');
+    });
+
+    it('opens the thread when the unread badge is clicked', () => {
+        const selected: string[] = [];
+        component.select.subscribe(id => selected.push(id));
+        fixture.componentRef.setInput('thread', makeChat({ id: 'a', name: 'Alpha', unread_count: 4 }));
+        fixture.detectChanges();
+
+        (fixture.nativeElement.querySelector('.thread-row__badge') as HTMLButtonElement).click();
+
+        expect(selected).toEqual(['a']);
     });
 
     it('renders an unchecked select checkbox and emits toggleSelect without navigating', () => {

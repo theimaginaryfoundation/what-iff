@@ -101,4 +101,16 @@ describe('MemoryDetailPageComponent', () => {
       'Delete',
     ]);
   });
+
+  it('does not show the raw backend "Type" in the metadata panel', () => {
+    const fixture = TestBed.createComponent(MemoryDetailPageComponent);
+    fixture.componentInstance.ngOnInit();
+    fixture.detectChanges();
+
+    const labels = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('aside dt')).map(dt =>
+      dt.textContent?.trim(),
+    );
+    expect(labels).toContain('Level');
+    expect(labels).not.toContain('Type');
+  });
 });

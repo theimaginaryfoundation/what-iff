@@ -70,7 +70,7 @@ func (m *Manager) resolveAgentJobChat(ctx context.Context, userID, agentJobID uu
 		return job.ChatID, job, nil
 	}
 
-	chatName := "[JOB]: New Chat"
+	chatName := "[JOB]: New thread"
 	if job.Title != nil && strings.TrimSpace(*job.Title) != "" {
 		chatName = "[JOB]: " + strings.TrimSpace(*job.Title)
 	}
@@ -87,6 +87,12 @@ func (m *Manager) resolveAgentJobChat(ctx context.Context, userID, agentJobID uu
 	}
 	return &newChat.ID, updated, nil
 }
+
+// ScheduleErrorMarker prefixes the last_error of a recurring job the scheduler paused because it
+// could not compute the next run. The web app matches it (scheduleFailureReason in
+// job-status.helpers.ts) to tell that pause apart from a user pause, which always clears last_error;
+// keep the two in sync.
+const ScheduleErrorMarker = "failed to compute next_run_at:"
 
 func deriveStatusAndErrorText(job *models.AgentJob, runErr error, scheduleErrText string) (*models.AgentJobStatus, string) {
 	errText := ""
@@ -223,7 +229,7 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 	nextRunAt, nextErr := computeNextRunAt(*job, runAt)
 	scheduleErrText := ""
 	if nextErr != nil {
-		scheduleErrText = fmt.Sprintf("failed to compute next_run_at: %s", nextErr.Error())
+		scheduleErrText = fmt.Sprintf("%s %s", ScheduleErrorMarker, nextErr.Error())
 		m.logger.Warn("failed to compute next run time",
 			zap.String("agent_job_id", agentJobID.String()),
 			zap.String("schedule_type", string(job.ScheduleType)),

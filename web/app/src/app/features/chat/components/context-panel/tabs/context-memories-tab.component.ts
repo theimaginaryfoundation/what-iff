@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
 import { Memory } from '../../../../../core/models/memory.model';
+import { ConfirmationService } from '../../../../../core/services/confirmation.service';
 import { MemoryService } from '../../../../../core/services/memory.service';
 import { apiErrorMessage } from '../../../../../core/utils/api-error.helpers';
 import { ButtonComponent } from '../../../../../shared/ui/button/button.component';
@@ -278,6 +279,7 @@ export class ContextMemoriesTabComponent implements OnChanges {
   readonly personalityId = input<string | null>(null);
   readonly memoryService = inject(MemoryService);
   private readonly router = inject(Router);
+  private readonly confirmationService = inject(ConfirmationService);
 
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
@@ -365,7 +367,14 @@ export class ContextMemoriesTabComponent implements OnChanges {
   }
 
   async deleteMemory(memory: Memory): Promise<void> {
-    if (!confirm('Delete this memory?')) return;
+    const confirmed = await this.confirmationService.confirm({
+      title: 'Delete Memory',
+      message: 'Delete this memory? This cannot be undone.',
+      type: 'danger',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+    });
+    if (!confirmed) return;
     try {
       await firstValueFrom(this.memoryService.deleteMemory(memory.id));
       await this.refresh();

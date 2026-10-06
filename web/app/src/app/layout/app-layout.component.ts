@@ -23,7 +23,7 @@ import { ThemeService } from '../core/services/theme.service';
 import { GeneratePersonalityModalService } from '../core/services/generate-personality-modal.service';
 import { ProfileSettingsModalService } from '../features/profile-settings/profile-settings-modal.service';
 import { Personality } from '../core/models/personality.model';
-import { Chat } from '../core/models/chat.model';
+import { Chat, DEFAULT_THREAD_NAME } from '../core/models/chat.model';
 import { CommandPaletteComponent } from './command-palette/command-palette.component';
 import { ContextPanelService } from '../features/chat/services/context-panel.service';
 import { PersonaPickerDialogComponent } from '../features/personality/picker/persona-picker-dialog.component';
@@ -219,7 +219,7 @@ export class AppLayoutComponent implements OnInit, OnDestroy {
     try {
       const chat = await firstValueFrom(
         this.chatService.createChat({
-          name: 'New Chat',
+          name: DEFAULT_THREAD_NAME,
           personality_id: personality.id,
         }),
       );

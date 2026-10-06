@@ -72,6 +72,7 @@ type fakeProber struct {
 }
 
 type fakeOAuthService struct {
+	callback     string
 	startURL     string
 	startErr     error
 	callbackURL  string
@@ -99,6 +100,8 @@ func (f *fakeOAuthService) HandleCallback(_ context.Context, _, _, _, _ string) 
 	}
 	return f.callbackURL, "ok", true, nil
 }
+
+func (f *fakeOAuthService) CallbackURL() string { return f.callback }
 
 func (f *fakeProber) ProbeConnection(_ context.Context, server *models.MCPServer) (int, error) {
 	f.calls++
@@ -434,6 +437,24 @@ func TestStartMCPServerOAuth(t *testing.T) {
 	var body startMCPServerOAuthResponse
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
 	require.Contains(t, body.AuthorizationURL, "authorize")
+}
+
+func TestGetMCPServerOAuthConfig(t *testing.T) {
+	t.Parallel()
+	oauth := &fakeOAuthService{callback: "https://api.example.com/api/mcp-servers/oauth/callback"}
+	router := newRouterWithOAuth(&fakeProvider{}, &fakeProber{}, oauth)
+	req := newAuthedRequest(t, http.MethodGet, "/mcp-servers/oauth/config", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var body mcpServerOAuthConfigResponse
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	require.Equal(t, "https://api.example.com/api/mcp-servers/oauth/callback", body.RedirectURI)
+
+	unauthed := httptest.NewRequest(http.MethodGet, "/mcp-servers/oauth/config", nil)
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, unauthed)
+	require.Equal(t, http.StatusUnauthorized, rr.Code)
 }
 
 func TestHandleMCPServerOAuthCallbackRedirects(t *testing.T) {

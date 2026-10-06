@@ -4,9 +4,11 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import { firstValueFrom } from 'rxjs';
 
+import { DEFAULT_THREAD_NAME } from '../../core/models/chat.model';
 import { Ritual, RitualSort } from '../../core/models/ritual.model';
 import { Personality } from '../../core/models/personality.model';
 import { PersonalityService } from '../../core/services/personality.service';
+import { MCPServerService } from '../../core/services/mcp-server.service';
 import { RitualViewService } from '../../core/services/ritual-view.service';
 import { RitualService } from '../../core/services/ritual.service';
 import { ChatService } from '../../core/services/chat.service';
@@ -53,6 +55,7 @@ export class RitualsPageComponent implements OnInit {
   private readonly view = inject(RitualViewService);
   private readonly ritualService = inject(RitualService);
   private readonly personalityService = inject(PersonalityService);
+  private readonly mcpServerService = inject(MCPServerService);
   private readonly chatService = inject(ChatService);
   private readonly draftMessageService = inject(DraftMessageService);
   private readonly route = inject(ActivatedRoute);
@@ -61,6 +64,7 @@ export class RitualsPageComponent implements OnInit {
 
   readonly personalities = signal<RitualSelectOption[]>([]);
   readonly personalityRecords = signal<Personality[]>([]);
+  readonly mcpServers = signal<RitualSelectOption[]>([]);
   readonly filters = this.view.filters;
   readonly loading = this.view.loading;
   readonly error = this.view.error;
@@ -130,6 +134,11 @@ export class RitualsPageComponent implements OnInit {
         this.personalityRecords.set([]);
         this.personalities.set([]);
       },
+    });
+
+    this.mcpServerService.listMCPServers(1, 200).subscribe({
+      next: result => this.mcpServers.set((result.results ?? []).map(server => ({ id: server.id, label: server.name }))),
+      error: () => this.mcpServers.set([]),
     });
 
     this.route.queryParams.subscribe(params => {
@@ -358,7 +367,7 @@ export class RitualsPageComponent implements OnInit {
   private async createChatWithSkill(skillName: string, personalityId: string): Promise<void> {
     const ritualInvocation = `/ritual ${skillName}`;
     try {
-      const chat = await firstValueFrom(this.chatService.createChat({ name: 'New Chat', personality_id: personalityId }));
+      const chat = await firstValueFrom(this.chatService.createChat({ name: DEFAULT_THREAD_NAME, personality_id: personalityId }));
       this.draftMessageService.saveDraft(chat.id, ritualInvocation);
       this.chatService.setLastChatId(chat.id);
       await this.router.navigate(['/chat', chat.id]);
