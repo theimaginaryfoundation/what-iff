@@ -10,19 +10,22 @@
     </div>
   </div>
 
-  <nav class="profile-settings__tabs" aria-label="Profile settings sections">
-    @for (tab of tabs; track tab.id) {
-      <button
-        type="button"
-        class="profile-settings__tab"
-        [class.profile-settings__tab--active]="modal.activeTab() === tab.id"
-        [attr.aria-selected]="modal.activeTab() === tab.id"
-        (click)="setTab(tab.id)">
-        <ui-user-icon [size]="13" />
-        {{ tab.label }}
-      </button>
-    }
-  </nav>
+  <!-- A bar with a single tab is just noise (the public build only has Profile). -->
+  @if (tabs.length > 1) {
+    <nav class="profile-settings__tabs" aria-label="Profile settings sections">
+      @for (tab of tabs; track tab.id) {
+        <button
+          type="button"
+          class="profile-settings__tab"
+          [class.profile-settings__tab--active]="modal.activeTab() === tab.id"
+          [attr.aria-selected]="modal.activeTab() === tab.id"
+          (click)="setTab(tab.id)">
+          <ui-user-icon [size]="13" />
+          {{ tab.label }}
+        </button>
+      }
+    </nav>
+  }
 
   @if (message()) {
     <div class="profile-settings__message" [ngClass]="'profile-settings__message--' + message()!.type">

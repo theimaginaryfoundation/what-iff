@@ -153,6 +153,26 @@ describe('JobDetailPageComponent', () => {
         expect(host.querySelector('app-job-run-history')).not.toBeNull();
     });
 
+    it('explains a recurring job the scheduler paused, and not a plain pause', () => {
+        agentJobService.getAgentJob.mockReturnValue(of({
+            ...job,
+            status: 'paused',
+            last_error: 'failed to compute next_run_at: invalid cron schedule',
+        }));
+        fixture.detectChanges();
+        const host = fixture.nativeElement as HTMLElement;
+        expect(host.textContent).toContain('Status: Paused: schedule error');
+        expect(host.textContent).toContain("Paused: couldn't schedule the next run. invalid cron schedule");
+
+        fixture.destroy();
+        fixture = TestBed.createComponent(JobDetailPageComponent);
+        agentJobService.getAgentJob.mockReturnValue(of({ ...job, status: 'paused', last_error: null }));
+        fixture.detectChanges();
+        const plain = fixture.nativeElement as HTMLElement;
+        expect(plain.textContent).toContain('Status: Paused');
+        expect(plain.textContent).not.toContain("couldn't schedule");
+    });
+
     it('opens the associated chat after a successful run-now trigger', () => {
         agentJobService.runNow.mockReturnValue(of({ status: 'triggered' }));
         fixture.detectChanges();

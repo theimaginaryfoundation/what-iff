@@ -105,6 +105,13 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     expect(component.tabs.map(t => t.id)).toEqual(['profile']);
   });
 
+  it('hides the tab bar while there is only a single tab', async () => {
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    await openAndWaitForProfile(fixture);
+
+    expect(fixture.nativeElement.querySelector('.profile-settings__tabs')).toBeNull();
+  });
+
   it('renders default model and default personality settings', async () => {
     const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
     await openAndWaitForProfile(fixture);

@@ -421,7 +421,19 @@ func (a *Agent) extractAndStoreImportedMemories(ctx context.Context, userID, cha
 
 	memories := memoryutil.NormalizeExtractedMemories(extracted, importMemoryMaxPerThread)
 
-	stored := 0
+	// Evaluate the thread's personality now, at rehydration time (not when it was imported or
+	// unarchived), so a personality assigned or re-assigned since is honoured. CreateMemory applies
+	// the shared auto-pin rule to it: a User-scoped memory is pinned to the personality only if that
+	// personality has auto_pin_memories on; otherwise it stays global. A failed lookup degrades to
+	// unpinned (global), the pre-personality behaviour, rather than guessing.
+	personalityID, err := a.ds.GetChatPersonalityID(ctx, userID, chatID)
+	if err != nil {
+		a.logger.Warn("imported memory extraction: personality lookup failed; storing unpinned",
+			zap.String("chat_id", chatID.String()), zap.Error(err))
+		personalityID = uuid.Nil
+	}
+
+	stored, pinned := 0, 0
 	for _, mem := range memories {
 		embedding, err := a.memoryTool.CreateEmbedding(ctx, mem.Content)
 		if err != nil {
@@ -429,25 +441,32 @@ func (a *Agent) extractAndStoreImportedMemories(ctx context.Context, userID, cha
 				zap.String("chat_id", chatID.String()), zap.Error(err))
 			continue
 		}
-		// Imported threads have no personality; pass uuid.Nil so no auto-pin is attempted.
-		if _, err := a.ds.CreateMemory(ctx, userID, models.Memory{
+		created, err := a.ds.CreateMemory(ctx, userID, models.Memory{
 			ChatID:     chatID,
 			Content:    mem.Content,
 			Scope:      mem.Scope,
 			Confidence: mem.Confidence.Float(),
 			Status:     models.MemoryStatusActive,
-		}, embedding, uuid.Nil); err != nil {
+		}, embedding, personalityID)
+		if err != nil {
 			a.logger.Warn("imported memory extraction: create memory failed",
 				zap.String("chat_id", chatID.String()), zap.Error(err))
 			continue
 		}
 		stored++
+		if created.PinnedPersonalityID != nil {
+			pinned++
+		}
 	}
 
+	// The scope decision is recorded on each memory (chat_id = source thread, pinned_personality_id
+	// = personality scope, none = global/thread); this logs it per run so it is inspectable too.
 	a.logger.Info("imported memory extraction complete",
 		zap.String("chat_id", chatID.String()),
+		zap.String("personality_id", personalityID.String()),
 		zap.Int("candidates", len(memories)),
-		zap.Int("stored", stored))
+		zap.Int("stored", stored),
+		zap.Int("pinned_to_personality", pinned))
 }
 
 // extractMemoriesFromTranscript runs one structured-JSON memory-extraction call over a plain

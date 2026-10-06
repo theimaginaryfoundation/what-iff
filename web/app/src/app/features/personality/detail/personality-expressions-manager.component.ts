@@ -39,6 +39,7 @@ import { AsyncPipe } from '@angular/common';
 import { ExpressionGenerateModalComponent } from './expression-generate-modal.component';
 import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
+import { ExpandIconComponent } from '../../../shared/ui/icons';
 
 /**
  * Renders persisted expression slots only (no client-side default placeholders).
@@ -61,6 +62,7 @@ import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
     ExpressionGenerateModalComponent,
     HelpHintComponent,
     TooltipDirective,
+    ExpandIconComponent,
   ],
   template: `
     <section
@@ -193,6 +195,16 @@ import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
                     >CLEAR</button>
                   }
                 </div>
+                @if (slotImageUrl(slot)) {
+                  <button
+                    type="button"
+                    class="expression-slot__expand absolute bottom-1 right-1 z-10 inline-flex h-7 w-7 items-center justify-center rounded-md bg-black/55 text-white hover:bg-black/75 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--color-accent)"
+                    aria-haspopup="dialog"
+                    [attr.aria-label]="'View ' + slot.expressionKey + ' larger'"
+                    uiTooltip="View larger"
+                    (click)="openViewer(slot, $event)"
+                  ><ui-expand-icon [size]="14" /></button>
+                }
               </div>
               <input
                 type="text"
@@ -241,6 +253,25 @@ import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
       (busyChange)="generateBusy.set($event)"
       (saved)="onGenerateSaved($event)"
     />
+
+    <ui-modal [open]="viewer() !== null" [labelledBy]="viewerLabelId" size="xl" (dismiss)="closeViewer()">
+      <div modal-header class="min-w-0 flex-1">
+        <h2 [id]="viewerLabelId" class="truncate text-base font-semibold text-(--color-text-primary)">{{ viewer()?.key }}</h2>
+        @if (viewer()?.label; as viewerLabel) {
+          <p class="truncate text-xs text-(--color-text-secondary)">{{ viewerLabel }}</p>
+        }
+      </div>
+      @if (viewer(); as v) {
+        @if ((v.url | authImage | async); as src) {
+          <img
+            class="expression-viewer__image mx-auto block h-auto max-h-[calc(100dvh-10rem)] w-auto max-w-full object-contain"
+            [src]="src"
+            [alt]="v.label || v.key"
+            decoding="async"
+          />
+        }
+      }
+    </ui-modal>
 
     <ui-modal [open]="isCustomKeyOpen()" [labelledBy]="customKeyLabelId" size="sm" (dismiss)="closeCustomKey()">
       <div modal-header>
@@ -407,6 +438,7 @@ export class PersonalityExpressionsManagerComponent implements OnInit {
 
   readonly customKeyLabelId = `expressions-add-key-${randomId()}`;
   readonly galleryLabelId = `expressions-pick-image-${randomId()}`;
+  readonly viewerLabelId = `expressions-view-image-${randomId()}`;
 
   readonly errorMessage = signal<string | null>(null);
   /** A default-grid job (server-started) is running for this personality. */
@@ -500,6 +532,36 @@ export class PersonalityExpressionsManagerComponent implements OnInit {
 
   slotAriaLabel(slot: MergedExpression): string {
     return `${slot.expressionKey}: ${slot.imageId ? 'set' : 'unset'}`;
+  }
+
+  /** Expression key currently open in the larger-size viewer, if any. */
+  private readonly viewerKey = signal<string | null>(null);
+  private viewerTrigger: HTMLElement | null = null;
+
+  /**
+   * The slot shown in the larger-size viewer. Derived from the live slots so the image stays tied to its
+   * expression (and the viewer closes itself if that slot loses its image or is removed while open).
+   */
+  readonly viewer = computed<{ key: string; label: string | null; url: string } | null>(() => {
+    const key = this.viewerKey();
+    if (!key) return null;
+    const slot = this.slots().find(s => s.expressionKey === key);
+    if (!slot) return null;
+    const url = slot.imageId ? this.imageGallery.getImageUrl(slot.imageId, 'full') : slot.imageUrl;
+    return url ? { key, label: slot.label?.trim() || null, url } : null;
+  });
+
+  openViewer(slot: MergedExpression, event?: Event): void {
+    this.viewerTrigger = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+    this.viewerKey.set(slot.expressionKey);
+  }
+
+  closeViewer(): void {
+    this.viewerKey.set(null);
+    const trigger = this.viewerTrigger;
+    this.viewerTrigger = null;
+    // ui-modal restores focus to whatever was focused when it opened; Safari does not focus a clicked button.
+    if (trigger?.isConnected) trigger.focus();
   }
 
   slotImageUrl(slot: MergedExpression): string | null {

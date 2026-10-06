@@ -75,4 +75,11 @@ describe('IntegrationsComponent contributed tabs', () => {
     const fixture = create(false);
     expect(tabButton(fixture.nativeElement, 'Extra')).toBeUndefined();
   });
+
+  it('explains the missing access in "Tools" terms', () => {
+    const fixture = create(false);
+    const notice = (fixture.nativeElement as HTMLElement).querySelector('[role="status"]');
+    expect(notice?.textContent).toContain('Tools are unavailable for this account');
+    expect(notice?.textContent).not.toContain('Integrations');
+  });
 });

@@ -15,7 +15,7 @@ import { ContextPanelService } from '../../services/context-panel.service';
 import { RouterLink } from '@angular/router';
 import { ThreadJobSummary, jobDisplayName } from '../../helpers/thread-jobs.helpers';
 import { ThreadAutomation } from '../../../../core/services/thread-automation-source';
-import { statusDescription, statusLabel, statusTone } from '../../../agent-job/helpers/job-status.helpers';
+import { jobStatusDescription, jobStatusLabel, jobStatusTone, scheduleFailureReason, statusLabel } from '../../../agent-job/helpers/job-status.helpers';
 
 @Component({
   selector: 'app-thread-row',
@@ -90,15 +90,21 @@ import { statusDescription, statusLabel, statusTone } from '../../../agent-job/h
               class="thread-row__main"
               (click)="select.emit(thread().id)"
               (dblclick)="editing.set(true)"
-              (keydown.shift.f10)="deleteThread.emit(thread())"
               [attr.aria-label]="'Open thread ' + thread().name + unreadAriaSuffix()"
             >
-              <!-- Full name on hover only when cut off; on the span so it doesn't stack with the badge tooltip. -->
+              <!-- Full name on hover only when cut off. -->
               <span class="thread-row__name" [uiTooltip]="thread().name" truncatedOnly>{{ thread().name }}</span>
-              @if (thread().unread_count && thread().unread_count! > 0) {
-                <span class="thread-row__badge" [uiTooltip]="unreadLabel()">{{ thread().unread_count }}</span>
-              }
             </button>
+            @if (thread().unread_count && thread().unread_count! > 0) {
+              <!-- A sibling of the open button (not nested in it) so it is focusable and clickable on its own. -->
+              <button
+                type="button"
+                class="thread-row__badge"
+                [uiTooltip]="unreadLabel()"
+                [attr.aria-label]="unreadLabel() + ', open thread'"
+                (click)="select.emit(thread().id)"
+              >{{ thread().unread_count }}</button>
+            }
             <button
               type="button"
               class="thread-row__context"
@@ -296,12 +302,21 @@ import { statusDescription, statusLabel, statusTone } from '../../../agent-job/h
 
     .thread-row__badge {
       background: var(--color-accent);
+      border: 0;
       border-radius: 999px;
       color: white;
+      cursor: pointer;
+      flex: 0 0 auto;
+      font: inherit;
       font-size: 0.75rem;
       min-width: 1.25rem;
       padding: 0 0.375rem;
       text-align: center;
+    }
+
+    .thread-row__badge:hover,
+    .thread-row__badge:focus-visible {
+      filter: brightness(0.92);
     }
 
     .thread-row__tags {
@@ -579,16 +594,18 @@ export class ThreadRowComponent {
   });
   readonly jobTone = computed(() => {
     const summary = this.jobs();
-    return summary ? statusTone(summary.primary.status) : 'neutral';
+    return summary ? jobStatusTone(summary.primary) : 'neutral';
   });
   readonly jobStatusText = computed(() => {
     const summary = this.jobs();
-    return summary ? statusLabel(summary.primary.status) : '';
+    return summary ? jobStatusLabel(summary.primary) : '';
   });
   readonly jobStatusHint = computed(() => {
     const job = this.jobs()?.primary;
     if (!job) return '';
-    const description = statusDescription(job.status);
+    const description = jobStatusDescription(job);
+    // The schedule-failure description already carries the reason.
+    if (scheduleFailureReason(job) !== null) return description;
     return job.last_error ? `${description}. Last error: ${job.last_error}` : description;
   });
   /** Next run for jobs that will still run; otherwise when it last ran. */
