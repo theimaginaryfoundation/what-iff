@@ -4,6 +4,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import { firstValueFrom } from 'rxjs';
 
+import { DEFAULT_THREAD_NAME } from '../../core/models/chat.model';
 import { Ritual, RitualSort } from '../../core/models/ritual.model';
 import { Personality } from '../../core/models/personality.model';
 import { PersonalityService } from '../../core/services/personality.service';
@@ -366,7 +367,7 @@ export class RitualsPageComponent implements OnInit {
   private async createChatWithSkill(skillName: string, personalityId: string): Promise<void> {
     const ritualInvocation = `/ritual ${skillName}`;
     try {
-      const chat = await firstValueFrom(this.chatService.createChat({ name: 'New Chat', personality_id: personalityId }));
+      const chat = await firstValueFrom(this.chatService.createChat({ name: DEFAULT_THREAD_NAME, personality_id: personalityId }));
       this.draftMessageService.saveDraft(chat.id, ritualInvocation);
       this.chatService.setLastChatId(chat.id);
       await this.router.navigate(['/chat', chat.id]);

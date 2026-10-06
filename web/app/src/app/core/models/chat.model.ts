@@ -1,3 +1,9 @@
+/**
+ * Placeholder name a thread gets when it is created without one; the agent replaces it with a
+ * generated name after the first reply. Keep in sync with `defaultChatName` in internal/agent/message.go.
+ */
+export const DEFAULT_THREAD_NAME = 'New thread';
+
 export interface Chat {
   id: string;
   user_id: string;

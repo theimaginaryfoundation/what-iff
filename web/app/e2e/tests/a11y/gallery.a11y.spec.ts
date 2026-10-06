@@ -26,11 +26,11 @@ test('the gallery segmented controls expose which option is selected', async ({ 
   await expect(galleryPage.sourceSegment('Imported')).toHaveAttribute('aria-pressed', 'true');
   await expect(galleryPage.sourceSegment('All')).toHaveAttribute('aria-pressed', 'false');
 
-  // Sort: same contract.
+  // Sort: Created is the only key, so it is pressed by default and stays pressed when re-clicked
+  // (a re-click flips the direction, not the selection).
   await expect(galleryPage.sortSegment('Created')).toHaveAttribute('aria-pressed', 'true');
-  await galleryPage.sortBy('Last used');
-  await expect(galleryPage.sortSegment('Last used')).toHaveAttribute('aria-pressed', 'true');
-  await expect(galleryPage.sortSegment('Created')).toHaveAttribute('aria-pressed', 'false');
+  await galleryPage.sortBy('Created');
+  await expect(galleryPage.sortSegment('Created')).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('the gallery mode switch exposes which mode is active', async ({ galleryPage, userWithPersonality }) => {

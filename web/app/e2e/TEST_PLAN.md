@@ -202,7 +202,7 @@ preferences."
 
 Route: `/gallery`. Toggle between `Gallery` and `Expression Manager` views;
 filters (`Show all personalities` / `Show global images only`, search);
-sort (`All` / `Generated` / `Imported` counts, `Created` / `Last used`);
+sort (`All` / `Generated` / `Imported` counts, `Created`);
 `Import image` button.
 
 - [x] Switch between Gallery and Expression Manager, the source/sort segments,

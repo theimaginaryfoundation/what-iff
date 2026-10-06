@@ -1,7 +1,8 @@
-import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, OnInit, computed, effect, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
+import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 import { ActivatedRoute } from '@angular/router';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { MCPServerService } from '../../core/services/mcp-server.service';
@@ -18,7 +19,7 @@ import { Ritual } from '../../core/models/ritual.model';
 @Component({
   selector: 'app-integrations-connectors-tab',
   standalone: true,
-  imports: [CommonModule, FormsModule, TooltipDirective],
+  imports: [CommonModule, FormsModule, HelpHintComponent, TooltipDirective],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './integrations-connectors-tab.component.html'
 })
@@ -56,6 +57,10 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
   selectedRitualIds = signal<string[]>([]);
   testResult = signal<TestMCPServerConnectionResponse | null>(null);
   oauthBanner = signal<{ success: boolean; message: string } | null>(null);
+  /** The redirect_uri to register with OAuth providers, read from this server's config. */
+  oauthRedirectUri = signal<string | null>(null);
+  oauthRedirectUriState = signal<'idle' | 'loading' | 'loaded' | 'error'>('idle');
+  redirectUriCopied = signal(false);
 
   canSave = computed(() => {
     return this.formName().trim() !== '' &&
@@ -67,6 +72,15 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
   canTest = computed(() => {
     return this.formAuthMode() !== 'oauth' && this.formServerURL().trim() !== '' && !this.isTesting() && !this.isSaving();
   });
+
+  constructor() {
+    // Fetched the first time the OAuth fields show, so header-token-only users never ask.
+    effect(() => {
+      if (this.formAuthMode() === 'oauth' && this.oauthRedirectUriState() === 'idle') {
+        this.loadOAuthRedirectUri();
+      }
+    });
+  }
 
   ngOnInit(): void {
     const status = this.route.snapshot.queryParamMap.get('oauth_status');
@@ -209,6 +223,33 @@ export class IntegrationsConnectorsTabComponent implements OnInit {
     this.formOAuthClientSecret.set('');
     this.formClearOAuthClientSecret.set(true);
     this.clearTestResult();
+  }
+
+  loadOAuthRedirectUri(): void {
+    this.oauthRedirectUriState.set('loading');
+    this.mcpServerService.getOAuthConfig().subscribe({
+      next: (config) => {
+        const uri = config?.redirect_uri?.trim();
+        this.oauthRedirectUri.set(uri || null);
+        this.oauthRedirectUriState.set(uri ? 'loaded' : 'error');
+      },
+      error: () => this.oauthRedirectUriState.set('error')
+    });
+  }
+
+  async copyRedirectUri(): Promise<void> {
+    const uri = this.oauthRedirectUri();
+    if (!uri) return;
+    try {
+      await navigator.clipboard.writeText(uri);
+      this.redirectUriCopied.set(true);
+      setTimeout(() => this.redirectUriCopied.set(false), 2000);
+    } catch {
+      await this.confirmationService.alert({
+        message: 'Unable to copy automatically. Please select the redirect URI and copy it manually.',
+        type: 'warning'
+      });
+    }
   }
 
   onFormValueChange(): void {

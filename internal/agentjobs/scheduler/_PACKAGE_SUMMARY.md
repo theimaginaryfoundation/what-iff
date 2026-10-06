@@ -23,6 +23,7 @@
   `whatiff.scheduler.lateness` is start time minus the job's stored `next_run_at`, for regular firings only (manual runs and deferred retries have no planned time).
   The manager isn't handed a `*telemetry.Metrics`, so it records through `telemetry.Global()`.
   Scheduled runs create no `jobs` row, so they don't appear in the job-lifecycle metrics.
+- **Schedule failure on a recurring job:** if the next run can't be computed, the job is paused and `last_error` is prefixed with `ScheduleErrorMarker` (`job.go`). A user pause clears `last_error`, so paused + marker is how the web app (`scheduleFailureReason` in `job-status.helpers.ts`) shows "Paused: schedule error" with the reason instead of a plain pause. There is no separate status value or column; keep the marker and the helper in sync.
 - **MVP note:** `Config.EnableAgentJobsScheduler` gates whether the scheduler runs at all.
 
 ## Testing

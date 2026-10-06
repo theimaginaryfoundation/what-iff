@@ -3,6 +3,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { of, throwError } from 'rxjs';
 import { ActivatedRoute, convertToParamMap } from '@angular/router';
+import { By } from '@angular/platform-browser';
+import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { MCPServerService } from '../../core/services/mcp-server.service';
 import { RitualService } from '../../core/services/ritual.service';
@@ -11,7 +13,7 @@ import { IntegrationsConnectorsTabComponent } from './integrations-connectors-ta
 describe('IntegrationsConnectorsTabComponent', () => {
   let fixture: ComponentFixture<IntegrationsConnectorsTabComponent>;
   let component: IntegrationsConnectorsTabComponent;
-  let mcpServerService: Pick<MockedObject<MCPServerService>, 'listMCPServers' | 'getMCPServer' | 'createMCPServer' | 'updateMCPServer' | 'deleteMCPServer' | 'testMCPServerConnection' | 'startOAuth'>;
+  let mcpServerService: Pick<MockedObject<MCPServerService>, 'listMCPServers' | 'getMCPServer' | 'createMCPServer' | 'updateMCPServer' | 'deleteMCPServer' | 'testMCPServerConnection' | 'startOAuth' | 'getOAuthConfig'>;
   let ritualService: Pick<MockedObject<RitualService>, 'listRituals'>;
   let confirmationService: Pick<MockedObject<ConfirmationService>, 'confirm' | 'alert'>;
   let routeParams: Record<string, string>;
@@ -41,8 +43,10 @@ describe('IntegrationsConnectorsTabComponent', () => {
       updateMCPServer: vi.fn().mockName('MCPServerService.updateMCPServer'),
       deleteMCPServer: vi.fn().mockName('MCPServerService.deleteMCPServer'),
       testMCPServerConnection: vi.fn().mockName('MCPServerService.testMCPServerConnection'),
-      startOAuth: vi.fn().mockName('MCPServerService.startOAuth')
+      startOAuth: vi.fn().mockName('MCPServerService.startOAuth'),
+      getOAuthConfig: vi.fn().mockName('MCPServerService.getOAuthConfig')
     };
+    mcpServerService.getOAuthConfig.mockReturnValue(of({ redirect_uri: 'https://api.example.com/api/mcp-servers/oauth/callback' }));
     mcpServerService.listMCPServers.mockReturnValue(of({ results: [], total_count: 0, page: 1 }));
     mcpServerService.testMCPServerConnection.mockReturnValue(of({ pass: true, tool_count: 2, message: 'ok' }));
     ritualService = {
@@ -374,6 +378,53 @@ describe('IntegrationsConnectorsTabComponent', () => {
 
     component.authenticate(makeServer({ auth_mode: 'oauth', id: 'oauth-id' }));
     expect(mcpServerService.startOAuth).toHaveBeenCalledWith('oauth-id', { redirect_after: originalHref });
+  });
+
+  it('fetches the redirect URI only once oauth mode is chosen, and shows it', () => {
+    expect(mcpServerService.getOAuthConfig).not.toHaveBeenCalled();
+
+    component.formAuthMode.set('oauth');
+    fixture.detectChanges();
+    component.formAuthMode.set('header');
+    fixture.detectChanges();
+    component.formAuthMode.set('oauth');
+    fixture.detectChanges();
+
+    expect(mcpServerService.getOAuthConfig).toHaveBeenCalledTimes(1);
+    expect(component.oauthRedirectUriState()).toBe('loaded');
+    const field = fixture.debugElement.query(By.css('[data-testid="oauth-redirect-uri"]'));
+    expect(field.nativeElement.textContent.trim()).toBe('https://api.example.com/api/mcp-servers/oauth/callback');
+  });
+
+  it('explains when the redirect URI cannot be loaded', () => {
+    mcpServerService.getOAuthConfig.mockReturnValueOnce(throwError(() => new Error('nope')));
+    component.formAuthMode.set('oauth');
+    fixture.detectChanges();
+
+    expect(component.oauthRedirectUriState()).toBe('error');
+    expect(fixture.nativeElement.textContent).toContain("Couldn't load this server's redirect URI");
+  });
+
+  it('copies the redirect URI', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    component.formAuthMode.set('oauth');
+    fixture.detectChanges();
+
+    await component.copyRedirectUri();
+
+    expect(writeText).toHaveBeenCalledWith('https://api.example.com/api/mcp-servers/oauth/callback');
+    expect(component.redirectUriCopied()).toBe(true);
+  });
+
+  it('shows the Bearer format as the token placeholder and links hints to the connectors guide', () => {
+    const token = fixture.debugElement.query(By.css('input[placeholder="Bearer your-token"]'));
+    expect(token).toBeTruthy();
+
+    const hints = fixture.debugElement.queryAll(By.directive(HelpHintComponent));
+    const labels = hints.map((h) => h.componentInstance.label());
+    expect(labels).toContain('How do I enter the token?');
+    expect(hints.every((h) => h.componentInstance.guide() === 'connectors')).toBe(true);
   });
 
   it('alerts when oauth start fails', async () => {

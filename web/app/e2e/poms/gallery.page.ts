@@ -7,7 +7,7 @@ export type GalleryMode = 'Gallery' | 'Expression Manager';
 export type GallerySource = 'All' | 'Generated' | 'Imported';
 
 /** Sort segment in the gallery toolbar. Labels carry a direction arrow when active. */
-export type GallerySort = 'Created' | 'Last used';
+export type GallerySort = 'Created';
 
 /**
  * Image gallery (`/gallery`) — features/gallery/gallery-page.component.html.

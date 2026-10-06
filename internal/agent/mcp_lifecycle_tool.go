@@ -46,7 +46,11 @@ func (a *Agent) loadMCPToolsTool(ctx context.Context, chatCtx *chatContext, inpu
 		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{ServerID: serverID.String(), Error: "tools is required and must include at least one tool name"})
 	}
 
-	server, err := a.findChatMCPServerByID(ctx, chatCtx.userID, chatCtx.chat.ID, serverID)
+	scope, err := a.mcpServersInScope(ctx, chatCtx)
+	if err != nil {
+		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{ServerID: serverID.String(), Error: err.Error()})
+	}
+	server, err := findMCPServerInScope(scope, serverID)
 	if err != nil {
 		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{ServerID: serverID.String(), Error: err.Error()})
 	}
@@ -96,7 +100,7 @@ func (a *Agent) loadMCPToolsTool(ctx context.Context, chatCtx *chatContext, inpu
 		return marshalMCPToolLifecycleResult(mcpToolLifecycleResult{ServerID: serverID.String(), Error: err.Error()})
 	}
 
-	chatCtx.setMCPServerCache(chatCtx.mcpServers, loadedByServerWithUpdate(loadedByServer, server.ID, next))
+	chatCtx.setMCPServerCache(scope, loadedByServerWithUpdate(loadedByServer, server.ID, next))
 	res := mcpToolLifecycleResult{
 		ServerID:      server.ID.String(),
 		Loaded:        loaded,
@@ -203,17 +207,15 @@ func parseMCPServerIDArg(raw string) (uuid.UUID, error) {
 	return id, nil
 }
 
-func (a *Agent) findChatMCPServerByID(ctx context.Context, userID, chatID, serverID uuid.UUID) (*models.MCPServer, error) {
-	servers, err := a.ds.ListChatMCPServers(ctx, userID, chatID)
-	if err != nil {
-		return nil, err
-	}
+// findMCPServerInScope picks the connector from the turn's in-scope list (thread-attached plus
+// the active skills' connectors; see mcpServersInScope).
+func findMCPServerInScope(servers []*models.MCPServer, serverID uuid.UUID) (*models.MCPServer, error) {
 	for _, server := range servers {
 		if server != nil && server.ID == serverID {
 			return server, nil
 		}
 	}
-	return nil, fmt.Errorf("mcp connector %s is not connected to this chat", serverID.String())
+	return nil, fmt.Errorf("mcp connector %s is not available in this chat: it is neither attached to the thread nor linked to an active skill", serverID.String())
 }
 
 type requestedTools struct {
