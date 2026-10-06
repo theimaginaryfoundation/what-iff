@@ -10,6 +10,7 @@ import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { PersonalityMediaJobService } from '../../core/services/personality-media-job.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
+import { DEFAULT_THREAD_NAME } from '../../core/models/chat.model';
 import { Personality, PersonalityExpression, buildPersonalityUpdateRequest } from '../../core/models/personality.model';
 import { environment } from '../../../environments/environment';
 import { GalleryFilters, toGalleryTileVm } from './helpers/gallery-vm.helpers';
@@ -31,7 +32,11 @@ import { personalityAccent } from '../personality/helpers/personality-vm.helpers
 import { personalityCoverUrl } from '../personality/helpers/cover-image.helpers';
 
 type GalleryMode = 'gallery' | 'expressions';
-type GallerySort = 'created' | 'last_used';
+/**
+ * Gallery images carry only `created_at` — the API has no per-image "last used" signal — so creation
+ * time is the one real sort key. A "Last used" option is deliberately absent until that data exists.
+ */
+type GallerySort = 'created';
 
 @Component({
   selector: 'app-gallery-page',
@@ -90,16 +95,9 @@ export class GalleryPageComponent implements OnInit {
   });
   readonly sortedImages = computed(() => {
     const direction = this.sortDescending() ? -1 : 1;
-    const sortBy = this.sort();
-    return [...this.view.filteredImages()].sort((a, b) => {
-      const dateA = Date.parse(a.created_at);
-      const dateB = Date.parse(b.created_at);
-      if (sortBy === 'last_used') {
-        // Last-used metadata is not yet exposed by the API; use creation time fallback.
-        return (dateA - dateB) * direction;
-      }
-      return (dateA - dateB) * direction;
-    });
+    return [...this.view.filteredImages()].sort(
+      (a, b) => (Date.parse(a.created_at) - Date.parse(b.created_at)) * direction,
+    );
   });
   /** What an empty grid says: a new folder is a prompt to fill it, not a failed search. */
   readonly emptyMessage = computed(() => {
@@ -219,13 +217,9 @@ export class GalleryPageComponent implements OnInit {
     this.onFilterChange({ source });
   }
 
-  /**
-   * Tooltip for a sort button, reflecting the current direction. "Last used" has no direction
-   * wording because the API doesn't expose last-used dates yet (it falls back to created time).
-   */
+  /** Tooltip for a sort button, reflecting the current direction. */
   sortTooltip(sort: GallerySort): string {
     const active = this.sort() === sort;
-    if (sort === 'last_used') return active ? 'Click again to flip the order' : '';
     if (!active) return 'Sort by date created, newest first';
     return this.sortDescending() ? 'Newest first — click to flip' : 'Oldest first — click to flip';
   }
@@ -332,7 +326,7 @@ export class GalleryPageComponent implements OnInit {
 
   onStartNewChat(imageId: string): void {
     this.onCloseDetail();
-    this.chatService.createChat({ name: 'New Chat' }).subscribe({
+    this.chatService.createChat({ name: DEFAULT_THREAD_NAME }).subscribe({
       next: chat => {
         void this.router.navigate(['/chat', chat.id], {
           queryParams: { galleryImageId: imageId },

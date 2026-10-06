@@ -124,8 +124,12 @@
   </div>
 
   <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 h-fit">
-    <h2 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+    <h2 class="inline-flex items-center gap-1 text-sm font-semibold text-gray-900 dark:text-white mb-3">
       {{ editingServer() ? 'Edit connector' : 'Add connector' }}
+      <ui-help-hint label="What is a connector?" heading="Connectors" guide="connectors" guideLabel="Read the connectors guide" align="end">
+        A connector links an outside service (an MCP server) so your personalities can use its tools. After saving,
+        attach it to a thread from the thread's Tools panel.
+      </ui-help-hint>
     </h2>
     <div class="space-y-3">
       <div>
@@ -154,9 +158,15 @@
 
       @if (formAuthMode() === 'header') {
       <div>
-        <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Authentication token</label>
+        <div class="flex items-center gap-1 mb-1">
+          <label class="text-xs font-medium text-gray-700 dark:text-gray-300">Authentication token</label>
+          <ui-help-hint label="How do I enter the token?" heading="Authentication token" guide="connectors" guideLabel="Read the connectors guide" align="end">
+            Sent exactly as you type it, as the server's Authorization header. WhatIff doesn't add "Bearer" for you,
+            so for a bearer token type Bearer, a space, then the token. Leave it empty if the server needs no sign-in.
+          </ui-help-hint>
+        </div>
         <div class="flex items-center gap-2">
-          <input [ngModel]="formAuthentication()" (ngModelChange)="onAuthenticationChange($event)" type="text" [placeholder]="editingServer() ? 'Leave empty to keep existing token' : ''"
+          <input [ngModel]="formAuthentication()" (ngModelChange)="onAuthenticationChange($event)" type="text" [placeholder]="editingServer() ? 'Leave empty to keep existing token' : 'Bearer your-token'"
             class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm" />
           @if (editingServer()) {
             <button
@@ -185,6 +195,39 @@
       }
 
       @if (formAuthMode() === 'oauth') {
+        <div>
+          <div class="flex items-center gap-1 mb-1">
+            <label class="text-xs font-medium text-gray-700 dark:text-gray-300">Redirect URI</label>
+            <ui-help-hint label="What is the redirect URI?" heading="Redirect URI" guide="connectors" guideLabel="Read the connectors guide" align="end">
+              Register this exact address as the redirect (callback) URI in the OAuth app you set up with the provider.
+              It comes from this WhatIff server's settings, so a self-hosted install shows its own address.
+            </ui-help-hint>
+          </div>
+          @switch (oauthRedirectUriState()) {
+            @case ('loaded') {
+              <div class="flex items-start gap-2">
+                <!-- Wraps rather than scrolls: people compare it character by character with the provider's field. -->
+                <code data-testid="oauth-redirect-uri"
+                  class="block w-full select-all break-all rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-900/60 text-gray-900 dark:text-white px-3 py-2 text-xs font-mono">{{ oauthRedirectUri() }}</code>
+                <button (click)="copyRedirectUri()" type="button"
+                  class="shrink-0 px-3 py-2 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200 dark:text-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-700 dark:hover:bg-indigo-900/30">
+                  {{ redirectUriCopied() ? 'Copied' : 'Copy' }}
+                </button>
+              </div>
+            }
+            @case ('error') {
+              <p class="text-[11px] text-amber-700 dark:text-amber-300">
+                Couldn't load this server's redirect URI. Ask whoever runs your WhatIff server for its MCP OAuth callback address.
+              </p>
+            }
+            @default {
+              <p class="text-[11px] text-gray-500 dark:text-gray-400">Loading redirect URI...</p>
+            }
+          }
+          <p class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+            Fill in the provider's details below and save, then select Authenticate on the connector to sign in.
+          </p>
+        </div>
         <div>
           <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">OAuth Authorization URL</label>
           <input [ngModel]="formOAuthAuthURL()" (ngModelChange)="formOAuthAuthURL.set($event); onFormValueChange()" type="text"
@@ -233,10 +276,16 @@
           </select>
         </div>
       }
-      <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-        <input [ngModel]="formDefaultEnabled()" (ngModelChange)="formDefaultEnabled.set($event)" type="checkbox" class="rounded border-gray-300 dark:border-gray-600" />
-        Enabled by default in new threads
-      </label>
+      <div class="flex items-center gap-1">
+        <label class="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+          <input [ngModel]="formDefaultEnabled()" (ngModelChange)="formDefaultEnabled.set($event)" type="checkbox" class="rounded border-gray-300 dark:border-gray-600" />
+          Enabled by default in new threads
+        </label>
+        <ui-help-hint label="What does enabled by default do?" heading="Enabled by default" guide="connectors" guideLabel="Read the connectors guide" align="end">
+          Attaches this connector to threads you start from now on. Existing threads don't change; attach it to those from
+          the thread's Tools panel. Your personality loads its tools only when it needs them.
+        </ui-help-hint>
+      </div>
 
       @if (editingServer()) {
         <div class="pt-2 border-t border-gray-200 dark:border-gray-700">

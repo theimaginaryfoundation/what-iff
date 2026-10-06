@@ -71,10 +71,6 @@
               <dd><span [uiTooltip]="levelHint(currentMemory.level)">{{ levelLabel(currentMemory.level) }}</span></dd>
             </div>
             <div>
-              <dt class="font-medium text-text-primary">Type</dt>
-              <dd>{{ currentMemory.type }}</dd>
-            </div>
-            <div>
               <dt class="font-medium text-text-primary">Confidence</dt>
               <dd><span [uiTooltip]="confidenceHint">{{ currentMemory.confidence | percent }}</span></dd>
             </div>

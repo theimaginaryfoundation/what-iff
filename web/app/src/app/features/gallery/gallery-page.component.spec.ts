@@ -29,6 +29,11 @@ describe('GalleryPageComponent refreshing', () => {
   beforeEach(() => {
     view = {
       importRequestTick: signal(0),
+      filteredImages: signal([
+        { id: 'old', created_at: '2026-01-01T00:00:00Z' },
+        { id: 'new', created_at: '2026-03-01T00:00:00Z' },
+        { id: 'mid', created_at: '2026-02-01T00:00:00Z' },
+      ]),
       setMode: vi.fn(),
       loadInitial: vi.fn(),
       loadFolders: vi.fn(),
@@ -59,6 +64,14 @@ describe('GalleryPageComponent refreshing', () => {
     view.refresh.mockClear();
     view.loadFolders.mockClear();
     view.loadInitial.mockClear();
+  });
+
+  it('sorts by created date, newest first, and flips when the Created sort is clicked again', () => {
+    expect(component.sortedImages().map(i => i.id)).toEqual(['new', 'mid', 'old']);
+
+    component.setSort('created');
+
+    expect(component.sortedImages().map(i => i.id)).toEqual(['old', 'mid', 'new']);
   });
 
   it('reloads the images and folders when you come back from the Expression Manager', () => {

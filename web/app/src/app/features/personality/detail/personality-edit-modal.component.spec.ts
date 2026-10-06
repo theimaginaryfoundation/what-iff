@@ -170,6 +170,33 @@ describe('PersonalityEditModalComponent', () => {
         expect(component.dismissed.emit).toHaveBeenCalled();
     });
 
+    it('manage expressions navigates without confirming when the form is clean', async () => {
+        vi.spyOn(component.dismissed, 'emit').mockReturnValue(undefined);
+
+        await component.manageExpressions();
+
+        expect(confirmDiscardCalls).toBe(0);
+        expect(component.dismissed.emit).toHaveBeenCalled();
+        expect(router.navigate).toHaveBeenCalled();
+    });
+
+    it('manage expressions confirms before discarding a dirty form and stays put when declined', async () => {
+        vi.spyOn(component.dismissed, 'emit').mockReturnValue(undefined);
+        component.setDraftField('name', 'Vera 2');
+
+        confirmDiscardResult = false;
+        await component.manageExpressions();
+        expect(confirmDiscardCalls).toBe(1);
+        expect(component.dismissed.emit).not.toHaveBeenCalled();
+        expect(router.navigate).not.toHaveBeenCalled();
+
+        confirmDiscardResult = true;
+        await component.manageExpressions();
+        expect(confirmDiscardCalls).toBe(2);
+        expect(component.dismissed.emit).toHaveBeenCalled();
+        expect(router.navigate).toHaveBeenCalled();
+    });
+
     it('saves updates and emits saved + dismissed', () => {
         vi.spyOn(component.saved, 'emit').mockReturnValue(undefined);
         vi.spyOn(component.dismissed, 'emit').mockReturnValue(undefined);
