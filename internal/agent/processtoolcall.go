@@ -127,9 +127,16 @@ func (a *Agent) dispatchMCPToolUse(ctx context.Context, chatCtx *chatContext, us
 	// The in-scope connectors (thread-attached + active skills'), same set list/load see. A tool
 	// whose connector fell out of scope (e.g. its Mode was switched away) is not callable even
 	// if its loaded state persists.
-	servers := chatCtx.mcpServers
-	if len(servers) == 0 {
-		servers = a.getChatMCPServers(ctx, chatCtx.userID, chatCtx.chat.ID, chatCtx.mcpRitualIDs)
+	servers, err := a.mcpServersInScope(ctx, chatCtx)
+	if err != nil {
+		a.logger.Warn("failed to resolve in-scope MCP connectors for dispatch",
+			zap.String("chat_id", chatCtx.chat.ID.String()),
+			zap.String("user_id", chatCtx.userID.String()),
+			zap.Error(err))
+		return "", nil, fmt.Errorf("unable to resolve the connectors available in this chat; retry the call")
+	}
+	if len(chatCtx.mcpServers) == 0 {
+		// Cache miss: remember the scope together with the chat's loaded-tool state.
 		loadedByServer, err := a.ds.ListChatMCPLoadedTools(ctx, chatCtx.userID, chatCtx.chat.ID)
 		if err != nil {
 			a.logger.Warn("failed to load chat MCP loaded-tool state for dispatch",
@@ -141,7 +148,7 @@ func (a *Agent) dispatchMCPToolUse(ctx context.Context, chatCtx *chatContext, us
 		chatCtx.setMCPServerCache(servers, loadedByServer)
 	}
 	if !mcpToolIsLoaded(chatCtx, use.Name) {
-		if mcpToolLoadedOutOfScope(chatCtx, use.Name) {
+		if mcpToolLoadedOutOfScope(chatCtx, servers, use.Name) {
 			return "", nil, fmt.Errorf("mcp tool %q belongs to a connector that is not in scope right now (it comes from a skill that is not active); it can't be called until that skill is active again", use.Name)
 		}
 		return "", nil, fmt.Errorf("mcp tool %q is not loaded for this chat; call %q first", use.Name, tools.LoadMCPToolsToolSpec.Name)
@@ -154,14 +161,16 @@ func (a *Agent) dispatchMCPToolUse(ctx context.Context, chatCtx *chatContext, us
 }
 
 // mcpToolLoadedOutOfScope reports whether the tool is recorded as loaded for a connector that
-// is no longer in this turn's scope, so dispatch can say why it is refused.
-func mcpToolLoadedOutOfScope(chatCtx *chatContext, fullToolName string) bool {
+// is not among inScopeServers, so dispatch can say why it is refused. The caller passes the
+// resolved scope (from mcpServersInScope) rather than this reading chatCtx.mcpServers, which is
+// empty until the turn's cache is filled and would make every loaded tool look out of scope.
+func mcpToolLoadedOutOfScope(chatCtx *chatContext, inScopeServers []*models.MCPServer, fullToolName string) bool {
 	if chatCtx == nil {
 		return false
 	}
 	name := strings.TrimSpace(fullToolName)
-	inScope := make(map[uuid.UUID]struct{}, len(chatCtx.mcpServers))
-	for _, server := range chatCtx.mcpServers {
+	inScope := make(map[uuid.UUID]struct{}, len(inScopeServers))
+	for _, server := range inScopeServers {
 		if server != nil {
 			inScope[server.ID] = struct{}{}
 		}
