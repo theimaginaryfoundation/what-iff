@@ -52,7 +52,11 @@ const (
 	JobTypeAgentJobRun  = "agent_job_run"
 	defaultModelNameKey = "DEFAULT_MODEL_NAME"
 
-	defaultChatName = "New Chat"
+	// defaultChatName is the placeholder name clients give a freshly created thread; the first
+	// reply replaces it with a generated name. legacyDefaultChatName is what older clients sent
+	// ("chat" before the app standardised on "thread") and is still auto-renamed.
+	defaultChatName       = "New thread"
+	legacyDefaultChatName = "New Chat"
 
 	checkpointMaxAssistantMessagesSinceStart   = 5
 	checkpointMaxAssistantMessagesSinceSummary = 20
@@ -2581,6 +2585,11 @@ func (a *Agent) resolvePersonalityName(ctx context.Context, userID, personalityI
 	return strings.TrimSpace(personality.Name)
 }
 
+// isDefaultChatName reports whether name is still a client-supplied placeholder (current or legacy).
+func isDefaultChatName(name string) bool {
+	return name == defaultChatName || name == legacyDefaultChatName
+}
+
 // finalizeChat finalizes the chat by generating a name if needed and extracting memories
 func (a *Agent) finalizeChat(ctx context.Context, userID uuid.UUID, chatMessage, agentMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext, qd metering.Decision) {
 	start := time.Now()
@@ -2588,7 +2597,7 @@ func (a *Agent) finalizeChat(ctx context.Context, userID uuid.UUID, chatMessage,
 		a.recordTurnStage(ctx, turnStagePostProcess, time.Since(start))
 	}()
 	// Generate chat name if it's still the default
-	if chatCtx.chat.Name == defaultChatName {
+	if isDefaultChatName(chatCtx.chat.Name) {
 		doneChatName := a.timeTurnStage(ctx, turnStageChatName)
 		nameCtx, cancelName := context.WithTimeout(ctx, chatNameTimeout)
 		chatName, err := a.generateChatName(nameCtx, chatMessage.Message)

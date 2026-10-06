@@ -9,6 +9,7 @@ import { PersonalityGenFlowService } from '../../../core/services/personality-ge
 import { PersonalityMediaJobService } from '../../../core/services/personality-media-job.service';
 import { ImageGalleryService } from '../../../core/services/image-gallery.service';
 import { ConfirmationService } from '../../../core/services/confirmation.service';
+import { DEFAULT_THREAD_NAME } from '../../../core/models/chat.model';
 import { ChatService } from '../../../core/services/chat.service';
 import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
@@ -417,7 +418,7 @@ export class PersonalityGenerateComponent implements OnInit {
         try {
           const chat = await firstValueFrom(
             this.chatService.createChat({
-              name: 'New Chat',
+              name: DEFAULT_THREAD_NAME,
               personality_id: personality.id,
             }),
           );

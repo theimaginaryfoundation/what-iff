@@ -77,6 +77,12 @@ func New(store Store, client *http.Client, logger *zap.Logger, cfg Config) *Serv
 	}
 }
 
+// CallbackURL returns the redirect_uri this deployment sends to OAuth providers
+// (MCP_OAUTH_REDIRECT_URL, or the localhost default).
+func (s *Service) CallbackURL() string {
+	return s.redirectURL
+}
+
 func (s *Service) StartAuth(ctx context.Context, userID, connectorID uuid.UUID, redirectAfter string) (string, error) {
 	server, err := s.store.GetMCPServer(ctx, userID, connectorID)
 	if err != nil {

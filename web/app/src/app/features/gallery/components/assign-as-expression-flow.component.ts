@@ -35,6 +35,8 @@ export class AssignAsExpressionFlowComponent {
   readonly expressionKey = signal('');
   readonly label = signal('');
   readonly availableExpressionKeys = signal<string[]>([]);
+  /** Existing labels by expression key, so picking an existing slot shows (and keeps) its current label. */
+  private existingLabels = new Map<string, string>();
   readonly loadingKeys = signal(false);
   readonly submitting = signal(false);
   readonly error = signal<string | null>(null);
@@ -51,6 +53,7 @@ export class AssignAsExpressionFlowComponent {
     this.selectedPersonalityId.set(personalityId);
     this.expressionKey.set('');
     this.label.set('');
+    this.existingLabels = new Map();
     if (!personalityId) {
       this.availableExpressionKeys.set([]);
       return;
@@ -60,7 +63,7 @@ export class AssignAsExpressionFlowComponent {
 
   chooseKey(key: string): void {
     this.expressionKey.set(key);
-    this.label.set(this.toTitleCase(key));
+    this.label.set(this.existingLabels.get(key) || this.toTitleCase(key));
   }
 
   submit(): void {
@@ -68,6 +71,9 @@ export class AssignAsExpressionFlowComponent {
     if (!imageId || !this.selectedPersonalityId() || !this.expressionKey().trim()) {
       return;
     }
+
+    // A blank label is omitted (not sent as null) so an existing slot keeps its current label.
+    const label = this.label().trim() || undefined;
 
     this.error.set(null);
     this.submitting.set(true);
@@ -77,6 +83,8 @@ export class AssignAsExpressionFlowComponent {
         this.expressionKey().trim().toLowerCase(),
         imageId,
         this.imageUrl(),
+        undefined,
+        label,
       )
       .subscribe({
         next: () => {
@@ -96,6 +104,9 @@ export class AssignAsExpressionFlowComponent {
     this.personalityService.listExpressions(personalityId).subscribe({
       next: rows => {
         this.loadingKeys.set(false);
+        this.existingLabels = new Map(
+          rows.filter(row => row.label?.trim()).map(row => [row.expression_key, row.label!.trim()]),
+        );
         this.availableExpressionKeys.set(rows.map(row => row.expression_key).sort());
       },
       error: () => {
@@ -111,6 +122,7 @@ export class AssignAsExpressionFlowComponent {
     this.expressionKey.set('');
     this.label.set('');
     this.availableExpressionKeys.set([]);
+    this.existingLabels = new Map();
     this.loadingKeys.set(false);
     this.submitting.set(false);
     this.error.set(null);

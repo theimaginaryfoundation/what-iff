@@ -10,74 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	entmemory "github.com/theimaginaryfoundation/what-iff/ent/memory"
 	entmerge "github.com/theimaginaryfoundation/what-iff/ent/memorymergeevent"
-	"github.com/theimaginaryfoundation/what-iff/internal/memoryutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
-
-func TestMergeLiveExtractedMemory_BatchCreateAndFoldLive(t *testing.T) {
-	ds, cleanup := newMemoryMergeTestDatastore(t)
-	defer cleanup()
-
-	ctx := context.Background()
-	userID := uuid.New()
-	chatID := uuid.New()
-
-	require.NoError(t, insertMemoryMergeTestUser(t, ds, userID))
-	require.NoError(t, insertMemoryMergeTestChat(t, ds, userID, chatID))
-
-	liveID := uuid.New()
-	require.NoError(t, insertMemoryMergeTestMemory(t, ds, liveID, userID, chatID, entmemory.ScopeChat, "Prefers dark mode", nil))
-
-	collapsed := memoryutil.CollapsedExtractedMemory{
-		Content:             "Prefers dark mode",
-		Scope:               "Chat",
-		Confidence:          models.MemoryConfidenceHigh,
-		BatchDuplicateCount: 2,
-	}
-	folded, err := ds.MergeLiveExtractedMemory(ctx, userID, chatID, collapsed, testEmbeddingVector(), uuid.Nil, []uuid.UUID{liveID})
-	require.NoError(t, err)
-	require.NotNil(t, folded)
-	require.Equal(t, liveID, folded.ID)
-	require.NotNil(t, folded.ChainMetadata)
-	// duplicate_count is a tally of total observations: the pre-existing survivor stands for one
-	// observation (even with no prior chain metadata) plus the 2 folded this batch = 3.
-	require.Equal(t, 3, folded.ChainMetadata.DuplicateCount)
-
-	events, err := ds.ListMemoryMergeEvents(ctx, userID, 1, 10, models.MemoryMergeEventFilters{})
-	require.NoError(t, err)
-	require.Equal(t, 1, events.TotalCount)
-	event := events.Results[0].(*models.MemoryMergeEvent)
-	require.Equal(t, models.MemoryMergeTypeFoldLive, event.MergeType)
-	require.Equal(t, 2, event.DuplicatesFolded)
-	require.Len(t, event.SourceMembers, 3)
-	require.False(t, event.SourceMembers[0].IsNew)
-	require.Equal(t, liveID, *event.SourceMembers[0].MemoryID)
-	require.True(t, event.SourceMembers[1].IsNew)
-
-	collapsedNew := memoryutil.CollapsedExtractedMemory{
-		Content:             "Drinks tea daily",
-		Scope:               "User",
-		Confidence:          models.MemoryConfidenceMedium,
-		BatchDuplicateCount: 3,
-	}
-	created, err := ds.MergeLiveExtractedMemory(ctx, userID, chatID, collapsedNew, testEmbeddingVector(), uuid.Nil, nil)
-	require.NoError(t, err)
-	require.NotNil(t, created)
-	require.NotNil(t, created.ChainMetadata)
-	require.Equal(t, 3, created.ChainMetadata.DuplicateCount)
-
-	reverted, err := ds.UndoMemoryMergeEvent(ctx, userID, event.ID)
-	require.NoError(t, err)
-	require.NotNil(t, reverted.RevertedAt)
-
-	restored, err := ds.dbClient.Memory.Get(ctx, liveID)
-	require.NoError(t, err)
-	require.Nil(t, restored.ChainMetadata)
-
-	exists, err := ds.dbClient.Memory.Query().Where(entmemory.ID(created.ID)).Exist(ctx)
-	require.NoError(t, err)
-	require.True(t, exists)
-}
 
 // Legacy create-type merge events remain undoable (delete survivor) even though new code no longer
 // emits them — keeps undo working for rows written before the created_memories refactor.
@@ -131,20 +65,18 @@ func TestListMemoryMergeEvents_HidesCreates(t *testing.T) {
 	require.NoError(t, insertMemoryMergeTestUser(t, ds, userID))
 	require.NoError(t, insertMemoryMergeTestChat(t, ds, userID, chatID))
 
-	_, err := ds.MergeLiveExtractedMemory(ctx, userID, chatID, memoryutil.CollapsedExtractedMemory{
-		Content:             "Singleton fact",
-		Scope:               "User",
-		Confidence:          models.MemoryConfidenceMedium,
-		BatchDuplicateCount: 1,
-	}, testEmbeddingVector(), uuid.Nil, nil)
+	_, err := ds.PersistMemoryMergeGroup(ctx, userID, chatID, models.MemoryMergeGroupProposal{
+		CanonicalContent: "Singleton fact",
+		Scope:            "User",
+		Confidence:       models.MemoryConfidenceMedium,
+	}, 1, nil, nil, testEmbeddingVector(), uuid.Nil, nil, nil)
 	require.NoError(t, err)
 
-	_, err = ds.MergeLiveExtractedMemory(ctx, userID, chatID, memoryutil.CollapsedExtractedMemory{
-		Content:             "Batch-collapsed fact",
-		Scope:               "User",
-		Confidence:          models.MemoryConfidenceMedium,
-		BatchDuplicateCount: 3,
-	}, testEmbeddingVector(), uuid.Nil, nil)
+	_, err = ds.PersistMemoryMergeGroup(ctx, userID, chatID, models.MemoryMergeGroupProposal{
+		CanonicalContent: "Batch-collapsed fact",
+		Scope:            "User",
+		Confidence:       models.MemoryConfidenceMedium,
+	}, 3, nil, nil, testEmbeddingVector(), uuid.Nil, nil, nil)
 	require.NoError(t, err)
 
 	listed, err := ds.ListMemoryMergeEvents(ctx, userID, 1, 10, models.MemoryMergeEventFilters{})
