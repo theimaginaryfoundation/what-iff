@@ -100,6 +100,12 @@ describe('ExpressionAssignmentService', () => {
         });
     });
 
+    it('sends the label alongside the image when provided', async () => {
+        personalityService.upsertExpression.mockReturnValue(of(makeServerExpression()));
+        service.assignFromGallery('p-1', 'happy', 'img-1', null, undefined, 'Happy').subscribe();
+        expect(personalityService.upsertExpression).toHaveBeenCalledWith('p-1', 'happy', { image_id: 'img-1', label: 'Happy' });
+    });
+
     it('applies an optimistic update before the network commit', async () => {
         const { ctx, state, history } = makeContext({ imageId: null, imageUrl: null, label: null, exists: false });
         personalityService.upsertExpression.mockReturnValue(of(makeServerExpression({ image_id: 'img-1', image_url: '/server.png' })));
