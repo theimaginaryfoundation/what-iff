@@ -4260,7 +4260,7 @@ paths:
   /chat/{id}/context:
     get:
       summary: Get chat context
-      description: Returns the current scratchpad and checkpoint summary that power the chat session. A sandboxed thread (`context_scope: sandbox`) has no scratchpad: `active_scratchpad` is empty for it.
+      description: Returns the current scratchpad and checkpoint summary that power the chat session. A sandboxed thread (`context_scope` of `sandbox`) has no scratchpad, so `active_scratchpad` is empty for it.
       tags: [Chat Management]
       parameters:
         - name: id

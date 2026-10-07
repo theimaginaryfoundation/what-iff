@@ -6224,7 +6224,7 @@ export interface paths {
         };
         /**
          * Get chat context
-         * @description Returns the current scratchpad and checkpoint summary that power the chat session.
+         * @description Returns the current scratchpad and checkpoint summary that power the chat session. A sandboxed thread (`context_scope` of `sandbox`) has no scratchpad, so `active_scratchpad` is empty for it.
          */
         get: {
             parameters: {
@@ -6274,7 +6274,7 @@ export interface paths {
         head?: never;
         /**
          * Patch chat context
-         * @description Updates the active scratchpad for the chat's active personality (last-write-wins).
+         * @description Updates the active scratchpad for the chat's active personality (last-write-wins). A sandboxed thread has no scratchpad, so this is a 400 for it.
          */
         patch: {
             parameters: {
