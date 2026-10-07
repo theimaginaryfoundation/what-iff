@@ -1,5 +1,8 @@
-import { ChangeDetectionStrategy, Component, effect, inject, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
+
+import { isSandboxed } from '../../core/models/chat.model';
 
 import { ContextPanelService } from '../chat/services/context-panel.service';
 import { DiscordBinding, DiscordService, bindingLabel } from './discord.service';
@@ -13,8 +16,20 @@ import { DiscordBinding, DiscordService, bindingLabel } from './discord.service'
 @Component({
   selector: 'app-discord-composer-toggle',
   standalone: true,
+  imports: [RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    @if (pausedBindings().length > 0) {
+      <p class="paused" role="status" data-testid="discord-paused-note">
+        This thread is no longer sandboxed, so Discord tags in
+        @for (b of pausedBindings(); track b.id) {
+          <strong>{{ label(b) }}</strong
+          >{{ $last ? '' : ', ' }}
+        }
+        are paused until you acknowledge it, or move the channel to a new sandboxed thread, in
+        <a [routerLink]="['/integrations']" [queryParams]="{ tab: 'discord' }">Integrations → Discord</a>.
+      </p>
+    }
     @if (bindings().length > 0) {
       <div class="toggle" data-testid="discord-composer-toggle">
         @for (b of bindings(); track b.id) {
@@ -36,6 +51,21 @@ import { DiscordBinding, DiscordService, bindingLabel } from './discord.service'
   `,
   styles: [
     `
+      .paused {
+        background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+        border: 1px solid color-mix(in srgb, var(--color-warning) 40%, var(--color-border-base));
+        border-radius: 0.5rem;
+        color: var(--color-text-primary);
+        font-size: 0.75rem;
+        margin: 0 0 0.5rem;
+        padding: 0.5rem 0.75rem;
+      }
+
+      .paused a {
+        color: var(--color-accent, var(--color-text-primary));
+        text-decoration: underline;
+      }
+
       .toggle {
         display: flex;
         flex-wrap: wrap;
@@ -127,6 +157,16 @@ export class DiscordComposerToggleComponent {
   private readonly contextPanel = inject(ContextPanelService);
 
   readonly bindings = signal<DiscordBinding[]>([]);
+  /**
+   * Bindings the relay will not answer right now: the thread is not sandboxed (read live from the
+   * panel's chat, so leaving the sandbox shows this at once) and the owner has not acknowledged
+   * the binding. Nothing is posted to Discord about it, so this is where the owner learns.
+   */
+  readonly pausedBindings = computed(() => {
+    const chat = this.contextPanel.activeChat();
+    if (!chat || isSandboxed(chat)) return [];
+    return this.bindings().filter(b => !b.allow_unrestricted);
+  });
   readonly pending = signal<ReadonlySet<string>>(new Set());
   readonly saving = signal(false);
   readonly label = bindingLabel;

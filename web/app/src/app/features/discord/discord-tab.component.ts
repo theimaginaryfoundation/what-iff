@@ -21,6 +21,7 @@ import {
   bindingLabel,
   needsRelayAcknowledgement,
 } from './discord.service';
+import { DiscordBindingThreadComponent } from './discord-binding-thread.component';
 import { DiscordIdChipsComponent } from './discord-id-chips.component';
 
 /** Per-bot "connect a channel" form state. */
@@ -54,7 +55,7 @@ interface AccessDraft {
 @Component({
   selector: 'app-discord-tab',
   standalone: true,
-  imports: [DatePipe, FormsModule, RouterLink, DiscordIdChipsComponent],
+  imports: [DatePipe, FormsModule, RouterLink, DiscordBindingThreadComponent, DiscordIdChipsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-6" data-testid="discord-tab">
@@ -236,6 +237,7 @@ interface AccessDraft {
                         >
                       }
                       <a class="text-indigo-600 underline dark:text-indigo-400" [routerLink]="['/chat', b.chat_id]">Open relay thread</a>
+                      <app-discord-binding-thread [binding]="b" [personalityId]="bot.personality_id" (moved)="onThreadMoved($event)" />
                       @if (b.last_activity_at) {
                         <span>Last activity {{ b.last_activity_at | date: 'short' }}</span>
                       }
@@ -635,6 +637,11 @@ export class DiscordTabComponent implements OnInit {
       async () => this.replaceBinding(await firstValueFrom(this.discord.updateBinding(b.id, { inbound_enabled: on }))),
       'Could not update the channel.',
     );
+  }
+
+  /** The binding now points at another thread (app-discord-binding-thread); show it as the server returned it. */
+  onThreadMoved(updated: DiscordBinding): void {
+    this.replaceBinding(updated);
   }
 
   async setAcknowledged(b: DiscordBinding, on: boolean): Promise<void> {

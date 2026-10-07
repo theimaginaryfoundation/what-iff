@@ -1,4 +1,5 @@
 import { signal } from '@angular/core';
+import { provideRouter } from '@angular/router';
 import { TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
 
@@ -31,6 +32,7 @@ async function settle(): Promise<void> {
 describe('DiscordComposerToggleComponent', () => {
   const activeChatId = signal<string | null>('chat-1');
   const latestBreakdown = signal<unknown>(null);
+  const activeChat = signal<{ id: string; context_scope?: 'account' | 'sandbox' } | null>({ id: 'chat-1', context_scope: 'sandbox' });
   let state: DiscordChatState;
   let setPostNextReply: ReturnType<typeof vi.fn>;
 
@@ -39,7 +41,8 @@ describe('DiscordComposerToggleComponent', () => {
     TestBed.configureTestingModule({
       imports: [DiscordComposerToggleComponent],
       providers: [
-        { provide: ContextPanelService, useValue: { activeChatId, latestBreakdown } },
+        provideRouter([]),
+        { provide: ContextPanelService, useValue: { activeChatId, latestBreakdown, activeChat } },
         { provide: DiscordService, useValue: { available: () => of(enabled), chatState: () => of(state), setPostNextReply } },
       ],
     });
@@ -52,6 +55,7 @@ describe('DiscordComposerToggleComponent', () => {
 
   beforeEach(() => {
     state = { bindings: [binding], pending_binding_ids: [], links: [] };
+    activeChat.set({ id: 'chat-1', context_scope: 'sandbox' });
   });
 
   it('shows a toggle per connected channel and arms the next reply', async () => {
@@ -66,6 +70,26 @@ describe('DiscordComposerToggleComponent', () => {
 
     expect(setPostNextReply).toHaveBeenCalledWith('chat-1', 'b1', true);
     expect(fixture.componentInstance.pending().has('b1')).toBe(true);
+  });
+
+  it('says tags are paused, with a way to Integrations, once the thread leaves the sandbox unacknowledged', async () => {
+    activeChat.set({ id: 'chat-1', context_scope: 'account' });
+    const fixture = await create();
+    const note = fixture.nativeElement.querySelector('[data-testid=discord-paused-note]') as HTMLElement;
+    expect(note.textContent).toContain('no longer sandboxed');
+    expect(note.textContent).toContain('#general · Home');
+    expect(note.querySelector('a')?.getAttribute('href')).toContain('/integrations');
+
+    activeChat.set({ id: 'chat-1', context_scope: 'sandbox' });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[data-testid=discord-paused-note]')).toBeNull();
+  });
+
+  it('says nothing once the binding is acknowledged', async () => {
+    activeChat.set({ id: 'chat-1', context_scope: 'account' });
+    state = { bindings: [{ ...binding, allow_unrestricted: true }], pending_binding_ids: [], links: [] };
+    const fixture = await create();
+    expect(fixture.nativeElement.querySelector('[data-testid=discord-paused-note]')).toBeNull();
   });
 
   it('reflects a pending post from the server', async () => {
