@@ -80,7 +80,7 @@ describe('ContextPanelComponent', () => {
     it('shows the Sandbox control on the Memories tab only', () => {
         context.setActiveTab('memories');
         fixture.detectChanges();
-        expect(fixture.nativeElement.querySelector('app-thread-sandbox input[type="checkbox"]')).not.toBeNull();
+        expect(fixture.nativeElement.querySelector('app-thread-sandbox .sandbox')).not.toBeNull();
 
         context.setActiveTab('tools');
         fixture.detectChanges();

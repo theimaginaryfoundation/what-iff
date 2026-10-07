@@ -160,9 +160,11 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   `ListMemoryMergeEvents` takes `OnlyChatID` (fold events whose survivor memory was created in that chat; link events are excluded).
   `MemoryIDsCreatedInChat` re-checks persisted memory ids against the chat's own memories.
   `toChatModel` blanks the personality scratchpad for a sandboxed chat; `GetChatContext` (the owner's context panel, which saves it back) still reads it.
-  `CreateChat` and `UpdateChat` write `sandboxed`; `UpdateChat` writes it only when `SetSandboxed` is true, so a stale copy saved by a turn cannot un-sandbox a chat.
+  `CreateChat` and `UpdateChat` write `context_scope` (validated; `ErrInvalidRequestBody` for an unknown scope); `UpdateChat` writes it only when `SetContextScope` is true, so a stale copy saved by a turn cannot un-sandbox a chat.
+  `CreateChat` honours `Chat.DisabledTools`, and gives a chat created sandboxed with no list of its own the registered sandbox defaults (`models.SandboxDefaultDisabledTools`), so every creation path starts a sandbox the same way.
+  `memoryOfChat` (`memory_chat_scope.go`) is the one predicate for "the chat's own memories": created in it AND Chat- or Summary-scoped; `MemoryIDsCreatedInChat`, `ensureMemoriesCreatedInChatTx` and the `OnlyChatID` merge-event filter all use it, so a User-scoped memory that merely came from the chat is outside the sandbox.
   `ListFileAttachmentsInChatScope` returns a conversation's uploads (plus a personality's documents when a personality id is given); a sandboxed chat passes none, so it sees only its own uploads.
-  The account export, account backup and conversation import carry the chat's `sandboxed` flag; absent reads as false.
+  The account export (`whatiff_context_scope`, omitted for `account`), account backup and conversation import carry the chat's `context_scope`; absent reads as `account`.
   `WithChatMemoriesOnly` confines `PersistMemoryMergeGroup` and `PersistMemoryLinkGroup` to memories the asking chat created (`ErrMemoryOutsideChat`, nothing written) and makes anything they create Chat-scoped.
   `ErrMemoryIDPrefixAmbiguous` lets a sandboxed chat treat an ambiguous id prefix like a missing memory.
 

@@ -1,3 +1,11 @@
+/** How much of the account a thread may read; see `Chat.context_scope`. */
+export type ContextScope = 'account' | 'sandbox';
+
+/** Whether a thread is sandboxed: the one check every sandbox rule in the UI asks. */
+export function isSandboxed(chat: Pick<Chat, 'context_scope'> | null | undefined): boolean {
+  return chat?.context_scope === 'sandbox';
+}
+
 export interface Chat {
   id: string;
   user_id: string;
@@ -24,11 +32,13 @@ export interface Chat {
    */
   rehydration_state?: string;
   /**
-   * When true the thread is sandboxed: it can't read anything outside itself (no memories made
-   * elsewhere, other conversations, scratchpad, or account-wide files/jobs/skills/personalities),
-   * only files uploaded to it, with a locked-down tool set. Absent on older responses = false.
+   * How much of the account the thread may read. `sandbox`: it can't read anything outside itself
+   * (no memories made elsewhere, other conversations, scratchpad, or account-wide
+   * files/jobs/skills/personalities), only files uploaded to it, and it starts with its heavier
+   * tools off and no connectors. Chosen when the thread is created; a thread can leave the sandbox
+   * later, never enter one. Absent on older responses = `account`.
    */
-  sandboxed?: boolean;
+  context_scope?: ContextScope;
   created_at: string;
   updated_at: string;
 }
@@ -58,8 +68,8 @@ export interface CreateChatRequest {
   model_id?: string;
   tags?: string[];
   is_favorite?: boolean;
-  /** Optional. Create the chat sandboxed. */
-  sandboxed?: boolean;
+  /** Optional. `sandbox` creates the thread sandboxed; the default is `account`. */
+  context_scope?: ContextScope;
 }
 
 export interface UpdateChatRequest {
@@ -70,7 +80,8 @@ export interface UpdateChatRequest {
   disabled_tools?: string[];
   tags?: string[];
   is_favorite?: boolean;
-  sandboxed?: boolean;
+  /** Only `account` is accepted on an existing thread (leaving the sandbox). */
+  context_scope?: ContextScope;
 }
 
 export interface PatchChatRequest {
@@ -88,8 +99,8 @@ export interface PatchChatRequest {
   /** Set to true to explicitly clear the active mood (Auto mood). */
   clear_active_mood?: boolean;
   archived?: boolean;
-  /** Turn the thread's sandbox on or off. */
-  sandboxed?: boolean;
+  /** `account` leaves the sandbox. A thread can only be sandboxed when it is created. */
+  context_scope?: ContextScope;
 }
 
 export interface ChatContext {

@@ -77,6 +77,10 @@ type UserTurn struct {
 	// Message is saved as a user message. ChatID and Message are required; Origin
 	// is always set to user.
 	Message models.ChatMessage
+	// Source names the plugin starting the turn ("discord", say), for the meter: a turn a
+	// stranger starts through a plugin is metered apart from the owner's own chat traffic.
+	// Empty means "plugin".
+	Source string
 }
 
 // TurnStarter starts an agent turn the same way the app and the webhook user mode

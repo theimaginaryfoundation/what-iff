@@ -205,7 +205,7 @@ describe('ContextPanelService', () => {
             service.setActiveChat(chat('chat-1', 'Thread'));
             expect(service.threadUpdate()).toBeNull();
 
-            const saved = { ...chat('chat-1', 'Thread'), sandboxed: true };
+            const saved = { ...chat('chat-1', 'Thread'), context_scope: 'sandbox' as const };
             service.publishThreadUpdate(saved);
 
             expect(service.activeChat()).toBe(saved);

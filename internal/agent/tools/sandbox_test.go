@@ -19,7 +19,7 @@ import (
 // sandboxed and an ordinary chat so the flag is shown to be the only difference.
 
 func sandboxedChat() *models.Chat {
-	return &models.Chat{ID: uuid.New(), UserID: uuid.New(), PersonalityID: uuid.New(), Sandboxed: true}
+	return &models.Chat{ID: uuid.New(), UserID: uuid.New(), PersonalityID: uuid.New(), ContextScope: models.ContextScopeSandbox}
 }
 
 func ordinaryChat() *models.Chat {

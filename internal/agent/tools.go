@@ -23,20 +23,15 @@ type ToolConfig struct {
 }
 
 // sandboxedChatDisabledTools are the function tools a sandboxed chat is never offered, whatever
-// the user's disabled_tools say:
-//
-//   - update_scratchpad writes the personality-wide scratchpad, shared across the owner's chats;
-//   - create_agent_job schedules a job that runs in a new chat that is not sandboxed (or attaches the
-//     owner's skills and their MCP servers), outside this sandbox;
-//   - move_files sorts the owner's account-wide gallery images into folders.
-//
-// The handlers refuse as well (defence in depth), and dispatch enforces the offered set. The
-// sandboxed tool-surface test classifies every catalog tool, so a new tool must be placed on one
-// side of this list deliberately.
-var sandboxedChatDisabledTools = []string{
-	agenttools.UpdateScratchpadToolSpec.Name,
-	agenttools.CreateAgentJobToolSpec.Name,
-	agenttools.MoveFilesToolSpec.Name,
+// the user's disabled_tools say: the catalog entries whose SandboxPolicy is SandboxNever
+// (update_scratchpad writes the personality-wide scratchpad shared across the owner's chats;
+// create_agent_job schedules a job that runs in a new chat that is not sandboxed; move_files sorts
+// the owner's account-wide gallery). The handlers refuse as well (defence in depth), and dispatch
+// enforces the offered set. Tools with SandboxDefaultOff are not here: they start in a new
+// sandbox's disabled_tools instead (models.SandboxDefaultDisabledTools), where the owner can turn
+// them back on. The sandboxed tool-surface test checks every catalog tool declares a policy.
+func sandboxedChatDisabledTools() []string {
+	return agenttools.SandboxNeverTools()
 }
 
 // offeredToolNames is the set of function-tool names the model is actually given: the specs minus
@@ -166,9 +161,13 @@ func (a *Agent) buildTurnToolPolicy(ctx context.Context, chatCtx *chatContext, u
 	// (see sandboxedChatDisabledTools). This runs before the tools-enabled early return below so
 	// no later path can offer them.
 	if chatCtx.chat.IsSandboxed() {
-		for _, name := range sandboxedChatDisabledTools {
+		for _, name := range sandboxedChatDisabledTools() {
 			disabledTools[name] = true
 		}
+		// Skills are the owner's account data (their text, and the MCP servers linked to them), so
+		// a sandboxed turn loads none, whether the message named them or its mood did
+		// (toolRitualMood already returns nothing for a sandboxed chat).
+		chatMessage = nil
 	}
 
 	policy := turnToolPolicy{

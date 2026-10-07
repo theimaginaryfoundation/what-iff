@@ -12,6 +12,7 @@ import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { ModelService } from '../../core/services/model.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { RitualService } from '../../core/services/ritual.service';
+import { isSandboxed } from '../../core/models/chat.model';
 import { ChatMessage, MessageBookmark } from '../../core/models/message.model';
 import {
   createPendingFileAttachment,
@@ -96,6 +97,7 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
 })
 export class ChatPageComponent implements OnInit, OnDestroy {
   readonly session = inject(ChatSessionService);
+  readonly isSandboxed = isSandboxed;
   readonly sendGate = inject(ChatSendGate);
   private readonly chatService = inject(ChatService);
   private readonly fileAttachmentService = inject(FileAttachmentService);

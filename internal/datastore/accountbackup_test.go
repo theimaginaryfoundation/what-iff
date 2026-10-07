@@ -988,7 +988,7 @@ func TestAdminImportAccountBackup_RestoresChatSandboxFlag(t *testing.T) {
 	zr := buildZipReaderForTest(t, map[string]string{
 		"manifest.json": `{"format_version":1}`,
 		"chats.jsonl": accountBackupJSONL(t,
-			models.AccountBackupChat{ID: sandboxedID, Name: "sandboxed", CreatedAt: now, UpdatedAt: now, Sandboxed: true},
+			models.AccountBackupChat{ID: sandboxedID, Name: "sandboxed", CreatedAt: now, UpdatedAt: now, ContextScope: models.ContextScopeSandbox},
 			models.AccountBackupChat{ID: ordinaryID, Name: "ordinary", CreatedAt: now, UpdatedAt: now},
 		),
 	})
@@ -997,9 +997,9 @@ func TestAdminImportAccountBackup_RestoresChatSandboxFlag(t *testing.T) {
 	require.Equal(t, 2, result.Sections["chats"].Created)
 
 	// Select just the column: the shared test schema predates some chat columns.
-	for id, want := range map[uuid.UUID]bool{sandboxedID: true, ordinaryID: false} {
-		got, err := ds.dbClient.Chat.Query().Where(entchat.ID(id)).Select(entchat.FieldSandboxed).Bools(ctx)
+	for id, want := range map[uuid.UUID]string{sandboxedID: "sandbox", ordinaryID: "account"} {
+		got, err := ds.dbClient.Chat.Query().Where(entchat.ID(id)).Select(entchat.FieldContextScope).Strings(ctx)
 		require.NoError(t, err)
-		require.Equal(t, []bool{want}, got)
+		require.Equal(t, []string{want}, got)
 	}
 }

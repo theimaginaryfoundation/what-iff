@@ -45,8 +45,9 @@ func WithChatMemoriesOnly() MergeGroupOption {
 }
 
 // ensureMemoriesCreatedInChatTx fails with ErrMemoryOutsideChat when any of ids is one of the
-// user's memories that chatID did not create. IDs that do not exist are ignored (the writes that
-// follow treat them as no-ops).
+// user's memories that is not chatID's own (memoryOfChat: created in it and Chat- or
+// Summary-scoped). IDs that do not exist are ignored (the writes that follow treat them as
+// no-ops).
 func ensureMemoriesCreatedInChatTx(ctx context.Context, tx *ent.Tx, userID, chatID uuid.UUID, ids []uuid.UUID) error {
 	if len(ids) == 0 {
 		return nil
@@ -55,7 +56,7 @@ func ensureMemoriesCreatedInChatTx(ctx context.Context, tx *ent.Tx, userID, chat
 		Where(
 			memory.IDIn(ids...),
 			memory.HasOwnerWith(user.ID(userID)),
-			memory.Not(memory.HasChatWith(entchat.ID(chatID))),
+			memory.Not(memoryOfChat(chatID)),
 		).
 		Count(ctx)
 	if err != nil {
@@ -877,9 +878,9 @@ func (d *Datastore) ListMemoryMergeEvents(ctx context.Context, userID uuid.UUID,
 		query = query.Where(entmerge.RevertedAtIsNil())
 	}
 	if filters.OnlyChatID != nil {
-		// Only folds whose survivor memory was created in the chat: a link's members can come from
-		// anywhere, so link events are left out. The survivor id is a plain column (no edge), hence
-		// the subquery on the memories table.
+		// Only folds whose survivor memory is the chat's own (created in it and Chat-scoped, as
+		// memoryOfChat): a link's members can come from anywhere, so link events are left out. The
+		// survivor id is a plain column (no edge), hence the subquery on the memories table.
 		chatID := *filters.OnlyChatID
 		query = query.Where(
 			entmerge.MergeTypeEQ(entmerge.MergeTypeFoldLive),
@@ -887,7 +888,10 @@ func (d *Datastore) ListMemoryMergeEvents(ctx context.Context, userID uuid.UUID,
 				t := sql.Table(memory.Table)
 				s.Where(sql.In(
 					s.C(entmerge.FieldSurvivorMemoryID),
-					sql.Select(t.C(memory.FieldID)).From(t).Where(sql.EQ(t.C(memory.ChatColumn), chatID)),
+					sql.Select(t.C(memory.FieldID)).From(t).Where(sql.And(
+						sql.EQ(t.C(memory.ChatColumn), chatID),
+						sql.In(t.C(memory.FieldScope), memory.ScopeChat, memory.ScopeSummary),
+					)),
 				))
 			},
 		)

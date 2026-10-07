@@ -66,7 +66,7 @@ func contextInputs(chatCtx *chatContext, modelContext *provider.ModelContext) *m
 		in.ScratchpadSHA = shortContentHash(chatCtx.chat.Scratchpad)
 		in.SummarySHA = shortContentHash(chatCtx.chat.CheckpointSummary)
 		sandboxed = chatCtx.chat.IsSandboxed()
-		in.Sandboxed = sandboxed
+		in.ContextScope = string(chatCtx.chat.ContextScope.OrDefault())
 	}
 
 	// A manifest is only worth writing when it records something; a sandboxed chat always

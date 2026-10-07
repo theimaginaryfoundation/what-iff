@@ -234,7 +234,7 @@ func buildSubagentModelContext(systemPrompt, scratchpad, message string) *provid
 func subagentToolContext(userID uuid.UUID, modelName string, sandboxed bool, mcpServers []*models.MCPServer, offered map[string]struct{}) *chatContext {
 	c := &chatContext{
 		userID:     userID,
-		chat:       &models.Chat{ID: uuid.New(), UserID: userID, Sandboxed: sandboxed},
+		chat:       &models.Chat{ID: uuid.New(), UserID: userID, ContextScope: sandboxScope(sandboxed)},
 		mcpServers: mcpServers,
 		model:      modelName,
 	}

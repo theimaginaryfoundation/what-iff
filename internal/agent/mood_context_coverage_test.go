@@ -37,7 +37,7 @@ func TestResolveActiveMood_AutoPolicyNoPersonalityReturnsNil(t *testing.T) {
 func TestResolveActiveMood_SandboxedChatSkipsAutoSelection(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
-	chatCtx := &chatContext{chat: &models.Chat{IsAutoMood: true, PersonalityID: uuid.New(), Sandboxed: true}}
+	chatCtx := &chatContext{chat: &models.Chat{IsAutoMood: true, PersonalityID: uuid.New(), ContextScope: models.ContextScopeSandbox}}
 	require.NotPanics(t, func() {
 		require.Nil(t, a.resolveActiveMood(context.Background(), uuid.New(), chatCtx, "hi", uuid.New()))
 	})
@@ -312,7 +312,7 @@ func TestActiveMoodID_NonNilMoodReturnsPointerToID(t *testing.T) {
 func TestChangeMoodTool_SandboxedChatCannotOverrideTheModel(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()} // no datastore: the refusal happens before any lookup
-	chatCtx := &chatContext{chat: &models.Chat{UserID: uuid.New(), Sandboxed: true}}
+	chatCtx := &chatContext{chat: &models.Chat{UserID: uuid.New(), ContextScope: models.ContextScopeSandbox}}
 	args, err := json.Marshal(changeMoodArgs{ModeID: uuid.New().String(), ModelOverride: "gpt-5.1"})
 	require.NoError(t, err)
 	out, err := a.changeMoodTool(context.Background(), chatCtx, args)

@@ -33,8 +33,8 @@ type ConversationInput struct {
 	Tags                       []string
 	IsFavorite                 bool
 	IsAutoMood                 bool
-	// Sandboxed is the chat's sandbox flag.
-	Sandboxed bool
+	// ContextScope is the chat's context scope ("account" or "sandbox"); empty reads as account.
+	ContextScope string
 }
 
 // MessageInput is one user/assistant message. Non-chat roles (system/tool) are filtered upstream.
@@ -58,8 +58,9 @@ type exportConversation struct {
 	WhatiffTags                     []string            `json:"whatiff_tags,omitempty"`
 	WhatiffIsFavorite               bool                `json:"whatiff_is_favorite,omitempty"`
 	WhatiffIsAutoMood               bool                `json:"whatiff_is_auto_mood"`
-	// Omitted when false, so exports from before the flag existed and ordinary chats look the same.
-	WhatiffSandboxed bool `json:"whatiff_sandboxed,omitempty"`
+	// Omitted for an ordinary (account-scoped) chat, so exports from before scopes existed and
+	// ordinary chats look the same.
+	WhatiffContextScope string `json:"whatiff_context_scope,omitempty"`
 }
 
 type exportChatMessage struct {
@@ -109,7 +110,7 @@ type ParsedConversation struct {
 	WhatiffTags                     []string
 	WhatiffIsFavorite               bool
 	WhatiffIsAutoMood               bool
-	WhatiffSandboxed                bool
+	WhatiffContextScope             string
 }
 
 // ParsedMessage is one decoded message; Sender is "human" or "assistant".
@@ -144,7 +145,7 @@ func ParseConversations(data []byte) ([]ParsedConversation, error) {
 			WhatiffTags:                     c.WhatiffTags,
 			WhatiffIsFavorite:               c.WhatiffIsFavorite,
 			WhatiffIsAutoMood:               c.WhatiffIsAutoMood,
-			WhatiffSandboxed:                c.WhatiffSandboxed,
+			WhatiffContextScope:             c.WhatiffContextScope,
 		})
 	}
 	return out, nil
@@ -192,7 +193,7 @@ func BuildConversationsJSON(convs []ConversationInput) ([]byte, error) {
 			WhatiffTags:                     c.Tags,
 			WhatiffIsFavorite:               c.IsFavorite,
 			WhatiffIsAutoMood:               c.IsAutoMood,
-			WhatiffSandboxed:                c.Sandboxed,
+			WhatiffContextScope:             exportedContextScope(c.ContextScope),
 		})
 	}
 
@@ -206,4 +207,13 @@ func BuildConversationsJSON(convs []ConversationInput) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// exportedContextScope is the scope written to an export: nothing for the account default, so
+// ordinary chats export as they always did.
+func exportedContextScope(scope string) string {
+	if scope == "" || scope == "account" {
+		return ""
+	}
+	return scope
 }

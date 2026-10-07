@@ -35,7 +35,7 @@ func importDedupSchema(t *testing.T, db *sql.DB) {
 			name text NOT NULL,
 			import_hash text,
 			source text,
-			sandboxed boolean NOT NULL DEFAULT false,
+			context_scope text NOT NULL DEFAULT 'account',
 			user_chats uuid NOT NULL
 		)`,
 	} {

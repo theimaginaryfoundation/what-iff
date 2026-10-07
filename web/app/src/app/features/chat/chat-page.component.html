@@ -89,7 +89,7 @@
           </div>
         </div>
         <div class="chat-page__title-actions">
-          <app-thread-sandboxed-chip [sandboxed]="session.thread()?.sandboxed" (openSettings)="openSandboxSettings()" />
+          <app-thread-sandboxed-chip [sandboxed]="isSandboxed(session.thread())" (openSettings)="openSandboxSettings()" />
           <app-thread-bookmarks [bookmarks]="bookmarks()" (jump)="jumpToBookmark($event)" (commitRemovals)="commitBookmarkRemovals($event)" />
           <button type="button" class="chat-page__export" (click)="exportActiveChat()" aria-label="Export thread" uiTooltip="Download this thread as a ZIP" placement="bottom">
             <ui-file-icon [size]="12" />

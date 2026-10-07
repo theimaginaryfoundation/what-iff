@@ -25,7 +25,7 @@ func runSubagentJSON(t *testing.T, chat *models.Chat, args string) runSubagentTo
 func TestRunSubagentTool_SandboxedChatCannotPullInOtherAccountData(t *testing.T) {
 	t.Parallel()
 	own, other, ritual := uuid.New(), uuid.New(), uuid.New()
-	sandboxed := &models.Chat{ID: uuid.New(), UserID: uuid.New(), PersonalityID: own, Sandboxed: true}
+	sandboxed := &models.Chat{ID: uuid.New(), UserID: uuid.New(), PersonalityID: own, ContextScope: models.ContextScopeSandbox}
 
 	for name, args := range map[string]string{
 		"another personality":            `{"message":"hi","personality_id":"` + other.String() + `"}`,

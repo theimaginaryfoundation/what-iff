@@ -41,8 +41,9 @@
   Generic codes are status-derived defaults and explicitly *not* stable branch targets, so a call site may narrow from a generic to a specific code freely.
   `ErrorResponse.Code` deliberately omits `omitempty`, so a missing code shows up as `""` rather than disappearing.
 - **`ErrorResponse.Error` is deprecated** and duplicates `Message`. It exists only until the frontend reads `Message`/`Code`; it should not gain new meaning.
-- **Sandboxed chats:** `Chat.Sandboxed` marks a thread as a sandbox, and `Chat.IsSandboxed()` is the one accessor every sandbox rule asks.
-  `Chat.SetSandboxed` marks `Sandboxed` as an explicit change on `UpdateChat`, so internal writers that save a stale copy of the chat cannot write the flag back.
+- **Context scope:** `context_scope.go` defines `ContextScope` (`account`, the default, or `sandbox`), a string rather than a flag so later scopes need no schema or API change; `Chat.ContextScope` carries it and `Chat.IsSandboxed()` is the one accessor every sandbox rule asks.
+  `Chat.SetContextScope` marks it as an explicit change on `UpdateChat`, so internal writers that save a stale copy of the chat cannot write the scope back.
+  `sandbox_tools.go` is the registry of tools a new sandbox starts with switched off (`RegisterSandboxDefaultDisabledTool`, `SandboxDefaultDisabledTools`); the tool catalog and other builds fill it from `init()`, and `datastore.CreateChat` reads it.
   `AdditionalContextTypeUserName` tags the first-message line naming the user, so a sandboxed chat can drop it when it replays persisted context.
   `MemoryMergeEventFilters.OnlyChatID` limits merge history to folds of memories created in one chat.
 

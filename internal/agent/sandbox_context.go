@@ -113,3 +113,12 @@ func checkpointSteps(chat *models.Chat, scratchpadWritten bool) (runScratchpad, 
 	runExtraction = scratchpadWritten || sandboxed
 	return runScratchpad, runExtraction
 }
+
+// sandboxScope is the context scope a conversation carved out of a chat (a sub-agent's tool loop,
+// say) is given: the parent's sandbox, or the account.
+func sandboxScope(sandboxed bool) models.ContextScope {
+	if sandboxed {
+		return models.ContextScopeSandbox
+	}
+	return models.ContextScopeAccount
+}

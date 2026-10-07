@@ -81,6 +81,9 @@ type Usage struct {
 	Metadata map[string]interface{}
 	// SubagentRun marks the usage as originating from a subagent job.
 	SubagentRun bool
+	// Source is where the turn was started from (TurnSourceApp, TurnSourceWebhook, or a plugin's
+	// own name such as "discord"); "" when the entry point did not say. See TurnSource.
+	Source string
 	// WebSearchCount is the number of billable web actions this turn (ADR 0x021): the
 	// provider's native searches, or, when WebSearchFirstParty is set, successful
 	// first-party web_search and fetch_page calls.

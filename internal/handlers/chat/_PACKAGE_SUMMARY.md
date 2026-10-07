@@ -56,8 +56,9 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
 - **Deleting a chat releases its attachment objects.**
   The ent cascade removes the attachment rows on the chat's messages without touching the object store, so `DeleteChat` reads them first (`ListChatFileAttachmentObjectRefs`) and calls `storage.ReleaseAttachmentObjects` after the delete.
   Keys a reference copy in another chat still uses are kept; failures are logged, never returned.
-- **Sandbox flag:** chat create, `PUT` and `PATCH` accept `sandboxed`.
-  The update paths mark it as an explicit change (`SetSandboxed`), so only a request that names it writes it.
+- **Context scope:** chat create accepts `context_scope` (`account` or `sandbox`; 400 otherwise), and a sandbox gets none of the owner's default-enabled MCP connectors.
+  `PUT` and `PATCH` accept it too, marked as an explicit change (`SetContextScope`), but `applyContextScopeChange` refuses `sandbox` on a chat that is not one already: a thread is sandboxed when it is created, never later.
+- **`disabled_tools` is not part of create:** `CreateChat` drops it from the request (set it with PATCH); the datastore honours it only for threads the server creates itself, and gives a new sandbox its own defaults.
 
 ## Testing
 

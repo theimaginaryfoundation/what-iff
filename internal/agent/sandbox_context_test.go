@@ -62,7 +62,7 @@ func TestBuild_SandboxedChatRefiltersReplayedMemoriesToItsOwn(t *testing.T) {
 			{Type: "FILE_HINT", Content: "not a memory"},
 		},
 	}}
-	chat := &models.Chat{ID: uuid.New(), SystemPrompt: "p", Sandboxed: true}
+	chat := &models.Chat{ID: uuid.New(), SystemPrompt: "p", ContextScope: models.ContextScopeSandbox}
 	var asked []uuid.UUID
 	var askedChat uuid.UUID
 	b := testBuilderWithLookup(t, history, func(_ context.Context, _, chatID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]struct{}, error) {
@@ -118,7 +118,7 @@ func TestBuild_SandboxedChatFailsClosedWhenTheLookupFails(t *testing.T) {
 	b := testBuilderWithLookup(t, history, func(context.Context, uuid.UUID, uuid.UUID, []uuid.UUID) (map[uuid.UUID]struct{}, error) {
 		return nil, errors.New("db down")
 	})
-	chat := &models.Chat{ID: uuid.New(), Sandboxed: true}
+	chat := &models.Chat{ID: uuid.New(), ContextScope: models.ContextScopeSandbox}
 	mc, err := b.build(context.Background(), messageContextBuildRequest{UserID: uuid.New(), Chat: chat, UserPrompt: "now"})
 	require.NoError(t, err, "a failed re-check must not fail the turn")
 	require.NotContains(t, segmentText(mc, provider.SegmentKindMemoryContext), "Some memory")
@@ -131,7 +131,7 @@ func TestBuild_SandboxedChatCurrentTurnMemoriesAreNotRefiltered(t *testing.T) {
 	b := testBuilderWithLookup(t, nil, func(context.Context, uuid.UUID, uuid.UUID, []uuid.UUID) (map[uuid.UUID]struct{}, error) {
 		return map[uuid.UUID]struct{}{}, nil
 	})
-	chat := &models.Chat{ID: uuid.New(), Sandboxed: true}
+	chat := &models.Chat{ID: uuid.New(), ContextScope: models.ContextScopeSandbox}
 	mc, err := b.build(context.Background(), messageContextBuildRequest{UserID: uuid.New(), Chat: chat, UserPrompt: "now", Memories: []string{"fresh prefetched memory"}})
 	require.NoError(t, err)
 	require.Contains(t, segmentText(mc, provider.SegmentKindMemoryContext), "fresh prefetched memory")
@@ -162,7 +162,7 @@ func TestBuild_SandboxedChatGetsNoScratchpadButReplaysToolResults(t *testing.T) 
 		return all.String()
 	}
 
-	text := render(&models.Chat{ID: uuid.New(), SystemPrompt: "p", Scratchpad: "PERSONALITY SCRATCHPAD", Sandboxed: true})
+	text := render(&models.Chat{ID: uuid.New(), SystemPrompt: "p", Scratchpad: "PERSONALITY SCRATCHPAD", ContextScope: models.ContextScopeSandbox})
 	require.NotContains(t, text, "PERSONALITY SCRATCHPAD", "belt and braces: even a Chat that carries a scratchpad does not inject it")
 	require.Contains(t, text, "a fact learned in this thread")
 	require.Contains(t, text, "a fox")
@@ -185,8 +185,8 @@ func TestCheckpointSteps(t *testing.T) {
 		{"ordinary with personality runs scratchpad, extracts after it succeeds", &models.Chat{PersonalityID: persona}, true, true, true},
 		{"ordinary waits for the scratchpad delta", &models.Chat{PersonalityID: persona}, false, true, false},
 		{"ordinary without a personality has neither step", &models.Chat{}, false, false, false},
-		{"sandboxed skips the scratchpad but still extracts", &models.Chat{PersonalityID: persona, Sandboxed: true}, false, false, true},
-		{"sandboxed without a personality still extracts", &models.Chat{Sandboxed: true}, false, false, true},
+		{"sandboxed skips the scratchpad but still extracts", &models.Chat{PersonalityID: persona, ContextScope: models.ContextScopeSandbox}, false, false, true},
+		{"sandboxed without a personality still extracts", &models.Chat{ContextScope: models.ContextScopeSandbox}, false, false, true},
 	}
 	for _, tc := range cases {
 		scratch, extract := checkpointSteps(tc.chat, tc.scratchpadWritten)
@@ -199,7 +199,7 @@ func TestBuildTurnToolPolicy_SandboxedChatLosesTheScratchpadTool(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
 	policyFor := func(sandboxed bool) turnToolPolicy {
-		chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), ToolsEnabled: true, Sandboxed: sandboxed}
+		chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), ToolsEnabled: true, ContextScope: sandboxScope(sandboxed)}
 		return a.buildTurnToolPolicy(context.Background(), &chatContext{chat: chat}, chat.UserID, &models.ChatMessage{})
 	}
 	require.True(t, policyFor(true).disabledTools[agenttools.UpdateScratchpadToolSpec.Name])
@@ -209,29 +209,29 @@ func TestBuildTurnToolPolicy_SandboxedChatLosesTheScratchpadTool(t *testing.T) {
 func TestContextInputs_RecordsThatTheChatWasSandboxed(t *testing.T) {
 	t.Parallel()
 	// A sandboxed chat always records, even with nothing else to report, so it is on file that it was one.
-	in := contextInputs(&chatContext{chat: &models.Chat{Sandboxed: true}}, nil)
+	in := contextInputs(&chatContext{chat: &models.Chat{ContextScope: models.ContextScopeSandbox}}, nil)
 	require.NotNil(t, in)
-	assert.True(t, in.Sandboxed)
+	assert.Equal(t, "sandbox", in.ContextScope)
 
 	mem := &models.Memory{ID: uuid.New(), Scope: "Chat"}
-	in = contextInputs(&chatContext{chat: &models.Chat{Sandboxed: true}, liveMemories: []*models.Memory{mem}, prefetchedMemoryCount: 1}, nil)
+	in = contextInputs(&chatContext{chat: &models.Chat{ContextScope: models.ContextScopeSandbox}, liveMemories: []*models.Memory{mem}, prefetchedMemoryCount: 1}, nil)
 	require.NotNil(t, in)
-	assert.True(t, in.Sandboxed)
+	assert.Equal(t, "sandbox", in.ContextScope)
 
 	// Ordinary chats record the manifest when it has something to say, and stay nil otherwise.
 	in = contextInputs(&chatContext{chat: &models.Chat{}, liveMemories: []*models.Memory{mem}, prefetchedMemoryCount: 1}, nil)
 	require.NotNil(t, in)
-	assert.False(t, in.Sandboxed)
+	assert.Equal(t, "account", in.ContextScope)
 	assert.Nil(t, contextInputs(&chatContext{chat: &models.Chat{}}, nil))
 
-	raw, err := json.Marshal(contextInputs(&chatContext{chat: &models.Chat{Sandboxed: true}}, nil))
+	raw, err := json.Marshal(contextInputs(&chatContext{chat: &models.Chat{ContextScope: models.ContextScopeSandbox}}, nil))
 	require.NoError(t, err)
-	assert.Contains(t, string(raw), `"sandboxed":true`)
+	assert.Contains(t, string(raw), `"context_scope":"sandbox"`)
 }
 
 func TestMemoryExtractionDeveloperMessage_SandboxedChatHasNoScratchpadDelta(t *testing.T) {
 	t.Parallel()
-	sandboxed := &chatContext{chat: &models.Chat{Sandboxed: true}}
+	sandboxed := &chatContext{chat: &models.Chat{ContextScope: models.ContextScopeSandbox}}
 	open := &chatContext{chat: &models.Chat{}}
 	require.NotContains(t, memoryExtractionDeveloperMessageFor(sandboxed), "scratchpad")
 	require.Contains(t, memoryExtractionDeveloperMessageFor(open), "scratchpad")
@@ -241,9 +241,9 @@ func TestMemoryExtractionDeveloperMessage_SandboxedChatHasNoScratchpadDelta(t *t
 func TestSubagentScratchpad_SandboxedChatSendsNone(t *testing.T) {
 	t.Parallel()
 	require.Equal(t, "notes", subagentScratchpad(&models.Chat{}, "notes"))
-	require.Empty(t, subagentScratchpad(&models.Chat{Sandboxed: true}, "notes"))
+	require.Empty(t, subagentScratchpad(&models.Chat{ContextScope: models.ContextScopeSandbox}, "notes"))
 	// The context built from it then carries no scratchpad segment.
-	mc := buildSubagentModelContext("prompt", subagentScratchpad(&models.Chat{Sandboxed: true}, "notes"), "task")
+	mc := buildSubagentModelContext("prompt", subagentScratchpad(&models.Chat{ContextScope: models.ContextScopeSandbox}, "notes"), "task")
 	require.Empty(t, segmentText(mc, provider.SegmentKindScratchpad))
 }
 

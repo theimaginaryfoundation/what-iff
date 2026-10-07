@@ -82,9 +82,9 @@ type ImportConversation struct {
 	Tags                       []string
 	IsFavorite                 bool
 	IsAutoMood                 bool
-	// Sandboxed restores the chat's sandbox flag from an account export; absent (an export from
-	// before the flag existed) leaves the chat unsandboxed.
-	Sandboxed     bool
+	// ContextScope restores the chat's context scope from an account export; absent (an export
+	// from before scopes existed) reads as account.
+	ContextScope  ContextScope
 	AccountExport bool
 	RestoreReady  bool
 }

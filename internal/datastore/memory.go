@@ -158,7 +158,7 @@ func (d *Datastore) CreateMemory(ctx context.Context, userID uuid.UUID, mem mode
 					user.ID(userID),
 				),
 			).
-			Select(entchat.FieldSandboxed).
+			Select(entchat.FieldContextScope).
 			Only(ctx)
 		if ent.IsNotFound(err) {
 			d.logger.Error(i18n.T2("memory.chat_not_found_or_unauthorized", "ChatID", mem.ChatID.String(), "UserID", userID.String()))
@@ -176,7 +176,7 @@ func (d *Datastore) CreateMemory(ctx context.Context, userID uuid.UUID, mem mode
 		}
 		// Whatever the caller asked for, a memory written from a sandboxed chat is Chat-scoped:
 		// nothing a sandbox learns reaches the owner's account, however the write got here.
-		if chatRow.Sandboxed {
+		if models.ContextScope(chatRow.ContextScope) == models.ContextScopeSandbox {
 			mem.Scope = string(memory.ScopeChat)
 		}
 	}

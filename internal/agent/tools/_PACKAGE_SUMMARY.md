@@ -55,7 +55,8 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
   Provider-facing tool prompts remain unchanged on `FunctionToolSpec.Description`.
 - **Spec parity:** `toolconstants_test.go` asserts OpenAI function tool projection stays aligned with the shared catalog; Claude schema sanitization is tested in `internal/agent/provider`.
 - **Execution location:** Some tools are defined here only as shared schema/registration (`run_subagent`) while execution lives in `internal/agent` to reuse chat/user/provider context safely.
-- **Sandboxed chats:** `sandbox.go` holds the one rule set for a chat with `Chat.Sandboxed`.
+- **Sandbox policy:** every catalog entry declares a `SandboxPolicy` (`sandbox_policy.go`): `SandboxNever` (the zero value, so an undeclared tool fails closed) is never offered in a sandbox, `SandboxDefaultOff` is offered but starts in a new sandbox's `disabled_tools` (registered with `models.RegisterSandboxDefaultDisabledTool` from `init()`; a build adding tools registers its own), and `SandboxAllowed` is offered as in any chat.
+- **Sandboxed chats:** `sandbox.go` holds the one rule set for a chat with `Chat.IsSandboxed()`.
   `memoryReadableBy` (a fetch by id) allows only a Chat-scoped memory or checkpoint summary of this conversation; `conversationReadable` allows only the chat itself; `fileInChatScope` allows only files uploaded to this conversation.
   Search retrieval is scoped in SQL (`GetRelatedMemories` takes the sandbox flag, `GetRelatedSummaryMemories` the one chat), and `find_context` lifecycle events list only folds of this chat's own memories.
   `list` refuses jobs, skills, personalities and conversations, and lists only this conversation's own files (`listSandboxFiles`); `update_scratchpad` and `move_files` refuse.

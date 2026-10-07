@@ -1,47 +1,58 @@
-import { ChangeDetectionStrategy, Component, ElementRef, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
+import { isSandboxed } from '../../../../core/models/chat.model';
 import { ChatService } from '../../../../core/services/chat.service';
 import { ConfirmationService } from '../../../../core/services/confirmation.service';
 import { apiErrorMessage } from '../../../../core/utils/api-error.helpers';
+import { ButtonComponent } from '../../../../shared/ui/button/button.component';
 import { HelpHintComponent } from '../../../../shared/ui/help-hint/help-hint.component';
 import { ContextPanelService } from '../../services/context-panel.service';
 
-/** What a sandboxed thread can and cannot see. Shared by the help hint and the on-state note. */
+/** What a sandboxed thread can and cannot do. Shared by the help hint and the on-state note. */
 export const SANDBOX_COPY =
-  "A sandboxed thread can't read anything outside itself: only memories created in this thread, no other conversations, no scratchpad, no account-wide files, jobs, skills or personalities. It can only use files uploaded to it, and has a locked-down set of tools. Memories it creates are visible only in this thread. It is never given your name and never picks moods automatically.";
+  'A sandboxed thread reads only itself: no memories made elsewhere, no other conversations, no scratchpad, no account-wide files, jobs, skills or personalities, and only files uploaded to it. Memories it creates stay in this thread. It starts with no connectors and with web search, page fetching, image generation and sub-agents switched off; turn any of those on in the Tools tab, or attach a connector, if this thread should have them. It is never given your name and never picks moods automatically.';
+
+/** Why the sandbox cannot be turned on later: shown in the off state. */
+export const SANDBOX_CREATE_ONLY_NOTE =
+  'Off: this thread can use your memories, other conversations and account files. A thread can only be sandboxed when it is created, since this one has already read your account.';
 
 /**
- * "Sandbox" setting for the active thread. Turning it on takes effect right away; turning it off
- * widens what the thread can read, so it asks first. Saved with the chat PATCH; the updated chat is
+ * "Sandbox" setting for the active thread. A thread is sandboxed when it is created, so this
+ * panel offers a new sandboxed thread (same personality and model) while the thread is not one,
+ * and a confirmed way out while it is. Leaving is saved with the chat PATCH; the updated chat is
  * published so the thread header and this panel stay in sync.
  */
 @Component({
   selector: 'app-thread-sandbox',
   standalone: true,
-  imports: [HelpHintComponent],
+  imports: [ButtonComponent, HelpHintComponent],
   template: `
     @if (chat(); as activeChat) {
       <div class="sandbox">
         <div class="sandbox__row">
-          <label class="sandbox__toggle">
-            <input
-              type="checkbox"
-              role="switch"
-              [checked]="sandboxed()"
-              [disabled]="saving()"
-              (change)="toggle($any($event.target).checked)"
-            />
-            <span class="sandbox__label">Sandbox</span>
-          </label>
+          <span class="sandbox__label">{{ sandboxed() ? 'Sandboxed thread' : 'Sandbox' }}</span>
           <ui-help-hint label="What is a sandbox?" heading="Sandbox" align="end">
             {{ copy }}
           </ui-help-hint>
         </div>
         @if (sandboxed()) {
           <p class="sandbox__note">{{ copy }}</p>
+          <ui-button size="sm" variant="secondary" [disabled]="saving()" (activate)="leaveSandbox()" data-testid="sandbox-leave">
+            Turn off sandbox
+          </ui-button>
         } @else {
-          <p class="sandbox__note">Off: this thread can use your memories, other conversations and account files. Turn it on to keep it self-contained.</p>
+          <p class="sandbox__note">{{ createOnlyNote }}</p>
+          <ui-button
+            size="sm"
+            variant="secondary"
+            [disabled]="saving()"
+            (activate)="startSandboxedThread()"
+            data-testid="sandbox-new-thread"
+          >
+            New sandboxed thread
+          </ui-button>
         }
         @if (error(); as message) {
           <p class="sandbox__error" role="alert">{{ message }}</p>
@@ -63,6 +74,7 @@ export const SANDBOX_COPY =
         border-radius: 0.375rem;
         display: grid;
         gap: 0.375rem;
+        justify-items: start;
         min-width: 0;
         padding: 0.5rem 0.625rem;
       }
@@ -72,13 +84,7 @@ export const SANDBOX_COPY =
         display: flex;
         gap: 0.25rem;
         justify-content: space-between;
-      }
-
-      .sandbox__toggle {
-        align-items: center;
-        cursor: pointer;
-        display: inline-flex;
-        gap: 0.4rem;
+        justify-self: stretch;
       }
 
       .sandbox__label {
@@ -108,47 +114,61 @@ export class ThreadSandboxComponent {
   private readonly context = inject(ContextPanelService);
   private readonly chatService = inject(ChatService);
   private readonly confirmation = inject(ConfirmationService);
-  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly router = inject(Router);
 
   readonly copy = SANDBOX_COPY;
+  readonly createOnlyNote = SANDBOX_CREATE_ONLY_NOTE;
 
   readonly chat = this.context.activeChat;
-  readonly sandboxed = computed(() => this.chat()?.sandboxed === true);
+  readonly sandboxed = computed(() => isSandboxed(this.chat()));
   readonly saving = signal(false);
   readonly error = signal<string | null>(null);
 
-  async toggle(next: boolean): Promise<void> {
+  /** Leaves the sandbox for good (a thread cannot re-enter one), after the owner confirms. */
+  async leaveSandbox(): Promise<void> {
     const chat = this.chat();
-    if (!chat || next === this.sandboxed() || this.saving()) return;
+    if (!chat || !this.sandboxed() || this.saving()) return;
+    const confirmed = await this.confirmation.confirm({
+      title: 'Turn off sandbox?',
+      message:
+        "This thread will be able to read your memories, other conversations, scratchpad and account-wide files, jobs, skills and personalities, and will use the full tool set. Everything said in it so far, by anyone who could talk to it, becomes part of what your personality learns from. This can't be undone: a thread can only be sandboxed when it is created.",
+      confirmText: 'Turn off sandbox',
+      type: 'warning',
+    });
+    if (!confirmed) return;
     this.saving.set(true);
     this.error.set(null);
     try {
-      if (!next) {
-        const confirmed = await this.confirmation.confirm({
-          title: 'Turn off sandbox?',
-          message:
-            'This thread will be able to read your memories, other conversations, scratchpad and account-wide files, jobs, skills and personalities, and will use the full tool set.',
-          confirmText: 'Turn off sandbox',
-          type: 'warning',
-        });
-        if (!confirmed) {
-          this.resyncSwitch();
-          return;
-        }
-      }
-      const updated = await firstValueFrom(this.chatService.patchChat(chat.id, { sandboxed: next }));
+      const updated = await firstValueFrom(this.chatService.patchChat(chat.id, { context_scope: 'account' }));
       this.context.publishThreadUpdate(updated);
     } catch (error) {
-      this.error.set(apiErrorMessage(error, 'Failed to update sandbox'));
-      this.resyncSwitch();
+      this.error.set(apiErrorMessage(error, 'Failed to turn off the sandbox'));
     } finally {
       this.saving.set(false);
     }
   }
 
-  /** The bound value didn't change, so Angular won't revert the checkbox the user just clicked. */
-  private resyncSwitch(): void {
-    const input = this.host.nativeElement.querySelector<HTMLInputElement>('input[type="checkbox"]');
-    if (input) input.checked = this.sandboxed();
+  /** Starts a new sandboxed thread with this thread's personality and model, and opens it. */
+  async startSandboxedThread(): Promise<void> {
+    const chat = this.chat();
+    if (!chat || this.saving()) return;
+    this.saving.set(true);
+    this.error.set(null);
+    try {
+      const created = await firstValueFrom(
+        this.chatService.createChat({
+          name: 'New Chat',
+          personality_id: chat.personality_id,
+          model_id: chat.model_id,
+          context_scope: 'sandbox',
+        }),
+      );
+      this.chatService.setLastChatId(created.id);
+      await this.router.navigate(['/chat', created.id]);
+    } catch (error) {
+      this.error.set(apiErrorMessage(error, 'Failed to start a sandboxed thread'));
+    } finally {
+      this.saving.set(false);
+    }
   }
 }

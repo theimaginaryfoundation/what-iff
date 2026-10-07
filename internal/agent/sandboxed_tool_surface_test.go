@@ -23,17 +23,17 @@ var sandboxedToolSurface = map[string]struct {
 	agenttools.UpdateScratchpadToolSpec.Name:  {false, "writes the personality-wide scratchpad shared with the owner's other chats"},
 	agenttools.MoveFilesToolSpec.Name:         {false, "sorts the owner's account-wide gallery images into folders"},
 	agenttools.CreateAgentJobToolSpec.Name:    {false, "schedules a job in a new ordinary chat and can attach the owner's skills and their MCP servers"},
-	agenttools.CreateMemoryToolSpec.Name:      {true, "level capped to the limit, never public, explicit sensitive kept"},
-	agenttools.ListToolSpec.Name:              {true, "jobs, skills, personalities and account-wide files are refused; conversations only at or below this chat's limit"},
+	agenttools.CreateMemoryToolSpec.Name:      {true, "always writes a Chat-scoped memory in a sandbox"},
+	agenttools.ListToolSpec.Name:              {true, "jobs, skills, personalities and other conversations are refused; only this conversation's own files"},
 	agenttools.ListMoodsToolSpec.Name:         {true, "this chat's own personality moods"},
 	agenttools.ChangeMoodToolSpec.Name:        {true, "this chat's own mood"},
-	agenttools.RunSubagentToolSpec.Name:       {true, "own persona and no skills; the sub-agent keeps the parent's limit"},
-	agenttools.GenerateImageToolSpec.Name:     {true, "no account data read"},
+	agenttools.RunSubagentToolSpec.Name:       {true, "default off; when on, own persona and no skills, and the sub-agent keeps the parent's sandbox"},
+	agenttools.GenerateImageToolSpec.Name:     {true, "default off; no account data read"},
 	agenttools.LoadMCPToolsToolSpec.Name:      {true, "only connectors attached to this chat"},
 	agenttools.UnloadMCPToolsToolSpec.Name:    {true, "only connectors attached to this chat"},
-	agenttools.WebSearchFunctionToolSpec.Name: {true, "no account data read (offered only when a backend is configured)"},
-	agenttools.FetchPageToolSpec.Name:         {true, "no account data read (offered only when a backend is configured)"},
-	agenttools.RecallToolSpec.Name:            {true, "memories at or below the limit; other conversations only at or below this chat's limit"},
+	agenttools.WebSearchFunctionToolSpec.Name: {true, "default off; no account data read (offered only when a backend is configured)"},
+	agenttools.FetchPageToolSpec.Name:         {true, "default off; no account data read (offered only when a backend is configured)"},
+	agenttools.RecallToolSpec.Name:            {true, "only this conversation's memories and summary"},
 }
 
 // conditionalSandboxedTools are classified tools that are only offered when some deployment
@@ -64,14 +64,25 @@ func TestSandboxedChatToolSurface_EveryCatalogToolIsClassified(t *testing.T) {
 		_, ok := catalog[name]
 		require.True(t, ok, "sandboxedToolSurface lists %q, which is no longer a catalog tool", name)
 	}
-	// And the disabled list is exactly the false rows.
+	// And the disabled list is exactly the false rows: the catalog entries whose SandboxPolicy is
+	// SandboxNever (the zero value, so a tool that declares nothing lands here and fails closed).
 	disabled := map[string]struct{}{}
-	for _, name := range sandboxedChatDisabledTools {
+	for _, name := range sandboxedChatDisabledTools() {
 		disabled[name] = struct{}{}
 	}
 	for name, row := range sandboxedToolSurface {
 		_, isDisabled := disabled[name]
-		require.Equal(t, !row.offered, isDisabled, "tool %q: sandboxedToolSurface and sandboxedChatDisabledTools disagree", name)
+		require.Equal(t, !row.offered, isDisabled, "tool %q: sandboxedToolSurface and the catalog's SandboxPolicy disagree", name)
+	}
+	// The default-off tools (SandboxDefaultOff) are offered by policy but registered as what a
+	// new sandbox starts with in its disabled_tools, so the owner can switch each one on.
+	defaultOff := models.SandboxDefaultDisabledTools()
+	for _, name := range agenttools.SandboxDefaultOffTools() {
+		require.True(t, sandboxedToolSurface[name].offered, "a default-off tool %q must still be offered once the owner enables it", name)
+		require.Contains(t, defaultOff, name, "tool %q is SandboxDefaultOff but not registered as a sandbox default (models.SandboxDefaultDisabledTools)", name)
+	}
+	for _, name := range []string{agenttools.RunSubagentToolSpec.Name, agenttools.GenerateImageToolSpec.Name, agenttools.ToolNameWebSearch, agenttools.ToolNameFetchPage} {
+		require.Contains(t, defaultOff, name, "%q spends the owner's credits or acts beyond the conversation, so a new sandbox starts with it off", name)
 	}
 }
 
@@ -81,7 +92,7 @@ func TestSandboxedChatToolSurface_ExactOfferedSets(t *testing.T) {
 	a := &Agent{logger: zap.NewNop()} // no web search backend: web_search and fetch_page are hidden for everyone
 
 	offered := func(sandboxed bool, showMood bool, userDisabled ...string) []string {
-		chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), ToolsEnabled: true, Sandboxed: sandboxed, DisabledTools: userDisabled}
+		chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), ToolsEnabled: true, ContextScope: sandboxScope(sandboxed), DisabledTools: userDisabled}
 		policy := a.buildTurnToolPolicy(context.Background(), &chatContext{chat: chat}, chat.UserID, &models.ChatMessage{})
 		policy.showMoodTools = showMood
 		return sortedNames(policy.offeredAgentToolNames())
@@ -129,7 +140,7 @@ func TestSandboxedChatToolSurface_ExactOfferedSets(t *testing.T) {
 // refused before the handler runs.
 func TestSandboxedChat_DispatchRefusesCreateAgentJobAndTheHandlerDoesToo(t *testing.T) {
 	a := &Agent{logger: zap.NewNop()}
-	chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), ToolsEnabled: false, Sandboxed: true}
+	chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), ToolsEnabled: false, ContextScope: models.ContextScopeSandbox}
 	chatCtx := &chatContext{chat: chat}
 	policy := a.buildTurnToolPolicy(context.Background(), chatCtx, chat.UserID, &models.ChatMessage{})
 	require.True(t, policy.disabledTools[agenttools.CreateAgentJobToolSpec.Name], "hidden even when tools are off")
@@ -157,7 +168,7 @@ func TestSandboxedChat_MoodRitualMCPServersAreNotOffered(t *testing.T) {
 	moodRitual := uuid.New()
 	mood := &models.Mood{ID: uuid.New(), RitualIDs: []uuid.UUID{moodRitual}}
 	policyFor := func(sandboxed bool) turnToolPolicy {
-		chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), ToolsEnabled: true, Sandboxed: sandboxed}
+		chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), ToolsEnabled: true, ContextScope: sandboxScope(sandboxed)}
 		return a.buildTurnToolPolicy(context.Background(), &chatContext{chat: chat, activeMood: mood}, chat.UserID, &models.ChatMessage{})
 	}
 	require.Contains(t, policyFor(false).ritualIDs, moodRitual, "an ordinary chat loads its mood's skill servers")

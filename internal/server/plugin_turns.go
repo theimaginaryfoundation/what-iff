@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
+	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
@@ -27,6 +28,11 @@ func (s agentTurnStarter) StartUserTurn(ctx context.Context, turn plugins.UserTu
 		return nil, errTurnMissingTarget
 	}
 	ctx = middleware.ContextWithUser(ctx, turn.UserID, turn.Timezone)
+	source := turn.Source
+	if source == "" {
+		source = metering.TurnSourcePlugin
+	}
+	ctx = metering.WithTurnSource(ctx, source)
 	msg := turn.Message
 	msg.Origin = models.MessageOriginUser
 	return s.agent.HandleUserMessage(ctx, msg)

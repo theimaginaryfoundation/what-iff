@@ -54,10 +54,10 @@ type AccountBackupChat struct {
 	LastCheckpointAt           *time.Time `json:"last_checkpoint_at,omitempty"`
 	DisabledTools              []string   `json:"disabled_tools,omitempty"`
 	IsAutoMood                 bool       `json:"is_auto_mood"`
-	// Sandboxed round-trips the chat's sandbox flag; absent in older backups (= not sandboxed).
-	Sandboxed bool      `json:"sandboxed,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	// ContextScope round-trips the chat's context scope; absent in older backups (= account).
+	ContextScope ContextScope `json:"context_scope,omitempty"`
+	CreatedAt    time.Time    `json:"created_at"`
+	UpdatedAt    time.Time    `json:"updated_at"`
 }
 
 type AccountBackupChatMessage struct {

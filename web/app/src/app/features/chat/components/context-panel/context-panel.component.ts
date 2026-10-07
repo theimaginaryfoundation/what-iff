@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 
+import { isSandboxed } from '../../../../core/models/chat.model';
 import { ContextPanelService } from '../../services/context-panel.service';
 import { ContextBreakdownTabComponent } from './tabs/context-breakdown-tab.component';
 import { ContextMemoriesTabComponent } from './tabs/context-memories-tab.component';
@@ -104,7 +105,7 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
           <app-context-memories-tab
             [chatId]="context.activeChatId()"
             [personalityId]="context.activeChat()?.personality_id ?? null"
-            [sandboxed]="context.activeChat()?.sandboxed === true"
+            [sandboxed]="isSandboxed(context.activeChat())"
           />
           }
           @case ('tools') {
@@ -237,6 +238,7 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
 })
 export class ContextPanelComponent {
   readonly context = inject(ContextPanelService);
+  readonly isSandboxed = isSandboxed;
 
   activeTabLabel(): string {
     const tab = this.context.activeTab();

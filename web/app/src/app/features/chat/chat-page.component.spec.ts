@@ -236,7 +236,7 @@ describe('ChatPageComponent', () => {
         });
 
         it('shows a Sandboxed chip when the thread is sandboxed', async () => {
-            chatService.getChat.mockReturnValue(of({ ...chat, sandboxed: true }));
+            chatService.getChat.mockReturnValue(of({ ...chat, context_scope: 'sandbox' }));
             fixture.detectChanges();
             await fixture.whenStable();
             fixture.detectChanges();
@@ -246,7 +246,7 @@ describe('ChatPageComponent', () => {
         });
 
         it('opens the Memories tab when the chip is clicked', async () => {
-            chatService.getChat.mockReturnValue(of({ ...chat, sandboxed: true }));
+            chatService.getChat.mockReturnValue(of({ ...chat, context_scope: 'sandbox' }));
             const context = TestBed.inject(ContextPanelService);
             fixture.detectChanges();
             await fixture.whenStable();
@@ -265,13 +265,13 @@ describe('ChatPageComponent', () => {
             fixture.detectChanges();
             expect(fixture.nativeElement.querySelector('app-thread-sandboxed-chip button')).toBeNull();
 
-            context.publishThreadUpdate({ ...chat, sandboxed: true });
+            context.publishThreadUpdate({ ...chat, context_scope: 'sandbox' });
             fixture.detectChanges();
             await fixture.whenStable();
             fixture.detectChanges();
 
             expect(fixture.nativeElement.querySelector('app-thread-sandboxed-chip button')).not.toBeNull();
-            expect(context.activeChat()?.sandboxed).toBe(true);
+            expect(context.activeChat()?.context_scope).toBe('sandbox');
         });
     });
 

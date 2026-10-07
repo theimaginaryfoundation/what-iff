@@ -645,10 +645,14 @@ func (a *Agent) loadImageBytesForClaude(ctx context.Context, userID uuid.UUID, c
 
 // HandleUserMessage handles a user message and initiates the agent processing flow
 func (a *Agent) HandleUserMessage(ctx context.Context, request models.ChatMessage) (*models.ChatMessageResponse, error) {
+	// The turn runs on its own context (it outlives the request); carry over where the turn was
+	// started from, so the meter can tell the owner's own traffic from a plugin's or a webhook's.
+	turnSource := metering.TurnSourceFromContext(ctx)
 	ctx, ok := middleware.CopyUserToIDContext(ctx, context.Background())
 	if !ok {
 		return nil, errors.New("user ID not found in context")
 	}
+	ctx = metering.WithTurnSource(ctx, turnSource)
 	// Extract user ID from context
 	userID, _ := middleware.GetUserIDFromContext(ctx)
 
@@ -2707,6 +2711,7 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 			ChatID:     chatMessage.ChatID.String(),
 			Tokens:     chatMessage.Tokens,
 			MessageID:  messageID,
+			Source:     metering.TurnSourceFromContext(ctx),
 		})
 
 		if usage, ok := a.webSearchUsage(userID, chatMessage.ChatID, chatCtx, actionType); ok {

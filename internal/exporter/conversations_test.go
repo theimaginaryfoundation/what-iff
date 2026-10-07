@@ -57,7 +57,7 @@ func TestConversationsRoundTripSandboxed(t *testing.T) {
 	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	msg := []MessageInput{{Origin: models.MessageOriginUser, Text: "hi", SentAt: now}}
 	data, err := BuildConversationsJSON([]ConversationInput{
-		{ID: uuid.New(), Title: "sandboxed thread", CreatedAt: now, Messages: msg, Sandboxed: true},
+		{ID: uuid.New(), Title: "sandboxed thread", CreatedAt: now, Messages: msg, ContextScope: "sandbox"},
 		{ID: uuid.New(), Title: "ordinary thread", CreatedAt: now.Add(time.Second), Messages: msg},
 	})
 	if err != nil {
@@ -69,7 +69,7 @@ func TestConversationsRoundTripSandboxed(t *testing.T) {
 	}
 	got := map[string]bool{}
 	for _, c := range parsed {
-		got[c.Name] = c.WhatiffSandboxed
+		got[c.Name] = c.WhatiffContextScope == "sandbox"
 	}
 	// A sandboxed chat round-trips; an ordinary one (and an export from before the flag existed)
 	// parses to false, which is not sandboxed on import.

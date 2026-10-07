@@ -36,8 +36,9 @@ type chatUpdateRequest struct {
 	DisabledTools *[]string `json:"disabled_tools,omitempty"`
 	Tags          *[]string `json:"tags,omitempty"`
 	IsFavorite    *bool     `json:"is_favorite,omitempty"`
-	// Sandboxed, when set, changes the chat's sandbox flag. Omit to keep it.
-	Sandboxed *bool `json:"sandboxed,omitempty"`
+	// ContextScope, when set, changes the chat's context scope. Omit to keep it. Only "account" is
+	// accepted on an existing chat: a chat is sandboxed when it is created, never later.
+	ContextScope *string `json:"context_scope,omitempty"`
 }
 
 type chatPatchRequest struct {
@@ -57,8 +58,10 @@ type chatPatchRequest struct {
 	ClearActiveMood bool `json:"clear_active_mood,omitempty"`
 	// Archived hides the thread from default lists or restores it when set to false.
 	Archived *bool `json:"archived,omitempty"`
-	// Sandboxed changes the chat's sandbox flag. Turning it on takes effect on the next turn.
-	Sandboxed *bool `json:"sandboxed,omitempty"`
+	// ContextScope changes the chat's context scope. Only "account" is accepted on an existing
+	// chat (leaving the sandbox takes effect on the next turn): a chat is sandboxed when it is
+	// created, never later.
+	ContextScope *string `json:"context_scope,omitempty"`
 }
 
 type markChatReadResponse struct {
@@ -95,6 +98,17 @@ func (h *Handler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Tags = normalizedTags
+	if req.ContextScope != "" {
+		scope, ok := models.ParseContextScope(string(req.ContextScope))
+		if !ok {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "context_scope must be account or sandbox", nil)
+			return
+		}
+		req.ContextScope = scope
+	}
+	// disabled_tools is not part of the create API (set it with PATCH); the datastore honours it
+	// only for threads the server creates itself, and gives a new sandbox its own defaults.
+	req.DisabledTools = nil
 
 	// Create chat
 	chat, err := h.ds.CreateChat(r.Context(), userID, req)
@@ -114,7 +128,9 @@ func (h *Handler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to create chat", err)
 		return
 	}
-	if featuregate.IsEntitled(r.Context(), userID) {
+	// A sandbox starts with no connectors: the owner's default-enabled MCP servers would run with
+	// the owner's credentials for whoever can talk in the sandbox. The owner attaches one on purpose.
+	if featuregate.IsEntitled(r.Context(), userID) && !chat.IsSandboxed() {
 		defaultServers, err := h.ds.ListDefaultEnabledMCPServers(r.Context(), userID)
 		if err != nil {
 			h.logger.Warn("failed to list default-enabled mcp servers",
@@ -524,9 +540,10 @@ func (h *Handler) UpdateChat(w http.ResponseWriter, r *http.Request) {
 		// Shallow copy of *existing aliases IsFavorite; nil means "omit" for datastore.
 		updated.IsFavorite = nil
 	}
-	if req.Sandboxed != nil {
-		updated.Sandboxed = *req.Sandboxed
-		updated.SetSandboxed = true
+	if req.ContextScope != nil {
+		if !h.applyContextScopeChange(w, existing, &updated, *req.ContextScope) {
+			return
+		}
 	}
 
 	// Update chat
@@ -586,7 +603,7 @@ func (h *Handler) PatchChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Must include at least one field to patch.
-	if req.Name == nil && req.LastMessageTime == nil && req.ModelID == nil && req.PersonalityID == nil && req.DisabledTools == nil && req.Tags == nil && req.IsFavorite == nil && req.ActiveMoodID == nil && req.IsAutoMood == nil && !req.ClearActiveMood && req.Archived == nil && req.Sandboxed == nil {
+	if req.Name == nil && req.LastMessageTime == nil && req.ModelID == nil && req.PersonalityID == nil && req.DisabledTools == nil && req.Tags == nil && req.IsFavorite == nil && req.ActiveMoodID == nil && req.IsAutoMood == nil && !req.ClearActiveMood && req.Archived == nil && req.ContextScope == nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "No fields to update", nil)
 		return
 	}
@@ -667,9 +684,10 @@ func (h *Handler) PatchChat(w http.ResponseWriter, r *http.Request) {
 	if req.Archived != nil {
 		updated.Archived = req.Archived
 	}
-	if req.Sandboxed != nil {
-		updated.Sandboxed = *req.Sandboxed
-		updated.SetSandboxed = true
+	if req.ContextScope != nil {
+		if !h.applyContextScopeChange(w, existing, &updated, *req.ContextScope) {
+			return
+		}
 	}
 
 	chat, err := h.ds.UpdateChat(r.Context(), userID, updated)
@@ -973,4 +991,23 @@ func (h *Handler) GetAvailableRituals(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, ritualsPage)
+}
+
+// applyContextScopeChange validates a context_scope sent on PUT or PATCH and marks it as an
+// explicit change. A chat can leave the sandbox (account) at any time; it can only be sandboxed
+// when it is created, because a thread that has already read the account would carry what it
+// read into the sandbox. When it returns false the response has been written.
+func (h *Handler) applyContextScopeChange(w http.ResponseWriter, existing *models.Chat, updated *models.Chat, raw string) bool {
+	scope, ok := models.ParseContextScope(raw)
+	if !ok {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "context_scope must be account or sandbox", nil)
+		return false
+	}
+	if scope == models.ContextScopeSandbox && !existing.IsSandboxed() {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "A thread can only be sandboxed when it is created; start a new sandboxed thread instead", nil)
+		return false
+	}
+	updated.ContextScope = scope
+	updated.SetContextScope = true
+	return true
 }

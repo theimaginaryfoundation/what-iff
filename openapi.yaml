@@ -3777,10 +3777,12 @@ paths:
                 is_favorite:
                   type: boolean
                   description: Whether the chat is marked as favorite
-                sandboxed:
-                  type: boolean
+                context_scope:
+                  type: string
+                  enum: [account, sandbox]
                   description: >-
-                    Optional sandbox flag; see the `sandboxed` property of the Chat schema.
+                    Optional. `sandbox` creates the thread sandboxed; see the `context_scope` property of the Chat schema.
+                    Defaults to `account`.
                 tts_autoplay_override:
                   type: boolean
                   nullable: true
@@ -4038,10 +4040,13 @@ paths:
                 is_favorite:
                   type: boolean
                   description: Optional favorite flag
-                sandboxed:
-                  type: boolean
+                context_scope:
+                  type: string
+                  enum: [account, sandbox]
                   description: >-
-                    Optional sandbox flag; see the `sandboxed` property of the Chat schema.
+                    Optional. Only `account` is accepted on an existing thread (it leaves the sandbox, which cannot be
+                    undone); a thread is sandboxed when it is created, never later, so `sandbox` on a thread that is
+                    not one is a 400. See the `context_scope` property of the Chat schema.
                 tts_autoplay_override:
                   type: boolean
                   nullable: true
@@ -4122,10 +4127,13 @@ paths:
                 archived:
                   type: boolean
                   description: When true, hides the thread from default lists; set to false to restore from the archive
-                sandboxed:
-                  type: boolean
+                context_scope:
+                  type: string
+                  enum: [account, sandbox]
                   description: >-
-                    Optional sandbox flag; see the `sandboxed` property of the Chat schema.
+                    Optional. Only `account` is accepted on an existing thread (it leaves the sandbox, which cannot be
+                    undone); a thread is sandboxed when it is created, never later, so `sandbox` on a thread that is
+                    not one is a 400. See the `context_scope` property of the Chat schema.
                 tts_autoplay_override:
                   type: boolean
                   nullable: true
@@ -7358,15 +7366,20 @@ components:
         archived:
           type: boolean
           description: When true, the thread is in the archive and omitted from default list responses
-        sandboxed:
-          type: boolean
+        context_scope:
+          type: string
+          enum: [account, sandbox]
           description: >
-            When true the thread is a sandbox: it cannot read anything outside itself and has a locked-down
-            tool set. It reads no memories except those created in the thread, no other conversation,
-            no scratchpad, no account-wide files, jobs, skills or other personalities, and only the files
-            uploaded to the thread. Memories it creates are visible only inside the thread. It cannot
-            update the scratchpad, schedule jobs, or run sub-agents as other personalities or with skills,
-            and it is never given the owner's name or auto-selected moods. Defaults to false.
+            How much of the account the thread may read. `account` (the default) reads everything, as any
+            thread. `sandbox` reads nothing outside itself: no memories except those created in the thread,
+            no other conversation, no scratchpad, no account-wide files, jobs, skills or other personalities,
+            and only the files uploaded to the thread. Memories it creates are Chat-scoped and visible only
+            inside the thread. It cannot update the scratchpad, schedule jobs or sort the gallery, and a
+            sub-agent it runs keeps its own personality and no skills. It is created with no MCP connectors
+            and with web search, page fetching, image generation and sub-agents in its `disabled_tools`
+            (the owner can enable any of these afterwards), and it is never given the owner's name or
+            auto-selected moods. Chosen at creation: a thread can leave the sandbox (`account`) but never
+            enter one later.
         created_at:
           type: string
           format: date-time
@@ -7381,7 +7394,7 @@ components:
         tags: ["work", "todo"]
         is_favorite: false
         archived: false
-        sandboxed: false
+        context_scope: account
         created_at: "2024-01-01T00:00:00Z"
         updated_at: "2024-01-01T00:00:00Z"
 
@@ -7946,11 +7959,12 @@ components:
         summary_sha:
           type: string
           description: First 12 hex characters of the SHA-256 of the checkpoint summary that was in context.
-        sandboxed:
-          type: boolean
+        context_scope:
+          type: string
+          enum: [account, sandbox]
           description: >-
-            Whether the chat was a sandbox when this turn ran. A sandboxed turn has only memories created
-            in the chat and no scratchpad. Always present on turns with a manifest.
+            The chat's context scope when this turn ran. A sandboxed turn has only memories created in the
+            chat and no scratchpad. Always present on turns with a manifest.
 
     ContextMemoryInput:
       type: object

@@ -5539,8 +5539,11 @@ export interface paths {
                         tags?: string[];
                         /** @description Whether the chat is marked as favorite */
                         is_favorite?: boolean;
-                        /** @description Optional sandbox flag; see the `sandboxed` property of the Chat schema. */
-                        sandboxed?: boolean;
+                        /**
+                         * @description Optional. `sandbox` creates the thread sandboxed; see the `context_scope` property of the Chat schema. Defaults to `account`.
+                         * @enum {string}
+                         */
+                        context_scope?: "account" | "sandbox";
                         /** @description Optional per-chat TTS autoplay override. Null/omitted means inherit personality default. */
                         tts_autoplay_override?: boolean | null;
                     };
@@ -5937,8 +5940,11 @@ export interface paths {
                         tags?: string[];
                         /** @description Optional favorite flag */
                         is_favorite?: boolean;
-                        /** @description Optional sandbox flag; see the `sandboxed` property of the Chat schema. */
-                        sandboxed?: boolean;
+                        /**
+                         * @description Optional. Only `account` is accepted on an existing thread (it leaves the sandbox, which cannot be undone); a thread is sandboxed when it is created, never later, so `sandbox` on a thread that is not one is a 400. See the `context_scope` property of the Chat schema.
+                         * @enum {string}
+                         */
+                        context_scope?: "account" | "sandbox";
                         /** @description Optional per-chat TTS autoplay override. Null means inherit personality default. */
                         tts_autoplay_override?: boolean | null;
                     };
@@ -6069,8 +6075,11 @@ export interface paths {
                         is_favorite?: boolean;
                         /** @description When true, hides the thread from default lists; set to false to restore from the archive */
                         archived?: boolean;
-                        /** @description Optional sandbox flag; see the `sandboxed` property of the Chat schema. */
-                        sandboxed?: boolean;
+                        /**
+                         * @description Optional. Only `account` is accepted on an existing thread (it leaves the sandbox, which cannot be undone); a thread is sandboxed when it is created, never later, so `sandbox` on a thread that is not one is a 400. See the `context_scope` property of the Chat schema.
+                         * @enum {string}
+                         */
+                        context_scope?: "account" | "sandbox";
                         /** @description Optional per-chat TTS autoplay override. Null means inherit personality default. */
                         tts_autoplay_override?: boolean | null;
                     };
@@ -9938,7 +9947,7 @@ export interface components {
          *       ],
          *       "is_favorite": false,
          *       "archived": false,
-         *       "sandboxed": false,
+         *       "context_scope": "account",
          *       "created_at": "2024-01-01T00:00:00Z",
          *       "updated_at": "2024-01-01T00:00:00Z"
          *     }
@@ -9967,8 +9976,11 @@ export interface components {
             tts_autoplay_override?: boolean | null;
             /** @description When true, the thread is in the archive and omitted from default list responses */
             archived?: boolean;
-            /** @description When true the thread is a sandbox: it cannot read anything outside itself and has a locked-down tool set. It reads no memories except those created in the thread, no other conversation, no scratchpad, no account-wide files, jobs, skills or other personalities, and only the files uploaded to the thread. Memories it creates are visible only inside the thread. It cannot update the scratchpad, schedule jobs, or run sub-agents as other personalities or with skills, and it is never given the owner's name or auto-selected moods. Defaults to false. */
-            sandboxed?: boolean;
+            /**
+             * @description How much of the account the thread may read. `account` (the default) reads everything, as any thread. `sandbox` reads nothing outside itself: no memories except those created in the thread, no other conversation, no scratchpad, no account-wide files, jobs, skills or other personalities, and only the files uploaded to the thread. Memories it creates are Chat-scoped and visible only inside the thread. It cannot update the scratchpad, schedule jobs or sort the gallery, and a sub-agent it runs keeps its own personality and no skills. It is created with no MCP connectors and with web search, page fetching, image generation and sub-agents in its `disabled_tools` (the owner can enable any of these afterwards), and it is never given the owner's name or auto-selected moods. Chosen at creation: a thread can leave the sandbox (`account`) but never enter one later.
+             * @enum {string}
+             */
+            context_scope?: "account" | "sandbox";
             /** Format: date-time */
             created_at?: string;
             /** Format: date-time */
@@ -10280,8 +10292,11 @@ export interface components {
             scratchpad_sha?: string;
             /** @description First 12 hex characters of the SHA-256 of the checkpoint summary that was in context. */
             summary_sha?: string;
-            /** @description Whether the chat was a sandbox when this turn ran. A sandboxed turn has only memories created in the chat and no scratchpad. Always present on turns with a manifest. */
-            sandboxed?: boolean;
+            /**
+             * @description The chat's context scope when this turn ran. A sandboxed turn has only memories created in the chat and no scratchpad. Always present on turns with a manifest.
+             * @enum {string}
+             */
+            context_scope?: "account" | "sandbox";
         };
         /** @description One memory retrieved for a turn. */
         ContextMemoryInput: {
