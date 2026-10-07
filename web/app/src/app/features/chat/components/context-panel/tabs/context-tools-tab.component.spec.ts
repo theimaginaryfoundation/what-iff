@@ -29,8 +29,8 @@ describe('ContextToolsTabComponent', () => {
             listTools: vi.fn().mockName("ToolService.listTools")
         };
         toolService.listTools.mockReturnValue(of([
-            { name: 'web_search', description: 'Search the web for current information.', guide: 'Ask for recent results only, or limit it to certain sites.', sandbox: 'default_off' },
-            { name: 'update_scratchpad', description: "Update this personality's working notes, which persist across conversations using the same personality.", sandbox: 'never' },
+            { name: 'web_search', description: 'Search the web for current information.', guide: 'Ask for recent results only, or limit it to certain sites.' },
+            { name: 'update_scratchpad', description: "Update this personality's working notes, which persist across conversations using the same personality." },
         ]));
         const mcpService = {
             listActiveForChat: vi.fn().mockName("MCPServerService.listActiveForChat"),
@@ -102,29 +102,6 @@ describe('ContextToolsTabComponent', () => {
         // A tool without a guide gets no tooltip.
         scratchpad.dispatchEvent(new Event('mouseenter'));
         expect(scratchpad.hasAttribute('aria-describedby')).toBe(false);
-    });
-
-    it('shows a tool a sandbox never offers as off and locked, and leaves the rest toggleable', async () => {
-        fixture.componentRef.setInput('chat', {
-            id: 'chat-1',
-            user_id: 'user-1',
-            name: 'Thread',
-            disabled_tools: [],
-            context_scope: 'sandbox',
-            created_at: '',
-            updated_at: '',
-        });
-        fixture.detectChanges();
-        await fixture.whenStable();
-        fixture.detectChanges();
-
-        const [webSearch, scratchpad] = Array.from(fixture.nativeElement.querySelectorAll('.tool-item input')) as HTMLInputElement[];
-        expect(webSearch.disabled).toBe(false);
-        expect(webSearch.checked).toBe(true);
-        expect(scratchpad.disabled).toBe(true);
-        expect(scratchpad.checked).toBe(false);
-        expect(fixture.nativeElement.querySelectorAll('[data-testid=tool-locked]').length).toBe(1);
-        expect(fixture.nativeElement.textContent).toContain('Not available in a sandboxed thread');
     });
 
     it('does not reload the tools list when only disabled_tools changes', async () => {

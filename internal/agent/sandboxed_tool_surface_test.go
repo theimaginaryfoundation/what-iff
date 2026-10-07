@@ -84,6 +84,11 @@ func TestSandboxedChatToolSurface_EveryCatalogToolIsClassified(t *testing.T) {
 	for _, name := range []string{agenttools.RunSubagentToolSpec.Name, agenttools.GenerateImageToolSpec.Name, agenttools.ToolNameWebSearch, agenttools.ToolNameFetchPage} {
 		require.Contains(t, defaultOff, name, "%q spends the owner's credits or acts beyond the conversation, so a new sandbox starts with it off", name)
 	}
+	// The never-offered tools start off as well, so the Tools tab shows them unticked rather than
+	// as enabled toggles the policy silently ignores.
+	for _, name := range sandboxedChatDisabledTools() {
+		require.Contains(t, defaultOff, name, "%q is never offered in a sandbox, so a new sandbox lists it as off", name)
+	}
 }
 
 // The exact set of tools offered in a sandboxed chat versus an ordinary one, computed through

@@ -3,7 +3,7 @@ import { ChangeDetectionStrategy, Component, OnChanges, SimpleChanges, inject, i
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
-import { Chat, isSandboxed } from '../../../../../core/models/chat.model';
+import { Chat } from '../../../../../core/models/chat.model';
 import { MCPServer } from '../../../../../core/models/mcp-server.model';
 import { ToolCall } from '../../../../../core/models/toolcall.model';
 import { MCPServerService } from '../../../../../core/services/mcp-server.service';
@@ -52,24 +52,20 @@ type ToolContextTab = 'available' | 'history';
             <span class="label">Tools for this thread</span>
             <ui-help-hint label="What are tools?" heading="Tools" align="end">
               Actions the personality can take while replying, such as searching the web or saving a memory. Unticking a tool turns it off
-              for this thread only. A sandboxed thread starts with its heavier tools off and can never use the ones marked as unavailable.
+              for this thread only. A sandboxed thread starts with most tools off.
             </ui-help-hint>
           </div>
           <ul class="list">
             @for (tool of tools(); track tool.name) {
               <li>
-                <label class="tool-item" [class.tool-item--locked]="isToolLocked(tool)" [uiTooltip]="tool.guide ?? ''" placement="left">
+                <label class="tool-item" [uiTooltip]="tool.guide ?? ''" placement="left">
                   <input
                     type="checkbox"
-                    [checked]="isToolEnabled(tool.name) && !isToolLocked(tool)"
-                    [disabled]="isToolLocked(tool)"
+                    [checked]="isToolEnabled(tool.name)"
                     (change)="toggleTool(tool.name, $any($event.target).checked)"
                   />
                   <span>{{ friendlyToolName(tool.name) }}</span>
                   <small>{{ tool.description }}</small>
-                  @if (isToolLocked(tool)) {
-                    <small class="tool-item__locked" data-testid="tool-locked">Not available in a sandboxed thread.</small>
-                  }
                 </label>
               </li>
             }
@@ -196,14 +192,6 @@ type ToolContextTab = 'available' | 'history';
         gap: 0.15rem;
         grid-template-columns: auto minmax(0, 1fr);
         padding: 0 0 0.5rem;
-      }
-
-      .tool-item--locked {
-        opacity: 0.6;
-      }
-
-      .tool-item__locked {
-        color: var(--color-warning);
       }
 
       .tool-item input {
@@ -357,11 +345,6 @@ export class ContextToolsTabComponent implements OnChanges {
     if (prevId !== nextId) {
       void this.loadForChat();
     }
-  }
-
-  /** A tool a sandboxed thread is never offered: shown off and locked, whatever disabled_tools says. */
-  isToolLocked(tool: ToolMeta): boolean {
-    return isSandboxed(this.chat()) && tool.sandbox === 'never';
   }
 
   isToolEnabled(toolName: string): boolean {

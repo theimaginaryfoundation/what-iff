@@ -21,18 +21,6 @@ const (
 	SandboxAllowed
 )
 
-// String is the policy as the tools API reports it.
-func (p SandboxPolicy) String() string {
-	switch p {
-	case SandboxDefaultOff:
-		return "default_off"
-	case SandboxAllowed:
-		return "allowed"
-	default:
-		return "never"
-	}
-}
-
 // SandboxNeverTools lists the catalog tools a sandboxed chat is never offered.
 func SandboxNeverTools() []string {
 	var out []string
@@ -55,12 +43,15 @@ func SandboxDefaultOffTools() []string {
 	return out
 }
 
-// The built-in catalog's default-off tools are what CreateChat starts a sandbox with. A build
-// that contributes tools through AdditionalFunctionToolCatalog registers its own default-off
-// names with models.RegisterSandboxDefaultDisabledTool from its init().
+// A new sandbox starts with every tool that is not SandboxAllowed switched off in its
+// disabled_tools: the default-off ones so the owner enables them deliberately, and the never
+// ones so the Tools tab shows them off too (the policy refuses those whatever the list says, so
+// re-ticking one is harmless). A build that contributes tools through
+// AdditionalFunctionToolCatalog registers its own names with
+// models.RegisterSandboxDefaultDisabledTool from its init().
 func init() {
 	for _, def := range functionToolCatalog {
-		if def.SandboxPolicy == SandboxDefaultOff {
+		if def.SandboxPolicy != SandboxAllowed {
 			models.RegisterSandboxDefaultDisabledTool(def.Spec.Name)
 		}
 	}
