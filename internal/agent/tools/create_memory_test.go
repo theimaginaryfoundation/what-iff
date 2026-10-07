@@ -109,3 +109,51 @@ func TestCreateMemoryTool_AppliesChatPersonalityAutoPin(t *testing.T) {
 		})
 	}
 }
+
+// In a Discord relay thread every memory is external and attributed: the speaker argument
+// wins over the default (the author of the message being answered). Elsewhere the argument is
+// ignored and nothing is attributed.
+func TestCreateMemoryToolWithOrigin_RecordsProvenanceAndSpeaker(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		origin      models.MemoryOrigin
+		args        string
+		wantSpeaker string
+	}{
+		{name: "relay thread, speaker argument", origin: models.MemoryOrigin{Provenance: models.MemoryProvenanceExternal, Speaker: "alice"}, args: `,"speaker":"bob"`, wantSpeaker: "bob"},
+		{name: "relay thread, default speaker", origin: models.MemoryOrigin{Provenance: models.MemoryProvenanceExternal, Speaker: "alice"}, wantSpeaker: "alice"},
+		{name: "own chat ignores the argument", origin: models.MemoryOrigin{Provenance: models.MemoryProvenanceUser}, args: `,"speaker":"bob"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tool, mock := newCreateMemoryTestTool(t)
+			chat := &models.Chat{ID: uuid.New(), UserID: uuid.New()}
+
+			mock.ExpectBegin()
+			mock.ExpectQuery("SELECT .* FROM `chats`").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(chat.ID))
+			if tc.wantSpeaker != "" {
+				mock.ExpectExec("INSERT INTO `memories` .*`provenance`.*`source_speaker`").
+					WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+						"external", tc.wantSpeaker, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+					WillReturnResult(sqlmock.NewResult(1, 1))
+			} else {
+				mock.ExpectExec("NOT source_speaker").WillReturnResult(sqlmock.NewResult(1, 1))
+			}
+			mock.ExpectExec("INSERT INTO `embeddings`").WillReturnResult(sqlmock.NewResult(1, 1))
+			mock.ExpectCommit()
+
+			out, err := tool.CreateMemoryToolWithOrigin(context.Background(), chat, tc.origin, []byte(`{"content":"Likes tea","scope":"Chat"`+tc.args+`}`))
+			require.NoError(t, err)
+			require.Contains(t, out, `"success":true`)
+			if tc.wantSpeaker != "" {
+				require.Contains(t, out, `"provenance":"external"`)
+				require.Contains(t, out, `"speaker":"`+tc.wantSpeaker+`"`)
+			} else {
+				require.NotContains(t, out, "provenance")
+			}
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}

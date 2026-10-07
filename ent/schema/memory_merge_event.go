@@ -55,6 +55,15 @@ type MemoryMergeUndoSnapshot struct {
 	PriorEmbeddingMissing bool      `json:"prior_embedding_missing,omitempty"`
 	// AbsorbedMembers lists every memory the fold set inactive, with its status beforehand.
 	AbsorbedMembers []MemoryMergeAbsorbedMember `json:"absorbed_members,omitempty"`
+	// OriginChanged is set when the fold changed the survivor's provenance or source speaker
+	// (an external member makes the survivor external; a speaker survives only when every member
+	// agrees). PriorProvenance and PriorSourceSpeaker are the values before, and FoldedProvenance
+	// the provenance the fold set. Undo restores them only while the survivor still holds
+	// FoldedProvenance, so a provenance the user set afterwards wins.
+	OriginChanged      bool    `json:"origin_changed,omitempty"`
+	PriorProvenance    string  `json:"prior_provenance,omitempty"`
+	PriorSourceSpeaker *string `json:"prior_source_speaker,omitempty"`
+	FoldedProvenance   string  `json:"folded_provenance,omitempty"`
 }
 
 // UnmarshalJSON accepts confidence buckets written before confidence became numeric.

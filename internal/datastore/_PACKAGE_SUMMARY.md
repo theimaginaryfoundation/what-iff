@@ -157,6 +157,27 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - For "exists" checks used by writes (chat/job/preferences/overrides), validate against active models only.
 - Do not hard-delete models in normal flows; use soft delete.
 - Seed code should insert missing defaults but must not overwrite metadata on existing active models.
+- **Sandboxed chats:** the SQL side of the sandbox.
+  `GetRelatedMemories` scopes a sandboxed chat to its own Chat-scoped memories in the `WHERE` clause (so it still gets a full set of matches), and `GetRelatedSummaryMemories` takes the one chat whose summary may be searched.
+  `ListMemoryMergeEvents` takes `OnlyChatID` (fold events whose survivor memory was created in that chat; link events are excluded).
+  `MemoryIDsCreatedInChat` re-checks persisted memory ids against the chat's own memories.
+  `toChatModel` blanks the personality scratchpad for a sandboxed chat, so neither a turn nor `GetChatContext` (the owner's context panel) sees it, and the chat handler refuses a scratchpad save for a sandbox.
+  `CreateChat` and `UpdateChat` write `context_scope` (validated; `ErrInvalidRequestBody` for an unknown scope); `UpdateChat` writes it only when `SetContextScope` is true, so a stale copy saved by a turn cannot un-sandbox a chat.
+  `CreateChat` honours `Chat.DisabledTools`, and gives a chat created sandboxed with no list of its own the registered sandbox defaults (`models.SandboxDefaultDisabledTools`), so every creation path starts a sandbox the same way.
+  `memoryOfChat` (`memory_chat_scope.go`) is the one predicate for "the chat's own memories": created in it AND Chat- or Summary-scoped; `MemoryIDsCreatedInChat`, `ensureMemoriesCreatedInChatTx` and the `OnlyChatID` merge-event filter all use it, so a User-scoped memory that merely came from the chat is outside the sandbox.
+  `ListFileAttachmentsInChatScope` returns a conversation's uploads (plus a personality's documents when a personality id is given); a sandboxed chat passes none, so it sees only its own uploads.
+  The account export (`whatiff_context_scope`, omitted for `account`), account backup and conversation import carry the chat's `context_scope`; absent reads as `account`.
+  `WithChatMemoriesOnly` confines `PersistMemoryMergeGroup` and `PersistMemoryLinkGroup` to memories the asking chat created (`ErrMemoryOutsideChat`, nothing written) and makes anything they create Chat-scoped.
+  `ErrMemoryIDPrefixAmbiguous` lets a sandboxed chat treat an ambiguous id prefix like a missing memory.
+- **Memory provenance:** every memory row has `provenance` (`user` or `external`) and an optional `source_speaker`.
+  `CreateMemory`, `createMergedMemory` (with `CollapsedExtractedMemory.Provenance` / `Speaker`), `PersistMemoryLinkGroup` (`LinkGroupNewMember.Origin`) and `PersistMemoryMergeGroup` (`WithNewMemberOrigin`) write it.
+  A fold's survivor is external when any member is and keeps a speaker only when all agree (`models.MergeOrigins`); the undo snapshot records `PriorProvenance` / `PriorSourceSpeaker` and undo restores them unless the user relabelled the memory since.
+  `UpsertChatSummaryMemory` marks a Discord relay thread's summary external, and it stays so.
+  `ListMemories` filters by `MemoryFilters.Provenance`, `UpdateMemory` accepts a provenance patch (the owner confirming a memory), and memory export/import carry both fields (the `user` default is not written).
+- **Discord relay (`discord.go`):** bots (token encrypted with the MCP token helper), bindings, message links and pending posts.
+  Methods taking a userID are owner-scoped; the relay's own (`FindDiscordBindingTarget`, `GetDiscordBindingTarget`, `ListActiveDiscordBotCredentials`, link and pending-post bookkeeping) act for the owner recorded on the bot.
+  `IsExternalRelayChat` (any chat bound by one of the user's bots) and `ExternalSpeakerForMessage` (the Discord author of a saved message) back memory provenance in the agent.
+  `CreateChat` honours `Chat.DisabledTools`, so a server-created relay thread never exists with its default-off tools on (the app's create route drops the field).
 
 ## Testing
 

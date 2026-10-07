@@ -265,3 +265,19 @@ describe('memory-filter.helpers', () => {
     expect(normalizeDateRange('  2026-01-01  ', '').minDate).toBe('2026-01-01');
   });
 });
+
+describe('memory-filter.helpers provenance', () => {
+  it('defaults to All and omits it from the URL and the API query', () => {
+    expect(DEFAULT_MEMORY_VIEW_FILTERS.provenance).toBe('all');
+    expect(serializeFilters(DEFAULT_MEMORY_VIEW_FILTERS)).not.toHaveProperty('provenance');
+    expect(toApiFilters(DEFAULT_MEMORY_VIEW_FILTERS).provenance).toBeUndefined();
+  });
+
+  it('round-trips External through the URL and sends it to the list query', () => {
+    const params = serializeFilters({ ...DEFAULT_MEMORY_VIEW_FILTERS, provenance: 'external' });
+    expect(params['provenance']).toBe('external');
+    expect(parseQueryParams(params).provenance).toBe('external');
+    expect(toApiFilters(parseQueryParams(params)).provenance).toBe('external');
+    expect(parseQueryParams({ provenance: 'discord' }).provenance).toBe('all');
+  });
+});

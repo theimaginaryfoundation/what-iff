@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/memoryutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"go.uber.org/zap"
@@ -55,7 +56,7 @@ func (t *RecallTool) gather(ctx context.Context, chat *models.Chat, query, src s
 	}
 
 	if wantsMemories(src) {
-		mems, err := t.store.GetRelatedMemories(ctx, chat.UserID, chat.ID, emb, chat.PersonalityID)
+		mems, err := t.store.GetRelatedMemories(ctx, chat.UserID, chat.ID, emb, chat.PersonalityID, chat.IsSandboxed())
 		if err != nil {
 			t.logger.Error("recall: memory search failed", zap.Error(err))
 			return r, fmt.Errorf("failed to search memories: %w", err)
@@ -75,9 +76,10 @@ func (t *RecallTool) gather(ctx context.Context, chat *models.Chat, query, src s
 	}
 
 	if wantsFiles(src) {
-		// current_conversation narrows to chat-attached files (drop personality-scoped docs).
+		// current_conversation narrows to chat-attached files (drop personality-scoped docs), and a
+		// sandboxed chat sees only the files uploaded to it.
 		pid := personalityPtr(chat)
-		if currentConversation {
+		if currentConversation || chat.IsSandboxed() {
 			pid = nil
 		}
 		// When time-scoping, over-fetch so the post-filter still has candidates to cap from.
@@ -119,7 +121,8 @@ func (t *RecallTool) gather(ctx context.Context, chat *models.Chat, query, src s
 	}
 
 	if wantsSummaries(src) {
-		sums, err := t.store.GetRelatedSummaryMemories(ctx, chat.UserID, emb, maxChunks)
+		// A sandboxed chat finds only its own summary (filtered in SQL).
+		sums, err := t.store.GetRelatedSummaryMemories(ctx, chat.UserID, emb, maxChunks, sandboxChatID(chat))
 		if err != nil {
 			t.logger.Error("recall: summary search failed", zap.Error(err))
 			return r, fmt.Errorf("failed to search summaries: %w", err)
@@ -131,7 +134,7 @@ func (t *RecallTool) gather(ctx context.Context, chat *models.Chat, query, src s
 			if !withinWindow(m.CreatedAt, window) {
 				continue
 			}
-			r.chunks = append(r.chunks, recallChunk{SourceType: "summary", Name: m.ChatName, ConversationID: m.ChatID.String(), Text: m.Content})
+			r.chunks = append(r.chunks, summaryChunk(m, m.ChatID))
 		}
 	}
 
@@ -262,7 +265,7 @@ func (t *RecallTool) fetch(ctx context.Context, chat *models.Chat, a recallArgs)
 
 	// Explicit memory:… tokens (full UUID or short prefix) always resolve as memories.
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(target)), "memory:") {
-		mem, err := t.resolveMemory(ctx, chat.UserID, target)
+		mem, err := t.resolveMemory(ctx, chat, target)
 		if err != nil {
 			return t.fail(recallModeFetch, err.Error())
 		}
@@ -279,6 +282,9 @@ func (t *RecallTool) fetch(ctx context.Context, chat *models.Chat, a recallArgs)
 		if err != nil {
 			return t.fail(recallModeFetch, err.Error())
 		}
+		if !conversationReadable(chat, chatID) {
+			return t.fail(recallModeFetch, sandboxedNote("Reading that conversation's bookmarks"))
+		}
 		return t.fetchBookmark(ctx, chat.UserID, chatID, messageID)
 	}
 
@@ -289,7 +295,7 @@ func (t *RecallTool) fetch(ctx context.Context, chat *models.Chat, a recallArgs)
 		if err != nil {
 			return t.fail(recallModeFetch, fmt.Sprintf("target %q must be summary:<conversation-uuid>", target))
 		}
-		return t.fetchSummary(ctx, chat.UserID, id)
+		return t.fetchSummary(ctx, chat, id)
 	}
 
 	if id, err := uuid.Parse(target); err == nil {
@@ -298,25 +304,27 @@ func (t *RecallTool) fetch(ctx context.Context, chat *models.Chat, a recallArgs)
 		// user resolves to not-found here — there is no UserID on the returned model to re-check,
 		// and none is needed.
 		// Try memory first.
-		if mem, err := t.store.GetMemory(ctx, chat.UserID, id); err == nil && mem != nil {
+		// A sandboxed chat treats anything outside the sandbox exactly like a missing id.
+		if mem, err := t.store.GetMemory(ctx, chat.UserID, id); err == nil && mem != nil && memoryReadableBy(chat, mem) {
 			return t.ok(recallResult{
 				Mode:     recallModeFetch,
 				Memories: formatMemories([]*models.Memory{mem}),
 			}, []*models.Memory{mem}, nil)
 		}
 		// Then a file attachment by ID.
-		if fa, err := t.store.GetFileAttachment(ctx, chat.UserID, id); err == nil && fa != nil {
+		if fa, err := t.store.GetFileAttachment(ctx, chat.UserID, id); err == nil && fa != nil && fileInChatScope(chat, fa) {
 			return t.fetchFile(ctx, chat.UserID, fa, a.NextPageToken, maxChunks)
 		}
-		// Then a conversation's checkpoint summary, treating the ID as a chat ID.
-		if sum, err := t.store.GetChatSummaryMemory(ctx, chat.UserID, id); err == nil && sum != nil {
+		// Then a conversation's checkpoint summary, treating the ID as a chat ID. A summary is a
+		// memory tied to its conversation, so the same read check gates it.
+		if sum, err := t.store.GetChatSummaryMemory(ctx, chat.UserID, id); err == nil && sum != nil && memoryReadableBy(chat, sum) {
 			return t.ok(summaryChunkResult(sum, id), []*models.Memory{sum}, nil)
 		}
 		return t.fail(recallModeFetch, fmt.Sprintf("no memory, file, or conversation summary found for id %q", target))
 	}
 
 	// Filename match — exact only, to avoid the fuzzy filter resolving to the wrong file.
-	fa, suggestions, err := t.resolveFileByName(ctx, chat.UserID, target)
+	fa, suggestions, err := t.resolveFileByName(ctx, chat, target)
 	if err != nil {
 		return t.fail(recallModeFetch, err.Error())
 	}
@@ -336,8 +344,19 @@ func (t *RecallTool) fetch(ctx context.Context, chat *models.Chat, a recallArgs)
 func summaryChunkResult(sum *models.Memory, chatID uuid.UUID) recallResult {
 	return recallResult{
 		Mode:   recallModeFetch,
-		Chunks: []recallChunk{{SourceType: "summary", Name: sum.ChatName, ConversationID: chatID.String(), Text: sum.Content}},
+		Chunks: []recallChunk{summaryChunk(sum, chatID)},
 	}
+}
+
+// summaryChunk renders a checkpoint summary as a recall chunk. A Discord relay thread's
+// summary retells what people outside the account said, so it carries the same unverified note an
+// external memory does.
+func summaryChunk(sum *models.Memory, chatID uuid.UUID) recallChunk {
+	c := recallChunk{SourceType: "summary", Name: sum.ChatName, ConversationID: chatID.String(), Text: sum.Content}
+	if sum.Provenance.IsExternal() {
+		c.Provenance = memoryutil.ExternalProvenanceNote(nil)
+	}
+	return c
 }
 
 func (t *RecallTool) fetchBookmark(ctx context.Context, userID, chatID, messageID uuid.UUID) (string, []*models.Memory, []*models.FileAttachment, error) {
@@ -377,12 +396,13 @@ func parseBookmarkFetchTarget(target string) (uuid.UUID, uuid.UUID, error) {
 }
 
 // fetchSummary resolves fetch mode for an explicit summary:<conversation-id> target.
-func (t *RecallTool) fetchSummary(ctx context.Context, userID, chatID uuid.UUID) (string, []*models.Memory, []*models.FileAttachment, error) {
-	sum, err := t.store.GetChatSummaryMemory(ctx, userID, chatID)
+// A sandboxed chat reads only its own conversation's summary; another reads as absent.
+func (t *RecallTool) fetchSummary(ctx context.Context, chat *models.Chat, chatID uuid.UUID) (string, []*models.Memory, []*models.FileAttachment, error) {
+	sum, err := t.store.GetChatSummaryMemory(ctx, chat.UserID, chatID)
 	if err != nil {
 		return t.fail(recallModeFetch, err.Error())
 	}
-	if sum == nil {
+	if sum == nil || !memoryReadableBy(chat, sum) {
 		return t.ok(recallResult{Mode: recallModeFetch, Note: fmt.Sprintf("No checkpoint summary found for conversation %s.", chatID)}, nil, nil)
 	}
 	return t.ok(summaryChunkResult(sum, chatID), []*models.Memory{sum}, nil)
@@ -420,6 +440,7 @@ func (t *RecallTool) fetchImage(ctx context.Context, userID uuid.UUID, fa *model
 	att := *fa
 	att.FileType = contentType
 	att.FileContent = base64.StdEncoding.EncodeToString(data)
+	att.ContextOnly = true // for the model to look at; not part of the reply
 
 	return t.ok(recallResult{
 		Mode: recallModeFetch,
@@ -469,10 +490,27 @@ func (t *RecallTool) fetchFileChunks(ctx context.Context, faID uuid.UUID, name, 
 // resolveFileByName returns the exact (case-insensitive) filename match. ListFileAttachments' Name
 // filter is fuzzy (also matches description / chat / personality names), so we never fall back to a
 // non-exact hit; instead we hand back the candidate names as suggestions for the model to retry.
-func (t *RecallTool) resolveFileByName(ctx context.Context, userID uuid.UUID, name string) (match *models.FileAttachment, suggestions []string, err error) {
-	page, err := t.store.ListFileAttachments(ctx, userID, 1, 10, models.FileAttachmentFilters{Name: strPtr(name)})
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to look up file %q: %v", name, err)
+func (t *RecallTool) resolveFileByName(ctx context.Context, chat *models.Chat, name string) (match *models.FileAttachment, suggestions []string, err error) {
+	var page *models.PaginatedResponse
+	if chat.IsSandboxed() {
+		// A sandboxed chat only sees the files uploaded to this conversation, so look the name up
+		// in that scope instead of the account-wide library.
+		scoped, serr := t.store.ListFileAttachmentsInChatScope(ctx, chat.UserID, chat.ID, nil, 0)
+		if serr != nil {
+			return nil, nil, fmt.Errorf("failed to look up file %q: %v", name, serr)
+		}
+		results := make([]any, 0, len(scoped))
+		for _, fa := range scoped {
+			if fa != nil && strings.Contains(strings.ToLower(fa.Name), strings.ToLower(name)) {
+				results = append(results, fa)
+			}
+		}
+		page = &models.PaginatedResponse{Results: results, TotalCount: len(results)}
+	} else {
+		page, err = t.store.ListFileAttachments(ctx, chat.UserID, 1, 10, models.FileAttachmentFilters{Name: strPtr(name)})
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to look up file %q: %v", name, err)
+		}
 	}
 	if page == nil || len(page.Results) == 0 {
 		return nil, nil, nil
@@ -496,7 +534,7 @@ func (t *RecallTool) resolveFileByName(ctx context.Context, userID uuid.UUID, na
 
 // related turns one memory into its cluster: use the memory's content as a semantic query.
 func (t *RecallTool) related(ctx context.Context, chat *models.Chat, a recallArgs) (string, []*models.Memory, []*models.FileAttachment, error) {
-	mem, err := t.resolveMemory(ctx, chat.UserID, a.Target)
+	mem, err := t.resolveMemory(ctx, chat, a.Target)
 	if err != nil {
 		return t.fail(recallModeRelated, err.Error())
 	}
@@ -505,7 +543,7 @@ func (t *RecallTool) related(ctx context.Context, chat *models.Chat, a recallArg
 	if err != nil {
 		return t.fail(recallModeRelated, fmt.Sprintf("failed to embed memory content: %v", err))
 	}
-	related, err := t.store.GetRelatedMemories(ctx, chat.UserID, chat.ID, emb, chat.PersonalityID)
+	related, err := t.store.GetRelatedMemories(ctx, chat.UserID, chat.ID, emb, chat.PersonalityID, chat.IsSandboxed())
 	if err != nil {
 		return t.fail(recallModeRelated, fmt.Sprintf("failed to find related memories: %v", err))
 	}
@@ -534,9 +572,16 @@ func (t *RecallTool) related(ctx context.Context, chat *models.Chat, a recallArg
 // then return the last N turns of its source conversation ending at memory.CreatedAt (default 5).
 // No per-message FK exists on Memory; ChatID + CreatedAt is the provenance we have.
 func (t *RecallTool) origin(ctx context.Context, chat *models.Chat, a recallArgs) (string, []*models.Memory, []*models.FileAttachment, error) {
-	mem, err := t.resolveMemory(ctx, chat.UserID, a.Target)
+	mem, err := t.resolveMemory(ctx, chat, a.Target)
 	if err != nil {
 		return t.fail(recallModeOrigin, err.Error())
+	}
+	if mem.ChatID != uuid.Nil && !conversationReadable(chat, mem.ChatID) {
+		return t.ok(recallResult{
+			Mode:     recallModeOrigin,
+			Memories: formatMemories([]*models.Memory{mem}),
+			Note:     sandboxedNote("The source conversation of this memory"),
+		}, []*models.Memory{mem}, nil)
 	}
 	if mem.ChatID == uuid.Nil {
 		return t.ok(recallResult{
@@ -616,6 +661,9 @@ func (t *RecallTool) conversation(ctx context.Context, chat *models.Chat, a reca
 	if err != nil {
 		return t.fail(recallModeConversation, err.Error())
 	}
+	if !conversationReadable(chat, chatID) {
+		return t.fail(recallModeConversation, sandboxedNote("Reading that conversation"))
+	}
 
 	if cur.ConversationID != "" && cur.ConversationID != chatID.String() {
 		return t.fail(recallModeConversation, "next_page_token belongs to a different conversation")
@@ -638,7 +686,7 @@ func (t *RecallTool) conversation(ctx context.Context, chat *models.Chat, a reca
 	}
 	if sum, err := t.store.GetChatSummaryMemory(ctx, chat.UserID, chatID); err != nil {
 		t.logger.Warn("recall: conversation summary lookup failed", zap.Error(err))
-	} else if sum != nil {
+	} else if sum != nil && memoryReadableBy(chat, sum) {
 		conv.Summary = sum.Content
 	}
 
@@ -674,6 +722,9 @@ func (t *RecallTool) bookmarks(ctx context.Context, chat *models.Chat, a recallA
 	chatID, err := recallConversationTarget(chat.ID, a.Target)
 	if err != nil {
 		return t.fail(recallModeBookmarks, err.Error())
+	}
+	if !conversationReadable(chat, chatID) {
+		return t.fail(recallModeBookmarks, sandboxedNote("Reading that conversation's bookmarks"))
 	}
 	rows, err := t.store.ListChatMessageBookmarksPage(ctx, chat.UserID, chatID, page, pageSize)
 	if err != nil {
@@ -795,11 +846,15 @@ func (t *RecallTool) lifecycleEvents(ctx context.Context, chat *models.Chat, a r
 	}
 
 	filters := models.MemoryMergeEventFilters{ExcludeReverted: true, MinDate: window.Min, MaxDate: window.Max}
+	if chat.IsSandboxed() {
+		id := chat.ID
+		filters.OnlyChatID = &id
+	}
 	if q, ok := validateNonEmptyString(a.Query); ok {
 		filters.Query = &q
 	}
 	if tgt := strings.TrimSpace(a.Target); tgt != "" {
-		mem, err := t.resolveMemory(ctx, chat.UserID, tgt)
+		mem, err := t.resolveMemory(ctx, chat, tgt)
 		if err != nil {
 			return t.fail(recallModeLifecycleEvents, err.Error())
 		}
@@ -817,7 +872,8 @@ func (t *RecallTool) lifecycleEvents(ctx context.Context, chat *models.Chat, a r
 		if !ok || ev == nil {
 			continue
 		}
-		out = append(out, toRecallLifecycleEvent(ev))
+		item := toRecallLifecycleEvent(ev)
+		out = append(out, item)
 	}
 
 	res := recallResult{
@@ -828,6 +884,9 @@ func (t *RecallTool) lifecycleEvents(ctx context.Context, chat *models.Chat, a r
 	res.setPageCursor(page, pageSize, events.TotalCount)
 	if len(out) == 0 {
 		res.Note = "No lifecycle events matched."
+		if chat.IsSandboxed() {
+			res.Note = joinRecallNotes(res.Note, "A sandboxed conversation sees fold events for memories created in it only.")
+		}
 	} else if res.HasMore {
 		res.Note = "More lifecycle events available — pass next_page_token for the next page."
 	}
@@ -907,11 +966,19 @@ func buildDistillMaterial(r retrieval) (material string, sources []string) {
 		if m == nil {
 			continue
 		}
-		add(memorySourceLabel(m.ID), m.Content)
+		text := m.Content
+		if m.Provenance.IsExternal() {
+			text += " [" + memoryutil.ExternalProvenanceNote(m.SourceSpeaker) + "]"
+		}
+		add(memorySourceLabel(m.ID), text)
 	}
 	for _, c := range r.chunks {
 		label := fmt.Sprintf("%s:%s#%d", c.SourceType, c.Name, c.Index)
-		add(label, c.Text)
+		text := c.Text
+		if c.Provenance != "" {
+			text += " [" + c.Provenance + "]"
+		}
+		add(label, text)
 	}
 	return strings.TrimSpace(b.String()), sources
 }

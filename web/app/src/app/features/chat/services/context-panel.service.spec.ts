@@ -199,4 +199,17 @@ describe('ContextPanelService', () => {
         service.setLatestBreakdown(breakdown(6000), 'msg-newest');
         expect(service.shownBreakdownId()).toBe('msg-newest');
     });
+
+    describe('publishThreadUpdate', () => {
+        it('makes the saved chat the active chat and exposes it for the session to adopt', () => {
+            service.setActiveChat(chat('chat-1', 'Thread'));
+            expect(service.threadUpdate()).toBeNull();
+
+            const saved = { ...chat('chat-1', 'Thread'), context_scope: 'sandbox' as const };
+            service.publishThreadUpdate(saved);
+
+            expect(service.activeChat()).toBe(saved);
+            expect(service.threadUpdate()).toBe(saved);
+        });
+    });
 });

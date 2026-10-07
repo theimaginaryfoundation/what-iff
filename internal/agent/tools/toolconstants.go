@@ -159,6 +159,10 @@ var CreateMemoryToolSpec = FunctionToolSpec{
 			"description": "The scope of the memory. Use 'User' for information that applies globally across all conversations (e.g., preferences, personal facts). Use 'Chat' for information specific to this conversation (e.g., project-specific context, conversation goals).",
 			"enum":        []string{MemoryScopeUser, MemoryScopeChat},
 		},
+		"speaker": map[string]interface{}{
+			"type":        "string",
+			"description": "Optional, and only in a conversation relayed from Discord: the display name of the Discord user this memory came from, as labelled before \"(Discord\" in their message. Defaults to the author of the message you are answering. Omit it everywhere else.",
+		},
 	},
 	Required: []string{"content", "scope"},
 }

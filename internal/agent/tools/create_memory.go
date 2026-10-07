@@ -13,6 +13,10 @@ import (
 type createMemoryToolArgs struct {
 	Content string `json:"content"`
 	Scope   string `json:"scope"`
+	// Speaker is optional and used only in a Discord relay thread, where every memory is
+	// external: the Discord display name the memory came from. It defaults to the author of the
+	// message being answered.
+	Speaker string `json:"speaker,omitempty"`
 }
 
 // createMemoryToolResult represents the result of creating a memory
@@ -22,10 +26,23 @@ type createMemoryToolResult struct {
 	Content  string `json:"content"`
 	Scope    string `json:"scope"`
 	Error    string `json:"error,omitempty"`
+	// Provenance and Speaker are reported only for an external memory (a Discord relay thread),
+	// so the model sees whom it was attributed to.
+	Provenance string `json:"provenance,omitempty"`
+	Speaker    string `json:"speaker,omitempty"`
 }
 
-// createMemoryTool is the implementation of the create_memory function
+// CreateMemoryTool is the create_memory function for a memory of the owner's own (user
+// provenance).
 func (t *VectorStoreMemoryTool) CreateMemoryTool(ctx context.Context, chat *models.Chat, args []byte) (string, error) {
+	return t.CreateMemoryToolWithOrigin(ctx, chat, models.MemoryOrigin{Provenance: models.MemoryProvenanceUser}, args)
+}
+
+// CreateMemoryToolWithOrigin is the create_memory function writing with origin: the chat's
+// provenance and, for an external memory, the default speaker (the Discord author of the message
+// being answered), which the tool's speaker argument overrides. Outside an external chat the
+// speaker argument is ignored.
+func (t *VectorStoreMemoryTool) CreateMemoryToolWithOrigin(ctx context.Context, chat *models.Chat, origin models.MemoryOrigin, args []byte) (string, error) {
 	var memoryArgs createMemoryToolArgs
 	if err := json.Unmarshal(args, &memoryArgs); err != nil {
 		result := createMemoryToolResult{
@@ -52,6 +69,11 @@ func (t *VectorStoreMemoryTool) CreateMemoryTool(ctx context.Context, chat *mode
 		memoryArgs.Scope = MemoryScopeChat
 		t.logger.Warn("invalid scope, defaulting to chat scope", zap.String("user_id", chat.UserID.String()), zap.String("chat_id", chat.ID.String()), zap.String("scope", memoryArgs.Scope))
 	}
+	// A sandboxed chat's memories stay inside it: the scope is always Chat, whatever was asked, so
+	// nothing a sandbox learns (or is told) reaches the owner's account.
+	if chat.IsSandboxed() {
+		memoryArgs.Scope = MemoryScopeChat
+	}
 
 	// Create embedding for the memory content
 	embedding, err := t.CreateEmbedding(ctx, trimmedContent)
@@ -69,10 +91,15 @@ func (t *VectorStoreMemoryTool) CreateMemoryTool(ctx context.Context, chat *mode
 		return marshalToolResult(result, "create_memory")
 	}
 
+	if origin.External() && models.CleanSpeakerName(memoryArgs.Speaker) != "" {
+		origin.Speaker = memoryArgs.Speaker
+	}
 	memory, err := t.ds.CreateMemory(ctx, chat.UserID, models.Memory{
-		ChatID:  chat.ID,
-		Content: trimmedContent,
-		Scope:   memoryArgs.Scope,
+		ChatID:        chat.ID,
+		Content:       trimmedContent,
+		Scope:         memoryArgs.Scope,
+		Provenance:    origin.Provenance.OrDefault(),
+		SourceSpeaker: origin.SpeakerPtr(),
 	}, embedding, chat.PersonalityID)
 
 	if err != nil {
@@ -95,6 +122,12 @@ func (t *VectorStoreMemoryTool) CreateMemoryTool(ctx context.Context, chat *mode
 		MemoryID: memory.ID.String(),
 		Content:  trimmedContent,
 		Scope:    memoryArgs.Scope,
+	}
+	if origin.External() {
+		result.Provenance = string(models.MemoryProvenanceExternal)
+		if speaker := origin.SpeakerPtr(); speaker != nil {
+			result.Speaker = *speaker
+		}
 	}
 
 	return marshalToolResult(result, "create_memory")

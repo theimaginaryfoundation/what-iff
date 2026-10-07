@@ -82,8 +82,11 @@ type ImportConversation struct {
 	Tags                       []string
 	IsFavorite                 bool
 	IsAutoMood                 bool
-	AccountExport              bool
-	RestoreReady               bool
+	// ContextScope restores the chat's context scope from an account export; absent (an export
+	// from before scopes existed) reads as account.
+	ContextScope  ContextScope
+	AccountExport bool
+	RestoreReady  bool
 }
 
 // MaxImportTitleLen is the maximum number of runes from a conversation title included in

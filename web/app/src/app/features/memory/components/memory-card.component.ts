@@ -12,6 +12,7 @@ import {
   VERIFIED_HINT,
 } from '../helpers/memory-vm.helpers';
 import { MemoryPersonalityOption } from './memory-form.component';
+import { MemoryProvenanceBadgeComponent } from './memory-provenance-badge.component';
 import { GlobeIconComponent, StarIconComponent } from '../../../shared/ui/icons/icons';
 import { PersonaAccentScopeComponent } from '../../personality/picker/persona-accent-scope.component';
 import { PersonaCoverComponent } from '../../personality/picker/persona-cover.component';
@@ -24,6 +25,7 @@ import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
     DatePipe,
     FormsModule,
     GlobeIconComponent,
+    MemoryProvenanceBadgeComponent,
     StarIconComponent,
     PersonaAccentScopeComponent,
     PersonaCoverComponent,

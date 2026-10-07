@@ -126,6 +126,7 @@ func (d *Datastore) ExportConversationInputs(ctx context.Context, userID uuid.UU
 			Tags:                       c.Tags,
 			IsFavorite:                 c.IsFavorite,
 			IsAutoMood:                 c.IsAutoMood,
+			ContextScope:               string(models.ContextScope(c.ContextScope).OrDefault()),
 		})
 	}
 

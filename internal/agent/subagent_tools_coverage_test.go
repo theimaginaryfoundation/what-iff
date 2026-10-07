@@ -56,7 +56,7 @@ func TestFindModelByID_NilDatastoreReturnsError(t *testing.T) {
 func TestCallSubagentModel_ZAIProviderMissing(t *testing.T) {
 	t.Parallel()
 	a := &Agent{}
-	out, err := a.callSubagentModel(context.Background(), uuid.New(), "glm-5.2", buildSubagentModelContext("", "", "hi"), nil)
+	out, err := a.callSubagentModel(context.Background(), uuid.New(), "glm-5.2", buildSubagentModelContext("", "", "hi"), nil, false)
 	require.Error(t, err)
 	require.Nil(t, out)
 	require.Contains(t, err.Error(), "ZAI_API_KEY")

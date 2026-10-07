@@ -126,3 +126,28 @@ func TestCreateChat_ReturnsNotFoundWhenModelMissing(t *testing.T) {
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	require.Equal(t, "Model not found", resp.Error)
 }
+
+// disabled_tools is not part of the create API: the datastore honours it only for threads the
+// server creates itself (a Discord relay thread), so a client cannot set it here.
+func TestCreateChat_DropsDisabledToolsFromTheRequest(t *testing.T) {
+	t.Parallel()
+
+	var captured models.Chat
+	store := &createChatStore{
+		createChatFn: func(ctx context.Context, uid uuid.UUID, chat models.Chat) (*models.Chat, error) {
+			captured = chat
+			return &models.Chat{ID: uuid.New(), Name: chat.Name}, nil
+		},
+	}
+	h := NewHandler(store, zap.NewNop(), nil, HandlerConfig{})
+	router := mux.NewRouter()
+	router.HandleFunc("/chat", h.CreateChat).Methods(http.MethodPost)
+
+	req := httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"name":"Test","disabled_tools":["create_memory"]}`))
+	req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, uuid.New()))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	require.Nil(t, captured.DisabledTools)
+}

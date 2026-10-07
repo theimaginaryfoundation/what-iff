@@ -38,6 +38,10 @@ type MemoryMergeEventFilters struct {
 	MinDate, MaxDate *time.Time
 	// ExcludeReverted, when true, restricts results to events with RevertedAt == nil.
 	ExcludeReverted bool
+	// OnlyChatID, when set, restricts results to fold events whose survivor memory was created in
+	// that chat (link events are excluded: their members can come from anywhere). It is the
+	// sandbox gate for a chat reading memory history and is never taken from a request.
+	OnlyChatID *uuid.UUID
 }
 
 type MemoryMergeEvent struct {

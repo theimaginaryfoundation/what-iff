@@ -13,7 +13,8 @@ func NormalizeContentForDedupe(content string) string {
 }
 
 // NormalizeExtractedMemories trims content, drops blanks, coerces any scope
-// outside {User, Chat} to Chat, and defaults missing confidence to medium.
+// outside {User, Chat} to Chat, defaults missing confidence to medium, and cleans the speaker
+// (relay-thread extraction only) with models.CleanSpeakerName.
 func NormalizeExtractedMemories(mems []models.ExtractedMemory, max int) []models.ExtractedMemory {
 	out := make([]models.ExtractedMemory, 0, len(mems))
 	for _, m := range mems {
@@ -29,7 +30,7 @@ func NormalizeExtractedMemories(mems []models.ExtractedMemory, max int) []models
 		if confidence == "" {
 			confidence = models.MemoryConfidenceMedium
 		}
-		out = append(out, models.ExtractedMemory{Content: content, Scope: scope, Confidence: confidence})
+		out = append(out, models.ExtractedMemory{Content: content, Scope: scope, Confidence: confidence, Speaker: models.CleanSpeakerName(m.Speaker)})
 		if max > 0 && len(out) >= max {
 			break
 		}

@@ -14,6 +14,18 @@ import (
 	"go.uber.org/zap"
 )
 
+// ListFileAttachmentsInChatScope mirrors the datastore: files uploaded to the chat, plus the
+// personality's documents when a personality id is given.
+func (f *fakeListStore) ListFileAttachmentsInChatScope(_ context.Context, _, chatID uuid.UUID, personalityID *uuid.UUID, _ int) ([]*models.FileAttachment, error) {
+	var out []*models.FileAttachment
+	for _, fa := range f.files {
+		if (fa.ChatID != nil && *fa.ChatID == chatID) || (personalityID != nil && fa.PersonalityID != nil && *fa.PersonalityID == *personalityID) {
+			out = append(out, fa)
+		}
+	}
+	return out, nil
+}
+
 type fakeListStore struct {
 	modelsList []*models.Model
 	pers       []*models.Personality
@@ -570,6 +582,9 @@ type erroringListStore struct{}
 
 var errListStoreBoom = errors.New("boom")
 
+func (e *erroringListStore) ListFileAttachmentsInChatScope(_ context.Context, _, _ uuid.UUID, _ *uuid.UUID, _ int) ([]*models.FileAttachment, error) {
+	return nil, errListStoreBoom
+}
 func (e *erroringListStore) ListModels(_ context.Context) ([]*models.Model, error) {
 	return nil, errListStoreBoom
 }

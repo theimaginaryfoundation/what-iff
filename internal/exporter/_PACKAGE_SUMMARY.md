@@ -12,6 +12,7 @@ source UUIDs for clone-style restore.
   persisted as a DB key on import. Optional `whatiff_*` fields preserve checkpoint/window, personality
   association, and continuation UI state without affecting standard Anthropic consumers. `ParseConversations`
   reverses this for the account-import path.
+  `whatiff_context_scope` carries a chat's context scope; it is omitted for an ordinary (`account`) chat, and an export without it imports as `account`.
 - `personalities/{id}/personality.json` — source personality ID, name, system prompt, scratchpad, auto-pin
   (self-contained). Source IDs are relationship references and are remapped on import.
   An imported SillyTavern card's passthrough blob rides along as `character_card` so account import keeps it.

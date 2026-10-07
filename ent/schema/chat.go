@@ -69,6 +69,10 @@ func (Chat) Fields() []ent.Field {
 		field.String("import_hash").
 			Optional().
 			Comment("Per-conversation dedup hash (sha256 of conversationID from the export); set on imported chats"),
+		field.Enum("context_scope").
+			Values("account", "sandbox").
+			Default("account").
+			Comment("How much of the account the chat may read (models.ContextScope). 'account' (the default) reads everything, as any chat. 'sandbox' reads nothing outside itself: only memories created in it, no other conversations, scratchpad or account-wide files, jobs, skills or personalities, and it writes only Chat-scoped memories. Set at creation; a chat can leave the sandbox but never enter one later."),
 		field.String("rehydration_state").
 			Optional().
 			Comment("Lazy-summarization lifecycle for imported threads: ''/'pending'/'processing'/'ready'/'failed'. Empty means no rehydration needed (e.g. native threads)"),

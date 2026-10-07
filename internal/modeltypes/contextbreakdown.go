@@ -70,6 +70,10 @@ type ContextInputs struct {
 	// were in context (first 12 hex characters of their SHA-256).
 	ScratchpadSHA string `json:"scratchpad_sha,omitempty"`
 	SummarySHA    string `json:"summary_sha,omitempty"`
+	// ContextScope is the chat's context scope when the turn ran ("account" or "sandbox"); a
+	// sandboxed turn's context holds only memories created in the chat and no scratchpad. Always
+	// present on a turn with a manifest.
+	ContextScope string `json:"context_scope"`
 }
 
 // ContextMemoryInput is one retrieved memory: which one, how it got here, and how relevant the

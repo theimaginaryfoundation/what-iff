@@ -1,5 +1,5 @@
 import { CommonModule, DOCUMENT } from '@angular/common';
-import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
 import { filter } from 'rxjs/operators';
@@ -12,6 +12,7 @@ import { ImageGalleryService } from '../../core/services/image-gallery.service';
 import { ModelService } from '../../core/services/model.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { RitualService } from '../../core/services/ritual.service';
+import { isSandboxed } from '../../core/models/chat.model';
 import { ChatMessage, MessageBookmark } from '../../core/models/message.model';
 import {
   createPendingFileAttachment,
@@ -41,11 +42,13 @@ import { ChatSessionService } from './chat-session.service';
 import { isChatSendFailed, isChatSendSucceeded } from './chat-send-result';
 import { ChatSendGate } from './services/chat-send-gate';
 import { ChatSendOutletComponent } from '../../extensions/chat-send-outlet.component';
+import { DiscordComposerToggleComponent } from '../discord/discord-composer-toggle.component';
 import { ThreadListService } from '../../core/services/thread-list.service';
 import { ThreadListPanelComponent } from './components/thread-list-panel/thread-list-panel.component';
 import { ContextPanelService, ContextPanelTab } from './services/context-panel.service';
 import { ScratchpadService } from './services/scratchpad.service';
 import { ContextPanelToggleComponent } from './components/context-panel/context-panel-toggle.component';
+import { ThreadSandboxedChipComponent } from './components/thread-sandboxed-chip/thread-sandboxed-chip.component';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { BrainIconComponent, ChevDownIconComponent, EditIconComponent, FileIconComponent, LayersIconComponent, NoteIconComponent, WrenchIconComponent, XIconComponent } from '../../shared/ui/icons/icons';
@@ -68,6 +71,7 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
   imports: [
     CommonModule,
     ChatSendOutletComponent,
+    DiscordComposerToggleComponent,
     ChatComposerComponent,
     MessageListComponent,
     ThreadBookmarksComponent,
@@ -76,6 +80,7 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
     AuthImagePipe,
     ThreadListPanelComponent,
     ContextPanelToggleComponent,
+    ThreadSandboxedChipComponent,
     HelpHintComponent,
     TooltipDirective,
     BrainIconComponent,
@@ -94,6 +99,7 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
 })
 export class ChatPageComponent implements OnInit, OnDestroy {
   readonly session = inject(ChatSessionService);
+  readonly isSandboxed = isSandboxed;
   readonly sendGate = inject(ChatSendGate);
   private readonly chatService = inject(ChatService);
   private readonly fileAttachmentService = inject(FileAttachmentService);
@@ -272,6 +278,13 @@ export class ChatPageComponent implements OnInit, OnDestroy {
 
   private readonly syncContextPanelChat = effect(() => {
     this.contextPanel.setActiveChat(this.session.thread());
+  });
+
+  // A change saved from the context panel (sandbox) is the newest copy of the chat; fold it
+  // into the session so the header and later optimistic updates don't use a stale copy.
+  private readonly adoptContextPanelUpdate = effect(() => {
+    const updated = this.contextPanel.threadUpdate();
+    if (updated) untracked(() => this.session.adoptThreadUpdate(updated));
   });
 
   // When a background checkpoint (scratchpad + summary) completes for the active
@@ -682,6 +695,15 @@ export class ChatPageComponent implements OnInit, OnDestroy {
       return;
     }
     this.contextPanel.setActiveTab(tab);
+    this.contextPanel.setDesktopVisible(true);
+    if (this.isMobileViewport()) {
+      this.contextPanel.openMobile();
+    }
+  }
+
+  /** Reveals the Memories tab, where the thread's sandbox is set (never toggles closed). */
+  openSandboxSettings(): void {
+    this.contextPanel.setActiveTab('memories');
     this.contextPanel.setDesktopVisible(true);
     if (this.isMobileViewport()) {
       this.contextPanel.openMobile();

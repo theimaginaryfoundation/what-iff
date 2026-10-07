@@ -29,6 +29,9 @@
           {{ levelLabel(currentMemory.level) }} · Created {{ currentMemory.created_at | date: "medium" }} · Updated
           {{ currentMemory.updated_at | date: "medium" }}
         </p>
+        <div class="mt-2 flex flex-wrap gap-2">
+          <app-memory-provenance-badge [provenance]="currentMemory.provenance" [speaker]="currentMemory.source_speaker" />
+        </div>
       </article>
       <div class="flex gap-2">
         <button
@@ -69,6 +72,16 @@
             <div>
               <dt class="font-medium text-text-primary">Level</dt>
               <dd><span [uiTooltip]="levelHint(currentMemory.level)">{{ levelLabel(currentMemory.level) }}</span></dd>
+            </div>
+            <div>
+              <dt class="font-medium text-text-primary">Source</dt>
+              <dd>
+                @if (currentMemory.provenance === 'external') {
+                  <app-memory-provenance-badge [provenance]="currentMemory.provenance" [speaker]="currentMemory.source_speaker" />
+                } @else {
+                  Yours
+                }
+              </dd>
             </div>
             <div>
               <dt class="font-medium text-text-primary">Confidence</dt>

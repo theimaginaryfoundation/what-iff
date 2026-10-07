@@ -22,31 +22,42 @@ type MemoryContextTab = 'thread' | 'global';
   template: `
     <section class="tab-body">
       <div class="memory-scope-row">
-        <div class="context-tabs" role="tablist" aria-label="Memory scope">
-          <button
-            type="button"
-            role="tab"
-            [attr.aria-selected]="activeMemoryTab() === 'thread'"
-            [class.context-tabs__button--active]="activeMemoryTab() === 'thread'"
-            (click)="activeMemoryTab.set('thread')"
-          >
-            This thread
-          </button>
-          <button
-            type="button"
-            role="tab"
-            [attr.aria-selected]="activeMemoryTab() === 'global'"
-            [class.context-tabs__button--active]="activeMemoryTab() === 'global'"
-            (click)="activeMemoryTab.set('global')"
-          >
-            Global
-          </button>
-        </div>
-        <ui-help-hint label="What are memories?" heading="Memories" guide="continuity" align="end">
-          Things the personality has saved to remember. <strong>This thread</strong> memories are used only in this
-          thread. <strong>Global</strong> lists memories used with every personality, plus ones pinned to this
-          personality. You can edit or remove any of them.
-        </ui-help-hint>
+        @if (sandboxed()) {
+          <p class="sandbox-note">Sandboxed: showing only memories created in this thread.</p>
+        } @else {
+          <div class="context-tabs" role="tablist" aria-label="Memory scope">
+            <button
+              type="button"
+              role="tab"
+              [attr.aria-selected]="activeMemoryTab() === 'thread'"
+              [class.context-tabs__button--active]="activeMemoryTab() === 'thread'"
+              (click)="activeMemoryTab.set('thread')"
+            >
+              This thread
+            </button>
+            <button
+              type="button"
+              role="tab"
+              [attr.aria-selected]="activeMemoryTab() === 'global'"
+              [class.context-tabs__button--active]="activeMemoryTab() === 'global'"
+              (click)="activeMemoryTab.set('global')"
+            >
+              Global
+            </button>
+          </div>
+        }
+        @if (sandboxed()) {
+          <ui-help-hint label="What are memories?" heading="Memories" guide="continuity" align="end">
+            This thread is sandboxed, so it only sees memories created inside it. Memories it saves are visible only
+            here. You can edit or remove any of them.
+          </ui-help-hint>
+        } @else {
+          <ui-help-hint label="What are memories?" heading="Memories" guide="continuity" align="end">
+            Things the personality has saved to remember. <strong>This thread</strong> memories are used only in this
+            thread. <strong>Global</strong> lists memories used with every personality, plus ones pinned to this
+            personality. You can edit or remove any of them.
+          </ui-help-hint>
+        }
       </div>
 
       <div class="memory-content">
@@ -125,6 +136,13 @@ type MemoryContextTab = 'thread' | 'global';
 
     .memory-scope-row .context-tabs {
       flex: 1;
+    }
+
+    .sandbox-note {
+      color: var(--color-text-secondary);
+      flex: 1;
+      font-size: 0.75rem;
+      margin: 0;
     }
 
     .context-tabs {
@@ -277,6 +295,8 @@ type MemoryContextTab = 'thread' | 'global';
 export class ContextMemoriesTabComponent implements OnChanges {
   readonly chatId = input<string | null>(null);
   readonly personalityId = input<string | null>(null);
+  /** Sandboxed threads only see memories created inside them, so the Global scope is hidden. */
+  readonly sandboxed = input(false);
   readonly memoryService = inject(MemoryService);
   private readonly router = inject(Router);
   private readonly confirmationService = inject(ConfirmationService);
@@ -288,7 +308,7 @@ export class ContextMemoriesTabComponent implements OnChanges {
   readonly globalMemories = signal<Memory[]>([]);
   readonly personalityMemories = signal<Memory[]>([]);
   readonly visibleMemories = computed(() =>
-    this.activeMemoryTab() === 'thread'
+    this.sandboxed() || this.activeMemoryTab() === 'thread'
       ? this.threadMemories()
       : [...this.globalMemories(), ...this.personalityMemories()],
   );
@@ -298,13 +318,14 @@ export class ContextMemoriesTabComponent implements OnChanges {
   readonly editingId = signal<string | null>(null);
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['chatId'] || changes['personalityId']) {
+    if (changes['chatId'] || changes['personalityId'] || changes['sandboxed']) {
       void this.refresh();
     }
   }
 
   async refresh(): Promise<void> {
     const chatId = this.chatId();
+    const sandboxed = this.sandboxed();
     this.error.set(null);
     this.loading.set(true);
     try {
@@ -312,8 +333,8 @@ export class ContextMemoriesTabComponent implements OnChanges {
         chatId
           ? firstValueFrom(this.memoryService.getMemories(1, 20, { chat_id: chatId, level: 'thread' }))
           : Promise.resolve({ results: [] }),
-        firstValueFrom(this.memoryService.getMemories(1, 20, { level: 'global' })),
-        this.personalityId()
+        sandboxed ? Promise.resolve({ results: [] }) : firstValueFrom(this.memoryService.getMemories(1, 20, { level: 'global' })),
+        this.personalityId() && !sandboxed
           ? firstValueFrom(this.memoryService.getMemories(1, 20, { pinned_personality_id: this.personalityId()! }))
           : Promise.resolve({ results: [] }),
       ]);

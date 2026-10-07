@@ -226,6 +226,55 @@ describe('ChatPageComponent', () => {
         expect(memoriesButton.getAttribute('aria-current')).toBe('true');
     });
 
+    describe('sandboxed thread', () => {
+        it('shows no indicator for a thread that is not sandboxed', async () => {
+            fixture.detectChanges();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            expect(fixture.nativeElement.querySelector('app-thread-sandboxed-chip button')).toBeNull();
+        });
+
+        it('shows a Sandboxed chip when the thread is sandboxed', async () => {
+            chatService.getChat.mockReturnValue(of({ ...chat, context_scope: 'sandbox' }));
+            fixture.detectChanges();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            const chip = fixture.nativeElement.querySelector('app-thread-sandboxed-chip button') as HTMLButtonElement;
+            expect(chip?.textContent).toContain('Sandboxed');
+        });
+
+        it('opens the Memories tab when the chip is clicked', async () => {
+            chatService.getChat.mockReturnValue(of({ ...chat, context_scope: 'sandbox' }));
+            const context = TestBed.inject(ContextPanelService);
+            fixture.detectChanges();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            (fixture.nativeElement.querySelector('app-thread-sandboxed-chip button') as HTMLButtonElement).click();
+
+            expect(context.activeTab()).toBe('memories');
+            expect(TestBed.inject(RightPanelService).visible()).toBe(true);
+        });
+
+        it('adopts a sandbox change saved from the context panel so the chip appears without a reload', async () => {
+            const context = TestBed.inject(ContextPanelService);
+            fixture.detectChanges();
+            await fixture.whenStable();
+            fixture.detectChanges();
+            expect(fixture.nativeElement.querySelector('app-thread-sandboxed-chip button')).toBeNull();
+
+            context.publishThreadUpdate({ ...chat, context_scope: 'sandbox' });
+            fixture.detectChanges();
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            expect(fixture.nativeElement.querySelector('app-thread-sandboxed-chip button')).not.toBeNull();
+            expect(context.activeChat()?.context_scope).toBe('sandbox');
+        });
+    });
+
     it('exports the active thread from the compact title bar', () => {
         fixture.detectChanges();
 

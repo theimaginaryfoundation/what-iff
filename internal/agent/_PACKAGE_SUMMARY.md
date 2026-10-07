@@ -178,6 +178,29 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   metering implementation may be linked to enforce usage limits and record
   usage, while builds without one fall back to `metering.NoopMeter` (allow
   all, record nothing). See `internal/metering`.
+- **Sandboxed chats:** `sandbox_context.go` assembles context for a chat whose `Chat.ContextScope` is `sandbox` (`Chat.IsSandboxed()`); the tool-side rules are in `internal/agent/tools/sandbox.go`.
+  A sandboxed chat is one that strangers can talk in (for example a Discord thread): it cannot read anything outside itself and has a locked-down tool set.
+  `getMemories` retrieves only the chat's own Chat-scoped memories (scoped in SQL) and adds no owner-name line.
+  `messageContextBuilder.build` re-checks the memory items persisted on earlier messages against the chat's own memories in one `MemoryIDsCreatedInChat` query (an id the chat did not create, an id-less memory line and a failed lookup are all dropped), so a memory moved or re-scoped in the memory manager since is not replayed.
+  A persisted `USER_NAME` item is dropped too, so the name is never replayed.
+  A sandboxed chat replays persisted tool results like any chat, so a thread keeps its recent tool output across turns.
+  The scratchpad is never injected (the loader blanks it; the builder, the sub-agent, the agent-job personality override and `update_scratchpad` are guarded too), and `buildTurnToolPolicy` removes the catalog's `SandboxNever` tools (`update_scratchpad`, `create_agent_job`, `move_files`) from the offered tools whatever the user's `disabled_tools` say, and loads no skills (the message's or the mood's), so no skill text or linked MCP server reaches the turn.
+  The `SandboxDefaultOff` tools (web search, page fetching, image generation, sub-agents) are offered by policy but start in a new sandbox's `disabled_tools` (`datastore.CreateChat` applies `models.SandboxDefaultDisabledTools`), so the owner enables each one deliberately; MCP tools come only from connectors the owner attached to the sandbox itself (the chat handler attaches no default connectors to a sandbox).
+  `sandboxed_tool_surface_test.go` classifies every catalog tool as offered or not in a sandboxed chat and checks that against each tool's `SandboxPolicy`, so a new tool must be placed deliberately (a tool declaring no policy fails closed); `conditionalSandboxedTools` lets other builds mark conditionally offered tools.
+  `checkpointSteps` decides the checkpoint plan: a sandboxed chat skips the scratchpad step but still extracts memories, from the turn's own response and without the scratchpad delta.
+  A sandboxed chat's checkpoint merges only memories that chat created (`sandboxedCompactionLiveMemories`, then `datastore.WithChatMemoriesOnly` on the fold and link writes, which also forces Chat scope), so it cannot fold, rewrite or retire the owner's memories.
+  `contextInputs` records `context_scope` in the X-ray manifest.
+  `run_subagent` (default off in a sandbox) refuses another `personality_id` and any `skill_ids` there, and its tool loop runs under a chat carrying the parent's scope.
+  `create_agent_job` is neither offered nor accepted in a sandboxed chat (the job would run in a new chat that is not sandboxed).
+  Auto mood selection does not run in a sandboxed chat (`autoMoodSelectionSkipped`); its `change_mood` picks only its own personality's modes, refuses `model_override`, and mood rituals are not loaded.
+  In every chat, dispatch refuses a tool the model was not offered that turn (`setOfferedTools`, recorded on every generation path including the sub-agent loops).
+- **Memory provenance (Discord relay threads):** `memory_provenance.go`.
+  `prepareChatContext` records `chatContext.memoryProvenance` (`memoryProvenanceForChat`: external for any chat bound to a Discord channel, sandboxed or not, `datastore.IsExternalRelayChat`; a failed lookup in a sandboxed chat reads as external) and the trigger message id.
+  `create_memory` writes with `createMemoryOrigin` (the Discord author of the message being answered, read when the tool runs; the tool's `speaker` argument overrides it).
+  Checkpoint extraction in such a thread uses the `ExtractedRelayMemory` schema (a `speaker` per memory) and `relayMemoryExtractionNote` (the speakers are Discord users labelled by name, not the owner); `stampExtractedProvenance` marks every extracted memory external, and the merge plan carries the new members' combined origin (`memoryFoldPlan.NewOrigin`, link members' `Origin`) to the datastore.
+  Scope is chosen exactly as in any chat (a sandboxed relay thread always writes Chat scope); provenance only records where a memory came from, and the shared formatter shows it to the model as unverified.
+- **Discord relay tool (`discord_post_tool.go`):** `post_to_discord` registers through the extension seams (`tools.AdditionalFunctionToolCatalog`, `extraToolHandlersForChat`, `additionalDisabledToolsForChat`, `additionalDeveloperContextForChat`), wrapping whatever another build already set there.
+  It is offered only when the chat's persona has a bot with an active binding (hidden otherwise), marks the reply for posting rather than sending text, and in a sandboxed chat reaches only that thread's own channel.
 
 ## Testing
 

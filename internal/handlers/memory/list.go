@@ -109,6 +109,15 @@ func (h *Handler) ListMemories(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if provenanceStr := strings.TrimSpace(queryParams.Get("provenance")); provenanceStr != "" {
+		provenance, err := parseProvenanceValue(provenanceStr)
+		if err != nil {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid provenance value", err)
+			return
+		}
+		filters.Provenance = &provenance
+	}
+
 	if searchQuery != "" {
 		filters.Query = &searchQuery
 	}

@@ -70,6 +70,9 @@ export class MemoryService {
     if (filters?.status) {
       params = params.set('status', filters.status);
     }
+    if (filters?.provenance) {
+      params = params.set('provenance', filters.provenance);
+    }
     if (filters?.sort) {
       params = params.set('sort', filters.sort);
     }

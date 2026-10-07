@@ -585,6 +585,24 @@ describe('ChatSessionService', () => {
         expect(service.thread()).toEqual(chat);
     });
 
+    describe('adoptThreadUpdate', () => {
+        it('replaces the active thread with the newer server copy', () => {
+            service.setActive('chat-1');
+
+            service.adoptThreadUpdate({ ...chat, context_scope: 'sandbox' });
+
+            expect(service.thread()?.context_scope).toBe('sandbox');
+        });
+
+        it('ignores an update for a thread that is no longer active', () => {
+            service.setActive('chat-1');
+
+            service.adoptThreadUpdate({ ...chat, id: 'chat-other', context_scope: 'sandbox' });
+
+            expect(service.thread()?.context_scope).toBeUndefined();
+        });
+    });
+
     it('ignores stale load errors after switching threads', () => {
         const firstChat$ = new Subject<Chat>();
         const firstMessages$ = new Subject<{

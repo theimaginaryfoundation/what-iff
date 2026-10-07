@@ -84,7 +84,24 @@
           <ui-chev-down-icon [size]="12" />
         </div>
       </label>
-      <button type="button" class="memories-list__clear" uiTooltip="Reset search, personality, dates and sort" (click)="onClearFilters()">
+      <label class="memories-list__filter-field">
+        <span>Source</span>
+        <div class="memories-list__sensitivity-wrap">
+          <select
+            aria-label="Filter by source"
+            [uiTooltip]="provenanceFilterHint()"
+            [value]="filters().provenance"
+            (change)="setProvenanceFilter($any($event.target).value)"
+            data-testid="memory-provenance-filter"
+          >
+            <option value="all">All</option>
+            <option value="user">Yours</option>
+            <option value="external">External</option>
+          </select>
+          <ui-chev-down-icon [size]="12" />
+        </div>
+      </label>
+      <button type="button" class="memories-list__clear" uiTooltip="Reset search, personality, dates, source and sort" (click)="onClearFilters()">
         Clear
       </button>
       @if (dateRangeError(); as dateError) {

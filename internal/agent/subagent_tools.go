@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
@@ -19,6 +20,33 @@ type runSubagentToolArgs struct {
 	PersonalityID string   `json:"personality_id,omitempty"`
 	Model         string   `json:"model,omitempty"`
 	RitualIDs     []string `json:"skill_ids,omitempty"`
+	// RitualIDsAlias is not advertised in the tool spec. It is decoded only so a sandboxed chat
+	// can refuse a model that passes skills under the internal name ("ritual_ids"); a
+	// chat that is not sandboxed ignores it, as before.
+	RitualIDsAlias []string `json:"ritual_ids,omitempty"`
+}
+
+// sandboxedSubagentRefusal returns the refusal for a run_subagent call a sandboxed chat may not
+// make, or "". A sub-agent started from a sandboxed chat runs as that chat's own persona and with
+// no skills: another personality's system prompt, or a skill's text and the MCP servers linked to
+// it, are the owner's account data, and the result returns into a conversation a stranger reads.
+// A personality_id equal to the chat's own persona is a no-op and allowed.
+func sandboxedSubagentRefusal(chat *models.Chat, args runSubagentToolArgs) string {
+	const note = "personality_id and skill_ids are not available in this sandboxed conversation: the sub-agent runs as this conversation's own personality with no skills"
+	if p := strings.TrimSpace(args.PersonalityID); p != "" {
+		id, err := uuid.Parse(p)
+		if err != nil || id != chat.PersonalityID {
+			return note
+		}
+	}
+	for _, ids := range [][]string{args.RitualIDs, args.RitualIDsAlias} {
+		for _, id := range ids {
+			if strings.TrimSpace(id) != "" {
+				return note
+			}
+		}
+	}
+	return ""
 }
 
 type runSubagentToolResult struct {
@@ -50,6 +78,14 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 			Success: false,
 			Error:   "message is required",
 		})
+	}
+
+	if chatCtx.chat.IsSandboxed() {
+		if refusal := sandboxedSubagentRefusal(chatCtx.chat, toolArgs); refusal != "" {
+			return marshalSubagentToolResult(runSubagentToolResult{Success: false, Error: refusal})
+		}
+		// Whatever a sandboxed chat passed, it gets no other persona and no skills.
+		toolArgs.PersonalityID, toolArgs.RitualIDs, toolArgs.RitualIDsAlias = "", nil, nil
 	}
 
 	modelName := chatCtx.model
@@ -103,6 +139,7 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 		systemPrompt = personality.SystemPrompt
 		scratchpad = personality.Scratchpad
 	}
+	scratchpad = subagentScratchpad(chatCtx.chat, scratchpad)
 
 	// Enrich message with any requested ritual content and collect ritual IDs for MCP loading.
 	ritualUUIDs := parseSkillIDs(toolArgs.RitualIDs)
@@ -127,7 +164,7 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 
 	modelContext := buildSubagentModelContext(systemPrompt, scratchpad, message)
 	subagentCtx := telemetry.WithCallPath(ctx, telemetry.CallPathSubagent)
-	callResult, err := a.callSubagentModel(subagentCtx, chatCtx.chat.UserID, modelName, modelContext, ritualUUIDs)
+	callResult, err := a.callSubagentModel(subagentCtx, chatCtx.chat.UserID, modelName, modelContext, ritualUUIDs, chatCtx.chat.IsSandboxed())
 	if err != nil {
 		return marshalSubagentToolResult(runSubagentToolResult{
 			Success:       false,
@@ -170,6 +207,16 @@ func (a *Agent) findModelByName(ctx context.Context, name string) (*models.Model
 		AllowDisplayName: true,
 		AllowPrefixMatch: true,
 	})
+}
+
+// subagentScratchpad is the scratchpad a sub-agent started from chat receives. A sandboxed chat
+// gives it none: the scratchpad is shared across the personality's conversations, and the
+// sub-agent's output returns into this one.
+func subagentScratchpad(chat *models.Chat, scratchpad string) string {
+	if chat.IsSandboxed() {
+		return ""
+	}
+	return scratchpad
 }
 
 func buildSubagentModelContext(systemPrompt, scratchpad, message string) *provider.ModelContext {
@@ -216,11 +263,37 @@ func errSubagentToolsUnsupported(provider models.ModelProvider, modelName string
 		"choose a tool-capable model or run the subagent without skill_ids", provider, modelName, toolCount)
 }
 
-func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelName string, modelContext *provider.ModelContext, ritualIDs []uuid.UUID) (*subagentCallResult, error) {
+// subagentToolContext is the context a sub-agent's tool loop runs under. Its chat is a fresh
+// conversation, but it carries the PARENT chat's sandbox, so every tool the sub-agent can
+// invoke is gated exactly as it would be in the chat that started it.
+func subagentToolContext(userID uuid.UUID, modelName string, sandboxed bool, mcpServers []*models.MCPServer, offered map[string]struct{}) *chatContext {
+	c := &chatContext{
+		userID:     userID,
+		chat:       &models.Chat{ID: uuid.New(), UserID: userID, ContextScope: sandboxScope(sandboxed)},
+		mcpServers: mcpServers,
+		model:      modelName,
+	}
+	c.setOfferedTools(offered)
+	return c
+}
+
+// openAIFunctionToolNames lists the function-tool names in an OpenAI tool list.
+func openAIFunctionToolNames(toolParams []responses.ToolUnionParam) map[string]struct{} {
+	out := make(map[string]struct{}, len(toolParams))
+	for _, t := range toolParams {
+		if t.OfFunction != nil {
+			out[t.OfFunction.Name] = struct{}{}
+		}
+	}
+	return out
+}
+
+// sandboxed is the parent chat's sandbox: the sub-agent's tool loop inherits it.
+func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelName string, modelContext *provider.ModelContext, ritualIDs []uuid.UUID, sandboxed bool) (*subagentCallResult, error) {
 	caps := a.subagentModelCapabilities(ctx, modelName)
 	modelProvider := caps.Provider
 	if models.UsesOpenAIChatCompletionsAPI(modelProvider, modelName) {
-		return a.callSubagentChatCompletions(ctx, userID, caps, modelName, modelContext, ritualIDs)
+		return a.callSubagentChatCompletions(ctx, userID, caps, modelName, modelContext, ritualIDs, sandboxed)
 	}
 
 	if models.UsesAnthropicMessagesAPI(modelProvider, modelName) {
@@ -242,12 +315,7 @@ func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelNa
 		}
 		if len(mcpSpecs) > 0 {
 			adapter := provider.NewClaudeAdapter(claudeProvider, claudeParams, claudeFunctionTools(mcpSpecs), false, nil, nil)
-			toolCtx := &chatContext{
-				userID:     userID,
-				chat:       &models.Chat{ID: uuid.New(), UserID: userID},
-				mcpServers: mcpServers,
-				model:      modelName,
-			}
+			toolCtx := subagentToolContext(userID, modelName, sandboxed, mcpServers, offeredToolNames(mcpSpecs, nil))
 			resp, _, _, err := a.handleAgentLoop(ctx, toolCtx, adapter)
 			if err != nil {
 				return nil, provider.WrapSafetyViolationError(models.SafetyViolationProviderAnthropic, fmt.Errorf("Claude subagent MCP call failed: %w", err))
@@ -284,11 +352,7 @@ func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelNa
 		Instructions:      "",
 	})
 	adapter := provider.NewOpenAIAdapter(a.OpenAIProvider, params)
-	toolCtx := &chatContext{
-		userID: userID,
-		chat:   &models.Chat{ID: uuid.New(), UserID: userID},
-		model:  modelName,
-	}
+	toolCtx := subagentToolContext(userID, modelName, sandboxed, nil, openAIFunctionToolNames(mcpTools))
 	if len(ritualIDs) > 0 {
 		if servers, err := a.ds.ListRitualMCPServers(ctx, userID, ritualIDs); err == nil {
 			toolCtx.mcpServers = servers
@@ -314,15 +378,15 @@ func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelNa
 // as in a normal turn. Like the other subagent paths it only exposes the MCP tools of
 // the requested skills, never the chat's own tools, and it renders no images (the
 // subagent message carries none; visionRenderContext still guards the request).
-func (a *Agent) callSubagentChatCompletions(ctx context.Context, userID uuid.UUID, caps subagentModelCapabilities, modelName string, modelContext *provider.ModelContext, ritualIDs []uuid.UUID) (*subagentCallResult, error) {
+func (a *Agent) callSubagentChatCompletions(ctx context.Context, userID uuid.UUID, caps subagentModelCapabilities, modelName string, modelContext *provider.ModelContext, ritualIDs []uuid.UUID, sandboxed bool) (*subagentCallResult, error) {
 	mcpSpecs, mcpServers := a.getSubagentMCPFunctionToolSpecs(ctx, userID, ritualIDs)
-	return a.runSubagentChatCompletions(ctx, userID, caps, modelName, modelContext, mcpSpecs, mcpServers)
+	return a.runSubagentChatCompletions(ctx, userID, caps, modelName, modelContext, mcpSpecs, mcpServers, sandboxed)
 }
 
 // runSubagentChatCompletions is callSubagentChatCompletions after the skills' MCP
 // tools have been discovered; the split keeps the capability gate and provider
 // routing testable without a live MCP server.
-func (a *Agent) runSubagentChatCompletions(ctx context.Context, userID uuid.UUID, caps subagentModelCapabilities, modelName string, modelContext *provider.ModelContext, mcpSpecs []agenttools.FunctionToolSpec, mcpServers []*models.MCPServer) (*subagentCallResult, error) {
+func (a *Agent) runSubagentChatCompletions(ctx context.Context, userID uuid.UUID, caps subagentModelCapabilities, modelName string, modelContext *provider.ModelContext, mcpSpecs []agenttools.FunctionToolSpec, mcpServers []*models.MCPServer, sandboxed bool) (*subagentCallResult, error) {
 	providerName := models.ProviderForModel(caps.Provider, modelName)
 	renderCtx := &chatContext{model: modelName, modelProvider: caps.Provider, modelVisionSupport: caps.VisionSupport}
 	params := buildOpenAIChatCompletionsParams(renderCtx, modelContext)
@@ -351,13 +415,9 @@ func (a *Agent) runSubagentChatCompletions(ctx context.Context, userID uuid.UUID
 		sv = models.SafetyViolationProvider(providerName)
 	}
 
-	toolCtx := &chatContext{
-		userID:        userID,
-		chat:          &models.Chat{ID: uuid.New(), UserID: userID, ToolsEnabled: caps.ToolSupport},
-		mcpServers:    mcpServers,
-		model:         modelName,
-		modelProvider: caps.Provider,
-	}
+	toolCtx := subagentToolContext(userID, modelName, sandboxed, mcpServers, offeredToolNames(mcpSpecs, nil))
+	toolCtx.chat.ToolsEnabled = caps.ToolSupport
+	toolCtx.modelProvider = caps.Provider
 	final, _, _, err := a.handleAgentLoop(ctx, toolCtx, adapter)
 	if err != nil {
 		return nil, provider.WrapSafetyViolationError(sv, fmt.Errorf("%s subagent call failed: %w", providerName, err))

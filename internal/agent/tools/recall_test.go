@@ -189,6 +189,10 @@ type fakeRecallStore struct {
 	lastMergeFilters   models.MemoryMergeEventFilters
 	lastMergePageNum   int
 	lastMergePageSize  int
+	// lastRelatedSandboxed and lastSummaryOnlyChat record the sandbox scope the tool passed down.
+	lastRelatedSandboxed bool
+	lastSummaryOnlyChat  uuid.UUID
+	scopeCalls           int
 }
 
 type recallImageStore struct{ content []byte }
@@ -199,8 +203,26 @@ func (s recallImageStore) DownloadFile(context.Context, string) ([]byte, error) 
 }
 func (s recallImageStore) DeleteFile(context.Context, string) error { return nil }
 
-func (f *fakeRecallStore) GetRelatedMemories(_ context.Context, _, _ uuid.UUID, _ []float32, _ uuid.UUID) ([]*models.Memory, error) {
-	return f.relatedMemories, nil
+func (f *fakeRecallStore) GetRelatedMemories(_ context.Context, _, chatID uuid.UUID, _ []float32, _ uuid.UUID, sandboxed bool) ([]*models.Memory, error) {
+	f.lastRelatedSandboxed = sandboxed
+	out := make([]*models.Memory, 0, len(f.relatedMemories))
+	for _, m := range f.relatedMemories { // mirror the SQL scope the real store applies
+		if sandboxed && !(memoryScopeOf(m) == MemoryScopeChat && m.ChatID == chatID) {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+func (f *fakeRecallStore) ListFileAttachmentsInChatScope(_ context.Context, _, chatID uuid.UUID, personalityID *uuid.UUID, _ int) ([]*models.FileAttachment, error) {
+	f.scopeCalls++
+	var out []*models.FileAttachment
+	for _, fa := range f.fileList {
+		if (fa.ChatID != nil && *fa.ChatID == chatID) || (personalityID != nil && fa.PersonalityID != nil && *fa.PersonalityID == *personalityID) {
+			out = append(out, fa)
+		}
+	}
+	return out, nil
 }
 func (f *fakeRecallStore) GetMemory(_ context.Context, _, id uuid.UUID) (*models.Memory, error) {
 	if m, ok := f.memoryByID[id]; ok {
@@ -215,7 +237,7 @@ func (f *fakeRecallStore) GetMemoryByIDPrefix(_ context.Context, _ uuid.UUID, pr
 		compact := strings.ReplaceAll(id.String(), "-", "")
 		if strings.HasPrefix(compact, prefix) {
 			if match != nil {
-				return nil, fmt.Errorf("memory ID prefix %q is ambiguous; pass the full UUID", prefix)
+				return nil, fmt.Errorf("%w (%q); pass the full UUID", datastore.ErrMemoryIDPrefixAmbiguous, prefix)
 			}
 			match = m
 		}
@@ -329,9 +351,17 @@ func (f *fakeRecallStore) GetChatSummaryMemory(_ context.Context, _, chatID uuid
 	}
 	return nil, nil
 }
-func (f *fakeRecallStore) GetRelatedSummaryMemories(_ context.Context, _ uuid.UUID, _ []float32, limit int) ([]*models.Memory, error) {
+func (f *fakeRecallStore) GetRelatedSummaryMemories(_ context.Context, _ uuid.UUID, _ []float32, limit int, onlyChatID uuid.UUID) ([]*models.Memory, error) {
 	f.lastSummaryLimit = limit
-	return f.relatedSummaries, nil
+	f.lastSummaryOnlyChat = onlyChatID
+	out := make([]*models.Memory, 0, len(f.relatedSummaries))
+	for _, m := range f.relatedSummaries { // mirror the SQL scope the real store applies
+		if onlyChatID != uuid.Nil && m.ChatID != onlyChatID {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out, nil
 }
 func (f *fakeRecallStore) ListMemoryMergeEvents(_ context.Context, _ uuid.UUID, pageNum, pageSize int, filters models.MemoryMergeEventFilters) (*models.PaginatedResponse, error) {
 	f.lastMergePageNum = pageNum
@@ -665,6 +695,9 @@ func TestRecallFetchImageAttachesToContext(t *testing.T) {
 	}
 	if atts[0].FileContent == "" {
 		t.Fatal("expected FileContent to be set on the returned attachment")
+	}
+	if !atts[0].ContextOnly {
+		t.Fatal("a fetched image is for the model to look at, not part of the reply (ContextOnly)")
 	}
 	decoded, decErr := base64.StdEncoding.DecodeString(atts[0].FileContent)
 	if decErr != nil || string(decoded) != string(raw) {

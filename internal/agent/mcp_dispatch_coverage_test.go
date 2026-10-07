@@ -165,6 +165,7 @@ func TestExecuteToolUses_MCPImagesBecomeInTurnVisionPayloads(t *testing.T) {
 			serverID: {fullToolName: {}},
 		},
 	}
+	offering(chatCtx, fullToolName)
 	results, _, atts := a.executeToolUses(context.Background(), chatCtx, 0, []provider.ToolUse{{
 		ID:    "mcp-img",
 		Name:  fullToolName,

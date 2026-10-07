@@ -107,6 +107,60 @@ describe('ContextMemoriesTabComponent', () => {
         expect(actions.textContent).toContain('Manage all memories');
     });
 
+    it('creates a thread memory with the thread level and Context type', async () => {
+        fixture.componentInstance.openCreateModal();
+        fixture.componentInstance.draft.set('new fact');
+        await fixture.componentInstance.saveEditor();
+
+        expect(memoryService.createMemory).toHaveBeenCalledWith({
+            chat_id: 'chat-1',
+            content: 'new fact',
+            level: 'thread',
+            type: 'Context',
+        });
+    });
+
+    it('saves edited content for an existing memory', async () => {
+        fixture.componentInstance.openEditModal(memory({ id: 'thread-1', content: 'thread memory' }));
+        fixture.componentInstance.draft.set('edited');
+        await fixture.componentInstance.saveEditor();
+
+        expect(memoryService.patchMemory).toHaveBeenCalledWith('thread-1', { content: 'edited' });
+    });
+
+    describe('when the thread is sandboxed', () => {
+        beforeEach(async () => {
+            memoryService.getMemories.mockClear();
+            fixture.componentRef.setInput('sandboxed', true);
+            fixture.detectChanges();
+            await fixture.whenStable();
+            await new Promise(resolve => setTimeout(resolve));
+            fixture.detectChanges();
+        });
+
+        it('says it only shows memories created in this thread', () => {
+            expect(fixture.nativeElement.querySelector('.sandbox-note')?.textContent).toContain(
+                'only memories created in this thread',
+            );
+        });
+
+        it('hides the scope tabs and lists only thread memories', () => {
+            expect(fixture.nativeElement.querySelector('.context-tabs')).toBeNull();
+            expect(fixture.nativeElement.textContent).toContain('thread memory');
+            expect(fixture.nativeElement.textContent).not.toContain('global memory');
+            expect(fixture.nativeElement.textContent).not.toContain('persona memory');
+        });
+
+        it('does not load global or personality memories', () => {
+            const filters = memoryService.getMemories.mock.calls.map(call => call[2]);
+            expect(filters).toEqual([{ chat_id: 'chat-1', level: 'thread' }]);
+        });
+    });
+
+    it('does not show the sandbox note when the thread is not sandboxed', () => {
+        expect(fixture.nativeElement.querySelector('.sandbox-note')).toBeNull();
+    });
+
     const clickDelete = async () => {
         const buttons = fixture.nativeElement.querySelectorAll('.memory-meta button') as NodeListOf<HTMLButtonElement>;
         const deleteButton = Array.from(buttons)

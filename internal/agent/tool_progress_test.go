@@ -227,7 +227,7 @@ func TestExecuteToolUses_RecordsLiveToolProgress(t *testing.T) {
 	w := &fakeProgressWriter{}
 	a := &Agent{logger: zap.NewNop()}
 	chat := &models.Chat{ID: uuid.New(), UserID: uuid.New(), PersonalityID: uuid.New()}
-	chatCtx := &chatContext{chat: chat, toolProgress: newJobToolProgress(context.Background(), w, zap.NewNop(), testChatJob(), nil)}
+	chatCtx := offering(&chatContext{chat: chat, toolProgress: newJobToolProgress(context.Background(), w, zap.NewNop(), testChatJob(), nil)}, "ok_tool", "bad_tool")
 
 	a.executeToolUses(context.Background(), chatCtx, 2, []provider.ToolUse{
 		{ID: "u1", Name: "ok_tool", Input: []byte(`{}`)},

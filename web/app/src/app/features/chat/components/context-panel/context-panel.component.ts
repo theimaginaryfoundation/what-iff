@@ -1,10 +1,12 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 
+import { isSandboxed } from '../../../../core/models/chat.model';
 import { ContextPanelService } from '../../services/context-panel.service';
 import { ContextBreakdownTabComponent } from './tabs/context-breakdown-tab.component';
 import { ContextMemoriesTabComponent } from './tabs/context-memories-tab.component';
 import { ContextScratchpadTabComponent } from './tabs/context-scratchpad-tab.component';
 import { ContextToolsTabComponent } from './tabs/context-tools-tab.component';
+import { ThreadSandboxComponent } from './thread-sandbox.component';
 import {
   BrainIconComponent,
   LayersIconComponent,
@@ -21,6 +23,7 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
     ContextScratchpadTabComponent,
     ContextMemoriesTabComponent,
     ContextToolsTabComponent,
+    ThreadSandboxComponent,
     ContextBreakdownTabComponent,
     XIconComponent,
     NoteIconComponent,
@@ -91,148 +94,151 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
       <div class="context-panel__body">
         @switch (context.activeTab()) {
           @case ('scratchpad') {
-          <app-context-scratchpad-tab
-            [chatId]="context.activeChatId()"
-            [canSave]="!!context.activeChat()?.personality_id"
-            [personalityName]="context.activeChat()?.personality_name ?? null"
-          />
+            <app-context-scratchpad-tab
+              [chatId]="context.activeChatId()"
+              [sandboxed]="isSandboxed(context.activeChat())"
+              [canSave]="!!context.activeChat()?.personality_id"
+              [personalityName]="context.activeChat()?.personality_name ?? null"
+            />
           }
           @case ('memories') {
-          <app-context-memories-tab
-            [chatId]="context.activeChatId()"
-            [personalityId]="context.activeChat()?.personality_id ?? null"
-          />
+            <app-thread-sandbox />
+            <app-context-memories-tab
+              [chatId]="context.activeChatId()"
+              [personalityId]="context.activeChat()?.personality_id ?? null"
+              [sandboxed]="isSandboxed(context.activeChat())"
+            />
           }
           @case ('tools') {
-          <app-context-tools-tab [chat]="context.activeChat()" [toolCalls]="context.toolCalls()" />
+            <app-context-tools-tab [chat]="context.activeChat()" [toolCalls]="context.toolCalls()" />
           }
           @case ('context') {
-          <app-context-breakdown-tab
-            [breakdown]="context.shownBreakdown()"
-            [messageId]="context.shownBreakdownId()"
-          />
+            <app-context-breakdown-tab [breakdown]="context.shownBreakdown()" [messageId]="context.shownBreakdownId()" />
           }
         }
       </div>
     </section>
   `,
-  styles: [`
-    .context-panel {
-      display: grid;
-      grid-template-rows: auto minmax(0, 1fr);
-      height: 100%;
-      min-height: 0;
-    }
-
-    .context-panel__header {
-      align-items: center;
-      border-bottom: 1px solid var(--color-border-base);
-      color: var(--color-text-muted);
-      display: flex;
-      flex-shrink: 0;
-      font-size: 0.625rem;
-      font-weight: 700;
-      justify-content: space-between;
-      letter-spacing: 0.06em;
-      padding: 0.625rem 0.875rem 0.5rem;
-      text-transform: uppercase;
-    }
-
-    .context-panel__close {
-      align-items: center;
-      background: transparent;
-      border: 0;
-      color: var(--color-text-muted);
-      cursor: pointer;
-      display: inline-flex;
-      flex-shrink: 0;
-      justify-content: center;
-      padding: 0.25rem;
-      transition: color 120ms ease;
-    }
-
-    .context-panel__close:hover,
-    .context-panel__close:focus-visible {
-      color: var(--color-accent);
-    }
-
-    .context-panel__body {
-      display: flex;
-      flex-direction: column;
-      min-height: 0;
-      overflow-y: auto;
-      padding: 0.875rem;
-    }
-
-    .context-panel__primary-tabs {
-      display: none;
-    }
-
-    @media (max-width: 1023px) {
-      /* Title, tab strip, then a body that takes the remaining height. */
+  styles: [
+    `
       .context-panel {
-        grid-template-rows: auto auto minmax(0, 1fr);
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        height: 100%;
+        min-height: 0;
       }
 
       .context-panel__header {
-        color: var(--color-text-primary);
-        font-size: 0.875rem;
-        padding-block: 0.5rem;
-        padding-inline: 0.75rem;
+        align-items: center;
+        border-bottom: 1px solid var(--color-border-base);
+        color: var(--color-text-muted);
+        display: flex;
+        flex-shrink: 0;
+        font-size: 0.625rem;
+        font-weight: 700;
+        justify-content: space-between;
+        letter-spacing: 0.06em;
+        padding: 0.625rem 0.875rem 0.5rem;
+        text-transform: uppercase;
       }
 
       .context-panel__close {
-        height: 2.75rem;
-        width: 2.75rem;
-      }
-
-      .context-panel__primary-tabs {
-        border-bottom: 1px solid var(--color-border-base);
-        display: flex;
-        gap: 0.5rem;
-        justify-content: center;
-        padding: 0.625rem 0.75rem;
-      }
-
-      .context-panel__primary-tabs button {
         align-items: center;
-        border: 1px solid var(--color-border-base);
-        border-radius: 0.625rem;
-        color: var(--color-text-secondary);
-        display: inline-flex;
-        flex: 0 0 auto;
-        height: 2.75rem;
-        justify-content: center;
-        padding: 0;
-        width: 2.75rem;
-      }
-
-      .context-panel__primary-tab-label {
+        background: transparent;
         border: 0;
-        clip: rect(0 0 0 0);
-        height: 1px;
-        margin: -1px;
-        overflow: hidden;
-        position: absolute;
-        white-space: nowrap;
-        width: 1px;
+        color: var(--color-text-muted);
+        cursor: pointer;
+        display: inline-flex;
+        flex-shrink: 0;
+        justify-content: center;
+        padding: 0.25rem;
+        transition: color 120ms ease;
       }
 
-      .context-panel__primary-tabs .context-panel__primary-tab--active {
-        background: color-mix(in srgb, var(--color-accent) 14%, transparent);
-        border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border-base));
+      .context-panel__close:hover,
+      .context-panel__close:focus-visible {
         color: var(--color-accent);
       }
 
       .context-panel__body {
-        padding: 0.75rem;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 0.875rem;
       }
-    }
-  `],
+
+      .context-panel__primary-tabs {
+        display: none;
+      }
+
+      @media (max-width: 1023px) {
+        /* Title, tab strip, then a body that takes the remaining height. */
+        .context-panel {
+          grid-template-rows: auto auto minmax(0, 1fr);
+        }
+
+        .context-panel__header {
+          color: var(--color-text-primary);
+          font-size: 0.875rem;
+          padding-block: 0.5rem;
+          padding-inline: 0.75rem;
+        }
+
+        .context-panel__close {
+          height: 2.75rem;
+          width: 2.75rem;
+        }
+
+        .context-panel__primary-tabs {
+          border-bottom: 1px solid var(--color-border-base);
+          display: flex;
+          gap: 0.5rem;
+          justify-content: center;
+          padding: 0.625rem 0.75rem;
+        }
+
+        .context-panel__primary-tabs button {
+          align-items: center;
+          border: 1px solid var(--color-border-base);
+          border-radius: 0.625rem;
+          color: var(--color-text-secondary);
+          display: inline-flex;
+          flex: 0 0 auto;
+          height: 2.75rem;
+          justify-content: center;
+          padding: 0;
+          width: 2.75rem;
+        }
+
+        .context-panel__primary-tab-label {
+          border: 0;
+          clip: rect(0 0 0 0);
+          height: 1px;
+          margin: -1px;
+          overflow: hidden;
+          position: absolute;
+          white-space: nowrap;
+          width: 1px;
+        }
+
+        .context-panel__primary-tabs .context-panel__primary-tab--active {
+          background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+          border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border-base));
+          color: var(--color-accent);
+        }
+
+        .context-panel__body {
+          padding: 0.75rem;
+        }
+      }
+    `,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ContextPanelComponent {
   readonly context = inject(ContextPanelService);
+  readonly isSandboxed = isSandboxed;
 
   activeTabLabel(): string {
     const tab = this.context.activeTab();

@@ -13,6 +13,8 @@ function makeVm(partial: Partial<MemoryCardVm> = {}): MemoryCardVm {
     level: 'global',
     levelLabel: 'Global',
     status: 'active',
+    provenance: 'user',
+    sourceSpeaker: null,
     starred: false,
     chatName: null,
     chatId: null,

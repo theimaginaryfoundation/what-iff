@@ -100,6 +100,14 @@ func (h *Handler) PatchMemory(w http.ResponseWriter, r *http.Request) {
 		}
 		patch.Confidence = &confidence
 	}
+	if raw, exists := payload["provenance"]; exists {
+		provenance, err := parsePatchProvenance(raw)
+		if err != nil {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid provenance", err)
+			return
+		}
+		patch.Provenance = provenance
+	}
 	if raw, exists := payload["chat_id"]; exists {
 		patch.SetChatID = true
 		if string(raw) != "null" {

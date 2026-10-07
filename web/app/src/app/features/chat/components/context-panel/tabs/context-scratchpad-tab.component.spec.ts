@@ -53,6 +53,16 @@ describe('ContextScratchpadTabComponent', () => {
         expect(textarea).not.toBeNull();
     });
 
+    it('shows no scratchpad at all for a sandboxed thread', async () => {
+        fixture.componentRef.setInput('sandboxed', true);
+        fixture.detectChanges();
+        await fixture.whenStable();
+        fixture.detectChanges();
+
+        expect(fixture.nativeElement.querySelector('textarea')).toBeNull();
+        expect(fixture.nativeElement.querySelector('[data-testid=scratchpad-sandboxed]')?.textContent).toContain('neither reads nor updates');
+    });
+
     it('shows the active personality name in the scratchpad heading', () => {
         fixture.componentRef.setInput('personalityName', 'Aurex');
         fixture.detectChanges();

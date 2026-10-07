@@ -12,6 +12,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
+	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 
@@ -82,7 +83,7 @@ func (h *Handler) CreateChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response, err := h.messageAgent.HandleUserMessage(ctx, msg)
+	response, err := h.messageAgent.HandleUserMessage(metering.WithTurnSource(ctx, metering.TurnSourceApp), msg)
 	if err != nil {
 		if errors.Is(err, agent.ErrQuotaExceeded) {
 			handlerutils.RespondWithError(w, h.logger, http.StatusTooManyRequests, models.ErrCodeQuotaExceeded,

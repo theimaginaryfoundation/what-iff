@@ -104,8 +104,13 @@ type Memory struct {
 	// Confidence is a stored float in [0,1]. The extraction/merge LLM emits coarse buckets that
 	// map to anchors (see MemoryConfidence.Float); other signals (e.g. the reconfirmation tally)
 	// can refine it to finer values over time.
-	Confidence          float64              `json:"confidence"`
-	Starred             bool                 `json:"starred"`
+	Confidence float64 `json:"confidence"`
+	Starred    bool    `json:"starred"`
+	// Provenance is user (the default) or external: learned in a Discord relay thread from
+	// people outside the account, and unverified. SourceSpeaker is the Discord display name it came
+	// from, when known.
+	Provenance          MemoryProvenance     `json:"provenance"`
+	SourceSpeaker       *string              `json:"source_speaker,omitempty"`
 	Scope               string               `json:"-"`
 	ChainMetadata       *MemoryChainMetadata `json:"chain_metadata,omitempty"`
 	PinnedPersonalityID *uuid.UUID           `json:"pinned_personality_id,omitempty"`
@@ -131,6 +136,8 @@ type MemoryFilters struct {
 	MaxDate              *time.Time    `json:"max_date,omitempty"`
 	Scope                *string       `json:"-"`
 	Status               *MemoryStatus `json:"status,omitempty"`
+	// Provenance, when set, lists only memories of that provenance (the manager's External filter).
+	Provenance *MemoryProvenance `json:"provenance,omitempty"`
 }
 
 type CreateMemoryInput struct {
@@ -189,6 +196,8 @@ type MemoryPatch struct {
 	Starred                *bool             `json:"starred,omitempty"`
 	Status                 *MemoryStatus     `json:"status,omitempty"`
 	Confidence             *MemoryConfidence `json:"confidence,omitempty"`
+	// Provenance lets the owner re-label a memory: user marks an external memory as verified.
+	Provenance *MemoryProvenance `json:"provenance,omitempty"`
 }
 
 // ChatSummaryBackfillCandidate identifies a legacy checkpoint summary that has
@@ -216,6 +225,9 @@ type MemoryRecord struct {
 	ChatID    *uuid.UUID `json:"chat_id,omitempty"`
 	ChatName  *string    `json:"chat_name,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
+	// Provenance and SourceSpeaker round-trip too; absent in old exports, which import as user.
+	Provenance    MemoryProvenance `json:"provenance,omitempty"`
+	SourceSpeaker *string          `json:"source_speaker,omitempty"`
 }
 
 // MemoryImportResult reports import execution stats for a ZIP upload.

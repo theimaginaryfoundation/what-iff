@@ -76,6 +76,9 @@ type memoryMergeCandidate struct {
 	// Starred is known only for stored memories loaded this turn (liveMemories); it lets the
 	// planner skip embedding a canonical rewrite the datastore would decline anyway.
 	Starred bool
+	// Origin is set for new candidates only: the provenance the checkpoint writes with and the
+	// speaker extraction named. Stored memories keep their own origin in the database.
+	Origin models.MemoryOrigin
 }
 
 func dedupeContextMemoryRefs(refs []provider.ContextMemoryRef) []models.ContextMemoryRef {
@@ -216,6 +219,7 @@ func buildMemoryMergeCandidates(modelContext *provider.ModelContext, liveMemorie
 			Scope:      scope,
 			Confidence: item.Confidence,
 			IsNew:      true,
+			Origin:     item.Origin(),
 		})
 		for dup := 1; dup < item.BatchDuplicateCount; dup++ {
 			candidates = append(candidates, memoryMergeCandidate{
@@ -223,6 +227,7 @@ func buildMemoryMergeCandidates(modelContext *provider.ModelContext, liveMemorie
 				Scope:      scope,
 				Confidence: item.Confidence,
 				IsNew:      true,
+				Origin:     item.Origin(),
 			})
 		}
 	}
@@ -598,12 +603,16 @@ type memoryFoldPlan struct {
 	DuplicatesFolded int
 	NeedsEmbedding   bool
 	SourceMembers    []models.MemoryMergeSourceMember
+	// NewOrigin is the new members' combined origin (models.MergeOrigins); nil when the group has
+	// none.
+	NewOrigin *models.MemoryOrigin
 }
 
 // memoryLinkNewMemberPlan is a freshly-extracted surface in a link cluster (embedding deferred).
 type memoryLinkNewMemberPlan struct {
 	Content    string
 	Confidence models.MemoryConfidence
+	Origin     models.MemoryOrigin
 }
 
 // memoryLinkPlan is one cross-reference action ready for PersistMemoryLinkGroup.
@@ -655,7 +664,25 @@ func planFoldGroup(group models.MemoryMergeGroupProposal, candidates []memoryMer
 		DuplicatesFolded: duplicatesFolded,
 		NeedsEmbedding:   survivorID == nil || survivorMayBeRewritten(group, candidates, *survivorID),
 		SourceMembers:    sourceMembersForGroup(group, candidates),
+		NewOrigin:        newMemberOrigin(group, candidates),
 	}, true
+}
+
+// newMemberOrigin is the combined origin of a group's new members (external if any is, a speaker
+// only when all agree), or nil when the group has none.
+func newMemberOrigin(group models.MemoryMergeGroupProposal, candidates []memoryMergeCandidate) *models.MemoryOrigin {
+	var origins []models.MemoryOrigin
+	for _, idx := range group.MemberIndices {
+		if idx < 0 || idx >= len(candidates) || !candidates[idx].IsNew {
+			continue
+		}
+		origins = append(origins, candidates[idx].Origin)
+	}
+	if len(origins) == 0 {
+		return nil
+	}
+	merged := models.MergeOrigins(origins...)
+	return &merged
 }
 
 // survivorMayBeRewritten reports whether the fold may reword the survivor and so needs an
@@ -702,6 +729,7 @@ func planLinkGroup(group models.MemoryMergeGroupProposal, candidates []memoryMer
 		newMembers = append(newMembers, memoryLinkNewMemberPlan{
 			Content:    c.Content,
 			Confidence: c.Confidence,
+			Origin:     c.Origin,
 		})
 	}
 	if len(existingIDs)+len(newMembers) < 2 {

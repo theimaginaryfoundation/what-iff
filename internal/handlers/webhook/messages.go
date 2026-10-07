@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
+	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
@@ -59,6 +60,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleWebhookUserMode(w http.ResponseWriter, ctx context.Context, req models.WebhookChatMessageRequest, chatID uuid.UUID) {
+	ctx = metering.WithTurnSource(ctx, metering.TurnSourceWebhook)
 	response, err := h.agent.HandleUserMessage(ctx, models.ChatMessage{
 		ChatID:      chatID,
 		Message:     req.Message,

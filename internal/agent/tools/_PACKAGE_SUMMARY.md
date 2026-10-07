@@ -56,6 +56,18 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
   Provider-facing tool prompts remain unchanged on `FunctionToolSpec.Description`.
 - **Spec parity:** `toolconstants_test.go` asserts OpenAI function tool projection stays aligned with the shared catalog; Claude schema sanitization is tested in `internal/agent/provider`.
 - **Execution location:** Some tools are defined here only as shared schema/registration (`run_subagent`) while execution lives in `internal/agent` to reuse chat/user/provider context safely.
+- **Sandbox policy:** every catalog entry declares a `SandboxPolicy` (`sandbox_policy.go`): `SandboxNever` (the zero value, so an undeclared tool fails closed) is never offered in a sandbox, `SandboxDefaultOff` is offered but starts in a new sandbox's `disabled_tools`, and `SandboxAllowed` is offered as in any chat.
+  Every tool that is not `SandboxAllowed` is registered as a sandbox default-off tool from `init()` (`models.RegisterSandboxDefaultDisabledTool`; a build adding tools registers its own), so the Tools tab of a new sandbox simply shows them unticked.
+- **Sandboxed chats:** `sandbox.go` holds the one rule set for a chat with `Chat.IsSandboxed()`.
+  `memoryReadableBy` (a fetch by id) allows only a Chat-scoped memory or checkpoint summary of this conversation; `conversationReadable` allows only the chat itself; `fileInChatScope` allows only files uploaded to this conversation.
+  Search retrieval is scoped in SQL (`GetRelatedMemories` takes the sandbox flag, `GetRelatedSummaryMemories` the one chat), and `find_context` lifecycle events list only folds of this chat's own memories.
+  `list` refuses jobs, skills and personalities, lists conversations as just this one (so the model can reach its own id for `find_context`), and lists only this conversation's own files (`listSandboxFiles`); `update_scratchpad` and `move_files` refuse.
+  `create_memory` always writes a Chat-scoped memory in a sandboxed chat, whatever scope was asked.
+  A hidden memory, an unknown id and an ambiguous id prefix give a sandboxed chat the same `not found` error (`resolveMemory`).
+  Refusals share `sandboxedNote`, so the model gets one consistent message.
+- **Memory provenance:** `CreateMemoryToolWithOrigin` writes the origin the agent computed for the turn (external in a Discord relay thread); its optional `speaker` argument names the Discord user a memory came from and is ignored elsewhere.
+  `find_context` shows external memories through the shared formatter (`source=external(...)`) and marks a relay thread's summary chunks with `provenance`; distillation material carries the same note.
+- **`find_context` images are context-only:** an image fetched in fetch mode is returned with `FileAttachment.ContextOnly`, so the agent shows it to the model without saving it onto the reply.
 
 ## Testing
 

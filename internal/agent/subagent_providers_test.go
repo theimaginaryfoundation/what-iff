@@ -117,7 +117,7 @@ func TestRunSubagentChatCompletions_PreviouslyRejectedProvidersSucceed(t *testin
 			caps := subagentModelCapabilities{Provider: tc.provider, ToolSupport: true}
 
 			out, err := a.runSubagentChatCompletions(context.Background(), uuid.New(), caps, tc.model,
-				buildSubagentModelContext("be brief", "", "say hi"), nil, nil)
+				buildSubagentModelContext("be brief", "", "say hi"), nil, nil, false)
 
 			require.NoError(t, err)
 			require.Equal(t, "hello from "+tc.provider, out.Output)
@@ -138,7 +138,7 @@ func TestRunSubagentChatCompletions_QwenSendsSkillToolsWhenToolCapable(t *testin
 
 	out, err := a.runSubagentChatCompletions(context.Background(), uuid.New(),
 		subagentModelCapabilities{Provider: "qwen", ToolSupport: true}, "qwen3.7-plus",
-		buildSubagentModelContext("", "", "weather?"), subagentTestSpecs(), nil)
+		buildSubagentModelContext("", "", "weather?"), subagentTestSpecs(), nil, false)
 
 	require.NoError(t, err)
 	require.Equal(t, "done", out.Output)
@@ -154,7 +154,7 @@ func TestRunSubagentChatCompletions_ToolsRejectedWhenModelLacksToolSupport(t *te
 
 	out, err := a.runSubagentChatCompletions(context.Background(), uuid.New(),
 		subagentModelCapabilities{Provider: "qwen", ToolSupport: false}, "qwen-turbo",
-		buildSubagentModelContext("", "", "weather?"), subagentTestSpecs(), nil)
+		buildSubagentModelContext("", "", "weather?"), subagentTestSpecs(), nil, false)
 
 	require.Nil(t, out)
 	require.ErrorContains(t, err, `qwen model "qwen-turbo" does not support tool calling`)
@@ -170,7 +170,7 @@ func TestRunSubagentChatCompletions_NoToolsNeededWorksWithoutToolSupport(t *test
 
 	out, err := a.runSubagentChatCompletions(context.Background(), uuid.New(),
 		subagentModelCapabilities{Provider: "qwen", ToolSupport: false}, "qwen-turbo",
-		buildSubagentModelContext("", "", "hi"), nil, nil)
+		buildSubagentModelContext("", "", "hi"), nil, nil, false)
 
 	require.NoError(t, err)
 	require.Equal(t, "plain", out.Output)
@@ -188,7 +188,7 @@ func TestRunSubagentChatCompletions_TextOnlyModelNeverGetsImageParts(t *testing.
 	mc.AppendUserMessage(provider.RoleUser, "look", []provider.UserMessageImage{{RawBytes: []byte{0x89, 0x50}, MediaType: "image/png"}}, false)
 
 	_, err := a.runSubagentChatCompletions(context.Background(), uuid.New(),
-		subagentModelCapabilities{Provider: "qwen", VisionSupport: false}, "qwen3.7-plus", mc, nil, nil)
+		subagentModelCapabilities{Provider: "qwen", VisionSupport: false}, "qwen3.7-plus", mc, nil, nil, false)
 	require.NoError(t, err)
 
 	raw, _ := json.Marshal(rec.bodies[0])
@@ -210,7 +210,7 @@ func TestRunSubagentChatCompletions_MissingAPIKeyNamesTheEnvVar(t *testing.T) {
 			a := &Agent{logger: zap.NewNop()}
 			out, err := a.runSubagentChatCompletions(context.Background(), uuid.New(),
 				subagentModelCapabilities{Provider: tc.provider, ToolSupport: true}, tc.model,
-				buildSubagentModelContext("", "", "hi"), nil, nil)
+				buildSubagentModelContext("", "", "hi"), nil, nil, false)
 			require.Nil(t, out)
 			require.ErrorContains(t, err, tc.env)
 		})
@@ -227,7 +227,7 @@ func TestRunSubagentChatCompletions_ProviderErrorIsPreserved(t *testing.T) {
 
 	out, err := a.runSubagentChatCompletions(context.Background(), uuid.New(),
 		subagentModelCapabilities{Provider: "qwen", ToolSupport: true}, "qwen3.7-plus",
-		buildSubagentModelContext("", "", "hi"), nil, nil)
+		buildSubagentModelContext("", "", "hi"), nil, nil, false)
 
 	require.Nil(t, out)
 	require.ErrorContains(t, err, "qwen subagent call failed")
@@ -244,7 +244,7 @@ func TestRunSubagentChatCompletions_ContentPolicyBlockIsTypedAsSafetyViolation(t
 
 	_, err := a.runSubagentChatCompletions(context.Background(), uuid.New(),
 		subagentModelCapabilities{Provider: "qwen", ToolSupport: true}, "qwen3.7-plus",
-		buildSubagentModelContext("", "", "hi"), nil, nil)
+		buildSubagentModelContext("", "", "hi"), nil, nil, false)
 
 	violation, ok := provider.IsSafetyViolationError(err)
 	require.True(t, ok)
@@ -258,7 +258,7 @@ func TestRunSubagentChatCompletions_EmptyChoicesIsAnError(t *testing.T) {
 
 	out, err := a.runSubagentChatCompletions(context.Background(), uuid.New(),
 		subagentModelCapabilities{Provider: "qwen", ToolSupport: true}, "qwen3.7-plus",
-		buildSubagentModelContext("", "", "hi"), nil, nil)
+		buildSubagentModelContext("", "", "hi"), nil, nil, false)
 
 	require.Nil(t, out)
 	require.ErrorContains(t, err, "qwen subagent call failed")
@@ -284,7 +284,7 @@ func TestCallSubagentModel_QwenRoutesToQwenProvider(t *testing.T) {
 	a := newSubagentChatCompletionsAgent(rec.srv.URL)
 	a.ds = ds
 
-	out, err := a.callSubagentModel(context.Background(), uuid.New(), "qwen3.7-plus", buildSubagentModelContext("", "", "hi"), nil)
+	out, err := a.callSubagentModel(context.Background(), uuid.New(), "qwen3.7-plus", buildSubagentModelContext("", "", "hi"), nil, false)
 
 	require.NoError(t, err)
 	require.Equal(t, "qwen says hi", out.Output)
@@ -299,7 +299,7 @@ func TestCallSubagentModel_QwenWithoutKeyReportsConfigError(t *testing.T) {
 	expectModelRow(mock, "qwen3.7-plus", "qwen", true)
 
 	a := newTestAgent(ds)
-	out, err := a.callSubagentModel(context.Background(), uuid.New(), "qwen3.7-plus", buildSubagentModelContext("", "", "hi"), nil)
+	out, err := a.callSubagentModel(context.Background(), uuid.New(), "qwen3.7-plus", buildSubagentModelContext("", "", "hi"), nil, false)
 
 	require.Nil(t, out)
 	require.ErrorContains(t, err, "QWEN_API_KEY is not configured")
@@ -336,7 +336,7 @@ func TestCallSubagentModel_ZAIRoutesToZAIProvider(t *testing.T) {
 	a.ZAIProvider = newHTTPTestClaudeProvider(zaiSrv.URL)
 	a.ClaudeProvider = newHTTPTestClaudeProvider(anthropicSrv.URL)
 
-	out, err := a.callSubagentModel(context.Background(), uuid.New(), "glm-5.2", buildSubagentModelContext("", "", "hi"), nil)
+	out, err := a.callSubagentModel(context.Background(), uuid.New(), "glm-5.2", buildSubagentModelContext("", "", "hi"), nil, false)
 
 	require.NoError(t, err)
 	require.Equal(t, "glm says hi", out.Output)

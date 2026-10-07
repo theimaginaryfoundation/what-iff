@@ -92,7 +92,7 @@ func TestLoadTurnMemories_TimelineRow(t *testing.T) {
 			t.Parallel()
 			w := &fakeProgressWriter{}
 			progress := testMemoryProgress(w)
-			tt.agent.loadTurnMemories(context.Background(), progress, uuid.New(), uuid.New(), uuid.New(), "hi")
+			tt.agent.loadTurnMemories(context.Background(), progress, uuid.New(), uuid.New(), uuid.New(), "hi", false)
 
 			got := writes(t, w)
 			statuses := make([][]models.ChatTurnToolStatus, 0, len(got))
@@ -122,7 +122,7 @@ func TestLoadTurnMemories_TimelineRow(t *testing.T) {
 func TestLoadTurnMemories_NilProgressIsSafe(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop(), testHooks: memoryHook([]string{"m1"}, nil)}
-	memories, _, failed := a.loadTurnMemories(context.Background(), nil, uuid.New(), uuid.New(), uuid.New(), "hi")
+	memories, _, failed := a.loadTurnMemories(context.Background(), nil, uuid.New(), uuid.New(), uuid.New(), "hi", false)
 	assert.False(t, failed)
 	assert.Equal(t, []string{"m1"}, memories)
 }

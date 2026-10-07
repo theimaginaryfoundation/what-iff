@@ -1,11 +1,13 @@
 import { Params } from '@angular/router';
 
-import { MemoryFilters, MemorySort } from '../../../core/models/memory.model';
+import { MemoryFilters, MemoryProvenance, MemorySort } from '../../../core/models/memory.model';
 
 export type MemoryScopeFilter = 'all' | 'user' | 'chat';
 export type MemoryLevelFilter = 'all' | 'global' | 'personality' | 'thread' | 'summary';
 /** Active / Archived are status filters; Summaries is a dedicated view of checkpoint summaries. */
 export type MemoryStatusFilter = 'active' | 'inactive' | 'summaries';
+/** `all` sends no provenance filter; `external` lists what was learned in Discord relay threads. */
+export type MemoryProvenanceFilter = 'all' | MemoryProvenance;
 /** Persona-filter sentinel for unpinned User memories shared across all personas. */
 export const GLOBAL_PERSONALITY_FILTER = '__global__';
 
@@ -14,6 +16,7 @@ export interface MemoryViewFilters {
   level: MemoryLevelFilter;
   status: MemoryStatusFilter;
   sort: MemorySort;
+  provenance: MemoryProvenanceFilter;
   query: string;
   personalityId: string;
   chatId: string;
@@ -26,6 +29,7 @@ export const DEFAULT_MEMORY_VIEW_FILTERS: MemoryViewFilters = {
   level: 'all',
   status: 'active',
   sort: 'created_desc',
+  provenance: 'all',
   query: '',
   personalityId: '',
   chatId: '',
@@ -51,6 +55,7 @@ export function parseQueryParams(params: Params): MemoryViewFilters {
     level,
     status,
     sort: normalizeSort(params['sort']),
+    provenance: normalizeProvenance(params['provenance']) ?? 'all',
     query: String(params['query'] ?? '').trim(),
     personalityId: String(params['personality_id'] ?? '').trim(),
     chatId: String(params['chat'] ?? params['chat_id'] ?? '').trim(),
@@ -69,6 +74,7 @@ export function serializeFilters(filters: MemoryViewFilters): Params {
     if (filters.status !== 'active') params['status'] = filters.status;
   }
   if (filters.sort !== 'created_desc') params['sort'] = filters.sort;
+  if (filters.provenance !== 'all') params['provenance'] = filters.provenance;
   if (filters.query.trim()) params['query'] = filters.query.trim();
   if (filters.personalityId.trim()) params['personality_id'] = filters.personalityId.trim();
   if (filters.chatId.trim()) params['chat'] = filters.chatId.trim();
@@ -82,6 +88,7 @@ export function toApiFilters(filters: MemoryViewFilters): MemoryFilters {
   const api: MemoryFilters = {};
   if (filters.query.trim()) api.query = filters.query.trim();
   api.sort = filters.sort;
+  if (filters.provenance !== 'all') api.provenance = filters.provenance;
   if (filters.personalityId === GLOBAL_PERSONALITY_FILTER) {
     api.global_only = true;
   } else if (filters.personalityId.trim()) {
@@ -168,4 +175,9 @@ function normalizeStatus(raw: unknown): MemoryStatusFilter {
 function normalizeSort(raw: unknown): MemorySort {
   if (raw === 'created_asc' || raw === 'updated_desc') return raw;
   return 'created_desc';
+}
+
+/** Narrows an unknown value (URL param, API field) to a known provenance, or null. */
+export function normalizeProvenance(raw: unknown): MemoryProvenance | null {
+  return raw === 'user' || raw === 'external' ? raw : null;
 }

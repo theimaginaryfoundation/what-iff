@@ -23,6 +23,9 @@ import (
 //     high (trust), or a value refined away from the default.
 //   - reconfirmed=Nx  — the dedupe tally, when the same fact has been observed more than once.
 //   - relevance=0.NN  — the retrieval-time cosine similarity, set only on freshly-queried memories.
+//   - source=external(…) — the memory was learned from someone outside the account in a public
+//     Discord relay thread (models.MemoryProvenanceExternal): unverified, and attributed to its
+//     speaker when known.
 func FormatMemoryForContext(mem *models.Memory) string {
 	if mem == nil {
 		return ""
@@ -39,5 +42,23 @@ func FormatMemoryForContext(mem *models.Memory) string {
 	if mem.Relevance != nil {
 		meta += fmt.Sprintf(" relevance=%.2f", *mem.Relevance)
 	}
+	if mem.Provenance.IsExternal() {
+		meta += " " + ExternalProvenanceNote(mem.SourceSpeaker)
+	}
 	return fmt.Sprintf("%s [%s]", mem.Content, meta)
+}
+
+// ExternalProvenanceNote is the metadata note an external memory carries in model context: it
+// came from someone outside the account, in a Discord thread, and is unverified. The
+// speaker is the stored display name (already cleaned of the characters that delimit the
+// metadata block), or nil when unknown.
+func ExternalProvenanceNote(speaker *string) string {
+	name := ""
+	if speaker != nil {
+		name = models.CleanSpeakerName(*speaker)
+	}
+	if name == "" {
+		return "source=external(unverified; said by someone in a Discord thread, not by the user)"
+	}
+	return fmt.Sprintf("source=external(unverified; said by %s on Discord, not by the user)", name)
 }

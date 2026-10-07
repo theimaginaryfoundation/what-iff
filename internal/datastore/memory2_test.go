@@ -1426,7 +1426,7 @@ func TestGetRelatedMemories_PropagatesQueryError(t *testing.T) {
 	userID := uuid.New()
 	createTestUser(t, ds, userID)
 
-	_, err := ds.GetRelatedMemories(ctx, userID, uuid.New(), []float32{0.1, 0.2}, uuid.Nil)
+	_, err := ds.GetRelatedMemories(ctx, userID, uuid.New(), []float32{0.1, 0.2}, uuid.Nil, false)
 	require.Error(t, err, "sqlite does not support the pgvector '<->' operator memory.go embeds via sql.ExprP")
 }
 
@@ -1438,6 +1438,6 @@ func TestGetRelatedSummaryMemories_PropagatesQueryError(t *testing.T) {
 	userID := uuid.New()
 	createTestUser(t, ds, userID)
 
-	_, err := ds.GetRelatedSummaryMemories(ctx, userID, []float32{0.1, 0.2}, 0)
+	_, err := ds.GetRelatedSummaryMemories(ctx, userID, []float32{0.1, 0.2}, 0, uuid.Nil)
 	require.Error(t, err, "sqlite does not support the pgvector '<->' operator memory.go embeds via sql.ExprP")
 }

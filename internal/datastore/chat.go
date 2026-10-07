@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -58,6 +59,7 @@ func toChatModel(e *ent.Chat) *models.Chat {
 		chatModel.ImportHash = &h
 	}
 	chatModel.RehydrationState = e.RehydrationState
+	chatModel.ContextScope = models.ContextScope(e.ContextScope).OrDefault()
 
 	if e.ResponseID != "" {
 		chatModel.ResponseID = &e.ResponseID
@@ -84,7 +86,11 @@ func toChatModel(e *ent.Chat) *models.Chat {
 		chatModel.PersonalityID = e.Edges.Personality.ID
 		chatModel.PersonalityName = e.Edges.Personality.Name
 		chatModel.SystemPrompt = e.Edges.Personality.SystemPrompt
-		chatModel.Scratchpad = e.Edges.Personality.Scratchpad
+		// The personality scratchpad is shared by all of its conversations, so a sandboxed chat is
+		// never handed it: this is the one place it enters a Chat model.
+		if !chatModel.IsSandboxed() {
+			chatModel.Scratchpad = e.Edges.Personality.Scratchpad
+		}
 		chatModel.PersonalityExpressionsEnabled = e.Edges.Personality.ExpressionsEnabled
 	}
 
@@ -247,6 +253,21 @@ func (d *Datastore) CreateChat(ctx context.Context, userID uuid.UUID, chat model
 	}
 	isFirstChat := existingChatCount == 0
 
+	scope := chat.ContextScope.OrDefault()
+	if !scope.Valid() {
+		if rerr := tx.Rollback(); rerr != nil {
+			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+		}
+		return nil, fmt.Errorf("%w: invalid context_scope: %s", ErrInvalidRequestBody, scope)
+	}
+	disabledTools := append([]string(nil), chat.DisabledTools...)
+	if scope == models.ContextScopeSandbox && chat.DisabledTools == nil {
+		// A sandbox starts with the tools that spend the owner's credits or act beyond the
+		// conversation switched off (models.SandboxDefaultDisabledTools); the owner turns each one
+		// on deliberately. A caller that passes its own list (a backup restore) keeps it.
+		disabledTools = models.SandboxDefaultDisabledTools()
+	}
+
 	// Create chat.
 	// Use SetTags (replace semantics) rather than Ent AppendTags to keep validation
 	// consistent with schema + shared normalizer across all write paths.
@@ -256,7 +277,13 @@ func (d *Datastore) CreateChat(ctx context.Context, userID uuid.UUID, chat model
 		SetModelID(chat.ModelID).
 		SetTags(normalizedTags).
 		SetNillableIsFavorite(chat.IsFavorite).
-		SetIsAutoMood(true)
+		SetIsAutoMood(true).
+		SetContextScope(entchat.ContextScope(scope))
+	if len(disabledTools) > 0 {
+		// Server-created threads (a Discord relay thread, say) start with tools switched off in the
+		// same transaction, so the thread never exists with them on.
+		create.SetDisabledTools(disabledTools)
+	}
 
 	if chat.LastMessageTime != nil {
 		create.SetLastMessageTime(*chat.LastMessageTime)
@@ -546,6 +573,8 @@ func (d *Datastore) GetChatContext(ctx context.Context, userID, chatID uuid.UUID
 		return nil, err
 	}
 
+	// A sandboxed chat neither reads nor writes the personality scratchpad, so its context view
+	// has none either (toChatModel left chat.Scratchpad blank); the handler refuses a save.
 	return &models.ChatContext{
 		ChatID:           chat.ID,
 		ActiveScratchpad: chat.Scratchpad,
@@ -941,6 +970,18 @@ func (d *Datastore) UpdateChat(ctx context.Context, userID uuid.UUID, chat model
 	}
 	update.SetIsAutoMood(chat.IsAutoMood)
 	update.SetNillableArchived(chat.Archived)
+	// Only an explicit change writes the scope (see models.Chat.SetContextScope): a stale copy saved
+	// by a turn that started before the user changed it must not write the old value back.
+	if chat.SetContextScope {
+		scope := chat.ContextScope.OrDefault()
+		if !scope.Valid() {
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, fmt.Errorf("%w: invalid context_scope: %s", ErrInvalidRequestBody, scope)
+		}
+		update.SetContextScope(entchat.ContextScope(scope))
+	}
 
 	entChat, err := update.Save(ctx)
 	if err != nil {

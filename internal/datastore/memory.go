@@ -20,6 +20,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/embedding"
 	"github.com/theimaginaryfoundation/what-iff/ent/memory"
 	entpersonality "github.com/theimaginaryfoundation/what-iff/ent/personality"
+	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
 	entschema "github.com/theimaginaryfoundation/what-iff/ent/schema"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
@@ -93,12 +94,17 @@ func toMemoryModel(e *ent.Memory) *models.Memory {
 		Status:     status,
 		Confidence: models.ClampConfidence(e.Confidence),
 		Starred:    e.Starred,
+		Provenance: models.MemoryProvenance(e.Provenance).OrDefault(),
 		Scope:      string(e.Scope),
 		CreatedAt:  e.CreatedAt,
 		UpdatedAt:  e.UpdatedAt,
 	}
 	if e.ChainMetadata != nil {
 		memoryModel.ChainMetadata = chainMetadataToModel(e.ChainMetadata)
+	}
+	if memoryModel.Provenance.IsExternal() && e.SourceSpeaker != nil {
+		speaker := *e.SourceSpeaker
+		memoryModel.SourceSpeaker = &speaker
 	}
 
 	// Add pinned personality ID if set
@@ -150,14 +156,22 @@ func (d *Datastore) CreateMemory(ctx context.Context, userID uuid.UUID, mem mode
 
 	// If provided, validate chat ownership before linking.
 	if mem.ChatID != uuid.Nil {
-		chatExists, err := tx.Chat.Query().
+		chatRow, err := tx.Chat.Query().
 			Where(
 				entchat.ID(mem.ChatID),
 				entchat.HasOwnerWith(
 					user.ID(userID),
 				),
 			).
-			Exist(ctx)
+			Select(entchat.FieldContextScope).
+			Only(ctx)
+		if ent.IsNotFound(err) {
+			d.logger.Error(i18n.T2("memory.chat_not_found_or_unauthorized", "ChatID", mem.ChatID.String(), "UserID", userID.String()))
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, ErrChatNotFound
+		}
 		if err != nil {
 			d.logger.Error(i18n.T1("query.failed", "Entity", "chat"), zap.Error(err))
 			if rerr := tx.Rollback(); rerr != nil {
@@ -165,12 +179,10 @@ func (d *Datastore) CreateMemory(ctx context.Context, userID uuid.UUID, mem mode
 			}
 			return nil, err
 		}
-		if !chatExists {
-			d.logger.Error(i18n.T2("memory.chat_not_found_or_unauthorized", "ChatID", mem.ChatID.String(), "UserID", userID.String()))
-			if rerr := tx.Rollback(); rerr != nil {
-				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
-			}
-			return nil, ErrChatNotFound
+		// Whatever the caller asked for, a memory written from a sandboxed chat is Chat-scoped:
+		// nothing a sandbox learns reaches the owner's account, however the write got here.
+		if models.ContextScope(chatRow.ContextScope) == models.ContextScopeSandbox {
+			mem.Scope = string(memory.ScopeChat)
 		}
 	}
 
@@ -191,6 +203,8 @@ func (d *Datastore) CreateMemory(ctx context.Context, userID uuid.UUID, mem mode
 		SetStatus(normalizeMemoryStatus(mem.Status)).
 		SetConfidence(models.ClampConfidence(mem.Confidence)).
 		SetStarred(mem.Starred).
+		SetProvenance(memory.Provenance(mem.Provenance.OrDefault())).
+		SetNillableSourceSpeaker(models.OriginFrom(mem.Provenance, mem.SourceSpeaker).SpeakerPtr()).
 		SetCreatedAt(time.Now()).
 		SetUpdatedAt(time.Now())
 
@@ -552,6 +566,15 @@ func (d *Datastore) UpdateMemory(ctx context.Context, userID, memoryID uuid.UUID
 		nextConfidence = *patch.Confidence
 	}
 
+	nextProvenance := models.MemoryProvenance(existing.Provenance).OrDefault()
+	if patch.Provenance != nil {
+		if !patch.Provenance.Valid() {
+			tx.Rollback()
+			return nil, fmt.Errorf("%w: invalid provenance: %s", ErrInvalidRequestBody, *patch.Provenance)
+		}
+		nextProvenance = *patch.Provenance
+	}
+
 	currentLevel := memoryLevelForEntity(existing)
 	nextLevel := currentLevel
 	if patch.Level != nil {
@@ -626,7 +649,12 @@ func (d *Datastore) UpdateMemory(ctx context.Context, userID, memoryID uuid.UUID
 		SetStatus(normalizeMemoryStatus(nextStatus)).
 		SetConfidence(nextConfidence.Float()).
 		SetStarred(nextStarred).
+		SetProvenance(memory.Provenance(nextProvenance)).
 		SetUpdatedAt(time.Now())
+	if nextProvenance == models.MemoryProvenanceUser {
+		// A memory confirmed as the owner's has no outside speaker.
+		update.ClearSourceSpeaker()
+	}
 
 	if nextChatID != nil && *nextChatID != uuid.Nil {
 		update.SetChatID(*nextChatID)
@@ -711,6 +739,18 @@ func (d *Datastore) UpsertChatSummaryMemory(ctx context.Context, userID, chatID 
 		tx.Rollback()
 		return ErrChatNotFound
 	}
+	// A Discord relay thread's summary retells what people outside the account said, so it
+	// is external like the memories written there. Once external it stays so (it is cumulative).
+	external, err := externalRelayChat(ctx, tx.Client(), userID, chatID)
+	if err != nil {
+		tx.Rollback()
+		d.logger.Error(i18n.T1("query.failed", "Entity", "discord binding"), zap.Error(err))
+		return err
+	}
+	provenance := models.MemoryProvenanceUser
+	if external {
+		provenance = models.MemoryProvenanceExternal
+	}
 
 	summaryMemory, err := tx.Memory.Query().
 		Where(
@@ -732,6 +772,7 @@ func (d *Datastore) UpsertChatSummaryMemory(ctx context.Context, userID, chatID 
 			SetScope(memory.ScopeSummary).
 			SetStatus(memory.StatusActive).
 			SetConfidence(0.9).
+			SetProvenance(memory.Provenance(provenance)).
 			SetOwnerID(userID).
 			SetChatID(chatID).
 			SetCreatedAt(time.Now()).
@@ -746,6 +787,10 @@ func (d *Datastore) UpsertChatSummaryMemory(ctx context.Context, userID, chatID 
 			SetContent(summary).
 			SetStatus(memory.StatusActive).
 			SetConfidence(0.9).
+			SetProvenance(memory.Provenance(models.MergeOrigins(
+				models.MemoryOrigin{Provenance: models.MemoryProvenance(summaryMemory.Provenance)},
+				models.MemoryOrigin{Provenance: provenance},
+			).Provenance)).
 			Save(ctx)
 		if err != nil {
 			d.logger.Error(i18n.T1("update.failed", "Entity", "summary memory"), zap.Error(err))
@@ -887,6 +932,9 @@ func (d *Datastore) ListMemories(ctx context.Context, userID uuid.UUID, pageNum,
 	// Apply filters if provided
 	if filters.ChatID != nil {
 		query = query.Where(memory.HasChatWith(entchat.ID(*filters.ChatID)))
+	}
+	if filters.Provenance != nil && filters.Provenance.Valid() {
+		query = query.Where(memory.ProvenanceEQ(memory.Provenance(*filters.Provenance)))
 	}
 
 	if filters.Level != nil && *filters.Level != "" {
@@ -1295,7 +1343,7 @@ func (d *Datastore) GetMemoryByIDPrefix(ctx context.Context, userID uuid.UUID, p
 		if rerr := tx.Rollback(); rerr != nil {
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
 		}
-		return nil, fmt.Errorf("memory ID prefix %q is ambiguous; pass the full UUID", prefix)
+		return nil, fmt.Errorf("%w (%q); pass the full UUID", ErrMemoryIDPrefixAmbiguous, prefix)
 	}
 	if err := tx.Commit(); err != nil {
 		d.logger.Error(i18n.T("tx.commit_failed"), zap.Error(err))
@@ -1775,6 +1823,8 @@ func (d *Datastore) importPreparedMemories(ctx context.Context, userID uuid.UUID
 			SetScope(p.candidate.scope).
 			SetStatus(memory.StatusActive).
 			SetConfidence(models.DefaultMemoryConfidence).
+			SetProvenance(memory.Provenance(p.candidate.record.Provenance.OrDefault())).
+			SetNillableSourceSpeaker(models.OriginFrom(p.candidate.record.Provenance, p.candidate.record.SourceSpeaker).SpeakerPtr()).
 			SetOwnerID(userID).
 			SetCreatedAt(p.candidate.record.CreatedAt)
 		if p.candidate.chatID != nil {
@@ -2318,6 +2368,11 @@ func toMemoryRecord(m *ent.Memory) models.MemoryRecord {
 		Content:   m.Content,
 		CreatedAt: m.CreatedAt,
 	}
+	// The user default is omitted, so exports of ordinary memories look as they did before.
+	if origin := models.OriginFrom(models.MemoryProvenance(m.Provenance), m.SourceSpeaker); origin.External() {
+		rec.Provenance = models.MemoryProvenanceExternal
+		rec.SourceSpeaker = origin.SpeakerPtr()
+	}
 
 	if m.Scope == memory.ScopeChat && m.Edges.Chat != nil {
 		chatID := m.Edges.Chat.ID
@@ -2329,7 +2384,11 @@ func toMemoryRecord(m *ent.Memory) models.MemoryRecord {
 	return rec
 }
 
-func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.UUID, queryEmbedding []float32, activePersonalityID uuid.UUID) ([]*models.Memory, error) {
+// GetRelatedMemories returns the active memories nearest queryEmbedding that the asking chat may
+// use: its own Chat-scoped memories plus User-scoped ones visible to the active personality. A
+// sandboxed chat gets only its own Chat-scoped memories. The scope is applied in the WHERE clause,
+// so a sandbox still gets a full set of its own matches (never a post-filtered top-5).
+func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.UUID, queryEmbedding []float32, activePersonalityID uuid.UUID, sandboxed bool) ([]*models.Memory, error) {
 
 	// Start transaction
 	tx, err := d.dbClient.Tx(ctx)
@@ -2375,15 +2434,16 @@ func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.
 		)
 	}
 
+	readable := memory.Or(chatScopedPredicate, userScopedPredicate)
+	if sandboxed {
+		readable = chatScopedPredicate
+	}
 	dbEmbeddings, err := tx.Embedding.Query().
 		Where(
 			embedding.HasMemoryWith(
 				memory.HasOwnerWith(user.ID(userId)),
 				memory.StatusEQ(memory.StatusActive),
-				memory.Or(
-					chatScopedPredicate,
-					userScopedPredicate,
-				),
+				readable,
 			),
 		).
 		Where(func(s *sql.Selector) {
@@ -2434,7 +2494,10 @@ func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.
 // by vector distance to queryEmbedding. GetRelatedMemories intentionally excludes Summary-scope
 // rows (they are internal checkpoint state, not facts); this is the counterpart recall's
 // source_type=summaries search uses instead. limit is clamped to [1, 20], defaulting to 5.
-func (d *Datastore) GetRelatedSummaryMemories(ctx context.Context, userID uuid.UUID, queryEmbedding []float32, limit int) ([]*models.Memory, error) {
+//
+// onlyChatID, when not uuid.Nil, restricts the search to that chat's own summary: a sandboxed chat
+// reads no other conversation's summary.
+func (d *Datastore) GetRelatedSummaryMemories(ctx context.Context, userID uuid.UUID, queryEmbedding []float32, limit int, onlyChatID uuid.UUID) ([]*models.Memory, error) {
 	if limit <= 0 {
 		limit = 5
 	}
@@ -2446,14 +2509,16 @@ func (d *Datastore) GetRelatedSummaryMemories(ctx context.Context, userID uuid.U
 	// Format vector as PostgreSQL array literal to avoid parameter binding issues
 	vectorStr := embVec.String()
 
+	summaryPreds := []predicate.Memory{
+		memory.HasOwnerWith(user.ID(userID)),
+		memory.StatusEQ(memory.StatusActive),
+		memory.ScopeEQ(memory.ScopeSummary),
+	}
+	if onlyChatID != uuid.Nil {
+		summaryPreds = append(summaryPreds, memory.HasChatWith(entchat.ID(onlyChatID)))
+	}
 	dbEmbeddings, err := d.dbClient.Embedding.Query().
-		Where(
-			embedding.HasMemoryWith(
-				memory.HasOwnerWith(user.ID(userID)),
-				memory.StatusEQ(memory.StatusActive),
-				memory.ScopeEQ(memory.ScopeSummary),
-			),
-		).
+		Where(embedding.HasMemoryWith(summaryPreds...)).
 		Where(func(s *sql.Selector) {
 			// Use string formatting to embed vector and threshold directly in SQL
 			s.Where(sql.ExprP(fmt.Sprintf("embedding <-> '%s' <= %f", vectorStr, MemoryRelevanceThreshold)))

@@ -15,6 +15,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// sandboxedAgentJobNote is the refusal a sandboxed conversation gets for create_agent_job.
+const sandboxedAgentJobNote = "scheduling jobs is not available in this sandboxed conversation"
+
 type createAgentJobToolArgs struct {
 	Title            *string  `json:"title,omitempty"`
 	ScheduleInput    string   `json:"schedule_input"`
@@ -42,6 +45,15 @@ func (a *Agent) createAgentJobTool(ctx context.Context, chat *models.Chat, args 
 		return marshalAgentJobToolResult(createAgentJobToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("invalid arguments: %v", err),
+		})
+	}
+	// A job runs in a chat of its own (not sandboxed, no persona) and may attach the owner's skills
+	// and their MCP servers, so a sandboxed chat must not schedule one. The tool is not offered
+	// there; this refuses a call the model makes anyway.
+	if chat.IsSandboxed() {
+		return marshalAgentJobToolResult(createAgentJobToolResult{
+			Success: false,
+			Error:   sandboxedAgentJobNote,
 		})
 	}
 	if !featuregate.IsEntitled(ctx, chat.UserID) {
