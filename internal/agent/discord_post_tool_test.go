@@ -138,7 +138,7 @@ func TestASandboxedThreadCanPostOnlyToItsOwnChannel(t *testing.T) {
 		store.pending = nil
 		_, err := discordPost(context.Background(), store, chat, []byte(arg))
 		require.Error(t, err, arg)
-		assert.Contains(t, err.Error(), "restricted thread", arg)
+		assert.Contains(t, err.Error(), "sandboxed thread", arg)
 		assert.Contains(t, err.Error(), "own Discord channel", arg)
 		assert.NotContains(t, err.Error(), "secret-ops)", "the other channel is not listed back")
 		assert.Empty(t, store.pending, arg)
