@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
 	"github.com/theimaginaryfoundation/what-iff/internal/replyhook"
@@ -46,6 +47,14 @@ const (
 // UnrestrictedWarning is recorded on a binding (its last_error, shown in the app,
 // never posted to Discord) when tags are being dropped because the bound thread
 // is no longer sandboxed and the binding carries no acknowledgement.
+// ThreadDeletedError is recorded on a binding (status broken) when its relay thread no longer
+// exists, so the app shows why tags go unanswered. Repointing the binding clears it.
+const ThreadDeletedError = "The relay thread was deleted. Connect this channel to another thread."
+
+// TurnSource is how the relay's turns are metered (metering.TurnSource): a turn a stranger
+// starts from Discord is not the owner's own chat traffic.
+const TurnSource = "discord"
+
 const UnrestrictedWarning = "Paused: this thread is no longer sandboxed, so Discord tags are not answered. " +
 	"Sandbox the thread again, or acknowledge that anyone allowed to tag the bot may use everything the thread can read."
 
@@ -204,6 +213,11 @@ func (s *Service) threadOpen(ctx context.Context, t models.DiscordBindingTarget)
 	if err != nil || chat == nil {
 		s.Logger.Warn("discord relay: cannot read the bound thread; dropping tag",
 			zap.String("binding_id", b.ID.String()), zap.Error(err))
+		if errors.Is(err, datastore.ErrChatNotFound) && b.Status != models.DiscordBindingBroken {
+			// The owner deleted the relay thread: say so on the binding instead of showing
+			// "Connected" while every tag vanishes. Repointing the binding (or reactivate) clears it.
+			_ = s.Store.SetDiscordBindingStatus(ctx, b.ID, models.DiscordBindingBroken, ThreadDeletedError)
+		}
 		return false
 	}
 	if RelayThreadOpenWithoutAcknowledgement(chat) {
@@ -337,6 +351,8 @@ func (s *Service) runInbound(ctx context.Context, w inboundWork) {
 		// No timezone: the turn's timestamps use the server default, so the owner's
 		// local time zone is not shown to whoever tagged the bot.
 		UserID: bot.OwnerID,
+		// Metered as a Discord turn (metering.TurnSource), apart from the owner's own chats.
+		Source: TurnSource,
 		Message: models.ChatMessage{
 			ChatID:      b.ChatID,
 			Message:     prompt,
@@ -460,22 +476,17 @@ func (s *Service) OnReply(ctx context.Context, ev replyhook.Event) {
 			s.Logger.Warn("discord relay: find inbound link", zap.Error(err))
 		}
 		if inbound != nil {
-			if target, err := s.Store.GetDiscordBindingTarget(ctx, inbound.BindingID); err == nil {
-				replyTo := ""
-				if inbound.DiscordMessageID != nil {
-					replyTo = *inbound.DiscordMessageID
-				}
-				channel := inbound.DiscordChannelID
-				if channel == "" {
-					channel = target.Binding.ChannelID
-				}
-				linkID := inbound.ID
-				s.post(ctx, *target, ev.MessageID, channel, replyTo, &linkID)
-				postedTo[target.Binding.ID] = true
-			}
-			s.release(*ev.TriggerMessageID)
+			s.postInboundReply(ctx, inbound, ev, postedTo)
 		} else if err == nil {
 			s.keepOrphan(ev)
+			// runInbound attaches the link right after the turn starts, then takes any orphan.
+			// If it attached between the lookup above and keepOrphan, it found no orphan and
+			// nobody would post: look once more, and post it ourselves if the link is there now.
+			if again, err := s.Store.FindInboundDiscordLink(ctx, *ev.TriggerMessageID); err == nil && again != nil {
+				if _, mine := s.takeOrphan(*ev.TriggerMessageID); mine {
+					s.postInboundReply(ctx, again, ev, postedTo)
+				}
+			}
 		}
 	}
 
@@ -562,13 +573,37 @@ func (s *Service) post(ctx context.Context, target models.DiscordBindingTarget, 
 	switch {
 	case errors.Is(err, ErrInvalidToken):
 		_ = s.Store.SetDiscordBotStatus(ctx, bot.ID, models.DiscordBotInvalidToken, "Discord rejected the bot token. Paste a new one.")
-	case errors.Is(err, ErrNoAccess):
+	case errors.Is(err, ErrNoAccess) && channelID == b.ChannelID:
 		_ = s.Store.SetDiscordBindingStatus(ctx, b.ID, models.DiscordBindingBroken, "The bot can no longer post in this channel.")
+	case errors.Is(err, ErrNoAccess):
+		// A Discord thread inside the bound channel (locked, archived or deleted): the binding
+		// itself still works, so only this reply is lost.
+		log.Warn("discord relay: cannot post in the Discord thread; the channel binding is left as is",
+			zap.String("discord_channel_id", channelID), zap.Error(err))
 	case err != nil:
 		log.Warn("discord relay: post failed", zap.Error(err))
 	default:
 		_ = s.Store.TouchDiscordBinding(ctx, b.ID)
 	}
+}
+
+// postInboundReply posts a finished reply back to the channel (or Discord thread) its inbound
+// link came from, and records the binding it went to.
+func (s *Service) postInboundReply(ctx context.Context, inbound *models.DiscordMessageLink, ev replyhook.Event, postedTo map[uuid.UUID]bool) {
+	if target, err := s.Store.GetDiscordBindingTarget(ctx, inbound.BindingID); err == nil {
+		replyTo := ""
+		if inbound.DiscordMessageID != nil {
+			replyTo = *inbound.DiscordMessageID
+		}
+		channel := inbound.DiscordChannelID
+		if channel == "" {
+			channel = target.Binding.ChannelID
+		}
+		linkID := inbound.ID
+		s.post(ctx, *target, ev.MessageID, channel, replyTo, &linkID)
+		postedTo[target.Binding.ID] = true
+	}
+	s.release(*ev.TriggerMessageID)
 }
 
 // keepOrphan remembers a reply whose trigger has no inbound link yet, when a relay

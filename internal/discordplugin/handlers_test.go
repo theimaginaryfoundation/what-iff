@@ -22,7 +22,9 @@ import (
 // stubStore implements Store; methods a test does not set panic via the nil embed.
 type stubStore struct {
 	Store
-	bots        map[uuid.UUID]*models.DiscordBotCredentials
+	bots map[uuid.UUID]*models.DiscordBotCredentials
+	// status is each bot's stored status; a bot not listed is active.
+	status      map[uuid.UUID]models.DiscordBotStatus
 	created     []models.DiscordBotCreate
 	chats       []models.Chat
 	bindings    []models.DiscordBindingCreate
@@ -47,6 +49,18 @@ func (s *stubStore) CreateDiscordBot(_ context.Context, _ uuid.UUID, in models.D
 	}
 	s.created = append(s.created, in)
 	return &models.DiscordBot{ID: uuid.New(), PersonalityID: in.PersonalityID, ApplicationID: in.ApplicationID, BotUserID: in.BotUserID, BotUsername: in.BotUsername}, nil
+}
+
+func (s *stubStore) ListDiscordBots(_ context.Context, _ uuid.UUID) ([]models.DiscordBot, error) {
+	var out []models.DiscordBot
+	for id, c := range s.bots {
+		st := s.status[id]
+		if st == "" {
+			st = models.DiscordBotActive
+		}
+		out = append(out, models.DiscordBot{ID: id, PersonalityID: c.PersonalityID, BotUserID: c.BotUserID, Status: st})
+	}
+	return out, nil
 }
 
 func (s *stubStore) GetDiscordBotCredentials(_ context.Context, _ uuid.UUID, id uuid.UUID) (*models.DiscordBotCredentials, error) {
@@ -82,7 +96,11 @@ func (s *stubStore) CreateDiscordBinding(_ context.Context, _ uuid.UUID, botID u
 }
 
 func (s *stubStore) GetChat(_ context.Context, _ uuid.UUID, id uuid.UUID) (*models.Chat, error) {
-	return &models.Chat{ID: id, Sandboxed: !s.unsandboxed[id]}, nil
+	scope := models.ContextScopeSandbox
+	if s.unsandboxed[id] {
+		scope = models.ContextScopeAccount
+	}
+	return &models.Chat{ID: id, ContextScope: scope}, nil
 }
 
 func (s *stubStore) GetDiscordBinding(_ context.Context, _ uuid.UUID, id uuid.UUID) (*models.DiscordBinding, error) {
@@ -212,6 +230,35 @@ func TestReplacingATokenMustKeepTheSameBot(t *testing.T) {
 	assert.Equal(t, models.DiscordBotActive, *store.patches[0].Status, "a working token reactivates the bot")
 }
 
+// A refresh or a new token clears invalid_token, but a bot the owner paused stays paused: only
+// the explicit enabled flag resumes it.
+func TestRefreshingAPausedBotKeepsItPaused(t *testing.T) {
+	botID := uuid.New()
+	store := &stubStore{
+		bots:   map[uuid.UUID]*models.DiscordBotCredentials{botID: {ID: botID, BotUserID: "111", Token: "old"}},
+		status: map[uuid.UUID]models.DiscordBotStatus{botID: models.DiscordBotDisabled},
+	}
+	d := &stubDiscord{identity: discordrelay.BotIdentity{BotUserID: "111", Username: "Vix"}}
+
+	rec := serve(t, newHandler(store, d), http.MethodPatch, "/bots/"+botID.String(), map[string]any{"refresh": true})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, store.patches, 1)
+	assert.Nil(t, store.patches[0].Status, "a refresh does not resume a paused bot")
+
+	rec = serve(t, newHandler(store, d), http.MethodPatch, "/bots/"+botID.String(), map[string]any{"token": "new"})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Nil(t, store.patches[1].Status, "nor does a new token")
+
+	rec = serve(t, newHandler(store, d), http.MethodPatch, "/bots/"+botID.String(), map[string]any{"refresh": true, "enabled": true})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, models.DiscordBotActive, *store.patches[2].Status, "the explicit flag resumes it")
+
+	store.status[botID] = models.DiscordBotInvalidToken
+	rec = serve(t, newHandler(store, d), http.MethodPatch, "/bots/"+botID.String(), map[string]any{"token": "newer"})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, models.DiscordBotActive, *store.patches[3].Status, "a working token clears invalid_token")
+}
+
 func TestAnotherAccountsBotIsNotFound(t *testing.T) {
 	rec := serve(t, newHandler(&stubStore{}, &stubDiscord{}), http.MethodGet, "/bots/"+uuid.NewString()+"/guilds", nil)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
@@ -230,11 +277,9 @@ func TestCreateBindingWithoutAChatCreatesARelayThreadForThePersona(t *testing.T)
 	require.Len(t, store.chats, 1)
 	assert.Equal(t, "Discord · #general", store.chats[0].Name)
 	assert.Equal(t, persona, store.chats[0].PersonalityID)
-	assert.True(t, store.chats[0].Sandboxed,
+	assert.Equal(t, models.ContextScopeSandbox, store.chats[0].ContextScope,
 		"a new relay thread is a public surface: sandboxed, until the user switches that off")
-	for _, tool := range []string{"create_agent_job", "run_subagent", "update_scratchpad", "web_search", "fetch_page", "generate_image"} {
-		assert.Contains(t, store.chats[0].DisabledTools, tool, "a new relay thread starts with %s off", tool)
-	}
+	assert.Nil(t, store.chats[0].DisabledTools, "the sandbox's own defaults apply (datastore.CreateChat), not a relay list")
 	require.Len(t, store.bindings, 1)
 	assert.Equal(t, "general", store.bindings[0].ChannelName)
 	assert.True(t, store.bindings[0].InboundEnabled, "inbound defaults on")

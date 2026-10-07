@@ -12,14 +12,15 @@ It talks to Discord through a small `Discord` interface (REST via discordgo), an
 - **Attachments in (`attachments_in.go`):** fetches files posted with a tag from Discord's CDN only (`CDNFetcher`: HTTPS, an allow-listed host, public addresses checked after DNS on every connection) and saves them through `plugins.AttachmentIngester`.
 - **Outbound (`Service.OnReply`, the reply hook):** posts a reply back to where the tag came from, and to any binding a composer toggle or `post_to_discord` armed (`ConsumeDiscordPendingPosts`); at most once per message and binding, with retries for transient errors.
 - **Formatting (`SplitForDiscord`):** 2000-character parts on paragraph and line boundaries, never splitting a code block without closing and reopening it; Markdown tables become code blocks.
-- **New relay thread defaults (`RelayThreadDisabledTools`, `RegisterRelayThreadDisabledTool`):** the tools a server-created relay thread starts with switched off.
-  Other builds register their own tools there from an `init()`.
+- **New relay thread defaults:** a server-created relay thread is a sandbox (`models.ContextScopeSandbox`), and the sandbox brings its own defaults (`models.SandboxDefaultDisabledTools`, applied by `datastore.CreateChat`); the relay keeps no list of its own.
+  `RegisterRelayThreadDisabledTool` forwards to `models.RegisterSandboxDefaultDisabledTool` for builds that already call it from an `init()`.
+- **Metering:** the relay's turns carry `Source: "discord"` (`TurnSource`, `plugins.UserTurn.Source`), so a metering implementation can keep them out of the owner's own chat allowance.
 
 ## Key types and entry points
 
 - `Service`, `InboundMessage`, `Triggered`, `Allowed`, `PromptText`, `SplitForDiscord`.
 - `Discord` and `REST` (`NewREST`), `InviteURL`, `ErrInvalidToken`, `ErrNoAccess`.
-- `RelayThreadDisabledTools`, `RegisterRelayThreadDisabledTool`.
+- `RegisterRelayThreadDisabledTool` (forwarding), `TurnSource`, `ThreadDeletedError`.
 - Subpackage `gateway`: the Gateway connections (see its summary).
 
 ## Dependencies

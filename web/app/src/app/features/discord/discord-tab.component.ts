@@ -9,7 +9,7 @@ import { PersonalityService } from '../../core/services/personality.service';
 import { Personality } from '../../core/models/personality.model';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { ChatService } from '../../core/services/chat.service';
-import { Chat } from '../../core/models/chat.model';
+import { Chat, isSandboxed } from '../../core/models/chat.model';
 import {
   DiscordBinding,
   DiscordBot,
@@ -570,7 +570,7 @@ export class DiscordTabComponent implements OnInit {
   }
 
   threadUnrestricted(t: Chat): boolean {
-    return needsRelayAcknowledgement(t.sandboxed);
+    return needsRelayAcknowledgement(isSandboxed(t));
   }
 
   selectedThreadUnrestricted(form: ConnectForm): boolean {

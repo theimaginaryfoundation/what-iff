@@ -3,7 +3,7 @@
 - **Status:** Accepted (expected to change once it is in use)
 - **Date:** 2026-10-05
 - **Deciders:** What Iff maintainers
-- **Builds on:** sandboxed threads (`Chat.sandboxed`, `Chat.IsSandboxed()`), the plugin seam (`internal/plugins`) and the reply hook (`internal/replyhook`)
+- **Builds on:** sandboxed threads (`Chat.context_scope`, `Chat.IsSandboxed()`), the plugin seam (`internal/plugins`) and the reply hook (`internal/replyhook`)
 
 ## Context
 
@@ -66,7 +66,7 @@ Nothing writes a separate "Discord version" of a reply.
 
 - In a bound channel with `inbound_enabled`, the persona answers an @mention of the bot, or a Discord reply to one of its messages. Bots and webhooks are always ignored, including the bot itself.
 - The message is saved as a user message in the relay thread as `alice (Discord, #general): text`. A reply to someone other than the bot quotes the replied-to message first. Files posted with it are fetched from Discord's CDN only (HTTPS, public addresses only, at most 4 files of 20 MB) and attached through the app's own upload path.
-- The turn runs through the plugin turn starter (`plugins.Deps.Turns`, the same path as the app and the webhook user mode), metered against the bot's owner.
+- The turn runs through the plugin turn starter (`plugins.Deps.Turns`, the same path as the app and the webhook user mode), metered against the bot's owner with source `discord` (`metering.TurnSource`), so a metering implementation can keep relay turns out of the owner's own chat allowance.
 - One turn at a time per relay thread; up to 5 tags queue behind it, and an overflow is told so in the channel (at most once a minute per binding). While a turn runs the bot shows "typing…". A failed turn posts a neutral notice that reveals nothing about the owner's account.
 - Relay turns run without the owner's time zone, so their timestamps do not reveal it. Display names are cleaned of the characters that make up the `name (Discord, #channel):` label, so a nickname cannot pose as another speaker.
 
@@ -74,12 +74,12 @@ Nothing writes a separate "Discord version" of a reply.
 
 - Each binding has an allow list and a deny list of Discord user ids. An empty allow list means anyone in the channel; deny always wins.
 - **A new relay thread is sandboxed and quiet by default.** When a binding is made without an existing thread, the server creates one with:
-  - `sandboxed` = true: it reads only itself. It sees no memory but those created in it (and its own checkpoint summary), no other conversation, no scratchpad, no owner name, no account-wide files, jobs, skills or personas, and only the files uploaded to it; and everything it learns is saved Chat-scoped, so it never reaches the owner's account;
-  - `disabled_tools` = `create_agent_job`, `run_subagent`, `update_scratchpad`, `web_search`, `fetch_page`, `generate_image`, plus any names another build registers through `discordrelay.RegisterRelayThreadDisabledTool` (the sandbox already refuses `create_agent_job` and `update_scratchpad` whatever this list says; the list is what the owner sees and can change);
-  - no MCP connectors (the app's create route attaches the user's default connectors; the relay does not).
-  The owner can change the tool list, or switch the sandbox off, in the thread's settings.
+  - `context_scope` = `sandbox`: it reads only itself. It sees no memory but those created in it (and its own checkpoint summary), no other conversation, no scratchpad, no owner name, no account-wide files, jobs, skills or personas, and only the files uploaded to it; and everything it learns is saved Chat-scoped, so it never reaches the owner's account;
+  - the sandbox's own defaults: `disabled_tools` holds the catalog's default-off tools (`run_subagent`, `web_search`, `fetch_page`, `generate_image`, plus any a build registers with `models.RegisterSandboxDefaultDisabledTool`), while `create_agent_job`, `update_scratchpad` and `move_files` are refused whatever the list says;
+  - no MCP connectors (the app's create route attaches the user's default connectors; neither the relay nor a sandbox does).
+  The owner can switch tools on, attach a connector (a public GitHub MCP for filing issues from Discord, say), or leave the sandbox, in the thread's settings. A thread cannot be sandboxed later, so a relay thread that left the sandbox stays an acknowledged binding.
 - **Binding an existing thread leaves its settings alone.** A thread that is not sandboxed is refused unless the request carries `allow_unrestricted`, because anyone allowed to tag the bot would then act on the owner's whole account; the acknowledgement is stored only while the thread is not sandboxed.
-- **The relay re-checks on every tag.** It reads the bound thread's current sandbox flag each time, including when a queued tag's turn comes. An unacknowledged thread that is not sandboxed drops tags (silently in Discord, with a warning on the binding). When a thread is sandboxed again, a stored acknowledgement is withdrawn, so switching the sandbox off later pauses the binding instead of silently re-opening it. A tag queued for a binding that was repointed meanwhile is dropped.
+- **The relay re-checks on every tag.** It reads the bound thread's current scope each time, including when a queued tag's turn comes. An unacknowledged thread that is not sandboxed drops tags (silently in Discord, with a warning on the binding); a thread that no longer exists marks the binding broken (`ThreadDeletedError`). A tag queued for a binding that was repointed meanwhile is dropped. (A stale acknowledgement on a sandboxed thread is withdrawn too, which can only happen through repointing, since a thread cannot enter a sandbox later.)
 - **Relay threads are walled off from each other by the sandbox itself.** A sandboxed chat reads only itself, so one server's channel is not readable from another server's relay thread, and a relay thread's external memories (§7) are not retrievable from any other chat's sandbox. The relay adds no separate rule for this.
 - **`post_to_discord` in a relay thread** (any bound thread, sandboxed or not) or in any sandboxed chat reaches only that thread's own channel(s), and never learns the names of the owner's other channels. The channel list is given to the model only when the tool is available in the thread.
 

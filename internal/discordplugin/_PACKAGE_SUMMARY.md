@@ -22,7 +22,8 @@ Linked by a blank import in `cmd/api-server/plugins.go`.
 
 ## Non-obvious decisions
 
-- **A relay thread the server creates is sandboxed and quiet:** `Sandboxed` true, `disabled_tools` from `discordrelay.RelayThreadDisabledTools`, and no MCP connectors (it uses `CreateChat`, which attaches none).
+- **A relay thread the server creates is sandboxed and quiet:** `ContextScope` sandbox, so `CreateChat` gives it the sandbox's default-off tools (`models.SandboxDefaultDisabledTools`), and no MCP connectors (it uses `CreateChat`, which attaches none).
+  A refresh or a new token clears `invalid_token` but never resumes a bot the owner paused (`botStatus`).
   Binding an existing thread leaves its settings alone.
 - **Threads that are not sandboxed need an acknowledgement** (`allow_unrestricted`) to be bound or repointed to, and it is stored only while the thread is not sandboxed (`bindableChat`, `discordrelay.RelayThreadOpenWithoutAcknowledgement`).
   Bindings report whether their thread is sandboxed right now (`chat_sandboxed`, computed on read).

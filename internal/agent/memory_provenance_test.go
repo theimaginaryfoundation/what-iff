@@ -15,7 +15,7 @@ import (
 
 func relayChatCtx() *chatContext {
 	return &chatContext{
-		chat:             &models.Chat{ID: uuid.New(), UserID: uuid.New(), Sandboxed: true},
+		chat:             &models.Chat{ID: uuid.New(), UserID: uuid.New(), ContextScope: models.ContextScopeSandbox},
 		memoryProvenance: models.MemoryProvenanceExternal,
 	}
 }

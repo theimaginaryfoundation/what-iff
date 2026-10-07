@@ -119,7 +119,7 @@ func TestDiscordDeveloperContextListsChannelsAndExplainsTheRelayThread(t *testin
 
 func sandboxedChat() *models.Chat {
 	c := testChat()
-	c.Sandboxed = true
+	c.ContextScope = models.ContextScopeSandbox
 	return c
 }
 

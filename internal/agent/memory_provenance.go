@@ -51,18 +51,19 @@ func (a *Agent) memoryProvenanceForChat(ctx context.Context, userID uuid.UUID, c
 
 // createMemoryOrigin is the origin create_memory writes with this turn: the chat's provenance and,
 // for an external memory, the Discord author of the message the turn answers (the tool's speaker
-// argument overrides it). The author is read when the tool runs, since the relay records it just
-// after the turn starts.
+// argument overrides it). The author is read when the tool runs; the relay attaches its link to
+// the saved message only after the turn has started, so the lookup also accepts the chat's
+// inbound link that has no message yet (datastore.ExternalSpeakerForTurn).
 func (a *Agent) createMemoryOrigin(ctx context.Context, chatCtx *chatContext) models.MemoryOrigin {
 	origin := models.MemoryOrigin{Provenance: models.MemoryProvenanceUser}
 	if chatCtx == nil {
 		return origin
 	}
 	origin.Provenance = chatCtx.memoryProvenance.OrDefault()
-	if !origin.External() || chatCtx.triggerMessageID == uuid.Nil || a.ds == nil {
+	if !origin.External() || a.ds == nil || chatCtx.chat == nil {
 		return origin
 	}
-	speaker, err := a.ds.ExternalSpeakerForMessage(ctx, chatCtx.userID, chatCtx.triggerMessageID)
+	speaker, err := a.ds.ExternalSpeakerForTurn(ctx, chatCtx.userID, chatCtx.chat.ID, chatCtx.triggerMessageID)
 	if err != nil {
 		if a.logger == nil {
 			return origin

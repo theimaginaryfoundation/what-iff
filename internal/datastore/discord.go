@@ -652,15 +652,42 @@ func externalRelayChat(ctx context.Context, client *ent.Client, userID, chatID u
 // ExternalSpeakerForMessage returns the Discord display name recorded for one of the user's saved
 // messages, when that message arrived from Discord through the relay; "" otherwise.
 func (d *Datastore) ExternalSpeakerForMessage(ctx context.Context, userID, chatMessageID uuid.UUID) (string, error) {
-	if chatMessageID == uuid.Nil {
+	return d.ExternalSpeakerForTurn(ctx, userID, uuid.Nil, chatMessageID)
+}
+
+// ExternalSpeakerForTurn is ExternalSpeakerForMessage for a turn that may still be starting: the
+// relay attaches the inbound link to the saved message only after the turn has started, so a
+// tool call early in the turn finds no link by message id. It then falls back to the chat's
+// inbound link that has no message yet (one relay turn runs per thread at a time, so that is
+// the running one). chatID uuid.Nil skips the fallback.
+func (d *Datastore) ExternalSpeakerForTurn(ctx context.Context, userID, chatID, chatMessageID uuid.UUID) (string, error) {
+	owned := discordmessagelink.HasBindingWith(discordbinding.HasBotWith(discordbot.HasOwnerWith(user.ID(userID))))
+	if chatMessageID != uuid.Nil {
+		row, err := d.dbClient.DiscordMessageLink.Query().
+			Where(
+				discordmessagelink.ChatMessageID(chatMessageID),
+				discordmessagelink.DirectionEQ(discordmessagelink.DirectionInbound),
+				owned,
+			).
+			First(ctx)
+		if err == nil {
+			return row.AuthorName, nil
+		}
+		if !ent.IsNotFound(err) {
+			return "", fmt.Errorf("find discord speaker: %w", err)
+		}
+	}
+	if chatID == uuid.Nil {
 		return "", nil
 	}
 	row, err := d.dbClient.DiscordMessageLink.Query().
 		Where(
-			discordmessagelink.ChatMessageID(chatMessageID),
+			discordmessagelink.ChatMessageIDIsNil(),
 			discordmessagelink.DirectionEQ(discordmessagelink.DirectionInbound),
-			discordmessagelink.HasBindingWith(discordbinding.HasBotWith(discordbot.HasOwnerWith(user.ID(userID)))),
+			discordmessagelink.HasBindingWith(discordbinding.ChatID(chatID)),
+			owned,
 		).
+		Order(ent.Desc(discordmessagelink.FieldCreatedAt)).
 		First(ctx)
 	if err != nil {
 		if ent.IsNotFound(err) {

@@ -372,12 +372,12 @@ func TestCreateChat_StoresDisabledTools(t *testing.T) {
 	persona := createAgentJobTestPersonality(t, ds, userID)
 
 	chat, err := ds.CreateChat(ctx, userID, models.Chat{
-		Name: "Discord · #general", PersonalityID: persona, Sandboxed: true,
+		Name: "Discord · #general", PersonalityID: persona, ContextScope: models.ContextScopeSandbox,
 		DisabledTools: []string{"web_search", "generate_image"},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"web_search", "generate_image"}, chat.DisabledTools)
-	assert.True(t, chat.Sandboxed)
+	assert.True(t, chat.IsSandboxed())
 	row, err := ds.dbClient.Chat.Get(ctx, chat.ID)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"web_search", "generate_image"}, row.DisabledTools)

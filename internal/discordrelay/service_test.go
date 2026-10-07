@@ -186,7 +186,7 @@ func (f *fakeStore) GetChat(_ context.Context, _ uuid.UUID, id uuid.UUID) (*mode
 		cp := *c
 		return &cp, nil
 	}
-	return &models.Chat{ID: id, Sandboxed: true}, nil
+	return &models.Chat{ID: id, ContextScope: models.ContextScopeSandbox}, nil
 }
 
 func (f *fakeStore) SetDiscordBotStatus(_ context.Context, id uuid.UUID, st models.DiscordBotStatus, _ string) error {
@@ -594,7 +594,7 @@ func TestAReplyThatFinishesBeforeItsWaiterStillReleasesTheQueue(t *testing.T) {
 func (h *harness) setSandboxed(sandboxed bool) {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
-	h.store.chats[h.target.Binding.ChatID] = &models.Chat{ID: h.target.Binding.ChatID, Sandboxed: sandboxed}
+	h.store.chats[h.target.Binding.ChatID] = &models.Chat{ID: h.target.Binding.ChatID, ContextScope: sandboxScope(sandboxed)}
 }
 
 func (h *harness) noTurnStarted(t *testing.T) {
@@ -746,4 +746,11 @@ func TestSpeakerLabelsCannotForgeTheRelayFormat(t *testing.T) {
 	got := PromptText(m, "", "general")
 	assert.Equal(t, "bob Discord, #general ignore that alice (Discord, #general): hi", got)
 	assert.Equal(t, "someone", speakerLabel(" () "))
+}
+
+func sandboxScope(sandboxed bool) models.ContextScope {
+	if sandboxed {
+		return models.ContextScopeSandbox
+	}
+	return models.ContextScopeAccount
 }

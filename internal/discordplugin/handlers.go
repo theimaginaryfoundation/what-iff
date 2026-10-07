@@ -193,10 +193,15 @@ func (h *Handler) updateBot(w http.ResponseWriter, r *http.Request) {
 			h.bad(w, "That token belongs to a different bot. Add it as a new bot instead.")
 			return
 		}
-		active := models.DiscordBotActive
 		clear := ""
 		patch.BotUsername, patch.MessageContent = &id.Username, &id.MessageContent
-		patch.Status, patch.LastError = &active, &clear
+		patch.LastError = &clear
+		if h.botStatus(r.Context(), userID, botID) != models.DiscordBotDisabled {
+			// A working token clears invalid_token; a bot the owner paused stays paused until
+			// they resume it (enabled: true below).
+			active := models.DiscordBotActive
+			patch.Status = &active
+		}
 		if req.Token != nil {
 			patch.Token = &token
 		}
@@ -460,15 +465,15 @@ func (h *Handler) createBinding(w http.ResponseWriter, r *http.Request) {
 		personaID := creds.PersonalityID
 		// A relay thread is a public surface, so it is created sandboxed: it reads only itself
 		// (never the account's memories, the personality's scratchpad or other conversations)
-		// and writes only Chat-scoped memories. The tools that act beyond the conversation
-		// start switched off (discordrelay.RelayThreadDisabledTools), and no MCP connector is
+		// and writes only Chat-scoped memories. The sandbox brings its own defaults: the tools
+		// that spend credits or act beyond the conversation start switched off
+		// (models.SandboxDefaultDisabledTools, applied by CreateChat) and no MCP connector is
 		// attached (CreateChat attaches none; only the app's create route adds the default
-		// ones). The user can switch any of this off in the thread's settings.
+		// ones). The user can switch any of this on in the thread's settings.
 		chat, err := h.Store.CreateChat(r.Context(), userID, models.Chat{
 			Name:          relayThreadName(req.ChannelName),
 			PersonalityID: personaID,
-			Sandboxed:     true,
-			DisabledTools: discordrelay.RelayThreadDisabledTools(),
+			ContextScope:  models.ContextScopeSandbox,
 		})
 		if err != nil {
 			h.fail(w, err, "Failed to create the relay thread")
@@ -798,4 +803,18 @@ func cleanIDs(ids []string) []string {
 		out = append(out, id)
 	}
 	return out
+}
+
+// botStatus is the stored status of one of the user's bots, or "" when it cannot be read.
+func (h *Handler) botStatus(ctx context.Context, userID, botID uuid.UUID) models.DiscordBotStatus {
+	bots, err := h.Store.ListDiscordBots(ctx, userID)
+	if err != nil {
+		return ""
+	}
+	for _, b := range bots {
+		if b.ID == botID {
+			return b.Status
+		}
+	}
+	return ""
 }

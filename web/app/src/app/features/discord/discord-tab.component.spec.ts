@@ -66,9 +66,9 @@ describe('DiscordTabComponent', () => {
             listChatsPage: vi.fn(() =>
               of({
                 results: [
-                  { id: 'chat-open', name: 'My main thread', sandboxed: false },
+                  { id: 'chat-open', name: 'My main thread', context_scope: 'account' },
                   { id: 'chat-unset', name: 'Old thread' },
-                  { id: 'chat-safe', name: 'Sandbox', sandboxed: true },
+                  { id: 'chat-safe', name: 'Sandbox', context_scope: 'sandbox' },
                 ],
                 total_count: 3,
                 page: 1,

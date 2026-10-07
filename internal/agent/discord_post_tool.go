@@ -68,6 +68,9 @@ func init() {
 			HumanDescription: "Post a reply to one of this personality's connected Discord channels.",
 			UserGuide:        "When this personality has a Discord bot, ask it to post its reply to a channel, e.g. \"post that to #general\". The reply is posted exactly as it appears here.",
 			AgentDefault:     true,
+			// Offered in a sandbox: discordChannelsFor lets a sandboxed (or bound) chat reach only
+			// its own channel, so the tool cannot post anywhere a stranger should not reach.
+			SandboxPolicy: tools.SandboxAllowed,
 			// Not toggleable: the Tools tab lists toggleable tools for every thread,
 			// and this one only means something where the persona has a Discord bot.
 			// It is disabled per chat instead when the persona has no connected

@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
 	entmemory "github.com/theimaginaryfoundation/what-iff/ent/memory"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -62,7 +63,7 @@ func TestIsExternalRelayChat_IsAnyChatTheUsersBotIsBoundTo(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok, "an ordinary chat")
 
-	require.NoError(t, f.ds.dbClient.Chat.UpdateOneID(f.chat).SetSandboxed(true).Exec(ctx))
+	require.NoError(t, f.ds.dbClient.Chat.UpdateOneID(f.chat).SetContextScope(entchat.ContextScopeSandbox).Exec(ctx))
 	ok, err = f.ds.IsExternalRelayChat(ctx, f.owner, f.chat)
 	require.NoError(t, err)
 	require.False(t, ok, "sandboxed but not bound")
@@ -76,7 +77,7 @@ func TestIsExternalRelayChat_IsAnyChatTheUsersBotIsBoundTo(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok, "another account's chat is never one")
 
-	require.NoError(t, f.ds.dbClient.Chat.UpdateOneID(f.chat).SetSandboxed(false).Exec(ctx))
+	require.NoError(t, f.ds.dbClient.Chat.UpdateOneID(f.chat).SetContextScope(entchat.ContextScopeAccount).Exec(ctx))
 	ok, err = f.ds.IsExternalRelayChat(ctx, f.owner, f.chat)
 	require.NoError(t, err)
 	require.True(t, ok, "unsandboxing a relay thread does not change who talks in it")
@@ -105,7 +106,7 @@ func TestExternalSpeakerForMessage_ReadsTheInboundAuthorOwnerScoped(t *testing.T
 func TestUpsertChatSummaryMemory_RelayThreadSummaryIsExternal(t *testing.T) {
 	f := newDiscordFixture(t)
 	ctx := context.Background()
-	require.NoError(t, f.ds.dbClient.Chat.UpdateOneID(f.chat).SetSandboxed(true).Exec(ctx))
+	require.NoError(t, f.ds.dbClient.Chat.UpdateOneID(f.chat).SetContextScope(entchat.ContextScopeSandbox).Exec(ctx))
 
 	require.NoError(t, f.ds.UpsertChatSummaryMemory(ctx, f.owner, f.chat, "talked about tea", []float32{1}))
 	sum, err := f.ds.GetChatSummaryMemory(ctx, f.owner, f.chat)
@@ -120,7 +121,7 @@ func TestUpsertChatSummaryMemory_RelayThreadSummaryIsExternal(t *testing.T) {
 
 	// Unbinding or unsandboxing the thread later does not launder what was already said there.
 	require.NoError(t, f.ds.DeleteDiscordBot(ctx, f.owner, mustOnlyBot(t, f)))
-	require.NoError(t, f.ds.dbClient.Chat.UpdateOneID(f.chat).SetSandboxed(false).Exec(ctx))
+	require.NoError(t, f.ds.dbClient.Chat.UpdateOneID(f.chat).SetContextScope(entchat.ContextScopeAccount).Exec(ctx))
 	require.NoError(t, f.ds.UpsertChatSummaryMemory(ctx, f.owner, f.chat, "and more", []float32{1}))
 	sum, err = f.ds.GetChatSummaryMemory(ctx, f.owner, f.chat)
 	require.NoError(t, err)
