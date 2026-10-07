@@ -6,8 +6,11 @@ export type GalleryMode = 'Gallery' | 'Expression Manager';
 /** Source segment in the gallery toolbar. Labels carry a live count ("All 3"). */
 export type GallerySource = 'All' | 'Generated' | 'Imported';
 
+/** Type segment in the gallery toolbar: images, other files (documents, code, data), or both. */
+export type GalleryType = 'All' | 'Images' | 'Files';
+
 /** Sort segment in the gallery toolbar. Labels carry a direction arrow when active. */
-export type GallerySort = 'Created' | 'Last used';
+export type GallerySort = 'Created';
 
 /**
  * Image gallery (`/gallery`) — features/gallery/gallery-page.component.html.
@@ -30,12 +33,14 @@ export class GalleryPage {
     // mode switch repeats the same two words as the heading.
     this.heading = this.root.getByRole('heading', { level: 1 });
     this.modeSwitch = this.root.getByRole('group', { name: 'Gallery mode' });
+    this.typeGroup = this.root.getByRole('group', { name: 'Filter by type' });
     this.sourceGroup = this.root.getByRole('group', { name: 'Filter by source' });
     this.sortGroup = this.root.getByRole('group', { name: 'Sort images' });
-    this.searchInput = this.root.getByLabel('Search images');
+    this.searchInput = this.root.getByLabel('Search the gallery');
     this.resultsSummary = this.root.getByText(/\d+ of \d+ shown/);
     this.grid = this.page.getByRole('list', { name: 'Gallery images' });
-    this.emptyMessage = this.page.getByText('No images match these filters yet.');
+    // The wording follows the type filter ("No images match…", "No files match…", "Nothing matches…").
+    this.emptyMessage = this.page.getByText(/^(No \w+ match|Nothing matches) these filters yet\./);
     this.loadingStatus = this.page.getByRole('status', { name: 'Loading gallery' });
   }
 
@@ -49,6 +54,9 @@ export class GalleryPage {
   readonly heading: Locator;
 
   readonly modeSwitch: Locator;
+
+  /** The "Filter by type" segmented group: All, Images, Files. */
+  readonly typeGroup: Locator;
 
   /** The "Filter by source" segmented group. */
   readonly sourceGroup: Locator;
@@ -83,6 +91,14 @@ export class GalleryPage {
    */
   sourceSegment(source: GallerySource): Locator {
     return this.sourceGroup.getByRole('button', { name: new RegExp(`^${source}\\b`) });
+  }
+
+  typeSegment(type: GalleryType): Locator {
+    return this.typeGroup.getByRole('button', { name: type, exact: true });
+  }
+
+  async filterByType(type: GalleryType): Promise<void> {
+    await this.typeSegment(type).click();
   }
 
   async filterBySource(source: GallerySource): Promise<void> {

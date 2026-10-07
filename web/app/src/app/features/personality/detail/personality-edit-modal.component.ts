@@ -488,10 +488,13 @@ export class PersonalityEditModalComponent {
   }
 
   private async requestSoftDismiss(): Promise<void> {
-    if (this.isDirty() && !(await this.confirmationService.confirmDiscardChanges())) {
-      return;
-    }
+    if (!(await this.confirmDiscardIfDirty())) return;
     this.cancel();
+  }
+
+  /** Resolves true when it is safe to leave the modal: the draft is clean or the user agreed to discard it. */
+  private async confirmDiscardIfDirty(): Promise<boolean> {
+    return !this.isDirty() || (await this.confirmationService.confirmDiscardChanges());
   }
 
   setDraftField<K extends keyof PersonalityEditDraft>(key: K, value: PersonalityEditDraft[K]): void {
@@ -566,7 +569,9 @@ export class PersonalityEditModalComponent {
     this.galleryOpen.set(false);
   }
 
-  manageExpressions(): void {
+  async manageExpressions(): Promise<void> {
+    // Navigating away closes the modal, so guard unsaved edits like the other dismiss paths.
+    if (!(await this.confirmDiscardIfDirty())) return;
     const personalityId = this.personality()?.id;
     this.dismissed.emit();
     void this.router.navigate(['/gallery'], {

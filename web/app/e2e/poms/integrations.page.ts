@@ -19,7 +19,7 @@ export class IntegrationsPage {
 
   constructor(private readonly page: Page) {
     this.confirmation = new ConfirmationModal(page);
-    this.unavailableNotice = this.page.getByRole('status').filter({ hasText: 'Integrations are unavailable for this account' });
+    this.unavailableNotice = this.page.getByRole('status').filter({ hasText: 'Tools are unavailable for this account' });
     this.connectorsTab = this.page.getByRole('button', {
       name: 'Connectors',
       exact: true,

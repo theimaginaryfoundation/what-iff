@@ -12,7 +12,7 @@ import { ImageIconComponent } from '../../../../shared/ui/icons/icons';
   standalone: true,
   imports: [CommonModule, AuthImagePipe, ImageIconComponent],
   template: `
-    <div class="message-images" aria-label="Message images">
+    <div class="message-images" [class.message-images--full]="size() === 'full'" aria-label="Message images">
       @for (attachment of attachments(); track attachment.id) {
         <figure class="message-images__card">
           <div class="message-images__preview">
@@ -67,6 +67,14 @@ import { ImageIconComponent } from '../../../../shared/ui/icons/icons';
       width: 100%;
     }
 
+    /* Full-resolution images keep their natural size (never stretched), only shrinking to fit. */
+    .message-images--full .message-images__preview img {
+      height: auto;
+      max-height: 18rem;
+      max-width: 100%;
+      width: auto;
+    }
+
     .message-images__footer,
     .message-images__name {
       align-items: center;
@@ -112,13 +120,18 @@ import { ImageIconComponent } from '../../../../shared/ui/icons/icons';
 })
 export class MessageImageAttachmentsComponent {
   readonly attachments = input<readonly FileAttachment[]>([]);
+  /**
+   * Which stored variant to display. The thumbnail is a 256px JPEG, which looks soft once it fills
+   * the card; user turns ask for 'full' (the upload-normalized original) instead.
+   */
+  readonly size = input<'thumbnail' | 'full'>('thumbnail');
 
   private readonly document = inject(DOCUMENT);
   private readonly http = inject(HttpClient);
   private readonly imageGallery = inject(ImageGalleryService);
 
   previewUrl(attachment: FileAttachment): string {
-    return this.imageGallery.getImageUrl(attachment.id, 'thumbnail');
+    return this.imageGallery.getImageUrl(attachment.id, this.size());
   }
 
   download(attachment: FileAttachment): void {

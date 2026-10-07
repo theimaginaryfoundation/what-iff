@@ -9,7 +9,7 @@ import { ChatStreamingService } from '../../core/services/chat-streaming.service
 import { DraftMessageService } from '../../core/services/draft-message.service';
 import { JobService } from '../../core/services/job.service';
 import { MessageService } from '../../core/services/message.service';
-import { Chat } from '../../core/models/chat.model';
+import { Chat, DEFAULT_THREAD_NAME } from '../../core/models/chat.model';
 import { FileAttachment, PendingFileAttachment } from '../../core/models/file-attachment.model';
 import { ChatMessage } from '../../core/models/message.model';
 import { Model } from '../../core/models/model.model';
@@ -421,7 +421,7 @@ export class ChatSessionService implements OnDestroy {
 
   async createThread(opts: { personalityId?: string; modelId?: string } = {}): Promise<Chat> {
     const chat = await firstValueFrom(this.chatService.createChat({
-      name: 'New Chat',
+      name: DEFAULT_THREAD_NAME,
       personality_id: opts.personalityId,
       model_id: opts.modelId,
     }));

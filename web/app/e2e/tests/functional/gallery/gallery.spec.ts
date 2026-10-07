@@ -35,9 +35,9 @@ test('offers the source and sort segments in gallery mode', async ({ galleryPage
   for (const source of ['All', 'Generated', 'Imported'] as const) {
     await expect(galleryPage.sourceSegment(source)).toBeVisible();
   }
-  for (const sort of ['Created', 'Last used'] as const) {
-    await expect(galleryPage.sortSegment(sort)).toBeVisible();
-  }
+  await expect(galleryPage.sortSegment('Created')).toBeVisible();
+  // Images only carry a created date, so there is no "Last used" sort to offer.
+  await expect(galleryPage.sortGroup.getByRole('button', { name: /last used/i })).toHaveCount(0);
 
   // Selecting a segment must not tear the page down — the results summary is
   // rendered from the same branch, so it standing is the signal the view
@@ -45,8 +45,26 @@ test('offers the source and sort segments in gallery mode', async ({ galleryPage
   // to assistive tech is a separate claim, asserted in tests/a11y/.
   await galleryPage.filterBySource('Imported');
   await expect(galleryPage.resultsSummary).toBeVisible();
-  await galleryPage.sortBy('Last used');
+  await galleryPage.sortBy('Created');
   await expect(galleryPage.resultsSummary).toBeVisible();
+});
+
+test('filters by type, with the empty state saying what was looked for', async ({ galleryPage, userWithPersonality }) => {
+  await galleryPage.navigateTo();
+
+  for (const type of ['All', 'Images', 'Files'] as const) {
+    await expect(galleryPage.typeSegment(type)).toBeVisible();
+  }
+  await expect(galleryPage.typeSegment('All')).toHaveAttribute('aria-pressed', 'true');
+
+  // Narrowed by a name nothing has, so the empty state shows on a shared account too.
+  await galleryPage.search(`no-such-file-${shortId()}`);
+  await galleryPage.filterByType('Files');
+  await expect(galleryPage.typeSegment('Files')).toHaveAttribute('aria-pressed', 'true');
+  await expect(galleryPage.emptyMessage).toHaveText(/^No files match/);
+
+  await galleryPage.filterByType('Images');
+  await expect(galleryPage.emptyMessage).toHaveText('No images match these filters yet.');
 });
 
 test('a search that matches nothing shows the empty state', async ({ galleryPage, userWithPersonality }) => {

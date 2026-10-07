@@ -391,6 +391,57 @@ func TestListMCPServersScopedToChat(t *testing.T) {
 	}
 }
 
+// A connector reached only through an active skill is not attached to the thread, so the plain
+// store query would miss it; the agent's scope resolver supplies it instead.
+func TestListMCPServers_UsesInScopeResolverWhenGiven(t *testing.T) {
+	chat := listTestChat()
+	attached := &models.MCPServer{ID: uuid.New(), Name: "attached", ServerURL: "https://a.example", Status: models.MCPServerStatusActive}
+	skillOnly := &models.MCPServer{ID: uuid.New(), Name: "skill-only", ServerURL: "https://s.example", Status: models.MCPServerStatusActive}
+	store := &fakeListStore{
+		mcp:       []*models.MCPServer{attached},
+		loadedMCP: map[uuid.UUID][]string{skillOnly.ID: {"mcp__skill__go"}},
+	}
+	tool := newTestListTool(store)
+	tool.SetMCPDiscoverer(fakeMCPDiscoverer{out: mcpclient.DiscoveryResult{Tools: []mcpclient.ConnectorTool{
+		{ConnectorID: skillOnly.ID, FullName: "mcp__skill__go"},
+	}}})
+
+	out, err := tool.ListInMCPScope(context.Background(), chat, []byte(`{"kind":"mcp_servers"}`), func(context.Context) ([]*models.MCPServer, error) {
+		return []*models.MCPServer{attached, skillOnly}, nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if store.lastMCPChatID != uuid.Nil {
+		t.Fatalf("expected the resolver, not the thread-attached store query, to supply servers")
+	}
+	res := decodeList(t, out)
+	if res.Count != 2 {
+		t.Fatalf("expected both the attached and skill-only connector, got %+v", res.Items)
+	}
+	var found bool
+	for _, it := range res.Items {
+		if it.ID == skillOnly.ID.String() {
+			found = true
+			if len(it.MCPTools) != 1 || len(it.LoadedTools) != 1 {
+				t.Fatalf("expected the skill-only connector's tools and loaded state, got %+v", it)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("skill-only connector missing from %+v", res.Items)
+	}
+
+	// Without a resolver the listing stays thread-attached only.
+	out, err = tool.List(context.Background(), chat, []byte(`{"kind":"mcp_servers"}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res := decodeList(t, out); res.Count != 1 {
+		t.Fatalf("expected only the attached connector without a resolver, got %+v", res.Items)
+	}
+}
+
 func TestListMCPServers_PartialDiscoveryFailureAddsNoteNotError(t *testing.T) {
 	chat := listTestChat()
 	store := &fakeListStore{mcp: []*models.MCPServer{

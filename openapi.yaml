@@ -5692,6 +5692,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /mcp-servers/oauth/config:
+    get:
+      summary: Get connector OAuth settings
+      description: >-
+        Returns the redirect_uri this server sends to OAuth providers (MCP_OAUTH_REDIRECT_URL, or the
+        localhost default). Users register this exact value with the provider, so it differs between the
+        hosted service and self-hosted installs.
+      tags: [MCP Integrations]
+      responses:
+        '200':
+          description: Connector OAuth settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPServerOAuthConfigResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /mcp-servers/oauth/callback:
     get:
       summary: OAuth callback for connector authentication
@@ -6408,12 +6430,24 @@ paths:
     get:
       summary: List gallery folders
       description: >-
-        Lists every folder that holds at least one of the user's gallery images, with the number
-        of images directly in it, sorted by path. The top level is implied and not listed. Parent
-        folders that hold no image of their own are not listed; derive them from the paths.
-        To list one folder's images, use `GET /image-gallery?folder=<path>` (an empty value is the
-        top level; leaving `folder` out lists every image).
+        Lists every folder that holds at least one of the user's gallery files of the requested
+        kind, with the number of them directly in it, sorted by path. Images and other files
+        share one folder tree. The top level is implied and not listed. Parent folders that hold
+        nothing of their own are not listed; derive them from the paths. To list one folder's
+        files, use `GET /image-gallery?folder=<path>&kind=<kind>` (an empty folder value is the top
+        level; leaving `folder` out lists every file of that kind).
       tags: [Image Gallery]
+      parameters:
+        - name: kind
+          in: query
+          required: false
+          description: >-
+            Which files: `images` (the default, as before files were listed), `files` (every
+            file that is not an image: documents, code, data) or `all`.
+          schema:
+            type: string
+            enum: [images, files, all]
+            default: images
       responses:
         '200':
           description: The user's gallery folders
@@ -6442,11 +6476,12 @@ paths:
 
   /image-gallery/move:
     post:
-      summary: Move gallery images into a folder
+      summary: Move gallery files into a folder
       description: >-
-        Files the given images in a folder, creating the folder if it does not exist. An id may
-        name an image or a chat-reuse copy of it; a copy moves the original. Ids that are not the
-        caller's gallery images are skipped. Only the label changes; stored files are untouched.
+        Files the given files (images, documents or any other upload) in a folder, creating the
+        folder if it does not exist. An id may name a file or a chat-reuse copy of it; a copy moves
+        the original. Ids that are not the caller's files are skipped. Only the label changes;
+        stored files are untouched, and a personality's documents stay attached to it.
       tags: [Image Gallery]
       requestBody:
         required: true
@@ -6469,7 +6504,7 @@ paths:
               required: [ids, folder]
       responses:
         '200':
-          description: How many images were moved
+          description: How many files were moved
           content:
             application/json:
               schema:
@@ -6497,7 +6532,7 @@ paths:
     post:
       summary: Rename or move a gallery folder
       description: >-
-        Renames the folder `from` to `to`, carrying every folder beneath it along: moving `charts`
+        Renames the folder `from` to `to`, carrying every file and folder beneath it along: moving `charts`
         to `archive/charts` turns `charts/oura` into `archive/charts/oura`. If `to` already exists
         the two merge. `to` may be empty, which moves the contents up to the top level.
       tags: [Image Gallery]
@@ -6519,7 +6554,7 @@ paths:
               required: [from, to]
       responses:
         '200':
-          description: How many images changed folder
+          description: How many files changed folder
           content:
             application/json:
               schema:
@@ -6543,6 +6578,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+
+  /image-gallery/{id}/info:
+    get:
+      summary: Get a gallery file's metadata
+      description: >-
+        Returns one of the user's files (any kind: image, document, code, data), in the same shape
+        the gallery list returns. Lets a link to a file open its viewer when the file is not on a
+        page the client has loaded. Fetch the bytes with `GET /file-attachment/{id}` (or
+        `GET /image-gallery/{id}` for an image's thumbnail and full size).
+      tags: [Image Gallery]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: File attachment ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The file's metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileAttachment'
+        '400':
+          description: Invalid file ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such file for this user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /search:
     get:
       summary: Cross-resource command palette search
@@ -7733,6 +7817,16 @@ components:
       required:
         - authorization_url
 
+    MCPServerOAuthConfigResponse:
+      type: object
+      properties:
+        redirect_uri:
+          type: string
+          format: uri
+          description: Callback URL to register with the OAuth provider.
+      required:
+        - redirect_uri
+
     # Chat Message Schemas
     MessageOrigin:
       type: string
@@ -8250,7 +8344,7 @@ components:
           description: Lower-case folder path, e.g. `charts/oura`
         count:
           type: integer
-          description: Gallery images directly in this folder (not in folders beneath it)
+          description: Gallery files of the requested kind directly in this folder (not in folders beneath it)
       required: [path, count]
       example:
         path: "charts/oura"
@@ -8260,7 +8354,7 @@ components:
       properties:
         moved:
           type: integer
-          description: Number of images whose folder changed
+          description: Number of files whose folder changed
       required: [moved]
       example:
         moved: 7
@@ -8291,11 +8385,21 @@ components:
           type: string
           format: uuid
           description: ID of the chat message this attachment belongs to (optional)
+        chat_id:
+          type: string
+          format: uuid
+          description: >-
+            ID of the thread the attachment's message is in. Present only where the attachment is
+            fetched singly (e.g. `GET /image-gallery/{id}/info`), not on list rows.
+        personality_id:
+          type: string
+          format: uuid
+          description: ID of the personality this file is a document of (or an image owned by), if any
         folder:
           type: string
           description: >-
-            Gallery folder the image is filed in, a lower-case path such as `charts/oura`.
-            Omitted for files at the top level. It is a label only: moving an image changes
+            Gallery folder the file is filed in, a lower-case path such as `charts/oura`.
+            Omitted for files at the top level. It is a label only: moving a file changes
             this field, not where the file is stored.
         personalities:
           type: array

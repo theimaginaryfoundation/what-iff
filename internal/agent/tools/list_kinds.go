@@ -267,8 +267,14 @@ func (t *ListTool) listJobs(ctx context.Context, chat *models.Chat, a listArgs) 
 	return t.okPaged(listKindJobs, items, note, meta)
 }
 
-func (t *ListTool) listMCPServers(ctx context.Context, chat *models.Chat) (string, error) {
-	servers, err := t.store.ListChatMCPServers(ctx, chat.UserID, chat.ID)
+func (t *ListTool) listMCPServers(ctx context.Context, chat *models.Chat, scope MCPScopeFunc) (string, error) {
+	var servers []*models.MCPServer
+	var err error
+	if scope != nil {
+		servers, err = scope(ctx)
+	} else {
+		servers, err = t.store.ListChatMCPServers(ctx, chat.UserID, chat.ID)
+	}
 	if err != nil {
 		return t.fail(listKindMCPServers, fmt.Sprintf("failed to list MCP servers: %v", err))
 	}
@@ -329,7 +335,7 @@ func (t *ListTool) listMCPServers(ctx context.Context, chat *models.Chat) (strin
 		Kind:  listKindMCPServers,
 		Count: len(items),
 		Items: items,
-		Note:  "MCP servers connected to the current conversation. Use load_mcp_tools before calling MCP tools.",
+		Note:  "MCP servers available to the current conversation (attached to it or linked to an active skill). Use load_mcp_tools before calling MCP tools.",
 	}
 	if len(items) > 0 && failedDiscovery == len(items) {
 		result.Error = "MCP discovery failed for all connected servers. MCP tools are currently unavailable; review connector auth/settings and retry."

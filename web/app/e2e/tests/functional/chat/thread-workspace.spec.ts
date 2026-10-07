@@ -138,12 +138,7 @@ test('opens the Import & Export screen from Thread Manager', async ({ chatImport
   await expect(chatImportModal.importButton).toBeDisabled();
 });
 
-test('creates, edits and deletes a thread memory from the context panel', async ({ chatPage, page, seed, userWithPersonality }) => {
-  // The delete action goes through window.confirm(), not the app's own
-  // ConfirmationModal (context-memories-tab.component.ts) — accept it so the
-  // dialog doesn't block on the (headless, unattended) default of dismissing.
-  page.on('dialog', dialog => dialog.accept());
-
+test('creates, edits and deletes a thread memory from the context panel', async ({ chatPage, confirmationModal, page, seed, userWithPersonality }) => {
   const thread = await seed.thread();
   await chatPage.navigateTo(thread.id as string);
 
@@ -173,7 +168,9 @@ test('creates, edits and deletes a thread memory from the context panel', async 
 
   await expect(chatPage.contextPanel).toContainText(updated);
 
+  // Delete goes through the app's ConfirmationService (context-memories-tab.component.ts).
   await chatPage.contextPanel.getByRole('button', { name: 'delete' }).click();
+  await confirmationModal.confirm();
   await expect(chatPage.contextPanel).toContainText('No memories yet.');
 });
 

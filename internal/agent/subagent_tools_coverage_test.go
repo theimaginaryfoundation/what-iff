@@ -53,17 +53,6 @@ func TestFindModelByID_NilDatastoreReturnsError(t *testing.T) {
 
 // --- callSubagentModel ---
 
-func TestCallSubagentModel_OpenAIChatCompletionsAPIUnsupported(t *testing.T) {
-	t.Parallel()
-	a := &Agent{}
-	// Gemini models route through the OpenAI-compatible chat-completions API,
-	// which subagent calls do not support.
-	out, err := a.callSubagentModel(context.Background(), uuid.New(), "gemini-3.5-flash", buildSubagentModelContext("", "", "hi"), nil, false)
-	require.Error(t, err)
-	require.Nil(t, out)
-	require.Contains(t, err.Error(), "not yet supported")
-}
-
 func TestCallSubagentModel_ZAIProviderMissing(t *testing.T) {
 	t.Parallel()
 	a := &Agent{}

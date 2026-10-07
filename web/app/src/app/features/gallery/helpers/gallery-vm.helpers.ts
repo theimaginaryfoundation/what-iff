@@ -1,4 +1,5 @@
-import { FileAttachment } from '../../../core/models/file-attachment.model';
+import { FileAttachment, isImageAttachment } from '../../../core/models/file-attachment.model';
+import { fileBadge } from './file-preview.helpers';
 import { formatSource, GalleryImageSource, sourceForImage } from './image-source.helpers';
 
 export type GalleryDateRange = 'any' | '7d' | '30d' | '90d';
@@ -22,6 +23,11 @@ export interface GalleryTileVm {
   sourceLabel: string;
   /** The folder the image is filed in; "" at the top level. */
   folder: string;
+  /** A document, code or data file rather than an image: no thumbnail, and it opens in the file viewer. */
+  isFile: boolean;
+  /** Short type label for a file tile ("PDF", "MD"); empty for images. */
+  badge: string;
+  /** Image bytes; empty for files, which have no thumbnail. */
   thumbnailUrl: string;
   fullUrl: string;
 }
@@ -56,9 +62,10 @@ export function toGalleryTileVm(
     : personalityName
       ? [personalityName]
       : [];
+  const isFile = !isImageAttachment(image);
   return {
     id: image.id,
-    name: image.name || 'Untitled image',
+    name: image.name || (isFile ? 'Untitled file' : 'Untitled image'),
     createdAt: image.created_at,
     personalityId,
     personalityName,
@@ -66,8 +73,10 @@ export function toGalleryTileVm(
     source,
     sourceLabel: formatSource(source),
     folder: image.folder ?? '',
-    thumbnailUrl: getImageUrl(image.id, 'thumbnail'),
-    fullUrl: getImageUrl(image.id, 'full'),
+    isFile,
+    badge: isFile ? fileBadge(image) : '',
+    thumbnailUrl: isFile ? '' : getImageUrl(image.id, 'thumbnail'),
+    fullUrl: isFile ? '' : getImageUrl(image.id, 'full'),
   };
 }
 

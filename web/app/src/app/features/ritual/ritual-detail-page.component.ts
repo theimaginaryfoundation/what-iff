@@ -8,6 +8,7 @@ import { catchError, map } from 'rxjs/operators';
 import { Ritual } from '../../core/models/ritual.model';
 import { ChatService } from '../../core/services/chat.service';
 import { PersonalityService } from '../../core/services/personality.service';
+import { MCPServerService } from '../../core/services/mcp-server.service';
 import { RitualService } from '../../core/services/ritual.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { RitualFormComponent, RitualFormSave } from './components/ritual-form.component';
@@ -25,6 +26,7 @@ import { RitualAvailablePreviewComponent } from './components/ritual-available-p
 export class RitualDetailPageComponent implements OnInit {
   private readonly ritualService = inject(RitualService);
   private readonly personalityService = inject(PersonalityService);
+  private readonly mcpServerService = inject(MCPServerService);
   private readonly chatService = inject(ChatService);
   private readonly confirmation = inject(ConfirmationService);
   private readonly route = inject(ActivatedRoute);
@@ -37,6 +39,7 @@ export class RitualDetailPageComponent implements OnInit {
   readonly error = signal<string | null>(null);
   readonly isSystem = signal(false);
   readonly personalities = signal<RitualSelectOption[]>([]);
+  readonly mcpServers = signal<RitualSelectOption[]>([]);
   readonly chats = signal<RitualSelectOption[]>([]);
   readonly selectedChatId = signal('');
 
@@ -60,6 +63,7 @@ export class RitualDetailPageComponent implements OnInit {
   private loadSelectOptions(): void {
     forkJoin({
       personalities: this.personalityService.listPersonalities(1, 200).pipe(catchError(() => of({ results: [] } as any))),
+      mcpServers: this.mcpServerService.listMCPServers(1, 200).pipe(catchError(() => of({ results: [] } as any))),
       chats: this.chatService.listAllChats(200).pipe(
         catchError(() => of({ chats: [], truncated: false })),
         map(result => ({ results: result.chats })),
@@ -67,6 +71,9 @@ export class RitualDetailPageComponent implements OnInit {
     }).subscribe(result => {
       this.personalities.set(
         (result.personalities.results ?? []).map((personality: any) => ({ id: personality.id, label: personality.name })),
+      );
+      this.mcpServers.set(
+        (result.mcpServers.results ?? []).map((server: any) => ({ id: server.id, label: server.name })),
       );
       this.chats.set((result.chats.results ?? []).map((chat: any) => ({ id: chat.id, label: chat.name || 'Untitled chat' })));
       if (!this.selectedChatId() && this.chats().length > 0) {

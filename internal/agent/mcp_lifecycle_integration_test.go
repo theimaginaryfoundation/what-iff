@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
@@ -95,7 +98,176 @@ func TestLoadMCPToolsTool_ServerNotConnected(t *testing.T) {
 	})
 	out, err := agent.loadMCPToolsTool(ctx, chatCtx, raw)
 	require.NoError(t, err)
-	require.Contains(t, out, "not connected to this chat")
+	require.Contains(t, out, "not available in this chat")
+}
+
+// newSkillOnlyConnector creates a connector that is NOT attached to the fixture thread and links it
+// to a new skill (ritual), the way "Also attach to skills" does. It returns the connector and skill IDs.
+func newSkillOnlyConnector(t *testing.T, agent *Agent, chatCtx *chatContext, serverURL string) (connectorID, skillID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	connector, err := agent.ds.CreateMCPServer(ctx, chatCtx.userID, models.MCPServer{
+		Name:        "skill-tracker",
+		Description: "reachable only through a skill",
+		ServerURL:   serverURL,
+	})
+	require.NoError(t, err)
+	skill, err := agent.ds.CreateRitual(ctx, chatCtx.userID, models.Ritual{
+		Name:         "tracking",
+		Description:  "uses the tracker",
+		Content:      "use it",
+		MCPServerIDs: &[]uuid.UUID{connector.ID},
+	})
+	require.NoError(t, err)
+	return connector.ID, skill.ID
+}
+
+func mcpToolNames(specs []agenttools.FunctionToolSpec) []string {
+	names := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		names = append(names, spec.Name)
+	}
+	return names
+}
+
+// A connector reached only through the active skill (Mode or /skill) is registered for the turn,
+// so it must also show up in list, be loadable, and be callable.
+func TestMCPLifecycleTools_SkillOnlyConnectorListLoadCall(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestMCPRPCServer()
+	defer srv.Close()
+
+	agent, chatCtx, threadServerID, cleanup := newMCPLifecycleAgentFixture(t, srv.URL)
+	defer cleanup()
+	agent.listTool = agenttools.NewListTool(agent.ds, zap.NewNop())
+	agent.listTool.SetMCPDiscoverer(agent.mcpClient)
+	skillServerID, skillID := newSkillOnlyConnector(t, agent, chatCtx, srv.URL)
+
+	// Turn preparation fills the in-scope cache (thread-attached + the skill's connector).
+	specs := agent.prepareTurnMCPToolSpecs(ctx, chatCtx, chatCtx.userID, chatCtx.chat.ID, []uuid.UUID{skillID})
+	require.Len(t, specs, 4, "two tools from each of the two connectors are registered")
+	require.Len(t, chatCtx.mcpServers, 2)
+
+	// list(kind="mcp_servers") shows both.
+	listOut, _, err := agent.toolHandlers(chatCtx)["list"](ctx, []byte(`{"kind":"mcp_servers"}`))
+	require.NoError(t, err)
+	require.Contains(t, listOut, skillServerID.String())
+	require.Contains(t, listOut, threadServerID.String())
+
+	// load_mcp_tools resolves the skill-only connector.
+	loadRaw, _ := json.Marshal(map[string]any{"mcp_server_id": skillServerID.String(), "tools": []string{"search"}})
+	out, err := agent.loadMCPToolsTool(ctx, chatCtx, loadRaw)
+	require.NoError(t, err)
+	var loadRes mcpToolLifecycleResult
+	require.NoError(t, json.Unmarshal([]byte(out), &loadRes))
+	require.Empty(t, loadRes.Error)
+	require.Len(t, loadRes.Loaded, 1)
+
+	// ...and the loaded tool is callable (dispatch gating sees the same scope).
+	got, _, err := agent.dispatchMCPToolUse(ctx, chatCtx, provider.ToolUse{Name: loadRes.Loaded[0], Input: json.RawMessage(`{}`)})
+	require.NoError(t, err)
+	require.Equal(t, "called", got)
+
+	// An uncached chatCtx (cache miss) still reaches the skill connector via mcpRitualIDs.
+	fresh := &chatContext{userID: chatCtx.userID, chat: chatCtx.chat, mcpRitualIDs: []uuid.UUID{skillID}}
+	got, _, err = agent.dispatchMCPToolUse(ctx, fresh, provider.ToolUse{Name: loadRes.Loaded[0], Input: json.RawMessage(`{}`)})
+	require.NoError(t, err)
+	require.Equal(t, "called", got)
+}
+
+// Loaded state is per chat and persists across Mode changes; once the skill is no longer active the
+// connector is out of scope: not sent, not listed, not loadable, not callable. Re-activating the
+// skill brings the still-loaded tools back.
+func TestMCPLifecycleTools_SkillConnectorOutOfScopeAfterModeSwitch(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestMCPRPCServer()
+	defer srv.Close()
+
+	agent, chatCtx, _, cleanup := newMCPLifecycleAgentFixture(t, srv.URL)
+	defer cleanup()
+	agent.listTool = agenttools.NewListTool(agent.ds, zap.NewNop())
+	agent.listTool.SetMCPDiscoverer(agent.mcpClient)
+	skillServerID, skillID := newSkillOnlyConnector(t, agent, chatCtx, srv.URL)
+
+	agent.prepareTurnMCPToolSpecs(ctx, chatCtx, chatCtx.userID, chatCtx.chat.ID, []uuid.UUID{skillID})
+	loadRaw, _ := json.Marshal(map[string]any{"mcp_server_id": skillServerID.String(), "tools": []string{"search"}})
+	out, err := agent.loadMCPToolsTool(ctx, chatCtx, loadRaw)
+	require.NoError(t, err)
+	var loadRes mcpToolLifecycleResult
+	require.NoError(t, json.Unmarshal([]byte(out), &loadRes))
+	require.Len(t, loadRes.Loaded, 1)
+	toolName := loadRes.Loaded[0]
+
+	// Next turn: the Mode (skill) is gone.
+	specs := agent.prepareTurnMCPToolSpecs(ctx, chatCtx, chatCtx.userID, chatCtx.chat.ID, nil)
+	require.NotContains(t, mcpToolNames(specs), toolName, "out-of-scope tools are not sent")
+	require.Len(t, specs, 2, "only the thread-attached connector's tools are sent")
+
+	listOut, _, err := agent.toolHandlers(chatCtx)["list"](ctx, []byte(`{"kind":"mcp_servers"}`))
+	require.NoError(t, err)
+	require.NotContains(t, listOut, skillServerID.String())
+
+	out, err = agent.loadMCPToolsTool(ctx, chatCtx, loadRaw)
+	require.NoError(t, err)
+	require.Contains(t, out, "not available in this chat")
+
+	_, _, err = agent.dispatchMCPToolUse(ctx, chatCtx, provider.ToolUse{Name: toolName, Input: json.RawMessage(`{}`)})
+	require.ErrorContains(t, err, "not in scope")
+
+	// The loaded state was kept, so switching back restores access without a new load.
+	specs = agent.prepareTurnMCPToolSpecs(ctx, chatCtx, chatCtx.userID, chatCtx.chat.ID, []uuid.UUID{skillID})
+	require.Contains(t, mcpToolNames(specs), toolName)
+	got, _, err := agent.dispatchMCPToolUse(ctx, chatCtx, provider.ToolUse{Name: toolName, Input: json.RawMessage(`{}`)})
+	require.NoError(t, err)
+	require.Equal(t, "called", got)
+}
+
+// On a cache miss dispatch resolves the scope before deciding why a call is refused, so the message
+// matches the real scope: "not loaded" for an in-scope connector, "not in scope" once the skill that
+// brought the connector is no longer active.
+func TestDispatchMCPToolUse_CacheMissRefusalReasonFollowsResolvedScope(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestMCPRPCServer()
+	defer srv.Close()
+
+	agent, chatCtx, _, cleanup := newMCPLifecycleAgentFixture(t, srv.URL)
+	defer cleanup()
+	skillServerID, skillID := newSkillOnlyConnector(t, agent, chatCtx, srv.URL)
+
+	agent.prepareTurnMCPToolSpecs(ctx, chatCtx, chatCtx.userID, chatCtx.chat.ID, []uuid.UUID{skillID})
+	loadRaw, _ := json.Marshal(map[string]any{"mcp_server_id": skillServerID.String(), "tools": []string{"search"}})
+	out, err := agent.loadMCPToolsTool(ctx, chatCtx, loadRaw)
+	require.NoError(t, err)
+	var loadRes mcpToolLifecycleResult
+	require.NoError(t, json.Unmarshal([]byte(out), &loadRes))
+	require.Len(t, loadRes.Loaded, 1)
+	loaded := loadRes.Loaded[0]
+	notLoaded := strings.TrimSuffix(loaded, "search") + "get"
+
+	// Cache miss, skill still active: the connector is in scope, its other tool was never loaded.
+	fresh := &chatContext{userID: chatCtx.userID, chat: chatCtx.chat, mcpRitualIDs: []uuid.UUID{skillID}}
+	_, _, err = agent.dispatchMCPToolUse(ctx, fresh, provider.ToolUse{Name: notLoaded, Input: json.RawMessage(`{}`)})
+	require.ErrorContains(t, err, "is not loaded for this chat")
+	require.NotContains(t, err.Error(), "not in scope")
+
+	// Cache miss, skill gone: the loaded tool's connector is out of scope.
+	fresh = &chatContext{userID: chatCtx.userID, chat: chatCtx.chat}
+	_, _, err = agent.dispatchMCPToolUse(ctx, fresh, provider.ToolUse{Name: loaded, Input: json.RawMessage(`{}`)})
+	require.ErrorContains(t, err, "not in scope")
+}
+
+// A failure to resolve the in-scope connectors is reported, not treated as "no connectors".
+func TestDispatchMCPToolUse_ScopeResolveFailureIsReported(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestMCPRPCServer()
+	defer srv.Close()
+
+	agent, chatCtx, _, cleanup := newMCPLifecycleAgentFixture(t, srv.URL)
+	cleanup() // closes the database, so reading the thread's connectors fails
+
+	fresh := &chatContext{userID: chatCtx.userID, chat: chatCtx.chat}
+	_, _, err := agent.dispatchMCPToolUse(ctx, fresh, provider.ToolUse{Name: "mcp__tracker__search", Input: json.RawMessage(`{}`)})
+	require.ErrorContains(t, err, "unable to resolve the connectors")
 }
 
 func newMCPLifecycleAgentFixture(t *testing.T, serverURL string) (*Agent, *chatContext, uuid.UUID, func()) {
@@ -283,6 +455,12 @@ func newTestMCPRPCServer() *httptest.Server {
 						},
 					},
 				},
+			})
+		case "tools/call":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result":  map[string]any{"content": []map[string]any{{"type": "text", "text": "called"}}},
 			})
 		default:
 			w.WriteHeader(http.StatusBadRequest)

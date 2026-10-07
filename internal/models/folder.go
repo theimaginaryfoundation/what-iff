@@ -91,7 +91,32 @@ func ExpressionFolder(personalityName string) string {
 	return folder
 }
 
-// FolderCount is how many gallery images sit directly in a folder.
+// GalleryKind narrows the gallery to images, to every other file (documents, code, data), or to both.
+type GalleryKind string
+
+const (
+	GalleryKindImages GalleryKind = "images"
+	GalleryKindFiles  GalleryKind = "files"
+	GalleryKindAll    GalleryKind = "all"
+)
+
+// ErrInvalidGalleryKind is what ParseGalleryKind returns for a value it does not know.
+var ErrInvalidGalleryKind = errors.New(`kind must be "images", "files" or "all"`)
+
+// ParseGalleryKind reads a gallery kind. An empty value is images: the gallery listed only images
+// before it listed other files, and clients that do not ask keep getting what they always got.
+func ParseGalleryKind(raw string) (GalleryKind, error) {
+	switch kind := GalleryKind(strings.ToLower(strings.TrimSpace(raw))); kind {
+	case "":
+		return GalleryKindImages, nil
+	case GalleryKindImages, GalleryKindFiles, GalleryKindAll:
+		return kind, nil
+	default:
+		return "", ErrInvalidGalleryKind
+	}
+}
+
+// FolderCount is how many gallery files sit directly in a folder.
 type FolderCount struct {
 	Path  string `json:"path"`
 	Count int    `json:"count"`

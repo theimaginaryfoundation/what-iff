@@ -11,7 +11,6 @@ import (
 	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
 	"github.com/theimaginaryfoundation/what-iff/ent"
-	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
 	"github.com/theimaginaryfoundation/what-iff/ent/embedding"
 	"github.com/theimaginaryfoundation/what-iff/ent/memory"
 	entmerge "github.com/theimaginaryfoundation/what-iff/ent/memorymergeevent"
@@ -381,109 +380,6 @@ func (d *Datastore) PersistMemoryLinkGroup(
 	return toMemoryMergeEventModel(event), nil
 }
 
-// MergeLiveExtractedMemory persists one collapsed extraction row, folding only into
-// memories that were live in the current turn context (by ID). Batch duplicates are
-// already collapsed upstream; duplicates_folded tracks how many rows were folded.
-func (d *Datastore) MergeLiveExtractedMemory(
-	ctx context.Context,
-	userID uuid.UUID,
-	chatID uuid.UUID,
-	extract memoryutil.CollapsedExtractedMemory,
-	embeddingVector []float32,
-	activePersonalityID uuid.UUID,
-	liveMemoryIDs []uuid.UUID,
-) (*models.Memory, error) {
-	normalized := memoryutil.NormalizeContentForDedupe(extract.Content)
-	if normalized == "" {
-		return nil, nil
-	}
-
-	tx, err := d.dbClient.Tx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if v := recover(); v != nil {
-			_ = tx.Rollback()
-			panic(v)
-		}
-	}()
-
-	now := time.Now().UTC()
-	targetScope := memory.Scope(extract.Scope)
-	if extract.Scope != string(memory.ScopeUser) && extract.Scope != string(memory.ScopeChat) {
-		targetScope = memory.ScopeChat
-	}
-
-	liveMatch, err := findLiveMemoryMatch(ctx, tx, userID, chatID, targetScope, normalized, liveMemoryIDs)
-	if err != nil {
-		_ = tx.Rollback()
-		return nil, err
-	}
-
-	if liveMatch != nil {
-		sourceMembers := sourceMembersForLiveFold(liveMatch, extract)
-		// liveMatch already equals extract.Content after normalization, so this fold never rewrites
-		// the survivor and needs no embedding.
-		mem, mergeErr := d.foldIntoLiveMemory(ctx, tx, userID, liveMatch, extract, now, foldLiveOptions{sourceMembers: sourceMembers})
-		if mergeErr != nil {
-			_ = tx.Rollback()
-			return nil, mergeErr
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, err
-		}
-		return mem, nil
-	}
-
-	mem, mergeErr := d.createMergedMemory(ctx, tx, userID, chatID, extract, embeddingVector, activePersonalityID, targetScope, now, nil)
-	if mergeErr != nil {
-		_ = tx.Rollback()
-		return nil, mergeErr
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return mem, nil
-}
-
-func findLiveMemoryMatch(
-	ctx context.Context,
-	tx *ent.Tx,
-	userID uuid.UUID,
-	chatID uuid.UUID,
-	targetScope memory.Scope,
-	normalized string,
-	liveMemoryIDs []uuid.UUID,
-) (*ent.Memory, error) {
-	if len(liveMemoryIDs) == 0 {
-		return nil, nil
-	}
-
-	q := tx.Memory.Query().
-		Where(
-			memory.IDIn(liveMemoryIDs...),
-			memory.HasOwnerWith(user.ID(userID)),
-			memory.StatusEQ(memory.StatusActive),
-			memory.ScopeEQ(targetScope),
-		)
-	if targetScope == memory.ScopeChat {
-		q = q.Where(memory.HasChatWith(entchat.ID(chatID)))
-	}
-	rows, err := q.All(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, row := range rows {
-		if memoryutil.NormalizeContentForDedupe(row.Content) != normalized {
-			continue
-		}
-		return row, nil
-	}
-	return nil, nil
-}
-
 // lockRowsForUpdate is a query modifier that locks the selected rows until the transaction ends
 // (SELECT ... FOR UPDATE). Only Postgres gets the clause: SQLite, which the datastore tests run
 // on, has no row locks and rejects FOR UPDATE, and it serializes writers per database anyway.
@@ -762,7 +658,7 @@ func existingChainSourceIDs(existing *ent.Memory) []uuid.UUID {
 
 // createMergedMemory inserts a new memory (and optional embedding / compaction audit attach)
 // on the caller's transaction. It never commits or rolls back tx: every error path returns
-// without touching tx lifecycle, so callers (PersistMemoryMergeGroup, MergeLiveExtractedMemory)
+// without touching tx lifecycle, so caller (PersistMemoryMergeGroup)
 // MUST Rollback on any non-nil error before returning to their own callers.
 func (d *Datastore) createMergedMemory(
 	ctx context.Context,
@@ -1301,28 +1197,4 @@ func sourceMembersToModel(members []entschema.MemoryMergeSourceMember) []models.
 		}
 	}
 	return out
-}
-
-func sourceMembersForLiveFold(existing *ent.Memory, extract memoryutil.CollapsedExtractedMemory) []models.MemoryMergeSourceMember {
-	confidence := models.MemoryConfidenceFromFloat(existing.Confidence)
-	id := existing.ID
-	members := []models.MemoryMergeSourceMember{{
-		Content:    existing.Content,
-		Scope:      string(existing.Scope),
-		Confidence: confidence,
-		MemoryID:   &id,
-	}}
-	count := extract.BatchDuplicateCount
-	if count < 1 {
-		count = 1
-	}
-	for i := 0; i < count; i++ {
-		members = append(members, models.MemoryMergeSourceMember{
-			Content:    extract.Content,
-			Scope:      extract.Scope,
-			Confidence: extract.Confidence,
-			IsNew:      true,
-		})
-	}
-	return members
 }

@@ -50,7 +50,7 @@ export class GalleryMoveModalComponent {
   readonly title = computed(() =>
     this.isFolderMode()
       ? `Rename or move “${folderName(this.folderPath())}”`
-      : `Move ${this.imageCount()} ${this.imageCount() === 1 ? 'image' : 'images'}`,
+      : `Move ${this.imageCount()} ${this.imageCount() === 1 ? 'item' : 'items'}`,
   );
   readonly hint = computed(() =>
     this.isFolderMode()

@@ -69,6 +69,17 @@ describe('MessageContentComponent', () => {
             .flush(new Blob(['two'], { type: 'image/png' }));
     });
 
+    it('requests the full-resolution variant when imageSize is full', () => {
+        fixture.componentRef.setInput('imageSize', 'full');
+        fixture.componentRef.setInput('attachments', [imageAttachment('image-1', 'first.png')]);
+        fixture.detectChanges();
+
+        httpMock.expectNone(req => req.urlWithParams.includes('/image-gallery/image-1?size=thumbnail'));
+        httpMock.expectOne(req => req.urlWithParams.includes('/image-gallery/image-1?size=full'))
+            .flush(new Blob(['full'], { type: 'image/png' }));
+        expect(fixture.nativeElement.querySelector('.message-images--full')).toBeTruthy();
+    });
+
     it('downloads the full image attachment from the preview card', () => {
         vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:download');
         vi.spyOn(URL, 'revokeObjectURL').mockReturnValue(undefined);

@@ -86,6 +86,37 @@ describe('GalleryViewService folders', () => {
     });
   });
 
+  describe('images, files or both', () => {
+    const lastKindAsked = () => (api.listImages.mock.lastCall?.[2] as { kind?: string }).kind;
+
+    it('lists both by default and asks for the folders that hold either', () => {
+      service.loadInitial();
+      service.loadFolders();
+      expect(lastKindAsked()).toBe('all');
+      expect(api.listFolders).toHaveBeenLastCalledWith('all');
+    });
+
+    it('reloads the grid and the folder counts for the new kind, dropping the selection', () => {
+      service.setSelectionMode(true);
+      service.toggleSelected('a');
+      api.listImages.mockClear();
+      api.listFolders.mockClear();
+
+      service.setKind('files');
+
+      expect(service.kind()).toBe('files');
+      expect(lastKindAsked()).toBe('files');
+      expect(api.listFolders).toHaveBeenCalledWith('files');
+      expect(service.selectedCount()).toBe(0);
+    });
+
+    it('does nothing when the kind did not change', () => {
+      api.listImages.mockClear();
+      service.setKind('all');
+      expect(api.listImages).not.toHaveBeenCalled();
+    });
+  });
+
   describe('creating a folder', () => {
     it('makes one under the open folder, opens it, and keeps it until an image arrives', () => {
       service.openFolder('charts');
@@ -128,6 +159,13 @@ describe('GalleryViewService folders', () => {
       expect(service.totalCount()).toBe(1);
       expect(service.selectedCount()).toBe(0);
       expect(api.listFolders).toHaveBeenCalled();
+      expect(service.lastMove()).toEqual({ ids: new Set(['a']), folder: 'charts/oura' });
+    });
+
+    it('does not record a move that failed', async () => {
+      api.moveImages.mockReturnValue(throwError(() => new Error('nope')));
+      await service.moveImages(['a'], 'charts');
+      expect(service.lastMove()).toBeNull();
     });
 
     it('leaves the grid alone when images are moved into the folder already open', async () => {

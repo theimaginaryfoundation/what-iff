@@ -31,6 +31,18 @@ describe('job-vm.helpers', () => {
         expect(vm.canPauseResume).toBe(true);
     });
 
+    it('shows a scheduler-paused recurring job as a schedule error, not a plain pause', () => {
+        const vm = toJobCardVm({
+            ...job,
+            status: 'paused',
+            last_error: 'failed to compute next_run_at: invalid cron schedule',
+        });
+        expect(vm.statusLabel).toBe('Paused: schedule error');
+        expect(vm.statusTone).toBe('danger');
+        expect(vm.statusDescription).toContain('invalid cron schedule');
+        expect(toJobCardVm({ ...job, status: 'paused' }).statusLabel).toBe('Paused');
+    });
+
     it('formats missing dates and truncates prompt excerpt', () => {
         expect(formatDate(null)).toBe('—');
         expect(excerpt('abcdef', 4)).toBe('abc…');

@@ -49,10 +49,10 @@ const ListDescription = `List your available resources. Pick a kind:
 - models — chat models you can run (id, name, provider, tool support).
 - personalities — personalities you can switch to or run as a subagent.
 - skills — skills you can attach to a subagent or scheduled job (id, name, description).
-- files — your uploaded files, most-recent first. Filter with file_type (e.g. "image", "pdf"), scope ("personality" docs, "conversation" attachments, or "all") and folder. Images dominate most libraries, so pass file_type to cut through them. Gallery images can be filed in folders (e.g. "charts/oura"); folder lists that folder and everything beneath it, and each row shows its folder.
+- files — your uploaded files, most-recent first. Filter with file_type (e.g. "image", "pdf"), scope ("personality" docs, "conversation" attachments, or "all") and folder. Images dominate most libraries, so pass file_type to cut through them. Files, images and documents alike, can be filed in gallery folders (e.g. "charts/oura"); folder lists that folder and everything beneath it, and each row shows its folder.
 - conversations — your past conversations, including archived imports, that have messages, most-recent first (id, name). Pass an id to find_context (mode="conversation"/"origin") to read one.
 - jobs — your scheduled jobs (id, name, status, next_runtime for still-active ones). Active by default; set include_completed=true to also see finished/failed one-offs.
-- mcp_servers — MCP servers connected to the current conversation, with discoverable MCP tools and currently loaded tools for this chat.
+- mcp_servers — MCP servers available to the current conversation (attached to it, or linked to a skill that is active now), with discoverable MCP tools and currently loaded tools for this chat.
 
 Use filter for a free-text name/content match (files, conversations, jobs). Use limit to cap page size and page (1-based) to walk further results when has_more is true.`
 
@@ -163,7 +163,7 @@ type listItem struct {
 	Provider     string   `json:"provider,omitempty"`      // models
 	ToolSupport  *bool    `json:"tool_support,omitempty"`  // models
 	FileType     string   `json:"file_type,omitempty"`     // files
-	Folder       string   `json:"folder,omitempty"`        // files (gallery images that are filed in a folder)
+	Folder       string   `json:"folder,omitempty"`        // files (gallery files that are filed in a folder)
 	Status       string   `json:"status,omitempty"`        // jobs, mcp_servers
 	StatusDetail string   `json:"status_detail,omitempty"` // mcp_servers
 	MCPTools     []string `json:"tools,omitempty"`         // mcp_servers
@@ -194,8 +194,20 @@ type listPageMeta struct {
 
 // --- dispatch -------------------------------------------------------------
 
-// List executes a list tool call, routing on `kind`.
+// MCPScopeFunc resolves the MCP connectors in scope for the current turn (attached to the
+// thread plus those of the skills active now). The agent supplies it so kind="mcp_servers"
+// agrees with what load_mcp_tools can load and what the turn registers.
+type MCPScopeFunc func(ctx context.Context) ([]*models.MCPServer, error)
+
+// List executes a list tool call, routing on `kind`. kind="mcp_servers" lists only the
+// connectors attached to the thread; use ListInMCPScope to include the active skills' connectors.
 func (t *ListTool) List(ctx context.Context, chat *models.Chat, args []byte) (string, error) {
+	return t.ListInMCPScope(ctx, chat, args, nil)
+}
+
+// ListInMCPScope is List with an explicit resolver for the connectors in scope this turn
+// (kind="mcp_servers" only). A nil resolver falls back to the thread-attached connectors.
+func (t *ListTool) ListInMCPScope(ctx context.Context, chat *models.Chat, args []byte, mcpScope MCPScopeFunc) (string, error) {
 	var a listArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return t.fail("", fmt.Sprintf("invalid arguments: %v", err))
@@ -219,7 +231,7 @@ func (t *ListTool) List(ctx context.Context, chat *models.Chat, args []byte) (st
 	case listKindJobs:
 		return t.listJobs(ctx, chat, a)
 	case listKindMCPServers:
-		return t.listMCPServers(ctx, chat)
+		return t.listMCPServers(ctx, chat, mcpScope)
 	case "":
 		return t.fail("", "kind is required; one of: models, personalities, skills, files, conversations, jobs, mcp_servers")
 	default:

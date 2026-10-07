@@ -50,6 +50,7 @@ export class ExpressionAssignmentService {
    * @param imageId The gallery image ID to assign.
    * @param imageUrl Optional URL to display while the request is in flight (eg. the gallery thumb).
    * @param ctx     Optional optimistic-update hooks; when omitted, the service simply forwards the request.
+   * @param label   Optional label saved in the same request; when omitted the existing label is left unchanged.
    */
   assignFromGallery(
     personalityId: string,
@@ -57,11 +58,12 @@ export class ExpressionAssignmentService {
     imageId: string,
     imageUrl: string | null,
     ctx?: OptimisticContext,
+    label?: string,
   ): Observable<PersonalityExpression> {
     return this.upsertWithOptimisticUpdate(
       personalityId,
       expressionKey,
-      { image_id: imageId },
+      label === undefined ? { image_id: imageId } : { image_id: imageId, label },
       imageUrl,
       ctx,
     );

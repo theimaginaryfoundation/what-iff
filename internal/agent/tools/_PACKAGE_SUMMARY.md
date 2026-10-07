@@ -14,7 +14,8 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
   - `ScratchpadTool` — update scratchpad (`scratchpad.go`, `update_scratchpad.go`); read-only scratchpad tool was removed because scratchpad is already injected into context.
   - `list` — unified resource listing (`list.go`, `list_kinds.go`; tests in `list_test.go`).
   - `create_memory`, `generate_image`, `create_agent_job` — named files for those flows.
-  - `move_files` — files gallery images in a folder or back at the top level (`move_files.go`; tests in `move_files_test.go`).
+  - `move_files` — files gallery files (images, documents, any upload) in a folder or back at the top level (`move_files.go`; tests in `move_files_test.go`).
+    A personality's documents stay attached to it; only the folder label changes.
   - `RecallTool` — unified context retrieval (`recall.go`, `recall_modes.go`, `recall_memory_id.go`, `recall_time.go`; see ADR 0x017).
     Modes: `investigate`/`search`/`fetch`/`related`/`origin`/`conversation`/`lifecycle_events` (alias `merge_history`).
     `source_type=summaries` searches per-chat checkpoint Summary memories (via `datastore.GetRelatedSummaryMemories`); `lifecycle_events` lists the memory lifecycle audit trail (`datastore.ListMemoryMergeEvents`).

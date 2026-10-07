@@ -8138,6 +8138,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/mcp-servers/oauth/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get connector OAuth settings
+         * @description Returns the redirect_uri this server sends to OAuth providers (MCP_OAUTH_REDIRECT_URL, or the localhost default). Users register this exact value with the provider, so it differs between the hosted service and self-hosted installs.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Connector OAuth settings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MCPServerOAuthConfigResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mcp-servers/oauth/callback": {
         parameters: {
             query?: never;
@@ -9144,11 +9192,14 @@ export interface paths {
         };
         /**
          * List gallery folders
-         * @description Lists every folder that holds at least one of the user's gallery images, with the number of images directly in it, sorted by path. The top level is implied and not listed. Parent folders that hold no image of their own are not listed; derive them from the paths. To list one folder's images, use `GET /image-gallery?folder=<path>` (an empty value is the top level; leaving `folder` out lists every image).
+         * @description Lists every folder that holds at least one of the user's gallery files of the requested kind, with the number of them directly in it, sorted by path. Images and other files share one folder tree. The top level is implied and not listed. Parent folders that hold nothing of their own are not listed; derive them from the paths. To list one folder's files, use `GET /image-gallery?folder=<path>&kind=<kind>` (an empty folder value is the top level; leaving `folder` out lists every file of that kind).
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Which files: `images` (the default, as before files were listed), `files` (every file that is not an image: documents, code, data) or `all`. */
+                    kind?: "images" | "files" | "all";
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -9204,8 +9255,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Move gallery images into a folder
-         * @description Files the given images in a folder, creating the folder if it does not exist. An id may name an image or a chat-reuse copy of it; a copy moves the original. Ids that are not the caller's gallery images are skipped. Only the label changes; stored files are untouched.
+         * Move gallery files into a folder
+         * @description Files the given files (images, documents or any other upload) in a folder, creating the folder if it does not exist. An id may name a file or a chat-reuse copy of it; a copy moves the original. Ids that are not the caller's files are skipped. Only the label changes; stored files are untouched, and a personality's documents stay attached to it.
          */
         post: {
             parameters: {
@@ -9227,7 +9278,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description How many images were moved */
+                /** @description How many files were moved */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -9282,7 +9333,7 @@ export interface paths {
         put?: never;
         /**
          * Rename or move a gallery folder
-         * @description Renames the folder `from` to `to`, carrying every folder beneath it along: moving `charts` to `archive/charts` turns `charts/oura` into `archive/charts/oura`. If `to` already exists the two merge. `to` may be empty, which moves the contents up to the top level.
+         * @description Renames the folder `from` to `to`, carrying every file and folder beneath it along: moving `charts` to `archive/charts` turns `charts/oura` into `archive/charts/oura`. If `to` already exists the two merge. `to` may be empty, which moves the contents up to the top level.
          */
         post: {
             parameters: {
@@ -9308,7 +9359,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description How many images changed folder */
+                /** @description How many files changed folder */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -9346,6 +9397,84 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/image-gallery/{id}/info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a gallery file's metadata
+         * @description Returns one of the user's files (any kind: image, document, code, data), in the same shape the gallery list returns. Lets a link to a file open its viewer when the file is not on a page the client has loaded. Fetch the bytes with `GET /file-attachment/{id}` (or `GET /image-gallery/{id}` for an image's thumbnail and full size).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description File attachment ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The file's metadata */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FileAttachment"];
+                    };
+                };
+                /** @description Invalid file ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such file for this user */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -10161,6 +10290,13 @@ export interface components {
             /** Format: uri */
             authorization_url: string;
         };
+        MCPServerOAuthConfigResponse: {
+            /**
+             * Format: uri
+             * @description Callback URL to register with the OAuth provider.
+             */
+            redirect_uri: string;
+        };
         /**
          * @example User
          * @enum {string}
@@ -10460,7 +10596,7 @@ export interface components {
         GalleryFolder: {
             /** @description Lower-case folder path, e.g. `charts/oura` */
             path: string;
-            /** @description Gallery images directly in this folder (not in folders beneath it) */
+            /** @description Gallery files of the requested kind directly in this folder (not in folders beneath it) */
             count: number;
         };
         /**
@@ -10469,7 +10605,7 @@ export interface components {
          *     }
          */
         GalleryMoveResult: {
-            /** @description Number of images whose folder changed */
+            /** @description Number of files whose folder changed */
             moved: number;
         };
         /**
@@ -10514,7 +10650,17 @@ export interface components {
              * @description ID of the chat message this attachment belongs to (optional)
              */
             chat_message_id?: string;
-            /** @description Gallery folder the image is filed in, a lower-case path such as `charts/oura`. Omitted for files at the top level. It is a label only: moving an image changes this field, not where the file is stored. */
+            /**
+             * Format: uuid
+             * @description ID of the thread the attachment's message is in. Present only where the attachment is fetched singly (e.g. `GET /image-gallery/{id}/info`), not on list rows.
+             */
+            chat_id?: string;
+            /**
+             * Format: uuid
+             * @description ID of the personality this file is a document of (or an image owned by), if any
+             */
+            personality_id?: string;
+            /** @description Gallery folder the file is filed in, a lower-case path such as `charts/oura`. Omitted for files at the top level. It is a label only: moving a file changes this field, not where the file is stored. */
             folder?: string;
             /** @description Personalities associated with this attachment via direct ownership and expression image links. */
             personalities?: components["schemas"]["FileAttachmentPersonality"][];

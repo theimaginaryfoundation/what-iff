@@ -389,6 +389,9 @@ func (d *Datastore) ListFileAttachments(ctx context.Context, userID uuid.UUID, p
 	if filters.FileType != nil && *filters.FileType != "" {
 		query = query.Where(entfileattachment.FileTypeContainsFold(*filters.FileType))
 	}
+	if kind := galleryKindPredicate(filters.Kind); kind != nil {
+		query = query.Where(kind)
+	}
 
 	if filters.ChatMessageID != nil {
 		query = query.Where(entfileattachment.HasChatMessageWith(

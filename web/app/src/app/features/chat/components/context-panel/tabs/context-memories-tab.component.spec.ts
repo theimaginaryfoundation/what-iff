@@ -5,6 +5,7 @@ import { Router } from '@angular/router';
 import { of } from 'rxjs';
 
 import { Memory, MemoryFilters } from '../../../../../core/models/memory.model';
+import { ConfirmationService } from '../../../../../core/services/confirmation.service';
 import { MemoryService } from '../../../../../core/services/memory.service';
 import { ContextMemoriesTabComponent } from './context-memories-tab.component';
 
@@ -13,8 +14,10 @@ describe('ContextMemoriesTabComponent', () => {
 
     let fixture: ComponentFixture<ContextMemoriesTabComponent>;
     let memoryService: MemoryServiceMock;
+    let confirmationService: Pick<MockedObject<ConfirmationService>, 'confirm'>;
 
     beforeEach(async () => {
+        confirmationService = { confirm: vi.fn().mockName("ConfirmationService.confirm") } as unknown as Pick<MockedObject<ConfirmationService>, 'confirm'>;
         memoryService = {
             getMemories: vi.fn().mockName("MemoryService.getMemories"),
             createMemory: vi.fn().mockName("MemoryService.createMemory"),
@@ -62,6 +65,7 @@ describe('ContextMemoriesTabComponent', () => {
             providers: [
                 provideZonelessChangeDetection(),
                 { provide: MemoryService, useValue: memoryService },
+                { provide: ConfirmationService, useValue: confirmationService },
                 { provide: Router, useValue: {
                         navigate: vi.fn().mockName("Router.navigate")
                     } },
@@ -157,16 +161,31 @@ describe('ContextMemoriesTabComponent', () => {
         expect(fixture.nativeElement.querySelector('.sandbox-note')).toBeNull();
     });
 
-    it('deletes memories through the memory service', async () => {
-        vi.spyOn(window, 'confirm').mockReturnValue(true);
-
+    const clickDelete = async () => {
         const buttons = fixture.nativeElement.querySelectorAll('.memory-meta button') as NodeListOf<HTMLButtonElement>;
         const deleteButton = Array.from(buttons)
             .find((button): button is HTMLButtonElement => button.textContent?.trim() === 'delete');
         deleteButton?.click();
         await fixture.whenStable();
+    };
 
+    it('deletes memories through the memory service after ConfirmationService agrees', async () => {
+        const nativeConfirm = vi.spyOn(window, 'confirm');
+        confirmationService.confirm.mockResolvedValue(true);
+
+        await clickDelete();
+
+        expect(confirmationService.confirm).toHaveBeenCalledWith(expect.objectContaining({ type: 'danger' }));
+        expect(nativeConfirm).not.toHaveBeenCalled();
         expect(memoryService.deleteMemory).toHaveBeenCalledWith('thread-1');
+    });
+
+    it('does not delete when the confirmation is declined', async () => {
+        confirmationService.confirm.mockResolvedValue(false);
+
+        await clickDelete();
+
+        expect(memoryService.deleteMemory).not.toHaveBeenCalled();
     });
 });
 
