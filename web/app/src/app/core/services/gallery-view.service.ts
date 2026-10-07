@@ -3,7 +3,7 @@ import { firstValueFrom, Subscription } from 'rxjs';
 import { finalize } from 'rxjs/operators';
 
 import { FileAttachment } from '../models/file-attachment.model';
-import { ImageGalleryService } from './image-gallery.service';
+import { GalleryKind, ImageGalleryService } from './image-gallery.service';
 import {
   applyGalleryFilters,
   DEFAULT_GALLERY_FILTERS,
@@ -41,6 +41,8 @@ export class GalleryViewService {
   readonly associationFilterMode = signal<GalleryAssociationFilterMode>('all');
   readonly selectedPersonalityIds = signal<string[]>([]);
   readonly importRequestTick = signal(0);
+  /** Images, other files (documents, code, data), or both. Filtered server-side so pages and folder counts agree. */
+  readonly kind = signal<GalleryKind>('all');
 
   /** Folders that hold images (all levels), as the server lists them. */
   readonly folders = signal<GalleryFolder[]>([]);
@@ -60,6 +62,8 @@ export class GalleryViewService {
   readonly drag = signal<GalleryDrag | null>(null);
   /** Images a "Move to…" was asked for outside select mode (from the image popup), if any. */
   readonly moveRequest = signal<readonly string[] | null>(null);
+  /** The last move that went through, so an open file viewer can show its file's new folder. */
+  readonly lastMove = signal<{ ids: ReadonlySet<string>; folder: string } | null>(null);
 
   /**
    * The single in-flight list request (first page or load-more). A reload cancels
@@ -135,6 +139,7 @@ export class GalleryViewService {
         personalityId,
         globalOnly: associationMode === 'global',
         folder: this.activeFolder(),
+        kind: this.kind(),
       })
       .pipe(finalize(() => this.isLoading.set(false)))
       .subscribe({
@@ -145,7 +150,7 @@ export class GalleryViewService {
         error: () => {
           this.images.set([]);
           this.totalCount.set(0);
-          this.error.set('Failed to load gallery images.');
+          this.error.set('Failed to load the gallery.');
         },
       });
   }
@@ -165,6 +170,7 @@ export class GalleryViewService {
         personalityId,
         globalOnly: associationMode === 'global',
         folder: this.activeFolder(),
+        kind: this.kind(),
       })
       .pipe(finalize(() => this.isLoadingMore.set(false)))
       .subscribe({
@@ -175,7 +181,7 @@ export class GalleryViewService {
           this.currentPage.set(nextPage);
         },
         error: () => {
-          this.error.set('Failed to load more images.');
+          this.error.set('Failed to load more of the gallery.');
         },
       });
   }
@@ -223,6 +229,17 @@ export class GalleryViewService {
 
   setMode(mode: GalleryMode): void {
     this.mode.set(mode);
+  }
+
+  /** Switches between images, other files and both. Folder counts follow, so a folder holding only documents does not show in Images. */
+  setKind(kind: GalleryKind): void {
+    if (kind === this.kind()) {
+      return;
+    }
+    this.kind.set(kind);
+    this.clearSelection();
+    this.loadInitial();
+    this.loadFolders();
   }
 
   resetFilters(): void {
@@ -278,7 +295,7 @@ export class GalleryViewService {
   }
 
   loadFolders(): void {
-    this.galleryService.listFolders().subscribe({
+    this.galleryService.listFolders(this.kind()).subscribe({
       next: folders => {
         this.folders.set(folders);
         // A folder that now holds an image (or has one beneath it) is real; stop tracking it as pending.
@@ -360,6 +377,7 @@ export class GalleryViewService {
       return false;
     }
     const moved = new Set(ids);
+    this.lastMove.set({ ids: moved, folder });
     if (this.browsingFolders()) {
       // The moved images leave this folder's grid, unless they were moved into it.
       if (folder !== this.currentFolder()) {

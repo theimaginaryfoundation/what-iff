@@ -1,4 +1,17 @@
-import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, OnInit, signal } from '@angular/core';
+import {
+  afterNextRender,
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  DestroyRef,
+  effect,
+  ElementRef,
+  inject,
+  Injector,
+  OnInit,
+  signal,
+  untracked,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
 import { EMPTY, catchError } from 'rxjs';
@@ -6,11 +19,12 @@ import { EMPTY, catchError } from 'rxjs';
 import { ChatService } from '../../core/services/chat.service';
 import { FileAttachmentService } from '../../core/services/file-attachment.service';
 import { GalleryViewService } from '../../core/services/gallery-view.service';
-import { ImageGalleryService } from '../../core/services/image-gallery.service';
+import { GalleryKind, ImageGalleryService } from '../../core/services/image-gallery.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { PersonalityMediaJobService } from '../../core/services/personality-media-job.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { DEFAULT_THREAD_NAME } from '../../core/models/chat.model';
+import { FileAttachment, isImageAttachment } from '../../core/models/file-attachment.model';
 import { Personality, PersonalityExpression, buildPersonalityUpdateRequest } from '../../core/models/personality.model';
 import { environment } from '../../../environments/environment';
 import { GalleryFilters, toGalleryTileVm } from './helpers/gallery-vm.helpers';
@@ -22,6 +36,7 @@ import { GalleryPersonalityOption } from './components/gallery-filter-bar.compon
 import { GalleryFolderToolsComponent } from './components/gallery-folder-tools.component';
 import { GalleryGridComponent } from './components/gallery-grid.component';
 import { ImageDetailModalComponent } from './components/image-detail-modal.component';
+import { FileViewerComponent } from './components/file-viewer.component';
 import { PersonalityExpressionsManagerComponent } from '../personality/detail/personality-expressions-manager.component';
 import { PersonalityMediaJobBannerComponent } from '../personality/components/personality-media-job-banner.component';
 import { mediaJobFinished$ } from './helpers/gallery-job-refresh.helpers';
@@ -45,6 +60,7 @@ type GallerySort = 'created';
     GalleryGridComponent,
     GalleryFolderToolsComponent,
     ImageDetailModalComponent,
+    FileViewerComponent,
     GalleryImportModalComponent,
     AssignAsExpressionFlowComponent,
     PersonalityExpressionsManagerComponent,
@@ -67,6 +83,23 @@ export class GalleryPageComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly injector = inject(Injector);
+
+  readonly kindOptions: readonly { kind: GalleryKind; label: string; tooltip: string }[] = [
+    { kind: 'all', label: 'All', tooltip: 'Images and files together' },
+    { kind: 'images', label: 'Images', tooltip: 'Only images' },
+    { kind: 'files', label: 'Files', tooltip: 'Documents, code and data from your threads and personalities' },
+  ];
+
+  /** The file open in the viewer (the `file` query parameter), if any. */
+  readonly openFileId = signal<string | null>(null);
+  /** Its metadata: the loaded row at once, then the server's copy (which also names its thread). */
+  readonly openFile = signal<FileAttachment | null>(null);
+  readonly openFileError = signal<string | null>(null);
+  readonly viewerOpen = computed(() => this.openFileId() !== null);
+  /** Where the page was scrolled when the viewer opened, to return there on the way back. */
+  private browseScrollTop: number | null = null;
 
   readonly personalities = signal<Personality[]>([]);
   readonly mode = signal<GalleryMode>('gallery');
@@ -102,9 +135,16 @@ export class GalleryPageComponent implements OnInit {
   /** What an empty grid says: a new folder is a prompt to fill it, not a failed search. */
   readonly emptyMessage = computed(() => {
     if (this.view.browsingFolders() && this.view.currentFolder() !== '') {
-      return 'This folder is empty. Use Select to pick images, then Move to folder to file them here.';
+      return 'This folder is empty. Use Select to pick images or files, then Move to folder to file them here.';
     }
-    return 'No images match these filters yet.';
+    switch (this.view.kind()) {
+      case 'images':
+        return 'No images match these filters yet.';
+      case 'files':
+        return 'No files match these filters yet. Files you share in threads and documents you give a personality show up here.';
+      default:
+        return 'Nothing matches these filters yet.';
+    }
   });
   readonly tiles = computed(() => {
     const namesById = this.personalityNames();
@@ -122,6 +162,14 @@ export class GalleryPageComponent implements OnInit {
     if (!selectedId) return -1;
     return this.view.filteredImages().findIndex(row => row.id === selectedId);
   });
+  /** The non-image files in the grid's order, which Prev / Next in the viewer step through. */
+  readonly filesInView = computed(() => this.sortedImages().filter(row => !isImageAttachment(row)));
+  private readonly openFileIndex = computed(() => {
+    const id = this.openFileId();
+    return id ? this.filesInView().findIndex(row => row.id === id) : -1;
+  });
+  readonly hasPrevFile = computed(() => this.openFileIndex() > 0);
+  readonly hasNextFile = computed(() => this.openFileIndex() >= 0 && this.openFileIndex() < this.filesInView().length - 1);
   readonly hasPrev = computed(() => this.selectedIndex() > 0);
   readonly hasNext = computed(() => this.selectedIndex() >= 0 && this.selectedIndex() < this.view.filteredImages().length - 1);
   readonly selectedPersonalityFilterIds = computed(() => this.view.selectedPersonalityIds());
@@ -155,6 +203,14 @@ export class GalleryPageComponent implements OnInit {
       return acc;
     }, {}),
   );
+  /** A move made from the viewer (through the move dialog) shows up in its details line. */
+  private readonly syncOpenFileFolder = effect(() => {
+    const move = this.view.lastMove();
+    const file = untracked(this.openFile);
+    if (move && file && move.ids.has(file.id)) {
+      this.openFile.set({ ...file, folder: move.folder || undefined });
+    }
+  });
   private readonly syncImportRequest = effect(() => {
     const requestTick = this.view.importRequestTick();
     if (requestTick === 0) return;
@@ -184,6 +240,8 @@ export class GalleryPageComponent implements OnInit {
         if (imageId) {
           this.view.openDetail(imageId);
         }
+
+        this.showFile(params.get('file'));
       });
   }
 
@@ -278,6 +336,11 @@ export class GalleryPageComponent implements OnInit {
   }
 
   onOpenImage(imageId: string): void {
+    const row = this.view.images().find(image => image.id === imageId);
+    if (row && !isImageAttachment(row)) {
+      this.router.navigate([], { queryParams: { file: imageId }, queryParamsHandling: 'merge' });
+      return;
+    }
     this.view.openDetail(imageId);
     this.router.navigate([], {
       queryParams: { image: imageId },
@@ -345,6 +408,10 @@ export class GalleryPageComponent implements OnInit {
   async onDelete(imageId: string): Promise<void> {
     const image = this.view.images().find(row => row.id === imageId);
     if (!image) return;
+    if (!isImageAttachment(image)) {
+      await this.onDeleteFile(image);
+      return;
+    }
     const confirmed = await this.confirmationService.confirm({
       title: 'Delete image',
       message: `Delete "${image.name}"? This cannot be undone.`,
@@ -365,6 +432,136 @@ export class GalleryPageComponent implements OnInit {
         });
       },
     });
+  }
+
+  // --- file viewer ----------------------------------------------------------------------------
+
+  closeFile(): void {
+    this.router.navigate([], { queryParams: { file: null }, queryParamsHandling: 'merge' });
+  }
+
+  /** Prev / Next through the files in the grid, without stacking a history entry per step. */
+  stepFile(delta: -1 | 1): void {
+    const target = this.filesInView()[this.openFileIndex() + delta];
+    if (target) {
+      this.router.navigate([], { queryParams: { file: target.id }, queryParamsHandling: 'merge', replaceUrl: true });
+    }
+  }
+
+  async onDeleteFile(file: FileAttachment): Promise<void> {
+    const personality = file.personality_id
+      ? this.personalityNames()[file.personality_id] ?? file.personalities?.[0]?.name ?? 'its personality'
+      : null;
+    const confirmed = await this.confirmationService.confirm({
+      title: 'Delete file',
+      message: personality
+        ? `Delete "${file.name}"? It is one of ${personality}'s documents, so ${personality} will no longer be able to search or read it. This cannot be undone.`
+        : `Delete "${file.name}"? Threads it was shared in will no longer be able to open it. This cannot be undone.`,
+      type: 'danger',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+    });
+    if (!confirmed) {
+      return;
+    }
+    this.fileAttachmentService.deleteFileAttachment(file.id).subscribe({
+      next: () => {
+        this.view.removeImage(file.id);
+        this.view.loadFolders();
+        if (this.openFileId() === file.id) {
+          this.closeFile();
+        }
+      },
+      error: async () => {
+        await this.confirmationService.alert({
+          title: 'Delete failed',
+          message: 'Could not delete this file. Please try again.',
+          type: 'danger',
+        });
+      },
+    });
+  }
+
+  onRenameFile(payload: { id: string; name: string }): void {
+    this.galleryService.renameImage(payload.id, payload.name).subscribe({
+      next: updated => {
+        if (this.view.images().some(row => row.id === updated.id)) {
+          this.view.upsertImage(updated);
+        }
+        // The rename response does not carry the thread link the viewer got from the info read.
+        this.openFile.update(file => (file?.id === updated.id ? { ...file, ...updated, chat_id: file.chat_id } : file));
+      },
+      error: async () => {
+        await this.confirmationService.alert({
+          title: 'Rename failed',
+          message: 'Could not rename this file. Please try again.',
+          type: 'danger',
+        });
+      },
+    });
+  }
+
+  /**
+   * Opens (or closes) the viewer for the `file` query parameter. The row already loaded shows at
+   * once; the server's copy follows, so a link to a file in another folder still opens.
+   */
+  private showFile(fileId: string | null): void {
+    const previous = this.openFileId();
+    if (fileId === previous) {
+      return;
+    }
+    this.openFileId.set(fileId);
+    this.openFileError.set(null);
+    if (!fileId) {
+      this.openFile.set(null);
+      this.restoreBrowseScroll();
+      return;
+    }
+    if (previous === null) {
+      this.saveBrowseScroll();
+    }
+    if (this.mode() !== 'gallery') {
+      this.setMode('gallery');
+    }
+    this.openFile.set(this.view.images().find(row => row.id === fileId) ?? null);
+    this.galleryService.getFileInfo(fileId).subscribe({
+      next: info => {
+        if (this.openFileId() === fileId) {
+          this.openFile.set(info);
+        }
+      },
+      error: () => {
+        if (this.openFileId() === fileId && !this.openFile()) {
+          this.openFileError.set('This file could not be found. It may have been deleted.');
+        }
+      },
+    });
+  }
+
+  private saveBrowseScroll(): void {
+    const scroller = scrollParent(this.host.nativeElement);
+    this.browseScrollTop = scroller?.scrollTop ?? null;
+    if (scroller) {
+      scroller.scrollTop = 0;
+    }
+  }
+
+  /** Back in the grid where you left it, once it is shown again. */
+  private restoreBrowseScroll(): void {
+    const top = this.browseScrollTop;
+    this.browseScrollTop = null;
+    if (top === null) {
+      return;
+    }
+    afterNextRender(
+      () => {
+        const scroller = scrollParent(this.host.nativeElement);
+        if (scroller) {
+          scroller.scrollTop = top;
+        }
+      },
+      { injector: this.injector },
+    );
   }
 
   openImportModal(): void {
@@ -512,4 +709,15 @@ export class GalleryPageComponent implements OnInit {
     );
   }
 
+}
+
+/** The nearest ancestor that scrolls (the app's main pane), else the document's own scroller. */
+function scrollParent(element: HTMLElement): HTMLElement | null {
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    const overflowY = getComputedStyle(node).overflowY;
+    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) {
+      return node;
+    }
+  }
+  return (document.scrollingElement as HTMLElement | null) ?? null;
 }

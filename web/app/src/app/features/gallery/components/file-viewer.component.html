@@ -1,0 +1,175 @@
+<section class="file-viewer" aria-labelledby="file-viewer-title">
+  <header class="file-viewer__bar">
+    <button type="button" class="file-viewer__back" (click)="close.emit()" aria-label="Back to the gallery">
+      <ui-arrow-left-icon [size]="16" />
+      <span>Gallery</span>
+    </button>
+
+    <div class="file-viewer__title-block">
+      @if (isRenaming()) {
+        <div class="file-viewer__rename-row">
+          <input
+            type="text"
+            class="file-viewer__rename-input"
+            [value]="renameDraft()"
+            (input)="renameDraft.set($any($event.target).value)"
+            (keydown.enter)="submitRename()"
+            (keydown.escape)="cancelRename()"
+            aria-label="File name"
+            autofocus
+          />
+          <button type="button" class="file-viewer__button file-viewer__button--primary" (click)="submitRename()">Save</button>
+          <button type="button" class="file-viewer__button" (click)="cancelRename()">Cancel</button>
+        </div>
+      } @else {
+        <h2
+          #titleEl
+          id="file-viewer-title"
+          class="file-viewer__title"
+          [uiTooltip]="title()"
+          truncatedOnly
+          [truncationTarget]="titleEl"
+          placement="bottom"
+        >{{ title() }}</h2>
+      }
+      <p class="file-viewer__meta">
+        <span>{{ typeLabel() }}</span>
+        @if (origin()) {
+          <span>{{ origin() }}</span>
+        }
+        <span>
+          {{ folderName() }}
+          <button type="button" class="file-viewer__link" uiTooltip="File this in a folder" (click)="moveToFolder.emit(file().id)">Move to…</button>
+        </span>
+        <span>{{ file().created_at | date: 'medium' }}</span>
+        @if (file().chat_id) {
+          <a class="file-viewer__link" [routerLink]="['/chat', file().chat_id]">Open its thread</a>
+        }
+      </p>
+    </div>
+
+    <div class="file-viewer__actions">
+      @if (!isRenaming()) {
+        <button
+          type="button"
+          class="file-viewer__icon-btn"
+          uiTooltip="Rename this file"
+          placement="bottom"
+          aria-label="Rename file"
+          (click)="startRename()"
+        >
+          <ui-edit-icon [size]="14" />
+        </button>
+      }
+      <button
+        type="button"
+        class="file-viewer__icon-btn"
+        uiTooltip="Download this file"
+        placement="bottom"
+        aria-label="Download file"
+        [disabled]="downloading()"
+        (click)="download()"
+      >
+        <ui-download-icon [size]="14" />
+      </button>
+      <button type="button" class="file-viewer__button file-viewer__button--danger" (click)="delete.emit(file())">Delete</button>
+      <button type="button" class="file-viewer__button" [disabled]="!hasPrev()" (click)="previous.emit()">Prev</button>
+      <button type="button" class="file-viewer__button" [disabled]="!hasNext()" (click)="next.emit()">Next</button>
+    </div>
+  </header>
+
+  @if (state() === 'ready' && (kind() === 'markdown' || kind() === 'csv' || kind() === 'text')) {
+    <div class="file-viewer__toolbar">
+      @if (canRender()) {
+        <div class="file-viewer__segmented" role="group" aria-label="View as">
+          <button type="button" [attr.aria-pressed]="rendered()" (click)="rendered.set(true)">
+            {{ kind() === 'csv' ? 'Table' : 'Formatted' }}
+          </button>
+          <button type="button" [attr.aria-pressed]="!rendered()" (click)="rendered.set(false)">Raw</button>
+        </div>
+      }
+      @if (!showRendered()) {
+        <label class="file-viewer__toggle">
+          <input type="checkbox" [checked]="wrapLines()" (change)="wrapLines.set($any($event.target).checked)" />
+          Wrap lines
+        </label>
+      }
+      @if (decoded()?.truncated) {
+        <span class="file-viewer__notice" role="status">Showing the first 1 MB. Download the file to see all of it.</span>
+      } @else if (kind() === 'markdown' && markdownTooBig()) {
+        <span class="file-viewer__notice" role="status">Too long to format, so it is shown as raw text.</span>
+      } @else if (showRendered() && csv()?.truncated) {
+        <span class="file-viewer__notice" role="status">
+          Showing the first {{ csv()!.rows.length }} rows; the rest are in the raw view and the download.
+        </span>
+      }
+    </div>
+  }
+
+  <div class="file-viewer__body" [class.file-viewer__body--flush]="state() === 'ready' && (kind() === 'pdf' || kind() === 'image')">
+    @switch (state()) {
+      @case ('loading') {
+        <p class="file-viewer__placeholder" role="status">Loading {{ title() }}…</p>
+      }
+      @case ('error') {
+        <div class="file-viewer__placeholder" role="alert">
+          <p>Could not load this file.</p>
+          <button type="button" class="file-viewer__button" (click)="download()">Try downloading it</button>
+        </div>
+      }
+      @case ('ready') {
+        @if (decoded()?.binary) {
+          <div class="file-viewer__placeholder">
+            <p>This file does not look like text, so there is no preview.</p>
+            <button type="button" class="file-viewer__button file-viewer__button--primary" (click)="download()">Download</button>
+          </div>
+        } @else if (kind() === 'pdf') {
+          <iframe class="file-viewer__frame" [src]="safeObjectUrl()" [title]="title()"></iframe>
+        } @else if (kind() === 'image') {
+          <img class="file-viewer__image" [src]="safeObjectUrl()" [alt]="title()" />
+        } @else if (showRendered() && kind() === 'markdown') {
+          <markdown class="file-viewer__markdown prose prose-sm max-w-none dark:prose-invert" [data]="text()"></markdown>
+        } @else if (showRendered() && csv()) {
+          @let table = csv()!;
+          <div class="file-viewer__table-wrap">
+            <table class="file-viewer__table">
+              <thead>
+                <tr>
+                  @for (cell of table.header; track $index) {
+                    <th scope="col">{{ cell }}</th>
+                  }
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of table.rows; track $index) {
+                  <tr>
+                    @for (cell of row; track $index) {
+                      <td>{{ cell }}</td>
+                    }
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else if (text() === '') {
+          <p class="file-viewer__placeholder">This file is empty.</p>
+        } @else {
+          <pre class="file-viewer__text" [class.file-viewer__text--wrap]="wrapLines()" tabindex="0">{{ text() }}</pre>
+        }
+      }
+      @default {
+        <div class="file-viewer__placeholder">
+          <p class="file-viewer__placeholder-badge" aria-hidden="true">{{ typeLabel() }}</p>
+          @if (kind() === 'pdf') {
+            <p>This browser cannot show PDFs inline.</p>
+          } @else {
+            <p>There is no preview for this kind of file.</p>
+          }
+          <button type="button" class="file-viewer__button file-viewer__button--primary" [disabled]="downloading()" (click)="download()">
+            {{ downloading() ? 'Downloading…' : 'Download' }}
+          </button>
+        </div>
+      }
+    }
+  </div>
+</section>

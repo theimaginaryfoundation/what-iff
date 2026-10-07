@@ -7,8 +7,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// Handler serves the image gallery API: listing a user's images and proxying
-// full-resolution or thumbnail bytes from object storage.
+// Handler serves the gallery API: listing a user's images and other files, filing them in folders,
+// and proxying full-resolution or thumbnail image bytes from object storage.
 type Handler struct {
 	ds        Store
 	logger    *zap.Logger
@@ -37,5 +37,6 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	gallery.HandleFunc("/{id}", h.GetImageContent).Methods("GET")
 	gallery.HandleFunc("/{id}", h.DeleteImage).Methods("DELETE")
 	gallery.HandleFunc("/{id}", h.RenameImage).Methods("PATCH")
+	gallery.HandleFunc("/{id}/info", h.GetFileInfo).Methods("GET")
 	gallery.HandleFunc("/{id}/reference", h.ReferenceImage).Methods("POST")
 }

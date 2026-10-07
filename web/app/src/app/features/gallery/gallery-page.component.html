@@ -6,7 +6,8 @@
       @if (mode() === 'gallery') {
         <ui-help-hint label="What is the gallery?" heading="Gallery" guide="expressions">
           Every image made by the image tool in your threads, plus images you import. Any of them can become a
-          personality's portrait or one of its expressions.
+          personality's portrait or one of its expressions. Files from your threads and your personalities' documents
+          are here too: open one to read it, or file it in a folder.
         </ui-help-hint>
       } @else {
         <ui-help-hint label="What are expressions?" heading="Expressions" guide="expressions">
@@ -39,57 +40,95 @@
     <app-personality-media-job-banner />
   }
 
+  @if (mode() === 'gallery' && viewerOpen()) {
+    @if (openFile(); as file) {
+      <app-file-viewer
+        [file]="file"
+        [personalityName]="file.personality_id ? personalityNames()[file.personality_id] ?? null : null"
+        [hasPrev]="hasPrevFile()"
+        [hasNext]="hasNextFile()"
+        (close)="closeFile()"
+        (previous)="stepFile(-1)"
+        (next)="stepFile(1)"
+        (delete)="onDeleteFile($event)"
+        (rename)="onRenameFile($event)"
+        (moveToFolder)="view.requestMove([$event])" />
+    } @else {
+      <div class="gallery-page__file-missing" [attr.role]="openFileError() ? 'alert' : 'status'">
+        <p>{{ openFileError() ?? 'Loading the file…' }}</p>
+        @if (openFileError()) {
+          <button type="button" (click)="closeFile()">Back to the gallery</button>
+        }
+      </div>
+    }
+  }
+
   @if (mode() === 'gallery') {
-    <div class="gallery-page__search-row">
-      <input
-        type="search"
-        aria-label="Search images"
-        [value]="view.filters().query"
-        (input)="onFilterChange({ query: $any($event.target).value })"
-        placeholder="Search names, prompts, threads…"
-      />
-    </div>
-
-    <div class="gallery-page__control-row">
-      <div class="gallery-page__segmented" role="group" aria-label="Filter by source">
-        <button
-          type="button"
-          [attr.aria-pressed]="view.filters().source === 'all'"
-          [class.gallery-page__segmented-button--active]="view.filters().source === 'all'"
-          (click)="setSourceFilter('all')"
-        >All {{ sourceCounts().all }}</button>
-        <button
-          type="button"
-          [attr.aria-pressed]="view.filters().source === 'generated'"
-          [class.gallery-page__segmented-button--active]="view.filters().source === 'generated'"
-          uiTooltip="Made by the image tool in your threads"
-          (click)="setSourceFilter('generated')"
-        >Generated {{ sourceCounts().generated }}</button>
-        <button
-          type="button"
-          [attr.aria-pressed]="view.filters().source === 'uploaded'"
-          [class.gallery-page__segmented-button--active]="view.filters().source === 'uploaded'"
-          uiTooltip="Images you uploaded"
-          (click)="setSourceFilter('uploaded')"
-        >Imported {{ sourceCounts().imported }}</button>
+    <div class="gallery-page__browse" [class.gallery-page__browse--hidden]="viewerOpen()">
+      <div class="gallery-page__search-row">
+        <input
+          type="search"
+          aria-label="Search the gallery"
+          [value]="view.filters().query"
+          (input)="onFilterChange({ query: $any($event.target).value })"
+          placeholder="Search names, prompts, threads…"
+        />
       </div>
 
-      <div class="gallery-page__segmented" role="group" aria-label="Sort images">
-        <button
-          type="button"
-          [uiTooltip]="sortTooltip('created')"
-          [attr.aria-pressed]="sort() === 'created'"
-          [class.gallery-page__segmented-button--active]="sort() === 'created'"
-          (click)="setSort('created')"
-        >Created {{ sort() === 'created' ? (sortDescending() ? '▼' : '▲') : '' }}</button>
-      </div>
+      <div class="gallery-page__control-row">
+        <div class="gallery-page__segmented" role="group" aria-label="Filter by type">
+          @for (option of kindOptions; track option.kind) {
+            <button
+              type="button"
+              [attr.aria-pressed]="view.kind() === option.kind"
+              [class.gallery-page__segmented-button--active]="view.kind() === option.kind"
+              [uiTooltip]="option.tooltip"
+              (click)="view.setKind(option.kind)"
+            >{{ option.label }}</button>
+          }
+        </div>
 
-      <span class="gallery-page__results-summary" role="status">{{ tiles().length }} of {{ sourceCounts().all }} shown</span>
+        <div class="gallery-page__segmented" role="group" aria-label="Filter by source">
+          <button
+            type="button"
+            [attr.aria-pressed]="view.filters().source === 'all'"
+            [class.gallery-page__segmented-button--active]="view.filters().source === 'all'"
+            (click)="setSourceFilter('all')"
+          >All {{ sourceCounts().all }}</button>
+          <button
+            type="button"
+            [attr.aria-pressed]="view.filters().source === 'generated'"
+            [class.gallery-page__segmented-button--active]="view.filters().source === 'generated'"
+            uiTooltip="Made by the assistant in your threads"
+            (click)="setSourceFilter('generated')"
+          >Generated {{ sourceCounts().generated }}</button>
+          <button
+            type="button"
+            [attr.aria-pressed]="view.filters().source === 'uploaded'"
+            [class.gallery-page__segmented-button--active]="view.filters().source === 'uploaded'"
+            uiTooltip="Files and images you uploaded"
+            (click)="setSourceFilter('uploaded')"
+          >Imported {{ sourceCounts().imported }}</button>
+        </div>
+
+        <div class="gallery-page__segmented" role="group" aria-label="Sort images">
+          <button
+            type="button"
+            [uiTooltip]="sortTooltip('created')"
+            [attr.aria-pressed]="sort() === 'created'"
+            [class.gallery-page__segmented-button--active]="sort() === 'created'"
+            (click)="setSort('created')"
+          >Created {{ sort() === 'created' ? (sortDescending() ? '▼' : '▲') : '' }}</button>
+        </div>
+
+        <span class="gallery-page__results-summary" role="status">{{ tiles().length }} of {{ sourceCounts().all }} shown</span>
+      </div>
     </div>
 
-    <app-gallery-folder-tools />
+    <app-gallery-folder-tools [barHidden]="viewerOpen()" />
 
     <app-gallery-grid
+      [class.gallery-page__browse--hidden]="viewerOpen()"
       [tiles]="tiles()"
       [folderTiles]="view.folderTiles()"
       [selectable]="view.selectionMode()"

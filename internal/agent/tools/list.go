@@ -49,7 +49,7 @@ const ListDescription = `List your available resources. Pick a kind:
 - models — chat models you can run (id, name, provider, tool support).
 - personalities — personalities you can switch to or run as a subagent.
 - skills — skills you can attach to a subagent or scheduled job (id, name, description).
-- files — your uploaded files, most-recent first. Filter with file_type (e.g. "image", "pdf"), scope ("personality" docs, "conversation" attachments, or "all") and folder. Images dominate most libraries, so pass file_type to cut through them. Gallery images can be filed in folders (e.g. "charts/oura"); folder lists that folder and everything beneath it, and each row shows its folder.
+- files — your uploaded files, most-recent first. Filter with file_type (e.g. "image", "pdf"), scope ("personality" docs, "conversation" attachments, or "all") and folder. Images dominate most libraries, so pass file_type to cut through them. Files, images and documents alike, can be filed in gallery folders (e.g. "charts/oura"); folder lists that folder and everything beneath it, and each row shows its folder.
 - conversations — your past conversations, including archived imports, that have messages, most-recent first (id, name). Pass an id to find_context (mode="conversation"/"origin") to read one.
 - jobs — your scheduled jobs (id, name, status, next_runtime for still-active ones). Active by default; set include_completed=true to also see finished/failed one-offs.
 - mcp_servers — MCP servers available to the current conversation (attached to it, or linked to a skill that is active now), with discoverable MCP tools and currently loaded tools for this chat.
@@ -161,7 +161,7 @@ type listItem struct {
 	Provider     string   `json:"provider,omitempty"`      // models
 	ToolSupport  *bool    `json:"tool_support,omitempty"`  // models
 	FileType     string   `json:"file_type,omitempty"`     // files
-	Folder       string   `json:"folder,omitempty"`        // files (gallery images that are filed in a folder)
+	Folder       string   `json:"folder,omitempty"`        // files (gallery files that are filed in a folder)
 	Status       string   `json:"status,omitempty"`        // jobs, mcp_servers
 	StatusDetail string   `json:"status_detail,omitempty"` // mcp_servers
 	MCPTools     []string `json:"tools,omitempty"`         // mcp_servers

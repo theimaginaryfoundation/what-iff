@@ -103,25 +103,55 @@ func TestFolderPrefixTreatsPercentAndUnderscoreAsLiterals(t *testing.T) {
 	assert.Empty(t, f.names(t, models.FileAttachmentFilters{FolderPrefix: strp("c_arts")}))
 }
 
-func TestListImageFoldersCountsImagesDirectlyInEachFolder(t *testing.T) {
+func TestListGalleryFoldersCountsFilesOfTheKindDirectlyInEachFolder(t *testing.T) {
 	f := newFolderFixture(t)
+	f.add(t, "report.pdf", "application/pdf", "charts")
+	f.add(t, "plan.md", "text/markdown", "docs")
+	ctx := context.Background()
 
-	got, err := f.ds.ListImageFolders(context.Background(), f.user)
+	images, err := f.ds.ListGalleryFolders(ctx, f.user, models.GalleryKindImages)
 	require.NoError(t, err)
-
 	assert.Equal(t, []models.FolderCount{
 		{Path: "art", Count: 1},
 		{Path: "charts", Count: 1},
 		{Path: "charts-old", Count: 1},
 		{Path: "charts/oura", Count: 2},
-	}, got, "sorted by path; the top level and non-images are not counted")
+	}, images, "sorted by path; the top level and other files are not counted")
+
+	files, err := f.ds.ListGalleryFolders(ctx, f.user, models.GalleryKindFiles)
+	require.NoError(t, err)
+	assert.Equal(t, []models.FolderCount{
+		{Path: "charts", Count: 1},
+		{Path: "docs", Count: 1},
+	}, files, "only folders holding a non-image file, counting only those")
+
+	all, err := f.ds.ListGalleryFolders(ctx, f.user, models.GalleryKindAll)
+	require.NoError(t, err)
+	assert.Equal(t, []models.FolderCount{
+		{Path: "art", Count: 1},
+		{Path: "charts", Count: 2},
+		{Path: "charts-old", Count: 1},
+		{Path: "charts/oura", Count: 2},
+		{Path: "docs", Count: 1},
+	}, all, "images and other files share one folder tree")
+}
+
+func TestListFileAttachmentsByGalleryKind(t *testing.T) {
+	f := newFolderFixture(t)
+	f.add(t, "report.pdf", "application/pdf", "charts")
+
+	assert.ElementsMatch(t, []string{"notes.txt", "report.pdf"}, f.names(t, models.FileAttachmentFilters{Kind: models.GalleryKindFiles}))
+	assert.Len(t, f.names(t, models.FileAttachmentFilters{Kind: models.GalleryKindImages}), 6)
+	assert.Len(t, f.names(t, models.FileAttachmentFilters{Kind: models.GalleryKindAll}), 8)
+	assert.ElementsMatch(t, []string{"sleep.png"}, f.names(t, models.FileAttachmentFilters{Kind: models.GalleryKindImages, Folder: strp("charts")}),
+		"kind combines with the folder filter")
 }
 
 func TestFoldersAreScopedToTheirOwner(t *testing.T) {
 	f := newFolderFixture(t)
 	other := createFATestUser(t, f.ds)
 
-	folders, err := f.ds.ListImageFolders(context.Background(), other)
+	folders, err := f.ds.ListGalleryFolders(context.Background(), other, models.GalleryKindAll)
 	require.NoError(t, err)
 	assert.Empty(t, folders)
 
@@ -130,7 +160,7 @@ func TestFoldersAreScopedToTheirOwner(t *testing.T) {
 	assert.Zero(t, moved, "someone else's image is not moved")
 	assert.Equal(t, "charts", f.folderOf(t, "sleep.png"))
 
-	moved, err = f.ds.MoveImageFolder(context.Background(), other, "charts", "mine")
+	moved, err = f.ds.MoveGalleryFolder(context.Background(), other, "charts", "mine")
 	require.NoError(t, err)
 	assert.Zero(t, moved)
 	assert.Equal(t, "charts", f.folderOf(t, "sleep.png"))
@@ -153,53 +183,55 @@ func TestMoveFileAttachmentsToFolder(t *testing.T) {
 
 	moved, err = f.ds.MoveFileAttachmentsToFolder(ctx, f.user, []uuid.UUID{f.ids["notes.txt"]}, "charts")
 	require.NoError(t, err)
-	assert.Zero(t, moved, "only gallery images are moved")
-	assert.Equal(t, "", f.folderOf(t, "notes.txt"))
+	assert.Equal(t, 1, moved, "documents are filed like images")
+	assert.Equal(t, "charts", f.folderOf(t, "notes.txt"))
 
 	moved, err = f.ds.MoveFileAttachmentsToFolder(ctx, f.user, nil, "x")
 	require.NoError(t, err)
 	assert.Zero(t, moved)
 }
 
-func TestMoveImageFolderRenamesItAndEverythingBeneath(t *testing.T) {
+func TestMoveGalleryFolderRenamesItAndEverythingBeneath(t *testing.T) {
 	f := newFolderFixture(t)
+	f.add(t, "report.pdf", "application/pdf", "charts/oura")
 
-	moved, err := f.ds.MoveImageFolder(context.Background(), f.user, "charts", "archive/charts")
+	moved, err := f.ds.MoveGalleryFolder(context.Background(), f.user, "charts", "archive/charts")
 
 	require.NoError(t, err)
-	assert.Equal(t, 3, moved)
+	assert.Equal(t, 4, moved)
+	assert.Equal(t, "archive/charts/oura", f.folderOf(t, "report.pdf"), "a document rides along with the images")
 	assert.Equal(t, "archive/charts", f.folderOf(t, "sleep.png"))
 	assert.Equal(t, "archive/charts/oura", f.folderOf(t, "hrv.png"))
 	assert.Equal(t, "archive/charts/oura", f.folderOf(t, "readiness.png"))
 	assert.Equal(t, "charts-old", f.folderOf(t, "old.png"), "a sibling that shares a prefix is left alone")
 }
 
-func TestMoveImageFolderToTheTopLevelAndIntoAnExistingFolder(t *testing.T) {
+func TestMoveGalleryFolderToTheTopLevelAndIntoAnExistingFolder(t *testing.T) {
 	f := newFolderFixture(t)
 	ctx := context.Background()
 
-	moved, err := f.ds.MoveImageFolder(ctx, f.user, "charts/oura", "")
+	moved, err := f.ds.MoveGalleryFolder(ctx, f.user, "charts/oura", "")
 	require.NoError(t, err)
 	assert.Equal(t, 2, moved)
 	assert.Equal(t, "", f.folderOf(t, "hrv.png"), "its contents move up to the top level")
 
-	moved, err = f.ds.MoveImageFolder(ctx, f.user, "art", "charts")
+	moved, err = f.ds.MoveGalleryFolder(ctx, f.user, "art", "charts")
 	require.NoError(t, err)
 	assert.Equal(t, 1, moved)
 	assert.Equal(t, "charts", f.folderOf(t, "art.png"), "moving onto an existing folder merges them")
 	assert.Equal(t, "charts", f.folderOf(t, "sleep.png"))
 }
 
-func TestMoveImageFolderRefusesImpossibleMoves(t *testing.T) {
+func TestMoveGalleryFolderRefusesImpossibleMoves(t *testing.T) {
 	f := newFolderFixture(t)
 	ctx := context.Background()
 
-	_, err := f.ds.MoveImageFolder(ctx, f.user, "charts", "charts/oura/deeper")
+	_, err := f.ds.MoveGalleryFolder(ctx, f.user, "charts", "charts/oura/deeper")
 	assert.ErrorIs(t, err, ErrFolderIntoItself)
-	_, err = f.ds.MoveImageFolder(ctx, f.user, "", "anywhere")
+	_, err = f.ds.MoveGalleryFolder(ctx, f.user, "", "anywhere")
 	assert.ErrorIs(t, err, models.ErrInvalidFolder, "the top level cannot be moved")
 
-	moved, err := f.ds.MoveImageFolder(ctx, f.user, "charts", "charts")
+	moved, err := f.ds.MoveGalleryFolder(ctx, f.user, "charts", "charts")
 	require.NoError(t, err)
 	assert.Zero(t, moved, "moving a folder onto itself is a no-op")
 	assert.Equal(t, "charts/oura", f.folderOf(t, "hrv.png"))
@@ -213,7 +245,7 @@ func TestReferenceCopiesNeverCarryAFolderGetCountedOrBlockAMove(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "", ref.Folder, "a chat-reuse copy starts at the top level")
 
-	folders, err := f.ds.ListImageFolders(ctx, f.user)
+	folders, err := f.ds.ListGalleryFolders(ctx, f.user, models.GalleryKindImages)
 	require.NoError(t, err)
 	for _, fc := range folders {
 		if fc.Path == "charts" {

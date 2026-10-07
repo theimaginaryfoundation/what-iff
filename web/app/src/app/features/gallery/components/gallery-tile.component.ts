@@ -31,6 +31,11 @@ export class GalleryTileComponent {
   readonly delete = output<string>();
   readonly assign = output<string>();
 
+  /** What to call this tile in labels. */
+  noun(): string {
+    return this.tile().isFile ? 'file' : 'image';
+  }
+
   onDragStart(event: DragEvent): void {
     // What is moved is decided by the gallery view (a selected image takes the whole selection);
     // the data set here is only what browsers need to start a drag.

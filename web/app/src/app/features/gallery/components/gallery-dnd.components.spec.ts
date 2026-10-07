@@ -44,6 +44,8 @@ const tile: GalleryTileVm = {
   source: 'uploaded',
   sourceLabel: 'Imported',
   folder: '',
+  isFile: false,
+  badge: '',
   thumbnailUrl: '/thumb',
   fullUrl: '/full',
 };

@@ -49,6 +49,24 @@ test('offers the source and sort segments in gallery mode', async ({ galleryPage
   await expect(galleryPage.resultsSummary).toBeVisible();
 });
 
+test('filters by type, with the empty state saying what was looked for', async ({ galleryPage, userWithPersonality }) => {
+  await galleryPage.navigateTo();
+
+  for (const type of ['All', 'Images', 'Files'] as const) {
+    await expect(galleryPage.typeSegment(type)).toBeVisible();
+  }
+  await expect(galleryPage.typeSegment('All')).toHaveAttribute('aria-pressed', 'true');
+
+  // Narrowed by a name nothing has, so the empty state shows on a shared account too.
+  await galleryPage.search(`no-such-file-${shortId()}`);
+  await galleryPage.filterByType('Files');
+  await expect(galleryPage.typeSegment('Files')).toHaveAttribute('aria-pressed', 'true');
+  await expect(galleryPage.emptyMessage).toHaveText(/^No files match/);
+
+  await galleryPage.filterByType('Images');
+  await expect(galleryPage.emptyMessage).toHaveText('No images match these filters yet.');
+});
+
 test('a search that matches nothing shows the empty state', async ({ galleryPage, userWithPersonality }) => {
   await galleryPage.navigateTo();
 

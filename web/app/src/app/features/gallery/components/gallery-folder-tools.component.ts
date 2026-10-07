@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import { GalleryViewService } from '../../../core/services/gallery-view.service';
@@ -21,6 +21,8 @@ import { GalleryMoveModalComponent } from './gallery-move-modal.component';
 })
 export class GalleryFolderToolsComponent {
   readonly view = inject(GalleryViewService);
+  /** Hide the bar (the file viewer has the page) while keeping the move dialogs usable. */
+  readonly barHidden = input(false);
 
   readonly creating = signal(false);
   readonly newName = signal('');
