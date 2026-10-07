@@ -290,9 +290,9 @@ func (d *Datastore) UpdateDiscordBinding(ctx context.Context, userID, id uuid.UU
 	return d.patchDiscordBinding(ctx, id, p)
 }
 
-// WithdrawDiscordBindingAcknowledgement clears a binding's "unrestricted is fine" acknowledgement.
-// The relay calls it when it sees the bound thread restricted again, so raising the thread's Memory
-// access later cannot silently re-open the binding.
+// WithdrawDiscordBindingAcknowledgement clears a binding's "not sandboxed is fine" acknowledgement.
+// The relay calls it when it sees the bound thread sandboxed again, so switching the sandbox off
+// later cannot silently re-open the binding.
 func (d *Datastore) WithdrawDiscordBindingAcknowledgement(ctx context.Context, id uuid.UUID) error {
 	off := false
 	_, err := d.patchDiscordBinding(ctx, id, models.DiscordBindingPatch{AllowUnrestricted: &off})
@@ -628,10 +628,10 @@ func (d *Datastore) ListDiscordPendingPosts(ctx context.Context, userID, chatID 
 }
 
 // IsExternalRelayChat reports whether chatID is one of the user's Discord relay threads: bound to
-// a Discord channel by one of the user's bots, whatever its memory limit. People outside the
+// a Discord channel by one of the user's bots, sandboxed or not. People outside the
 // account speak there, so memories written from it are stored with external provenance
-// (models.MemoryProvenanceExternal). The limit decides what such a thread may read, not who is
-// talking in it, so an owner who widened a relay thread still gets its memories marked.
+// (models.MemoryProvenanceExternal). The sandbox decides what such a thread may read, not who is
+// talking in it, so an owner who unsandboxed a relay thread still gets its memories marked.
 func (d *Datastore) IsExternalRelayChat(ctx context.Context, userID, chatID uuid.UUID) (bool, error) {
 	return externalRelayChat(ctx, d.dbClient, userID, chatID)
 }

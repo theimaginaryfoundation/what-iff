@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
@@ -214,5 +215,28 @@ func TestApplyMemoryCompactionPlan_LinkWithTooFewMembersIsSkipped(t *testing.T) 
 	require.NotPanics(t, func() {
 		a.applyMemoryCompactionPlan(context.Background(), uuid.New(), uuid.New(), uuid.New(), plan, nil, false)
 	})
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// A fold's new-member origin must reach the datastore: a brand-new memory extracted in a Discord
+// relay thread is written as external, with its speaker, by the real apply path.
+func TestApplyMemoryCompactionPlan_NewFoldCarriesTheNewMembersOrigin(t *testing.T) {
+	t.Parallel()
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+	a := newTestAgent(ds)
+	origin := models.MemoryOrigin{Provenance: models.MemoryProvenanceExternal, Speaker: "alice"}
+	plan := memoryCompactionPlan{Folds: []memoryFoldPlan{{
+		Group:     models.MemoryMergeGroupProposal{CanonicalContent: "alice likes tea", Scope: "Chat", Confidence: models.MemoryConfidenceHigh},
+		NewOrigin: &origin,
+	}}}
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO `memories` .*`provenance`.*`source_speaker`").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+			"external", "alice", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.MatchExpectationsInOrder(false)
+	a.applyMemoryCompactionPlan(context.Background(), uuid.New(), uuid.New(), uuid.New(), plan, nil, false)
+	// The insert is what matters here; whatever bookkeeping follows is not mocked.
 	require.NoError(t, mock.ExpectationsWereMet())
 }

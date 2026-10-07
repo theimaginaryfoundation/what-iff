@@ -172,9 +172,9 @@ func TestASandboxedThreadWithNoChannelOfItsOwnHasNoPostTool(t *testing.T) {
 	assert.Empty(t, store.pending)
 }
 
-// An unrestricted chat (the owner's own) keeps the persona-wide reach: that is the
+// An ordinary chat (the owner's own) keeps the persona-wide reach: that is the
 // feature. Pinned so a change to it is deliberate.
-func TestAnUnrestrictedChatStillReachesEveryChannelOfThePersona(t *testing.T) {
+func TestAnOrdinaryChatStillReachesEveryChannelOfThePersona(t *testing.T) {
 	chat := testChat()
 	a, b := binding("Home", "general"), binding("Work", "ops")
 	store := &fakeDiscordToolStore{bindings: []models.DiscordBinding{a, b}}
@@ -195,10 +195,10 @@ func TestDeveloperContextOmitsChannelsWhenTheToolIsOff(t *testing.T) {
 	assert.True(t, discordToolAvailable(&models.Chat{ToolsEnabled: true}))
 }
 
-// A relay thread is driven by people outside the account even when the owner widened it, so it
-// reaches only its own channel, like a restricted chat.
-func TestABoundThreadReachesOnlyItsOwnChannelWhateverItsLimit(t *testing.T) {
-	chat := testChat() // unrestricted
+// A relay thread is driven by people outside the account even when the owner switched the sandbox off, so it
+// reaches only its own channel, like a sandboxed chat.
+func TestABoundThreadReachesOnlyItsOwnChannelSandboxedOrNot(t *testing.T) {
+	chat := testChat() // not sandboxed
 	own, other := binding("Home", "general"), binding("Work", "secret-ops")
 	own.ChatID = chat.ID
 	store := &fakeDiscordToolStore{bindings: []models.DiscordBinding{own, other}}

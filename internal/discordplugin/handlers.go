@@ -426,8 +426,8 @@ type createBindingRequest struct {
 	InboundEnabled *bool      `json:"inbound_enabled"`
 	AllowUserIDs   []string   `json:"allow_user_ids"`
 	DenyUserIDs    []string   `json:"deny_user_ids"`
-	// AllowUnrestricted acknowledges binding an existing thread whose Memory access
-	// is not restricted. Without it such a thread is refused with a 400.
+	// AllowUnrestricted acknowledges binding an existing thread that is not sandboxed.
+	// Without it such a thread is refused with a 400.
 	AllowUnrestricted bool `json:"allow_unrestricted"`
 }
 
@@ -528,7 +528,7 @@ type updateBindingRequest struct {
 	ChannelName    *string    `json:"channel_name"`
 	GuildName      *string    `json:"guild_name"`
 	// AllowUnrestricted acknowledges (true) or withdraws (false) the owner's
-	// acknowledgement that the thread reads more than public memories. Repointing to
+	// acknowledgement that the thread is not sandboxed. Repointing to
 	// such a thread requires it; sending it alone acknowledges the current thread.
 	AllowUnrestricted *bool `json:"allow_unrestricted"`
 	// Reactivate clears a broken status (after fixing the bot's access).
@@ -581,7 +581,7 @@ func (h *Handler) updateBinding(w http.ResponseWriter, r *http.Request) {
 		}
 		record := false
 		if *req.AllowUnrestricted {
-			// Only recorded while the thread really is wider than public.
+			// Only recorded while the thread really is not sandboxed.
 			chat, err := h.Store.GetChat(r.Context(), userID, current.ChatID)
 			if err != nil {
 				h.fail(w, err, "Failed to load the thread")

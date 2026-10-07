@@ -26,13 +26,13 @@ type Store interface {
 	FinishOutboundDiscordLink(ctx context.Context, linkID uuid.UUID, postedIDs []string, postErr error) error
 	ConsumeDiscordPendingPosts(ctx context.Context, userID, chatID uuid.UUID) ([]uuid.UUID, error)
 	SetDiscordBindingStatus(ctx context.Context, id uuid.UUID, status models.DiscordBindingStatus, lastError string) error
-	// WithdrawDiscordBindingAcknowledgement clears the unrestricted acknowledgement on a binding.
+	// WithdrawDiscordBindingAcknowledgement clears the "not sandboxed" acknowledgement on a binding.
 	WithdrawDiscordBindingAcknowledgement(ctx context.Context, id uuid.UUID) error
 	SetDiscordBotStatus(ctx context.Context, id uuid.UUID, status models.DiscordBotStatus, lastError string) error
 	TouchDiscordBinding(ctx context.Context, id uuid.UUID) error
 	GetChatMessage(ctx context.Context, userID, id uuid.UUID) (*models.ChatMessage, error)
 	GetJob(ctx context.Context, userID, id uuid.UUID) (*models.Job, error)
-	// GetChat reads the bound thread, for the restricted-thread check on every tag.
+	// GetChat reads the bound thread, for the sandbox check on every tag.
 	GetChat(ctx context.Context, userID, id uuid.UUID) (*models.Chat, error)
 }
 
@@ -192,10 +192,10 @@ func (s *Service) busyNoticeDue(bindingID uuid.UUID) bool {
 }
 
 // threadOpen is the relay's fail-closed check that the bound thread may be driven
-// from Discord: it must be limited to public memories
+// from Discord: it must be sandboxed
 // (RelayThreadOpenWithoutAcknowledgement), or the owner must have acknowledged the
-// binding. The chat's CURRENT limit is read every time, since it can be raised in
-// the app after binding. Any doubt (thread missing, lookup failing) means closed.
+// binding. The chat's CURRENT sandbox flag is read every time, since it can be switched
+// off in the app after binding. Any doubt (thread missing, lookup failing) means closed.
 // When it closes on an unacknowledged thread, the reason is recorded on the binding
 // so the app can show it; nothing is posted to Discord.
 func (s *Service) threadOpen(ctx context.Context, t models.DiscordBindingTarget) bool {
@@ -209,8 +209,8 @@ func (s *Service) threadOpen(ctx context.Context, t models.DiscordBindingTarget)
 	if RelayThreadOpenWithoutAcknowledgement(chat) {
 		s.clearUnrestrictedWarning(ctx, b)
 		if b.AllowUnrestricted {
-			// The acknowledgement only means something while the thread is wider than public.
-			// Withdraw it now, so widening the thread's Memory access later pauses the binding
+			// The acknowledgement only means something while the thread is not sandboxed.
+			// Withdraw it now, so switching the sandbox off later pauses the binding
 			// instead of silently re-opening it.
 			if err := s.Store.WithdrawDiscordBindingAcknowledgement(ctx, b.ID); err != nil {
 				s.Logger.Warn("discord relay: could not withdraw a stale acknowledgement",
@@ -223,7 +223,7 @@ func (s *Service) threadOpen(ctx context.Context, t models.DiscordBindingTarget)
 		s.clearUnrestrictedWarning(ctx, b)
 		return true
 	}
-	s.Logger.Warn("discord relay: bound thread is wider than public and the binding is not acknowledged; dropping tag",
+	s.Logger.Warn("discord relay: bound thread is not sandboxed and the binding is not acknowledged; dropping tag",
 		zap.String("binding_id", b.ID.String()), zap.String("chat_id", b.ChatID.String()))
 	if b.LastError == nil || *b.LastError != UnrestrictedWarning {
 		_ = s.Store.SetDiscordBindingStatus(ctx, b.ID, b.Status, UnrestrictedWarning)

@@ -417,7 +417,7 @@ func (a *Agent) applyMemoryCompactionPlan(
 			activePersonalityID,
 			fold.SourceMembers,
 			compactionEventID,
-			mergeOptions(sandboxed)...,
+			foldMemberOptions(fold, sandboxed)...,
 		); err != nil {
 			a.logger.Error("failed to persist memory merge group", zap.Error(err))
 		}

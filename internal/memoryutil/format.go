@@ -49,7 +49,7 @@ func FormatMemoryForContext(mem *models.Memory) string {
 }
 
 // ExternalProvenanceNote is the metadata note an external memory carries in model context: it
-// came from someone outside the account, in a public Discord thread, and is unverified. The
+// came from someone outside the account, in a Discord thread, and is unverified. The
 // speaker is the stored display name (already cleaned of the characters that delimit the
 // metadata block), or nil when unknown.
 func ExternalProvenanceNote(speaker *string) string {
@@ -58,7 +58,7 @@ func ExternalProvenanceNote(speaker *string) string {
 		name = models.CleanSpeakerName(*speaker)
 	}
 	if name == "" {
-		return "source=external(unverified; said by someone in a public Discord thread, not by the user)"
+		return "source=external(unverified; said by someone in a Discord thread, not by the user)"
 	}
 	return fmt.Sprintf("source=external(unverified; said by %s on Discord, not by the user)", name)
 }

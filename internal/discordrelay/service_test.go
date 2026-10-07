@@ -30,9 +30,9 @@ type fakeStore struct {
 	botStatus  map[uuid.UUID]models.DiscordBotStatus
 	bindStatus map[uuid.UUID]models.DiscordBindingStatus
 	bindError  map[uuid.UUID]string
-	chats      map[uuid.UUID]*models.Chat // by chat id; absent = a restricted (public-only) thread
+	chats      map[uuid.UUID]*models.Chat // by chat id; absent = a sandboxed thread
 	getChatErr error
-	withdrawn  []uuid.UUID // bindings whose unrestricted acknowledgement was withdrawn
+	withdrawn  []uuid.UUID // bindings whose "not sandboxed" acknowledgement was withdrawn
 }
 
 func newFakeStore(owner uuid.UUID) *fakeStore {

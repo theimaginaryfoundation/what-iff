@@ -84,12 +84,12 @@ func (DiscordBinding) Fields() []ent.Field {
 		// Discord user ids. Empty allow list = anyone not denied; deny always wins.
 		field.JSON("allow_user_ids", []string{}).Default([]string{}),
 		field.JSON("deny_user_ids", []string{}).Default([]string{}),
-		// The owner's explicit acknowledgement that this relay thread is NOT a
-		// restricted chat (its Memory access is "sensitive"), so anyone allowed to tag
-		// the bot can use its full memory, scratchpad and tools. Default false: the relay
-		// answers only restricted threads unless this is set (fail closed), and it is
-		// only ever recorded while the thread is unrestricted, so raising a restricted
-		// thread's Memory access later pauses the binding instead of silently widening it.
+		// The owner's explicit acknowledgement that this relay thread is NOT sandboxed,
+		// so anyone allowed to tag the bot can use its full memory, scratchpad and tools.
+		// Default false: the relay answers only sandboxed threads unless this is set (fail
+		// closed), and it is only ever recorded while the thread is not sandboxed, so
+		// switching a thread's sandbox off later pauses the binding instead of silently
+		// widening it.
 		field.Bool("allow_unrestricted").Default(false),
 		field.Enum("status").Values("active", "broken").Default("active"),
 		field.String("last_error").Optional().Nillable(),

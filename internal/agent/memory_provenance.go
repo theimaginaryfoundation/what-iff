@@ -112,7 +112,7 @@ func memoryExtractionDeveloperNote(chatCtx *chatContext) string {
 
 var relayMemoryExtractionSchema = provider.GenerateSchema[models.ExtractedRelayMemoryResponse]()
 
-// memoryExtractionSchemaFor picks the extraction schema: the speaker variant in a public Discord
+// memoryExtractionSchemaFor picks the extraction schema: the speaker variant in a Discord
 // relay thread, the default otherwise.
 func memoryExtractionSchemaFor(chatCtx *chatContext) map[string]interface{} {
 	if chatCtx.externalMemoryChat() {

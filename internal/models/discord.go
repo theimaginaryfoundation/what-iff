@@ -85,8 +85,7 @@ type DiscordBinding struct {
 	AllowUserIDs   []string  `json:"allow_user_ids"`
 	DenyUserIDs    []string  `json:"deny_user_ids"`
 	// AllowUnrestricted is the owner's stored acknowledgement that the bound thread
-	// reads more than public memories (its Memory access is personal or sensitive).
-	// Without it the relay answers only threads limited to public memories.
+	// is not sandboxed. Without it the relay answers only sandboxed threads.
 	AllowUnrestricted bool `json:"allow_unrestricted"`
 	// ChatSandboxed is whether the bound thread is sandboxed right now.
 	// Computed by the API on read, never stored; nil when the thread could not be loaded.
@@ -108,7 +107,7 @@ type DiscordBindingCreate struct {
 	InboundEnabled bool
 	AllowUserIDs   []string
 	DenyUserIDs    []string
-	// AllowUnrestricted records the acknowledgement for a thread wider than public.
+	// AllowUnrestricted records the acknowledgement for a thread that is not sandboxed.
 	AllowUnrestricted bool
 }
 

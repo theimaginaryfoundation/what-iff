@@ -85,7 +85,7 @@ func with(m InboundMessage, f func(*InboundMessage)) InboundMessage {
 
 // The owner's stated design: an empty allow list means anyone in the channel can
 // talk to the persona (deny still wins). That is intentional, so what protects the
-// owner's account is the bound thread being restricted, not the allow list. Pinned
+// owner's account is the bound thread being sandboxed, not the allow list. Pinned
 // so a change to these semantics is deliberate; see also the UI note on the binding form.
 func TestEmptyAllowListMeansAnyoneNotDenied(t *testing.T) {
 	for _, allow := range [][]string{nil, {}} {

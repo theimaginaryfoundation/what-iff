@@ -49,6 +49,6 @@ export class MemoryProvenanceBadgeComponent {
   readonly label = computed(() => (this.speaker() ? `External · ${this.speaker()}` : 'External'));
   readonly hint = computed(() => {
     const who = this.speaker() ? `${this.speaker()}, ` : 'someone ';
-    return `Learned from ${who}in a public Discord thread, not from you. Unverified: the persona treats it that way too.`;
+    return `Learned from ${who}in a Discord thread, not from you. Unverified: the persona treats it that way too.`;
   });
 }

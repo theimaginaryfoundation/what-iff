@@ -84,8 +84,8 @@ export class MemoriesListTabComponent implements OnInit {
   readonly globalScopeLabel = GLOBAL_SCOPE_LABEL;
   readonly provenanceFilterHint = computed(() =>
     this.filters().provenance === 'external'
-      ? 'Memories learned from other people in public Discord threads (unverified)'
-      : 'Filter by where memories came from: yours, or learned from other people in public Discord threads',
+      ? 'Memories learned from other people in Discord threads (unverified)'
+      : 'Filter by where memories came from: yours, or learned from other people in Discord threads',
   );
   readonly deleting = this.view.deleting;
   readonly mutating = this.view.mutating;
