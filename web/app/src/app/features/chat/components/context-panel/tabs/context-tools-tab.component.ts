@@ -3,7 +3,7 @@ import { ChangeDetectionStrategy, Component, OnChanges, SimpleChanges, inject, i
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
-import { Chat } from '../../../../../core/models/chat.model';
+import { Chat, isSandboxed } from '../../../../../core/models/chat.model';
 import { MCPServer } from '../../../../../core/models/mcp-server.model';
 import { ToolCall } from '../../../../../core/models/toolcall.model';
 import { MCPServerService } from '../../../../../core/services/mcp-server.service';
@@ -51,21 +51,25 @@ type ToolContextTab = 'available' | 'history';
           <div class="label-row">
             <span class="label">Tools for this thread</span>
             <ui-help-hint label="What are tools?" heading="Tools" align="end">
-              Actions the personality can take while replying, such as searching the web or saving a memory.
-              Unticking a tool turns it off for this thread only.
+              Actions the personality can take while replying, such as searching the web or saving a memory. Unticking a tool turns it off
+              for this thread only. A sandboxed thread starts with its heavier tools off and can never use the ones marked as unavailable.
             </ui-help-hint>
           </div>
           <ul class="list">
             @for (tool of tools(); track tool.name) {
               <li>
-                <label class="tool-item" [uiTooltip]="tool.guide ?? ''" placement="left">
+                <label class="tool-item" [class.tool-item--locked]="isToolLocked(tool)" [uiTooltip]="tool.guide ?? ''" placement="left">
                   <input
                     type="checkbox"
-                    [checked]="isToolEnabled(tool.name)"
+                    [checked]="isToolEnabled(tool.name) && !isToolLocked(tool)"
+                    [disabled]="isToolLocked(tool)"
                     (change)="toggleTool(tool.name, $any($event.target).checked)"
                   />
                   <span>{{ friendlyToolName(tool.name) }}</span>
                   <small>{{ tool.description }}</small>
+                  @if (isToolLocked(tool)) {
+                    <small class="tool-item__locked" data-testid="tool-locked">Not available in a sandboxed thread.</small>
+                  }
                 </label>
               </li>
             }
@@ -93,39 +97,39 @@ type ToolContextTab = 'available' | 'history';
           <!-- preventDefault keeps a click on the hint from also toggling the details. -->
           <span class="summary-hint" (click)="$event.preventDefault()">
             <ui-help-hint label="What are MCP servers?" heading="MCP servers" align="end">
-              External services that give the personality extra tools. Attach one to use its tools in this thread; set
-              servers up under Manage integrations.
+              External services that give the personality extra tools. Attach one to use its tools in this thread; set servers up under
+              Manage integrations.
             </ui-help-hint>
           </span>
         </summary>
-      @if (mcpLoading()) {
-        <p class="state">Loading MCP servers…</p>
-      } @else {
-        <div class="mcp-grid">
-          <div>
-            <h4>Connected</h4>
-            <ul>
-              @for (server of connected(); track server.id) {
-                <li>
-                  {{ server.name }}
-                  <button type="button" uiTooltip="Stop using this server's tools in this thread" (click)="detach(server)">Detach</button>
-                </li>
-              }
-            </ul>
+        @if (mcpLoading()) {
+          <p class="state">Loading MCP servers…</p>
+        } @else {
+          <div class="mcp-grid">
+            <div>
+              <h4>Connected</h4>
+              <ul>
+                @for (server of connected(); track server.id) {
+                  <li>
+                    {{ server.name }}
+                    <button type="button" uiTooltip="Stop using this server's tools in this thread" (click)="detach(server)">Detach</button>
+                  </li>
+                }
+              </ul>
+            </div>
+            <div>
+              <h4>Available</h4>
+              <ul>
+                @for (server of available(); track server.id) {
+                  <li>
+                    {{ server.name }}
+                    <button type="button" uiTooltip="Use this server's tools in this thread" (click)="attach(server)">Attach</button>
+                  </li>
+                }
+              </ul>
+            </div>
           </div>
-          <div>
-            <h4>Available</h4>
-            <ul>
-              @for (server of available(); track server.id) {
-                <li>
-                  {{ server.name }}
-                  <button type="button" uiTooltip="Use this server's tools in this thread" (click)="attach(server)">Attach</button>
-                </li>
-              }
-            </ul>
-          </div>
-        </div>
-      }
+        }
       </details>
       @if (error(); as error) {
         <p class="error" role="alert">{{ error }}</p>
@@ -133,186 +137,196 @@ type ToolContextTab = 'available' | 'history';
       <button type="button" class="link" (click)="openIntegrations()">Manage integrations</button>
     </section>
   `,
-  styles: [`
-    .tab-body {
-      display: grid;
-      gap: 0.75rem;
-    }
+  styles: [
+    `
+      .tab-body {
+        display: grid;
+        gap: 0.75rem;
+      }
 
-    h3 {
-      margin: 0;
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--color-text-muted);
-    }
+      h3 {
+        margin: 0;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--color-text-muted);
+      }
 
-    .context-tabs {
-      border-radius: 0.375rem;
-      display: flex;
-      overflow: hidden;
-    }
+      .context-tabs {
+        border-radius: 0.375rem;
+        display: flex;
+        overflow: hidden;
+      }
 
-    .context-tabs button {
-      background: transparent;
-      border: 0;
-      color: var(--color-text-muted);
-      cursor: pointer;
-      flex: 1;
-      font-size: 0.625rem;
-      font-weight: 700;
-      padding: 0.3125rem 0;
-    }
+      .context-tabs button {
+        background: transparent;
+        border: 0;
+        color: var(--color-text-muted);
+        cursor: pointer;
+        flex: 1;
+        font-size: 0.625rem;
+        font-weight: 700;
+        padding: 0.3125rem 0;
+      }
 
-    .context-tabs .context-tabs__button--active {
-      background: color-mix(in srgb, var(--color-accent) 14%, transparent);
-      color: var(--color-accent);
-    }
+      .context-tabs .context-tabs__button--active {
+        background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+        color: var(--color-accent);
+      }
 
-    h4 {
-      margin: 0 0 0.35rem;
-      font-size: 0.8rem;
-      color: var(--color-text-muted);
-      text-transform: uppercase;
-    }
+      h4 {
+        margin: 0 0 0.35rem;
+        font-size: 0.8rem;
+        color: var(--color-text-muted);
+        text-transform: uppercase;
+      }
 
-    .list,
-    .mcp-grid ul {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-      display: grid;
-      gap: 0.45rem;
-    }
+      .list,
+      .mcp-grid ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 0.45rem;
+      }
 
-    .tool-item {
-      border-bottom: 1px solid var(--color-border-base);
-      display: grid;
-      gap: 0.15rem;
-      grid-template-columns: auto minmax(0, 1fr);
-      padding: 0 0 0.5rem;
-    }
+      .tool-item {
+        border-bottom: 1px solid var(--color-border-base);
+        display: grid;
+        gap: 0.15rem;
+        grid-template-columns: auto minmax(0, 1fr);
+        padding: 0 0 0.5rem;
+      }
 
-    .tool-item input {
-      grid-row: span 2;
-      margin-top: 0.125rem;
-    }
+      .tool-item--locked {
+        opacity: 0.6;
+      }
 
-    .tool-item span {
-      font-size: 0.8125rem;
-      font-weight: 600;
-    }
+      .tool-item__locked {
+        color: var(--color-warning);
+      }
 
-    .tool-item small {
-      color: var(--color-text-muted);
-      font-size: 0.75rem;
-    }
+      .tool-item input {
+        grid-row: span 2;
+        margin-top: 0.125rem;
+      }
 
-    .history-list {
-      display: grid;
-      gap: 0.625rem;
-      list-style: none;
-      margin: 0;
-      padding: 0;
-    }
+      .tool-item span {
+        font-size: 0.8125rem;
+        font-weight: 600;
+      }
 
-    .history-item {
-      border-bottom: 1px solid var(--color-border-base);
-      display: grid;
-      gap: 0.125rem;
-      padding-bottom: 0.5rem;
-    }
+      .tool-item small {
+        color: var(--color-text-muted);
+        font-size: 0.75rem;
+      }
 
-    .history-item time {
-      color: var(--color-text-muted);
-      font-size: 0.625rem;
-      text-transform: uppercase;
-    }
+      .history-list {
+        display: grid;
+        gap: 0.625rem;
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
 
-    .history-item strong {
-      font-size: 0.8125rem;
-    }
+      .history-item {
+        border-bottom: 1px solid var(--color-border-base);
+        display: grid;
+        gap: 0.125rem;
+        padding-bottom: 0.5rem;
+      }
 
-    .history-item span {
-      color: var(--color-text-secondary);
-      font-size: 0.75rem;
-      overflow-wrap: anywhere;
-    }
+      .history-item time {
+        color: var(--color-text-muted);
+        font-size: 0.625rem;
+        text-transform: uppercase;
+      }
 
-    .label-row {
-      align-items: center;
-      display: flex;
-      gap: 0.5rem;
-      justify-content: space-between;
-    }
+      .history-item strong {
+        font-size: 0.8125rem;
+      }
 
-    .label {
-      color: var(--color-text-muted);
-      font-size: 0.75rem;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
+      .history-item span {
+        color: var(--color-text-secondary);
+        font-size: 0.75rem;
+        overflow-wrap: anywhere;
+      }
 
-    .summary-hint {
-      display: inline-flex;
-      vertical-align: middle;
-    }
+      .label-row {
+        align-items: center;
+        display: flex;
+        gap: 0.5rem;
+        justify-content: space-between;
+      }
 
-    .mcp-section {
-      color: var(--color-text-secondary);
-      font-size: 0.8125rem;
-    }
+      .label {
+        color: var(--color-text-muted);
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
 
-    .mcp-grid {
-      display: grid;
-      gap: 0.75rem;
-      grid-template-columns: minmax(0, 1fr);
-    }
+      .summary-hint {
+        display: inline-flex;
+        vertical-align: middle;
+      }
 
-    .mcp-grid li {
-      align-items: center;
-      background: var(--color-surface-base);
-      border: 1px solid var(--color-border-base);
-      border-radius: 0.5rem;
-      display: flex;
-      justify-content: space-between;
-      gap: 0.5rem;
-      min-width: 0;
-      padding: 0.45rem 0.5rem;
-    }
+      .mcp-section {
+        color: var(--color-text-secondary);
+        font-size: 0.8125rem;
+      }
 
-    .mcp-grid li {
-      overflow-wrap: anywhere;
-    }
+      .mcp-grid {
+        display: grid;
+        gap: 0.75rem;
+        grid-template-columns: minmax(0, 1fr);
+      }
 
-    .mcp-grid button {
-      border: 1px solid var(--color-border-base);
-      border-radius: 0.45rem;
-      font-size: 0.72rem;
-      padding: 0.2rem 0.45rem;
-    }
+      .mcp-grid li {
+        align-items: center;
+        background: var(--color-surface-base);
+        border: 1px solid var(--color-border-base);
+        border-radius: 0.5rem;
+        display: flex;
+        justify-content: space-between;
+        gap: 0.5rem;
+        min-width: 0;
+        padding: 0.45rem 0.5rem;
+      }
 
-    .state {
-      color: var(--color-text-muted);
-      margin: 0;
-      font-size: 0.85rem;
-    }
+      .mcp-grid li {
+        overflow-wrap: anywhere;
+      }
 
-    .error {
-      color: var(--color-danger);
-      margin: 0;
-      font-size: 0.85rem;
-    }
+      .mcp-grid button {
+        border: 1px solid var(--color-border-base);
+        border-radius: 0.45rem;
+        font-size: 0.72rem;
+        padding: 0.2rem 0.45rem;
+      }
 
-    .link {
-      background: transparent;
-      border: 0;
-      color: var(--color-accent);
-      font-size: 0.8rem;
-      justify-self: start;
-      padding: 0;
-    }
-  `],
+      .state {
+        color: var(--color-text-muted);
+        margin: 0;
+        font-size: 0.85rem;
+      }
+
+      .error {
+        color: var(--color-danger);
+        margin: 0;
+        font-size: 0.85rem;
+      }
+
+      .link {
+        background: transparent;
+        border: 0;
+        color: var(--color-accent);
+        font-size: 0.8rem;
+        justify-self: start;
+        padding: 0;
+      }
+    `,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ContextToolsTabComponent implements OnChanges {
@@ -345,6 +359,11 @@ export class ContextToolsTabComponent implements OnChanges {
     }
   }
 
+  /** A tool a sandboxed thread is never offered: shown off and locked, whatever disabled_tools says. */
+  isToolLocked(tool: ToolMeta): boolean {
+    return isSandboxed(this.chat()) && tool.sandbox === 'never';
+  }
+
   isToolEnabled(toolName: string): boolean {
     const chat = this.chat();
     const disabled = chat?.disabled_tools ?? [];
@@ -362,9 +381,7 @@ export class ContextToolsTabComponent implements OnChanges {
     }
 
     try {
-      const updated = await firstValueFrom(
-        this.chatService.patchChat(chat.id, { disabled_tools: [...disabled] }),
-      );
+      const updated = await firstValueFrom(this.chatService.patchChat(chat.id, { disabled_tools: [...disabled] }));
       this.contextPanel.setActiveChat(updated);
     } catch (error) {
       this.error.set(apiErrorMessage(error, 'Failed to update tool settings'));

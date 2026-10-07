@@ -13,14 +13,18 @@ import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.
     <section class="tab-body" aria-label="Thread scratchpad">
       @if (!chatId()) {
         <p class="state">Open a thread to view context.</p>
+      } @else if (sandboxed()) {
+        <p class="state" data-testid="scratchpad-sandboxed">
+          This thread is sandboxed, so it neither reads nor updates the personality's scratchpad.
+        </p>
       } @else if (scratchpad.loading()) {
         <p class="state">Loading scratchpad…</p>
       } @else {
         <div class="label-row">
           <label for="scratchpad-input" class="label">{{ scratchpadHeading() }}</label>
           <ui-help-hint label="What is the scratchpad?" heading="Scratchpad" guide="continuity" align="end">
-            Working notes this personality keeps about you: goals, projects and what matters to you. It updates them
-            at checkpoints as you chat, you can edit them here, and they carry into every thread with this personality.
+            Working notes this personality keeps about you: goals, projects and what matters to you. It updates them at checkpoints as you
+            chat, you can edit them here, and they carry into every thread with this personality.
           </ui-help-hint>
         </div>
         <!-- Scratchpads are per-personality, shared by all of its chats: saving here goes through
@@ -35,7 +39,11 @@ import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.
           placeholder="Notes this personality keeps across all of its threads"
         ></textarea>
         <p id="scratchpad-help" class="hint">
-          @if (canSave()) { Autosaves. Shared by every thread with this personality. } @else { Attach a personality to enable scratchpad saving. }
+          @if (canSave()) {
+            Autosaves. Shared by every thread with this personality.
+          } @else {
+            Attach a personality to enable scratchpad saving.
+          }
         </p>
         <div class="actions">
           <ui-button size="sm" variant="secondary" (activate)="copyToComposer()">Copy to composer</ui-button>
@@ -57,71 +65,77 @@ import { HelpHintComponent } from '../../../../../shared/ui/help-hint/help-hint.
       }
     </section>
   `,
-  styles: [`
-    .tab-body {
-      display: grid;
-      gap: 0.6rem;
-    }
+  styles: [
+    `
+      .tab-body {
+        display: grid;
+        gap: 0.6rem;
+      }
 
-    .label-row {
-      align-items: center;
-      display: flex;
-      justify-content: space-between;
-      gap: 0.5rem;
-    }
+      .label-row {
+        align-items: center;
+        display: flex;
+        justify-content: space-between;
+        gap: 0.5rem;
+      }
 
-    .label {
-      color: var(--color-text-muted);
-      font-size: 0.75rem;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
+      .label {
+        color: var(--color-text-muted);
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
 
-    textarea {
-      background: var(--color-surface-base);
-      border: 1px solid var(--color-border-base);
-      border-radius: 0.75rem;
-      color: var(--color-text-primary);
-      min-height: 12rem;
-      padding: 0.75rem;
-      resize: vertical;
-      width: 100%;
-    }
+      textarea {
+        background: var(--color-surface-base);
+        border: 1px solid var(--color-border-base);
+        border-radius: 0.75rem;
+        color: var(--color-text-primary);
+        min-height: 12rem;
+        padding: 0.75rem;
+        resize: vertical;
+        width: 100%;
+      }
 
-    .actions {
-      display: flex;
-      gap: 0.5rem;
-    }
+      .actions {
+        display: flex;
+        gap: 0.5rem;
+      }
 
-    .hint,
-    .saved,
-    .state,
-    .summary {
-      color: var(--color-text-muted);
-      font-size: 0.8rem;
-      margin: 0;
-    }
+      .hint,
+      .saved,
+      .state,
+      .summary {
+        color: var(--color-text-muted);
+        font-size: 0.8rem;
+        margin: 0;
+      }
 
-    .error {
-      color: var(--color-danger);
-      margin: 0;
-    }
-  `],
+      .error {
+        color: var(--color-danger);
+        margin: 0;
+      }
+    `,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ContextScratchpadTabComponent {
   readonly chatId = input<string | null>(null);
+  /** A sandboxed thread has no scratchpad: nothing is loaded, shown or saved. */
+  readonly sandboxed = input(false);
   readonly canSave = input(false);
   readonly personalityName = input<string | null>(null);
 
   readonly scratchpad = inject(ScratchpadService);
   private readonly contextPanel = inject(ContextPanelService);
-  private readonly loadTrigger = computed(() => ({ chatId: this.chatId(), canSave: this.canSave() }));
+  private readonly loadTrigger = computed(() => ({ chatId: this.chatId(), sandboxed: this.sandboxed(), canSave: this.canSave() }));
 
   constructor() {
     effect(() => {
       const state = this.loadTrigger();
-      void this.scratchpad.load(state.chatId, state.canSave);
+      // A sandboxed thread loads nothing: the panel never shows (or could save back) the
+      // personality's scratchpad from inside the sandbox.
+      void this.scratchpad.load(state.sandboxed ? null : state.chatId, state.canSave);
     });
   }
 
@@ -136,7 +150,7 @@ export class ContextScratchpadTabComponent {
   scratchpadHeading(): string {
     const trimmedName = this.personalityName()?.trim();
     if (!trimmedName) return 'Scratchpad';
-    const suffix = trimmedName.endsWith('s') ? '\'' : '\'s';
+    const suffix = trimmedName.endsWith('s') ? "'" : "'s";
     return `${trimmedName}${suffix} Scratchpad`;
   }
 }

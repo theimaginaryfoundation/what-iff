@@ -106,6 +106,10 @@ type ToolMeta struct {
 	// Guide is a short overview of what the tool can do, for its tooltip. Empty for tools
 	// without one (e.g. external tools).
 	Guide string `json:"guide,omitempty"`
+	// Sandbox is what a sandboxed thread does with the tool (agenttools.SandboxPolicy): "never"
+	// (refused there, whatever disabled_tools says), "default_off" (a new sandbox starts with it
+	// off; the owner can turn it on) or "allowed".
+	Sandbox string `json:"sandbox"`
 }
 
 // humanFacingToolDescription resolves the presentation copy for a tool.
@@ -130,12 +134,13 @@ func GetAvailableTools(ctx context.Context, firstPartyWebSearch bool) []ToolMeta
 		Name:        agenttools.ToolNameWebSearch,
 		Description: agenttools.WebSearchToggleDescription(firstPartyWebSearch),
 		Guide:       agenttools.WebSearchToggleGuide(firstPartyWebSearch),
+		Sandbox:     agenttools.SandboxDefaultOff.String(),
 	})
 	for _, def := range definitions {
 		if !def.UserToggleable {
 			continue
 		}
-		out = append(out, ToolMeta{Name: def.Spec.Name, Description: humanFacingToolDescription(def), Guide: strings.TrimSpace(def.UserGuide)})
+		out = append(out, ToolMeta{Name: def.Spec.Name, Description: humanFacingToolDescription(def), Guide: strings.TrimSpace(def.UserGuide), Sandbox: def.SandboxPolicy.String()})
 	}
 	return out
 }

@@ -130,3 +130,13 @@ func TestCreateChat_ContextScope(t *testing.T) {
 		})
 	}
 }
+
+// A sandboxed thread neither reads nor writes the personality scratchpad: the context panel's save
+// is refused before anything is loaded or written.
+func TestPatchChatContext_SandboxedThreadHasNoScratchpad(t *testing.T) {
+	t.Parallel()
+	code, _, body := sandboxRequest(t, http.MethodPatch, "/chat/{id}/context", `{"active_scratchpad":"notes"}`, models.ContextScopeSandbox)
+	if code != http.StatusBadRequest || !strings.Contains(body, "no scratchpad") {
+		t.Fatalf("status = %d, want 400 refusing the scratchpad: %s", code, body)
+	}
+}

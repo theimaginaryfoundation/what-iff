@@ -133,3 +133,21 @@ func TestGetAvailableToolsGuidesFollowWebSearchMode(t *testing.T) {
 		assert.NotEmpty(t, guide, "%s should have a tooltip guide", name)
 	}
 }
+
+// The tools API tells the UI what a sandboxed thread does with each tool, so the Tools tab can
+// show a never-offered tool as off and locked instead of as an enabled toggle.
+func TestGetAvailableToolsReportsTheSandboxPolicy(t *testing.T) {
+	byName := map[string]string{}
+	for _, tool := range GetAvailableTools(context.Background(), false) {
+		byName[tool.Name] = tool.Sandbox
+	}
+	require.Equal(t, "never", byName[agenttools.UpdateScratchpadToolSpec.Name])
+	require.Equal(t, "never", byName[agenttools.CreateAgentJobToolSpec.Name])
+	require.Equal(t, "never", byName[agenttools.MoveFilesToolSpec.Name])
+	require.Equal(t, "default_off", byName[agenttools.ToolNameWebSearch])
+	require.Equal(t, "default_off", byName[agenttools.RunSubagentToolSpec.Name])
+	require.Equal(t, "allowed", byName[agenttools.CreateMemoryToolSpec.Name])
+	for name, policy := range byName {
+		require.Contains(t, []string{"never", "default_off", "allowed"}, policy, name)
+	}
+}

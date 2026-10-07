@@ -425,6 +425,12 @@ func (h *Handler) PatchChatContext(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to patch chat context", err)
 		return
 	}
+	if chat.IsSandboxed() {
+		// The scratchpad is shared by every thread of the personality; a sandbox neither reads
+		// nor writes it, from a turn or from the context panel.
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "A sandboxed thread has no scratchpad", nil)
+		return
+	}
 	if chat.PersonalityID == uuid.Nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "Chat personality not found", datastore.ErrPersonalityNotFound)
 		return

@@ -50,10 +50,12 @@ func TestChat_ContextScope_DefaultUpdateAndScratchpadGate(t *testing.T) {
 	require.Empty(t, chat.Scratchpad)
 	require.Equal(t, personalityID, chat.PersonalityID, "the rest of the chat is unchanged")
 
-	// The owner's own context view still shows the scratchpad, so saving it cannot wipe it.
+	// The context view of a sandboxed chat has no scratchpad either (and the handler refuses a
+	// save), so nothing in the sandbox reads or writes the personality's notes.
 	chatContext, err := ds.GetChatContext(ctx, userID, chatID)
 	require.NoError(t, err)
-	require.Equal(t, "the personality's private notes", chatContext.ActiveScratchpad)
+	require.Empty(t, chatContext.ActiveScratchpad)
+	require.NotEmpty(t, chatContext.ChatID)
 
 	// Later updates that do not mention the scope keep it.
 	updated, err = ds.UpdateChat(ctx, userID, models.Chat{ID: chatID, Name: "again", PersonalityID: personalityID})

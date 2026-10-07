@@ -573,24 +573,11 @@ func (d *Datastore) GetChatContext(ctx context.Context, userID, chatID uuid.UUID
 		return nil, err
 	}
 
-	scratchpad := chat.Scratchpad
-	if chat.IsSandboxed() && chat.PersonalityID != uuid.Nil {
-		// toChatModel keeps the shared personality scratchpad out of a sandboxed chat's model
-		// context, but this is the owner's own view of it (the context panel edits and saves it
-		// back to the personality), so read it directly: showing it blank would let a save wipe it.
-		p, err := d.dbClient.Personality.Query().
-			Where(personality.ID(chat.PersonalityID), personality.HasUserWith(user.ID(userID))).
-			Select(personality.FieldScratchpad).
-			Only(ctx)
-		if err != nil {
-			return nil, err
-		}
-		scratchpad = p.Scratchpad
-	}
-
+	// A sandboxed chat neither reads nor writes the personality scratchpad, so its context view
+	// has none either (toChatModel left chat.Scratchpad blank); the handler refuses a save.
 	return &models.ChatContext{
 		ChatID:           chat.ID,
-		ActiveScratchpad: scratchpad,
+		ActiveScratchpad: chat.Scratchpad,
 		Summary:          chat.CheckpointSummary,
 	}, nil
 }

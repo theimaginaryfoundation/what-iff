@@ -21,6 +21,18 @@ const (
 	SandboxAllowed
 )
 
+// String is the policy as the tools API reports it.
+func (p SandboxPolicy) String() string {
+	switch p {
+	case SandboxDefaultOff:
+		return "default_off"
+	case SandboxAllowed:
+		return "allowed"
+	default:
+		return "never"
+	}
+}
+
 // SandboxNeverTools lists the catalog tools a sandboxed chat is never offered.
 func SandboxNeverTools() []string {
 	var out []string
