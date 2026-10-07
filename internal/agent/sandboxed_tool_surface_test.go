@@ -24,7 +24,7 @@ var sandboxedToolSurface = map[string]struct {
 	agenttools.MoveFilesToolSpec.Name:         {false, "sorts the owner's account-wide gallery images into folders"},
 	agenttools.CreateAgentJobToolSpec.Name:    {false, "schedules a job in a new ordinary chat and can attach the owner's skills and their MCP servers"},
 	agenttools.CreateMemoryToolSpec.Name:      {true, "always writes a Chat-scoped memory in a sandbox"},
-	agenttools.ListToolSpec.Name:              {true, "jobs, skills, personalities and other conversations are refused; only this conversation's own files"},
+	agenttools.ListToolSpec.Name:              {true, "jobs, skills and personalities are refused; conversations is just this one; only this conversation's own files"},
 	agenttools.ListMoodsToolSpec.Name:         {true, "this chat's own personality moods"},
 	agenttools.ChangeMoodToolSpec.Name:        {true, "this chat's own mood"},
 	agenttools.RunSubagentToolSpec.Name:       {true, "default off; when on, own persona and no skills, and the sub-agent keeps the parent's sandbox"},

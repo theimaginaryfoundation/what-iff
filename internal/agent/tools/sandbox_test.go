@@ -235,11 +235,23 @@ func TestList_Sandboxed_AccountContentIsUnavailableAndFilesAreTheChatsOwn(t *tes
 	}
 	lt := &ListTool{store: store, logger: zap.NewNop()}
 
-	for _, kind := range []string{"jobs", "skills", "personalities", "conversations"} {
+	for _, kind := range []string{"jobs", "skills", "personalities"} {
 		out, err := lt.List(context.Background(), chat, []byte(`{"kind":"`+kind+`"}`))
 		require.NoError(t, err)
 		require.Contains(t, out, "sandboxed conversation", kind)
 	}
+
+	// Conversations lists exactly this one, so the model can reach its own id for find_context;
+	// the store is never asked (a filter or page cannot widen it).
+	chat.Name = "Discord · #general"
+	out, err := lt.List(context.Background(), chat, []byte(`{"kind":"conversations","filter":"anything"}`))
+	require.NoError(t, err)
+	var res listResult
+	require.NoError(t, json.Unmarshal([]byte(out), &res))
+	require.Len(t, res.Items, 1)
+	require.Equal(t, chat.ID.String(), res.Items[0].ID)
+	require.Equal(t, "Discord · #general", res.Items[0].Name)
+	require.Contains(t, res.Note, "only read itself")
 
 	// Files are listed, but only the conversation's own uploads, whatever scope was asked for.
 	for _, scope := range []string{"", "all", "personality", "conversation"} {
@@ -250,7 +262,7 @@ func TestList_Sandboxed_AccountContentIsUnavailableAndFilesAreTheChatsOwn(t *tes
 	}
 
 	// An ordinary chat can still list the account's files.
-	out, err := lt.List(context.Background(), ordinaryChat(), []byte(`{"kind":"files"}`))
+	out, err = lt.List(context.Background(), ordinaryChat(), []byte(`{"kind":"files"}`))
 	require.NoError(t, err)
 	require.Contains(t, out, "theirs.txt")
 }

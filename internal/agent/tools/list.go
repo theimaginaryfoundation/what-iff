@@ -228,9 +228,10 @@ func (t *ListTool) List(ctx context.Context, chat *models.Chat, args []byte) (st
 }
 
 // sandboxedListKind reports whether a sandboxed chat may not list this kind, and what to call it
-// in the refusal. Jobs, skills, personalities and conversations are account content outside the
-// sandbox. Files are listed (listSandboxFiles shows only this conversation's own uploads). Models
-// and MCP servers are not account content.
+// in the refusal. Jobs, skills and personalities are account content outside the sandbox.
+// Conversations lists just this one (listConversations), so the model can reach its own id for
+// find_context. Files are listed (listSandboxFiles shows only this conversation's own uploads).
+// Models and MCP servers are not account content.
 func sandboxedListKind(chat *models.Chat, kind string) (what string, blocked bool) {
 	if !chat.IsSandboxed() {
 		return "", false
@@ -242,8 +243,6 @@ func sandboxedListKind(chat *models.Chat, kind string) (what string, blocked boo
 		return "Listing your skills", true
 	case listKindPersonalities:
 		return "Listing your other personalities", true
-	case listKindConversations:
-		return "Listing other conversations", true
 	}
 	return "", false
 }

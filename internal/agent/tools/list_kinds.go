@@ -183,6 +183,12 @@ func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs)
 // listConversations deliberately spans active and archived threads so the agent can
 // discover imported history and read it through find_context without rehydration.
 func (t *ListTool) listConversations(ctx context.Context, chat *models.Chat, a listArgs) (string, error) {
+	if chat.IsSandboxed() {
+		// A sandbox reads only itself, so the only conversation it can list (and then read with
+		// find_context) is this one; nothing else is named, filtered or paged.
+		items := []listItem{{ID: chat.ID.String(), Name: chat.Name, UpdatedAt: rfc3339Ptr(chat.LastMessageTime), Archived: chat.Archived}}
+		return t.ok(listKindConversations, items, "This sandboxed conversation can only read itself; this is the one conversation available to find_context.")
+	}
 	limit := clampLimit(a.Limit, listDefaultLimit)
 	pageNum := clampPage(a.Page)
 	filters := models.ChatFilters{
