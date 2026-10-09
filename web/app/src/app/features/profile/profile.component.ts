@@ -15,6 +15,7 @@ import { Model } from '../../core/models/model.model';
 import { Personality } from '../../core/models/personality.model';
 import { NULL_PERSONALITY_ID } from '../../core/constants/app.constants';
 import { ExternalAuthProvider } from '../../core/auth/external-auth.provider';
+import { listTimezones } from '../../core/utils/timezone.helpers';
 
 @Component({
   selector: 'app-profile',
@@ -115,14 +116,7 @@ export class ProfileComponent implements OnInit {
   }
 
   private loadTimezones(): void {
-    try {
-      const tz = typeof Intl !== 'undefined' && Intl.supportedValuesOf
-        ? Intl.supportedValuesOf('timeZone')
-        : ['America/New_York', 'America/Los_Angeles', 'America/Chicago', 'Europe/London', 'Europe/Paris', 'Asia/Tokyo', 'UTC'];
-      this.timezones.set(Array.isArray(tz) ? [...tz].sort() : ['America/New_York']);
-    } catch {
-      this.timezones.set(['America/New_York', 'America/Los_Angeles', 'UTC']);
-    }
+    this.timezones.set(listTimezones());
   }
 
   getTimezoneDisplayValue(): string {

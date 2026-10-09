@@ -18,11 +18,13 @@ import { Model } from '../../core/models/model.model';
 import { Personality } from '../../core/models/personality.model';
 import { Ritual } from '../../core/models/ritual.model';
 import { AgentJobService } from '../../core/services/agent-job.service';
+import { AuthService } from '../../core/services/auth.service';
 import { ChatService } from '../../core/services/chat.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { ModelService } from '../../core/services/model.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { RitualService } from '../../core/services/ritual.service';
+import { resolveDefaultTimezone } from '../../core/utils/timezone.helpers';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { isTerminalStatus, jobStatusDescription, jobStatusLabel, scheduleFailureReason } from './helpers/job-status.helpers';
@@ -41,6 +43,7 @@ export class JobDetailPageComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly agentJobService = inject(AgentJobService);
+  private readonly authService = inject(AuthService);
   private readonly chatService = inject(ChatService);
   private readonly modelService = inject(ModelService);
   private readonly personalityService = inject(PersonalityService);
@@ -93,7 +96,8 @@ export class JobDetailPageComponent implements OnInit, OnDestroy {
   private loadCreatePage(): void {
     this.loading.set(true);
     this.error.set(null);
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    // Placeholder until the saved profile timezone arrives; replaced in the forkJoin below.
+    const timezone = resolveDefaultTimezone();
     this.job.set({
       id: 'new',
       user_id: '',
@@ -113,8 +117,14 @@ export class JobDetailPageComponent implements OnInit, OnDestroy {
       ),
       personalities: this.personalityService.listPersonalities(1, 200).pipe(catchError(() => of({ results: [] } as any))),
       models: this.modelService.getModels().pipe(catchError(() => of([]))),
+      // A failed profile fetch just means we fall back to the browser timezone.
+      savedTimezone: this.authService.getUserProfile().pipe(
+        map(user => user.timezone),
+        catchError(() => of(undefined)),
+      ),
     }).subscribe({
       next: result => {
+        this.job.update(current => current && { ...current, timezone: resolveDefaultTimezone(result.savedTimezone) });
         this.chats.set(result.chats.results ?? []);
         this.personalities.set(result.personalities.results ?? []);
         this.models.set(result.models ?? []);

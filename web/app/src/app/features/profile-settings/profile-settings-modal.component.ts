@@ -13,6 +13,12 @@ import { ModelService } from '../../core/services/model.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { ThemeMode, ThemeService } from '../../core/services/theme.service';
 import { UserPreferencesService } from '../../core/services/user-preferences.service';
+import {
+  TIMEZONE_MAX_LENGTH,
+  detectBrowserTimezone,
+  listTimezones,
+  timezoneValidator,
+} from '../../core/utils/timezone.helpers';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { UserIconComponent } from '../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
@@ -46,6 +52,7 @@ export class ProfileSettingsModalComponent {
     email: ['', [Validators.required, Validators.email, Validators.maxLength(255)]],
     first_name: ['', [Validators.maxLength(50)]],
     last_name: ['', [Validators.maxLength(50)]],
+    timezone: ['', [Validators.maxLength(TIMEZONE_MAX_LENGTH), timezoneValidator]],
   });
   readonly passwordForm = this.fb.group({
     current_password: [''],
@@ -58,6 +65,16 @@ export class ProfileSettingsModalComponent {
   readonly models = signal<readonly Model[]>([]);
   readonly personalities = signal<readonly Personality[]>([]);
   readonly themeMode = signal<ThemeMode>('system');
+  /**
+   * IANA names offered in the Timezone select. A saved value the browser doesn't list is added on
+   * load so the select can still show it.
+   */
+  readonly timezones = signal<readonly string[]>(listTimezones());
+  /**
+   * True while the Timezone field shows the browser-detected zone because none is
+   * saved yet. Nothing is persisted until the user clicks Save Changes.
+   */
+  readonly timezoneSuggested = signal(false);
   readonly loadingProfile = signal(false);
   readonly loadingAction = signal(false);
   readonly message = signal<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
@@ -133,12 +150,14 @@ export class ProfileSettingsModalComponent {
       email: (this.profileForm.value.email ?? '').trim(),
       first_name: firstName || undefined,
       last_name: lastName || undefined,
+      timezone: (this.profileForm.value.timezone ?? '').trim() || undefined,
     };
     try {
       if (await this.isExternalAuthenticated()) await this.syncExternalProfile(firstName, lastName);
       const user = await firstValueFrom(this.authService.updateProfile(updateData));
       this.currentUser.set(user);
       this.profileForm.markAsPristine();
+      this.timezoneSuggested.set(false);
       this.message.set({ type: 'success', text: 'Profile updated.' });
     } catch (error) {
       this.message.set({ type: 'error', text: this.formatProfileError(error) });
@@ -200,11 +219,19 @@ export class ProfileSettingsModalComponent {
       this.preferences.set(preferences);
       this.models.set(models);
       this.personalities.set(personalities);
+      // With no saved timezone, suggest the browser's; it is only stored on an explicit save.
+      const suggestedTimezone = user.timezone ? '' : detectBrowserTimezone();
+      const shownTimezone = user.timezone || suggestedTimezone;
+      if (shownTimezone && !this.timezones().includes(shownTimezone)) {
+        this.timezones.update((list) => [...list, shownTimezone].sort());
+      }
       this.profileForm.patchValue({
         email: user.email || '',
         first_name: user.first_name || '',
         last_name: user.last_name || '',
+        timezone: shownTimezone,
       });
+      this.timezoneSuggested.set(Boolean(suggestedTimezone));
       this.themeMode.set(this.themeService.mode());
       this.profileForm.markAsPristine();
     } catch (error) {
