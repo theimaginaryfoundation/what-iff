@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/openai/openai-go/v3/option"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -346,4 +348,86 @@ func TestGenerateImageTool_FilesTheImagesInTheRequestedFolder(t *testing.T) {
 	var result generateImageToolResult
 	require.NoError(t, json.Unmarshal([]byte(out), &result))
 	require.Equal(t, "daily graphs/oura", result.Folder, "the model is told where the images went")
+}
+
+// --- metering ---
+
+// recordingMeter captures what the tool asks of the meter.
+type recordingMeter struct {
+	allow bool
+
+	mu      sync.Mutex
+	checks  []string
+	records []metering.Usage
+}
+
+func (m *recordingMeter) Check(_ context.Context, _ uuid.UUID, _, actionType string) metering.Decision {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.checks = append(m.checks, actionType)
+	return metering.Decision{Allowed: m.allow}
+}
+
+func (m *recordingMeter) Record(_ context.Context, _ metering.Decision, u metering.Usage) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.records = append(m.records, u)
+}
+
+func TestGenerateImageTool_BillsEachImageThroughTheMeter(t *testing.T) {
+	t.Parallel()
+	srv := imagesGenerateJSONServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(imagesSuccessBody("aGVsbG8=")))
+	})
+	defer srv.Close()
+
+	meter := &recordingMeter{allow: true}
+	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL), meter: meter}
+	count, quality := 2, "medium"
+	args, err := json.Marshal(generateImageToolArgs{Prompt: "a cat", Count: &count, Quality: &quality})
+	require.NoError(t, err)
+
+	userID, chatID := uuid.New(), uuid.New()
+	_, atts, err := a.generateImageTool(context.Background(), &models.Chat{UserID: userID, ID: chatID}, args)
+	require.NoError(t, err)
+	require.Len(t, atts, 2)
+
+	require.Equal(t, []string{models.ActionTypeImageGeneration}, meter.checks, "gated once, before generating")
+	require.Len(t, meter.records, 2, "one billable event per image")
+	for i, u := range meter.records {
+		require.Equal(t, userID, u.UserID)
+		require.Equal(t, models.ActionTypeImageGeneration, u.ActionType)
+		require.Equal(t, "medium", u.ImageQuality)
+		require.Equal(t, chatID.String(), u.ChatID)
+		require.Equal(t, "tool", u.Metadata["path"])
+		require.Equal(t, i+1, u.Metadata["image_index"])
+	}
+}
+
+func TestGenerateImageTool_RejectedByMeterGeneratesNothing(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int32
+	srv := imagesGenerateJSONServer(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(imagesSuccessBody("aGVsbG8=")))
+	})
+	defer srv.Close()
+
+	meter := &recordingMeter{allow: false}
+	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL), meter: meter}
+	args, err := json.Marshal(generateImageToolArgs{Prompt: "a cat"})
+	require.NoError(t, err)
+
+	out, atts, err := a.generateImageTool(context.Background(), &models.Chat{UserID: uuid.New(), ID: uuid.New()}, args)
+	require.NoError(t, err)
+	require.Empty(t, atts)
+	require.EqualValues(t, 0, hits.Load(), "no provider call without credits")
+	require.Empty(t, meter.records)
+
+	var result generateImageToolResult
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.False(t, result.Success)
+	require.Contains(t, result.Error, "credits")
 }
