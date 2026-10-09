@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -181,6 +182,29 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 		return out, nil, nil
 	}
 
+	// Quota gate. The images are billed per image once they exist, but the gate runs
+	// first so a user with no credits left does not get free generations. Like the
+	// turn-level gate it is fuzzy; the meter's atomic accounting at Record time is
+	// the precise enforcer. The tool is not told which tier the chat model is, and
+	// the gate ignores it for non-chat actions.
+	var qd metering.Decision
+	if a.meter != nil {
+		qd = a.meter.Check(ctx, chat.UserID, "", models.ActionTypeImageGeneration)
+		if !qd.Allowed {
+			a.logger.Warn("generate_image rejected by quota check", zap.String("user_id", chat.UserID.String()))
+			a.recordQuotaRejection(ctx)
+			out, merr := marshalGenerateImageToolResult(generateImageToolResult{
+				Success: false,
+				Error:   "not enough credits to generate images",
+			})
+			if merr != nil {
+				a.logger.Error("failed to marshal generate_image quota result", zap.Error(merr))
+				return "", nil, merr
+			}
+			return out, nil, nil
+		}
+	}
+
 	prefix := "image"
 	if toolArgs.FilenamePrefix != nil {
 		if trimmed := strings.TrimSpace(*toolArgs.FilenamePrefix); trimmed != "" {
@@ -275,12 +299,23 @@ func (a *Agent) generateImageTool(ctx context.Context, chat *models.Chat, args [
 		return "", nil, fmt.Errorf("failed to generate image: %w", firstErr)
 	}
 
-	// Record usage for each successfully generated image (fire-and-forget). The
-	// recorder is nil in builds without a metering implementation (the open-source
-	// build), so nothing is recorded there.
-	if recordImageGenerationUsage != nil {
+	// Record usage for each successfully generated image (fire-and-forget). With no
+	// metering implementation linked (the open-source build) the meter is the no-op
+	// one and nothing is tracked.
+	if a.meter != nil {
 		for i := 0; i < successCount; i++ {
-			recordImageGenerationUsage(ctx, a.ds, chat.UserID, string(quality), provider.ImageEngine, chat.ID.String(), i+1)
+			a.meter.Record(ctx, qd, metering.Usage{
+				UserID:       chat.UserID,
+				ActionType:   models.ActionTypeImageGeneration,
+				ChatID:       chat.ID.String(),
+				ImageQuality: string(quality),
+				Source:       metering.TurnSourceFromContext(ctx),
+				Metadata: map[string]interface{}{
+					"path":        "tool",
+					"engine":      provider.ImageEngine,
+					"image_index": i + 1,
+				},
+			})
 		}
 	}
 
