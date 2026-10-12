@@ -162,8 +162,7 @@ export function replaceRenderedMathWithTex(container: HTMLElement): void {
     if (tex == null) {
       continue;
     }
-    const display = !!formula.closest('.katex-display');
-    const target = display ? (formula.closest<HTMLElement>('.katex-display') ?? formula) : formula;
-    target.replaceWith(container.ownerDocument.createTextNode(display ? `$$${tex}$$` : `$${tex}$`));
+    const displayRoot = formula.closest('.katex-display');
+    (displayRoot ?? formula).replaceWith(container.ownerDocument.createTextNode(displayRoot ? `$$${tex}$$` : `$${tex}$`));
   }
 }

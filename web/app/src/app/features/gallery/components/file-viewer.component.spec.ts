@@ -1,12 +1,13 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
-import { provideMarkdown } from 'ngx-markdown';
+import { MARKED_EXTENSIONS, provideMarkdown } from 'ngx-markdown';
 import { NEVER, of, Subject, throwError } from 'rxjs';
 
 import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { ConfirmationService } from '../../../core/services/confirmation.service';
 import { FileAttachmentService } from '../../../core/services/file-attachment.service';
+import { latexMathExtension } from '../../../core/utils/latex-math.helpers';
 import { FileViewerComponent } from './file-viewer.component';
 
 function file(overrides: Partial<FileAttachment> = {}): FileAttachment {
@@ -40,7 +41,7 @@ describe('FileViewerComponent', () => {
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
-        provideMarkdown(),
+        provideMarkdown({ markedExtensions: [{ provide: MARKED_EXTENSIONS, useFactory: latexMathExtension, multi: true }] }),
         { provide: FileAttachmentService, useValue: { downloadFileAttachment: download } },
         { provide: ConfirmationService, useValue: { alert } },
       ],
@@ -94,6 +95,14 @@ describe('FileViewerComponent', () => {
     fixture.detectChanges();
     expect(el.querySelector('markdown')).toBeNull();
     expect(el.querySelector('pre.file-viewer__text')?.textContent).toBe('# Title\n\nSome *text*.');
+  });
+
+  it('renders LaTeX math in Markdown', async () => {
+    download.mockReturnValue(of(textBlob('Norm: $\\lVert x \\rVert$\n\n$$\nx_i^2\n$$')));
+    const el = await show(file({ name: 'notes.md', file_type: 'text/markdown' }));
+
+    await vi.waitFor(() => expect(el.querySelectorAll('.katex')).toHaveLength(2));
+    expect(el.querySelectorAll('.katex-display')).toHaveLength(1);
   });
 
   it('shows a CSV as a table with its header row', async () => {

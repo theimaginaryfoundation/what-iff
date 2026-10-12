@@ -45,6 +45,8 @@ describe('latexMathExtension', () => {
   it.each([
     ['prices', 'It costs $5 and $10 per month.'],
     ['a space after the opening dollar', 'Between $ x $ and y.'],
+    ['a space before the closing dollar', 'Between $x $ and y.'],
+    ['whitespace-only math', String.raw`Empty \(   \) parens.`],
     ['a digit after the closing dollar', 'Pay $x$5 now.'],
     ['an escaped dollar', String.raw`A \$5 fee and \$10 tip.`],
     ['unclosed delimiters', String.raw`Open \( and $$ never closed`],
@@ -58,6 +60,13 @@ describe('latexMathExtension', () => {
     expect(formulas(html)).toEqual([]);
     expect(html).toContain('<code>$x$</code>');
     expect(html).toContain(String.raw`\[ z \]`);
+  });
+
+  it('keeps a line that only starts with $$ inside its paragraph', () => {
+    const html = parse('Energy:\n$$E=mc^2$$ in words.');
+    expect(formulas(html)).toEqual(['display:E=mc^2']);
+    expect(html).not.toContain('<div');
+    expect(html.match(/<p>/g)).toHaveLength(1);
   });
 
   it('does not let a stray $$ swallow later paragraphs', () => {
@@ -90,6 +99,30 @@ describe('renderLatexMath', () => {
     expect(root.querySelectorAll('.katex')).toHaveLength(2);
     expect(root.querySelectorAll('.katex-display')).toHaveLength(1);
     expect(root.querySelector('annotation')?.textContent).toBe('x_i^2');
+    root.remove();
+  });
+
+  it('does nothing when there is no math', async () => {
+    const root = document.createElement('div');
+    root.innerHTML = parse('Just *words*.');
+
+    await renderLatexMath(root);
+
+    expect(root.innerHTML).toBe('<p>Just <em>words</em>.</p>\n');
+  });
+
+  it('skips placeholders replaced before KaTeX is ready (a streaming re-render)', async () => {
+    const root = document.createElement('div');
+    root.innerHTML = parse('$x$');
+    document.body.append(root);
+    const stale = root.querySelector('.latex-math')!;
+
+    const rendering = renderLatexMath(root);
+    root.innerHTML = '<p>newer chunk</p>';
+    await rendering;
+
+    expect(stale.querySelector('.katex')).toBeNull();
+    expect(stale.textContent).toBe('x');
     root.remove();
   });
 
@@ -128,5 +161,14 @@ describe('replaceRenderedMathWithTex', () => {
     expect(root.textContent).toContain('Inline $x^2$ and:');
     expect(root.textContent).toContain('$$y_1$$');
     root.remove();
+  });
+
+  it('leaves a formula fragment without its TeX annotation as it is', () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<span class="katex"><span class="katex-html">x</span></span>';
+
+    replaceRenderedMathWithTex(root);
+
+    expect(root.querySelector('.katex')?.textContent).toBe('x');
   });
 });
