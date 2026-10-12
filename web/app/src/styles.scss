@@ -93,3 +93,10 @@ html:has(.app-layout) body {
 .ui-tooltip--right {
   transform: translate(0, -50%);
 }
+
+/* LaTeX display math (see core/utils/latex-math.helpers.ts): a wide formula scrolls on its own
+   instead of widening the message or file view. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}

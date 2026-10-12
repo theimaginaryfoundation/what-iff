@@ -1,9 +1,10 @@
 import { APP_INITIALIZER, ApplicationConfig, SecurityContext, provideZonelessChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient, withInterceptors, withXhr } from '@angular/common/http';
-import { SANITIZE, provideMarkdown } from 'ngx-markdown';
+import { MARKED_EXTENSIONS, SANITIZE, provideMarkdown } from 'ngx-markdown';
 
 import { routes } from './app.routes';
+import { latexMathExtension } from './core/utils/latex-math.helpers';
 import { authInterceptor } from './core/interceptors/auth.interceptor';
 import { extraHttpInterceptors } from './extensions/http-interceptors';
 import { ExternalAuthProvider } from './core/auth/external-auth.provider';
@@ -20,6 +21,7 @@ export const appConfig: ApplicationConfig = {
     provideHttpClient(withXhr(), withInterceptors([authInterceptor, ...extraHttpInterceptors])),
     provideMarkdown({
       sanitize: { provide: SANITIZE, useValue: SecurityContext.HTML },
+      markedExtensions: [{ provide: MARKED_EXTENSIONS, useFactory: latexMathExtension, multi: true }],
     }),
     ...externalAuthProviders,
     ...chatSendGateProviders,

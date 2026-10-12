@@ -6,6 +6,9 @@
  */
 
 import DOMPurify from 'dompurify';
+
+import { replaceRenderedMathWithTex } from '../../../core/utils/latex-math.helpers';
+
 export function buildClipboardPayload(doc: Document, selection: Selection): { plainText: string; html: string } {
   if (selection.rangeCount < 1) {
     return { plainText: selection.toString(), html: '' };
@@ -21,6 +24,7 @@ export function buildClipboardPayload(doc: Document, selection: Selection): { pl
 }
 
 export function sanitizeClipboardContainer(container: HTMLElement): void {
+  replaceRenderedMathWithTex(container);
   replaceTaskCheckboxInputs(container);
   for (const element of containerElementsBottomUp(container)) {
     sanitizeClipboardElement(container, element);

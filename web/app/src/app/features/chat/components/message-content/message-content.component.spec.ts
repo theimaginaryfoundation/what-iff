@@ -2,8 +2,9 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { SecurityContext, provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient, withXhr } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { SANITIZE, provideMarkdown } from 'ngx-markdown';
+import { MARKED_EXTENSIONS, SANITIZE, provideMarkdown } from 'ngx-markdown';
 
+import { latexMathExtension } from '../../../../core/utils/latex-math.helpers';
 import { MessageContentComponent } from './message-content.component';
 
 describe('MessageContentComponent', () => {
@@ -19,6 +20,7 @@ describe('MessageContentComponent', () => {
                 provideHttpClientTesting(),
                 provideMarkdown({
                     sanitize: { provide: SANITIZE, useValue: SecurityContext.HTML },
+                    markedExtensions: [{ provide: MARKED_EXTENSIONS, useFactory: latexMathExtension, multi: true }],
                 }),
             ],
         }).compileComponents();
@@ -48,6 +50,21 @@ describe('MessageContentComponent', () => {
         const html = fixture.nativeElement.innerHTML as string;
         expect(html).not.toContain('<script');
         expect(html).not.toContain('onerror');
+    });
+
+    it('renders LaTeX through the sanitizer with KaTeX styling intact', async () => {
+        fixture.componentRef.setInput(
+            'content',
+            String.raw`Normalize by $\sqrt{d}$:` + '\n\n' + String.raw`\[ \text{RMSNorm}(x)=\frac{x}{\sqrt{\frac{1}{d}\sum_i x_i^2+\epsilon}}\odot g \]`,
+        );
+        fixture.detectChanges();
+        await vi.waitFor(() => expect(fixture.nativeElement.querySelectorAll('.katex')).toHaveLength(2));
+
+        const host = fixture.nativeElement as HTMLElement;
+        expect(host.querySelectorAll('.katex-display')).toHaveLength(1);
+        // Inline styles are what KaTeX layout depends on; Angular's sanitizer would have stripped them.
+        expect(host.querySelector('.katex-html [style]')).not.toBeNull();
+        expect(host.querySelector('em')).toBeNull();
     });
 
     it('renders image attachments as constrained preview cards', () => {

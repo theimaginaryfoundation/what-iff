@@ -5,6 +5,7 @@ import {
   computed,
   DestroyRef,
   effect,
+  ElementRef,
   inject,
   input,
   output,
@@ -20,6 +21,7 @@ import { FileAttachment } from '../../../core/models/file-attachment.model';
 import { ConfirmationService } from '../../../core/services/confirmation.service';
 import { FileAttachmentService } from '../../../core/services/file-attachment.service';
 import { saveBlobAsFile } from '../../../core/utils/download.helpers';
+import { renderLatexMath } from '../../../core/utils/latex-math.helpers';
 import {
   ArrowLeftIconComponent,
   DownloadIconComponent,
@@ -68,6 +70,7 @@ export class FileViewerComponent {
   private readonly files = inject(FileAttachmentService);
   private readonly confirmationService = inject(ConfirmationService);
   private readonly sanitizer = inject(DomSanitizer);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
   readonly file = input.required<FileAttachment>();
   /** The personality this file is a document of, by its current name, if any. */
@@ -159,6 +162,10 @@ export class FileViewerComponent {
       onCleanup(() => subscription.unsubscribe());
     });
     inject(DestroyRef).onDestroy(() => this.revokeObjectUrl());
+  }
+
+  onMarkdownReady(): void {
+    void renderLatexMath(this.host.nativeElement);
   }
 
   download(): void {

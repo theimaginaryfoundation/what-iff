@@ -28,7 +28,8 @@
             ],
             "styles": [
               "src/styles.scss",
-              "node_modules/@ctrl/ngx-emoji-mart/picker.css"
+              "node_modules/@ctrl/ngx-emoji-mart/picker.css",
+              "node_modules/katex/dist/katex.min.css"
             ],
             "scripts": [
               "node_modules/clipboard/dist/clipboard.min.js"
