@@ -94,9 +94,9 @@ func UserMessage(err error) string {
 	case KindUnreachable:
 		return "Could not reach the remote server. Check the address, or try again later."
 	case KindUnauthorized:
-		return "The remote server did not accept the token. It may have been revoked; create a new one under Integrations → Webhooks there."
+		return "The remote server did not accept the token. It may have been revoked; create a new one under Tools → Webhooks there."
 	case KindForbidden:
-		return "The token cannot read threads. Create one with “Read threads” (chat:read) under Integrations → Webhooks on the remote server."
+		return "The token cannot read threads. Create one with “Read threads” (chat:read) under Tools → Webhooks on the remote server."
 	case KindNotFound:
 		return "That address does not look like a What Iff server (no webhook routes). Check the address."
 	case KindRateLimited:

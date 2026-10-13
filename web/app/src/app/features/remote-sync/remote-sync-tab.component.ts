@@ -237,7 +237,7 @@ export class RemoteSyncTabComponent implements OnInit {
   readonly defaultBaseUrl = computed(() => this.settings()?.default_base_url || 'https://api.whatiff.chat');
   readonly tokenPlaceholder = computed(() => {
     const hint = this.settings()?.token_hint;
-    return hint ? `Stored token ending ${hint} (paste a new one to replace it)` : 'wht_…';
+    return hint ? `Saved (…${hint}); paste to replace` : 'wht_…';
   });
   readonly canSave = computed(() => !this.busy() && (!!this.settings()?.configured || this.token().trim() !== ''));
   readonly lastRunSummary = computed(() => runSummary(this.settings()?.last_run));
