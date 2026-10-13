@@ -475,6 +475,131 @@ paths:
                 $ref: '#/components/schemas/Error'
 
   # Discord relay (docs/adr/0x025-discord-relay.md). Absent when DISCORD_RELAY_ENABLED is false.
+  /remote-sync:
+    get:
+      summary: Get remote sync settings and status
+      description: >
+        The account's remote sync (ADR 0x026): the remote address, the stored token's last four
+        characters, whether sync is on, how the last run went, and totals. The token is never
+        returned. `configured` is false when sync was never set up. Only served when the server
+        runs with REMOTE_SYNC_ENABLED=true; otherwise this route does not exist (404).
+      tags: [Remote Sync]
+      responses:
+        '200':
+          description: Settings and status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoteSyncSettings'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Save remote sync settings
+      description: >
+        Saves the remote address, the token (required the first time; omit to keep the stored
+        one) and whether sync is on. Unless the request switches sync off, the token is first
+        checked against the remote (it must hold chat:read), and a refusal is reported as 400 with
+        the reason. A successful save starts a run. The address must be https unless the server
+        allows http (REMOTE_SYNC_ALLOW_LOCAL_NETWORK); the hosted app's web addresses map to its API.
+      tags: [Remote Sync]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemoteSyncUpsertRequest'
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoteSyncSettings'
+        '400':
+          description: Invalid address or token, or the remote refused the token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Remove remote sync
+      description: Stops syncing and forgets the token and the thread links. Local threads stay.
+      tags: [Remote Sync]
+      responses:
+        '204':
+          description: Removed
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /remote-sync/run:
+    post:
+      summary: Sync now
+      description: Starts a run in the background. Poll GET /remote-sync for its outcome.
+      tags: [Remote Sync]
+      responses:
+        '202':
+          description: Run started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoteSyncSettings'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Remote sync is not set up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: A run is already in progress, or sync is switched off
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /discord/bots:
     get:
       summary: List Discord bots
@@ -10837,6 +10962,59 @@ components:
           type: string
       required: [id, name]
 
+    RemoteSyncRunStats:
+      type: object
+      description: Counts from one run. Never content.
+      properties:
+        threads_checked: {type: integer}
+        threads_created: {type: integer, description: New local copies}
+        threads_adopted: {type: integer, description: Matched to a thread an account import already brought over}
+        threads_updated: {type: integer, description: Had new messages appended}
+        threads_forked: {type: integer, description: Diverged (written in both places) and continued in a new local thread}
+        threads_failed: {type: integer, description: Retried next run}
+        threads_deferred: {type: integer, description: Left for the next run by the per-run cap}
+        messages_added: {type: integer}
+    RemoteSyncTotals:
+      type: object
+      properties:
+        threads: {type: integer, description: Remote threads being copied}
+        messages: {type: integer, description: Remote messages copied}
+        forks: {type: integer, description: Times a thread forked because both sides wrote}
+      required: [threads, messages, forks]
+    RemoteSyncSettings:
+      type: object
+      properties:
+        configured: {type: boolean}
+        enabled: {type: boolean}
+        base_url: {type: string, example: 'https://api.whatiff.chat'}
+        token_hint: {type: string, description: The stored token's last four characters}
+        status:
+          type: string
+          enum: [pending, ok, error, needs_attention]
+          description: >
+            pending: never run. ok: the last run succeeded. error: it failed and will be retried.
+            needs_attention: the remote refused the token; runs stop until the settings are saved again.
+        last_error: {type: string, nullable: true}
+        last_run_at: {type: string, format: date-time, nullable: true}
+        last_success_at: {type: string, format: date-time, nullable: true}
+        last_run: {$ref: '#/components/schemas/RemoteSyncRunStats'}
+        running: {type: boolean}
+        totals: {$ref: '#/components/schemas/RemoteSyncTotals'}
+        interval_seconds: {type: integer}
+        default_base_url: {type: string}
+        allow_local_network: {type: boolean}
+      required: [configured, running]
+    RemoteSyncUpsertRequest:
+      type: object
+      properties:
+        base_url:
+          type: string
+          description: The remote server's address. Empty means the hosted app.
+          example: 'https://api.whatiff.chat'
+        token:
+          type: string
+          description: A wht_ webhook token with chat:read, created on the remote. Required the first time.
+        enabled: {type: boolean}
     DiscordBot:
       type: object
       description: A user's own Discord bot, speaking as one of their personalities. The token is never returned.
@@ -12514,6 +12692,8 @@ tags:
       paths are lower-case, `/` nests, and `""` is the top level.
   - name: Memory Management
     description: User memory storage and retrieval operations
+  - name: Remote Sync
+    description: Keeping a copy of your threads from another What Iff server (self-hosted installs)
   - name: Discord
     description: The Discord relay - personalities answering in Discord channels as their own bots
   - name: Buzz

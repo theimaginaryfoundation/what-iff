@@ -97,8 +97,8 @@ type RemoteSyncSettings struct {
 	IntervalSeconds int `json:"interval_seconds,omitempty"`
 	// DefaultBaseURL is the address the settings page suggests (the hosted app's API).
 	DefaultBaseURL string `json:"default_base_url,omitempty"`
-	// AllowInsecureHTTP reports whether this server accepts http:// remotes (development only).
-	AllowInsecureHTTP bool `json:"allow_insecure_http,omitempty"`
+	// AllowLocalNetwork reports whether this server accepts http:// remotes (development only).
+	AllowLocalNetwork bool `json:"allow_local_network,omitempty"`
 }
 
 // RemoteSyncUpsert saves an account's sync settings. Token is required the first time; nil

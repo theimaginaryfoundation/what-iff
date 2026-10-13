@@ -60,7 +60,7 @@ func TestClientSendsTheTokenAndReadsPages(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := NewClient(srv.URL, "wht_abc", nil)
+	c, err := NewClient(srv.URL, "wht_abc", NewHTTPClient(true))
 	require.NoError(t, err)
 	chats, err := c.ListChats(context.Background(), 2, true)
 	require.NoError(t, err)
@@ -88,7 +88,7 @@ func TestClientClassifiesFailures(t *testing.T) {
 		_, _ = w.Write([]byte(body))
 	}))
 	defer srv.Close()
-	c, err := NewClient(srv.URL, "wht_abc", nil)
+	c, err := NewClient(srv.URL, "wht_abc", NewHTTPClient(true))
 	require.NoError(t, err)
 
 	for _, tc := range []struct {
@@ -114,4 +114,19 @@ func TestClientClassifiesFailures(t *testing.T) {
 
 	srv.Close()
 	assert.Equal(t, KindUnreachable, KindOf(c.Check(context.Background())))
+}
+
+func TestTheDefaultClientRefusesLocalAddresses(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	}))
+	defer srv.Close()
+
+	c, err := NewClient(srv.URL, "wht_abc", nil)
+	require.NoError(t, err)
+	assert.Equal(t, KindUnreachable, KindOf(c.Check(context.Background())), "loopback is not public")
+
+	c, err = NewClient(srv.URL, "wht_abc", NewHTTPClient(true))
+	require.NoError(t, err)
+	assert.NoError(t, c.Check(context.Background()))
 }

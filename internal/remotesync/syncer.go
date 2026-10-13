@@ -54,7 +54,10 @@ type Config struct {
 	// MaxListPages and MaxMessagePages bound one walk, as a guard against a remote that never ends.
 	MaxListPages    int
 	MaxMessagePages int
-	// NewRemote builds the remote for an account. Defaults to NewClient with no HTTP client.
+	// AllowLocalNetwork lets the default remote reach private and loopback addresses (a server
+	// on the owner's own network, or development).
+	AllowLocalNetwork bool
+	// NewRemote builds the remote for an account. Defaults to NewClient over NewHTTPClient.
 	NewRemote func(baseURL, token string) (Remote, error)
 }
 
@@ -87,7 +90,8 @@ func (c Config) withDefaults() Config {
 		c.MaxMessagePages = defaultMaxMessagePages
 	}
 	if c.NewRemote == nil {
-		c.NewRemote = func(baseURL, token string) (Remote, error) { return NewClient(baseURL, token, nil) }
+		httpClient := NewHTTPClient(c.AllowLocalNetwork)
+		c.NewRemote = func(baseURL, token string) (Remote, error) { return NewClient(baseURL, token, httpClient) }
 	}
 	return c
 }

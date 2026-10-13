@@ -7,7 +7,8 @@
 //	REMOTE_SYNC_ENABLED=true               turn the feature on (default off)
 //	REMOTE_SYNC_INTERVAL=5m                how often an enabled account syncs (Go duration, at least 1m)
 //	REMOTE_SYNC_MAX_THREADS_PER_RUN=50     threads synced per run; the rest wait for the next
-//	REMOTE_SYNC_ALLOW_INSECURE_HTTP=true   accept http:// remotes (development only)
+//	REMOTE_SYNC_ALLOW_LOCAL_NETWORK=true   accept http:// and private or loopback addresses
+//	                                       (a server on your own network, or development)
 //
 // It is off by default because a server with it on makes outbound requests to an address each
 // user chooses; that is what a self-hosted install wants and what a shared one should decide on
@@ -55,32 +56,34 @@ func apply(d plugins.Deps) {
 		return
 	}
 
+	allowLocal := truthy("REMOTE_SYNC_ALLOW_LOCAL_NETWORK")
 	cfg := remotesync.Config{
-		Interval:         durationEnv(logger, "REMOTE_SYNC_INTERVAL", remotesync.DefaultInterval, time.Minute),
-		MaxThreadsPerRun: intEnv(logger, "REMOTE_SYNC_MAX_THREADS_PER_RUN", remotesync.DefaultMaxThreadsPerRun),
+		Interval:          durationEnv(logger, "REMOTE_SYNC_INTERVAL", remotesync.DefaultInterval, time.Minute),
+		MaxThreadsPerRun:  intEnv(logger, "REMOTE_SYNC_MAX_THREADS_PER_RUN", remotesync.DefaultMaxThreadsPerRun),
+		AllowLocalNetwork: allowLocal,
 	}
 	syncer := remotesync.NewSyncer(d.DataStore, cfg, logger)
-	allowInsecure := truthy("REMOTE_SYNC_ALLOW_INSECURE_HTTP")
+	httpClient := remotesync.NewHTTPClient(allowLocal)
 
 	h := &Handler{
 		Store:  d.DataStore,
 		Syncer: syncer,
 		Check: func(ctx context.Context, baseURL, token string) error {
-			c, err := remotesync.NewClient(baseURL, token, nil)
+			c, err := remotesync.NewClient(baseURL, token, httpClient)
 			if err != nil {
 				return err
 			}
 			return c.Check(ctx)
 		},
 		Lifecycle:         d.Lifecycle,
-		AllowInsecureHTTP: allowInsecure,
+		AllowLocalNetwork: allowLocal,
 		Logger:            logger,
 	}
 	h.Register(d.AuthRouter.PathPrefix("/remote-sync").Subrouter())
 
 	go (&remotesync.Runner{Syncer: syncer, Logger: logger}).Run(d.Lifecycle)
 	logger.Info("remote sync: routes registered, runner started",
-		zap.Duration("interval", syncer.Interval()), zap.Bool("allow_insecure_http", allowInsecure))
+		zap.Duration("interval", syncer.Interval()), zap.Bool("allow_local_network", allowLocal))
 }
 
 func durationEnv(logger *zap.Logger, name string, def, floor time.Duration) time.Duration {

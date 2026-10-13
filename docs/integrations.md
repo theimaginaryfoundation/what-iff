@@ -80,6 +80,10 @@ The bridge holds one token with only the scopes it needs, keeps its own mapping 
 One token per bridge lets you revoke it alone.
 First-party clients use the session API instead.
 
+**A self-hosted copy (remote sync).**
+What Iff itself is the first-party client of this surface: a self-hosted server with remote sync on holds a `chat:read` token from the hosted app and copies its owner's threads in, walking the thread list and each changed thread's messages with `cursor` ([ADR 0x026](adr/0x026-remote-sync.md)).
+It needs nothing beyond `chat:read`, which is why persona prompts, memories and attachments are not part of the copy.
+
 ## What to expect from the contract
 
 | Topic | Status | Detail |

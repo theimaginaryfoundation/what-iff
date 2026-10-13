@@ -40,7 +40,7 @@ type Handler struct {
 	Check func(ctx context.Context, baseURL, token string) error
 	// Lifecycle is the server's context: runs started from a request outlive the request.
 	Lifecycle         context.Context
-	AllowInsecureHTTP bool
+	AllowLocalNetwork bool
 	Logger            *zap.Logger
 }
 
@@ -82,7 +82,7 @@ func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(raw) == "" {
 		raw = remotesync.DefaultBaseURL
 	}
-	baseURL, err := remotesync.NormalizeBaseURL(raw, h.AllowInsecureHTTP)
+	baseURL, err := remotesync.NormalizeBaseURL(raw, h.AllowLocalNetwork)
 	if err != nil {
 		h.badRequest(w, upperFirst(err.Error())+".")
 		return
@@ -175,7 +175,7 @@ func (h *Handler) respondSettings(w http.ResponseWriter, r *http.Request, userID
 	}
 	s.IntervalSeconds = int(h.Syncer.Interval() / time.Second)
 	s.DefaultBaseURL = remotesync.DefaultBaseURL
-	s.AllowInsecureHTTP = h.AllowInsecureHTTP
+	s.AllowLocalNetwork = h.AllowLocalNetwork
 	w.Header().Set("Cache-Control", "no-store")
 	handlerutils.RespondWithJSON(w, h.Logger, status, s)
 }

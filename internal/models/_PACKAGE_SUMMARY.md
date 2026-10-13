@@ -67,6 +67,8 @@
   The model tables fail closed: a model they do not list gets no reasoning control.
   `ContextWindowFor` (`context_window.go`) gives a model's context window by name prefix (`DefaultContextWindow` when unknown; a family's smallest member), for Advanced compaction.
 - **Discord relay:** `discord.go` holds the relay's models (`DiscordBot`, `DiscordBinding`, `DiscordMessageLink`, and the server-only `DiscordBotCredentials`, which carries the decrypted token and never leaves the server).
+- **Remote sync:** `remote_sync.go` holds the settings, run results and apply inputs and outcomes (ADR 0x026); `RemoteSyncAccount` carries the decrypted token and never leaves the server.
+  `ConversationImportHash` (`chat_import.go`) is the import dedup key shared by chat import, account import and remote sync.
 
 ## Testing
 

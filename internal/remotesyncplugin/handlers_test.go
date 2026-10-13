@@ -150,7 +150,7 @@ func TestSaveValidatesInput(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Empty(t, *calls)
 
-	h.AllowInsecureHTTP = true
+	h.AllowLocalNetwork = true
 	rec = do(t, h, http.MethodPut, "/remote-sync", `{"base_url":"http://localhost:8080","token":"wht_x"}`)
 	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 }

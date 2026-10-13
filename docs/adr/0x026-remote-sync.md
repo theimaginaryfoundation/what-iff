@@ -35,7 +35,7 @@ Branching (PR #148) already gives the answer the product wants: when histories d
 | R4 | **Concurrent writes never interleave.** If a mirrored thread got local messages and the hosted thread also moved on, both continuations survive as separate threads. | Divergence is detected per thread and resolved by forking, never by merging. |
 | R5 | **Idempotent and crash-safe.** Re-running a sync, two instances running at once, or a crash halfway through never duplicates a message. | Per-message links with a unique key; each thread's changes commit in one transaction; a lease per account. |
 | R6 | **Gentle on the hosted app.** An idle account costs a couple of requests per interval. | Incremental discovery that stops at the first unchanged page; page limits; per-run caps; no retries on auth errors. |
-| R7 | **Off unless the operator turns it on, and safe when on.** A multi-tenant server must not become a proxy into other networks. | Opt-in env flag; HTTPS only (plain HTTP only with an explicit dev flag); the token is encrypted at rest and never returned. |
+| R7 | **Off unless the operator turns it on, and safe when on.** A multi-tenant server must not become a proxy into other networks. | Opt-in env flag; HTTPS to public addresses only, checked on every connection (local networks only with an explicit flag); the token is encrypted at rest and never returned. |
 | R8 | **Continuing offline works well.** A mirrored 2,000-message thread must not be fed raw to the model on the first local turn. | Mirrored threads are created as imported threads, so the existing rehydration summary (and memory seeding) runs on first use. |
 | R9 | **Optional and removable.** The feature is its own package and tables; the core `chats` and `chat_messages` schemas do not change. | Plugin seam, separate tables keyed by plain UUIDs, like the Discord relay. |
 
@@ -161,7 +161,7 @@ When the plugin is off these routes are not mounted (404), and the UI shows the 
 ### 10. Security (R7)
 
 - **Opt-in per deployment:** `REMOTE_SYNC_ENABLED=true`. The hosted deployment does not set it, so the hosted app never makes outbound sync requests on a user's behalf. The open-source `docker-compose.yml` turns it on, because a self-hosted server is the thing this is for.
-- **HTTPS only.** `REMOTE_SYNC_ALLOW_INSECURE_HTTP=true` permits `http://` for development (two local servers, or a server syncing from itself). Redirects are not followed.
+- **HTTPS to public addresses only.** Every connection is checked after DNS resolution (`internal/netguard`, shared with the Discord relay's CDN fetcher), so a user-chosen address cannot reach the server's own network or the cloud metadata service. `REMOTE_SYNC_ALLOW_LOCAL_NETWORK=true` permits `http://` and private or loopback addresses, for syncing from a server on your own network or for development. Redirects are not followed, so the token is never replayed to another host.
 - **The token is a read credential for the whole hosted account's conversations.** It is encrypted at rest, never returned by the API (only its last four characters), and never logged. The hosted side can revoke it at any time.
 - Error messages shown to the user name the class of failure (unreachable, unauthorized, missing scope, unexpected response), not raw upstream bodies.
 
@@ -196,4 +196,4 @@ When the plugin is off these routes are not mounted (404), and the UI shows the 
 - **Unit (`internal/remotesync`):** the client's error classification and paging; discovery stopping at the first unchanged page; the pull overlap and dedupe; the planner's create / adopt / append / fork / detach decisions, including a second fork; persona matching; caps and the skip for `needs_attention`.
 - **Datastore:** apply in one transaction (a failure leaves nothing), fork copy up to the head with links copied, adoption alignment, the lease claim under contention, ownership on every query, cascade on account deletion.
 - **Handlers:** validation outcomes on save, token never returned, 404 when the plugin is off.
-- **End to end (manual for now):** one local server syncing user B from user A on the same server over `http://localhost` with `REMOTE_SYNC_ALLOW_INSECURE_HTTP=true`: first sync, incremental append, local reply then remote reply (fork), local delete (detach), run now.
+- **End to end (manual for now):** one local server syncing user B from user A on the same server over `http://localhost` with `REMOTE_SYNC_ALLOW_LOCAL_NETWORK=true`: first sync, incremental append, local reply then remote reply (fork), local delete (detach), run now.

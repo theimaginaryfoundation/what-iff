@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/netguard"
 )
 
 // The remote's webhook read routes (ADR 0x023), as a sync client uses them. Everything here is a
@@ -116,9 +118,9 @@ const DefaultBaseURL = "https://api.whatiff.chat"
 var hostedAppHosts = map[string]bool{"whatiff.chat": true, "www.whatiff.chat": true, "app.whatiff.chat": true}
 
 // NormalizeBaseURL checks and tidies a remote server address: https only (http when
-// allowInsecure), a host, no credentials, query or fragment, and no trailing slash or /api
+// allowLocal), a host, no credentials, query or fragment, and no trailing slash or /api
 // suffix (the client adds /api itself).
-func NormalizeBaseURL(raw string, allowInsecure bool) (string, error) {
+func NormalizeBaseURL(raw string, allowLocal bool) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", errors.New("enter the remote server's address, e.g. https://whatiff.chat")
@@ -133,7 +135,7 @@ func NormalizeBaseURL(raw string, allowInsecure bool) (string, error) {
 	switch u.Scheme {
 	case "https":
 	case "http":
-		if !allowInsecure {
+		if !allowLocal {
 			return "", errors.New("the remote address must use https")
 		}
 	default:
@@ -160,15 +162,34 @@ type Client struct {
 	http  *http.Client
 }
 
-// NewClient builds a client for an already-normalized base URL. httpClient may be nil; a client
-// that follows no redirects (a token must never be replayed to another host) is used.
+// NewHTTPClient is the HTTP client sync uses. Unless allowLocal, it connects to public addresses
+// only (checked after DNS, on every connection), so a user-chosen address cannot reach the
+// server's own network or the cloud metadata service.
+func NewHTTPClient(allowLocal bool) *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	if !allowLocal {
+		dialer = netguard.PublicOnlyDialer(10 * time.Second)
+	}
+	return &http.Client{
+		Timeout: requestTimeout,
+		Transport: &http.Transport{
+			DialContext:         dialer.DialContext,
+			TLSHandshakeTimeout: 10 * time.Second,
+			ForceAttemptHTTP2:   true,
+		},
+	}
+}
+
+// NewClient builds a client for an already-normalized base URL. httpClient may be nil, which
+// means NewHTTPClient(false). Whatever client is used, redirects are never followed: a token
+// must never be replayed to another host.
 func NewClient(baseURL, token string, httpClient *http.Client) (*Client, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("invalid remote base URL")
 	}
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: requestTimeout}
+		httpClient = NewHTTPClient(false)
 	}
 	// Never follow redirects, whatever client was passed in.
 	c := *httpClient
