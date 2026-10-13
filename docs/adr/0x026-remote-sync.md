@@ -190,6 +190,9 @@ When the plugin is off these routes are not mounted (404), and the UI shows the 
 - **Hosted-side helper:** a "Sync to a self-hosted app" preset on the Webhooks tab that creates a correctly scoped token in one click.
 - **Thread list badge** for mirrored and forked threads (the link table already knows which are which).
 - **Archive and favourite state** are copied when a mirror is created, not afterwards.
+- **First-run path:** an account with no persona is sent to persona setup and cannot reach Tools until it has one. A brand-new self-hosted account that only wants to sync should be offered "Keep a copy of your whatiff.chat threads" right there.
+- **Close the apply race:** a local turn that commits between the local-tail check and the append is appended after rather than forked. The window is milliseconds; locking the tracking thread's row for the apply would close it.
+- **The hosted web app asks `GET /api/remote-sync` once per session** to decide whether to show the tab, and gets a 404 (the plugin is off there). A build-time flag could skip the request where the feature can never be on.
 
 ## Test plan
 
