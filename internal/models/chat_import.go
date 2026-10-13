@@ -15,6 +15,9 @@ import (
 const (
 	ChatSourceOpenAI    = "openai"
 	ChatSourceAnthropic = "anthropic"
+	// ChatSourceRemoteSync marks a thread copied from another What Iff server by remote sync
+	// (ADR 0x026). Like any imported thread, it is summarized lazily on first use.
+	ChatSourceRemoteSync = "remote_sync"
 )
 
 // Rehydration lifecycle states for imported threads (Chat.rehydration_state).
@@ -27,8 +30,9 @@ const (
 )
 
 // ConversationImportHash is the import dedup key for a source conversation id: hex sha256 of the
-// id as given. Chat imports and account imports both use it, so a thread brought in by one is
-// recognised by the other.
+// id as given. Chat imports, account imports and remote sync all use it, so a thread brought in by
+// one is recognised by the others (a remote-sync mirror is skipped by a later account import, and
+// an account-imported thread is adopted by remote sync instead of copied again).
 func ConversationImportHash(conversationID string) string {
 	sum := sha256.Sum256([]byte(conversationID))
 	return hex.EncodeToString(sum[:])
