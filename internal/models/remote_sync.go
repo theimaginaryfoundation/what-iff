@@ -95,6 +95,10 @@ type RemoteSyncSettings struct {
 	Totals  *RemoteSyncTotals `json:"totals,omitempty"`
 	// IntervalSeconds is how often the server syncs an enabled account.
 	IntervalSeconds int `json:"interval_seconds,omitempty"`
+	// DefaultBaseURL is the address the settings page suggests (the hosted app's API).
+	DefaultBaseURL string `json:"default_base_url,omitempty"`
+	// AllowInsecureHTTP reports whether this server accepts http:// remotes (development only).
+	AllowInsecureHTTP bool `json:"allow_insecure_http,omitempty"`
 }
 
 // RemoteSyncUpsert saves an account's sync settings. Token is required the first time; nil
@@ -113,6 +117,10 @@ type RemoteSyncAccount struct {
 	Token   string
 	Enabled bool
 	Status  RemoteSyncStatus
+	// FullWalk asks the syncer to list every remote thread instead of stopping at the first
+	// unchanged page: there has been no successful run yet, or the last one left threads for
+	// later, which may sit beyond pages that are already unchanged.
+	FullWalk bool
 }
 
 // RemoteSyncRunResult is what the syncer records at the end of a run.

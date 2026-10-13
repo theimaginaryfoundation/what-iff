@@ -67,7 +67,7 @@ Branching (PR #148) already gives the answer the product wants: when histories d
 ### 2. Setup (R1, R7)
 
 1. On the hosted app: Integrations → Webhooks → create a token with **Read threads** (`chat:read`). This page already exists.
-2. On the local app: Integrations → **Remote sync** → paste the token (the hosted URL defaults to `https://whatiff.chat`) → **Save**.
+2. On the local app: Integrations → **Remote sync** → paste the token (the address defaults to the hosted API, `https://api.whatiff.chat`; the app's own addresses are accepted and mapped to it) → **Save**.
    Saving checks the token against the remote (`GET /webhooks/personality?limit=1`) and reports precisely what is wrong: unreachable, not a token (401), or missing `chat:read` (403).
 3. Sync is on. The first run starts immediately; later runs come every `REMOTE_SYNC_INTERVAL` (default 5 minutes). **Sync now** runs one at once.
 

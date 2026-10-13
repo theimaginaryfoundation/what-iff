@@ -174,7 +174,21 @@ func (d *Datastore) GetRemoteSyncAccount(ctx context.Context, userID uuid.UUID) 
 		Token:   token,
 		Enabled: row.Enabled,
 		Status:  models.RemoteSyncStatus(row.Status),
+		FullWalk: row.LastSuccessAt == nil ||
+			models.RemoteSyncRunStatsFromMap(row.LastRun).ThreadsDeferred > 0,
 	}, nil
+}
+
+// ExtendRemoteSyncLease keeps a long run's lease from expiring under it.
+func (d *Datastore) ExtendRemoteSyncLease(ctx context.Context, userID uuid.UUID, leaseUntil time.Time) error {
+	_, err := d.dbClient.RemoteSync.Update().
+		Where(remotesync.HasOwnerWith(user.ID(userID)), remotesync.LeaseUntilNotNil()).
+		SetLeaseUntil(leaseUntil).
+		Save(ctx)
+	if err != nil {
+		return fmt.Errorf("extend remote sync lease: %w", err)
+	}
+	return nil
 }
 
 // ListDueRemoteSyncs returns the users whose enabled sync last ran before lastRunBefore (or
