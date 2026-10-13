@@ -1,6 +1,8 @@
 package models
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"time"
 	"unicode"
@@ -23,6 +25,14 @@ const (
 	RehydrationStateReady      = "ready"
 	RehydrationStateFailed     = "failed"
 )
+
+// ConversationImportHash is the import dedup key for a source conversation id: hex sha256 of the
+// id as given. Chat imports and account imports both use it, so a thread brought in by one is
+// recognised by the other.
+func ConversationImportHash(conversationID string) string {
+	sum := sha256.Sum256([]byte(conversationID))
+	return hex.EncodeToString(sum[:])
+}
 
 // ImportResult summarizes a chat import run.
 // Errors contains client-visible per-conversation error strings (capped at models.MaxImportErrors).
