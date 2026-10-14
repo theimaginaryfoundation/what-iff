@@ -1,5 +1,5 @@
 import { Injectable, Type } from '@angular/core';
-import { Observable, of } from 'rxjs';
+import { Observable, catchError, combineLatest, map, of } from 'rxjs';
 
 /** One extra tab on the Integrations page, contributed by another build. */
 export interface IntegrationTab {
@@ -28,4 +28,13 @@ export class NoIntegrationTabs extends IntegrationTabSource {
   tabs(): Observable<IntegrationTab[]> {
     return of([]);
   }
+}
+
+/**
+ * The tabs of several sources, in order. A source that fails contributes nothing rather than
+ * hiding the others' tabs.
+ */
+export function combineIntegrationTabs(...sources: IntegrationTabSource[]): Observable<IntegrationTab[]> {
+  if (sources.length === 0) return of([]);
+  return combineLatest(sources.map(s => s.tabs().pipe(catchError(() => of([] as IntegrationTab[]))))).pipe(map(lists => lists.flat()));
 }

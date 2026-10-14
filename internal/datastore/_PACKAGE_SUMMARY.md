@@ -184,6 +184,10 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Discord relay (`discord.go`):** bots (token encrypted with the MCP token helper), bindings, message links and pending posts.
   Methods taking a userID are owner-scoped; the relay's own (`FindDiscordBindingTarget`, `GetDiscordBindingTarget`, `ListActiveDiscordBotCredentials`, link and pending-post bookkeeping) act for the owner recorded on the bot.
   `IsExternalRelayChat` (any chat bound by one of the user's bots) and `ExternalSpeakerForMessage` (the Discord author of a saved message) back memory provenance in the agent.
+- **Remote sync (`remotesync.go`, `remotesync_apply.go`, ADR 0x026):** each user's sync settings (token encrypted with the MCP token helper) and lease, and the links from remote threads and messages to local ones.
+  `ApplyRemoteSyncThread` brings one remote thread in under one transaction: it creates a mirror (an imported thread with `source` `remote_sync` and the remote id's import hash), adopts a thread an account import already holds (aligning the shared prefix), appends, or forks when the tracking thread has messages after its newest remote one.
+  A deleted mirror detaches its link instead of being recreated.
+  Tests auto-migrate the generated schema on SQLite (`createGeneratedTestSchema`), minus the vector tables.
   `CreateChat` honours `Chat.DisabledTools`, so a server-created relay thread never exists with its default-off tools on (the app's create route drops the field).
 
 ## Testing

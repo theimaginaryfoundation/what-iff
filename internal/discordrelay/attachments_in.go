@@ -5,15 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/netguard"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
 	"go.uber.org/zap"
 )
@@ -69,7 +68,7 @@ type CDNFetcher struct {
 // connection, so a name that resolved to an internal address (or is rebound to one) still
 // cannot reach the server's own network.
 func NewCDNFetcher() *CDNFetcher {
-	dialer := &net.Dialer{Timeout: 10 * time.Second, Control: publicOnlyControl}
+	dialer := netguard.PublicOnlyDialer(10 * time.Second)
 	hosts := discordCDNHosts()
 	return &CDNFetcher{Hosts: hosts, Client: &http.Client{
 		Timeout: 30 * time.Second,
@@ -85,28 +84,6 @@ func NewCDNFetcher() *CDNFetcher {
 			return nil
 		},
 	}}
-}
-
-// cgnat is the shared address space (100.64.0.0/10), which net.IP.IsPrivate does not cover.
-var cgnat = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
-
-// isPublicIP reports whether ip is an address on the public internet: not loopback,
-// private, link-local (including the cloud metadata address), shared, multicast or unspecified.
-func isPublicIP(ip net.IP) bool {
-	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !cgnat.Contains(ip)
-}
-
-// publicOnlyControl is a net.Dialer Control hook: it runs with the resolved address just
-// before each connection is made.
-func publicOnlyControl(_, address string, _ syscall.RawConn) error {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return err
-	}
-	if ip := net.ParseIP(host); ip == nil || !isPublicIP(ip) {
-		return fmt.Errorf("discord attachment: refusing to connect to non-public address %s", host)
-	}
-	return nil
 }
 
 func (f *CDNFetcher) Fetch(ctx context.Context, rawURL string, max int64) ([]byte, error) {

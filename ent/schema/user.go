@@ -102,6 +102,10 @@ func (User) Edges() []ent.Edge {
 		// them their bindings and message links. See ent/schema/discord.go.
 		edge.To("discord_bots", DiscordBot.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),
+		// Remote sync settings. Cascade so deleting a user removes the stored token and,
+		// through it, the thread and message links. See ent/schema/remotesync.go.
+		edge.To("remote_syncs", RemoteSync.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}, userPrivateEdges()...)
 }
 

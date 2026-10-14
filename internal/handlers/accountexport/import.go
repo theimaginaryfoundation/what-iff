@@ -4,8 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -309,7 +307,7 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, sele
 				hashes := make([]string, 0, len(parsed))
 				for _, c := range parsed {
 					if strings.TrimSpace(c.UUID) != "" {
-						hashes = append(hashes, conversationImportHash(c.UUID))
+						hashes = append(hashes, models.ConversationImportHash(c.UUID))
 					}
 				}
 				destinations, mapErr := h.ds.ImportedChatIDsByHash(ctx, userID, hashes)
@@ -318,7 +316,7 @@ func (h *Handler) runAccountImport(userID, jobID uuid.UUID, tmpPath string, sele
 					result.Warnings = append(result.Warnings, "Conversation-linked memories could not be restored.")
 				} else {
 					for _, c := range parsed {
-						if id, found := destinations[conversationImportHash(c.UUID)]; found {
+						if id, found := destinations[models.ConversationImportHash(c.UUID)]; found {
 							if sourceID, parseErr := uuid.Parse(c.UUID); parseErr == nil {
 								chatIDs[sourceID] = id
 							}
@@ -774,7 +772,7 @@ func toImportConversations(parsed []exporter.ParsedConversation, personalityIDs 
 			Title:                      title,
 			CreatedAt:                  createdAt.UTC(),
 			Source:                     models.ChatSourceAnthropic,
-			ImportHash:                 conversationImportHash(c.UUID),
+			ImportHash:                 models.ConversationImportHash(c.UUID),
 			SourceID:                   sourceID,
 			Messages:                   msgs,
 			PersonalityID:              personalityID,
@@ -802,12 +800,6 @@ func senderToOrigin(sender string) (models.MessageOrigin, bool) {
 	default:
 		return "", false
 	}
-}
-
-// conversationImportHash mirrors the /chat/import dedup key: sha256 of the source conversation id.
-func conversationImportHash(uuid string) string {
-	sum := sha256.Sum256([]byte(uuid))
-	return hex.EncodeToString(sum[:])
 }
 
 func normalizeName(s string) string {

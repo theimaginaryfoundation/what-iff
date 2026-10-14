@@ -65,6 +65,9 @@ services:
       COGNITO_USER_POOL_ID: ${COGNITO_USER_POOL_ID:-}
       COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:-}
       # Billing feature flag - set to "true" to enable Stripe integration
+      # Remote sync (ADR 0x026): a self-hosted install is what it is for, so
+      # compose turns it on. Each user still has to paste a token to use it.
+      REMOTE_SYNC_ENABLED: ${REMOTE_SYNC_ENABLED:-true}
       REQUIRE_BILLING: ${REQUIRE_BILLING:-false}
       # Stripe configuration (only used when REQUIRE_BILLING=true)
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}

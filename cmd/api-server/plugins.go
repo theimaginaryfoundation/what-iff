@@ -9,4 +9,7 @@ import (
 	// The Discord relay: personas answer in Discord channels as their own bots.
 	// Set DISCORD_RELAY_ENABLED=false to switch it off (docs/adr/0x025-discord-relay.md).
 	_ "github.com/theimaginaryfoundation/what-iff/internal/discordplugin"
+	// Remote sync: keep a copy of your threads from another What Iff server (the hosted app).
+	// Off unless REMOTE_SYNC_ENABLED=true (docs/adr/0x026-remote-sync.md).
+	_ "github.com/theimaginaryfoundation/what-iff/internal/remotesyncplugin"
 )

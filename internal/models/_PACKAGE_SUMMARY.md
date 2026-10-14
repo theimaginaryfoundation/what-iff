@@ -53,6 +53,8 @@
   `CleanSpeakerName` makes an untrusted display name safe to store and render inside a memory's metadata block.
   `ExtractedRelayMemory` is the relay-thread extraction schema variant with a `speaker` per memory; `ExtractedMemory.Speaker` carries it without being part of the default schema.
 - **Discord relay:** `discord.go` holds the relay's models (`DiscordBot`, `DiscordBinding`, `DiscordMessageLink`, and the server-only `DiscordBotCredentials`, which carries the decrypted token and never leaves the server).
+- **Remote sync:** `remote_sync.go` holds the settings, run results and apply inputs and outcomes (ADR 0x026); `RemoteSyncAccount` carries the decrypted token and never leaves the server.
+  `ConversationImportHash` (`chat_import.go`) is the import dedup key shared by chat import, account import and remote sync.
 
 ## Testing
 

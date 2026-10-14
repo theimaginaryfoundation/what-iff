@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -205,20 +204,6 @@ func mustURL(t *testing.T, raw string) *url.URL {
 	u, err := url.Parse(raw)
 	require.NoError(t, err)
 	return u
-}
-
-func TestTheCDNFetcherRefusesToConnectToNonPublicAddresses(t *testing.T) {
-	for _, ip := range []string{
-		"127.0.0.1", "10.0.0.5", "172.16.3.4", "192.168.1.1", "169.254.169.254", // loopback, private, cloud metadata
-		"100.64.0.1", "0.0.0.0", "224.0.0.1", "::1", "fe80::1", "fc00::1",
-	} {
-		assert.False(t, isPublicIP(net.ParseIP(ip)), ip)
-		assert.Error(t, publicOnlyControl("tcp", net.JoinHostPort(ip, "443"), nil), ip)
-	}
-	for _, ip := range []string{"8.8.8.8", "162.159.135.233", "2606:4700::6810:84e5"} {
-		assert.True(t, isPublicIP(net.ParseIP(ip)), ip)
-		assert.NoError(t, publicOnlyControl("tcp", net.JoinHostPort(ip, "443"), nil), ip)
-	}
 }
 
 func TestTheRealFetcherCannotReachALocalServerEvenOnAnAllowedHost(t *testing.T) {
