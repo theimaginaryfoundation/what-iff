@@ -73,6 +73,7 @@
                 <input
                   type="password"
                   name="key"
+                  [attr.aria-label]="row.info.name + ' API key'"
                   autocomplete="off"
                   spellcheck="false"
                   [ngModel]="keyInput()"
@@ -90,6 +91,7 @@
                 <input
                   type="password"
                   name="current_password"
+                  aria-label="Your WhatIff password"
                   autocomplete="current-password"
                   [ngModel]="passwordInput()"
                   (ngModelChange)="passwordInput.set($event)"
