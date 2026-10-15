@@ -37,6 +37,7 @@ func toJobModel(e *ent.Job) *models.Job {
 		Reference:      e.Reference,
 		Status:         models.JobStatus(e.Status),
 		Error:          e.Error,
+		ErrorCode:      e.ErrorCode,
 		ResultID:       resultID,
 		DraftDeltas:    append([]string(nil), e.DraftDeltas...),
 		DraftReasoning: append([]string(nil), e.DraftReasoning...),
@@ -333,6 +334,11 @@ func (d *Datastore) UpdateJob(ctx context.Context, userID uuid.UUID, jobModel mo
 	} else {
 		jobUpdate.ClearError()
 	}
+	if jobModel.ErrorCode != "" {
+		jobUpdate.SetErrorCode(jobModel.ErrorCode)
+	} else {
+		jobUpdate.ClearErrorCode()
+	}
 
 	if jobModel.ResultID != nil {
 		jobUpdate.SetNillableResultID(jobModel.ResultID)
@@ -566,20 +572,21 @@ func (d *Datastore) FinalizeCancelledChatJobWithPartial(
 	generationMoodID *uuid.UUID,
 ) (*models.Job, *uuid.UUID, error) {
 	return d.finalizeChatJobWithPartial(
-		ctx, userID, jobID, chatID, generationModel, generationPersonality, generationMoodID, job.StatusCancelled, "",
+		ctx, userID, jobID, chatID, generationModel, generationPersonality, generationMoodID, job.StatusCancelled, "", "",
 	)
 }
 
 // FinalizeFailedChatJobWithPartial atomically preserves streamed assistant text (when present),
-// marks the job failed with failureMessage, updates result_id, and clears draft_deltas.
+// marks the job failed with failureMessage and failureCode (empty when the failure has no
+// stable code), updates result_id, and clears draft_deltas.
 func (d *Datastore) FinalizeFailedChatJobWithPartial(
 	ctx context.Context,
 	userID, jobID, chatID uuid.UUID,
-	generationModel, generationPersonality, failureMessage string,
+	generationModel, generationPersonality, failureMessage, failureCode string,
 	generationMoodID *uuid.UUID,
 ) (*models.Job, *uuid.UUID, error) {
 	return d.finalizeChatJobWithPartial(
-		ctx, userID, jobID, chatID, generationModel, generationPersonality, generationMoodID, job.StatusFailed, failureMessage,
+		ctx, userID, jobID, chatID, generationModel, generationPersonality, generationMoodID, job.StatusFailed, failureMessage, failureCode,
 	)
 }
 
@@ -589,7 +596,7 @@ func (d *Datastore) finalizeChatJobWithPartial(
 	generationModel, generationPersonality string,
 	generationMoodID *uuid.UUID,
 	terminalStatus job.Status,
-	failureMessage string,
+	failureMessage, failureCode string,
 ) (*models.Job, *uuid.UUID, error) {
 	if terminalStatus != job.StatusCancelled && terminalStatus != job.StatusFailed {
 		return nil, nil, fmt.Errorf("unsupported partial-response terminal status %q", terminalStatus)
@@ -648,7 +655,7 @@ func (d *Datastore) finalizeChatJobWithPartial(
 	}
 
 	// Phase 3: mark job terminal + clear deltas.
-	if err := d.updateJobToTerminalTx(ctx, tx, userID, jobID, resultID, terminalStatus, failureMessage); err != nil {
+	if err := d.updateJobToTerminalTx(ctx, tx, userID, jobID, resultID, terminalStatus, failureMessage, failureCode); err != nil {
 		d.rollbackTx(tx)
 		return nil, nil, err
 	}
@@ -752,7 +759,7 @@ func (d *Datastore) updateJobToTerminalTx(
 	userID, jobID uuid.UUID,
 	resultID *uuid.UUID,
 	terminalStatus job.Status,
-	failureMessage string,
+	failureMessage, failureCode string,
 ) error {
 	jobUpdate := tx.Job.Update().
 		Where(job.ID(jobID), job.HasOwnerWith(user.ID(userID))).
@@ -762,8 +769,14 @@ func (d *Datastore) updateJobToTerminalTx(
 	switch terminalStatus {
 	case job.StatusFailed:
 		jobUpdate.SetError(failureMessage)
+		if failureCode != "" {
+			jobUpdate.SetErrorCode(failureCode)
+		} else {
+			jobUpdate.ClearErrorCode()
+		}
 	case job.StatusCancelled:
 		jobUpdate.SetError("")
+		jobUpdate.ClearErrorCode()
 	default:
 		return fmt.Errorf("unsupported partial-response terminal status %q", terminalStatus)
 	}
@@ -1329,4 +1342,23 @@ func (d *Datastore) FindActivePersonalityGenerationJob(ctx context.Context, user
 		return nil, err
 	}
 	return toJobModel(j), nil
+}
+
+// SetJobErrorCode records a stable code for a job's failure, alongside the error
+// text already recorded by UpdateJobStatus. An empty code clears it.
+func (d *Datastore) SetJobErrorCode(ctx context.Context, userID, jobID uuid.UUID, code string) error {
+	upd := d.dbClient.Job.Update().Where(job.ID(jobID), job.HasOwnerWith(user.ID(userID)))
+	if code == "" {
+		upd.ClearErrorCode()
+	} else {
+		upd.SetErrorCode(code)
+	}
+	n, err := upd.Save(ctx)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrJobNotFound
+	}
+	return nil
 }
