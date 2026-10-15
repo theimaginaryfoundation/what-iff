@@ -65,11 +65,15 @@ export class AppShell {
    * (`app-layout__mobile-menu`, aria-label "Open navigation menu"). Desktop
    * layouts never render this button. Call before interacting with anything
    * inside the sidebar so the same POM works across all three projects.
+   *
+   * Waits for the shell to render first: straight after a reload neither
+   * button exists yet, and checking then would skip the menu on mobile.
    */
   async openMobileSidebarIfPresent(): Promise<void> {
     const menuButton = this.page.getByRole('button', {
       name: 'Open navigation menu',
     });
+    await menuButton.or(this.openProfileButton()).first().waitFor();
     if (await menuButton.isVisible().catch(() => false)) {
       await menuButton.click();
     }
