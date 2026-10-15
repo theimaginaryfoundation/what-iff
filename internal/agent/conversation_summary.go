@@ -9,7 +9,9 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
+	"go.uber.org/zap"
 )
 
 const checkpointSummaryMaxTokens = 1200
@@ -84,7 +86,20 @@ func (a *Agent) summarizeConversationForCheckpoint(ctx context.Context, userID u
 		return "", err
 	}
 
-	resp, err := a.OpenAIProvider.CallWithRetry(telemetry.WithCallPath(ctx, telemetry.CallPathConversationSummary), params)
+	callCtx := telemetry.WithCallPath(ctx, telemetry.CallPathConversationSummary)
+	resp, err := a.OpenAIProvider.CallWithRetry(callCtx, params)
+	if err != nil {
+		// A refused summary leaves the checkpoint where it was, so the next turn tries again
+		// and hits the same refusal: the chat is stuck. Images (often one a vendor just drew)
+		// are the likeliest trigger, so summarize once more from the turn's context without them.
+		if stripped, ok := checkpointSummaryWithoutImages(src); ok && isSafetyRefusal(err) {
+			a.logger.Warn("checkpoint summary refused on safety grounds; retrying without images",
+				zap.String("chat_id", chatCtx.chat.ID.String()))
+			if params, perr := buildCheckpointSummaryParams(userID, chatCtx.chat.CheckpointSummary, stripped); perr == nil {
+				resp, err = a.OpenAIProvider.CallWithRetry(callCtx, params)
+			}
+		}
+	}
 	if err != nil {
 		return "", fmt.Errorf("failed to summarize conversation for checkpoint: %w", err)
 	}
@@ -94,4 +109,37 @@ func (a *Agent) summarizeConversationForCheckpoint(ctx context.Context, userID u
 		return "", fmt.Errorf("conversation summarization returned empty summary")
 	}
 	return summary, nil
+}
+
+// checkpointSummaryWithoutImages is src rebuilt from its ModelContext with every image removed,
+// for retrying a summary the provider refused. A chained source (PreviousResponseID) carries the
+// turn's images on OpenAI's side, out of reach, so the retry uses the explicit context instead.
+// It reports false when src has no context to rebuild from, or when the rebuilt request would be
+// the same one again (no chain, no images).
+func checkpointSummaryWithoutImages(src checkpointSummarySource) (checkpointSummarySource, bool) {
+	if src.ModelContext == nil {
+		return checkpointSummarySource{}, false
+	}
+	chained := src.PreviousResponseID != nil && strings.TrimSpace(*src.PreviousResponseID) != ""
+	if !chained && !modelContextHasImages(src.ModelContext) {
+		return checkpointSummarySource{}, false
+	}
+	stripped := src.ModelContext.Clone()
+	stripped.StripUserMessageImages()
+	return checkpointSummarySource{ModelContext: stripped, AssistantReply: src.AssistantReply}, true
+}
+
+func modelContextHasImages(m *provider.ModelContext) bool {
+	for _, seg := range m.Segments {
+		if len(seg.UserImages) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// isSafetyRefusal reports whether an OpenAI call failed on the provider's safety filter.
+func isSafetyRefusal(err error) bool {
+	_, refused := provider.IsSafetyViolationError(provider.WrapSafetyViolationError(models.SafetyViolationProviderOpenAI, err))
+	return refused
 }

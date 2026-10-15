@@ -87,6 +87,7 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 | `OpenAIProvider.ImageGenerator` / `GeminiImageGenerator` / `ZAIImageGenerator` / `QwenImageGenerator` | One adapter per vendor in `ImageGenerationProviders` (OpenAI first, the default).
   OpenAI wraps the Images API path; Gemini calls native `generateContent` (`GeminiNativeBaseURL`); z.ai (`ZAIPaaSBaseURL`) and Qwen (`QwenNativeBaseURL`, DashScope sync) answer with a URL that is downloaded at once (https only) because it expires.
   Each maps quality/aspect to its own sizes, retries 429/503 with a short backoff (`imageRetryDelays`), and turns its vendor's content refusal into a `SafetyViolationError`. |
+| `ImageStripper` / `WithheldImageNote` | Optional adapter interface: `StripImages()` drops every image the next call would send, leaving a short note in each place, and returns the count. Implemented by the OpenAI (current input only; earlier rounds sit behind `previous_response_id`), Claude (including tool-result images) and Chat Completions adapters, so the agent loop can retry a safety refusal without images. |
 | `BuildOpenAITools` | Merges function tools; image tool when model supports it. |
 | `NewOpenAIProvider` / `NewClaudeProvider` | SDK clients; optional `*telemetry.Telemetry` (metrics + logger). All provider constructors take an optional `*http.Client` (nil = SDK default) so mock mode can inject the deny transport. |
 | `MockAdapter` / `NewMockAdapter` | In-process `AgentAdapter` fake for `LLM_BACKEND=mock` (echo/fixed/scripted modes, whitespace-preserving word-delta streaming, ctx cancellation). Built per request. |
@@ -167,6 +168,7 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 - `token_counter_test.go` — counting and carry-over selection.
 - `inference_metrics_test.go` — nil-safe usage recording.
 - `fileattachment_test.go`, `images_test.go` — helpers.
+- `image_safety_strip_test.go` — image stripping for Responses, Chat Completions, Claude and beta Claude requests, and that every image-capable adapter implements `ImageStripper`.
 - `image_generator_test.go` — each image adapter against a fake vendor (request shape, MIME, download, refusals), base-URL derivation, and the 429 retry.
 
 ## Related documentation

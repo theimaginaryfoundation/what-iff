@@ -11355,6 +11355,13 @@ export interface components {
             captured_at: string;
             /** @description What this context was built from, by reference (IDs and short hashes, never content). Absent on snapshots captured before it existed. */
             inputs?: components["schemas"]["ContextInputs"] | null;
+            /** @description Images the model did not see for this reply, for the reason in images_withheld_reason. Absent when none. */
+            images_withheld?: number;
+            /**
+             * @description no_vision: the chat model cannot see images, so the user's attachments were not sent. safety_refusal: the provider's safety filter refused a request that carried them, and it was retried without them. Set whenever images_withheld is.
+             * @enum {string}
+             */
+            images_withheld_reason?: "no_vision" | "safety_refusal";
         };
         /** @description Input manifest for one assistant turn: references to the memories, mode, scratchpad and checkpoint summary the model context was built from, so "why was this loaded?" can be answered after the fact. */
         ContextInputs: {

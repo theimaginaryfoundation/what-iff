@@ -44,7 +44,22 @@ type ContextBreakdown struct {
 	// Inputs lists, by reference, what this context was built from. Absent on snapshots
 	// captured before it existed.
 	Inputs *ContextInputs `json:"inputs,omitempty"`
+	// ImagesWithheld counts images the model did not see for this reply, for the reason in
+	// ImagesWithheldReason; the reply was generated without them.
+	ImagesWithheld int `json:"images_withheld,omitempty"`
+	// ImagesWithheldReason is ImagesWithheldNoVision or ImagesWithheldSafetyRefusal; set
+	// whenever ImagesWithheld is.
+	ImagesWithheldReason string `json:"images_withheld_reason,omitempty"`
 }
+
+// Why a reply's images were withheld from the model.
+const (
+	// ImagesWithheldNoVision: the chat model cannot see images, so the user's were not sent.
+	ImagesWithheldNoVision = "no_vision"
+	// ImagesWithheldSafetyRefusal: the provider refused a request that carried them on safety
+	// grounds, and it was retried without them.
+	ImagesWithheldSafetyRefusal = "safety_refusal"
+)
 
 // Memory input stages: how a memory reached this turn's context.
 const (

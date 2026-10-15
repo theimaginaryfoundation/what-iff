@@ -215,6 +215,34 @@ describe('MessageBubbleComponent', () => {
         expect(labels).toEqual(['Context', '[claude-sonnet:Focus]']);
     });
 
+    it('says when images were left out of a reply after a safety refusal', () => {
+        const breakdown = {
+            segments: [{ kind: 'history_turn', segments: 1, tokens: 100, cacheable: false }],
+            total_tokens: 100,
+            budget_tokens: 30000,
+            captured_at: '2026-08-17T12:00:00Z',
+        };
+        fixture.componentRef.setInput('message', { ...message('Assistant'), context_breakdown: breakdown });
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('[data-testid="images-withheld"]')).toBeNull();
+
+        fixture.componentRef.setInput('message', { ...message('Assistant'), context_breakdown: { ...breakdown, images_withheld: 2 } });
+        fixture.detectChanges();
+        const hint = fixture.nativeElement.querySelector('[data-testid="images-withheld"]') as HTMLElement;
+        expect(hint?.textContent?.trim()).toBe('Images left out');
+        const labels = Array.from(fixture.nativeElement.querySelector('.bubble__meta-end')?.children ?? [], (element: Element) => element.textContent?.trim());
+        expect(labels[0]).toBe('Images left out');
+        expect(fixture.componentInstance.imagesWithheldHint()).toContain("safety filter");
+
+        fixture.componentRef.setInput('message', {
+            ...message('Assistant'),
+            context_breakdown: { ...breakdown, images_withheld: 1, images_withheld_reason: 'no_vision' as const },
+        });
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('[data-testid="images-withheld"]')).toBeTruthy();
+        expect(fixture.componentInstance.imagesWithheldHint()).toContain("can't see images");
+    });
+
     it('shows skill name pills for user messages with rituals', () => {
         fixture.componentRef.setInput('message', {
             ...message('User'),

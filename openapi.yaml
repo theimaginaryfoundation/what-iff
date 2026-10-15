@@ -8618,6 +8618,19 @@ components:
           description: >-
             What this context was built from, by reference (IDs and short hashes, never content).
             Absent on snapshots captured before it existed.
+        images_withheld:
+          type: integer
+          minimum: 0
+          description: >-
+            Images the model did not see for this reply, for the reason in
+            images_withheld_reason. Absent when none.
+        images_withheld_reason:
+          type: string
+          enum: [no_vision, safety_refusal]
+          description: >-
+            no_vision: the chat model cannot see images, so the user's attachments were not sent.
+            safety_refusal: the provider's safety filter refused a request that carried them, and
+            it was retried without them. Set whenever images_withheld is.
       required: [segments, total_tokens, budget_tokens, captured_at]
 
     ContextInputs:

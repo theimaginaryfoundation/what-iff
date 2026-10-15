@@ -33,6 +33,10 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
   The pass runs only on the instance that wins the Postgres advisory lock `MemoryEmbeddingBackfillLockKey` (default 80920033); other instances, and databases without advisory locks, skip it quietly.
   It does not start at all under mock/local LLM backends (`nonVendorLLM`), where embeddings have no provider.
   Both backfills are idempotent and only log failures; a pass stops early when the provider is unreachable (e.g. the deny-network client under mock/local backends).
+- **Image safety retries (`image_safety_retry.go`):** when a model call in the agent loop is refused on safety grounds and its adapter is a `provider.ImageStripper` with images to drop, `retryWithoutImagesOnRefusal` strips them and retries that one call (tools already run are not re-run).
+  The count lands on the reply's context breakdown as `images_withheld`; a refusal with nothing to strip, or a second refusal, goes to the existing safety-violation path.
+  A chat model without vision records the user's image attachments the same way (`withholdImages`, reason `no_vision` instead of `safety_refusal`), so the reply can say its images were not seen.
+  A refused checkpoint summary is retried once from the turn's own context without images (`checkpointSummaryWithoutImages`), since a chained `previous_response_id` keeps them out of reach and a stuck summary would be retried every turn.
 - **Rituals:** User and system rituals, image ritual flow, registry of built-in system rituals.
 - **Image vendor (`image_generators.go`):** `NewAgent` builds a `provider.ImageGenerator` for each image vendor with a credential.
   `imageGeneratorForUser` picks the user's `image_generation_provider` for the `generate_image` tool and the image ritual, among the vendors the caller holds a key for (asked per request, since keys can belong to accounts), falling back to the first of those (OpenAI first).

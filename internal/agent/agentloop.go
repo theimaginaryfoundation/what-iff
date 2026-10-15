@@ -32,7 +32,15 @@ func (a *Agent) handleAgentLoop(
 			}
 		}
 		logInferenceCall(ctx, a.logger, chatCtx, adapter, round)
-		result, toolUses, err := adapter.Call(ctx)
+		var (
+			result   *provider.GenerateResponse
+			toolUses []provider.ToolUse
+		)
+		err := a.retryWithoutImagesOnRefusal(ctx, chatCtx, adapter, func() error {
+			var callErr error
+			result, toolUses, callErr = adapter.Call(ctx)
+			return callErr
+		})
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -53,7 +61,12 @@ func (a *Agent) handleAgentLoop(
 
 		if round == maxToolCallRounds-1 {
 			// Max rounds reached — strip tools and force a prose response.
-			final, err := adapter.ForceFinalResponse(ctx)
+			var final *provider.GenerateResponse
+			err := a.retryWithoutImagesOnRefusal(ctx, chatCtx, adapter, func() error {
+				var callErr error
+				final, callErr = adapter.ForceFinalResponse(ctx)
+				return callErr
+			})
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("failed to force final response: %w", err)
 			}
