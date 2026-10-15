@@ -1,7 +1,9 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 
 import { ChatMessage } from '../../../../core/models/message.model';
+import { ProviderKeysService } from '../../../../core/services/provider-keys.service';
+import { ProfileSettingsModalService } from '../../../profile-settings/profile-settings-modal.service';
 import { AuthImagePipe } from '../../../../core/pipes/auth-image.pipe';
 import { MessageBubbleComponent } from '../message-bubble/message-bubble.component';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
@@ -100,6 +102,9 @@ interface AssistantVisual {
         @if (userGenerationError(); as errInfo) {
           <div class="message-group__gen-error message-group__gen-error--user" role="alert">
             <span class="message-group__gen-error-text">{{ errInfo.text }}</span>
+            @if (errInfo.needsKey) {
+              <button type="button" class="message-group__gen-error-retry" (click)="openProviderKeys()">Add key</button>
+            }
             <button
               type="button"
               class="message-group__gen-error-retry"
@@ -429,7 +434,10 @@ export class MessageGroupComponent {
   /** When false, hide the entire assistant image column (expression, portrait, thinking). */
   readonly showAssistantAvatar = computed(() => this.assistantVisual()?.expressionsEnabled !== false);
 
-  readonly userGenerationError = computed((): { text: string; message: ChatMessage } | null => {
+  private readonly providerKeys = inject(ProviderKeysService);
+  private readonly settings = inject(ProfileSettingsModalService);
+
+  readonly userGenerationError = computed((): { text: string; message: ChatMessage; needsKey: boolean } | null => {
     if (this.origin() !== 'User') {
       return null;
     }
@@ -437,8 +445,15 @@ export class MessageGroupComponent {
     if (!target?.last_error_message?.trim()) {
       return null;
     }
-    return { text: target.last_error_message.trim(), message: target };
+    // A missing key is the account's to fix only where accounts bring their own keys.
+    const needsKey = target.last_error_code === 'provider_not_configured' && this.providerKeys.accountsSupplyKeys();
+    return { text: target.last_error_message.trim(), message: target, needsKey };
   });
+
+  /** Opens Profile & Settings on the API keys tab. */
+  openProviderKeys(): void {
+    this.settings.open('api-keys');
+  }
 
   /** Shown after assistant bubbles when a post-turn checkpoint (scratchpad + summary) completed. */
   readonly assistantCheckpointLine = computed((): string | null => {

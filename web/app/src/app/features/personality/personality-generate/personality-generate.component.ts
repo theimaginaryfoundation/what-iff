@@ -2,6 +2,8 @@ import { Component, computed, DestroyRef, inject, input, OnInit, output, signal,
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { AsyncPipe, NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ProviderKeysService } from '../../../core/services/provider-keys.service';
+import { ProfileSettingsModalService } from '../../profile-settings/profile-settings-modal.service';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { GeneratePersonalityModalService } from '../../../core/services/generate-personality-modal.service';
@@ -101,6 +103,15 @@ export class PersonalityGenerateComponent implements OnInit {
   private confirmationService = inject(ConfirmationService);
   private chatService = inject(ChatService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly providerKeys = inject(ProviderKeysService);
+  private readonly settings = inject(ProfileSettingsModalService);
+
+  /** Leaves the wizard (its answers are saved as a draft) for the API keys tab. */
+  addProviderKey(): void {
+    this.errorNeedsKey.set(false);
+    this.generateModal.hide();
+    this.settings.open('api-keys');
+  }
 
   readonly pages = WIZARD_PAGES;
   readonly imageStyles = IMAGE_STYLES;
@@ -111,6 +122,8 @@ export class PersonalityGenerateComponent implements OnInit {
   flow = signal<PersonalityGenFlow | null>(null);
   isLoading = signal(true);
   errorMessage = signal<string | null>(null);
+  /** The last failure was a missing provider key the account can add itself. */
+  errorNeedsKey = signal(false);
 
   // Wizard navigation.
   currentStep = signal(0);
@@ -191,6 +204,7 @@ export class PersonalityGenerateComponent implements OnInit {
   loadFlow(): void {
     this.isLoading.set(true);
     this.errorMessage.set(null);
+    this.errorNeedsKey.set(false);
 
     this.genFlowService.getOrCreateFlow().subscribe({
       next: (flow) => {
@@ -322,12 +336,14 @@ export class PersonalityGenerateComponent implements OnInit {
       // Answers are unchanged — reuse existing generated output.
       this.isEditingAnswers.set(false);
       this.errorMessage.set(null);
+    this.errorNeedsKey.set(false);
       return;
     }
 
     // Save the last page first, then trigger generation.
     this.isGenerating.set(true);
     this.errorMessage.set(null);
+    this.errorNeedsKey.set(false);
 
     const refIdForGen = this.referenceImageId();
     this.genFlowService.updateFlow(f.id, {
@@ -389,6 +405,7 @@ export class PersonalityGenerateComponent implements OnInit {
 
     this.isGenerating.set(true);
     this.errorMessage.set(null);
+    this.errorNeedsKey.set(false);
     this.selectedNameIndex.set(0);
     this.resetPortraitJob();
 
@@ -414,6 +431,7 @@ export class PersonalityGenerateComponent implements OnInit {
 
     this.isAccepting.set(true);
     this.errorMessage.set(null);
+    this.errorNeedsKey.set(false);
 
     const acceptReq: { name: string; cover_image_id?: string } = { name: this.selectedName() };
     const coverId = this.coverImageId();
@@ -488,6 +506,7 @@ export class PersonalityGenerateComponent implements OnInit {
 
     this.isResetting.set(true);
     this.errorMessage.set(null);
+    this.errorNeedsKey.set(false);
 
     this.genFlowService.resetFlow(f.id).subscribe({
       next: (resetFlow) => {
@@ -533,6 +552,7 @@ export class PersonalityGenerateComponent implements OnInit {
     this.isEditingAnswers.set(true);
     this.currentStep.set(this.totalSteps - 1);
     this.errorMessage.set(null);
+    this.errorNeedsKey.set(false);
   }
 
   goBackToList(): void {
@@ -622,6 +642,7 @@ export class PersonalityGenerateComponent implements OnInit {
           } else if (job.status === 'failed') {
             this.isGenerating.set(false);
             this.errorMessage.set(job.error || 'AI generation failed. Please try again.');
+            this.errorNeedsKey.set(job.error_code === 'provider_not_configured' && this.providerKeys.accountsSupplyKeys());
           }
         },
         error: () => {

@@ -6,10 +6,10 @@
     </div>
   </div>
 
-  <!-- A bar with a single tab is just noise (the public build only has Profile). -->
-  @if (tabs.length > 1) {
+  <!-- A bar with a single tab is just noise: without account keys there is only Profile. -->
+  @if (tabs().length > 1) {
     <nav class="profile-settings__tabs" aria-label="Profile settings sections">
-      @for (tab of tabs; track tab.id) {
+      @for (tab of tabs(); track tab.id) {
         <button
           type="button"
           class="profile-settings__tab"
@@ -17,7 +17,14 @@
           [attr.aria-selected]="modal.activeTab() === tab.id"
           (click)="setTab(tab.id)"
         >
-          <ui-user-icon [size]="13" />
+          @switch (tab.icon) {
+            @case ('api-keys') {
+              <ui-shield-icon [size]="13" />
+            }
+            @default {
+              <ui-user-icon [size]="13" />
+            }
+          }
           {{ tab.label }}
         </button>
       }
@@ -31,6 +38,9 @@
   }
 
   <div class="profile-settings__body">
+    @if (modal.activeTab() === 'api-keys' && tabs().length > 1) {
+      <app-provider-keys-section />
+    } @else {
     <section class="profile-settings__section">
       @if (loadingProfile()) {
         <div class="profile-settings__empty">Loading profile...</div>
@@ -184,5 +194,6 @@
         </div>
       }
     </section>
+    }
   </div>
 </ui-modal>

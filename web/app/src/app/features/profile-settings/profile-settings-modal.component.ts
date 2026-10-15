@@ -20,25 +20,28 @@ import { AuthService } from '../../core/services/auth.service';
 import { LoggerService } from '../../core/services/logger.service';
 import { ModelService } from '../../core/services/model.service';
 import { PersonalityService } from '../../core/services/personality.service';
+import { ProviderKeysService } from '../../core/services/provider-keys.service';
 import { ThemeMode, ThemeService } from '../../core/services/theme.service';
 import { UserPreferencesService } from '../../core/services/user-preferences.service';
 import { TIMEZONE_MAX_LENGTH, detectBrowserTimezone, listTimezones, timezoneValidator } from '../../core/utils/timezone.helpers';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
-import { UserIconComponent } from '../../shared/ui/icons/icons';
+import { ShieldIconComponent, UserIconComponent } from '../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { ProfileSettingsModalService, ProfileSettingsTab } from './profile-settings-modal.service';
+import { ProviderKeysSectionComponent } from './provider-keys/provider-keys-section.component';
 
 /** Profile & Settings modal: account identity, appearance, defaults, and password. */
 @Component({
   selector: 'app-profile-settings-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ReactiveFormsModule, UserIconComponent, TooltipDirective],
+  imports: [CommonModule, ModalComponent, ReactiveFormsModule, UserIconComponent, ShieldIconComponent, TooltipDirective, ProviderKeysSectionComponent],
   templateUrl: './profile-settings-modal.component.html',
   styleUrl: './profile-settings-modal.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ProfileSettingsModalComponent {
   readonly modal = inject(ProfileSettingsModalService);
+  private readonly providerKeys = inject(ProviderKeysService);
   private readonly authService = inject(AuthService);
   private readonly externalAuth = inject(ExternalAuthProvider);
   private readonly fb = inject(FormBuilder);
@@ -49,7 +52,11 @@ export class ProfileSettingsModalComponent {
   private readonly router = inject(Router);
   private readonly logger = inject(LoggerService);
 
-  readonly tabs: Array<{ id: ProfileSettingsTab; label: string; icon: 'profile' }> = [{ id: 'profile', label: 'Profile', icon: 'profile' }];
+  /** The API keys tab appears only where accounts bring their own provider keys. */
+  readonly tabs = computed<Array<{ id: ProfileSettingsTab; label: string; icon: 'profile' | 'api-keys' }>>(() => [
+    { id: 'profile', label: 'Profile', icon: 'profile' },
+    ...(this.providerKeys.accountsSupplyKeys() ? [{ id: 'api-keys' as const, label: 'API keys', icon: 'api-keys' as const }] : []),
+  ]);
 
   readonly profileForm = this.fb.group({
     email: ['', [Validators.required, Validators.email, Validators.maxLength(255)]],
@@ -137,6 +144,7 @@ export class ProfileSettingsModalComponent {
         if (!this.hasLoadedForOpen) {
           this.hasLoadedForOpen = true;
           void this.loadProfile();
+          this.providerKeys.refreshAccess().subscribe();
         }
       } else {
         this.hasLoadedForOpen = false;
