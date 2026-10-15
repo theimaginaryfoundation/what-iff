@@ -3,6 +3,8 @@ package datastore
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
 	"testing"
 	"time"
 
@@ -13,7 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/ent/embedding"
 	entmemory "github.com/theimaginaryfoundation/what-iff/ent/memory"
+	"github.com/theimaginaryfoundation/what-iff/internal/apicontext"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 )
 
 // embeddingRowsFor returns every Embedding row pointing at memoryID.
@@ -419,4 +423,46 @@ func TestLockRowForUpdate_OnlyOnDialectsWithRowLocks(t *testing.T) {
 	}
 	require.Contains(t, render(dialect.Postgres), "FOR UPDATE")
 	require.NotContains(t, render(dialect.SQLite), "FOR UPDATE")
+}
+
+// Memories are embedded as the account they belong to, so a per-account key
+// applies, and an account with no key is passed over without stopping the
+// run for anyone else.
+func TestBackfillMemoryEmbeddings_EmbedsAsEachOwnerAndPassesOverOwnersWithoutAKey(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newMemoryTestDatastore(t)
+	defer cleanup()
+
+	withKey, withoutKey := uuid.New(), uuid.New()
+	createTestUser(t, ds, withKey)
+	createTestUser(t, ds, withoutKey)
+	owner := map[string]uuid.UUID{}
+	for i, u := range []uuid.UUID{withKey, withoutKey, withKey} {
+		content := fmt.Sprintf("memory %d", i)
+		_, err := ds.CreateMemoryFromInput(ctx, u, models.CreateMemoryInput{Content: content, Level: models.MemoryLevelGlobal})
+		require.NoError(t, err)
+		owner[content] = u
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	embed := func(ctx context.Context, inputs []string) ([][]float32, error) {
+		caller, ok := apicontext.UserIDFrom(ctx)
+		require.True(t, ok, "embedding runs as an account")
+		if caller == withoutKey {
+			return nil, &url.Error{Op: "Post", URL: "https://api.openai.com/v1/embeddings",
+				Err: &providerkeys.NotConfiguredError{Provider: models.ModelProviderOpenAI}}
+		}
+		out := make([][]float32, len(inputs))
+		for i, in := range inputs {
+			if in != memoryEmbeddingProviderProbe {
+				require.Equal(t, caller, owner[in], "each memory is embedded as its own account")
+			}
+			out[i] = []float32{1}
+		}
+		return out, nil
+	}
+
+	stats, err := ds.BackfillMemoryEmbeddings(ctx, 10, embed)
+	require.NoError(t, err, "a keyless account does not stop the run")
+	require.Equal(t, MemoryEmbeddingBackfillStats{Embedded: 2, NoKey: 1}, stats)
 }

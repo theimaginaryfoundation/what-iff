@@ -2,6 +2,7 @@ package datastore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,8 +12,10 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/ent/memory"
 	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
+	"github.com/theimaginaryfoundation/what-iff/internal/apicontext"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 
 	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
@@ -51,11 +54,15 @@ func lockRowForUpdate(s *sql.Selector) {
 }
 
 func toMemoryEmbeddingCandidate(m *ent.Memory) models.MemoryEmbeddingCandidate {
-	return models.MemoryEmbeddingCandidate{
+	c := models.MemoryEmbeddingCandidate{
 		MemoryID:  m.ID,
 		Content:   m.Content,
 		CreatedAt: m.CreatedAt,
 	}
+	if m.Edges.Owner != nil {
+		c.OwnerID = m.Edges.Owner.ID
+	}
+	return c
 }
 
 // OwnedMemoriesMissingEmbedding returns the memories among ids that userID
@@ -104,6 +111,7 @@ func (d *Datastore) ListMemoriesMissingEmbedding(ctx context.Context, afterCreat
 		)
 	q = memoryCursorPredicate(afterCreatedAt, afterID)(q)
 	rows, err := q.
+		WithOwner(func(uq *ent.UserQuery) { uq.Select(user.FieldID) }).
 		Order(ent.Asc(memory.FieldCreatedAt), ent.Asc(memory.FieldID)).
 		Limit(limit).
 		All(ctx)
@@ -205,6 +213,9 @@ type MemoryEmbeddingBackfillStats struct {
 	// Failed counts memories whose embedding or write failed; they stay
 	// unembedded for the next run.
 	Failed int
+	// NoKey counts memories whose account has no key for the embedding
+	// provider. They wait, unembedded, for a key and the next run.
+	NoKey int
 }
 
 // memoryEmbeddingProviderProbe is embedded when every memory in a backfill
@@ -225,6 +236,11 @@ const memoryEmbeddingProviderProbe = "memory embedding backfill probe"
 // are logged. If every memory in a page fails, a trivial probe input decides
 // whether the provider is unavailable (the run stops with that error, leaving
 // the rest for the next run) or the page is just bad input (skipped).
+//
+// Each page is embedded one account at a time, as that account (on its
+// context), so the embedding uses the key of the account the memories belong
+// to. An account with no key for the embedding provider is passed over
+// (NoKey) rather than stopping the run for everyone else.
 func (d *Datastore) BackfillMemoryEmbeddings(ctx context.Context, batchSize int, createEmbeddings MemoryImportBatchEmbeddingFunc) (MemoryEmbeddingBackfillStats, error) {
 	var stats MemoryEmbeddingBackfillStats
 	if createEmbeddings == nil {
@@ -250,48 +266,92 @@ func (d *Datastore) BackfillMemoryEmbeddings(ctx context.Context, batchSize int,
 		last := candidates[len(candidates)-1]
 		afterCreatedAt, afterID = last.CreatedAt, last.MemoryID
 
-		vectors, err := embedMemoryCandidates(ctx, candidates, createEmbeddings)
-		if err != nil {
-			d.logger.Warn("memory embedding backfill: batch embedding failed; retrying one by one",
-				zap.Int("batch_size", len(candidates)),
-				zap.Error(err))
-			var providerErr error
-			vectors, providerErr = d.embedMemoryCandidatesOneByOne(ctx, candidates, createEmbeddings)
-			if providerErr != nil {
-				stats.Failed += len(candidates)
-				return stats, fmt.Errorf("memory embedding backfill: embedding provider unavailable: %w", providerErr)
+		for _, group := range groupMemoryCandidatesByOwner(candidates) {
+			if err := d.backfillOwnerGroup(apicontext.WithUserID(ctx, group[0].OwnerID), group, createEmbeddings, &stats); err != nil {
+				return stats, err
 			}
-		}
-
-		var failedIDs []string
-		for i, c := range candidates {
-			if len(vectors[i]) == 0 {
-				stats.Failed++
-				failedIDs = append(failedIDs, c.MemoryID.String())
-				continue
-			}
-			wrote, err := d.SetMemoryEmbedding(ctx, c.MemoryID, c.Content, vectors[i])
-			switch {
-			case err != nil:
-				d.logger.Warn("memory embedding backfill: failed to store embedding",
-					zap.String("memory_id", c.MemoryID.String()),
-					zap.Error(err))
-				stats.Failed++
-			case wrote:
-				stats.Embedded++
-			default:
-				stats.Skipped++
-			}
-		}
-		if len(failedIDs) > 0 {
-			d.logger.Warn("memory embedding backfill: memories failed to embed; skipped until the next run",
-				zap.Strings("memory_ids", failedIDs))
 		}
 
 		if len(candidates) < batchSize {
 			return stats, nil
 		}
 	}
+}
+
+// groupMemoryCandidatesByOwner splits a page into one group per account, each
+// in the page's order.
+func groupMemoryCandidatesByOwner(candidates []models.MemoryEmbeddingCandidate) [][]models.MemoryEmbeddingCandidate {
+	index := map[uuid.UUID]int{}
+	var groups [][]models.MemoryEmbeddingCandidate
+	for _, c := range candidates {
+		i, ok := index[c.OwnerID]
+		if !ok {
+			i = len(groups)
+			index[c.OwnerID] = i
+			groups = append(groups, nil)
+		}
+		groups[i] = append(groups[i], c)
+	}
+	return groups
+}
+
+// backfillOwnerGroup embeds and stores one account's memories from a page. An
+// account with no key is counted in stats.NoKey and passed over; an
+// unavailable provider is returned as an error, which stops the run.
+func (d *Datastore) backfillOwnerGroup(ctx context.Context, group []models.MemoryEmbeddingCandidate, createEmbeddings MemoryImportBatchEmbeddingFunc, stats *MemoryEmbeddingBackfillStats) error {
+	vectors, err := embedMemoryCandidates(ctx, group, createEmbeddings)
+	if err != nil {
+		if isMissingProviderKey(err) {
+			stats.NoKey += len(group)
+			return nil
+		}
+		d.logger.Warn("memory embedding backfill: batch embedding failed; retrying one by one",
+			zap.Int("batch_size", len(group)),
+			zap.Error(err))
+		var providerErr error
+		vectors, providerErr = d.embedMemoryCandidatesOneByOne(ctx, group, createEmbeddings)
+		if providerErr != nil {
+			if isMissingProviderKey(providerErr) {
+				stats.NoKey += len(group)
+				return nil
+			}
+			stats.Failed += len(group)
+			return fmt.Errorf("memory embedding backfill: embedding provider unavailable: %w", providerErr)
+		}
+	}
+
+	var failedIDs []string
+	for i, c := range group {
+		if len(vectors[i]) == 0 {
+			stats.Failed++
+			failedIDs = append(failedIDs, c.MemoryID.String())
+			continue
+		}
+		wrote, err := d.SetMemoryEmbedding(ctx, c.MemoryID, c.Content, vectors[i])
+		switch {
+		case err != nil:
+			d.logger.Warn("memory embedding backfill: failed to store embedding",
+				zap.String("memory_id", c.MemoryID.String()),
+				zap.Error(err))
+			stats.Failed++
+		case wrote:
+			stats.Embedded++
+		default:
+			stats.Skipped++
+		}
+	}
+	if len(failedIDs) > 0 {
+		d.logger.Warn("memory embedding backfill: memories failed to embed; skipped until the next run",
+			zap.Strings("memory_ids", failedIDs))
+	}
+	return nil
+}
+
+// isMissingProviderKey reports whether err is the credential transport
+// refusing a request the account has no key for.
+func isMissingProviderKey(err error) bool {
+	var notConfigured *providerkeys.NotConfiguredError
+	return errors.As(err, &notConfigured)
 }
 
 // embedMemoryCandidatesOneByOne embeds each candidate in its own call. A
