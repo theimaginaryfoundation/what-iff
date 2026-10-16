@@ -16,6 +16,11 @@ export class PersonalityDetailPage {
     this.promptTextarea = this.promptEditor.getByRole('textbox', { name: /^Prompt\b/ });
     this.savePromptButton = this.promptEditor.getByRole('button', { name: 'Save' });
     this.cancelPromptButton = this.promptEditor.getByRole('button', { name: 'Cancel' });
+    this.promptHistory = this.page.getByRole('region', { name: 'Prompt changes' });
+    this.promptChangesToggle = this.page.getByTestId('prompt-change-toggle');
+    this.promptChangesList = this.page.getByRole('list', { name: 'Personality prompt changes' });
+    this.noPromptChangesMessage = this.page.getByText('No prompt changes logged yet.');
+    this.scratchpadTextarea = this.page.getByRole('textbox', { name: 'Scratchpad' });
     this.attachments = this.page.getByLabel('Personality attachments');
     this.uploadInput = this.page.locator('#personality-attachments-file-input');
     this.deleteButton = this.page.getByRole('button', { name: 'Delete', exact: true });
@@ -97,6 +102,64 @@ export class PersonalityDetailPage {
 
   async cancelPrompt(): Promise<void> {
     await this.cancelPromptButton.click();
+  }
+
+  // --- prompt change history -------------------------------------------------
+
+  /** The "Prompt changes" section directly under the system prompt editor. */
+  readonly promptHistory: Locator;
+
+  /** "Show history" / "Hide history"; the section is collapsed by default. */
+  readonly promptChangesToggle: Locator;
+
+  /** Rendered only once expanded and at least one change exists. */
+  readonly promptChangesList: Locator;
+
+  /** Shown in place of the list once expanded, when nothing has been logged. */
+  readonly noPromptChangesMessage: Locator;
+
+  /** The scratchpad field, the section that follows the prompt history. */
+  readonly scratchpadTextarea: Locator;
+
+  async expandPromptChanges(): Promise<void> {
+    if ((await this.promptChangesToggle.getAttribute('aria-expanded')) !== 'true') {
+      await this.promptChangesToggle.click();
+    }
+  }
+
+  /** Every change card, newest first. */
+  promptChangeCards(): Locator {
+    return this.promptChangesList.getByRole('listitem');
+  }
+
+  /**
+   * The card below its header row — the System prompt title, the restore
+   * action, and the before/after diff grid. Everything in it is derived from
+   * the prompts themselves, so unlike the full card it carries no timestamp
+   * and is safe to screenshot without a mask.
+   */
+  promptChangeBody(card: Locator): Locator {
+    return card.locator('.prompt-change-card__body');
+  }
+
+  /** The rendered prompt text in a card's "Before" / "After" diff pane. */
+  promptChangePane(card: Locator, side: 'Before' | 'After'): Locator {
+    return card.locator(side === 'Before' ? '.diff-pane--old' : '.diff-pane--new').locator('.diff-pane__content');
+  }
+
+  /** The card's "Edited" / "Restored" label. */
+  promptChangeAction(card: Locator): Locator {
+    return card.locator('.prompt-change-card__action');
+  }
+
+  /**
+   * Restores the prompt from before a change, including the confirmation
+   * step. The dialog's confirm button is labelled "Restore", not the
+   * ConfirmationModal default of "Delete".
+   */
+  async restorePrevious(card: Locator): Promise<void> {
+    await card.getByRole('button', { name: 'Restore previous' }).click();
+    await this.confirmation.confirm('Restore');
   }
 
   // --- attachments -------------------------------------------------------------

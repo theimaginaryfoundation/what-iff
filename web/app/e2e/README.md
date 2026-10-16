@@ -676,10 +676,10 @@ Full-page baselines are only taken where the *whole* screen is stable. Where
 the surrounding page carries per-run counts or timestamps but the component
 does not, the spec screenshots the element instead — see
 `memories.visual.spec.ts` (the list header counts vary, the card does not)
-and `compaction-log.visual.spec.ts`.
+and `personality-prompt-history.visual.spec.ts`.
 
 Two specs are `@visual` but take no screenshot at all:
-`compaction-log.visual.spec.ts`'s collapsed-history check and
+`personality-prompt-history.visual.spec.ts`'s collapsed-history check and
 `context-xray.visual.spec.ts`. Both assert *geometry* — bounding-box
 relationships — because the screens they guard are laid out deterministically
 while every number on them comes from a live turn. That is the intended

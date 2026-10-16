@@ -1,10 +1,10 @@
 import { test, expect } from '../../fixtures';
 
 /**
- * @functional-coverage tests/functional/memory/compaction-log.spec.ts
+ * @functional-coverage tests/functional/personality/prompt-history.spec.ts
  *
  * Audit entries being written on save, the toggle gating them, and restore
- * appending rather than rewriting are covered by the functional compaction-log
+ * appending rather than rewriting are covered by the functional prompt-history
  * spec.
  *
  * A baseline pins how this looks; it cannot tell you it still works. See
@@ -14,7 +14,7 @@ import { test, expect } from '../../fixtures';
 test(
   'personality prompt change history',
   { tag: ['@visual', '@mock-only'] },
-  async ({ authenticatedPage: page, personalitiesPage, personalityDetailPage, compactionLogPage }) => {
+  async ({ authenticatedPage: page, personalitiesPage, personalityDetailPage }) => {
     const personalityName = 'E2E Prompt History Persona';
     const initialPrompt = 'You are a calm assistant. Keep answers concise.';
     const updatedPrompt = 'You are a precise assistant. Explain your reasoning in short bullet points.';
@@ -31,27 +31,25 @@ test(
     await personalityDetailPage.savePrompt();
     await saved;
 
-    await compactionLogPage.navigateTo();
-    await expect(compactionLogPage.heading).toBeVisible();
-    await expect(compactionLogPage.promptChangesToggle).toBeVisible();
-    await expect(compactionLogPage.promptChangesToggle).toHaveAttribute('aria-expanded', 'false');
-    await expect(compactionLogPage.promptChangesList).toHaveCount(0);
+    await expect(personalityDetailPage.promptChangesToggle).toBeVisible();
+    await expect(personalityDetailPage.promptChangesToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(personalityDetailPage.promptChangesList).toHaveCount(0);
 
-    // The visual contract for #76 is geometric rather than pixel-identical: when prompt history is
-    // collapsed, the existing compaction feed must remain immediately below it instead of being
-    // displaced by the prompt diff card that #65 added above the feed.
-    const feedStatus = page.getByText(/^No compactions logged yet\./);
-    await expect(feedStatus).toBeVisible();
-    const toggleBox = await compactionLogPage.promptChangesToggle.boundingBox();
-    const feedBox = await feedStatus.boundingBox();
-    expect(toggleBox).not.toBeNull();
-    expect(feedBox).not.toBeNull();
-    expect(feedBox!.y).toBeGreaterThan(toggleBox!.y + toggleBox!.height);
-    expect(feedBox!.y - (toggleBox!.y + toggleBox!.height)).toBeLessThan(100);
+    // The visual contract for #76 is geometric rather than pixel-identical: while prompt history is
+    // collapsed it must stay a one-line section, so the scratchpad below it is not displaced by the
+    // prompt diff cards. Since #205 the history sits between the system prompt editor and the
+    // scratchpad on the personality detail page.
+    await expect(personalityDetailPage.scratchpadTextarea).toBeVisible();
+    const historyBox = await personalityDetailPage.promptHistory.boundingBox();
+    const scratchpadBox = await personalityDetailPage.scratchpadTextarea.boundingBox();
+    expect(historyBox).not.toBeNull();
+    expect(scratchpadBox).not.toBeNull();
+    expect(scratchpadBox!.y).toBeGreaterThan(historyBox!.y + historyBox!.height);
+    expect(scratchpadBox!.y - (historyBox!.y + historyBox!.height)).toBeLessThan(100);
 
-    await compactionLogPage.expandPromptChanges();
-    await expect(compactionLogPage.promptChangesToggle).toHaveAttribute('aria-expanded', 'true');
-    const changeCard = compactionLogPage.promptChangeCard(personalityName);
+    await personalityDetailPage.expandPromptChanges();
+    await expect(personalityDetailPage.promptChangesToggle).toHaveAttribute('aria-expanded', 'true');
+    const changeCard = personalityDetailPage.promptChangeCards().first();
     await expect(changeCard).toBeVisible();
     await expect(changeCard).toContainText(initialPrompt);
     await expect(changeCard).toContainText(updatedPrompt);
@@ -66,9 +64,9 @@ test(
     // header row carries the entry's own date and time, and masking that
     // sub-element leaves a sliver of unmasked text at the mask's edge whenever
     // the rendered time changes width between runs. Dropping the header from
-    // the shot removes the variance instead of tolerating it; the badges it
-    // holds are asserted by the functional spec.
-    await expect(compactionLogPage.promptChangeBody(personalityName)).toHaveScreenshot(
+    // the shot removes the variance instead of tolerating it; the action label
+    // it holds is asserted by the functional spec.
+    await expect(personalityDetailPage.promptChangeBody(changeCard)).toHaveScreenshot(
       'prompt-change-card.png',
       { animations: 'disabled' },
     );
