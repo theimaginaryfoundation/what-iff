@@ -52,6 +52,11 @@ const (
 	ErrCodeMessageTooLong      = "message_too_long"
 	ErrCodeQuotaExceeded       = "quota_exceeded"
 	ErrCodeSystemPromptTooLong = "system_prompt_too_long"
+
+	// ErrCodeReauthenticationRequired: the action needs the account owner to
+	// confirm it (for example with the current password), and that confirmation
+	// was missing or wrong. Answered with 403, not 401: the session is valid.
+	ErrCodeReauthenticationRequired = "reauthentication_required"
 )
 
 // AllErrorCodes is every code this API can emit. It is the source the
@@ -80,6 +85,7 @@ var AllErrorCodes = []string{
 	ErrCodeMessageTooLong,
 	ErrCodeQuotaExceeded,
 	ErrCodeSystemPromptTooLong,
+	ErrCodeReauthenticationRequired,
 }
 
 // genericErrorCodes maps HTTP statuses to their generic code.

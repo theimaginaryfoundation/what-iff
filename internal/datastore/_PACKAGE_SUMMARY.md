@@ -44,6 +44,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   - Models: `model.go`.
   - Safety violations: `safety_violation_event.go`.
   - Tool call persistence: `toolcall.go`.
+- **`CheckUserPassword`** reports whether a password is the account's current one (false for identity-provider accounts); it backs `reauth`'s default confirmation.
 - **`errors.go`:** Sentinel errors for handlers and agent.
 - **DB metrics** (`dbmetrics.go`): **`InstrumentEntClient`** adds an ent interceptor and hook that record `db.client.operation.duration` for every query and mutation, with `db.collection.name` = snake_case entity (`chat_message`) and `db.operation.name` = `query`/`create`/`update`/`delete`.
   `internal/server` calls it once at startup; calling it twice double-counts.

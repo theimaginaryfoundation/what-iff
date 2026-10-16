@@ -485,6 +485,23 @@ func (d *Datastore) DeleteUser(ctx context.Context, userID uuid.UUID) error {
 	return nil
 }
 
+// CheckUserPassword reports whether password is the account's current password.
+// An account whose password is managed by an identity provider has no local
+// password, so nothing matches it.
+func (d *Datastore) CheckUserPassword(ctx context.Context, userID uuid.UUID, password string) (bool, error) {
+	u, err := d.dbClient.User.Get(ctx, userID)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			return false, ErrUserNotFound
+		}
+		return false, err
+	}
+	if u.PasswordHash == auth.ExternalAuthPasswordPlaceholder {
+		return false, nil
+	}
+	return auth.CheckPassword(password, u.PasswordHash), nil
+}
+
 // RefreshUserToken refreshes a user's token
 func (d *Datastore) RefreshUserToken(ctx context.Context, refreshToken string) (*models.TokenPair, error) {
 	// Validate refresh token

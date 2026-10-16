@@ -901,7 +901,7 @@ paths:
           $ref: '#/components/schemas/ModelProvider'
     put:
       summary: Store the account's key for a provider
-      description: Stores the key, encrypted at rest, replacing any key already stored for this provider. The key is never returned.
+      description: Stores the key, encrypted at rest, replacing any key already stored for this provider. The key is never returned. Requires the account's current password.
       tags: [Provider Keys]
       security:
         - bearerAuth: []
@@ -926,6 +926,14 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: >-
+            The current password was missing or wrong. `code` is
+            `reauthentication_required`; the session itself is still valid.
           content:
             application/json:
               schema:
@@ -8767,7 +8775,7 @@ components:
           format: date-time
     SetProviderKeyRequest:
       type: object
-      required: [key]
+      required: [key, current_password]
       properties:
         key:
           type: string
@@ -8776,6 +8784,14 @@ components:
           # characters with no whitespace; this pattern says the same.
           pattern: '^\s*\S{8,512}\s*$'
           description: The provider API key, 8 to 512 characters. Leading and trailing whitespace is trimmed; whitespace inside the key is rejected.
+        current_password:
+          type: string
+          format: password
+          writeOnly: true
+          description: >-
+            The account's current password. Holding a session is not enough to
+            change where the account's conversations are sent.
+
     WebhookToken:
       type: object
       properties:
@@ -10730,6 +10746,7 @@ components:
         - message_too_long
         - quota_exceeded
         - system_prompt_too_long
+        - reauthentication_required
 
     # Cross-resource search schemas (GET /search)
     SearchResult:
