@@ -2997,7 +2997,7 @@ func (a *Agent) setJobStatusFailedWithPartial(
 			generationPersonality = a.resolvePersonalityName(ctx, chatJob.UserID, chatCtx.chat.PersonalityID)
 		}
 	}
-	failureMessage := strings.TrimSpace(cause.Error())
+	failureMessage := strings.TrimSpace(providerkeys.FailureText(cause))
 	updated, _, err := a.ds.FinalizeFailedChatJobWithPartial(
 		ctx,
 		chatJob.UserID,
@@ -3028,7 +3028,7 @@ func (a *Agent) setJobStatusFailed(ctx context.Context, chatJob *models.Job, cau
 	}
 	toSave := *chatJob
 	toSave.Status = models.JobStatusFailed
-	toSave.Error = cause.Error()
+	toSave.Error = providerkeys.FailureText(cause)
 	updated, uerr := a.ds.UpdateJob(ctx, chatJob.UserID, toSave)
 	if uerr != nil {
 		a.logger.Error("failed to update job", zap.Error(uerr))
@@ -3050,7 +3050,7 @@ func (a *Agent) setJobStatusFailed(ctx context.Context, chatJob *models.Job, cau
 	if perr != nil {
 		return
 	}
-	errText := strings.TrimSpace(cause.Error())
+	errText := strings.TrimSpace(providerkeys.FailureText(cause))
 	if errText == "" {
 		return
 	}

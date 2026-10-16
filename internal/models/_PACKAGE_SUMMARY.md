@@ -8,7 +8,7 @@
 
 - Request/response structs for chats, messages, memories, personalities, rituals, models, jobs, agent jobs (including schedule types), billing-related payloads, file attachments, MCP servers, users, quotas, etc.
 - **Defaults and validation helpers** where present (e.g. `model_defaults.go` for model configuration).
-- **Provider keys** (`provider_key.go`): `ModelProviders` lists every provider, `ModelProvider.Known` checks one, and `ProviderKeySummary` describes a stored key without it.
+- **Provider keys** (`provider_key.go`): `ModelProviders` lists every provider, `ModelProvider.Known` checks one, `ProviderKeySummary` describes a stored key without it, and `ProviderAccess` reports where an account's keys come from (`KeysFromDeployment`/`KeysFromAccount`) and which providers it has a key for.
 - **Gallery folder paths (`folder.go`):** `NormalizeFolder` is the one definition of a valid folder path, used by the gallery API and the agent tools (trimmed, lower-cased, `/` or `\` separate, no `.` or `..`, at most 8 levels and 255 characters), plus `FolderIsWithin` and `FolderCount`.
   `GalleryKind` (`images`, `files`, `all`) narrows the gallery and its folder counts; `ParseGalleryKind` reads an empty value as `images`, so clients that do not ask keep the image-only list.
   `ExpressionFolder` gives the folder a personality's generated expression images are filed under (`expressions/<name>`, always one level, always valid), so they do not crowd the top level of the gallery.
