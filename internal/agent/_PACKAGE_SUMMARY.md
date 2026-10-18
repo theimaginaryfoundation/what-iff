@@ -285,6 +285,8 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 - `checkpoint_window_test.go` — the post-checkpoint history window start (#268): after the reply, before the user message when another message arrived mid-turn, and the fallbacks.
 - `message_test.go`, `message_timezone_test.go` — attachment labels, memories, tool-call context, human-readable `[sys:…]` timezone stamps (weekday + local offset).
 - `mcp_tools_test.go` — MCP tool wiring (OpenAI + Claude MCP config mapping).
+- `mcp_dispatch_coverage_test.go` and `mcp_error_integration_test.go` — MCP status, structured data and images through dispatch, plus complete loop continuation after MCP and registered local tool failures.
+  They verify the tool-call error records used for persistence and error text serialized for OpenAI and Claude, including Claude's `is_error` flag.
 - `processtoolcall_test.go` — catalog-derived tool list and dispatch handler registration (including `list_models`, `list_personalities`, `run_subagent`).
 - `subagent_tools_test.go` — minimal subagent context composition and argument validation behavior.
 - `subagent_providers_test.go` — subagent routing to Chat Completions providers (Qwen et al.) and z.ai against fake endpoints: tool-support gate, text-only rendering, missing-key and provider-error diagnostics.

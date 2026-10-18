@@ -3,10 +3,8 @@
 package mcpclient
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"net/url"
 	"os"
 	"testing"
@@ -39,7 +37,7 @@ func TestLiveConnectorInventory(t *testing.T) {
 	defer cancel()
 	tools, err := client.listToolsRPC(ctx, server, make(SessionState))
 	if err != nil {
-		t.Fatal("connector discovery failed; inspect local connector logs")
+		t.Fatal(connectorRequestFailure("inventory", err))
 	}
 	encoded, err := json.MarshalIndent(tools, "", "  ")
 	if err != nil {
@@ -56,20 +54,8 @@ func TestLiveConnectorRoundTrip(t *testing.T) {
 	if planPath == "" {
 		t.Fatal("MCP_SMOKE_PLAN is required for live writes")
 	}
-	data, err := os.ReadFile(planPath)
+	scenario, err := loadConnectorScenario(planPath)
 	if err != nil {
-		t.Fatal("could not read MCP_SMOKE_PLAN")
-	}
-	var scenario connectorScenario
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&scenario); err != nil {
-		t.Fatal("invalid connector scenario JSON")
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		t.Fatal("connector scenario must contain exactly one JSON object")
-	}
-	if err := scenario.validate(); err != nil {
 		t.Fatal(err)
 	}
 	client, server := liveConnector(t)

@@ -33,8 +33,9 @@ func testConnectorScenario() connectorScenario {
 }
 
 func TestConnectorRoundTrip(t *testing.T) {
-	for _, mode := range []string{"JSON", "SSE", "legacy_text"} {
+	for _, mode := range []string{"JSON", "SSE", "legacy_text", "plain_ack"} {
 		t.Run(mode, func(t *testing.T) {
+			t.Parallel() // Each subtest owns its connector, document and session state.
 			server := newConnectorScenarioServer(t, mode, mode == "SSE", nil)
 			report, err := runConnectorScenario(context.Background(), New(nil, nil), server, testConnectorScenario())
 			require.NoError(t, err)
@@ -59,21 +60,28 @@ func TestConnectorRoundTrip_Failures(t *testing.T) {
 		{"cleanup_noop", "verify_deleted: expected isError=true", "failed"},
 		{"missing_masked_by_permission", "error does not confirm the document is missing", "failed"},
 		{"protocol_failure", "reject: transport or protocol failure", "verified"},
+		{"non_json_legacy", "read_created: expected a JSON tool result", "failed"},
 	} {
 		t.Run(tt.fault, func(t *testing.T) {
 			server := newConnectorScenarioServer(t, tt.fault, false, nil)
 			report, err := runConnectorScenario(context.Background(), New(nil, nil), server, testConnectorScenario())
 			require.ErrorContains(t, err, tt.wantError)
 			require.Equal(t, tt.cleanup, report.Cleanup)
-			if tt.fault == "ownership_changed" {
-				for _, receipt := range report.Receipts {
-					require.NotEqual(t, "cleanup", receipt.Phase)
-				}
+			var phases []string
+			for _, receipt := range report.Receipts {
+				phases = append(phases, receipt.Phase)
 			}
-			if tt.fault == "wrong_world" || tt.fault == "missing_tool" {
-				for _, receipt := range report.Receipts {
-					require.NotEqual(t, "create", receipt.Phase)
-				}
+			switch tt.fault {
+			case "missing_tool":
+				require.Empty(t, phases, "capability preflight must fail before calling any tool")
+			case "wrong_world":
+				require.Equal(t, []string{"identity"}, phases)
+			case "ownership_changed":
+				require.Equal(t, []string{"identity", "create", "read_created", "update", "read_updated", "cleanup_ownership"}, phases)
+			case "non_json_legacy":
+				require.Equal(t, []string{"identity", "create", "read_created", "cleanup_ownership"}, phases)
+			default:
+				require.NotEmpty(t, phases)
 			}
 		})
 	}
@@ -90,6 +98,8 @@ func TestConnectorRoundTrip_CleanupAfterCancellation(t *testing.T) {
 
 func newConnectorScenarioServer(t *testing.T, fault string, sse bool, cancel context.CancelFunc) *models.MCPServer {
 	t.Helper()
+	// State and its lock belong to this server instance, not the test package.
+	// Independent subtests may run in parallel; requests within a fixture are locked.
 	var mu sync.Mutex
 	var document map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -190,6 +200,11 @@ func newConnectorScenarioServer(t *testing.T, fault string, sse bool, cancel con
 				}
 				delete(result, "structuredContent")
 				result["content"] = []map[string]any{{"type": "text", "text": string(encoded)}}
+			}
+			if (fault == "non_json_legacy" && req.Params.Name == "read") ||
+				(fault == "plain_ack" && (req.Params.Name == "update" || req.Params.Name == "delete")) {
+				delete(result, "structuredContent")
+				result["content"] = []map[string]any{{"type": "text", "text": "plain acknowledgement"}}
 			}
 		default:
 			http.Error(w, "unexpected method", http.StatusBadRequest)

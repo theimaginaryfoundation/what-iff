@@ -71,6 +71,21 @@ func TestParseToolCallResult_Output(t *testing.T) {
 			output:     "Structured content:\n{}",
 			structured: `{}`,
 		},
+		{
+			name:   "null structured content keeps text",
+			input:  `{"content":[{"type":"text","text":"done"}],"structuredContent": null}`,
+			output: "done",
+		},
+		{
+			name:   "whitespace surrounded null keeps error status",
+			input:  "{\"content\":[],\"isError\":true,\"structuredContent\": \n null \t}",
+			output: "MCP tool reported an error", isError: true,
+		},
+		{
+			name:   "known text survives unknown blocks",
+			input:  `{"content":[{"type":"future-block","value":"ignored"},{"type":"text","text":"known"}]}`,
+			output: "known",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -106,11 +121,31 @@ func TestCallToolResult_ErrIsATypedToolReportedError(t *testing.T) {
 	require.NoError(t, (CallToolResult{Output: "fine"}).Err())
 }
 
+func TestCallToolResult_ErrTrimsRenderingOnly(t *testing.T) {
+	for _, tt := range []struct{ output, want string }{
+		{" \n rejected \t", "rejected"},
+		{" \n\t ", "MCP tool reported an error"},
+	} {
+		result := CallToolResult{IsError: true, Output: tt.output}
+		require.EqualError(t, result.Err(), tt.want)
+		require.Equal(t, tt.output, result.Output)
+	}
+}
+
 func TestParseToolCallResult_RawFallback(t *testing.T) {
-	for _, input := range []string{`{"status":"ok"}`, `{"content":[{"type":"unknown"}]}`, `not json`} {
+	for _, input := range []string{`{"status":"ok"}`, `{"content":[{"type":"unknown"}]}`, `{"structuredContent":null}`, `{"structuredContent":invalid}`, `not json`} {
 		_, ok := New(nil, nil).parseToolCallResult(json.RawMessage(input))
 		require.False(t, ok, input)
 	}
+}
+
+func TestParseToolCallResult_NullKeepsAttachments(t *testing.T) {
+	result, ok := New(nil, nil).parseToolCallResult(json.RawMessage(`{"structuredContent":null,"content":[{"type":"blob","data":"aGVsbG8=","mimeType":"text/plain"}]}`))
+	require.True(t, ok)
+	require.Empty(t, result.Output)
+	require.Empty(t, result.StructuredContent)
+	require.Len(t, result.GeneratedAttachments, 1)
+	require.Equal(t, "aGVsbG8=", result.GeneratedAttachments[0].FileContent)
 }
 
 func TestCallToolByFullName_ToolError(t *testing.T) {

@@ -118,9 +118,12 @@ Each local receipt records a run ID, created document ID, phase, original tool n
 It omits endpoint, authorization headers, arguments, result bodies, and raw transport error messages.
 Receipts establish ordering and correlate a run with its configured inputs; hashes alone do not diagnose an arbitrary server-side failure.
 Keep the local plan and inspect redacted connector logs when more detail is needed.
+Plan diagnostics identify the invalid field or JSON byte offset, and discovery/request diagnostics report safe categories such as HTTP 401, timeouts or JSON-RPC failures.
+Their wrapped causes remain available to local `errors.Is` / `errors.As` inspection, while ordinary error rendering excludes raw paths, endpoints, response bodies and malformed values.
 
 Cleanup runs on a separate 30-second context even if the main test fails or is cancelled.
 It first reads the captured ID and verifies the exact unique ownership marker, then deletes that ID and verifies absence.
+The content marker changes before update assertions; cleanup instead uses the immutable run UUID and captured document ID, so stale or failed updates do not weaken ownership verification.
 Failed ownership checks stop deletion and leave cleanup marked failed.
 If a create response provides no usable ID, completion is uncertain: the test records `unknown_created_id` and never retries or deletes by a guessed name.
 Reconcile that run's unique marker before starting another write test.

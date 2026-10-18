@@ -130,6 +130,10 @@ func TestExecuteToolUses_MCPResultsPreserveStatusAndContent(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			const tinyPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+			resultText := "graph result"
+			if tt.isError {
+				resultText = "graph rendering failed"
+			}
 			serverID := uuid.New()
 			prefix := strings.ReplaceAll(serverID.String(), "-", "")
 			fullToolName := "mcp__" + prefix[:8] + "__render_graph"
@@ -158,7 +162,7 @@ func TestExecuteToolUses_MCPResultsPreserveStatusAndContent(t *testing.T) {
 							"isError":           tt.isError,
 							"structuredContent": map[string]any{"count": 0, "enabled": false},
 							"content": []map[string]any{
-								{"type": "text", "text": "graph result"},
+								{"type": "text", "text": resultText},
 								{"type": "image", "data": tinyPNG, "mimeType": "image/png"},
 							},
 						},
@@ -190,11 +194,12 @@ func TestExecuteToolUses_MCPResultsPreserveStatusAndContent(t *testing.T) {
 			require.Len(t, results, 1)
 			require.Equal(t, tt.isError, results[0].IsErr)
 			require.Equal(t, "mcp-img", results[0].ID)
-			require.Equal(t, "graph result", results[0].Output, "text only: structuredContent is not repeated after it")
+			require.Equal(t, resultText, results[0].Output, "text only: structuredContent is not repeated after it")
 			require.Len(t, calls, 1)
 			if tt.isError {
 				require.Equal(t, results[0].Output, calls[0].ToolError)
 				require.Empty(t, calls[0].ToolOutput)
+				assertMCPAndLocalErrorContinuation(t, a, chatCtx, provider.ToolUse{ID: "mcp-error", Name: fullToolName, Input: json.RawMessage(`{}`)})
 			} else {
 				require.Equal(t, results[0].Output, calls[0].ToolOutput)
 				require.Empty(t, calls[0].ToolError)

@@ -95,37 +95,6 @@ func connectorDigest(raw []byte) string {
 	return fmt.Sprintf("%x", sha256.Sum256(raw))
 }
 
-func (s connectorScenario) validate() error {
-	for name, step := range map[string]connectorStep{
-		"identity": s.Identity, "create": s.Create, "read": s.Read,
-		"update": s.Update, "reject": s.Reject, "cleanup": s.Cleanup,
-	} {
-		if step.Tool == "" || !json.Valid(step.Arguments) || !strings.HasPrefix(strings.TrimSpace(string(step.Arguments)), "{") {
-			return fmt.Errorf("%s requires a tool and JSON object arguments", name)
-		}
-	}
-	if s.IDPath == "" || s.OwnershipPath == "" || !strings.Contains(s.OwnershipValue, "{{run}}") || s.MissingError == "" {
-		return fmt.Errorf("id_path, ownership_path and missing_error are required; ownership_value must contain {{run}}")
-	}
-	if len(s.Identity.Expect) == 0 || len(s.Read.Expect) == 0 {
-		return fmt.Errorf("identity and read require explicit assertions")
-	}
-	if !strings.Contains(string(s.Read.Arguments), "{{id}}") ||
-		!strings.Contains(string(s.Update.Arguments), "{{id}}") ||
-		!strings.Contains(string(s.Cleanup.Arguments), "{{id}}") {
-		return fmt.Errorf("read, update and cleanup must address the created {{id}}")
-	}
-	if !strings.Contains(string(s.Create.Arguments), "{{marker}}") ||
-		!strings.Contains(string(s.Update.Arguments), "{{marker}}") {
-		return fmt.Errorf("create and update must write {{marker}}")
-	}
-	readExpect, err := json.Marshal(s.Read.Expect)
-	if err != nil || !strings.Contains(string(readExpect), "{{marker}}") {
-		return fmt.Errorf("read must assert {{marker}}")
-	}
-	return nil
-}
-
 func runConnectorScenario(ctx context.Context, client *Client, server *models.MCPServer, scenario connectorScenario) (report connectorReport, runErr error) {
 	report.RunID = uuid.NewString()
 	report.Cleanup = "not_needed"
@@ -133,6 +102,9 @@ func runConnectorScenario(ctx context.Context, client *Client, server *models.MC
 		return report, err
 	}
 	sessions := make(SessionState)
+	// run and the captured id stay fixed. Only marker changes for update/read
+	// assertions; cleanup uses the run-specific ownership value, not that marker.
+	// The call closure intentionally shares vars so it sends the latest values.
 	vars := map[string]string{"run": report.RunID, "marker": "whatiff-smoke-" + report.RunID}
 	call, err := prepareConnectorCalls(ctx, client, server, scenario, sessions, vars, &report)
 	if err != nil {
@@ -179,7 +151,7 @@ func prepareConnectorCalls(ctx context.Context, client *Client, server *models.M
 	servers := []*models.MCPServer{server}
 	discovered, err := client.DiscoverToolsWithSessionState(ctx, uuid.Nil, servers, sessions)
 	if err != nil {
-		return nil, fmt.Errorf("discovery failed")
+		return nil, connectorDiscoveryFailure(discovered, err)
 	}
 	toolNames := make(map[string]string)
 	for _, tool := range discovered.Tools {
@@ -198,7 +170,7 @@ func prepareConnectorCalls(ctx context.Context, client *Client, server *models.M
 			OutputHash: connectorDigest([]byte(result.Output)), IsError: result.IsError, RequestError: err != nil,
 		})
 		if err != nil {
-			return result, fmt.Errorf("%s: transport or protocol failure", phase)
+			return result, connectorRequestFailure(phase, err)
 		}
 		if result.IsError != wantError {
 			return result, fmt.Errorf("%s: expected isError=%t, received %t", phase, wantError, result.IsError)
@@ -212,6 +184,8 @@ func verifyConnectorPhases(ctx context.Context, scenario connectorScenario, vars
 		step := scenario.Read
 		switch phase {
 		case "update":
+			// Change only the content assertion marker. Ownership remains tied to
+			// the original run UUID even if the update fails or reads stay stale.
 			vars["marker"] += "-updated"
 			step = scenario.Update
 		case "reject":
@@ -233,6 +207,8 @@ type connectorCall func(context.Context, string, connectorStep, bool) (CallToolR
 func cleanupConnectorScenario(ctx context.Context, scenario connectorScenario, vars map[string]string, call connectorCall) error {
 	// Read the captured ID and prove it still bears this run's unique ownership marker.
 	// A failed or mismatched read must never trigger a delete by name or a broad cleanup.
+	// This call reads by id; only ownership_path/ownership_value are asserted here,
+	// not Read.Expect or the mutable content marker used by the normal read phases.
 	read, err := call(ctx, "cleanup_ownership", scenario.Read, false)
 	if err != nil {
 		return err

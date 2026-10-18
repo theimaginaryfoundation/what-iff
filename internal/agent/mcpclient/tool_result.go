@@ -1,6 +1,7 @@
 package mcpclient
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -31,15 +32,16 @@ func (e *ToolReportedError) Error() string { return e.Message }
 
 // Err reports a tool-level failure separately from transport and protocol errors, as a
 // *ToolReportedError. Detailed invocation methods return these failures in CallToolResult, not
-// their error value.
+// their error value. The message is trimmed; Output is left as it is.
 func (r CallToolResult) Err() error {
 	if !r.IsError {
 		return nil
 	}
-	if r.Output == "" {
+	output := strings.TrimSpace(r.Output)
+	if output == "" {
 		return &ToolReportedError{Message: toolErrorFallback}
 	}
-	return &ToolReportedError{Message: r.Output}
+	return &ToolReportedError{Message: output}
 }
 
 func (c *Client) parseToolCallResult(result json.RawMessage) (CallToolResult, bool) {
@@ -51,10 +53,15 @@ func (c *Client) parseToolCallResult(result json.RawMessage) (CallToolResult, bo
 	if err := json.Unmarshal(result, &parsed); err != nil {
 		return CallToolResult{}, false
 	}
+	// A JSON null is no structured content at all.
+	structured := bytes.TrimSpace(parsed.StructuredContent)
+	if bytes.Equal(structured, []byte("null")) {
+		structured = nil
+	}
 
 	callResult := CallToolResult{
 		IsError:              parsed.IsError,
-		StructuredContent:    parsed.StructuredContent,
+		StructuredContent:    structured,
 		GeneratedAttachments: make([]*models.FileAttachment, 0),
 	}
 	var textParts []string
@@ -76,8 +83,8 @@ func (c *Client) parseToolCallResult(result json.RawMessage) (CallToolResult, bo
 	// instead. Either way the text is what the model should read, so appending the JSON as well
 	// only duplicates it (2x to 9x the tokens on real replies). Use it only when there is no text;
 	// it stays available on CallToolResult.StructuredContent either way.
-	if len(parsed.StructuredContent) > 0 && len(textParts) == 0 {
-		textParts = append(textParts, "Structured content:\n"+string(parsed.StructuredContent))
+	if len(structured) > 0 && len(textParts) == 0 {
+		textParts = append(textParts, "Structured content:\n"+string(structured))
 	}
 	callResult.Output = strings.Join(textParts, "\n")
 	if callResult.IsError && callResult.Output == "" {
