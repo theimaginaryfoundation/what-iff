@@ -39,10 +39,13 @@ type Personality struct {
 	ExpressionsEnabled bool `json:"expressions_enabled"`
 	// ImageStyle is the preferred image generation style (e.g. "auto", "anime", "none").
 	// Persisted from the generation wizard and used for future expression grid generations.
-	ImageStyle string                `json:"image_style"`
-	CreatedAt  time.Time             `json:"created_at"`
-	UpdatedAt  time.Time             `json:"updated_at"`
-	Stats      PersonalityUsageStats `json:"stats"`
+	ImageStyle string `json:"image_style"`
+	// TurnSettingValues are this personality's reasoning effort and agent loop (ADR 0x026). They
+	// seed a new thread with this personality, over the account default. Full replace on update.
+	TurnSettingValues
+	CreatedAt time.Time             `json:"created_at"`
+	UpdatedAt time.Time             `json:"updated_at"`
+	Stats     PersonalityUsageStats `json:"stats"`
 	// CharacterCard is the verbatim `data` object of the character card (SillyTavern) this
 	// personality was imported from. It is a create-time input only: it never appears in API
 	// responses and is never filled when reading a personality (it can be large and the hot paths

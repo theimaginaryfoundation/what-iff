@@ -9,11 +9,20 @@ import { ExternalAuthProvider } from '../../core/auth/external-auth.provider';
 import { Model } from '../../core/models/model.model';
 import { Personality } from '../../core/models/personality.model';
 import {
+  AGENT_LOOP_DESCRIPTIONS,
+  AGENT_LOOP_LABELS,
+  REASONING_EFFORT_DESCRIPTION,
+  REASONING_EFFORT_OPTIONS,
+  parseAgentLoop,
+  parseReasoningEffort,
+} from '../../core/models/turn-settings.model';
+import {
   IMAGE_GENERATION_PROVIDER_LABELS,
   ImageGenerationProvider,
   UpdatePasswordRequest,
   UpdateUserRequest,
   UserPreferences,
+  UserPreferencesUpdateRequest,
   UserResponse,
 } from '../../core/models/user.model';
 import { AuthService } from '../../core/services/auth.service';
@@ -65,6 +74,11 @@ export class ProfileSettingsModalComponent {
     },
     { validators: this.passwordMatchValidator },
   );
+
+  readonly reasoningEffortOptions = REASONING_EFFORT_OPTIONS;
+  readonly reasoningEffortDescription = REASONING_EFFORT_DESCRIPTION;
+  readonly agentLoopLabels = AGENT_LOOP_LABELS;
+  readonly agentLoopDescriptions = AGENT_LOOP_DESCRIPTIONS;
 
   readonly currentUser = signal<UserResponse | null>(null);
   readonly preferences = signal<UserPreferences | null>(null);
@@ -182,6 +196,15 @@ export class ProfileSettingsModalComponent {
 
   async onDefaultPersonalityChange(personalityId: string): Promise<void> {
     await this.savePreferences({ default_personality_id: personalityId || undefined }, 'Default personality updated.');
+  }
+
+  /** `''` (Model default) clears the account default; the PUT preserves a field only when absent or null. */
+  async onDefaultReasoningEffortChange(value: string): Promise<void> {
+    await this.savePreferences({ reasoning_effort: parseReasoningEffort(value) ?? '' }, 'Default reasoning effort updated.');
+  }
+
+  async onDefaultAgentLoopChange(value: string): Promise<void> {
+    await this.savePreferences({ agent_loop: parseAgentLoop(value) ?? '' }, 'Default agent loop updated.');
   }
 
   async saveProfile(): Promise<void> {
@@ -303,7 +326,9 @@ export class ProfileSettingsModalComponent {
   }
 
   private async savePreferences(
-    patch: Partial<Pick<UserPreferences, 'default_model_id' | 'default_personality_id' | 'image_generation_provider'>>,
+    patch: Partial<
+      Pick<UserPreferencesUpdateRequest, 'default_model_id' | 'default_personality_id' | 'image_generation_provider' | 'reasoning_effort' | 'agent_loop'>
+    >,
     successMessage: string,
   ): Promise<void> {
     if (!this.preferences()) return;
@@ -314,7 +339,7 @@ export class ProfileSettingsModalComponent {
       // when the modal opened: the theme toggle above and the model picker's favorites write
       // preferences through their own read-modify-write, and a stale copy would undo them.
       const current = await firstValueFrom(this.preferencesService.getUserPreferences());
-      const updatedPreferences = { ...current, ...patch };
+      const updatedPreferences: UserPreferencesUpdateRequest = { ...current, ...patch };
       if ('default_personality_id' in patch && patch.default_personality_id === undefined) {
         delete updatedPreferences.default_personality_id;
       }

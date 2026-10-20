@@ -4,6 +4,7 @@ import {
   Personality,
   PersonalityThumbnailCircle,
 } from '../../../core/models/personality.model';
+import { AgentLoop, ReasoningEffort } from '../../../core/models/turn-settings.model';
 
 export interface PersonalityEditDraft {
   name: string;
@@ -14,6 +15,9 @@ export interface PersonalityEditDraft {
   accent_color: string | null;
   cover_image_id: string | null;
   thumbnail_circle: PersonalityThumbnailCircle | null;
+  /** Seeds new threads with this personality (ADR 0x026); null = use the account default. */
+  reasoning_effort: ReasoningEffort | null;
+  agent_loop: AgentLoop | null;
 }
 
 const DEFAULT_THUMBNAIL_CIRCLE: PersonalityThumbnailCircle = { cx: 0.5, cy: 0.42, r: 0.34 };
@@ -63,6 +67,8 @@ export class PersonalityEditorSessionService {
       accent_color: personality.accent_color ?? null,
       cover_image_id: personality.cover_image_id ?? null,
       thumbnail_circle: personality.thumbnail_circle ?? DEFAULT_THUMBNAIL_CIRCLE,
+      reasoning_effort: personality.reasoning_effort ?? null,
+      agent_loop: personality.agent_loop ?? null,
     };
   }
 }

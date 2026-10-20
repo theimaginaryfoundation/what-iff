@@ -43,6 +43,8 @@ import {
 import { ChatSessionService } from './chat-session.service';
 import { isChatSendFailed, isChatSendSucceeded } from './chat-send-result';
 import { ChatSendGate } from './services/chat-send-gate';
+import { Mood } from '../../core/models/mood.model';
+import { effectiveReasoningEffort, resolveEffectiveTurnSettings } from '../../core/models/turn-settings.model';
 import { ChatSendOutletComponent } from '../../extensions/chat-send-outlet.component';
 import { DiscordComposerToggleComponent } from '../discord/discord-composer-toggle.component';
 import { ThreadListService } from '../../core/services/thread-list.service';
@@ -141,7 +143,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
           ? null
           : this.thinkingExpressionThumbUrl(),
       });
-      grouped = appendLiveToolCallGroup(grouped, pending, this.session.liveToolCalls());
+      grouped = appendLiveToolCallGroup(grouped, pending, this.session.liveToolCalls(), this.session.advancedProgress());
       grouped = appendPendingAssistantGroup(grouped, pending);
     }
     return grouped;
@@ -317,10 +319,21 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     this.bookmarks.set([]);
     if (threadId) this.refreshBookmarks(threadId);
   });
-  private readonly syncActiveModel = effect(() => {
+  /** The thread's active mode as the composer loaded it; its turn settings override the thread's. */
+  readonly activeMode = signal<Mood | null>(null);
+  private readonly activeModel = computed(() => {
     const modelId = this.session.model()?.id ?? this.session.thread()?.model_id ?? null;
-    const model = modelId ? this.models().find(item => item.id === modelId) : undefined;
-    this.sendGate.setActiveModel(model ?? null);
+    return (modelId ? this.models().find(item => item.id === modelId) : undefined) ?? null;
+  });
+  private readonly syncActiveModel = effect(() => {
+    this.sendGate.setActiveModel(this.activeModel());
+  });
+  private readonly syncActiveTurnSettings = effect(() => {
+    const resolved = resolveEffectiveTurnSettings(this.session.thread(), this.activeMode());
+    this.sendGate.setActiveTurnSettings({
+      reasoningEffort: effectiveReasoningEffort(this.activeModel()?.reasoning_support, resolved.reasoningEffort.value),
+      agentLoop: resolved.agentLoop.value,
+    });
   });
 
   private readonly syncComposerInsert = effect(() => {

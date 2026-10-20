@@ -176,6 +176,10 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   `MemoryIDsCreatedInChat` re-checks persisted memory ids against the chat's own memories.
   `toChatModel` blanks the personality scratchpad for a sandboxed chat, so neither a turn nor `GetChatContext` (the owner's context panel) sees it, and the chat handler refuses a scratchpad save for a sandbox.
   `CreateChat` and `UpdateChat` write `context_scope` (validated; `ErrInvalidRequestBody` for an unknown scope); `UpdateChat` writes it only when `SetContextScope` is true, so a stale copy saved by a turn cannot un-sandbox a chat.
+- **Turn settings (ADR 0x026, `turnsettings.go`):** user preferences, personalities, moods, chats and agent jobs each carry nullable `reasoning_effort` / `agent_loop` enums (one Ent enum type per entity; the generic helpers convert).
+  `CreateChat` seeds a new chat's unset values from its personality, then the account default (`seedChatTurnSettings`), and the chat keeps them; a sandboxed chat (the Discord relay) is not seeded; `UpdateChat` writes them only when `SetReasoningEffort` / `SetAgentLoop` is true, like the scope.
+  `UpdateUserPreferences` leaves an omitted value alone and clears on `""`; personality and mood updates replace both.
+  `ChatMessage.agent_run` holds a saved Advanced run; `Job.draft_agent_run` holds a run in progress (`UpdateJobDraftAgentRun`, `job_agent_run.go`), and the partial-finalize path turns it into the partial message with its tool calls (`consumeDraftAgentRunToMessageTx`).
   `CreateChat` honours `Chat.DisabledTools`, and gives a chat created sandboxed with no list of its own the registered sandbox defaults (`models.SandboxDefaultDisabledTools`), so every creation path starts a sandbox the same way.
   `memoryOfChat` (`memory_chat_scope.go`) is the one predicate for "the chat's own memories": created in it AND Chat- or Summary-scoped; `MemoryIDsCreatedInChat`, `ensureMemoriesCreatedInChatTx` and the `OnlyChatID` merge-event filter all use it, so a User-scoped memory that merely came from the chat is outside the sandbox.
   `ListFileAttachmentsInChatScope` returns a conversation's uploads (plus a personality's documents when a personality id is given); a sandboxed chat passes none, so it sees only its own uploads.
@@ -196,6 +200,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 ## Testing
 
 - `chat_checkpoint_test.go`, `chatmessage_test.go`, `chatmessage_mark_read_test.go` — message and checkpoint behavior.
+- `turnsettings_test.go` — thread seeding from personality then account default, explicit-only chat writes, and preference update semantics for the turn settings.
 - `memory_test.go`, `memory2_test.go`, `filechunk_test.go` — retrieval (including **`ListMemories`** excluding Summary unless `level=summary`), ZIP export/import helpers, full import count/persist coverage, and chunks.
 - `memory_embedding_test.go` — stale-embedding drop on content edits (not for Summary), missing-embedding queries, the `SetMemoryEmbedding` content guard and replace, non-content patches on untrimmed legacy rows, the dialect-gated row lock, and backfill batching, per-item retry, skipping a page of bad input, and early stop.
 - `memory_import_metrics_test.go` — memory import stage timings and item counts, including a failed embed stage.

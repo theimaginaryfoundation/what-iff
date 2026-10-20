@@ -68,6 +68,11 @@ func (h *Handler) UpdatePersonalityWithPromptHistory(w http.ResponseWriter, r *h
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
 		return
 	}
+	if err := req.TurnSettingValues.Validate(); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
+		return
+	}
+	req.TurnSettingValues = req.TurnSettingValues.Normalized()
 	req.ID = personalityID
 
 	updated, err := store.UpdatePersonalityWithPromptHistory(r.Context(), userID, req)

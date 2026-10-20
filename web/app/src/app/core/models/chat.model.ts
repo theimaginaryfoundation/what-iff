@@ -3,6 +3,8 @@
  * generated name after the first reply. Keep in sync with `defaultChatName` in internal/agent/message.go.
  */
 export const DEFAULT_THREAD_NAME = 'New thread';
+import { AgentLoop, AgentLoopUpdate, ReasoningEffort, ReasoningEffortUpdate } from './turn-settings.model';
+
 /** How much of the account a thread may read; see `Chat.context_scope`. */
 export type ContextScope = 'account' | 'sandbox';
 
@@ -44,6 +46,14 @@ export interface Chat {
    * later, never enter one. Absent on older responses = `account`.
    */
   context_scope?: ContextScope;
+  /**
+   * The thread's reasoning effort (ADR 0x026), seeded at creation from the personality, then the
+   * account default, and thread-local after. An active mode's value overrides it for a turn.
+   * Null when not set (the model's default).
+   */
+  reasoning_effort?: ReasoningEffort | null;
+  /** The thread's agent loop, seeded like `reasoning_effort`. Null when not set (standard). */
+  agent_loop?: AgentLoop | null;
   created_at: string;
   updated_at: string;
 }
@@ -75,6 +85,10 @@ export interface CreateChatRequest {
   is_favorite?: boolean;
   /** Optional. `sandbox` creates the thread sandboxed; the default is `account`. */
   context_scope?: ContextScope;
+  /** Optional. Omit to seed it from the personality, then the account default. */
+  reasoning_effort?: ReasoningEffort | null;
+  /** Optional. Omit to seed it from the personality, then the account default. */
+  agent_loop?: AgentLoop | null;
 }
 
 export interface UpdateChatRequest {
@@ -87,6 +101,10 @@ export interface UpdateChatRequest {
   is_favorite?: boolean;
   /** Only `account` is accepted on an existing thread (leaving the sandbox). */
   context_scope?: ContextScope;
+  /** Omit to keep; `''` clears. */
+  reasoning_effort?: ReasoningEffortUpdate;
+  /** Omit to keep; `''` clears. */
+  agent_loop?: AgentLoopUpdate;
 }
 
 export interface PatchChatRequest {
@@ -106,6 +124,10 @@ export interface PatchChatRequest {
   archived?: boolean;
   /** `account` leaves the sandbox. A thread can only be sandboxed when it is created. */
   context_scope?: ContextScope;
+  /** Change the thread's reasoning effort. Omit to keep; `''` clears it. */
+  reasoning_effort?: ReasoningEffortUpdate;
+  /** Change the thread's agent loop. Omit to keep; `''` clears it. */
+  agent_loop?: AgentLoopUpdate;
 }
 
 export interface ChatContext {

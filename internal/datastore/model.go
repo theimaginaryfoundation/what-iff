@@ -38,6 +38,7 @@ func toModelModel(e *ent.Model) *models.Model {
 		SubscriptionTier:   string(e.SubscriptionTier),
 		Deleted:            e.Deleted,
 		IsDefault:          e.IsDefault,
+		ReasoningSupport:   models.ReasoningSupportFor(string(e.Provider), e.Name),
 	}
 }
 

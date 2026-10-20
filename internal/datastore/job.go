@@ -549,6 +549,7 @@ func (d *Datastore) ClearJobDraftDeltas(ctx context.Context, userID, id uuid.UUI
 		Where(job.ID(id), job.HasOwnerWith(user.ID(userID))).
 		ClearDraftDeltas().
 		ClearDraftReasoning().
+		ClearDraftAgentRun().
 		Save(ctx)
 	if err != nil {
 		d.logger.Error(i18n.T1("update.failed", "Entity", "job draft_deltas"), zap.Error(err))
@@ -639,9 +640,16 @@ func (d *Datastore) finalizeChatJobWithPartial(
 	// Phase 2: consume current draft deltas into a partial assistant message (if any).
 	partialText := strings.Join(entJob.DraftDeltas, "")
 	partialReasoning := strings.Join(entJob.DraftReasoning, "")
-	resultID, err := d.consumeDraftDeltasToMessageTx(
-		ctx, tx, chatID, partialText, partialReasoning, generationModel, generationPersonality, generationMoodID,
-	)
+	var resultID *uuid.UUID
+	if entJob.DraftAgentRun != nil {
+		// An Advanced run (ADR 0x026) keeps everything it wrote in its structured draft.
+		resultID, err = d.consumeDraftAgentRunToMessageTx(ctx, tx, chatID, entJob.DraftAgentRun, terminalStatus,
+			generationModel, generationPersonality, generationMoodID)
+	} else {
+		resultID, err = d.consumeDraftDeltasToMessageTx(
+			ctx, tx, chatID, partialText, partialReasoning, generationModel, generationPersonality, generationMoodID,
+		)
+	}
 	if err != nil {
 		d.rollbackTx(tx)
 		return nil, nil, err
@@ -695,8 +703,8 @@ func (d *Datastore) loadOwnedJobTx(ctx context.Context, tx *ent.Tx, userID, jobI
 }
 
 func (d *Datastore) finalizeTerminalPartialIdempotentTx(ctx context.Context, tx *ent.Tx, entJob *ent.Job) (*uuid.UUID, error) {
-	if len(entJob.DraftDeltas) > 0 || len(entJob.DraftReasoning) > 0 {
-		if _, err := tx.Job.UpdateOneID(entJob.ID).SetDraftDeltas([]string{}).ClearDraftReasoning().Save(ctx); err != nil {
+	if len(entJob.DraftDeltas) > 0 || len(entJob.DraftReasoning) > 0 || entJob.DraftAgentRun != nil {
+		if _, err := tx.Job.UpdateOneID(entJob.ID).SetDraftDeltas([]string{}).ClearDraftReasoning().ClearDraftAgentRun().Save(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -758,7 +766,8 @@ func (d *Datastore) updateJobToTerminalTx(
 		Where(job.ID(jobID), job.HasOwnerWith(user.ID(userID))).
 		SetStatus(terminalStatus).
 		SetDraftDeltas([]string{}).
-		ClearDraftReasoning()
+		ClearDraftReasoning().
+		ClearDraftAgentRun()
 	switch terminalStatus {
 	case job.StatusFailed:
 		jobUpdate.SetError(failureMessage)

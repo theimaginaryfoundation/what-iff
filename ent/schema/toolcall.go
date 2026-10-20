@@ -31,6 +31,10 @@ func (ToolCall) Fields() []ent.Field {
 		field.Text("tool_error").
 			Optional().
 			Comment("The error from the tool call execution"),
+		field.Int("step").
+			Optional().
+			Default(0).
+			Comment("Advanced-loop step (ADR 0x026) the call ran in, 1-based; 0 for Standard turns."),
 	}
 }
 

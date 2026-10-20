@@ -1,3 +1,5 @@
+import { AgentLoop, ReasoningEffort } from './turn-settings.model';
+
 export interface Personality {
   id: string;
   name: string;
@@ -26,6 +28,10 @@ export interface Personality {
   expressions_enabled: boolean;
   /** Preferred image generation style (e.g. 'auto', 'anime', 'none'). */
   image_style: string;
+  /** Reasoning effort that seeds new threads with this personality, over the account default (ADR 0x026). */
+  reasoning_effort?: ReasoningEffort | null;
+  /** Agent loop that seeds new threads with this personality, over the account default. */
+  agent_loop?: AgentLoop | null;
   created_at: string;
   updated_at: string;
   stats: PersonalityUsageStats;
@@ -115,6 +121,10 @@ export interface UpdatePersonalityRequest {
   expressions_enabled?: boolean;
   /** Preferred image generation style. */
   image_style?: string;
+  /** PUT semantics: null or omitted clears it (back to the account default). */
+  reasoning_effort?: ReasoningEffort | null;
+  /** PUT semantics: null or omitted clears it (back to the account default). */
+  agent_loop?: AgentLoop | null;
 }
 
 /**
@@ -140,6 +150,8 @@ export function buildPersonalityUpdateRequest(
     memory_write_prompt: personality.memory_write_prompt,
     expressions_enabled: personality.expressions_enabled,
     image_style: personality.image_style,
+    reasoning_effort: personality.reasoning_effort ?? null,
+    agent_loop: personality.agent_loop ?? null,
     ...overrides,
   };
 }

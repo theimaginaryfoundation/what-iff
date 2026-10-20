@@ -32,6 +32,7 @@ func toToolCallModel(e *ent.ToolCall) *models.ToolCall {
 		ToolInput:     e.ToolInput,
 		ToolOutput:    e.ToolOutput,
 		ToolError:     e.ToolError,
+		Step:          e.Step,
 		CreatedAt:     e.CreatedAt,
 		UpdatedAt:     e.UpdatedAt,
 	}
@@ -57,6 +58,9 @@ func (d *Datastore) createToolCallsBulk(ctx context.Context, tx *ent.Tx, chatMes
 		}
 		if toolCall.ToolError != "" {
 			create.SetToolError(toolCall.ToolError)
+		}
+		if toolCall.Step > 0 {
+			create.SetStep(toolCall.Step)
 		}
 
 		toolCallCreates[i] = create

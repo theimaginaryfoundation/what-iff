@@ -13,7 +13,7 @@ import { ConfirmationService } from '../../core/services/confirmation.service';
 import { ModeViewService } from '../../core/services/mode-view.service';
 import { ModelService } from '../../core/services/model.service';
 import { MCPServerService } from '../../core/services/mcp-server.service';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 
 describe('MoodListComponent', () => {
     let moodServiceSpy: Pick<MockedObject<MoodService>, 'listMoods' | 'getMood' | 'createMood' | 'updateMood' | 'attachToPersonalities' | 'deleteMood'>;
@@ -188,5 +188,57 @@ describe('MoodListComponent', () => {
         mood.personality_ids = ['persona-1'];
         fixture.componentInstance.vm.addPersonalityToMode(mood as any, 'persona-2', new MouseEvent('click'));
         expect(moodServiceSpy.attachToPersonalities).toHaveBeenCalledWith('mode-1', { personality_ids: ['persona-1', 'persona-2'] });
+    });
+
+    it('hydrates, edits and saves a mode\'s turn settings', () => {
+        moodServiceSpy.getMood.mockReturnValue(of({
+            id: 'mode-1',
+            name: 'Focused',
+            description: '',
+            prompt_snippet: '',
+            reasoning_effort: 'low',
+            agent_loop: null,
+            image_ids: [],
+            ritual_ids: [],
+            personality_ids: ['persona-1'],
+            created_at: '',
+            updated_at: '',
+        } as any));
+        // Saving closes the modal and navigates back to the list.
+        vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+        const fixture = TestBed.createComponent(MoodListComponent);
+        fixture.detectChanges();
+        const vm = fixture.componentInstance.vm;
+
+        vm.openEditMoodModal('mode-1', false);
+        expect(vm.modalState().reasoningEffort).toBe('low');
+        expect(vm.modalState().agentLoop).toBe('');
+        expect(vm.hasUnsavedModeEdits()).toBe(false);
+
+        vm.setFormReasoningEffort('high');
+        vm.setFormAgentLoop('advanced');
+        expect(vm.hasUnsavedModeEdits()).toBe(true);
+        vm.saveEditMood();
+        expect(moodServiceSpy.updateMood).toHaveBeenLastCalledWith('mode-1', expect.objectContaining({ reasoning_effort: 'high', agent_loop: 'advanced' }));
+
+        vm.openEditMoodModal('mode-1', false);
+        vm.setFormReasoningEffort('');
+        vm.setFormAgentLoop('not-a-loop');
+        expect(vm.formReasoningEffort()).toBe('');
+        expect(vm.formAgentLoop()).toBe('');
+        vm.saveEditMood();
+        expect(moodServiceSpy.updateMood).toHaveBeenLastCalledWith('mode-1', expect.objectContaining({ reasoning_effort: null, agent_loop: null }));
+    });
+
+    it('sends turn settings when creating a mode', () => {
+        const fixture = TestBed.createComponent(MoodListComponent);
+        fixture.detectChanges();
+        const vm = fixture.componentInstance.vm;
+        vm.openCreateModeModal();
+        expect(vm.formReasoningEffort()).toBe('');
+        vm.formName.set('Deep work');
+        vm.setFormReasoningEffort('medium');
+        vm.saveEditMood();
+        expect(moodServiceSpy.createMood).toHaveBeenLastCalledWith(expect.objectContaining({ reasoning_effort: 'medium', agent_loop: null }));
     });
 });

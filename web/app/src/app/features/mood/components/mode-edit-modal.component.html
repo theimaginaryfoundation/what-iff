@@ -58,6 +58,40 @@
         </section>
 
         <section class="mode-modal__section">
+          <label for="mode-reasoning-effort">REASONING EFFORT</label>
+          <select
+            id="mode-reasoning-effort"
+            aria-describedby="mode-reasoning-effort-help"
+            [ngModel]="state().reasoningEffort"
+            (ngModelChange)="reasoningEffortChange.emit($event)">
+            <option value="">Don't change</option>
+            @for (option of reasoningEffortOptions; track option.value) {
+              <option [value]="option.value">{{ option.label }}</option>
+            }
+          </select>
+          <p id="mode-reasoning-effort-help" class="mode-modal__helper-text">
+            {{ reasoningEffortDescription }} If set, replies use it while this mode is active instead of the thread's setting.
+          </p>
+        </section>
+
+        <section class="mode-modal__section">
+          <label for="mode-agent-loop">AGENT LOOP</label>
+          <select
+            id="mode-agent-loop"
+            aria-describedby="mode-agent-loop-help"
+            [ngModel]="state().agentLoop"
+            (ngModelChange)="agentLoopChange.emit($event)">
+            <option value="">Don't change</option>
+            @for (option of agentLoopOptions; track option.value) {
+              <option [value]="option.value">{{ option.label }}</option>
+            }
+          </select>
+          <p id="mode-agent-loop-help" class="mode-modal__helper-text">
+            Advanced: {{ agentLoopDescriptions.advanced }} If set, it applies while this mode is active instead of the thread's setting.
+          </p>
+        </section>
+
+        <section class="mode-modal__section">
           <div class="mode-modal__section-head">
             <h3>ATTACHED SKILLS</h3>
             <span class="mode-modal__section-count">{{ attachedSkillsCountLabel() }}</span>

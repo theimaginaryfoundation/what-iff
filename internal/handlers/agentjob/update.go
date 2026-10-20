@@ -24,6 +24,10 @@ type updateAgentJobRequest struct {
 	ModelID       *string `json:"model_id,omitempty"`
 	ScheduleInput *string `json:"schedule_input,omitempty"`
 	Timezone      *string `json:"timezone,omitempty"`
+	// ReasoningEffort / AgentLoop override everything else for this job's runs (ADR 0x026).
+	// Omit to keep; "" clears.
+	ReasoningEffort *string `json:"reasoning_effort,omitempty"`
+	AgentLoop       *string `json:"agent_loop,omitempty"`
 }
 
 func (h *Handler) UpdateAgentJob(w http.ResponseWriter, r *http.Request) {
@@ -159,7 +163,25 @@ func (h *Handler) UpdateAgentJob(w http.ResponseWriter, r *http.Request) {
 			patch.ModelID = &parsedID
 		}
 	}
-	if patch.UpdatePersonality || patch.UpdateModel {
+	if req.ReasoningEffort != nil {
+		value, _, ok := models.ParseReasoningEffortUpdate(req.ReasoningEffort)
+		if !ok {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "reasoning_effort must be one of off, low, medium, high (or empty to clear)", nil)
+			return
+		}
+		patch.UpdateReasoningEffort = true
+		patch.TurnSettings.ReasoningEffort = value
+	}
+	if req.AgentLoop != nil {
+		value, _, ok := models.ParseAgentLoopUpdate(req.AgentLoop)
+		if !ok {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "agent_loop must be standard or advanced (or empty to clear)", nil)
+			return
+		}
+		patch.UpdateAgentLoop = true
+		patch.TurnSettings.AgentLoop = value
+	}
+	if patch.UpdatePersonality || patch.UpdateModel || patch.UpdateReasoningEffort || patch.UpdateAgentLoop {
 		updated, err = h.provider.SetAgentJobOverrides(r.Context(), userID, id, patch)
 		if err == datastore.ErrAgentJobNotFound {
 			handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "AgentJob not found", nil)

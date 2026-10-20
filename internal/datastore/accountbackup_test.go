@@ -40,7 +40,9 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			prompt_snippet text NOT NULL DEFAULT '',
 			thumbnail_data blob,
 			recommended_model text DEFAULT '',
-			user_moods uuid NOT NULL
+			user_moods uuid NOT NULL,
+			reasoning_effort text,
+			agent_loop text
 		)`,
 		`CREATE TABLE models (
 			id uuid PRIMARY KEY,
@@ -64,7 +66,9 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			image_generation_provider text,
 			user_preferences uuid NOT NULL UNIQUE,
 			default_model uuid NOT NULL,
-			default_personality uuid
+			default_personality uuid,
+			reasoning_effort text,
+			agent_loop text
 		)`,
 		`CREATE TABLE rituals (
 			id uuid PRIMARY KEY,
@@ -91,6 +95,7 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			generation_personality text,
 			generation_expression_reasoning text,
 			model_reasoning text,
+			agent_run json,
 			last_error_message text,
 			checkpoint_completed_at datetime,
 			context_breakdown json,
@@ -114,7 +119,8 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			tool_input text,
 			tool_output text,
 			tool_error text,
-			chat_message_tool_calls uuid NOT NULL
+			chat_message_tool_calls uuid NOT NULL,
+			step integer DEFAULT 0
 		)`,
 		`CREATE TABLE agent_jobs (
 			id uuid PRIMARY KEY,
@@ -135,7 +141,9 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			personality_id uuid,
 			model_id uuid,
 			chat_agent_jobs uuid,
-			user_agent_jobs uuid NOT NULL
+			user_agent_jobs uuid NOT NULL,
+			reasoning_effort text,
+			agent_loop text
 		)`,
 		`CREATE TABLE personality_moods (
 			personality_id uuid NOT NULL,

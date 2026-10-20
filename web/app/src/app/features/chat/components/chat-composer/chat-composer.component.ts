@@ -36,6 +36,7 @@ import { RitualService } from '../../../../core/services/ritual.service';
 import { MoodService } from '../../../../core/services/mood.service';
 import { ImageGalleryService } from '../../../../core/services/image-gallery.service';
 import { Mood } from '../../../../core/models/mood.model';
+import { AgentLoop, ReasoningEffort } from '../../../../core/models/turn-settings.model';
 import { MODE_PLURAL, MODE_SINGULAR } from '../../../mood/mode-ui.labels';
 import { AuthImagePipe } from '../../../../core/pipes/auth-image.pipe';
 import { MAX_FILE_SIZE_BYTES, isMimeOrExtensionAllowedForChatUpload } from '../../chat.constants';
@@ -54,6 +55,7 @@ import {
 } from '../../helpers/emoji-shortcode.helpers';
 import { AttachmentPreviewComponent } from './attachment-preview.component';
 import { ModelPickerComponent } from '../model-picker/model-picker.component';
+import { TurnSettingsPickerComponent } from '../turn-settings-picker/turn-settings-picker.component';
 import { ThreadPickerPopoverComponent } from '../thread-picker-popover/thread-picker-popover.component';
 import { ThreadRefChipsComponent } from '../thread-ref-chips/thread-ref-chips.component';
 import { THREAD_DRAG_MIME, isThreadDrag } from '../../helpers/thread-drag.helpers';
@@ -96,6 +98,7 @@ let nextPreviewId = 0;
     FormsModule,
     PickerComponent,
     ModelPickerComponent,
+    TurnSettingsPickerComponent,
     ThreadPickerPopoverComponent,
     ThreadRefChipsComponent,
     AttachmentPreviewComponent,
@@ -285,6 +288,15 @@ let nextPreviewId = 0;
               [selectedId]="selectedModelId()"
               [disabled]="modelPickerDisabled()"
               (selected)="modelSelected.emit($event)"
+            />
+            <app-turn-settings-picker
+              [threadReasoningEffort]="threadReasoningEffort()"
+              [threadAgentLoop]="threadAgentLoop()"
+              [activeMode]="activeMode()"
+              [reasoningSupport]="selectedModelReasoningSupport()"
+              [disabled]="modelPickerDisabled()"
+              (reasoningEffortChange)="reasoningEffortSelected.emit($event)"
+              (agentLoopChange)="agentLoopSelected.emit($event)"
             />
 
             <div class="composer__plus-anchor">
@@ -1379,6 +1391,9 @@ export class ChatComposerComponent {
   readonly personalityId = input<string | null>(null);
   readonly activeMoodId = input<string | null>(null);
   readonly isAutoMood = input(true);
+  /** The thread's own turn settings (ADR 0x026); the active mode's values override them per turn. */
+  readonly threadReasoningEffort = input<ReasoningEffort | null>(null);
+  readonly threadAgentLoop = input<AgentLoop | null>(null);
 
   readonly draftChange = output<string>();
   readonly send = output<string>();
@@ -1397,6 +1412,10 @@ export class ChatComposerComponent {
   readonly galleryAttachment = output<FileAttachment>();
   readonly attachmentRemoved = output<string>();
   readonly modeSelected = output<string | null>();
+  readonly reasoningEffortSelected = output<ReasoningEffort | null>();
+  readonly agentLoopSelected = output<AgentLoop | null>();
+  /** The thread's active mode as loaded for the Mode menu (null when none), so the page can resolve turn settings. */
+  readonly activeModeChange = output<Mood | null>();
 
   readonly textareaPlaceholder = computed(() => {
     const custom = this.composerPlaceholder()?.trim();
@@ -1512,6 +1531,9 @@ export class ChatComposerComponent {
   readonly activeMode = computed(() =>
     this.modeOptions().find(m => m.id === this.activeMoodId()) ?? null,
   );
+  readonly selectedModelReasoningSupport = computed(
+    () => this.models().find(model => model.id === this.selectedModelId())?.reasoning_support ?? null,
+  );
   readonly modeMenuLabel = computed(() => {
     if (!this.personalityId()) {
       return this.modeSingular;
@@ -1562,6 +1584,8 @@ export class ChatComposerComponent {
         this.modePickerLoads.next();
       }
     });
+
+    effect(() => this.activeModeChange.emit(this.activeMode()));
 
     this.modePickerLoads
       .pipe(

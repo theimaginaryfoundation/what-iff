@@ -13,6 +13,8 @@ type ToolCall struct {
 	ToolInput     string    `json:"tool_input"`
 	ToolOutput    string    `json:"tool_output"`
 	ToolError     string    `json:"tool_error"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	// Step is the Advanced-loop step (1-based) the call ran in; 0 for Standard turns.
+	Step      int       `json:"step,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

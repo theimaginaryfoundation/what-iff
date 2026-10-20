@@ -61,6 +61,11 @@ func (h *Handler) CreatePersonality(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
 		return
 	}
+	if err := req.TurnSettingValues.Validate(); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
+		return
+	}
+	req.TurnSettingValues = req.TurnSettingValues.Normalized()
 
 	// Create personality
 	personality, err := h.ds.CreatePersonality(r.Context(), userID, req)
@@ -304,6 +309,11 @@ func (h *Handler) UpdatePersonality(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
 		return
 	}
+	if err := req.TurnSettingValues.Validate(); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
+		return
+	}
+	req.TurnSettingValues = req.TurnSettingValues.Normalized()
 
 	// Set the ID from URL parameter
 	req.ID = personalityID

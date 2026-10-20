@@ -47,6 +47,20 @@ type XiaomiAdapter struct {
 	// thinkingDisabled records that a truncated call already triggered the
 	// thinking-off retry, so a turn retries at most once and later rounds stay off.
 	thinkingDisabled bool
+	final            chatCompletionsFinal
+	usageLog
+}
+
+// DisableThinking turns MiMo's thinking off for the whole turn: a reasoning effort of off
+// (ADR 0x026). MiMo has no other reasoning control.
+func (a *XiaomiAdapter) DisableThinking() {
+	a.thinkingDisabled = true
+	mergeChatExtraFields(&a.params, map[string]any{"thinking": map[string]any{"type": "disabled"}})
+}
+
+// ContinueWith implements Continuer, echoing the reply's reasoning as MiMo requires.
+func (a *XiaomiAdapter) ContinueWith(text string) {
+	a.final.continueWith(&a.params.Messages, text, a.lastReasoning)
 }
 
 func NewXiaomiProvider(apiKey, baseURL string, tel *telemetry.Telemetry, httpClient *http.Client) *XiaomiProvider {
@@ -126,6 +140,7 @@ func (a *XiaomiAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse,
 	}
 	toolUses := extractChatCompletionToolUses(resp)
 	if len(toolUses) == 0 {
+		a.final.last = resp
 		return a.toGenerateResponse(resp), nil, nil
 	}
 	a.params.Messages = append(a.params.Messages, chatCompletionAssistantReplay(resp.Choices[0].Message, a.lastReasoning))
@@ -145,6 +160,7 @@ func (a *XiaomiAdapter) ForceFinalResponse(ctx context.Context) (*GenerateRespon
 	if err != nil {
 		return nil, WrapSafetyViolationError(models.SafetyViolationProviderXiaomi, fmt.Errorf("Xiaomi final-response call failed: %w", err))
 	}
+	a.final.last = resp
 	return a.toGenerateResponse(resp), nil
 }
 
@@ -156,14 +172,17 @@ func (a *XiaomiAdapter) call(ctx context.Context) (*openai.ChatCompletion, error
 	resp, reasoning, err := a.callOnce(ctx)
 	if err == nil && !a.thinkingDisabled && chatCompletionTruncatedWithoutText(resp) {
 		a.provider.recordRetry(ctx, string(a.params.Model), retryReasonLength)
+		// The discarded call was still made and billed by the provider: meter it too.
+		a.addUsage(chatCompletionUsage(resp))
 		a.thinkingDisabled = true
-		a.params.SetExtraFields(map[string]any{"thinking": map[string]any{"type": "disabled"}})
+		mergeChatExtraFields(&a.params, map[string]any{"thinking": map[string]any{"type": "disabled"}})
 		a.liveReasoning.reset()
 		resp, reasoning, err = a.callOnce(ctx)
 	}
 	if err != nil {
 		return nil, err
 	}
+	a.addUsage(chatCompletionUsage(resp))
 	a.reasoning.add(reasoning)
 	a.lastReasoning = reasoning
 	return resp, nil

@@ -82,6 +82,7 @@ type chatTurnStore interface {
 	ListPendingTurnJobsForChat(ctx context.Context, userID, chatID, excludeJobID uuid.UUID) ([]*models.Job, error)
 	CreateJob(ctx context.Context, userID uuid.UUID, job models.Job) (*models.Job, error)
 	UpdateJobStatus(ctx context.Context, userID, id uuid.UUID, status models.JobStatus, errorMsg string) (*models.Job, error)
+	FinalizeFailedChatJobWithPartial(ctx context.Context, userID, jobID, chatID uuid.UUID, generationModel, generationPersonality, failureMessage string, generationMoodID *uuid.UUID) (*models.Job, *uuid.UUID, error)
 	JobStatus(ctx context.Context, userID, jobID uuid.UUID) (models.JobStatus, error)
 	FinishTurnJobIfActive(ctx context.Context, userID, jobID uuid.UUID, replied bool, failMsg string) (models.JobStatus, error)
 	TouchJob(ctx context.Context, userID, id uuid.UUID) error
@@ -341,7 +342,7 @@ func (a *Agent) FailInFlightTurns(ctx context.Context) {
 		if turn.replied || !blocksLaterTurns(current) {
 			status, msg = models.JobStatusComplete, ""
 		}
-		if _, err := g.store.UpdateJobStatus(ctx, turn.userID, jobID, status, msg); err != nil {
+		if err := finishInterruptedTurn(ctx, g.store, jobID, turn, status, msg); err != nil {
 			a.logger.Warn("shutdown: failed to finish in-flight turn job", zap.String("job_id", jobID.String()), zap.Error(err))
 			continue
 		}
@@ -350,6 +351,20 @@ func (a *Agent) FailInFlightTurns(ctx context.Context) {
 	if finished > 0 {
 		a.logger.Info("shutdown: finished in-flight turn jobs", zap.Int("count", finished))
 	}
+}
+
+// finishInterruptedTurn ends a turn the shutdown interrupted. A failed turn keeps what it had
+// written: its streamed text, or an Advanced run's saved steps (ADR 0x026), become a partial
+// reply, as they do when a turn fails or is stopped while the server runs. The generation
+// metadata comes from the job's draft.
+func finishInterruptedTurn(ctx context.Context, store chatTurnStore, jobID uuid.UUID, turn inFlightTurn, status models.JobStatus, msg string) error {
+	if status == models.JobStatusFailed && turn.chatID != uuid.Nil {
+		if _, _, err := store.FinalizeFailedChatJobWithPartial(ctx, turn.userID, jobID, turn.chatID, "", "", msg, nil); err == nil {
+			return nil
+		}
+	}
+	_, err := store.UpdateJobStatus(ctx, turn.userID, jobID, status, msg)
+	return err
 }
 
 // failChatTurnWait records why a chat_message turn never started: cancelled when it was stopped

@@ -214,7 +214,7 @@ func TestResponsesNewStreaming_FailedEventCarriesStatus(t *testing.T) {
 	} {
 		srv := sseServer(t, []string{failed(code)})
 		_, _, err := newTestOpenAIProvider(srv.URL).responsesNewStreaming(t.Context(),
-			responses.ResponseNewParams{Model: "test"}, nil, nil)
+			responses.ResponseNewParams{Model: "test"}, nil, nil, nil)
 		srv.Close()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), code, "message is unchanged")

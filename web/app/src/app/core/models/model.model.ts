@@ -1,3 +1,5 @@
+import { ReasoningSupport } from './turn-settings.model';
+
 export interface Model {
   id: string;
   name: string;
@@ -22,5 +24,10 @@ export interface Model {
    * Optional for the same rollout-safety reason.
    */
   subscription_tier?: string;
+  /**
+   * How the model takes a reasoning effort (ADR 0x026). Optional for rollout safety; absence is
+   * treated as `none` (no control shown).
+   */
+  reasoning_support?: ReasoningSupport;
 }
 

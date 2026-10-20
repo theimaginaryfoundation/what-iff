@@ -154,10 +154,11 @@ func TestChatCompletionsStream_RecordsMetrics(t *testing.T) {
 	srv := sseServer(t, frames)
 	defer srv.Close()
 
-	p := &DeepSeekProvider{client: newTestClient(srv.URL), tel: tel}
+	send := chatCompletionsWithReasoning(tel, telemetry.DependencyDeepSeek, newTestClient(srv.URL))
 	ctx := telemetry.WithCallPath(t.Context(), telemetry.CallPathAgentJob)
-	resp, err := p.CallStreaming(ctx, openai.ChatCompletionNewParams{Model: "deepseek-test"}, nil)
+	resp, reasoning, err := send(ctx, openai.ChatCompletionNewParams{Model: "deepseek-test"}, func(string) {}, nil)
 	require.NoError(t, err)
+	require.Equal(t, "thinking", reasoning, "streamed reasoning_content is captured")
 	require.Equal(t, int64(120), resp.Usage.PromptTokens, "returned usage is unchanged")
 
 	provider := telemetry.AttrGenAIProvider.String(telemetry.DependencyDeepSeek)

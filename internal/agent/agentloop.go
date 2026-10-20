@@ -20,8 +20,44 @@ func (a *Agent) handleAgentLoop(
 	chatCtx *chatContext,
 	adapter provider.AgentAdapter,
 ) (*provider.GenerateResponse, []*models.ToolCall, []*models.FileAttachment, error) {
+	result, toolCalls, attachments, _, err := a.runToolRounds(ctx, chatCtx, adapter, toolRoundsOptions{})
+	return result, toolCalls, attachments, err
+}
+
+// toolRoundsOptions are how the Advanced loop (ADR 0x026) runs the tool loop as one of its
+// steps. The zero value is the Standard loop.
+type toolRoundsOptions struct {
+	// step tags the tool calls with the Advanced step they ran in (0 on Standard turns).
+	step int
+	// endStepAtCap ends the rounds when maxToolCallRounds is reached, leaving the last tool
+	// results appended for the next step's first call, instead of forcing a final answer.
+	endStepAtCap bool
+	// skipPostAttachments leaves appendPostToolLoopGeneratedAttachments to the caller, which
+	// runs the rounds many times but finishes the turn once.
+	skipPostAttachments bool
+	// beforeCall and afterCall run around every model call. An error from beforeCall stops the
+	// rounds before that call: runToolRounds returns it with the tool calls already made.
+	beforeCall func() error
+	afterCall  func()
+}
+
+// runToolRounds is the tool loop: it calls the model until it answers without requesting tools,
+// at most maxToolCallRounds rounds. capped reports that endStepAtCap stopped it at the cap (no
+// final answer; the last tool results are pending).
+func (a *Agent) runToolRounds(
+	ctx context.Context,
+	chatCtx *chatContext,
+	adapter provider.AgentAdapter,
+	opts toolRoundsOptions,
+) (result *provider.GenerateResponse, toolCalls []*models.ToolCall, attachments []*models.FileAttachment, capped bool, err error) {
 	var allToolCalls []*models.ToolCall
 	var allGeneratedAttachments []*models.FileAttachment
+	finishAttachments := func() []*models.FileAttachment {
+		if opts.skipPostAttachments {
+			return allGeneratedAttachments
+		}
+		return a.appendPostToolLoopGeneratedAttachments(ctx, chatCtx, allGeneratedAttachments)
+	}
 
 	for round := 0; round < maxToolCallRounds; round++ {
 		// Send only the tools loaded so far: a load_tools call in the previous round shows its
@@ -32,38 +68,58 @@ func (a *Agent) handleAgentLoop(
 			}
 		}
 		logInferenceCall(ctx, a.logger, chatCtx, adapter, round)
+		if opts.beforeCall != nil {
+			if err := opts.beforeCall(); err != nil {
+				return nil, allToolCalls, allGeneratedAttachments, false, err
+			}
+		}
 		result, toolUses, err := adapter.Call(ctx)
+		if opts.afterCall != nil {
+			opts.afterCall()
+		}
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, false, err
 		}
 		if result != nil && len(toolUses) > 0 {
-			return nil, nil, nil, fmt.Errorf("adapter invariant violated: Call returned both a result and tool uses")
+			return nil, nil, nil, false, fmt.Errorf("adapter invariant violated: Call returned both a result and tool uses")
 		}
 		logInferenceResult(a.logger, chatCtx, round, result, toolUses)
 
 		if len(toolUses) == 0 {
 			// Model produced a final answer — no tool calls requested.
-			allGeneratedAttachments = a.appendPostToolLoopGeneratedAttachments(ctx, chatCtx, allGeneratedAttachments)
-			return result, allToolCalls, allGeneratedAttachments, nil
+			return result, allToolCalls, finishAttachments(), false, nil
 		}
 
 		toolResults, modelToolCalls, generatedAttachments := a.executeToolUses(ctx, chatCtx, round, toolUses)
+		for _, tc := range modelToolCalls {
+			tc.Step = opts.step
+		}
 		allToolCalls = append(allToolCalls, modelToolCalls...)
 		allGeneratedAttachments = append(allGeneratedAttachments, generatedAttachments...)
 		adapter.AppendToolResults(toolResults)
 
 		if round == maxToolCallRounds-1 {
-			// Max rounds reached — strip tools and force a prose response.
-			final, err := adapter.ForceFinalResponse(ctx)
-			if err != nil {
-				return nil, nil, nil, fmt.Errorf("failed to force final response: %w", err)
+			if opts.endStepAtCap {
+				return nil, allToolCalls, allGeneratedAttachments, true, nil
 			}
-			allGeneratedAttachments = a.appendPostToolLoopGeneratedAttachments(ctx, chatCtx, allGeneratedAttachments)
-			return final, allToolCalls, allGeneratedAttachments, nil
+			// Max rounds reached — strip tools and force a prose response.
+			if opts.beforeCall != nil {
+				if err := opts.beforeCall(); err != nil {
+					return nil, allToolCalls, allGeneratedAttachments, false, err
+				}
+			}
+			final, err := adapter.ForceFinalResponse(ctx)
+			if opts.afterCall != nil {
+				opts.afterCall()
+			}
+			if err != nil {
+				return nil, nil, nil, false, fmt.Errorf("failed to force final response: %w", err)
+			}
+			return final, allToolCalls, finishAttachments(), false, nil
 		}
 	}
 
-	return nil, nil, nil, fmt.Errorf("agent loop ended without a final response after %d rounds", maxToolCallRounds)
+	return nil, nil, nil, false, fmt.Errorf("agent loop ended without a final response after %d rounds", maxToolCallRounds)
 }
 
 func (a *Agent) appendPostToolLoopGeneratedAttachments(ctx context.Context, chatCtx *chatContext, existing []*models.FileAttachment) []*models.FileAttachment {

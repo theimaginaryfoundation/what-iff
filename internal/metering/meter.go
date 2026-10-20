@@ -39,6 +39,10 @@ type Meter interface {
 	// The check is intentionally fuzzy — concurrent requests are not serialised
 	// here; the implementation's atomic accounting at Record time is the precise
 	// enforcer. A returned Decision with Allowed=false must hard-reject the turn.
+	//
+	// A running Advanced turn also calls Check before each model call after its first, with
+	// the usage it has not recorded yet on ctx (WithPendingUsage). Allowed=false then stops the
+	// run before that call.
 	Check(ctx context.Context, userID uuid.UUID, tier, actionType string) Decision
 
 	// Record settles the cost of one completed turn (fire-and-forget; it must not
@@ -104,6 +108,36 @@ type Usage struct {
 	// models.ActionTypeImageGeneration; empty means OpenAI, the only vendor before
 	// users could choose one.
 	ImageProvider string
+	// ReasoningEffort is the reasoning effort ("off"|"low"|"medium"|"high") the turn was run
+	// at when the user explicitly selected one and the model honours it (ADR 0x026). Empty
+	// when no effort was selected, including models that always reason by default, so an
+	// implementation that prices effort leaves those turns as they were.
+	ReasoningEffort string
+	// AgentLoop is the loop the turn ran ("standard"|"advanced"; ADR 0x026). Empty means
+	// standard.
+	AgentLoop string
+	// Calls are the model calls this record covers, in order, with each call's token usage
+	// (ADR 0x026). A Standard turn's record carries every call of the turn (tool rounds and the
+	// reply). An Advanced turn is recorded step by step as it runs (Step > 0), each record carrying
+	// that step's calls, and the turn's final record carries whatever calls remain. Empty when the
+	// usage is unknown (Tokens still holds the final call's input, as before).
+	Calls []CallUsage
+	// Step is the Advanced step a step record covers (1-based); 0 for a turn's final record and
+	// for Standard turns.
+	Step int
+	// TurnID identifies the turn (its job) across its step records and final record, so an
+	// implementation can total a turn's charges. Empty when the turn has no job.
+	TurnID string
+}
+
+// CallUsage is one model call's token usage as the provider reported it. InputTokens includes
+// CachedInputTokens; OutputTokens includes ReasoningTokens where the provider reports them
+// separately (Anthropic reports thinking only as output).
+type CallUsage struct {
+	InputTokens       int64
+	CachedInputTokens int64
+	OutputTokens      int64
+	ReasoningTokens   int64
 }
 
 // New constructs the production Meter. It is nil in builds that do not link a

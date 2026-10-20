@@ -88,6 +88,11 @@ func (h *Handler) CreateMood(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "A mood can only have one image", nil)
 		return
 	}
+	if err := req.TurnSettingValues.Validate(); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
+		return
+	}
+	req.TurnSettingValues = req.TurnSettingValues.Normalized()
 
 	created, err := h.ds.CreateMood(r.Context(), userID, req)
 	if err != nil {
@@ -135,6 +140,11 @@ func (h *Handler) UpdateMood(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "A mood can only have one image", nil)
 		return
 	}
+	if err := req.TurnSettingValues.Validate(); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
+		return
+	}
+	req.TurnSettingValues = req.TurnSettingValues.Normalized()
 
 	updated, err := h.ds.UpdateMood(r.Context(), userID, id, req)
 	if err != nil {

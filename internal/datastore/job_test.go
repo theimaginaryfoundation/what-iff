@@ -34,6 +34,7 @@ func createJobTestSchema(t *testing.T, db *sql.DB) {
 		result_id uuid,
 		draft_deltas json,
 		draft_reasoning json,
+		draft_agent_run json,
 		progress text,
 		user_jobs uuid NOT NULL,
 		FOREIGN KEY (user_jobs) REFERENCES users(id)
@@ -1131,6 +1132,7 @@ func createPartialJobTestTables(t *testing.T, ds *Datastore) {
 			result_id uuid,
 			draft_deltas json,
 			draft_reasoning json,
+			draft_agent_run json,
 			progress text,
 			created_at datetime NOT NULL,
 			updated_at datetime NOT NULL,
@@ -1148,6 +1150,7 @@ func createPartialJobTestTables(t *testing.T, ds *Datastore) {
 			generation_personality text,
 			generation_expression_reasoning text,
 			model_reasoning text,
+			agent_run json,
 			last_error_message text,
 			checkpoint_completed_at datetime,
 			context_breakdown json,

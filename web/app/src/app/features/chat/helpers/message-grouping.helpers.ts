@@ -1,5 +1,5 @@
 import { ChatMessage } from '../../../core/models/message.model';
-import { ChatTurnToolCall } from '../../../core/models/job.model';
+import { ChatTurnAdvancedProgress, ChatTurnToolCall } from '../../../core/models/job.model';
 import { ToolCall, ToolCallView } from '../../../core/models/toolcall.model';
 
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../chat.constants';
@@ -24,6 +24,8 @@ export interface ToolCallGroupItem {
   readonly toolCalls: readonly ToolCallView[];
   /** The in-flight turn's timeline (shown expanded, rows carry a status) rather than saved calls. */
   readonly live?: boolean;
+  /** Live Advanced turns only (ADR 0x026): the current step and plan. */
+  readonly advanced?: ChatTurnAdvancedProgress | null;
 }
 
 export interface ModelChangeDividerItem {
@@ -199,23 +201,38 @@ export function appendLiveToolCallGroup(
   groups: readonly GroupedItem[],
   pendingMessage: ChatMessage,
   liveCalls: readonly ChatTurnToolCall[],
+  advanced: ChatTurnAdvancedProgress | null = null,
 ): GroupedItem[] {
-  if (liveCalls.length === 0) return [...groups];
+  if (liveCalls.length === 0 && !advanced) return [...groups];
+  const seen = new Map<string, number>();
   const item: ToolCallGroupItem = {
     kind: 'tool-call-group',
     message: pendingMessage,
-    toolCalls: liveCalls.map((call, index) => liveToolCallView(call, index, pendingMessage.id)),
+    toolCalls: liveCalls.map(call => {
+      // View id scheme: live-<step>-<round>-<tool call id>-<occurrence>.
+      // - Not the list position: an Advanced turn keeps only its newest calls (60), so older ones
+      //   drop off the front and positions shift on every poll.
+      // - A call keeps its id from running to finished, so its row (and expansion state) is stable.
+      // - occurrence counts calls sharing step, round and id within the current window, for
+      //   providers that repeat or omit ids. If an earlier duplicate drops off the front, a later
+      //   one's occurrence (and so its id) shifts; that needs a repeated id in the same step and
+      //   round, and only re-mounts that row.
+      // - Saved messages use the persisted ToolCall ids instead, so nothing here outlives the turn.
+      const key = `${call.step ?? 0}-${call.round}-${call.id}`;
+      const occurrence = seen.get(key) ?? 0;
+      seen.set(key, occurrence + 1);
+      return liveToolCallView(call, `live-${key}-${occurrence}`, pendingMessage.id);
+    }),
     live: true,
+    advanced,
   };
   return [...groups, item];
 }
 
-function liveToolCallView(call: ChatTurnToolCall, index: number, messageId: string): ToolCallView {
+function liveToolCallView(call: ChatTurnToolCall, id: string, messageId: string): ToolCallView {
   const output = call.output ?? '';
   return {
-    // Position keeps the id unique even if a provider repeats or omits tool-call ids; entries are
-    // only ever appended, so a call keeps its position (and its DOM row) as it updates.
-    id: `live-${index}-${call.id}`,
+    id,
     chat_message_id: messageId,
     tool_name: call.name,
     tool_input: call.input ?? '',
@@ -223,6 +240,7 @@ function liveToolCallView(call: ChatTurnToolCall, index: number, messageId: stri
     tool_error: call.status === 'error' ? output : '',
     created_at: call.started_at,
     updated_at: call.finished_at ?? call.started_at,
+    ...(call.step ? { step: call.step } : {}),
     status: call.status,
   };
 }

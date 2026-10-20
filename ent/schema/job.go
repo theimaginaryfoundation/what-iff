@@ -6,6 +6,7 @@ import (
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/index"
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 )
 
 // Job holds the schema definition for the Job entity.
@@ -43,6 +44,9 @@ func (Job) Fields() []ent.Field {
 		field.JSON("draft_reasoning", []string{}).
 			Optional().
 			Comment("Incremental model reasoning chunks persisted while inference is still running (GLM/MiMo); display-only, cleared with draft_deltas and reset when a truncated call is retried"),
+		field.JSON("draft_agent_run", &modeltypes.AgentRunDraft{}).
+			Optional().
+			Comment("An Advanced run in progress (ADR 0x026), written at every step boundary so a failed, stopped or interrupted run still becomes a partial message; cleared with the drafts."),
 		field.Text("progress").
 			Optional().
 			Comment("Optional JSON-encoded progress payload for long-running jobs (e.g. chat import imported/skipped/total counts)"),

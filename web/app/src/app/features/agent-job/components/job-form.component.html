@@ -63,6 +63,36 @@
         }
       </select>
     </label>
+
+    <label class="text-sm text-text-secondary">
+      Reasoning effort
+      <select
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        [ngModel]="reasoningEffort()"
+        (ngModelChange)="reasoningEffort.set($event)"
+        [uiTooltip]="reasoningEffortDescription + ' Applies to job runs only; the thread keeps its own.'"
+        name="reasoningEffort">
+        <option value="">Use thread setting</option>
+        @for (option of reasoningEffortOptions; track option.value) {
+          <option [value]="option.value">{{ option.label }}</option>
+        }
+      </select>
+    </label>
+
+    <label class="text-sm text-text-secondary">
+      Agent loop
+      <select
+        class="mt-1 w-full rounded-xl border border-border-base bg-surface-base px-3 py-2 text-sm text-text-primary"
+        [ngModel]="agentLoop()"
+        (ngModelChange)="agentLoop.set($event)"
+        [uiTooltip]="agentLoopDescriptions.advanced + ' Applies to job runs only; the thread keeps its own.'"
+        name="agentLoop">
+        <option value="">Use thread setting</option>
+        @for (option of agentLoopOptions; track option.value) {
+          <option [value]="option.value">{{ option.label }}</option>
+        }
+      </select>
+    </label>
   </div>
 
   <div class="block text-sm text-text-secondary">

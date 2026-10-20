@@ -4231,6 +4231,16 @@ paths:
             schema:
               type: object
               properties:
+                reasoning_effort:
+                  allOf:
+                    - $ref: '#/components/schemas/ReasoningEffort'
+                  nullable: true
+                  description: Reasoning effort for the new thread. Omit to seed it from the personality, then the account default.
+                agent_loop:
+                  allOf:
+                    - $ref: '#/components/schemas/AgentLoop'
+                  nullable: true
+                  description: Agent loop for the new thread. Omit to seed it from the personality, then the account default.
                 name:
                   type: string
                   description: Name of the chat session
@@ -4494,6 +4504,14 @@ paths:
             schema:
               type: object
               properties:
+                reasoning_effort:
+                  type: string
+                  enum: ['', 'off', 'low', 'medium', 'high']
+                  description: Change the thread's reasoning effort. Omit to keep; an empty string clears it.
+                agent_loop:
+                  type: string
+                  enum: ['', 'standard', 'advanced']
+                  description: Change the thread's agent loop. Omit to keep; an empty string clears it.
                 name:
                   type: string
                   description: Name of the chat session
@@ -4578,6 +4596,14 @@ paths:
             schema:
               type: object
               properties:
+                reasoning_effort:
+                  type: string
+                  enum: ['', 'off', 'low', 'medium', 'high']
+                  description: Change the thread's reasoning effort. Omit to keep; an empty string clears it.
+                agent_loop:
+                  type: string
+                  enum: ['', 'standard', 'advanced']
+                  description: Change the thread's agent loop. Omit to keep; an empty string clears it.
                 name:
                   type: string
                   description: Name of the chat session
@@ -7586,6 +7612,16 @@ components:
         present in a response. See UserPreferencesUpdateRequest for the subset a client
         may write.
       properties:
+        reasoning_effort:
+          allOf:
+            - $ref: '#/components/schemas/ReasoningEffort'
+          nullable: true
+          description: Account-default reasoning effort, which seeds a new thread whose personality sets none (ADR 0x026). Null when not set.
+        agent_loop:
+          allOf:
+            - $ref: '#/components/schemas/AgentLoop'
+          nullable: true
+          description: Account-default agent loop, which seeds a new thread whose personality sets none. Null when not set (standard).
         id:
           type: string
           format: uuid
@@ -7651,6 +7687,31 @@ components:
         image_generation_provider: "openai"
         image_generation_providers: ["openai", "google"]
 
+    # ReasoningEffort, AgentLoop and ReasoningSupport mirror models.ReasoningEffort,
+    # models.AgentLoop and models.ReasoningSupport (internal/models/reasoning.go); keep them in sync.
+    ReasoningEffort:
+      type: string
+      enum: ['off', 'low', 'medium', 'high']
+      description: |
+        How hard a turn asks the model to think (ADR 0x026). Not set means the model's own
+        default. `off` asks for no reasoning where the model allows it; a model that always
+        reasons runs it as `low`.
+
+    AgentLoop:
+      type: string
+      enum: ['standard', 'advanced']
+      description: |
+        How a turn drives tools (ADR 0x026): `standard` is the original tool loop; `advanced` is
+        the long-horizon loop that works in steps until its plan is done, showing its interim
+        output as reasoning. Not set means `standard`.
+
+    ReasoningSupport:
+      type: string
+      enum: ['none', 'optional', 'toggle', 'always']
+      description: |
+        How a model takes a reasoning effort: `none` (no control), `optional` (off and the
+        three levels), `toggle` (on or off only) or `always` (levels, no off).
+
     ImageGenerationProvider:
       type: string
       enum: [openai, google, zai, qwen]
@@ -7669,6 +7730,14 @@ components:
         Clients should generally read the current preferences and send them back with only
         the intended fields changed, rather than sending a sparse object.
       properties:
+        reasoning_effort:
+          type: string
+          enum: ['', 'off', 'low', 'medium', 'high']
+          description: Account-default reasoning effort. Preserved when absent; an empty string clears it.
+        agent_loop:
+          type: string
+          enum: ['', 'standard', 'advanced']
+          description: Account-default agent loop. Preserved when absent; an empty string clears it.
         default_model_id:
           type: string
           format: uuid
@@ -7727,6 +7796,8 @@ components:
     Model:
       type: object
       properties:
+        reasoning_support:
+          $ref: '#/components/schemas/ReasoningSupport'
         id:
           type: string
           format: uuid
@@ -7850,7 +7921,10 @@ components:
           type: array
           description: >-
             Incremental model reasoning chunks emitted while inference is in progress (z.ai GLM,
-            Xiaomi MiMo). Display-only. Unlike draft_deltas this can be reset (emptied and
+            Xiaomi MiMo, and OpenAI/Anthropic when a reasoning effort is selected). On an Advanced
+            turn it carries everything the model writes before its final reply, with step headers,
+            and the final reply streams here too until it is saved as the message (whose agent_run
+            then holds the notes by step). Display-only. Unlike draft_deltas this can be reset (emptied and
             re-sent) when a truncated call is retried, so clients should render the whole
             array on each poll rather than appending by cursor.
           items:
@@ -7867,7 +7941,10 @@ components:
             `error`, `input`/`output` are truncated previews, and `output`/`finished_at` are set once the
             call finishes. It is display-only; the saved assistant message's `tool_calls` are authoritative.
             While the turn is queued behind an earlier turn in its chat the payload also carries
-            `waiting_on` (`reply`), absent once the turn runs.
+            `waiting_on` (`reply`), absent once the turn runs. On an Advanced turn (ADR 0x026) it also
+            carries `step` (the current step, 1-based) and `plan` (`[{content, status}]`, status
+            `pending`, `in_progress`, `completed` or `cancelled`), each tool call carries its `step`, and
+            only the newest 60 tool calls are kept.
         created_at:
           type: string
           format: date-time
@@ -7897,6 +7974,16 @@ components:
     AgentJob:
       type: object
       properties:
+        reasoning_effort:
+          allOf:
+            - $ref: '#/components/schemas/ReasoningEffort'
+          nullable: true
+          description: Reasoning effort for this job's runs; overrides the thread and mode. Null when not set.
+        agent_loop:
+          allOf:
+            - $ref: '#/components/schemas/AgentLoop'
+          nullable: true
+          description: Agent loop for this job's runs; overrides the thread and mode. Null when not set.
         id:
           type: string
           format: uuid
@@ -8013,6 +8100,14 @@ components:
     UpdateAgentJobRequest:
       type: object
       properties:
+        reasoning_effort:
+          type: string
+          enum: ['', 'off', 'low', 'medium', 'high']
+          description: Reasoning effort for this job's runs. Preserved when absent; an empty string clears it.
+        agent_loop:
+          type: string
+          enum: ['', 'standard', 'advanced']
+          description: Agent loop for this job's runs. Preserved when absent; an empty string clears it.
         title:
           type: string
           nullable: true
@@ -8047,6 +8142,16 @@ components:
     Chat:
       type: object
       properties:
+        reasoning_effort:
+          allOf:
+            - $ref: '#/components/schemas/ReasoningEffort'
+          nullable: true
+          description: The thread's reasoning effort, seeded at creation from the personality, then the account default, and thread-local after. An active mode's value overrides it for a turn. Null when not set (the model's default).
+        agent_loop:
+          allOf:
+            - $ref: '#/components/schemas/AgentLoop'
+          nullable: true
+          description: The thread's agent loop, seeded like reasoning_effort. Null when not set (standard).
         id:
           type: string
           format: uuid
@@ -8561,9 +8666,18 @@ components:
           nullable: true
           description: >-
             Reasoning/thinking text the model reported for this assistant turn (e.g. z.ai GLM
-            thinking blocks, Xiaomi MiMo reasoning_content), joined across the turn's tool
-            rounds. Display-only; never replayed to the model. Omitted when the provider
-            reported none.
+            thinking blocks, Xiaomi MiMo reasoning_content, OpenAI reasoning summaries and Anthropic
+            thinking when a reasoning effort is selected), joined across the turn's tool rounds.
+            Display-only; never replayed to the model. Omitted when the provider reported none, and on
+            Advanced turns, whose working notes are in agent_run.
+        agent_run:
+          allOf:
+            - $ref: '#/components/schemas/AgentRun'
+          nullable: true
+          description: >-
+            The Advanced run (ADR 0x026) that produced this assistant message: its working notes per
+            step, its plan and why it ended. The message text is the run's final reply. Absent on
+            Standard turns.
         last_error_message:
           type: string
           nullable: true
@@ -8621,6 +8735,51 @@ components:
           description: Image payloads carried by this kind (token estimates do not account for images).
       required: [kind, segments, tokens, cacheable]
 
+    AgentRun:
+      type: object
+      description: >-
+        A saved Advanced run (ADR 0x026). Enum-like string fields are open-ended: clients should
+        render unknown values generically rather than reject them.
+      properties:
+        steps:
+          type: array
+          description: >-
+            Per step, in order, what the model wrote before its final reply: native reasoning and the
+            text it wrote between tool calls. Notes are capped in size; tool calls are in the message's
+            tool_calls, each with its step.
+          items:
+            type: object
+            properties:
+              step:
+                type: integer
+                description: The step, 1-based.
+              notes:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    kind:
+                      type: string
+                      description: '`reasoning` (the model''s native reasoning) or `text` (text it wrote).'
+                    text:
+                      type: string
+        plan:
+          type: array
+          description: The run's plan as it stood when the run ended.
+          items:
+            type: object
+            properties:
+              content:
+                type: string
+              status:
+                type: string
+                description: '`pending`, `in_progress`, `completed` or `cancelled`.'
+        end_reason:
+          type: string
+          description: >-
+            Why the run ended: `done`, `stalled`, `duration_limit`, `step_limit`, `quota`, `cancelled` or
+            `failed`. A run that ended for any reason other than `done` with open plan items has those
+            items offered to the thread's next Advanced turn.
     ContextBreakdown:
       type: object
       description: >-
@@ -9155,6 +9314,9 @@ components:
     ToolCall:
       type: object
       properties:
+        step:
+          type: integer
+          description: Advanced-loop step (1-based) the call ran in; absent on Standard turns.
         id:
           type: string
           format: uuid
@@ -9193,6 +9355,16 @@ components:
     Personality:
       type: object
       properties:
+        reasoning_effort:
+          allOf:
+            - $ref: '#/components/schemas/ReasoningEffort'
+          nullable: true
+          description: "Reasoning effort that seeds new threads with this personality (over the account default). Full replace on update: null clears."
+        agent_loop:
+          allOf:
+            - $ref: '#/components/schemas/AgentLoop'
+          nullable: true
+          description: "Agent loop that seeds new threads with this personality. Full replace on update: null clears."
         id:
           type: string
           format: uuid

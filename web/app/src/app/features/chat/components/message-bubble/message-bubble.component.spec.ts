@@ -141,6 +141,87 @@ describe('MessageBubbleComponent', () => {
         expect(fixture.nativeElement.querySelector('.bubble__reasoning')).toBeNull();
     });
 
+    describe('saved Advanced run (agent_run)', () => {
+        const details = () => fixture.nativeElement.querySelector('details.bubble__reasoning') as HTMLDetailsElement | null;
+
+        it('shows the working notes per step, the plan and the stop reason in the collapsed disclosure', () => {
+            fixture.componentRef.setInput('message', {
+                ...message('Assistant'),
+                agent_run: {
+                    steps: [
+                        { step: 1, notes: [{ kind: 'reasoning', text: 'Weigh the options.' }, { kind: 'text', text: 'Searching now.' }] },
+                        { step: 2, notes: [{ kind: 'text', text: 'Found it.' }] },
+                    ],
+                    plan: [
+                        { content: 'Search', status: 'completed' },
+                        { content: 'Summarise', status: 'in_progress' },
+                    ],
+                    end_reason: 'step_limit',
+                },
+            });
+            fixture.detectChanges();
+
+            const box = details()!;
+            expect(box.open).toBe(false);
+            expect(box.querySelector('summary')?.textContent).toContain('Working notes');
+            expect(box.nextElementSibling?.classList).toContain('bubble__body');
+            const steps = [...box.querySelectorAll('.agent-run__step')];
+            expect(steps.map(s => s.querySelector('.agent-run__step-title')?.textContent?.trim())).toEqual(['Step 1', 'Step 2']);
+            const firstNotes = [...steps[0].querySelectorAll('.agent-run__note')];
+            expect(firstNotes.map(n => n.textContent)).toEqual(['Weigh the options.', 'Searching now.']);
+            expect(firstNotes[0].classList).toContain('agent-run__note--reasoning');
+            expect(firstNotes[1].classList).toContain('agent-run__note--text');
+            const plan = [...box.querySelectorAll('.agent-run__plan li')];
+            expect(plan.map(li => li.querySelector('.advanced-run__content')?.textContent)).toEqual(['Search', 'Summarise']);
+            expect(plan[1].classList).toContain('advanced-run__item--in_progress');
+            expect(box.querySelector('.agent-run__stop')?.textContent).toBe('Stopped: step limit reached');
+        });
+
+        it('shows a generic stop label for an unknown end reason and none for a finished run', () => {
+            fixture.componentRef.setInput('message', { ...message('Assistant'), agent_run: { end_reason: 'brand_new' } });
+            fixture.detectChanges();
+            expect(details()?.querySelector('.agent-run__stop')?.textContent).toBe('Stopped before finishing');
+
+            fixture.componentRef.setInput('message', {
+                ...message('Assistant'),
+                agent_run: { steps: [{ step: 1, notes: [{ kind: 'text', text: 'Done.' }] }], end_reason: 'done' },
+            });
+            fixture.detectChanges();
+            expect(details()?.querySelector('.agent-run__stop')).toBeNull();
+            expect(details()?.querySelector('.agent-run__plan')).toBeNull();
+        });
+
+        it('needs no model_reasoning, and hides the disclosure when the run has nothing to show or the message is a user one', () => {
+            fixture.componentRef.setInput('message', { ...message('Assistant'), agent_run: { steps: [], end_reason: 'done' } });
+            fixture.detectChanges();
+            expect(details()).toBeNull();
+
+            const run = { steps: [{ step: 1, notes: [{ kind: 'text', text: 'x' }] }] };
+            fixture.componentRef.setInput('message', { ...message('User'), agent_run: run });
+            fixture.detectChanges();
+            expect(details()).toBeNull();
+        });
+
+        it('replaces a live pending reasoning view without leaving the old text behind', () => {
+            fixture.componentRef.setInput('message', { ...pendingAssistantMessage(), model_reasoning: '— Step 1 —\nThinking live' });
+            fixture.componentRef.setInput('displayContent', '');
+            fixture.detectChanges();
+            expect(details()?.querySelector('summary')?.textContent).toContain('Thinking…');
+
+            fixture.componentRef.setInput('message', {
+                ...message('Assistant'),
+                agent_run: { steps: [{ step: 1, notes: [{ kind: 'reasoning', text: 'Thinking live' }] }], end_reason: 'done' },
+            });
+            fixture.componentRef.setInput('displayContent', 'Final answer');
+            fixture.detectChanges();
+            expect(fixture.nativeElement.querySelectorAll('details.bubble__reasoning').length).toBe(1);
+            expect(details()?.open).toBe(false);
+            expect(details()?.querySelector('summary')?.textContent).toContain('Working notes');
+            expect(details()?.textContent).not.toContain('— Step 1 —');
+            expect(details()?.querySelector('.agent-run__note')?.textContent).toBe('Thinking live');
+        });
+    });
+
     it('shows live reasoning open while thinking, then settles collapsed once the reply streams', () => {
         fixture.componentRef.setInput('message', { ...pendingAssistantMessage(), model_reasoning: 'Considering it' });
         fixture.componentRef.setInput('displayContent', '');

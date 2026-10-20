@@ -25,6 +25,9 @@ type Model struct {
 	// IsDefault marks the application-wide default model. At most one active model
 	// has this set; it is used as the default for new users when present.
 	IsDefault bool `json:"is_default"`
+	// ReasoningSupport is how the model takes a reasoning effort (ADR 0x026). Derived from the
+	// provider and name (ReasoningSupportFor), read-only.
+	ReasoningSupport ReasoningSupport `json:"reasoning_support"`
 }
 
 type CreateModelRequest struct {

@@ -1,8 +1,6 @@
 package provider
 
 import (
-	"context"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -19,15 +17,13 @@ type MistralProvider struct {
 	tel    *telemetry.Telemetry
 }
 
-// MistralAdapter implements AgentAdapter for Mistral's OpenAI-compatible Chat
-// Completions API. When a text-delta handler is set the turn streams token
-// deltas; otherwise it falls back to a single non-streaming request. The full
-// assistant text is always available via GenerateResponse.
+// MistralAdapter implements AgentAdapter for Mistral's OpenAI-compatible Chat Completions API. When
+// a text-delta handler is set the turn streams token deltas; otherwise it falls back to a single
+// non-streaming request. Content is read through mistralSender, which splits a reasoning model's
+// thinking chunks from its reply, and thinking is replayed as Mistral's own chunks
+// (mistralChunkReplay).
 type MistralAdapter struct {
-	provider         *MistralProvider
-	params           openai.ChatCompletionNewParams
-	tools            scopedToolList[openai.ChatCompletionToolUnionParam]
-	textDeltaHandler func(delta string)
+	reasoningChatAdapter
 }
 
 func NewMistralProvider(apiKey, baseURL string, tel *telemetry.Telemetry, httpClient *http.Client) *MistralProvider {
@@ -45,82 +41,8 @@ func NewMistralProvider(apiKey, baseURL string, tel *telemetry.Telemetry, httpCl
 	return &MistralProvider{client: &client, tel: tel}
 }
 
-func (p *MistralProvider) Call(ctx context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
-	return chatCompletionsNew(ctx, p.tel, telemetry.DependencyMistral, p.client, params)
-}
-
-// CallStreaming streams a Chat Completions request, forwarding text deltas to onTextDelta.
-func (p *MistralProvider) CallStreaming(ctx context.Context, params openai.ChatCompletionNewParams, onTextDelta func(delta string)) (*openai.ChatCompletion, error) {
-	resp, err := chatCompletionsStream(ctx, p.tel, telemetry.DependencyMistral, p.client, params, chatCompletionStreamHooks{onTextDelta: onTextDelta})
-	if err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
 func NewMistralAdapter(provider *MistralProvider, params openai.ChatCompletionNewParams, functionTools []openai.ChatCompletionToolUnionParam, disabledTools map[string]bool) *MistralAdapter {
-	tools := chatCompletionScopedTools(&params, functionTools, disabledTools)
-	return &MistralAdapter{provider: provider, params: params, tools: tools}
-}
-
-func (a *MistralAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse, error) {
-	resp, err := a.call(ctx)
-	if err != nil {
-		return nil, nil, WrapSafetyViolationError(models.SafetyViolationProviderMistral, fmt.Errorf("Mistral API call failed: %w", err))
-	}
-	if len(resp.Choices) == 0 {
-		return nil, nil, fmt.Errorf("Mistral API returned no choices")
-	}
-	toolUses := extractChatCompletionToolUses(resp)
-	if len(toolUses) == 0 {
-		return a.toGenerateResponse(resp), nil, nil
-	}
-	a.params.Messages = append(a.params.Messages, chatCompletionAssistantReplay(resp.Choices[0].Message, ""))
-	return nil, toolUses, nil
-}
-
-func (a *MistralAdapter) AppendToolResults(results []ToolResult) {
-	for _, r := range results {
-		a.params.Messages = append(a.params.Messages, openai.ToolMessage(toolResultOutput(r), r.ID))
-	}
-}
-
-func (a *MistralAdapter) ForceFinalResponse(ctx context.Context) (*GenerateResponse, error) {
-	a.params.Tools = nil
-	a.params.Messages = append(a.params.Messages, openai.UserMessage("Please provide your best final response based on the information gathered so far without additional tool calls."))
-	resp, err := a.call(ctx)
-	if err != nil {
-		return nil, WrapSafetyViolationError(models.SafetyViolationProviderMistral, fmt.Errorf("Mistral final-response call failed: %w", err))
-	}
-	return a.toGenerateResponse(resp), nil
-}
-
-// call streams when a text-delta handler is set, else issues a non-streaming request.
-func (a *MistralAdapter) call(ctx context.Context) (*openai.ChatCompletion, error) {
-	if a.textDeltaHandler != nil {
-		return a.provider.CallStreaming(ctx, a.params, a.textDeltaHandler)
-	}
-	return a.provider.Call(ctx, a.params)
-}
-
-func (a *MistralAdapter) WebSearchCompletedCount() int { return 0 }
-
-// SetTextDeltaHandler stores the handler; when set, the Mistral path streams token deltas.
-func (a *MistralAdapter) SetTextDeltaHandler(handler func(delta string)) {
-	a.textDeltaHandler = handler
-}
-
-func (a *MistralAdapter) toGenerateResponse(resp *openai.ChatCompletion) *GenerateResponse {
-	inputTokens, outputTokens := chatCompletionTokenUsage(resp)
-	return &GenerateResponse{
-		ID:           resp.ID,
-		Text:         ExtractChatCompletionText(resp),
-		InputTokens:  inputTokens,
-		OutputTokens: outputTokens,
-	}
-}
-
-// ScopeTools implements ToolScoper.
-func (a *MistralAdapter) ScopeTools(hidden func(name string) bool) {
-	a.params.Tools = a.tools.scope(hidden)
+	a := &MistralAdapter{newReasoningChatAdapter("Mistral", models.SafetyViolationProviderMistral, mistralSender(provider.tel, provider.client), params, functionTools, disabledTools)}
+	a.replay = mistralChunkReplay{}
+	return a
 }

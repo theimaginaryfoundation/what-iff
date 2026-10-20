@@ -260,6 +260,40 @@ refetch_count="$(jq --arg m "$MSG" '[.results[] | select(.origin == "Assistant" 
 [ "$refetch_count" -ge 1 ] || { echo "❌ assistant reply missing on re-fetch"; exit 1; }
 echo "echo reply persisted"
 
+# ── Turn settings + Advanced loop (ADR 0x026) ──────────────────────────────────
+step "setting the thread's reasoning effort and agent loop"
+patched="$(curl -fsS -X PATCH "${BASE}/api/chat/${CHAT_ID}" "${AUTH[@]}" \
+  -H 'Content-Type: application/json' -d '{"reasoning_effort":"high","agent_loop":"advanced"}')" \
+  || { echo "❌ PATCH chat turn settings failed"; exit 1; }
+[ "$(jq -r '.reasoning_effort' <<<"$patched" 2>/dev/null)" = "high" ] || { echo "❌ reasoning_effort not saved: $patched"; exit 1; }
+[ "$(jq -r '.agent_loop' <<<"$patched" 2>/dev/null)" = "advanced" ] || { echo "❌ agent_loop not saved: $patched"; exit 1; }
+
+ADV_MSG="Advanced mock-e2e ${RUN_ID}"
+step "sending an Advanced-loop message"
+adv_resp="$(curl -fsS -X POST "${BASE}/api/chat/${CHAT_ID}/chat-message" "${AUTH[@]}" \
+  -H 'Content-Type: application/json' \
+  -d "$(jq -n --arg m "$ADV_MSG" '{message:$m, origin:"User"}')")"
+ADV_JOB_ID="$(jq -r '.job_id // empty' <<<"$adv_resp" 2>/dev/null)" || ADV_JOB_ID=""
+[ -n "$ADV_JOB_ID" ] || { echo "❌ Advanced message did not return a job id: $adv_resp"; exit 1; }
+poll_job "$ADV_JOB_ID"
+adv_messages="$(curl -fsS "${BASE}/api/chat/${CHAT_ID}/chat-message?limit=50" "${AUTH[@]}")"
+adv_count="$(jq --arg m "$ADV_MSG" '[.results[] | select(.origin == "Assistant" and .message == $m)] | length' <<<"$adv_messages" 2>/dev/null)" || adv_count=0
+[ "$adv_count" -ge 1 ] || { echo "❌ Advanced reply not saved as the message; messages: $adv_messages"; exit 1; }
+echo "Advanced turn completed and saved its final reply"
+
+step "seeding a new thread from the account default"
+prefs="$(curl -fsS "${BASE}/api/user/preferences" "${AUTH[@]}")" || { echo "❌ GET preferences failed"; exit 1; }
+prefs="$(jq '.reasoning_effort = "low" | .agent_loop = "advanced"' <<<"$prefs")"
+curl -fsS -X PUT "${BASE}/api/user/preferences" "${AUTH[@]}" -H 'Content-Type: application/json' -d "$prefs" >/dev/null \
+  || { echo "❌ PUT preferences failed"; exit 1; }
+seeded="$(curl -fsS -X POST "${BASE}/api/chat" "${AUTH[@]}" -H 'Content-Type: application/json' -d '{"name":"Seeded"}')"
+[ "$(jq -r '.reasoning_effort' <<<"$seeded" 2>/dev/null)" = "low" ] || { echo "❌ new thread not seeded with the account effort: $seeded"; exit 1; }
+[ "$(jq -r '.agent_loop' <<<"$seeded" 2>/dev/null)" = "advanced" ] || { echo "❌ new thread not seeded with the account loop: $seeded"; exit 1; }
+models_resp="$(curl -fsS "${BASE}/api/model" "${AUTH[@]}")" || { echo "❌ GET models failed"; exit 1; }
+jq -e '[(if type == "array" then . else .results end)[] | select(.reasoning_support != null)] | length > 0' <<<"$models_resp" >/dev/null \
+  || { echo "❌ models carry no reasoning_support: $models_resp"; exit 1; }
+echo "turn settings seeded and models report reasoning support"
+
 # ── Gallery image: a PNG stored through the real save path ─────────────────────
 step "importing a PNG into the gallery"
 upload="${WORKDIR}/upload.png"

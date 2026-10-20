@@ -24,6 +24,7 @@ type fakeChatTurnStore struct {
 	listCalls int
 	touches   map[uuid.UUID]int
 	progress  map[uuid.UUID][]string // progress payloads written per job, in order
+	partials  []uuid.UUID            // jobs finalized through FinalizeFailedChatJobWithPartial
 }
 
 func newFakeChatTurnStore() *fakeChatTurnStore {
@@ -149,6 +150,15 @@ func (f *fakeChatTurnStore) UpdateJobStatus(_ context.Context, _, id uuid.UUID, 
 	j.UpdatedAt = time.Now()
 	cp := *j
 	return &cp, nil
+}
+
+// FinalizeFailedChatJobWithPartial records the call and fails the job (the fake keeps no drafts).
+func (f *fakeChatTurnStore) FinalizeFailedChatJobWithPartial(ctx context.Context, userID, jobID, _ uuid.UUID, _, _, failureMessage string, _ *uuid.UUID) (*models.Job, *uuid.UUID, error) {
+	f.mu.Lock()
+	f.partials = append(f.partials, jobID)
+	f.mu.Unlock()
+	j, err := f.UpdateJobStatus(ctx, userID, jobID, models.JobStatusFailed, failureMessage)
+	return j, nil, err
 }
 
 // FinishTurnJobIfActive mirrors the datastore: a no-op on a terminal job, complete when the turn
@@ -595,6 +605,7 @@ func TestFailInFlightTurns_FinishesThisProcesssTurnJobs(t *testing.T) {
 
 	a.FailInFlightTurns(context.Background())
 	require.Equal(t, models.JobStatusFailed, store.status(running.ID))
+	require.Equal(t, []uuid.UUID{running.ID}, store.partials, "a failed turn keeps what it wrote as a partial reply")
 	require.Equal(t, models.JobStatusComplete, store.status(replied.ID), "a turn past its reply completes")
 	require.Equal(t, models.JobStatusCancelled, store.status(stopped.ID), "terminal jobs are left alone")
 	require.Equal(t, models.JobStatusProcessing, store.status(elsewhere.ID), "only this process's turns")
