@@ -3,6 +3,8 @@ package buzzrelay
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/png"
 	"os"
@@ -255,4 +257,23 @@ func TestLiveUploadAndAttach(t *testing.T) {
 	assert.NotEmpty(t, got) // the relay may re-encode images (EXIF stripping)
 	_, err = c.FetchMedia(ctx, ep, agent, "https://elsewhere.example/media/x.png", 1<<20)
 	assert.Error(t, err, "files are fetched from the community only")
+}
+
+// An image carrying metadata (here a PNG text chunk) is refused by Buzz as is; Upload strips it.
+func TestLiveUploadStripsImageMetadata(t *testing.T) {
+	ep, c, owner := liveRig(t)
+	ctx := context.Background()
+	pic := testPNG(t)
+	// Insert a tEXt chunk after IHDR (8-byte signature + 25-byte IHDR chunk).
+	text := []byte("tEXtComment\x00made by a camera")
+	chunk := make([]byte, 0, len(text)+8)
+	chunk = binary.BigEndian.AppendUint32(chunk, uint32(len(text)-4))
+	chunk = append(chunk, text...)
+	chunk = binary.BigEndian.AppendUint32(chunk, crc32.ChecksumIEEE(text))
+	tagged := append(append(append([]byte{}, pic[:33]...), chunk...), pic[33:]...)
+
+	blob, err := c.Upload(ctx, ep, owner, "photo.jpg", "image/png", tagged)
+	require.NoError(t, err)
+	assert.Equal(t, "photo.png", blob.Name, "re-encoded images are PNGs")
+	assert.Equal(t, "image/png", blob.Type)
 }

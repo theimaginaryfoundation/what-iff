@@ -1,6 +1,7 @@
 # ADR 0x028: Buzz relay — your persona as a member of a Buzz community
 
 - **Status:** Proposed (proof of concept; expected to change once it is in use)
+- **Branch:** `feat/buzz-relay`
 - **Date:** 2026-10-22
 - **Deciders:** What Iff maintainers
 - **Builds on:** [ADR 0x025](0x025-discord-relay.md) (Discord relay), sandboxed threads (`Chat.context_scope`), the plugin seam (`internal/plugins`) and the reply hook (`internal/replyhook`)
@@ -130,7 +131,37 @@ ADR 0x025 §7 applies as written, with Buzz as a second source:
 - **Run the persona behind `buzz-acp`** (Buzz's harness for Claude Code, Codex, Goose and Pi) with a small ACP shim that calls What Iff's webhook API. Cheap, but the persona would live on someone's desktop and only answer while the Buzz app is open. Kept as a demo path, not the product.
 - **Ask the owner for their Buzz key to mint the attestation server-side.** Rejected: What Iff would then hold a person's identity, not an agent's. The attestation is optional and pasted.
 - **Generalise the Discord tables into shared `relay_bot`/`relay_binding` tables with a platform column.** Cleaner in the long run, but it migrates shipped production tables for a proof of concept. Rejected for now; the runtime pieces are shared (`relaykit`) and the storage stays per platform.
+- **Answer every message in a thread the persona took part in.**
+  Rejected as too chatty: a direct reply to the persona's message, or the asker writing on in their own thread, is answered without a mention (`BuzzThreadContinues`); anyone else in the thread mentions the persona.
 - **Subscribe only to mentions (`#p` = persona).** Cheaper on a busy relay, but a reply in the persona's thread does not always p-tag it, and the channel stream is what later channel-history context will need. The subscription is per bound channel only, so the cost is bounded by what the owner binds.
+
+### 10. Found against a real relay
+
+The wire format was checked against Buzz itself (relay `ghcr.io/block/buzz:main`, October 2026), which settled details the docs leave open:
+
+- Two identical NIP-98 requests in one second sign the same event, and Buzz's replay guard refuses the second, so every header carries a random `nonce` tag.
+- The community is bound from the Host header: NIP-98 URLs, the NIP-42 `relay` tag and the Blossom `server` tag (port included) must all name it, and a relay reached under another name answers 404.
+- Media reads are members-only (a BUD-11 `get` authorization, with the attestation in `x-auth-tag`), and uploads that carry image metadata are refused, so images are re-encoded first (`buzzrelay.PrepareMedia`).
+- An owner attestation admits a persona that is not itself a member (NIP-AA), and an invite claim makes it a full member.
+
+## Local development
+
+The relay can be tried end to end without the Buzz desktop app:
+
+- Run a Buzz relay with its Compose bundle (`deploy/compose` in block/buzz) on `localhost:3000`, closed to members, with a test owner key.
+- Run What Iff with `BUZZ_ALLOW_PRIVATE_RELAYS=true`. When the API runs in Docker, a sidecar sharing its network namespace forwards its `localhost:3000` to the host, so the relay sees the host name it serves.
+- `go run ./cmd/buzz-rig` mints attestations and invites, creates channels, publishes profiles, posts as a test person (`say -mention`, `-reply`, `-file`) and watches a channel.
+- `BUZZ_LIVE_RELAY=http://localhost:3000 BUZZ_LIVE_OWNER_SECRET=<hex> go test -run Live ./internal/buzzrelay/` runs the live wire tests.
+
+## Questions for the Buzz team
+
+- Can Buzz Desktop mint a NIP-OA attestation for an agent key it did not create ("adopt this agent")? Today the owner needs their key in a tool to produce one.
+- Does a thread reply in the desktop app p-tag the thread's participants (or the parent's author)? We answer direct replies to the persona and the asker's own follow-ups without a mention, and would rather follow Buzz's convention.
+- Is there a supported way for a hosted operator to give a third-party server's agents access across many communities (a service identity, or NIP-FI for agents)?
+- What is the plan for a production web client, and for the plugin panel API (`browser.View`) on non-macOS builds?
+- Which kinds and NIPs are stable enough to build on (NIP-OA, NIP-AA, NIP-29 kinds 9 and 9021, NIP-CW windows), given the 0.x → 1.0 move?
+- How should an external agent signal liveness: owner-sent kind 20003, or its own presence?
+- Is agent-to-agent loop prevention planned in the relay (hop counts, rate limits per agent pair), or left to each agent?
 
 ## Consequences
 
@@ -148,3 +179,6 @@ ADR 0x025 §7 applies as written, with Buzz as a second source:
 - Agent-to-agent conversation and its loop guards, shared with the Discord follow-up.
 - DMs, reactions, edits and deletes from Buzz, forum channels, canvases and artifacts, and NIP-AE engrams.
 - Keeping relay turns out of the owner's own chat allowance in the private overlay (it keys on `metering.TurnSource`; `buzz` needs the same treatment as `discord`).
+- Moving a Buzz binding to another thread in the app (Discord has it), and sharing the composer toggle and key-chip components between the two relays.
+- An author without a Buzz profile is labelled by a shortened npub, which a small model can misread in the extraction note (it once took "Buzz" for the speaker's name); a clearer fallback label is a cheap follow-up.
+- Persona presence in Buzz (online/offline), and showing "via Buzz · alice" on relayed messages in the app.

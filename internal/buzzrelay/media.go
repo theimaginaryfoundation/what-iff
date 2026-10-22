@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/buzzrelay/nostr"
+	"github.com/theimaginaryfoundation/what-iff/internal/imageutil"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
 	"github.com/theimaginaryfoundation/what-iff/internal/relaykit"
@@ -44,6 +45,8 @@ type Blob struct {
 	SHA256 string `json:"sha256"`
 	Size   int64  `json:"size"`
 	Type   string `json:"type"`
+	// Name is the file name as uploaded (an image re-encoded by PrepareMedia is a .png).
+	Name string `json:"-"`
 }
 
 // Imeta is the file's imeta tag (NIP-92), as Buzz expects it on a message.
@@ -55,8 +58,30 @@ func (b *Blob) Imeta(filename string) []string {
 	return tag
 }
 
-// Upload stores a file in the community's media store (PUT /upload) as s.
+// PrepareMedia readies a file for a Buzz media store: images are re-encoded as PNG (scaled to
+// the app's upload size), because Buzz refuses images that carry metadata (EXIF, PNG text
+// chunks) and stripping it is what the Buzz app does too. Anything else is returned as is.
+func PrepareMedia(name, contentType string, data []byte) (string, string, []byte) {
+	if !strings.HasPrefix(contentType, "image/") {
+		contentType = http.DetectContentType(data)
+	}
+	switch contentType {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+	default:
+		return name, contentType, data
+	}
+	var out bytes.Buffer
+	pngName, err := imageutil.NormalizeForUpload(bytes.NewReader(data), &out, name, imageutil.DefaultUploadImageMaxPx)
+	if err != nil {
+		return name, contentType, data // not decodable: let the relay judge it
+	}
+	return pngName, imageutil.NormalizedUploadContentType, out.Bytes()
+}
+
+// Upload stores a file in the community's media store (PUT /upload) as s. Images are passed
+// through PrepareMedia first.
 func (c *Client) Upload(ctx context.Context, ep Endpoint, s Signer, name, contentType string, data []byte) (*Blob, error) {
+	name, contentType, data = PrepareMedia(name, contentType, data)
 	sum := sha256.Sum256(data)
 	digest := hex.EncodeToString(sum[:])
 	auth, err := blossomAuth(s, ep, "upload", digest, "Upload "+path.Base(name))
@@ -82,6 +107,7 @@ func (c *Client) Upload(ctx context.Context, ep Endpoint, s Signer, name, conten
 	if blob.URL == "" || blob.SHA256 != digest {
 		return nil, fmt.Errorf("%w: the media store returned an unexpected descriptor", ErrUnreachable)
 	}
+	blob.Name = name
 	return &blob, nil
 }
 
@@ -252,7 +278,7 @@ func (s *Service) uploadReplyFiles(ctx context.Context, ep Endpoint, signer Sign
 			skipped = append(skipped, f.Name)
 			continue
 		}
-		media = append(media, blob.Imeta(f.Name))
+		media = append(media, blob.Imeta(blob.Name))
 	}
 	return media, skipped
 }

@@ -185,12 +185,14 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Memory provenance:** every memory row has `provenance` (`user` or `external`) and an optional `source_speaker`.
   `CreateMemory`, `createMergedMemory` (with `CollapsedExtractedMemory.Provenance` / `Speaker`), `PersistMemoryLinkGroup` (`LinkGroupNewMember.Origin`) and `PersistMemoryMergeGroup` (`WithNewMemberOrigin`) write it.
   A fold's survivor is external when any member is and keeps a speaker only when all agree (`models.MergeOrigins`); the undo snapshot records `PriorProvenance` / `PriorSourceSpeaker` and undo restores them unless the user relabelled the memory since.
-  `UpsertChatSummaryMemory` marks a Discord relay thread's summary external, and it stays so.
+  `UpsertChatSummaryMemory` marks a relay thread's summary (Discord or Buzz) external, and it stays so.
   `ListMemories` filters by `MemoryFilters.Provenance`, `UpdateMemory` accepts a provenance patch (the owner confirming a memory), and memory export/import carry both fields (the `user` default is not written).
 - **Discord relay (`discord.go`):** bots (token encrypted with the MCP token helper), bindings, message links and pending posts.
 - **`EncryptToken` / `DecryptToken`** expose the token helper to packages that keep their own tables but share the one key (`internal/accountkeys`).
   Methods taking a userID are owner-scoped; the relay's own (`FindDiscordBindingTarget`, `GetDiscordBindingTarget`, `ListActiveDiscordBotCredentials`, link and pending-post bookkeeping) act for the owner recorded on the bot.
-  `IsExternalRelayChat` (any chat bound by one of the user's bots) and `ExternalSpeakerForMessage` (the Discord author of a saved message) back memory provenance in the agent.
+  `IsExternalRelayChat` (any chat bound by one of the user's Discord bots or Buzz identities) and `ExternalSpeakerForMessage` (the Discord or Buzz author of a saved message) back memory provenance in the agent; `RelayPlatformForChat` names the platform for the extraction note.
+- **Buzz relay (`buzz.go`, ADR 0x028):** personas' Buzz identities (secret key encrypted with the token helper), communities (attestation encrypted too), bindings, message links and pending posts, mirroring `discord.go`.
+  `ListActiveBuzzConnections` is the gateway's work list; `SetBuzzCommunityState` never resumes a community the owner paused; `BuzzThreadContinues` decides thread continuations from the links.
   `CreateChat` honours `Chat.DisabledTools`, so a server-created relay thread never exists with its default-off tools on (the app's create route drops the field).
 
 ## Testing

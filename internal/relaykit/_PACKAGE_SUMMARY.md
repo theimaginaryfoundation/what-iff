@@ -13,7 +13,10 @@ Each relay keeps its own storage, wire format and trigger rules; what is the sam
   It remembers a release that came before its waiter, and keeps a reply whose inbound link is not attached yet (an orphan) until the relay can post it.
 - **`Throttle`:** at most one action per key per interval (the "busy" notice).
 - **`Supervisor[T]`:** one long-lived connection per target while holding a leader lock; it re-lists targets, reconnects on a changed fingerprint, and closes everything and releases the lock when it stops leading.
+  `Kick` makes the leader reconcile now (after the owner bound a channel, say).
   `AdvisoryLocker` (the datastore's Postgres advisory lock, a key per relay) and `SingleInstanceLocker`.
+- **`ThreadOpen`, `Gate`:** the fail-closed check that a bound thread may be driven from outside (sandboxed, or acknowledged by the owner), keeping the binding's record honest (deleted thread, stale acknowledgement, paused warning).
+- **`LoadReplyFiles`:** the files a reply produced, within a platform's limits, never the context-only ones.
 - **`PublicOnlyControl`, `IsPublicIP`:** the `net.Dialer` hook that refuses non-public addresses after DNS on every connection.
 - **`SpeakerLabel`, `Allowed`, `SleepCtx`:** speaker names cleaned so they cannot forge the `name (Platform, #channel):` label; allow and deny lists where deny wins.
 

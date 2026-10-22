@@ -236,8 +236,8 @@ func (r *fakeRelay) Query(_ context.Context, _ Endpoint, _ Signer, filters ...Fi
 	return nil, nil
 }
 
-func (r *fakeRelay) Upload(context.Context, Endpoint, Signer, string, string, []byte) (*Blob, error) {
-	return &Blob{URL: "https://acme.example/media/abc.png", SHA256: "abc", Size: 3, Type: "image/png"}, nil
+func (r *fakeRelay) Upload(_ context.Context, _ Endpoint, _ Signer, name, _ string, _ []byte) (*Blob, error) {
+	return &Blob{URL: "https://acme.example/media/abc.png", SHA256: "abc", Size: 3, Type: "image/png", Name: name}, nil
 }
 
 func (r *fakeRelay) FetchMedia(context.Context, Endpoint, Signer, string, int64) ([]byte, error) {

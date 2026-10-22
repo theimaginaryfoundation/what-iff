@@ -8,6 +8,7 @@
 //	buzz-rig say      -relay <url> -as <hex secret> -channel <id> -text <text> [-mention <npub|hex>]... [-reply <event id>] [-file <path>]
 //	buzz-rig watch    -relay <url> -as <hex secret> -channel <id> [-for 60s]  print the channel's messages as they arrive
 //	buzz-rig channels -relay <url> -as <hex secret>                          list channels
+//	buzz-rig profile  -relay <url> -as <hex secret> -name <display name>     publish a profile (so the persona sees a name)
 //
 // -relay accepts http:// and ws:// (local relays). BUZZ_RIG_OWNER / BUZZ_RIG_AS supply -owner / -as.
 package main
@@ -111,7 +112,7 @@ func main() {
 			check(err)
 			blob, err := c.Upload(ctx, ep, s, filepath.Base(*file), http.DetectContentType(data), data)
 			check(err)
-			media = append(media, blob.Imeta(filepath.Base(*file)))
+			media = append(media, blob.Imeta(blob.Name))
 		}
 		ev, err := buzzrelay.MessageEvent(s, *channel, *text, thread, mentions, media)
 		check(err)
@@ -145,6 +146,15 @@ func main() {
 		})
 		time.Sleep(*watchFor)
 		_ = session.Close()
+	case "profile":
+		if *name == "" {
+			fail("-name is required")
+		}
+		s := buzzrelay.Signer{Keys: keys(*as, "-as")}
+		ev, err := buzzrelay.ProfileEvent(s, buzzrelay.Profile{Name: *name, DisplayName: *name})
+		check(err)
+		check(c.Publish(ctx, ep, s, ev))
+		fmt.Println(ev.ID)
 	case "channels":
 		s := buzzrelay.Signer{Keys: keys(*as, "-as")}
 		info, err := c.Info(ctx, ep)
@@ -185,6 +195,6 @@ func fail(msg string) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: buzz-rig attest|channel|say|watch|channels [flags] (see the package comment)")
+	fmt.Fprintln(os.Stderr, "usage: buzz-rig attest|channel|invite|say|watch|channels|profile [flags] (see the package comment)")
 	os.Exit(2)
 }
