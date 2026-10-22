@@ -100,6 +100,10 @@ func (User) Edges() []ent.Edge {
 		// them their bindings and message links. See ent/schema/discord.go.
 		edge.To("discord_bots", DiscordBot.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),
+		// Buzz relay identities. Cascade so deleting a user removes their personas' Buzz keys,
+		// and through them communities, bindings and message links. See ent/schema/buzz.go.
+		edge.To("buzz_agents", BuzzAgent.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}, userPrivateEdges()...)
 }
 
