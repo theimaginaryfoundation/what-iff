@@ -115,6 +115,8 @@ func apply(d plugins.Deps) {
 		Dial:        gw.dial,
 		Logger:      logger,
 	}
+	// Applied during setup, before the server serves, so the handler sees it from the first request.
+	h.Changed = sup.Kick
 	go sup.Run(d.Lifecycle)
 	logger.Info("buzz relay: routes registered, gateway supervisor started")
 }

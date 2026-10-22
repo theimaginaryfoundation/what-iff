@@ -149,3 +149,24 @@ func TestSupervisorReconcileFollowsFingerprints(t *testing.T) {
 	assert.Empty(t, s.Connected())
 	assert.True(t, dialed["a2"].closed.Load())
 }
+
+func TestSupervisorKickReconcilesAtOnce(t *testing.T) {
+	var lists atomic.Int32
+	s := &Supervisor[uuid.UUID]{
+		Name: "test", Locker: SingleInstanceLocker{}, Logger: zap.NewNop(),
+		List:           func(context.Context) ([]uuid.UUID, error) { lists.Add(1); return nil, nil },
+		Key:            func(id uuid.UUID) uuid.UUID { return id },
+		Fingerprint:    func(uuid.UUID) string { return "" },
+		Dial:           func(context.Context, uuid.UUID) (Conn, error) { return &fakeConn{}, nil },
+		ReconcileEvery: time.Hour,
+		RetryEvery:     time.Hour,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Run(ctx)
+	require.Eventually(t, func() bool { return lists.Load() == 1 }, time.Second, time.Millisecond)
+	s.Kick()
+	require.Eventually(t, func() bool { return lists.Load() == 2 }, time.Second, time.Millisecond, "a kick reconciles without waiting an hour")
+	s.Kick()
+	s.Kick() // never blocks
+}

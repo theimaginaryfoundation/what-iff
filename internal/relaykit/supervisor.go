@@ -91,6 +91,24 @@ type Supervisor[T any] struct {
 
 	mu    sync.Mutex
 	conns map[uuid.UUID]openConn
+	kick  chan struct{}
+	once  sync.Once
+}
+
+func (s *Supervisor[T]) kicks() chan struct{} {
+	s.once.Do(func() { s.kick = make(chan struct{}, 1) })
+	return s.kick
+}
+
+// Kick asks the leader to reconcile now rather than at its next interval (after the owner
+// bound a channel, say). It never blocks; on a follower it does nothing until it leads, and
+// with several API tasks only the leader's own kicks reach it (the others still converge at
+// the next interval).
+func (s *Supervisor[T]) Kick() {
+	select {
+	case s.kicks() <- struct{}{}:
+	default:
+	}
 }
 
 type openConn struct {
@@ -145,8 +163,14 @@ func (s *Supervisor[T]) lead(ctx context.Context, lock Lock) {
 			return
 		}
 		s.Reconcile(ctx)
-		if !SleepCtx(ctx, jitter(s.ReconcileEvery)) {
+		t := time.NewTimer(jitter(s.ReconcileEvery))
+		select {
+		case <-ctx.Done():
+			t.Stop()
 			return
+		case <-t.C:
+		case <-s.kicks():
+			t.Stop()
 		}
 	}
 }

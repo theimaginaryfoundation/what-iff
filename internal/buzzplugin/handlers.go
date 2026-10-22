@@ -73,6 +73,15 @@ type Handler struct {
 	Logger *zap.Logger
 	// AllowPrivate accepts ws:// and http:// community addresses (local development).
 	AllowPrivate bool
+	// Changed is told when a community or binding changed, so the gateway reconciles now
+	// instead of at its next interval. Nil does nothing.
+	Changed func()
+}
+
+func (h *Handler) changed() {
+	if h.Changed != nil {
+		h.Changed()
+	}
 }
 
 // Register mounts the routes on r (already prefixed with /buzz).
@@ -209,6 +218,7 @@ func (h *Handler) updateAgent(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err, "Failed to update the Buzz identity")
 		return
 	}
+	h.changed()
 	handlerutils.RespondWithJSON(w, h.Logger, http.StatusOK, h.agentResponse(r.Context(), userID, *agent, h.communitiesOf(r.Context(), userID, id)))
 }
 
@@ -239,6 +249,7 @@ func (h *Handler) deleteAgent(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err, "Failed to remove the Buzz identity")
 		return
 	}
+	h.changed()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -365,6 +376,7 @@ func (h *Handler) addCommunity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	community = h.recheck(r.Context(), userID, community.ID, true)
+	h.changed()
 	h.Logger.Info("buzz community added", zap.String("community_id", community.ID.String()), zap.String("status", string(community.Status)))
 	handlerutils.RespondWithJSON(w, h.Logger, http.StatusCreated, community)
 }
@@ -657,6 +669,7 @@ func (h *Handler) updateCommunity(w http.ResponseWriter, r *http.Request) {
 	if community.Status != models.BuzzCommunityDisabled && (req.Recheck || req.Invite != "" || req.Attestation != nil || req.Enabled != nil) {
 		community = h.recheck(r.Context(), userID, id, true)
 	}
+	h.changed()
 	handlerutils.RespondWithJSON(w, h.Logger, http.StatusOK, community)
 }
 
@@ -673,6 +686,7 @@ func (h *Handler) deleteCommunity(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err, "Failed to remove the community")
 		return
 	}
+	h.changed()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -889,6 +903,7 @@ func (h *Handler) createBinding(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err, "Failed to connect the channel")
 		return
 	}
+	h.changed()
 	h.markOne(r.Context(), userID, binding)
 	handlerutils.RespondWithJSON(w, h.Logger, http.StatusCreated, binding)
 }
@@ -975,6 +990,7 @@ func (h *Handler) updateBinding(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err, "Failed to update the channel")
 		return
 	}
+	h.changed()
 	h.markOne(r.Context(), userID, binding)
 	handlerutils.RespondWithJSON(w, h.Logger, http.StatusOK, binding)
 }
@@ -992,6 +1008,7 @@ func (h *Handler) deleteBinding(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err, "Failed to disconnect the channel")
 		return
 	}
+	h.changed()
 	w.WriteHeader(http.StatusNoContent)
 }
 
