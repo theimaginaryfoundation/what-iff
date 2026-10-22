@@ -11,6 +11,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
+	"github.com/theimaginaryfoundation/what-iff/internal/relaykit"
 	"github.com/theimaginaryfoundation/what-iff/internal/replyhook"
 	"go.uber.org/zap"
 )
@@ -99,23 +100,13 @@ type Service struct {
 	// RetryBackoff is the wait before the first retry; it doubles each time.
 	RetryBackoff time.Duration
 
-	once    sync.Once
-	mu      sync.Mutex
-	queues  map[uuid.UUID]chan inboundWork // per relay thread
-	waiting map[uuid.UUID]chan struct{}    // saved user message id -> reply posted
-	// early records replies that finished before their waiter was registered.
-	early map[uuid.UUID]time.Time
-	// orphans holds replies that finished before their inbound link was attached to
-	// the user message (the turn starter returns after the turn starts), keyed by that
-	// message; runInbound posts them once the link is attached.
-	orphans map[uuid.UUID]orphanReply
-	// lastBusy throttles NoticeBusy per binding.
-	lastBusy map[uuid.UUID]time.Time
-}
-
-type orphanReply struct {
-	ev replyhook.Event
-	at time.Time
+	once sync.Once
+	// turns runs one inbound turn at a time per relay thread.
+	turns relaykit.TurnQueue[inboundWork]
+	// replies matches finished replies with the inbound turns waiting for them.
+	replies relaykit.Replies
+	// busy throttles NoticeBusy per binding.
+	busy relaykit.Throttle
 }
 
 type inboundWork struct {
@@ -150,6 +141,10 @@ func (s *Service) setDefaults() {
 	if s.RetryBackoff <= 0 {
 		s.RetryBackoff = 2 * time.Second
 	}
+	s.turns.Depth = s.QueueDepth
+	s.turns.Run = s.runInbound
+	s.replies.TTL = s.TurnTimeout
+	s.busy.Every = busyNoticeEvery
 }
 
 // HandleInbound is called for every message a connected bot sees. It returns at
@@ -188,16 +183,7 @@ func (s *Service) HandleInbound(ctx context.Context, botID uuid.UUID, botUserID 
 
 // busyNoticeDue reports whether the binding may post NoticeBusy now, and records it.
 func (s *Service) busyNoticeDue(bindingID uuid.UUID) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.lastBusy == nil {
-		s.lastBusy = map[uuid.UUID]time.Time{}
-	}
-	if at, ok := s.lastBusy[bindingID]; ok && time.Since(at) < busyNoticeEvery {
-		return false
-	}
-	s.lastBusy[bindingID] = time.Now()
-	return true
+	return s.busy.Due(bindingID)
 }
 
 // threadOpen is the relay's fail-closed check that the bound thread may be driven
@@ -251,60 +237,9 @@ func (s *Service) clearUnrestrictedWarning(ctx context.Context, b models.Discord
 	}
 }
 
-// enqueue adds w to the thread's queue, starting its worker on first use, and
-// reports false when the queue is full. The send happens under the lock the worker
-// takes before it retires an idle queue, so a tag can never land in a queue whose
-// worker has just exited. The worker exits once the queue has been idle, so idle
-// threads hold nothing.
+// enqueue adds w to the thread's queue (relaykit.TurnQueue) and reports false when it is full.
 func (s *Service) enqueue(ctx context.Context, chatID uuid.UUID, w inboundWork) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.queues == nil {
-		s.queues = map[uuid.UUID]chan inboundWork{}
-	}
-	q, ok := s.queues[chatID]
-	if !ok {
-		q = make(chan inboundWork, s.QueueDepth)
-		s.queues[chatID] = q
-		go s.work(ctx, chatID, q)
-	}
-	select {
-	case q <- w:
-		return true
-	default:
-		return false
-	}
-}
-
-const workerIdle = time.Minute
-
-func (s *Service) work(ctx context.Context, chatID uuid.UUID, q chan inboundWork) {
-	idle := time.NewTimer(workerIdle)
-	defer idle.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case w := <-q:
-			s.runInbound(ctx, w)
-			if !idle.Stop() {
-				select {
-				case <-idle.C:
-				default:
-				}
-			}
-			idle.Reset(workerIdle)
-		case <-idle.C:
-			s.mu.Lock()
-			if len(q) == 0 {
-				delete(s.queues, chatID)
-				s.mu.Unlock()
-				return
-			}
-			s.mu.Unlock()
-			idle.Reset(workerIdle)
-		}
-	}
+	return s.turns.Enqueue(ctx, chatID, w)
 }
 
 // runInbound turns one tag into a turn and waits for its reply to be posted (or
@@ -419,49 +354,13 @@ func (s *Service) waitForReply(ctx context.Context, bot models.DiscordBotCredent
 	}
 }
 
-// setWaiter registers ch to be closed when the reply to user message id is
-// posted. If that already happened (a reply can finish before the turn starter
-// returns), ch is closed at once.
-func (s *Service) setWaiter(id uuid.UUID, ch chan struct{}) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for k, at := range s.early {
-		if time.Since(at) > s.TurnTimeout {
-			delete(s.early, k)
-		}
-	}
-	if _, ok := s.early[id]; ok {
-		delete(s.early, id)
-		close(ch)
-		return
-	}
-	if s.waiting == nil {
-		s.waiting = map[uuid.UUID]chan struct{}{}
-	}
-	s.waiting[id] = ch
-}
+// setWaiter registers ch to be closed when the reply to user message id is posted
+// (relaykit.Replies). If that already happened, ch is closed at once.
+func (s *Service) setWaiter(id uuid.UUID, ch chan struct{}) { s.replies.Wait(id, ch) }
 
-func (s *Service) clearWaiter(id uuid.UUID) {
-	s.mu.Lock()
-	delete(s.waiting, id)
-	s.mu.Unlock()
-}
+func (s *Service) clearWaiter(id uuid.UUID) { s.replies.Forget(id) }
 
-func (s *Service) release(id uuid.UUID) {
-	s.mu.Lock()
-	ch, ok := s.waiting[id]
-	delete(s.waiting, id)
-	if !ok {
-		if s.early == nil {
-			s.early = map[uuid.UUID]time.Time{}
-		}
-		s.early[id] = time.Now()
-	}
-	s.mu.Unlock()
-	if ok {
-		close(ch)
-	}
-}
+func (s *Service) release(id uuid.UUID) { s.replies.Release(id) }
 
 // OnReply is the reply hook: it posts a finished reply to Discord when the turn
 // came from Discord (back to where it came from) or when a post was requested
@@ -609,31 +508,14 @@ func (s *Service) postInboundReply(ctx context.Context, inbound *models.DiscordM
 // keepOrphan remembers a reply whose trigger has no inbound link yet, when a relay
 // turn is running in its thread (so ordinary chats' replies are never kept).
 func (s *Service) keepOrphan(ev replyhook.Event) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, active := s.queues[ev.ChatID]; !active || ev.TriggerMessageID == nil {
-		return
+	if s.turns.Active(ev.ChatID) {
+		s.replies.KeepOrphan(ev)
 	}
-	if s.orphans == nil {
-		s.orphans = map[uuid.UUID]orphanReply{}
-	}
-	for k, o := range s.orphans {
-		if time.Since(o.at) > s.TurnTimeout {
-			delete(s.orphans, k)
-		}
-	}
-	s.orphans[*ev.TriggerMessageID] = orphanReply{ev: ev, at: time.Now()}
 }
 
 // takeOrphan returns and forgets the reply kept for a user message, if any.
 func (s *Service) takeOrphan(messageID uuid.UUID) (replyhook.Event, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	o, ok := s.orphans[messageID]
-	if ok {
-		delete(s.orphans, messageID)
-	}
-	return o.ev, ok
+	return s.replies.TakeOrphan(messageID)
 }
 
 // notice posts a short reply to the triggering message; failures are ignored.
@@ -643,13 +525,4 @@ func (s *Service) notice(ctx context.Context, token, channelID, replyTo, text st
 	}
 }
 
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-t.C:
-		return true
-	}
-}
+func sleepCtx(ctx context.Context, d time.Duration) bool { return relaykit.SleepCtx(ctx, d) }

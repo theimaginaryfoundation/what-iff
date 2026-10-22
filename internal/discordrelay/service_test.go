@@ -725,9 +725,7 @@ func TestAReplyThatBeatsTheInboundLinkIsStillPosted(t *testing.T) {
 	chatID := h.target.Binding.ChatID
 	userMsg := uuid.New()
 	// A relay turn is running in the thread, and its reply finished before the link was attached.
-	h.svc.mu.Lock()
-	h.svc.queues = map[uuid.UUID]chan inboundWork{chatID: make(chan inboundWork, 1)}
-	h.svc.mu.Unlock()
+	h.svc.turns.MarkActive(chatID)
 	ev := replyhook.Event{UserID: h.target.Bot.OwnerID, ChatID: chatID, MessageID: uuid.New(), TriggerMessageID: &userMsg}
 	h.svc.OnReply(h.ctx, ev)
 	got, ok := h.svc.takeOrphan(userMsg)
