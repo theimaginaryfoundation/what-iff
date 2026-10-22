@@ -499,7 +499,22 @@ func (m *Manager) reconcileOnce(ctx context.Context) {
 		if ok && j.FollowUserTimezone {
 			m.storeNextRunAt(ctx, j, next)
 		}
+		// Moving east can skip a run that had passed in the new timezone but not come up in the old
+		// one; run it once now. Checked on every (re)schedule, startup included: the run records the
+		// new timezone, so it does not repeat.
+		if j.FollowUserTimezone && lostSlotOnMove(j, time.Now()) {
+			m.runCatchUp(ctx, j)
+		}
 	}
+}
+
+// runCatchUp runs a job once now, in place of a slot its timezone change skipped.
+func (m *Manager) runCatchUp(ctx context.Context, j models.AgentJob) {
+	m.logger.Info("agent job catch-up run after timezone change",
+		zap.String("agent_job_id", j.ID.String()),
+		zap.String("timezone", j.ScheduleTimezone()),
+	)
+	go m.executeAgentJobDetached(context.WithoutCancel(ctx), j.UserID, j.ID, executionOptions{catchUp: true})
 }
 
 // storeNextRunAt writes the rescheduled job's next fire time when it differs from the stored one.

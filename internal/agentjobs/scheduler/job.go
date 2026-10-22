@@ -39,6 +39,8 @@ type executionOptions struct {
 	allowPaused        bool
 	deferredRetryCount int
 	recurrenceHint     recurrenceBucket
+	// catchUp marks a run in place of a slot a timezone change skipped (no planned time).
+	catchUp bool
 }
 
 func (m *Manager) cleanupScheduledAgentJob(agentJobID uuid.UUID) {

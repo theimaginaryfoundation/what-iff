@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -197,3 +198,118 @@ func TestReconcile_StoresTheNextRunWhenAFollowingJobMoves(t *testing.T) {
 }
 
 func ptrTime(t time.Time) *time.Time { return &t }
+
+func TestLostSlotOnMove(t *testing.T) {
+	ny := mustLoc(t, "America/New_York")
+	la := mustLoc(t, "America/Los_Angeles")
+
+	tests := []struct {
+		name      string
+		cron      string
+		effective string
+		lastRunAt *time.Time
+		lastRunTZ *string
+		now       time.Time
+		want      bool
+	}{
+		{
+			name: "east, signed in before the old zone's slot: 8am New York was lost",
+			// 8am LA ran yesterday; at 9am New York 8am there has passed and 8am LA (11am New York) is to come.
+			cron: "0 0 8 ? * *", effective: "America/New_York",
+			lastRunAt: ptrTime(time.Date(2026, 10, 21, 8, 0, 4, 0, la)), lastRunTZ: strPtr("America/Los_Angeles"),
+			now:  time.Date(2026, 10, 22, 9, 0, 0, 0, ny),
+			want: true,
+		},
+		{
+			name: "east, signed in late: the old schedule already ran today's slot",
+			cron: "0 0 8 ? * *", effective: "America/New_York",
+			lastRunAt: ptrTime(time.Date(2026, 10, 22, 8, 0, 4, 0, la)), lastRunTZ: strPtr("America/Los_Angeles"),
+			now:  time.Date(2026, 10, 22, 14, 0, 0, 0, ny),
+			want: false,
+		},
+		{
+			name: "east, signed in before today's slot in the new zone too: nothing lost",
+			cron: "0 0 8 ? * *", effective: "America/New_York",
+			lastRunAt: ptrTime(time.Date(2026, 10, 21, 8, 0, 4, 0, la)), lastRunTZ: strPtr("America/Los_Angeles"),
+			now:  time.Date(2026, 10, 22, 7, 0, 0, 0, ny),
+			want: false,
+		},
+		{
+			name: "west never loses a slot",
+			cron: "0 0 8 ? * *", effective: "America/Los_Angeles",
+			lastRunAt: ptrTime(time.Date(2026, 10, 22, 8, 0, 4, 0, ny)), lastRunTZ: strPtr("America/New_York"),
+			now:  time.Date(2026, 10, 22, 9, 0, 0, 0, ny),
+			want: false,
+		},
+		{
+			name: "east, hourly: the hours lost to the move count once",
+			// 11am LA ran; at 11:30 LA (2:30pm New York) noon-2pm New York have passed but noon LA is to come.
+			cron: "0 0 9-17 ? * *", effective: "America/New_York",
+			lastRunAt: ptrTime(time.Date(2026, 10, 22, 11, 0, 2, 0, la)), lastRunTZ: strPtr("America/Los_Angeles"),
+			now:  time.Date(2026, 10, 22, 14, 30, 0, 0, ny),
+			want: true,
+		},
+		{
+			name: "same timezone as the last run",
+			cron: "0 0 8 ? * *", effective: "America/New_York",
+			lastRunAt: ptrTime(time.Date(2026, 10, 21, 8, 0, 4, 0, ny)), lastRunTZ: strPtr("America/New_York"),
+			now:  time.Date(2026, 10, 22, 9, 0, 0, 0, ny),
+			want: false,
+		},
+		{
+			name: "a job that has never run",
+			cron: "0 0 8 ? * *", effective: "America/New_York",
+			now:  time.Date(2026, 10, 22, 9, 0, 0, 0, ny),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			j := followJob(tt.cron, tt.effective, tt.lastRunAt, tt.lastRunTZ)
+			if got := lostSlotOnMove(j, tt.now); got != tt.want {
+				t.Fatalf("lostSlotOnMove = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReconcile_RunsOnceForASlotLostMovingEast(t *testing.T) {
+	ds := &fakeDatastoreProvider{gets: make(chan uuid.UUID, 4)}
+	m, err := NewManager(ds, nil, zap.NewNop(), Config{})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	m.sched = &fakeScheduler{}
+
+	// Ran in LA a day ago; now runs in New York. Picking the schedule as "the hour before now"
+	// guarantees a New York slot just passed that LA (3 hours behind) has not reached yet.
+	la := mustLoc(t, "America/Los_Angeles")
+	ny := mustLoc(t, "America/New_York")
+	now := time.Now().In(ny)
+	slot := now.Add(-time.Hour)
+	cron := fmt.Sprintf("0 %d %d ? * *", slot.Minute(), slot.Hour())
+	lastRun := time.Date(slot.Year(), slot.Month(), slot.Day()-1, slot.Hour(), slot.Minute(), 0, 0, la)
+	moved := followJob(cron, "America/New_York", &lastRun, strPtr("America/Los_Angeles"))
+	pinned := moved
+	pinned.ID = uuid.New()
+	pinned.FollowUserTimezone = false
+	ds.jobs = []*models.AgentJob{&moved, &pinned}
+
+	m.reconcileOnce(context.Background())
+	select {
+	case id := <-ds.gets:
+		if id != moved.ID {
+			t.Fatalf("catch-up ran job %s, want %s", id, moved.ID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected a catch-up run for the job that moved east")
+	}
+
+	// Nothing changed since: the next reconcile does not run it again.
+	m.reconcileOnce(context.Background())
+	select {
+	case id := <-ds.gets:
+		t.Fatalf("unexpected second run of %s", id)
+	case <-time.After(100 * time.Millisecond):
+	}
+}

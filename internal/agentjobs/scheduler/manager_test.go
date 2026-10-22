@@ -30,6 +30,8 @@ type fakeDatastoreProvider struct {
 	// jobs is what ListAgentJobsForScheduler returns; nextRunWrites records SetAgentJobNextRunAt.
 	jobs          []*models.AgentJob
 	nextRunWrites map[uuid.UUID]time.Time
+	// gets, when set, receives the id of every GetAgentJob call (a run loading its job).
+	gets chan uuid.UUID
 }
 
 func (f *fakeDatastoreProvider) TryAcquireSchedulerLeaderLock(ctx context.Context, lockKey int64) (datastore.SchedulerLeaderLock, bool, error) {
@@ -64,6 +66,9 @@ func (f *fakeDatastoreProvider) SetAgentJobNextRunAt(ctx context.Context, userID
 }
 
 func (f *fakeDatastoreProvider) GetAgentJob(ctx context.Context, userID, id uuid.UUID) (*models.AgentJob, error) {
+	if f.gets != nil {
+		f.gets <- id
+	}
 	return nil, datastore.ErrAgentJobNotFound
 }
 
