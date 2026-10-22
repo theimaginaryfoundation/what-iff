@@ -1368,6 +1368,746 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/buzz/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Buzz identities
+         * @description Returns the user's personas that have a Buzz identity, each with the communities it is in. A secret key is never returned.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Buzz identities */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzAgent"][];
+                    };
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        put?: never;
+        /**
+         * Give a persona a Buzz identity
+         * @description Generates a keypair for the persona. The secret key stays on the server, encrypted; the public key is shown as an npub so people can add the persona in Buzz.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BuzzAgentCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Identity created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzAgent"];
+                    };
+                };
+                400: components["responses"]["BuzzBadRequest"];
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                409: components["responses"]["BuzzConflict"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buzz/agents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["BuzzID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a Buzz identity
+         * @description Removes the identity and its communities and bindings. The key is gone for good, so Buzz will see a new member if the persona is connected again.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Identity removed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Pause or resume a Buzz identity */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        enabled: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated identity */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzAgent"];
+                    };
+                };
+                400: components["responses"]["BuzzBadRequest"];
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        trace?: never;
+    };
+    "/buzz/agents/{id}/sync-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["BuzzID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish the persona's name and portrait
+         * @description Republishes the persona's Buzz profile (name, portrait, bot flag) to every community it is in.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Where the profile was published */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            published: number;
+                            failed: string[];
+                        };
+                    };
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buzz/agents/{id}/communities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["BuzzID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Join a persona to a community
+         * @description Reads the community, verifies an owner attestation when one is given, claims an invite when one is given (after the owner accepted the community's join terms for the persona), records the community, publishes the persona's profile and checks whether it is let in. A 409 with code terms_required carries the terms to show and accept.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BuzzCommunityCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Community added */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzCommunity"];
+                    };
+                };
+                400: components["responses"]["BuzzBadRequest"];
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                /** @description The community has join terms to accept first, or the persona is already in it */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzTermsRequired"];
+                    };
+                };
+                500: components["responses"]["BuzzServerError"];
+                502: components["responses"]["BuzzUpstreamError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buzz/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preview a community's join terms */
+        get: {
+            parameters: {
+                query: {
+                    relay_url: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The community and its join terms (policy is null when it has none) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            name: string;
+                            relay_url: string;
+                            policy?: components["schemas"]["BuzzJoinPolicy"];
+                        };
+                    };
+                };
+                400: components["responses"]["BuzzBadRequest"];
+                401: components["responses"]["BuzzUnauthorized"];
+                502: components["responses"]["BuzzUpstreamError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buzz/communities/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["BuzzID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Leave a community
+         * @description Removes the community and its bindings from What Iff. Nothing is deleted in Buzz.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Community removed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Update a community
+         * @description Pauses or resumes the persona there, replaces or removes the attestation, claims an invite, or checks access again.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BuzzCommunityUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description Updated community */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzCommunity"];
+                    };
+                };
+                400: components["responses"]["BuzzBadRequest"];
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                /** @description The community has join terms to accept first */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzTermsRequired"];
+                    };
+                };
+                500: components["responses"]["BuzzServerError"];
+                502: components["responses"]["BuzzUpstreamError"];
+            };
+        };
+        trace?: never;
+    };
+    "/buzz/communities/{id}/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["BuzzID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List a community's channels
+         * @description The message channels the persona is in, and the public ones it could join.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Channels, the persona's own first */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzChannel"][];
+                    };
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                502: components["responses"]["BuzzUpstreamError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buzz/communities/{id}/channels/{channelId}/join": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["BuzzID"];
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Join a public channel
+         * @description Sends a join request for the persona (NIP-29).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                    channelId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Join requested */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                400: components["responses"]["BuzzBadRequest"];
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                502: components["responses"]["BuzzUpstreamError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buzz/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Buzz channel bindings */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Bindings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzBinding"][];
+                    };
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        put?: never;
+        /**
+         * Connect a channel to a thread
+         * @description Binds a community channel to a relay thread. Without chat_id a new sandboxed relay thread is created. Binding an existing thread that is not sandboxed needs allow_unrestricted.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BuzzBindingCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Channel connected */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzBinding"];
+                    };
+                };
+                400: components["responses"]["BuzzBadRequest"];
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                409: components["responses"]["BuzzConflict"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buzz/bindings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["BuzzID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Disconnect a channel */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Channel disconnected */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Update a binding */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["BuzzID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BuzzBindingUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description Updated binding */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzBinding"];
+                    };
+                };
+                400: components["responses"]["BuzzBadRequest"];
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        trace?: never;
+    };
+    "/buzz/chats/{chatId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chatId: components["parameters"]["BuzzChatID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A thread's Buzz state
+         * @description The thread's bindings, which of them will post the next reply, and the recent messages that crossed between the thread and Buzz.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: components["parameters"]["BuzzChatID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Buzz state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BuzzChatState"];
+                    };
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/buzz/chats/{chatId}/pending/{bindingId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chatId: components["parameters"]["BuzzChatID"];
+                bindingId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Post the next reply to a Buzz channel
+         * @description Arms the composer toggle. The next reply in the thread is posted to the binding's channel; the request expires after 30 minutes.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: components["parameters"]["BuzzChatID"];
+                    bindingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Armed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        post?: never;
+        /** Do not post the next reply to Buzz */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chatId: components["parameters"]["BuzzChatID"];
+                    bindingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Disarmed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["BuzzUnauthorized"];
+                404: components["responses"]["BuzzNotFound"];
+                500: components["responses"]["BuzzServerError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/webhook-tokens": {
         parameters: {
             query?: never;
@@ -12225,6 +12965,189 @@ export interface components {
             pending_binding_ids: string[];
             links: components["schemas"]["DiscordMessageLink"][];
         };
+        /** @description A personality's Buzz identity, with the communities it is in. */
+        BuzzAgent: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            personality_id: string;
+            persona_name?: string;
+            /** @description The public key, lowercase hex */
+            pubkey: string;
+            /** @description The public key as a NIP-19 npub, for people to find and add the persona in Buzz */
+            npub: string;
+            /** @enum {string} */
+            status: "active" | "disabled";
+            last_error?: string;
+            communities?: components["schemas"]["BuzzCommunity"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        BuzzAgentCreateRequest: {
+            /** Format: uuid */
+            personality_id: string;
+        };
+        /** @description One community a persona is in, or is trying to get into. */
+        BuzzCommunity: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            agent_id: string;
+            /** @description The community's WebSocket address (wss://host) */
+            relay_url: string;
+            name: string;
+            relay_pubkey: string;
+            /** @description Whether the owner gave an attestation for the persona's key */
+            attested: boolean;
+            owner_pubkey?: string;
+            /** @description The join terms version the owner accepted for the persona */
+            policy_version?: string;
+            /** @enum {string} */
+            status: "active" | "needs_access" | "error" | "disabled";
+            last_error?: string;
+            /** Format: date-time */
+            last_connected_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        BuzzCommunityCreateRequest: {
+            /** @description The community's address, or an invite link to it */
+            relay_url: string;
+            /** @description An invite link or code, when relay_url is not already one */
+            invite?: string;
+            /** @description The owner's NIP-OA attestation for the persona's key, as its JSON auth tag */
+            attestation?: string;
+            /** @description The join terms version the owner read and accepted for the persona */
+            accept_terms_version?: string;
+            /** @description The owner's confirmation of the community's age requirement, when it has one */
+            confirm_age?: boolean;
+        };
+        BuzzCommunityUpdateRequest: {
+            enabled?: boolean;
+            /** @description Replaces the attestation; an empty string removes it */
+            attestation?: string;
+            invite?: string;
+            accept_terms_version?: string;
+            confirm_age?: boolean;
+            /** @description Check access again (after an admin added the persona, say) */
+            recheck?: boolean;
+        };
+        BuzzJoinPolicy: {
+            terms_markdown?: string;
+            privacy_markdown?: string;
+            age_attestation_required?: boolean;
+            version?: string;
+        } | null;
+        /** @description The error envelope (code buzz_terms_required) with the community's join terms in details.policy */
+        BuzzTermsRequired: components["schemas"]["Error"] & {
+            details?: {
+                policy?: components["schemas"]["BuzzJoinPolicy"];
+            };
+        };
+        BuzzChannel: {
+            id: string;
+            name: string;
+            about?: string;
+            public: boolean;
+            /** @description Whether the persona is in the channel */
+            member: boolean;
+            archived?: boolean;
+        };
+        /** @description One community channel bound to a relay thread. */
+        BuzzBinding: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            community_id: string;
+            community_name?: string;
+            /** Format: uuid */
+            chat_id: string;
+            channel_id: string;
+            channel_name: string;
+            /** @description Whether mentioning the persona in the channel starts a turn */
+            inbound_enabled: boolean;
+            /** @description Pubkeys (hex) that may mention the persona; empty means anyone not denied */
+            allow_pubkeys: string[];
+            /** @description Pubkeys (hex) that may never mention the persona; deny always wins */
+            deny_pubkeys: string[];
+            /** @description Whether other agents (events carrying an owner attestation) may start turns */
+            answer_agents: boolean;
+            /** @description The owner's acknowledgement that the bound thread is not sandboxed */
+            allow_unrestricted: boolean;
+            /** @description Whether the bound thread is sandboxed right now (computed) */
+            chat_sandboxed?: boolean;
+            /** @enum {string} */
+            status: "active" | "broken";
+            last_error?: string;
+            /** Format: date-time */
+            last_activity_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        BuzzBindingCreateRequest: {
+            /** Format: uuid */
+            community_id: string;
+            channel_id: string;
+            channel_name?: string;
+            /**
+             * Format: uuid
+             * @description Binds an existing thread; omitted creates a new sandboxed relay thread
+             */
+            chat_id?: string;
+            inbound_enabled?: boolean;
+            /** @description Pubkeys as npub or hex */
+            allow_pubkeys?: string[];
+            deny_pubkeys?: string[];
+            answer_agents?: boolean;
+            allow_unrestricted?: boolean;
+        };
+        BuzzBindingUpdateRequest: {
+            /** Format: uuid */
+            chat_id?: string;
+            inbound_enabled?: boolean;
+            allow_pubkeys?: string[];
+            deny_pubkeys?: string[];
+            answer_agents?: boolean;
+            channel_name?: string;
+            allow_unrestricted?: boolean;
+            /** @description Clears a broken status */
+            reactivate?: boolean;
+        };
+        /** @description One message that crossed between a relay thread and its Buzz channel. */
+        BuzzMessageLink: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            binding_id: string;
+            /** @enum {string} */
+            direction: "inbound" | "outbound";
+            /** Format: uuid */
+            chat_message_id?: string;
+            event_id?: string;
+            thread_root: string;
+            posted_event_ids: string[];
+            author_pubkey?: string;
+            author_name?: string;
+            /** Format: uuid */
+            reply_to_link_id?: string;
+            /** @enum {string} */
+            status: "received" | "pending" | "sent" | "failed";
+            error?: string;
+            attempts: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        BuzzChatState: {
+            bindings: components["schemas"]["BuzzBinding"][];
+            pending_binding_ids: string[];
+            links: components["schemas"]["BuzzMessageLink"][];
+        };
         MemoryCreateRequest: {
             content: string;
             /** @enum {string} */
@@ -12603,7 +13526,7 @@ export interface components {
          *       on a generic code — use the HTTP status instead.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required";
         /** @description A single hit inside a search section. */
         SearchResult: {
             /**
@@ -12698,10 +13621,66 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description Invalid request (an address that is not a Buzz community, a refused invite, an attestation not signed for this key, a bad pubkey) */
+        BuzzBadRequest: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Unauthorized */
+        BuzzUnauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Not found (including another account's identity, community, binding, thread or personality) */
+        BuzzNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The personality already has a Buzz identity, is already in that community, or the channel is already bound */
+        BuzzConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The community refused the request or could not be reached */
+        BuzzUpstreamError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Internal server error */
+        BuzzServerError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
     };
     parameters: {
         DiscordBotID: string;
         DiscordChatID: string;
+        BuzzID: string;
+        BuzzChatID: string;
     };
     requestBodies: never;
     headers: never;

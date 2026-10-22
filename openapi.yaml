@@ -10568,6 +10568,9 @@ components:
         accept_terms_version:
           type: string
           description: The join terms version the owner read and accepted for the persona
+        confirm_age:
+          type: boolean
+          description: The owner's confirmation of the community's age requirement, when it has one
       required: [relay_url]
 
     BuzzCommunityUpdateRequest:
@@ -10582,6 +10585,8 @@ components:
           type: string
         accept_terms_version:
           type: string
+        confirm_age:
+          type: boolean
         recheck:
           type: boolean
           description: Check access again (after an admin added the persona, say)
@@ -10600,16 +10605,16 @@ components:
           type: string
 
     BuzzTermsRequired:
-      type: object
-      properties:
-        error:
-          type: string
-        code:
-          type: string
-          enum: [terms_required]
-        policy:
-          $ref: '#/components/schemas/BuzzJoinPolicy'
-      required: [error]
+      description: The error envelope (code buzz_terms_required) with the community's join terms in details.policy
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            details:
+              type: object
+              properties:
+                policy:
+                  $ref: '#/components/schemas/BuzzJoinPolicy'
 
     BuzzChannel:
       type: object
@@ -11486,6 +11491,7 @@ components:
         - message_too_long
         - quota_exceeded
         - system_prompt_too_long
+        - buzz_terms_required
 
     # Cross-resource search schemas (GET /search)
     SearchResult:

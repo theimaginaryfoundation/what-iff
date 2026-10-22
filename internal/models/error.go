@@ -52,6 +52,9 @@ const (
 	ErrCodeMessageTooLong      = "message_too_long"
 	ErrCodeQuotaExceeded       = "quota_exceeded"
 	ErrCodeSystemPromptTooLong = "system_prompt_too_long"
+	// ErrCodeBuzzTermsRequired: a Buzz community has join terms the owner has not yet
+	// accepted for the persona; details.policy carries them (ADR 0x028).
+	ErrCodeBuzzTermsRequired = "buzz_terms_required"
 )
 
 // AllErrorCodes is every code this API can emit. It is the source the
@@ -80,6 +83,7 @@ var AllErrorCodes = []string{
 	ErrCodeMessageTooLong,
 	ErrCodeQuotaExceeded,
 	ErrCodeSystemPromptTooLong,
+	ErrCodeBuzzTermsRequired,
 }
 
 // genericErrorCodes maps HTTP statuses to their generic code.

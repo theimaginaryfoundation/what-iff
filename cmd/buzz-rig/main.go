@@ -5,7 +5,7 @@
 //	buzz-rig attest   -owner <hex secret> -agent <npub|hex>                 print an owner attestation for a persona
 //	buzz-rig channel  -relay <url> -owner <hex secret> -name <name> [-add <npub|hex>]...  create a channel, add members
 //	buzz-rig invite   -relay <url> -owner <hex secret>                       mint an invite link (owner/admin only)
-//	buzz-rig say      -relay <url> -as <hex secret> -channel <id> -text <text> [-mention <npub|hex>]... [-reply <event id>]
+//	buzz-rig say      -relay <url> -as <hex secret> -channel <id> -text <text> [-mention <npub|hex>]... [-reply <event id>] [-file <path>]
 //	buzz-rig watch    -relay <url> -as <hex secret> -channel <id> [-for 60s]  print the channel's messages as they arrive
 //	buzz-rig channels -relay <url> -as <hex secret>                          list channels
 //
@@ -17,7 +17,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -45,6 +47,7 @@ func main() {
 	channel := fs.String("channel", "", "channel id")
 	text := fs.String("text", "", "message text")
 	reply := fs.String("reply", "", "event id to reply to (in its thread)")
+	file := fs.String("file", "", "a file to attach (uploaded to the community's media store)")
 	conditions := fs.String("conditions", "", "NIP-OA conditions (e.g. created_at<1900000000)")
 	watchFor := fs.Duration("for", time.Minute, "how long to watch")
 	var add, mention multi
@@ -102,7 +105,15 @@ func main() {
 			t := buzzrelay.ReplyThread(events[0])
 			thread = &t
 		}
-		ev, err := buzzrelay.MessageEvent(s, *channel, *text, thread, mentions, nil)
+		var media [][]string
+		if *file != "" {
+			data, err := os.ReadFile(*file)
+			check(err)
+			blob, err := c.Upload(ctx, ep, s, filepath.Base(*file), http.DetectContentType(data), data)
+			check(err)
+			media = append(media, blob.Imeta(filepath.Base(*file)))
+		}
+		ev, err := buzzrelay.MessageEvent(s, *channel, *text, thread, mentions, media)
 		check(err)
 		check(c.Publish(ctx, ep, s, ev))
 		fmt.Println(ev.ID)

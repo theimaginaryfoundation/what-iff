@@ -479,7 +479,7 @@ describe('MemoryCardComponent provenance badge', () => {
     return fixture.nativeElement as HTMLElement;
   }
 
-  it('marks a memory learned in a Discord thread as External, with its speaker', async () => {
+  it('marks a memory learned in a relay thread as External, with its speaker', async () => {
     const host = await render({ provenance: 'external', sourceSpeaker: 'alice' });
     expect(host.querySelector('.provenance-badge')?.textContent?.trim()).toBe('External · alice');
   });

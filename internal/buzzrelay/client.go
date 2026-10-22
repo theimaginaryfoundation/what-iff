@@ -251,12 +251,13 @@ func (c *Client) JoinPolicy(ctx context.Context, ep Endpoint) (*JoinPolicy, erro
 }
 
 // ClaimInvite joins the community as s with an invite code. version is the join policy
-// version the owner accepted for the persona ("" when the community has no terms).
-// It reports whether the persona was already a member.
-func (c *Client) ClaimInvite(ctx context.Context, ep Endpoint, s Signer, code, policyVersion string) (bool, error) {
+// version the owner accepted for the persona ("" when the community has no terms), and
+// ageConfirmed the owner's confirmation of its age requirement. It reports whether the
+// persona was already a member.
+func (c *Client) ClaimInvite(ctx context.Context, ep Endpoint, s Signer, code, policyVersion string, ageConfirmed bool) (bool, error) {
 	claim := map[string]any{"code": code}
 	if policyVersion != "" {
-		receipt, err := c.acceptPolicy(ctx, ep, code, policyVersion)
+		receipt, err := c.acceptPolicy(ctx, ep, code, policyVersion, ageConfirmed)
 		if err != nil {
 			return false, err
 		}
@@ -297,8 +298,8 @@ func (c *Client) MintInvite(ctx context.Context, ep Endpoint, s Signer, ttl time
 	return res.URL, nil
 }
 
-func (c *Client) acceptPolicy(ctx context.Context, ep Endpoint, code, version string) (string, error) {
-	body, _ := json.Marshal(map[string]any{"code": code, "policy_version": version, "age_confirmed": true})
+func (c *Client) acceptPolicy(ctx context.Context, ep Endpoint, code, version string, ageConfirmed bool) (string, error) {
+	body, _ := json.Marshal(map[string]any{"code": code, "policy_version": version, "age_confirmed": ageConfirmed})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.HTTP+"/api/invites/accept-policy", bytes.NewReader(body))
 	if err != nil {
 		return "", err

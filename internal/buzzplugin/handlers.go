@@ -60,7 +60,7 @@ type Relay interface {
 	buzzrelay.Relay
 	Info(ctx context.Context, ep buzzrelay.Endpoint) (*buzzrelay.RelayInfo, error)
 	JoinPolicy(ctx context.Context, ep buzzrelay.Endpoint) (*buzzrelay.JoinPolicy, error)
-	ClaimInvite(ctx context.Context, ep buzzrelay.Endpoint, s buzzrelay.Signer, code, policyVersion string) (bool, error)
+	ClaimInvite(ctx context.Context, ep buzzrelay.Endpoint, s buzzrelay.Signer, code, policyVersion string, ageConfirmed bool) (bool, error)
 }
 
 // Handler serves /api/buzz/... (behind auth).
@@ -288,15 +288,14 @@ type addCommunityRequest struct {
 	// AcceptTermsVersion is the community's join terms version the owner read and accepted
 	// for the persona. Required to claim an invite when the community has terms.
 	AcceptTermsVersion string `json:"accept_terms_version"`
+	// ConfirmAge is the owner's confirmation of the community's age requirement, when it
+	// has one (age_attestation_required).
+	ConfirmAge bool `json:"confirm_age"`
 }
 
-// errPolicyRequired is the 409 for an invite claim whose community has join terms the owner
-// has not accepted (yet, or in this version).
-type policyRequired struct {
-	Error  string                `json:"error"`
-	Code   string                `json:"code"`
-	Policy *buzzrelay.JoinPolicy `json:"policy"`
-}
+// termsRequiredMsg is the 409 message for an invite claim whose community has join terms the
+// owner has not accepted (yet, or in this version). The envelope's details carry the terms.
+const termsRequiredMsg = "This community has join terms. Read them, and accept them for the persona to join."
 
 // addCommunity joins a persona to a community: reads the community, verifies an attestation,
 // claims an invite (after the owner accepted the community's terms for the persona), records
@@ -348,7 +347,7 @@ func (h *Handler) addCommunity(w http.ResponseWriter, r *http.Request) {
 	}
 	var policyVersion *string
 	if code != "" {
-		v, ok := h.claim(w, r, ep, signer, code, req.AcceptTermsVersion)
+		v, ok := h.claim(w, r, ep, signer, code, req.AcceptTermsVersion, req.ConfirmAge)
 		if !ok {
 			return
 		}
@@ -401,10 +400,11 @@ func (h *Handler) verifyAttestation(w http.ResponseWriter, raw, agentPub string)
 }
 
 // claim joins the community with an invite as the persona. When the community has join terms,
-// the owner must have accepted this version; otherwise the 409 carries the terms to show.
+// the owner must have accepted this version (and confirmed the age requirement, when there is
+// one); otherwise the 409 (code buzz_terms_required) carries the terms to show in its details.
 // It returns the terms version accepted ("" when there are none). When ok is false the
 // response has been written.
-func (h *Handler) claim(w http.ResponseWriter, r *http.Request, ep buzzrelay.Endpoint, signer buzzrelay.Signer, code, accepted string) (string, bool) {
+func (h *Handler) claim(w http.ResponseWriter, r *http.Request, ep buzzrelay.Endpoint, signer buzzrelay.Signer, code, accepted string, ageConfirmed bool) (string, bool) {
 	policy, err := h.Relay.JoinPolicy(r.Context(), ep)
 	if err != nil {
 		handlerutils.RespondWithError(w, h.Logger, http.StatusBadGateway, handlerutils.CodeNotSet,
@@ -413,17 +413,14 @@ func (h *Handler) claim(w http.ResponseWriter, r *http.Request, ep buzzrelay.End
 	}
 	version := ""
 	if policy != nil && policy.Version != "" {
-		if strings.TrimSpace(accepted) != policy.Version {
-			handlerutils.RespondWithJSON(w, h.Logger, http.StatusConflict, policyRequired{
-				Error:  "This community has join terms. Read them, and accept them for the persona to join.",
-				Code:   "terms_required",
-				Policy: policy,
-			})
+		if strings.TrimSpace(accepted) != policy.Version || (policy.AgeAttestationRequired && !ageConfirmed) {
+			handlerutils.RespondWithErrorDetails(w, h.Logger, http.StatusConflict, models.ErrCodeBuzzTermsRequired,
+				termsRequiredMsg, map[string]any{"policy": policy}, nil)
 			return "", false
 		}
 		version = policy.Version
 	}
-	if _, err := h.Relay.ClaimInvite(r.Context(), ep, signer, code, version); err != nil {
+	if _, err := h.Relay.ClaimInvite(r.Context(), ep, signer, code, version, ageConfirmed); err != nil {
 		h.Logger.Info("buzz invite claim failed", zap.String("relay", ep.WS), zap.Error(err))
 		h.bad(w, inviteError(err))
 		return "", false
@@ -594,6 +591,7 @@ type updateCommunityRequest struct {
 	// Invite claims an invite now (with AcceptTermsVersion when the community has terms).
 	Invite             string `json:"invite"`
 	AcceptTermsVersion string `json:"accept_terms_version"`
+	ConfirmAge         bool   `json:"confirm_age"`
 	// Recheck probes access again (after an admin added the persona, say).
 	Recheck bool `json:"recheck"`
 }
@@ -636,7 +634,7 @@ func (h *Handler) updateCommunity(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, err, "Failed to load the community")
 			return
 		}
-		version, ok := h.claim(w, r, ep, signer, code, req.AcceptTermsVersion)
+		version, ok := h.claim(w, r, ep, signer, code, req.AcceptTermsVersion, req.ConfirmAge)
 		if !ok {
 			return
 		}

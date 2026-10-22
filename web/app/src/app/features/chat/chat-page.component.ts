@@ -45,6 +45,7 @@ import { isChatSendFailed, isChatSendSucceeded } from './chat-send-result';
 import { ChatSendGate } from './services/chat-send-gate';
 import { ChatSendOutletComponent } from '../../extensions/chat-send-outlet.component';
 import { DiscordComposerToggleComponent } from '../discord/discord-composer-toggle.component';
+import { BuzzComposerToggleComponent } from '../buzz/buzz-composer-toggle.component';
 import { ThreadListService } from '../../core/services/thread-list.service';
 import { ThreadListPanelComponent } from './components/thread-list-panel/thread-list-panel.component';
 import { ContextPanelService, ContextPanelTab } from './services/context-panel.service';
@@ -74,6 +75,7 @@ const DEFAULT_ASSISTANT_ACCENT = 'hsl(220 70% 50%)';
     CommonModule,
     ChatSendOutletComponent,
     DiscordComposerToggleComponent,
+    BuzzComposerToggleComponent,
     ChatComposerComponent,
     MessageListComponent,
     ThreadBookmarksComponent,

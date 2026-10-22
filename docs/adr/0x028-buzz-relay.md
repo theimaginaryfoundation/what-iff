@@ -42,7 +42,7 @@ A persona joins a community (`buzz_community`: the agent plus a relay URL) in on
 | Community | How the persona gets in |
 |---|---|
 | Open (no member list) | It authenticates; the relay registers it. |
-| Invite-only, and the owner has an invite link | The owner pastes the link; the server claims it as the persona (`POST /api/invites/claim`, NIP-98 signed). When the community has join terms, the owner reads and accepts them for the persona first (`/api/invites/accept-policy`), and the acceptance is recorded. |
+| Invite-only, and the owner has an invite link | The owner pastes the link; the server claims it as the persona (`POST /api/invites/claim`, NIP-98 signed). When the community has join terms, the owner reads and accepts them for the persona first (`/api/invites/accept-policy`, with the owner's own confirmation of any age requirement), and the accepted version is recorded; until then the claim answers 409 `buzz_terms_required` with the terms in its details. |
 | Invite-only, no invite | The app shows the persona's `npub`; an admin adds it as a member in Buzz, and the owner presses "Check again". |
 
 - Optionally, the owner pastes a NIP-OA **owner attestation** for the persona's key (`["auth", owner_pubkey, conditions, sig]`).
@@ -120,7 +120,7 @@ ADR 0x025 §7 applies as written, with Buzz as a second source:
 - `BUZZ_GATEWAY_LOCK_KEY`, `BUZZ_GATEWAY_SINGLE_INSTANCE` as in §3.
 - `BUZZ_ALLOW_PRIVATE_RELAYS=true` lets a persona connect to relays on loopback or private addresses, and over `ws://`/`http://`.
   It is for local development: without it, the server connects only to public addresses (checked after DNS on every connection, the Discord CDN fetcher's guard, now `relaykit.PublicOnlyControl`), over TLS, because a relay URL is user input and the server would otherwise connect wherever it points.
-- Routes (authenticated): `/api/buzz/agents`, `/agents/{id}` (update, remove), `/agents/{id}/sync-profile`, `/agents/{id}/communities`, `/communities/{id}` (update, check again, remove), `/communities/{id}/policy`, `/communities/{id}/channels`, `/bindings`, `/bindings/{id}`, `/chats/{chatId}`, `/chats/{chatId}/pending/{bindingId}`. Everything is owner-scoped; another account's rows are a 404.
+- Routes (authenticated): `/api/buzz/agents`, `/agents/{id}` (update, remove), `/agents/{id}/sync-profile`, `/agents/{id}/communities`, `/policy?relay_url=` (preview join terms), `/communities/{id}` (update, check again, remove), `/communities/{id}/channels`, `/communities/{id}/channels/{channelId}/join`, `/bindings`, `/bindings/{id}`, `/chats/{chatId}`, `/chats/{chatId}/pending/{bindingId}`. Everything is owner-scoped; another account's rows are a 404.
 - Web app: an Integrations → Buzz tab; Buzz relay threads in the Thread Manager's Jobs tab; the composer toggle in a relay thread.
 
 ## Alternatives considered

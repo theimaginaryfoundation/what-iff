@@ -6,7 +6,7 @@ export type MemoryScopeFilter = 'all' | 'user' | 'chat';
 export type MemoryLevelFilter = 'all' | 'global' | 'personality' | 'thread' | 'summary';
 /** Active / Archived are status filters; Summaries is a dedicated view of checkpoint summaries. */
 export type MemoryStatusFilter = 'active' | 'inactive' | 'summaries';
-/** `all` sends no provenance filter; `external` lists what was learned in Discord relay threads. */
+/** `all` sends no provenance filter; `external` lists what was learned in relay threads (Discord or Buzz). */
 export type MemoryProvenanceFilter = 'all' | MemoryProvenance;
 /** Persona-filter sentinel for unpinned User memories shared across all personas. */
 export const GLOBAL_PERSONALITY_FILTER = '__global__';

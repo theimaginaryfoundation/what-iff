@@ -129,10 +129,10 @@ func TestLiveInviteClaim(t *testing.T) {
 		version = policy.Version
 	}
 	agent, _ := nostr.GenerateKeys()
-	already, err := c.ClaimInvite(ctx, ep, Signer{Keys: agent}, code, version)
+	already, err := c.ClaimInvite(ctx, ep, Signer{Keys: agent}, code, version, true)
 	require.NoError(t, err)
 	assert.False(t, already)
-	already, err = c.ClaimInvite(ctx, ep, Signer{Keys: agent}, code, version)
+	already, err = c.ClaimInvite(ctx, ep, Signer{Keys: agent}, code, version, true)
 	if err == nil {
 		assert.True(t, already, "claiming again reports already a member")
 	}
