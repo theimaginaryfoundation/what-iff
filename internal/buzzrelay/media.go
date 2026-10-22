@@ -59,24 +59,7 @@ func (b *Blob) Imeta(filename string) []string {
 func (c *Client) Upload(ctx context.Context, ep Endpoint, s Signer, name, contentType string, data []byte) (*Blob, error) {
 	sum := sha256.Sum256(data)
 	digest := hex.EncodeToString(sum[:])
-	host := ep.Host()
-	if h, _, ok := strings.Cut(host, ":"); ok {
-		host = h
-	}
-	auth := &nostr.Event{
-		Kind: KindBlossomAuth,
-		Tags: nostr.Tags{
-			{"t", "upload"},
-			{"x", digest},
-			{"expiration", strconv.FormatInt(time.Now().Add(50*time.Second).Unix(), 10)},
-			{"server", host},
-		},
-		Content: "Upload " + path.Base(name),
-	}
-	if err := sign(s, auth); err != nil {
-		return nil, err
-	}
-	raw, err := json.Marshal(auth)
+	auth, err := blossomAuth(s, ep, "upload", digest, "Upload "+path.Base(name))
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +67,7 @@ func (c *Client) Upload(ctx context.Context, ep Endpoint, s Signer, name, conten
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Nostr "+base64.StdEncoding.EncodeToString(raw))
+	req.Header.Set("Authorization", auth)
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
@@ -102,12 +85,36 @@ func (c *Client) Upload(ctx context.Context, ep Endpoint, s Signer, name, conten
 	return &blob, nil
 }
 
+// blossomAuth is a BUD-11 Authorization header for one media operation (verb "upload" or
+// "get") on the blob with hex digest x, valid for under a minute. The server tag names the
+// community's host as Buzz binds it (port included; a default port normalises away).
+func blossomAuth(s Signer, ep Endpoint, verb, x, content string) (string, error) {
+	tags := nostr.Tags{
+		{"t", verb},
+		{"expiration", strconv.FormatInt(time.Now().Add(50*time.Second).Unix(), 10)},
+		{"server", ep.Host()},
+	}
+	if x != "" {
+		tags = append(tags, []string{"x", x})
+	}
+	ev := &nostr.Event{Kind: KindBlossomAuth, Tags: tags, Content: content}
+	if err := sign(s, ev); err != nil {
+		return "", err
+	}
+	raw, err := json.Marshal(ev)
+	if err != nil {
+		return "", err
+	}
+	return "Nostr " + base64.StdEncoding.EncodeToString(raw), nil
+}
+
 // errMediaTooLarge means a file is bigger than the cap.
 var errMediaTooLarge = errors.New("buzz media: too large")
 
-// FetchMedia downloads a file posted in a community, from that community's own host only (a
-// message's URLs are the author's to choose), reading at most max bytes.
-func (c *Client) FetchMedia(ctx context.Context, ep Endpoint, rawURL string, max int64) ([]byte, error) {
+// FetchMedia downloads a file posted in a community as s, from that community's own host only
+// (a message's URLs are the author's to choose), reading at most max bytes. Buzz media is
+// members-only, so the request carries a Blossom "get" authorization for the blob.
+func (c *Client) FetchMedia(ctx context.Context, ep Endpoint, s Signer, rawURL string, max int64) ([]byte, error) {
 	u, err := url.Parse(rawURL)
 	base, _ := url.Parse(ep.HTTP)
 	if err != nil || base == nil || u.Scheme != base.Scheme || !strings.EqualFold(u.Host, base.Host) {
@@ -116,6 +123,16 @@ func (c *Client) FetchMedia(ctx context.Context, ep Endpoint, rawURL string, max
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
+	}
+	// The blob's digest is its file name (/media/<sha256>.<ext>).
+	digest := strings.TrimSuffix(path.Base(u.Path), path.Ext(u.Path))
+	auth, err := blossomAuth(s, ep, "get", digest, "Get "+path.Base(u.Path))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", auth)
+	if s.Attestation != nil {
+		req.Header.Set("x-auth-tag", s.Attestation.JSON())
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
@@ -178,7 +195,7 @@ func MediaOf(ev nostr.Event) []MediaRef {
 // ingestInbound saves the files posted with a mention to the relay thread, so the persona sees
 // them with the message. Files that cannot be added are named in notes for the persona to pass
 // on, rather than dropped silently.
-func (s *Service) ingestInbound(ctx context.Context, ep Endpoint, ownerID, chatID uuid.UUID, ev nostr.Event) (atts []*models.FileAttachment, notes []string) {
+func (s *Service) ingestInbound(ctx context.Context, ep Endpoint, signer Signer, ownerID, chatID uuid.UUID, ev nostr.Event) (atts []*models.FileAttachment, notes []string) {
 	media := MediaOf(ev)
 	if len(media) == 0 {
 		return nil, nil
@@ -198,7 +215,7 @@ func (s *Service) ingestInbound(ctx context.Context, ep Endpoint, ownerID, chatI
 			skip(m, "too large")
 			continue
 		}
-		data, err := s.Relay.FetchMedia(ctx, ep, m.URL, MaxInboundFileBytes)
+		data, err := s.Relay.FetchMedia(ctx, ep, signer, m.URL, MaxInboundFileBytes)
 		if err != nil {
 			if errors.Is(err, errMediaTooLarge) {
 				skip(m, "too large")

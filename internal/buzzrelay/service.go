@@ -42,7 +42,7 @@ type Relay interface {
 	Publish(ctx context.Context, ep Endpoint, s Signer, ev *nostr.Event) error
 	Query(ctx context.Context, ep Endpoint, s Signer, filters ...Filter) ([]nostr.Event, error)
 	Upload(ctx context.Context, ep Endpoint, s Signer, name, contentType string, data []byte) (*Blob, error)
-	FetchMedia(ctx context.Context, ep Endpoint, rawURL string, max int64) ([]byte, error)
+	FetchMedia(ctx context.Context, ep Endpoint, s Signer, rawURL string, max int64) ([]byte, error)
 }
 
 // Notices posted to Buzz when a mention cannot be answered. They are neutral on purpose:
@@ -294,7 +294,7 @@ func (s *Service) runInbound(ctx context.Context, w inboundWork) {
 	}
 	npub, _ := nostr.EncodeNPub(t.Agent.PubKey)
 	quoteAuthor, quote := s.quoted(ctx, ep, signer, t.Agent.PubKey, ev, thread)
-	attachments, notes := s.ingestInbound(ctx, ep, t.Agent.OwnerID, b.ChatID, ev)
+	attachments, notes := s.ingestInbound(ctx, ep, signer, t.Agent.OwnerID, b.ChatID, ev)
 	prompt := PromptText(ev.Content, author, b.ChannelName, personaName, npub, quoteAuthor, quote)
 	if len(notes) > 0 {
 		prompt += "\n" + strings.Join(notes, "\n")

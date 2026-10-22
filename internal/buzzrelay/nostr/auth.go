@@ -1,6 +1,7 @@
 package nostr
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -40,10 +41,18 @@ func AuthEvent(k *Keys, relayURL, challenge string, attestation *Attestation) (*
 // for one request. url must be the absolute URL the server expects (Buzz: the
 // community's host and the request path, http or https). body, when not nil, is
 // bound to the event with a payload hash.
+//
+// Each header carries a random nonce tag: two identical requests in the same second
+// would otherwise sign the same event, and a relay's replay guard (Buzz has one)
+// rejects the second as a replay.
 func HTTPAuthHeader(k *Keys, method, url string, body []byte) (string, error) {
+	nonce := make([]byte, 8)
+	if _, err := rand.Read(nonce); err != nil {
+		return "", err
+	}
 	ev := &Event{
 		Kind: KindHTTPAuth,
-		Tags: Tags{{"u", url}, {"method", strings.ToUpper(method)}},
+		Tags: Tags{{"u", url}, {"method", strings.ToUpper(method)}, {"nonce", hex.EncodeToString(nonce)}},
 	}
 	if body != nil {
 		sum := sha256.Sum256(body)

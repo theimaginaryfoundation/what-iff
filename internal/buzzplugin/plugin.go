@@ -6,7 +6,7 @@
 // Configuration (environment):
 //
 //	BUZZ_RELAY_ENABLED=false            turn the whole feature off (default on; false/0/off disable it)
-//	BUZZ_GATEWAY_LOCK_KEY=<int64>       advisory-lock key for gateway leadership (default 80920033)
+//	BUZZ_GATEWAY_LOCK_KEY=<int64>       advisory-lock key for gateway leadership (default 80920034)
 //	BUZZ_GATEWAY_SINGLE_INSTANCE=true   lead without a lock (one process only)
 //	BUZZ_ALLOW_PRIVATE_RELAYS=true      allow relays on loopback/private addresses and plain ws/http
 //	                                    (local development only)
@@ -35,9 +35,10 @@ import (
 	"go.uber.org/zap"
 )
 
-// DefaultLockKey is the advisory lock key for Buzz gateway leadership: after the agent-job
-// scheduler (80920031) and the Discord gateway (80920032).
-const DefaultLockKey int64 = 80920033
+// DefaultLockKey is the advisory lock key for Buzz gateway leadership. Advisory keys share one
+// namespace (the registry is in .env.example): 80920031 is the agent-job scheduler, 80920032
+// the Discord gateway, 80920033 the memory embedding backfill.
+const DefaultLockKey int64 = 80920034
 
 // active is the running relay, set when the plugin is applied. The reply hook is registered at
 // init (replyhook requires it) and does nothing until then.

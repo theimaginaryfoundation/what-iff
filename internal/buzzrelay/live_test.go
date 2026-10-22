@@ -1,8 +1,10 @@
 package buzzrelay
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
+	"image"
+	"image/png"
 	"os"
 	"sync"
 	"testing"
@@ -56,6 +58,12 @@ func TestLiveInfoAndQuery(t *testing.T) {
 	assert.True(t, info.IsBuzz(), "software = %q", info.Software)
 	assert.Len(t, info.Self, 64)
 
+	// The same request twice in one second is not a replay.
+	for i := 0; i < 2; i++ {
+		_, err = c.Query(ctx, ep, owner, Filter{"kinds": []int{KindProfile}, "authors": []string{owner.Keys.PublicKey()}, "limit": 1})
+		require.NoError(t, err, "query %d", i)
+	}
+
 	channel := liveChannel(t, ctx, c, ep, owner)
 	meta, err := c.Query(ctx, ep, owner, Filter{"kinds": []int{KindGroupMetadata}, "#d": []string{channel}})
 	require.NoError(t, err)
@@ -107,20 +115,12 @@ func TestLiveStrangerIsRefusedAndAttestationAdmits(t *testing.T) {
 func TestLiveInviteClaim(t *testing.T) {
 	ep, c, owner := liveRig(t)
 	ctx := context.Background()
-	body, _ := json.Marshal(map[string]any{"ttl_secs": 3600, "max_uses": 1})
-	req, err := c.signedPost(ctx, ep, owner, "/api/invites", body)
+	link, err := c.MintInvite(ctx, ep, owner, time.Hour, 1)
 	require.NoError(t, err)
-	var minted struct {
-		Code string `json:"code"`
-		URL  string `json:"url"`
-	}
-	require.NoError(t, c.do(req, &minted))
-	require.NotEmpty(t, minted.Code)
-
-	parsed, code, err := ParseEndpoint(minted.URL, true)
+	parsed, code, err := ParseEndpoint(link, true)
 	require.NoError(t, err)
 	assert.Equal(t, ep, parsed)
-	assert.Equal(t, minted.Code, code)
+	require.NotEmpty(t, code)
 
 	policy, err := c.JoinPolicy(ctx, ep)
 	require.NoError(t, err)
@@ -220,4 +220,39 @@ func TestLiveMentionArrivesAndReplyThreads(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("the follow-up was not delivered")
 	}
+}
+
+// testPNG is a small real PNG (the relay decodes images it stores).
+func testPNG(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	for i := range img.Pix {
+		img.Pix[i] = byte(i * 7)
+	}
+	var buf bytes.Buffer
+	require.NoError(t, png.Encode(&buf, img))
+	return buf.Bytes()
+}
+
+func TestLiveUploadAndAttach(t *testing.T) {
+	ep, c, owner := liveRig(t)
+	ctx := context.Background()
+	agentKeys, _ := nostr.GenerateKeys()
+	att, _ := nostr.Attest(owner.Keys, agentKeys.PublicKey(), "")
+	agent := Signer{Keys: agentKeys, Attestation: att}
+	channel := liveChannel(t, ctx, c, ep, owner, agentKeys.PublicKey())
+
+	pic := testPNG(t)
+	blob, err := c.Upload(ctx, ep, agent, "dot.png", "image/png", pic)
+	require.NoError(t, err)
+	t.Logf("blob %+v", blob)
+	msg, err := MessageEvent(agent, channel, "a picture", nil, nil, [][]string{blob.Imeta("dot.png")})
+	require.NoError(t, err)
+	require.NoError(t, c.Publish(ctx, ep, agent, msg), "the relay accepts the imeta tag")
+
+	got, err := c.FetchMedia(ctx, ep, agent, MediaOf(*msg)[0].URL, 1<<20)
+	require.NoError(t, err)
+	assert.NotEmpty(t, got) // the relay may re-encode images (EXIF stripping)
+	_, err = c.FetchMedia(ctx, ep, agent, "https://elsewhere.example/media/x.png", 1<<20)
+	assert.Error(t, err, "files are fetched from the community only")
 }

@@ -53,7 +53,7 @@ A persona joins a community (`buzz_community`: the agent plus a relay URL) in on
 
 ### 3. Gateway: one WebSocket per persona per community, behind a leader lock
 
-- The supervisor (`relaykit.Supervisor`, shared with the Discord gateway) leads through a Postgres advisory lock on its own key, `80920033` (Discord uses `80920032`, the agent-job scheduler `80920031`), overridable with `BUZZ_GATEWAY_LOCK_KEY`.
+- The supervisor (`relaykit.Supervisor`, shared with the Discord gateway) leads through a Postgres advisory lock on its own key, `80920034` (the agent-job scheduler uses `80920031`, Discord `80920032`, the memory embedding backfill `80920033`; the registry is in `.env.example`), overridable with `BUZZ_GATEWAY_LOCK_KEY`.
   `BUZZ_GATEWAY_SINGLE_INSTANCE=true` skips the lock for one-process local runs.
 - The leader keeps one connection per active community row, answers the relay's `AUTH` challenge with a kind 22242 event signed by the persona (plus its attestation, when there is one), and subscribes to each bound channel: `{"kinds":[9], "#h":[channel], "since": …}`.
   It re-reads the rows and bindings about every 30 s and resubscribes when a binding is added or removed.

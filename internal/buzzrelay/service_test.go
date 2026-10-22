@@ -240,7 +240,7 @@ func (r *fakeRelay) Upload(context.Context, Endpoint, Signer, string, string, []
 	return &Blob{URL: "https://acme.example/media/abc.png", SHA256: "abc", Size: 3, Type: "image/png"}, nil
 }
 
-func (r *fakeRelay) FetchMedia(context.Context, Endpoint, string, int64) ([]byte, error) {
+func (r *fakeRelay) FetchMedia(context.Context, Endpoint, Signer, string, int64) ([]byte, error) {
 	return []byte("png"), nil
 }
 

@@ -146,6 +146,10 @@ func TestHTTPAuthHeader(t *testing.T) {
 	if ev.Kind != KindHTTPAuth || ev.Tags.Value("u") != "https://acme.example/query" || ev.Tags.Value("method") != "POST" {
 		t.Fatalf("event = %+v", ev)
 	}
+	h2, _ := HTTPAuthHeader(k, "post", "https://acme.example/query", []byte(`{"a":1}`))
+	if h2 == h {
+		t.Fatal("two identical requests signed the same event (a replay guard would reject the second)")
+	}
 	// sha256 of {"a":1}
 	if ev.Tags.Value("payload") != "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862" {
 		t.Fatalf("payload = %s", ev.Tags.Value("payload"))

@@ -276,6 +276,27 @@ func (c *Client) ClaimInvite(ctx context.Context, ep Endpoint, s Signer, code, p
 	return res.Status == "already_member", nil
 }
 
+// MintInvite creates an invite link to the community as s, who must be its owner or an admin
+// (POST /api/invites). What Iff never mints invites for people; this is for rigs and tests.
+func (c *Client) MintInvite(ctx context.Context, ep Endpoint, s Signer, ttl time.Duration, maxUses int) (string, error) {
+	req := map[string]any{"ttl_secs": int(ttl.Seconds())}
+	if maxUses > 0 {
+		req["max_uses"] = maxUses
+	}
+	body, _ := json.Marshal(req)
+	httpReq, err := c.signedPost(ctx, ep, s, "/api/invites", body)
+	if err != nil {
+		return "", err
+	}
+	var res struct {
+		URL string `json:"url"`
+	}
+	if err := c.do(httpReq, &res); err != nil {
+		return "", err
+	}
+	return res.URL, nil
+}
+
 func (c *Client) acceptPolicy(ctx context.Context, ep Endpoint, code, version string) (string, error) {
 	body, _ := json.Marshal(map[string]any{"code": code, "policy_version": version, "age_confirmed": true})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.HTTP+"/api/invites/accept-policy", bytes.NewReader(body))
