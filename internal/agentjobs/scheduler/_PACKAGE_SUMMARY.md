@@ -26,7 +26,7 @@
 - **Schedule failure on a recurring job:** if the next run can't be computed, the job is paused and `last_error` is prefixed with `ScheduleErrorMarker` (`job.go`).
   A user pause clears `last_error`, so paused + marker is how the web app (`scheduleFailureReason` in `job-status.helpers.ts`) shows "Paused: schedule error" with the reason instead of a plain pause.
   There is no separate status value or column; keep the marker and the helper in sync.
-- **Jobs that follow the user (`timezone.go`):** a cron job runs in `AgentJob.ScheduleTimezone()`.
+- **Jobs that follow the user (`timezone.go`, [ADR 0x027](../../../docs/adr/0x027-jobs-follow-user-timezone.md)):** a cron job runs in `AgentJob.ScheduleTimezone()`.
   For a job with `follow_user_timezone`, that is the owner's browser-reported `current_timezone` (the datastore derives it as `EffectiveTimezone`); otherwise it is the job's own `timezone`.
   The reconcile fingerprint uses the effective timezone, so a change of the owner's timezone reschedules only the jobs that follow them.
   The manager then stores their new `next_run_at`, except on the first schedule after startup.
@@ -47,4 +47,4 @@
 
 ## Related documentation
 
-- [Architecture summary](../../../docs/ARCHITECTURE_SUMMARY.md); [`internal/server`](../../server/_PACKAGE_SUMMARY.md) for scheduler-related config flags.
+- [Architecture summary](../../../docs/ARCHITECTURE_SUMMARY.md); [ADR 0x027](../../../docs/adr/0x027-jobs-follow-user-timezone.md) (jobs that follow the user's timezone); [`internal/server`](../../server/_PACKAGE_SUMMARY.md) for scheduler-related config flags.
