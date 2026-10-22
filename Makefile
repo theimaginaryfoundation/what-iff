@@ -347,6 +347,17 @@ local-superuser: ## Create/promote a local admin interactively (never SUPERADMIN
 # Hermetic testing (mock LLM, no provider keys, no egress)
 # =============================================================================
 
+.PHONY: test-mcp-inventory
+test-mcp-inventory: $(ENT_SENTINEL) ## Read a selected live MCP connector's advertised tool schemas (opt-in)
+	@test -n "$$MCP_SMOKE_URL" || { echo "Set MCP_SMOKE_URL to the selected connector"; exit 1; }
+	@go test -tags mcp_live ./internal/agent/mcpclient -run '^TestLiveConnectorInventory$$' -count=1 -v
+
+.PHONY: test-mcp-live
+test-mcp-live: $(ENT_SENTINEL) ## Verify a disposable document lifecycle on a selected live MCP connector (opt-in)
+	@test -n "$$MCP_SMOKE_URL" && test -n "$$MCP_SMOKE_PLAN" && test "$$MCP_SMOKE_ALLOW_WRITE" = 1 || \
+		{ echo "Set MCP_SMOKE_URL, MCP_SMOKE_PLAN and MCP_SMOKE_ALLOW_WRITE=1"; exit 1; }
+	@go test -tags mcp_live ./internal/agent/mcpclient -run '^TestLiveConnectorRoundTrip$$' -count=1 -v
+
 .PHONY: test-ci
 test-ci: $(ENT_SENTINEL) ## Run the hermetic CI suite (mock mode, dummy keys, race detector, coverage)
 	@echo "Running hermetic test suite (ENV=test LLM_BACKEND=mock, race detector)..."

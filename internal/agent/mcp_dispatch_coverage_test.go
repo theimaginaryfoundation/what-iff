@@ -13,6 +13,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"go.uber.org/zap"
 )
 
 func TestMCPToolIsLoaded(t *testing.T) {
@@ -115,66 +116,95 @@ func TestDispatchMCPToolUse_ReturnsGeneratedAttachments(t *testing.T) {
 	require.Equal(t, tinyPNG, atts[0].FileContent)
 }
 
-func TestExecuteToolUses_MCPImagesBecomeInTurnVisionPayloads(t *testing.T) {
-	const tinyPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-	serverID := uuid.New()
-	prefix := strings.ReplaceAll(serverID.String(), "-", "")
-	fullToolName := "mcp__" + prefix[:8] + "__render_graph"
+func TestExecuteToolUses_MCPResultsPreserveStatusAndContent(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		isError bool
+	}{
+		{name: "success"},
+		{name: "tool error", isError: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			const tinyPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+			resultText := "graph result"
+			if tt.isError {
+				resultText = "graph rendering failed"
+			}
+			serverID := uuid.New()
+			prefix := strings.ReplaceAll(serverID.String(), "-", "")
+			fullToolName := "mcp__" + prefix[:8] + "__render_graph"
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		var req map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		method, _ := req["method"].(string)
-		switch method {
-		case "initialize", "notifications/initialized":
-			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{}})
-		case "tools/list":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"jsonrpc": "2.0",
-				"id":      req["id"],
-				"result": map[string]any{
-					"tools": []map[string]any{{"name": "render_graph", "inputSchema": map[string]any{"type": "object"}}},
-				},
-			})
-		case "tools/call":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"jsonrpc": "2.0",
-				"id":      req["id"],
-				"result": map[string]any{
-					"content": []map[string]any{
-						{"type": "image", "data": tinyPNG, "mimeType": "image/png"},
-					},
-				},
-			})
-		default:
-			w.WriteHeader(http.StatusBadRequest)
-		}
-	}))
-	defer srv.Close()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer r.Body.Close()
+				var req map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				method, _ := req["method"].(string)
+				switch method {
+				case "initialize", "notifications/initialized":
+					_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{}})
+				case "tools/list":
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"jsonrpc": "2.0",
+						"id":      req["id"],
+						"result": map[string]any{
+							"tools": []map[string]any{{"name": "render_graph", "inputSchema": map[string]any{"type": "object"}}},
+						},
+					})
+				case "tools/call":
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"jsonrpc": "2.0",
+						"id":      req["id"],
+						"result": map[string]any{
+							"isError":           tt.isError,
+							"structuredContent": map[string]any{"count": 0, "enabled": false},
+							"content": []map[string]any{
+								{"type": "text", "text": resultText},
+								{"type": "image", "data": tinyPNG, "mimeType": "image/png"},
+							},
+						},
+					})
+				default:
+					w.WriteHeader(http.StatusBadRequest)
+				}
+			}))
+			defer srv.Close()
 
-	a := &Agent{mcpClient: mcpclient.New(nil, nil)}
-	chat := &models.Chat{ID: uuid.New(), UserID: uuid.New()}
-	chatCtx := &chatContext{
-		userID: chat.UserID,
-		chat:   chat,
-		mcpServers: []*models.MCPServer{
-			{ID: serverID, Name: "grafana", ServerURL: srv.URL, Status: models.MCPServerStatusActive},
-		},
-		loadedMCPTools: map[uuid.UUID]map[string]struct{}{
-			serverID: {fullToolName: {}},
-		},
+			a := &Agent{mcpClient: mcpclient.New(nil, nil), logger: zap.NewNop()}
+			chat := &models.Chat{ID: uuid.New(), UserID: uuid.New()}
+			chatCtx := &chatContext{
+				userID: chat.UserID,
+				chat:   chat,
+				mcpServers: []*models.MCPServer{
+					{ID: serverID, Name: "grafana", ServerURL: srv.URL, Status: models.MCPServerStatusActive},
+				},
+				loadedMCPTools: map[uuid.UUID]map[string]struct{}{
+					serverID: {fullToolName: {}},
+				},
+			}
+			offering(chatCtx, fullToolName)
+			results, calls, atts := a.executeToolUses(context.Background(), chatCtx, 0, []provider.ToolUse{{
+				ID:    "mcp-img",
+				Name:  fullToolName,
+				Input: json.RawMessage(`{"metric":"cpu"}`),
+			}})
+			require.Len(t, atts, 1)
+			require.Len(t, results, 1)
+			require.Equal(t, tt.isError, results[0].IsErr)
+			require.Equal(t, "mcp-img", results[0].ID)
+			require.Contains(t, results[0].Output, resultText+"\nStructured content:\n")
+			require.JSONEq(t, `{"count":0,"enabled":false}`, strings.SplitN(results[0].Output, "Structured content:\n", 2)[1])
+			require.Len(t, calls, 1)
+			if tt.isError {
+				require.Equal(t, results[0].Output, calls[0].ToolError)
+				require.Empty(t, calls[0].ToolOutput)
+				assertMCPAndLocalErrorContinuation(t, a, chatCtx, provider.ToolUse{ID: "mcp-error", Name: fullToolName, Input: json.RawMessage(`{}`)})
+			} else {
+				require.Equal(t, results[0].Output, calls[0].ToolOutput)
+				require.Empty(t, calls[0].ToolError)
+			}
+			require.Len(t, results[0].Images, 1)
+			require.Equal(t, "image/png", results[0].Images[0].MediaType)
+			require.NotEmpty(t, results[0].Images[0].RawBytes)
+		})
 	}
-	offering(chatCtx, fullToolName)
-	results, _, atts := a.executeToolUses(context.Background(), chatCtx, 0, []provider.ToolUse{{
-		ID:    "mcp-img",
-		Name:  fullToolName,
-		Input: json.RawMessage(`{"metric":"cpu"}`),
-	}})
-	require.Len(t, atts, 1)
-	require.Len(t, results, 1)
-	require.False(t, results[0].IsErr)
-	require.Len(t, results[0].Images, 1)
-	require.Equal(t, "image/png", results[0].Images[0].MediaType)
-	require.NotEmpty(t, results[0].Images[0].RawBytes)
 }
