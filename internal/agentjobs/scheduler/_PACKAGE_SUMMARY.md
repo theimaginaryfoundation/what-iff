@@ -26,11 +26,20 @@
 - **Schedule failure on a recurring job:** if the next run can't be computed, the job is paused and `last_error` is prefixed with `ScheduleErrorMarker` (`job.go`).
   A user pause clears `last_error`, so paused + marker is how the web app (`scheduleFailureReason` in `job-status.helpers.ts`) shows "Paused: schedule error" with the reason instead of a plain pause.
   There is no separate status value or column; keep the marker and the helper in sync.
+- **Jobs that follow the user (`timezone.go`):** a cron job runs in `AgentJob.ScheduleTimezone()`.
+  For a job with `follow_user_timezone`, that is the owner's browser-reported `current_timezone` (the datastore derives it as `EffectiveTimezone`); otherwise it is the job's own `timezone`.
+  The reconcile fingerprint uses the effective timezone, so a change of the owner's timezone reschedules only the jobs that follow them.
+  The manager then stores their new `next_run_at`, except on the first schedule after startup.
+  Each run records the timezone it ran in (`last_run_timezone`).
+  When a job's timezone differs from the one it last ran in, `slotGuardTrigger` skips fire times at or before the last run's wall-clock time in the new zone, so a slot that already ran is not run again.
+  For example, if 8am New York has run and the user moves to Los Angeles, 8am Los Angeles that same day is skipped.
+  Moving east can skip a slot that falls between the two zones' times; this is accepted.
 - **MVP note:** `Config.EnableAgentJobsScheduler` gates whether the scheduler runs at all.
 
 ## Testing
 
 - `manager_test.go`, `job_test.go` — scheduling and execution behavior with fakes/mocks.
+- `timezone_test.go` — following the user's timezone, the no-rerun guard (west, east, hourly), the fingerprint, and storing the next run on reconcile.
 - `metrics_test.go` — run outcomes (overlap, inactive, load failure, chat resolve failure, congestion skip and defer) and lateness rules, via `telemetrytest.UseGlobal` (not parallel).
 
 ## Related documentation

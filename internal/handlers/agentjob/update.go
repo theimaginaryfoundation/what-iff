@@ -24,6 +24,9 @@ type updateAgentJobRequest struct {
 	ModelID       *string `json:"model_id,omitempty"`
 	ScheduleInput *string `json:"schedule_input,omitempty"`
 	Timezone      *string `json:"timezone,omitempty"`
+	// FollowUserTimezone, when present, sets whether a recurring schedule runs in the user's
+	// current timezone.
+	FollowUserTimezone *bool `json:"follow_user_timezone,omitempty"`
 }
 
 func (h *Handler) UpdateAgentJob(w http.ResponseWriter, r *http.Request) {
@@ -172,6 +175,20 @@ func (h *Handler) UpdateAgentJob(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			h.logger.Error("failed to update agent job overrides", zap.String("user_id", userID.String()), zap.String("agent_job_id", id.String()), zap.Error(err))
 			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to update agent job overrides", err)
+			return
+		}
+	}
+
+	// Update whether the schedule follows the user's current timezone (optional).
+	if req.FollowUserTimezone != nil {
+		updated, err = h.provider.SetAgentJobFollowUserTimezone(r.Context(), userID, id, *req.FollowUserTimezone)
+		if err == datastore.ErrAgentJobNotFound {
+			handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "AgentJob not found", nil)
+			return
+		}
+		if err != nil {
+			h.logger.Error("failed to update agent job follow_user_timezone", zap.String("user_id", userID.String()), zap.String("agent_job_id", id.String()), zap.Error(err))
+			handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to update agent job timezone setting", err)
 			return
 		}
 	}

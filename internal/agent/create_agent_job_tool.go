@@ -27,6 +27,8 @@ type createAgentJobToolArgs struct {
 	ModelOverride    string   `json:"model_override,omitempty"`
 	UseCurrentThread *bool    `json:"use_current_thread,omitempty"`
 	ThreadID         string   `json:"thread_id,omitempty"`
+	// FollowUserTimezone is set only when the user asks for the job to follow them when they travel.
+	FollowUserTimezone bool `json:"follow_user_timezone,omitempty"`
 }
 
 type createAgentJobToolResult struct {
@@ -36,10 +38,12 @@ type createAgentJobToolResult struct {
 	Schedule     *string                     `json:"schedule,omitempty"`
 	RunAt        *time.Time                  `json:"run_at,omitempty"`
 	Timezone     string                      `json:"timezone,omitempty"`
-	HumanSummary string                      `json:"human_summary,omitempty"`
-	NextRunAt    *time.Time                  `json:"next_run_at,omitempty"`
-	ThreadID     string                      `json:"thread_id,omitempty"`
-	Error        string                      `json:"error,omitempty"`
+	// FollowsUserTimezone is true when the job follows the user's current timezone.
+	FollowsUserTimezone bool       `json:"follows_user_timezone,omitempty"`
+	HumanSummary        string     `json:"human_summary,omitempty"`
+	NextRunAt           *time.Time `json:"next_run_at,omitempty"`
+	ThreadID            string     `json:"thread_id,omitempty"`
+	Error               string     `json:"error,omitempty"`
 }
 
 func (a *Agent) createAgentJobTool(ctx context.Context, chat *models.Chat, args []byte) (string, error) {
@@ -128,16 +132,17 @@ func (a *Agent) createAgentJobTool(ctx context.Context, chat *models.Chat, args 
 	}
 
 	newJob := models.AgentJob{
-		Title:         toolArgs.Title,
-		Prompt:        prompt,
-		ScheduleInput: scheduleInput,
-		ScheduleType:  preview.ScheduleType,
-		Schedule:      preview.Schedule,
-		RunAt:         preview.RunAt,
-		Timezone:      preview.Timezone,
-		Status:        models.AgentJobStatusActive,
-		NextRunAt:     nextRunAt,
-		RunCount:      0,
+		Title:              toolArgs.Title,
+		Prompt:             prompt,
+		ScheduleInput:      scheduleInput,
+		ScheduleType:       preview.ScheduleType,
+		Schedule:           preview.Schedule,
+		RunAt:              preview.RunAt,
+		Timezone:           preview.Timezone,
+		FollowUserTimezone: toolArgs.FollowUserTimezone,
+		Status:             models.AgentJobStatusActive,
+		NextRunAt:          nextRunAt,
+		RunCount:           0,
 	}
 
 	newJob.ChatID = thread
@@ -183,14 +188,15 @@ func (a *Agent) createAgentJobTool(ctx context.Context, chat *models.Chat, args 
 	}
 
 	result := createAgentJobToolResult{
-		Success:      true,
-		AgentJobID:   created.ID.String(),
-		ScheduleType: created.ScheduleType,
-		Schedule:     created.Schedule,
-		RunAt:        created.RunAt,
-		Timezone:     created.Timezone,
-		HumanSummary: preview.HumanSummary,
-		NextRunAt:    created.NextRunAt,
+		Success:             true,
+		AgentJobID:          created.ID.String(),
+		ScheduleType:        created.ScheduleType,
+		Schedule:            created.Schedule,
+		RunAt:               created.RunAt,
+		Timezone:            created.Timezone,
+		FollowsUserTimezone: created.FollowUserTimezone,
+		HumanSummary:        preview.HumanSummary,
+		NextRunAt:           created.NextRunAt,
 	}
 	if created.ChatID != nil {
 		result.ThreadID = created.ChatID.String()

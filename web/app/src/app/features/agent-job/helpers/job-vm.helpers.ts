@@ -12,6 +12,7 @@ export interface JobCardVm {
   statusDescription: string;
   statusTone: JobStatusTone;
   timezone: string;
+  followsUserTimezone: boolean;
   nextRunLabel: string;
   lastRunLabel: string;
   runCount: number;
@@ -33,7 +34,8 @@ export function toJobCardVm(job: AgentJob): JobCardVm {
     statusLabel: jobStatusLabel(job),
     statusDescription: jobStatusDescription(job),
     statusTone: jobStatusTone(job),
-    timezone: job.timezone,
+    timezone: job.effective_timezone || job.timezone,
+    followsUserTimezone: !!job.follow_user_timezone,
     nextRunLabel: formatDate(job.next_run_at),
     lastRunLabel: formatDate(job.last_run_at),
     runCount: job.run_count,

@@ -27,6 +27,9 @@ type fakeDatastoreProvider struct {
 	acquireResults []acquireResult
 	acquireCalls   int
 	listCalls      int
+	// jobs is what ListAgentJobsForScheduler returns; nextRunWrites records SetAgentJobNextRunAt.
+	jobs          []*models.AgentJob
+	nextRunWrites map[uuid.UUID]time.Time
 }
 
 func (f *fakeDatastoreProvider) TryAcquireSchedulerLeaderLock(ctx context.Context, lockKey int64) (datastore.SchedulerLeaderLock, bool, error) {
@@ -43,16 +46,28 @@ func (f *fakeDatastoreProvider) TryAcquireSchedulerLeaderLock(ctx context.Contex
 
 func (f *fakeDatastoreProvider) ListAgentJobsForScheduler(ctx context.Context) ([]*models.AgentJob, error) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.listCalls++
-	f.mu.Unlock()
-	return []*models.AgentJob{}, nil
+	return append([]*models.AgentJob{}, f.jobs...), nil
+}
+
+func (f *fakeDatastoreProvider) SetAgentJobNextRunAt(ctx context.Context, userID, id uuid.UUID, nextRunAt *time.Time) (*models.AgentJob, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.nextRunWrites == nil {
+		f.nextRunWrites = map[uuid.UUID]time.Time{}
+	}
+	if nextRunAt != nil {
+		f.nextRunWrites[id] = *nextRunAt
+	}
+	return nil, nil
 }
 
 func (f *fakeDatastoreProvider) GetAgentJob(ctx context.Context, userID, id uuid.UUID) (*models.AgentJob, error) {
 	return nil, datastore.ErrAgentJobNotFound
 }
 
-func (f *fakeDatastoreProvider) RecordAgentJobRun(ctx context.Context, userID, id uuid.UUID, lastRunAt time.Time, nextRunAt *time.Time, runError string, newStatus *models.AgentJobStatus) (*models.AgentJob, error) {
+func (f *fakeDatastoreProvider) RecordAgentJobRun(ctx context.Context, userID, id uuid.UUID, lastRunAt time.Time, lastRunTimezone string, nextRunAt *time.Time, runError string, newStatus *models.AgentJobStatus) (*models.AgentJob, error) {
 	return nil, nil
 }
 

@@ -203,8 +203,9 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   `run_subagent` (default off in a sandbox) refuses another `personality_id` and any `skill_ids` there, and its tool loop runs under a chat carrying the parent's scope.
   `create_agent_job` and `update_agent_job` are neither offered nor accepted in a sandboxed chat (the job would run in a chat that is not sandboxed).
   Both take a `thread_id` (`resolveJobThread`): `"current"`, the id of one of the owner's conversations that is not sandboxed, or `"new"` for a dedicated thread made on the next run.
-  `update_agent_job` is a patch (only the fields passed change: title, prompt, schedule, model, thread, skills, active/paused); every argument is checked before anything is written, and the result shows the job as it now stands.
-  `list` (kind="jobs") shows each job's schedule, thread and a 200-rune prompt preview so the model can find what to change.
+  `update_agent_job` is a patch (only the fields passed change: title, prompt, schedule, model, thread, skills, active/paused, follow_user_timezone); every argument is checked before anything is written, and the result shows the job as it now stands.
+  Both take `follow_user_timezone`, which makes a recurring job keep its local time while the user travels; the tool descriptions say to set it only when the user asks.
+  `list` (kind="jobs") shows each job's schedule, thread, `follows_user_timezone` when set, and a 200-rune prompt preview so the model can find what to change.
   A job id as its `filter` reads that one job in full (whole prompt, model, skills, any status), which is how the model sees a prompt before rewriting it.
   Auto mood selection does not run in a sandboxed chat (`autoMoodSelectionSkipped`); its `change_mood` picks only its own personality's modes, refuses `model_override`, and mood rituals are not loaded.
   In every chat, dispatch refuses a tool the model was not offered that turn (`setOfferedTools`, recorded on every generation path including the sub-agent loops).

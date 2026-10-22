@@ -30,6 +30,7 @@ type UserResponse struct {
 	FirstName                string    `json:"first_name,omitempty"`
 	LastName                 string    `json:"last_name,omitempty"`
 	Timezone                 string    `json:"timezone,omitempty"`
+	CurrentTimezone          string    `json:"current_timezone,omitempty"`
 	Role                     string    `json:"role"`
 	Status                   string    `json:"status"`
 	EnableExperimentalModels bool      `json:"enable_experimental_models"`

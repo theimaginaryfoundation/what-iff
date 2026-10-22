@@ -298,6 +298,10 @@ func jobListItem(j *models.AgentJob) listItem {
 	if j.ChatID != nil {
 		item.ThreadID = j.ChatID.String()
 	}
+	if j.FollowUserTimezone {
+		follows := true
+		item.FollowsUserTimezone = &follows
+	}
 	// Next run only for jobs that still have a future — schedule_input ("in 5 minutes")
 	// is stale nonsense next to status=complete/failed.
 	if j.Status != models.AgentJobStatusComplete && j.Status != models.AgentJobStatusFailed {

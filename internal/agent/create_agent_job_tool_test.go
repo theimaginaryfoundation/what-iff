@@ -45,3 +45,14 @@ func TestCreateAgentJobToolArgs_ParsesThreadID(t *testing.T) {
 	require.Equal(t, "current", args.ThreadID)
 	require.Nil(t, args.UseCurrentThread)
 }
+
+func TestCreateAgentJobToolArgs_FollowUserTimezoneIsOffUnlessPassed(t *testing.T) {
+	t.Parallel()
+
+	var args createAgentJobToolArgs
+	require.NoError(t, json.Unmarshal([]byte(`{"schedule_input":"every day at 8am","prompt":"check in"}`), &args))
+	require.False(t, args.FollowUserTimezone)
+
+	require.NoError(t, json.Unmarshal([]byte(`{"schedule_input":"every day at 8am","prompt":"check in","follow_user_timezone":true}`), &args))
+	require.True(t, args.FollowUserTimezone)
+}

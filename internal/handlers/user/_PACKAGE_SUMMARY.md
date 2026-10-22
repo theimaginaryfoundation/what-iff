@@ -24,9 +24,15 @@ HTTP API for **users** — profile, preferences, registration/login-adjacent flo
 - **Account deletion purges stored files.**
   With a store from `WithFileStore`, `DeleteUser` removes everything under `users/{id}/` and the account's `exports/{id}/` bundles after the row delete (`storage.PurgeUserObjects`), best effort.
 
+- **Current timezone is separate from the profile timezone.**
+  `PUT /user/current-timezone` (`current_timezone.go`) stores the zone the web app's browser reports (`users.current_timezone`), writing only on a change, and answers 204.
+  Jobs with `follow_user_timezone` run in it; the profile `timezone` is unchanged.
+  It is best effort: Discord and webhooks never report one.
+
 ## Testing
 
 - `user_test.go` — selected HTTP behaviors.
+- `current_timezone_test.go` — current timezone reporting: valid, unknown, empty, bad body, no user.
 - `preferences_test.go` — image vendor list on preference responses; an unknown `image_generation_provider` is a 400.
 
 ## Related documentation

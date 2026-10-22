@@ -929,7 +929,7 @@ func TestRecordAgentJobRun_SuccessUpdatesRunMetadata(t *testing.T) {
 	lastRunAt := time.Now().UTC().Truncate(time.Second)
 	nextRunAt := lastRunAt.Add(24 * time.Hour)
 
-	got, err := ds.RecordAgentJobRun(ctx, userID, created.ID, lastRunAt, &nextRunAt, "", nil)
+	got, err := ds.RecordAgentJobRun(ctx, userID, created.ID, lastRunAt, "", &nextRunAt, "", nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, got.RunCount)
 	require.NotNil(t, got.LastRunAt)
@@ -940,7 +940,7 @@ func TestRecordAgentJobRun_SuccessUpdatesRunMetadata(t *testing.T) {
 	require.Equal(t, models.AgentJobStatusActive, got.Status)
 
 	// A second run increments the count again and can clear next_run_at.
-	got, err = ds.RecordAgentJobRun(ctx, userID, created.ID, lastRunAt, nil, "", nil)
+	got, err = ds.RecordAgentJobRun(ctx, userID, created.ID, lastRunAt, "", nil, "", nil)
 	require.NoError(t, err)
 	require.Equal(t, 2, got.RunCount)
 	require.Nil(t, got.NextRunAt)
@@ -956,7 +956,7 @@ func TestRecordAgentJobRun_ErrorAndStatusChange(t *testing.T) {
 	require.NoError(t, err)
 
 	newStatus := models.AgentJobStatusFailed
-	got, err := ds.RecordAgentJobRun(ctx, userID, created.ID, time.Now(), nil, "provider timeout", &newStatus)
+	got, err := ds.RecordAgentJobRun(ctx, userID, created.ID, time.Now(), "", nil, "provider timeout", &newStatus)
 	require.NoError(t, err)
 	require.Equal(t, models.AgentJobStatusFailed, got.Status)
 	require.Equal(t, "provider timeout", got.LastError)
@@ -967,7 +967,7 @@ func TestRecordAgentJobRun_NotFound(t *testing.T) {
 	defer cleanup()
 
 	userID := createAgentJobTestUser(t, ds)
-	_, err := ds.RecordAgentJobRun(context.Background(), userID, uuid.New(), time.Now(), nil, "", nil)
+	_, err := ds.RecordAgentJobRun(context.Background(), userID, uuid.New(), time.Now(), "", nil, "", nil)
 	require.ErrorIs(t, err, ErrAgentJobNotFound)
 }
 
@@ -981,7 +981,7 @@ func TestRecordAgentJobRun_WrongOwner(t *testing.T) {
 	created, err := ds.CreateAgentJob(ctx, userID, baseAgentJobModel())
 	require.NoError(t, err)
 
-	_, err = ds.RecordAgentJobRun(ctx, otherUserID, created.ID, time.Now(), nil, "", nil)
+	_, err = ds.RecordAgentJobRun(ctx, otherUserID, created.ID, time.Now(), "", nil, "", nil)
 	require.ErrorIs(t, err, ErrAgentJobNotFound)
 }
 
@@ -1127,4 +1127,124 @@ func TestRemoveAgentJobRitual_RitualDoesNotExist(t *testing.T) {
 
 	err = ds.RemoveAgentJobRitual(ctx, userID, created.ID, uuid.New())
 	require.ErrorIs(t, err, ErrRitualNotFound)
+}
+
+func TestAgentJob_FollowUserTimezoneRunsInOwnersCurrentTimezone(t *testing.T) {
+	ds, cleanup := newAgentJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createAgentJobTestUser(t, ds)
+	job := baseAgentJobModel()
+	job.Timezone = "America/New_York"
+	created, err := ds.CreateAgentJob(ctx, userID, job)
+	require.NoError(t, err)
+	require.False(t, created.FollowUserTimezone)
+	require.Equal(t, "America/New_York", created.EffectiveTimezone)
+
+	changed, err := ds.SetUserCurrentTimezone(ctx, userID, "America/Los_Angeles")
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	// Not following: the owner's current timezone does not move the job.
+	got, err := ds.GetAgentJob(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, "America/New_York", got.EffectiveTimezone)
+
+	got, err = ds.SetAgentJobFollowUserTimezone(ctx, userID, created.ID, true)
+	require.NoError(t, err)
+	require.True(t, got.FollowUserTimezone)
+	require.Equal(t, "America/New_York", got.Timezone)
+	require.Equal(t, "America/Los_Angeles", got.EffectiveTimezone)
+
+	jobs, err := ds.ListAgentJobsForScheduler(ctx)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	require.Equal(t, "America/Los_Angeles", jobs[0].ScheduleTimezone())
+
+	_, err = ds.SetAgentJobFollowUserTimezone(ctx, createAgentJobTestUser(t, ds), created.ID, false)
+	require.ErrorIs(t, err, ErrAgentJobNotFound)
+}
+
+func TestAgentJob_FollowUserTimezoneWithoutAReportedTimezoneKeepsJobTimezone(t *testing.T) {
+	ds, cleanup := newAgentJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createAgentJobTestUser(t, ds)
+	job := baseAgentJobModel()
+	job.Timezone = "America/New_York"
+	job.FollowUserTimezone = true
+	created, err := ds.CreateAgentJob(ctx, userID, job)
+	require.NoError(t, err)
+	require.True(t, created.FollowUserTimezone)
+	require.Equal(t, "America/New_York", created.EffectiveTimezone)
+}
+
+func TestRecordAgentJobRun_StoresRunTimezone(t *testing.T) {
+	ds, cleanup := newAgentJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createAgentJobTestUser(t, ds)
+	created, err := ds.CreateAgentJob(ctx, userID, baseAgentJobModel())
+	require.NoError(t, err)
+	require.Nil(t, created.LastRunTimezone)
+
+	got, err := ds.RecordAgentJobRun(ctx, userID, created.ID, time.Now(), "America/Los_Angeles", nil, "", nil)
+	require.NoError(t, err)
+	require.NotNil(t, got.LastRunTimezone)
+	require.Equal(t, "America/Los_Angeles", *got.LastRunTimezone)
+
+	// "" leaves the stored timezone alone.
+	got, err = ds.RecordAgentJobRun(ctx, userID, created.ID, time.Now(), "", nil, "", nil)
+	require.NoError(t, err)
+	require.Equal(t, "America/Los_Angeles", *got.LastRunTimezone)
+}
+
+func TestSetAgentJobNextRunAt(t *testing.T) {
+	ds, cleanup := newAgentJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createAgentJobTestUser(t, ds)
+	created, err := ds.CreateAgentJob(ctx, userID, baseAgentJobModel())
+	require.NoError(t, err)
+
+	next := time.Now().UTC().Add(3 * time.Hour).Truncate(time.Second)
+	got, err := ds.SetAgentJobNextRunAt(ctx, userID, created.ID, &next)
+	require.NoError(t, err)
+	require.NotNil(t, got.NextRunAt)
+	require.WithinDuration(t, next, *got.NextRunAt, time.Second)
+
+	got, err = ds.SetAgentJobNextRunAt(ctx, userID, created.ID, nil)
+	require.NoError(t, err)
+	require.Nil(t, got.NextRunAt)
+}
+
+func TestSetUserCurrentTimezone(t *testing.T) {
+	ds, cleanup := newAgentJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createAgentJobTestUser(t, ds)
+
+	changed, err := ds.SetUserCurrentTimezone(ctx, userID, " America/Los_Angeles ")
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	changed, err = ds.SetUserCurrentTimezone(ctx, userID, "America/Los_Angeles")
+	require.NoError(t, err)
+	require.False(t, changed, "reporting the same timezone again is not a change")
+
+	u, err := ds.dbClient.User.Get(ctx, userID)
+	require.NoError(t, err)
+	require.Equal(t, "America/Los_Angeles", u.CurrentTimezone)
+
+	_, err = ds.SetUserCurrentTimezone(ctx, userID, "Mars/Olympus_Mons")
+	require.ErrorIs(t, err, ErrInvalidTimezone)
+	_, err = ds.SetUserCurrentTimezone(ctx, userID, "")
+	require.ErrorIs(t, err, ErrInvalidTimezone)
+	_, err = ds.SetUserCurrentTimezone(ctx, uuid.New(), "America/Chicago")
+	require.ErrorIs(t, err, ErrUserNotFound)
 }
