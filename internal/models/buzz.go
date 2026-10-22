@@ -65,14 +65,14 @@ type BuzzCommunity struct {
 	RelayPubKey string    `json:"relay_pubkey"`
 	// Attested is whether the owner gave an attestation for the persona's key; OwnerPubKey
 	// is whose. The attestation itself is not returned.
-	Attested         bool                `json:"attested"`
-	OwnerPubKey      *string             `json:"owner_pubkey,omitempty"`
-	PolicyVersion    *string             `json:"policy_version,omitempty"`
-	Status           BuzzCommunityStatus `json:"status"`
-	LastError        *string             `json:"last_error,omitempty"`
-	LastConnectedAt  *time.Time          `json:"last_connected_at,omitempty"`
-	CreatedAt        time.Time           `json:"created_at"`
-	UpdatedAt        time.Time           `json:"updated_at"`
+	Attested        bool                `json:"attested"`
+	OwnerPubKey     *string             `json:"owner_pubkey,omitempty"`
+	PolicyVersion   *string             `json:"policy_version,omitempty"`
+	Status          BuzzCommunityStatus `json:"status"`
+	LastError       *string             `json:"last_error,omitempty"`
+	LastConnectedAt *time.Time          `json:"last_connected_at,omitempty"`
+	CreatedAt       time.Time           `json:"created_at"`
+	UpdatedAt       time.Time           `json:"updated_at"`
 }
 
 // BuzzCommunityCreate is a new community for an agent.
@@ -97,8 +97,8 @@ type BuzzCommunityPatch struct {
 	PolicyVersion *string
 	Status        *BuzzCommunityStatus
 	// LastError: a pointer to "" clears it.
-	LastError     *string
-	ConnectedNow  bool
+	LastError    *string
+	ConnectedNow bool
 }
 
 // BuzzConnection is everything the gateway needs to hold one connection: the persona's
@@ -129,8 +129,11 @@ const (
 
 // BuzzBinding ties one channel of a community to a relay thread.
 type BuzzBinding struct {
-	ID             uuid.UUID `json:"id"`
-	CommunityID    uuid.UUID `json:"community_id"`
+	ID          uuid.UUID `json:"id"`
+	CommunityID uuid.UUID `json:"community_id"`
+	// CommunityName is the community's cached name, filled where the community is loaded with
+	// the binding (listings).
+	CommunityName  string    `json:"community_name,omitempty"`
 	ChatID         uuid.UUID `json:"chat_id"`
 	ChannelID      string    `json:"channel_id"`
 	ChannelName    string    `json:"channel_name"`

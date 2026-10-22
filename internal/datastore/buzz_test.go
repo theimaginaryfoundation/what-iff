@@ -207,12 +207,20 @@ func TestBuzzActiveConnectionsListBoundChannels(t *testing.T) {
 	require.Len(t, conns[0].Channels, 1, "only bindings with inbound on are listened to")
 	assert.Equal(t, b.ID, conns[0].Channels[0].BindingID)
 
-	require.NoError(t, f.ds.SetBuzzCommunityState(ctx, c.ID, models.BuzzCommunityDisabled, ""))
+	disabled := models.BuzzCommunityDisabled
+	_, err = f.ds.UpdateBuzzCommunity(ctx, f.owner, c.ID, models.BuzzCommunityPatch{Status: &disabled})
+	require.NoError(t, err)
 	conns, err = f.ds.ListActiveBuzzConnections(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, conns, "a paused community is not connected")
-
 	require.NoError(t, f.ds.SetBuzzCommunityState(ctx, c.ID, models.BuzzCommunityActive, ""))
+	still, err := f.ds.GetBuzzCommunity(ctx, f.owner, c.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.BuzzCommunityDisabled, still.Status, "the gateway cannot resume a paused community")
+
+	active := models.BuzzCommunityActive
+	_, err = f.ds.UpdateBuzzCommunity(ctx, f.owner, c.ID, models.BuzzCommunityPatch{Status: &active})
+	require.NoError(t, err)
 	_, err = f.ds.SetBuzzAgentStatus(ctx, f.owner, a.ID, models.BuzzAgentDisabled)
 	require.NoError(t, err)
 	conns, err = f.ds.ListActiveBuzzConnections(ctx)

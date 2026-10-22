@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
 	"github.com/theimaginaryfoundation/what-iff/internal/relaykit"
@@ -64,11 +63,10 @@ const UnrestrictedWarning = "Paused: this thread is no longer sandboxed, so Disc
 const busyNoticeEvery = time.Minute
 
 // RelayThreadOpenWithoutAcknowledgement reports whether a thread may be driven from
-// Discord without the owner's acknowledgement: only a sandboxed one. Anything else
-// can read the owner's account (their name, memories, other conversations, files,
-// scratchpad) on behalf of whoever may tag the bot.
+// Discord without the owner's acknowledgement: only a sandboxed one
+// (relaykit.RelayThreadOpenWithoutAcknowledgement).
 func RelayThreadOpenWithoutAcknowledgement(chat *models.Chat) bool {
-	return chat.IsSandboxed()
+	return relaykit.RelayThreadOpenWithoutAcknowledgement(chat)
 }
 
 // Service is the relay: it turns tags into turns in the relay thread and posts
@@ -186,55 +184,33 @@ func (s *Service) busyNoticeDue(bindingID uuid.UUID) bool {
 	return s.busy.Due(bindingID)
 }
 
-// threadOpen is the relay's fail-closed check that the bound thread may be driven
-// from Discord: it must be sandboxed
-// (RelayThreadOpenWithoutAcknowledgement), or the owner must have acknowledged the
-// binding. The chat's CURRENT sandbox flag is read every time, since it can be switched
-// off in the app after binding. Any doubt (thread missing, lookup failing) means closed.
-// When it closes on an unacknowledged thread, the reason is recorded on the binding
-// so the app can show it; nothing is posted to Discord.
+// threadOpen is the relay's fail-closed check that the bound thread may be driven from
+// Discord (relaykit.ThreadOpen): sandboxed, or acknowledged by the owner, read fresh on every
+// tag. When it closes, the reason is recorded on the binding so the app can show it; nothing
+// is posted to Discord.
 func (s *Service) threadOpen(ctx context.Context, t models.DiscordBindingTarget) bool {
 	b := t.Binding
 	chat, err := s.Store.GetChat(ctx, t.Bot.OwnerID, b.ChatID)
-	if err != nil || chat == nil {
-		s.Logger.Warn("discord relay: cannot read the bound thread; dropping tag",
-			zap.String("binding_id", b.ID.String()), zap.Error(err))
-		if errors.Is(err, datastore.ErrChatNotFound) && b.Status != models.DiscordBindingBroken {
-			// The owner deleted the relay thread: say so on the binding instead of showing
-			// "Connected" while every tag vanishes. Repointing the binding (or reactivate) clears it.
-			_ = s.Store.SetDiscordBindingStatus(ctx, b.ID, models.DiscordBindingBroken, ThreadDeletedError)
-		}
-		return false
-	}
-	if RelayThreadOpenWithoutAcknowledgement(chat) {
-		s.clearUnrestrictedWarning(ctx, b)
-		if b.AllowUnrestricted {
-			// The acknowledgement only means something while the thread is not sandboxed.
-			// Withdraw it now, so switching the sandbox off later pauses the binding
-			// instead of silently re-opening it.
+	open := relaykit.ThreadOpen(relaykit.Gate{
+		Chat: chat, ChatErr: err,
+		Acknowledged: b.AllowUnrestricted, Broken: b.Status == models.DiscordBindingBroken, LastError: b.LastError,
+		Warning: UnrestrictedWarning, DeletedError: ThreadDeletedError,
+		MarkBroken: func(reason string) {
+			_ = s.Store.SetDiscordBindingStatus(ctx, b.ID, models.DiscordBindingBroken, reason)
+		},
+		SetLastError: func(msg string) { _ = s.Store.SetDiscordBindingStatus(ctx, b.ID, b.Status, msg) },
+		Withdraw: func() {
 			if err := s.Store.WithdrawDiscordBindingAcknowledgement(ctx, b.ID); err != nil {
 				s.Logger.Warn("discord relay: could not withdraw a stale acknowledgement",
 					zap.String("binding_id", b.ID.String()), zap.Error(err))
 			}
-		}
-		return true
+		},
+	})
+	if !open {
+		s.Logger.Warn("discord relay: bound thread is missing, or not sandboxed and not acknowledged; dropping tag",
+			zap.String("binding_id", b.ID.String()), zap.String("chat_id", b.ChatID.String()), zap.Error(err))
 	}
-	if b.AllowUnrestricted {
-		s.clearUnrestrictedWarning(ctx, b)
-		return true
-	}
-	s.Logger.Warn("discord relay: bound thread is not sandboxed and the binding is not acknowledged; dropping tag",
-		zap.String("binding_id", b.ID.String()), zap.String("chat_id", b.ChatID.String()))
-	if b.LastError == nil || *b.LastError != UnrestrictedWarning {
-		_ = s.Store.SetDiscordBindingStatus(ctx, b.ID, b.Status, UnrestrictedWarning)
-	}
-	return false
-}
-
-func (s *Service) clearUnrestrictedWarning(ctx context.Context, b models.DiscordBinding) {
-	if b.LastError != nil && *b.LastError == UnrestrictedWarning {
-		_ = s.Store.SetDiscordBindingStatus(ctx, b.ID, b.Status, "")
-	}
+	return open
 }
 
 // enqueue adds w to the thread's queue (relaykit.TurnQueue) and reports false when it is full.

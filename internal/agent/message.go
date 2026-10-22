@@ -838,8 +838,11 @@ type chatContext struct {
 	// type instead of being recognised by its text. Empty when the turn has no such line.
 	userNameLine string
 	// memoryProvenance is what memories written from this turn are stored with: external in a
-	// Discord relay thread, user otherwise (memoryProvenanceForChat).
+	// relay thread (Discord or Buzz), user otherwise (memoryProvenanceForChat).
 	memoryProvenance models.MemoryProvenance
+	// relayPlatform names the service an external thread is relayed from ("Discord", "Buzz"),
+	// for the extraction note; "" elsewhere (relayPlatformForChat).
+	relayPlatform string
 	// triggerMessageID is the saved user message this turn answers (uuid.Nil when there is none);
 	// create_memory attributes an external memory to its Discord author by default.
 	triggerMessageID uuid.UUID
@@ -2079,6 +2082,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 		memoryProgress:         memoryProgress,
 		mcpSessions:            make(map[string]string),
 		memoryProvenance:       a.memoryProvenanceForChat(ctx, userID, parentChat),
+		relayPlatform:          a.relayPlatformForChat(ctx, userID, parentChat),
 		triggerMessageID:       chatMessage.ID,
 	}, nil
 }

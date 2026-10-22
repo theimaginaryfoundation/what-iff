@@ -222,12 +222,24 @@ func (d *Datastore) UpdateBuzzCommunity(ctx context.Context, userID, id uuid.UUI
 }
 
 // SetBuzzCommunityState records how the connection stands (the gateway's view). An empty
-// lastError clears it; an active state records the connection time.
+// lastError clears it; an active state records the connection time. A community the owner
+// paused is left paused: a connection closing just after the pause cannot undo it.
 func (d *Datastore) SetBuzzCommunityState(ctx context.Context, id uuid.UUID, status models.BuzzCommunityStatus, lastError string) error {
-	_, err := d.patchBuzzCommunity(ctx, id, models.BuzzCommunityPatch{
-		Status: &status, LastError: &lastError, ConnectedNow: status == models.BuzzCommunityActive,
-	})
-	return err
+	upd := d.dbClient.BuzzCommunity.Update().
+		Where(buzzcommunity.ID(id), buzzcommunity.StatusNEQ(buzzcommunity.StatusDisabled)).
+		SetStatus(buzzcommunity.Status(status))
+	if lastError == "" {
+		upd.ClearLastError()
+	} else {
+		upd.SetLastError(lastError)
+	}
+	if status == models.BuzzCommunityActive {
+		upd.SetLastConnectedAt(time.Now())
+	}
+	if _, err := upd.Save(ctx); err != nil {
+		return fmt.Errorf("set buzz community state: %w", err)
+	}
+	return nil
 }
 
 func (d *Datastore) patchBuzzCommunity(ctx context.Context, id uuid.UUID, p models.BuzzCommunityPatch) (*models.BuzzCommunity, error) {
@@ -406,7 +418,9 @@ func (d *Datastore) listBuzzBindings(ctx context.Context, where ...predicate.Buz
 	}
 	out := make([]models.BuzzBinding, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, *buzzBindingModel(r, r.Edges.Community.ID))
+		m := buzzBindingModel(r, r.Edges.Community.ID)
+		m.CommunityName = r.Edges.Community.Name
+		out = append(out, *m)
 	}
 	return out, nil
 }
