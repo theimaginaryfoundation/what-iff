@@ -149,6 +149,9 @@ The wire format was checked against Buzz itself (relay `ghcr.io/block/buzz:main`
 The relay can be tried end to end without the Buzz desktop app:
 
 - Run a Buzz relay with its Compose bundle (`deploy/compose` in block/buzz) on `localhost:3000`, closed to members, with a test owner key.
+- The Buzz 1.0 desktop app accepts only `https://`/`wss://` communities, so to use it, put the relay behind TLS (Caddy with `tls internal`, the relay's `RELAY_URL` set to the TLS address) and trust Caddy's local CA in the keychain.
+  A community is bound to its host, so moving the relay to a new address starts a fresh community.
+  What Iff's API container then needs the CA too (`SSL_CERT_FILE` pointing at a bundle with Caddy's root appended).
 - Run What Iff with `BUZZ_ALLOW_PRIVATE_RELAYS=true`. When the API runs in Docker, a sidecar sharing its network namespace forwards its `localhost:3000` to the host, so the relay sees the host name it serves.
 - `go run ./cmd/buzz-rig` mints attestations and invites, creates channels, publishes profiles, posts as a test person (`say -mention`, `-reply`, `-file`) and watches a channel.
 - `BUZZ_LIVE_RELAY=http://localhost:3000 BUZZ_LIVE_OWNER_SECRET=<hex> go test -run Live ./internal/buzzrelay/` runs the live wire tests.
