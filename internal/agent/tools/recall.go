@@ -543,13 +543,14 @@ func wantsSummaries(src string) bool { return src == recallSourceAll || src == r
 
 // formatMemories renders live memory rows for recall JSON: each line is prefixed with a hop-ready
 // memory:<uuid> so related/origin can consume IDs from search/investigate without a second lookup.
-func formatMemories(mems []*models.Memory) []string {
+// A memory read from a weave peer carries its thread (memoryutil.WeaveLabel).
+func formatMemories(chat *models.Chat, mems []*models.Memory) []string {
 	out := make([]string, 0, len(mems))
 	for _, m := range mems {
 		if m == nil {
 			continue
 		}
-		out = append(out, memorySourceLabel(m.ID)+" "+memoryutil.FormatMemoryForContext(m))
+		out = append(out, memorySourceLabel(m.ID)+" "+memoryutil.WeaveLabel(m, chat)+memoryutil.FormatMemoryForContext(m))
 	}
 	return out
 }

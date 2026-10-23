@@ -73,6 +73,10 @@ func (Chat) Fields() []ent.Field {
 			Values("account", "sandbox").
 			Default("account").
 			Comment("How much of the account the chat may read (models.ContextScope). 'account' (the default) reads everything, as any chat. 'sandbox' reads nothing outside itself: only memories created in it, no other conversations, scratchpad or account-wide files, jobs, skills or personalities, and it writes only Chat-scoped memories. Set at creation; a chat can leave the sandbox but never enter one later."),
+		field.UUID("weave_id", uuid.UUID{}).
+			Optional().
+			Nillable().
+			Comment("The weave this chat belongs to (ent/schema/weave.go), if any. A sandboxed chat in a weave may also read its weave peers (their Chat-scoped memories, summaries and messages); it still writes only to itself. A plain column, so the weave is a membership list and Chat needs no edge."),
 		field.String("rehydration_state").
 			Optional().
 			Comment("Lazy-summarization lifecycle for imported threads: ''/'pending'/'processing'/'ready'/'failed'. Empty means no rehydration needed (e.g. native threads)"),
@@ -114,6 +118,7 @@ func (Chat) Indexes() []ent.Index {
 		index.Edges("owner"),
 		index.Edges("owner").Fields("last_message_time"),
 		index.Edges("owner").Fields("import_hash").Unique(),
+		index.Fields("weave_id"),
 	}
 }
 

@@ -69,6 +69,7 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
   `create_memory` always writes a Chat-scoped memory in a sandboxed chat, whatever scope was asked.
   A hidden memory, an unknown id and an ambiguous id prefix give a sandboxed chat the same `not found` error (`resolveMemory`).
   Refusals share `sandboxedNote`, so the model gets one consistent message.
+  A sandboxed chat in a weave (ADR 0x030) also reads its weave peers: `memoryReadableBy` and `conversationReadable` ask `Chat.CanReadChat`, the datastore widens the SQL scoping, and `formatMemories` labels a peer's memory with its thread (`memoryutil.WeaveLabel`); files and writes stay the chat's own.
 - **Memory provenance:** `CreateMemoryToolWithOrigin` writes the origin the agent computed for the turn (external in a Discord relay thread); its optional `speaker` argument names the Discord user a memory came from and is ignored elsewhere.
   `find_context` shows external memories through the shared formatter (`source=external(...)`) and marks a relay thread's summary chunks with `provenance`; distillation material carries the same note.
 - **`find_context` images are context-only:** an image fetched in fetch mode is returned with `FileAttachment.ContextOnly`.

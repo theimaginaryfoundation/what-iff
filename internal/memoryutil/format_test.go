@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
@@ -43,4 +44,18 @@ func TestFormatMemoryForContext_BaseAndOptionalSignals(t *testing.T) {
 	require.Contains(t, rich, "reconfirmed=5x")
 	require.Contains(t, rich, "relevance=0.87")
 	require.Equal(t, "Post the daily digest to #status-updates as a root message", StripMemoryContextMetadata(rich))
+}
+
+func TestWeaveLabel(t *testing.T) {
+	self, peer := uuid.New(), uuid.New()
+	chat := &models.Chat{ID: self, ContextScope: models.ContextScopeSandbox,
+		WeavePeers: []models.ChatRef{{ID: peer, Name: "#town-square"}}}
+
+	require.Equal(t, "[weave: #town-square] ", WeaveLabel(&models.Memory{ChatID: peer}, chat), "named from the peer list")
+	require.Equal(t, "[weave: #Notes] ", WeaveLabel(&models.Memory{ChatID: uuid.New(), ChatName: "Notes"}, chat))
+	require.Equal(t, "[weave: #a b] ", WeaveLabel(&models.Memory{ChatID: peer, ChatName: "a] b"}, chat), "names cannot close the label")
+	require.Empty(t, WeaveLabel(&models.Memory{ChatID: self}, chat), "its own")
+	require.Empty(t, WeaveLabel(&models.Memory{}, chat), "no chat")
+	require.Empty(t, WeaveLabel(&models.Memory{ChatID: peer}, &models.Chat{ID: self}), "not a sandbox")
+	require.Empty(t, WeaveLabel(nil, chat))
 }

@@ -2371,7 +2371,17 @@ func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.
 	// Format vector as PostgreSQL array literal to avoid parameter binding issues
 	vectorStr := embVec.String()
 
-	readable := relatedMemoryReadable(chatId, activePersonalityID, sandboxed)
+	var weave []uuid.UUID
+	if sandboxed {
+		// A sandboxed chat in a weave also reads its weave peers' Chat-scoped memories.
+		ids, err := readableChatIDs(ctx, tx.Client(), userId, chatId)
+		if err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+		weave = ids[1:]
+	}
+	readable := relatedMemoryReadable(chatId, activePersonalityID, sandboxed, weave...)
 	dbEmbeddings, err := tx.Embedding.Query().
 		Where(
 			embedding.HasMemoryWith(
@@ -2430,12 +2440,22 @@ func (d *Datastore) GetRelatedMemories(ctx context.Context, userId, chatId uuid.
 // another scope (MoveMemoryScope) is retrieved under its new scope with its existing embedding.
 // A change to what counts as readable here must keep TestMoveMemoryScope_RetrievalFollowsTheNewScope
 // passing, and may need matching rules in MoveMemoryScope.
-func relatedMemoryReadable(chatID, activePersonalityID uuid.UUID, sandboxed bool) predicate.Memory {
+//
+// weavePeers are the sandbox's weave peers (docs/adr/0x030-thread-weaves.md): a sandboxed chat
+// also reads their Chat-scoped memories. They are ignored outside a sandbox, which reads every
+// chat's anyway through the User scope and its own Chat scope.
+func relatedMemoryReadable(chatID, activePersonalityID uuid.UUID, sandboxed bool, weavePeers ...uuid.UUID) predicate.Memory {
 	chatScoped := memory.And(
 		memory.ScopeEQ(memory.ScopeChat),
 		memory.HasChatWith(entchat.ID(chatID)),
 	)
 	if sandboxed {
+		if len(weavePeers) > 0 {
+			return memory.And(
+				memory.ScopeEQ(memory.ScopeChat),
+				memory.HasChatWith(entchat.IDIn(append([]uuid.UUID{chatID}, weavePeers...)...)),
+			)
+		}
 		return chatScoped
 	}
 	pinned := memory.PinnedPersonalityIDIsNil()
@@ -2453,8 +2473,8 @@ func relatedMemoryReadable(chatID, activePersonalityID uuid.UUID, sandboxed bool
 // rows (they are internal checkpoint state, not facts); this is the counterpart recall's
 // source_type=summaries search uses instead. limit is clamped to [1, 20], defaulting to 5.
 //
-// onlyChatID, when not uuid.Nil, restricts the search to that chat's own summary: a sandboxed chat
-// reads no other conversation's summary.
+// onlyChatID, when not uuid.Nil, restricts the search to that chat's own summary and those of its
+// weave peers: a sandboxed chat reads no other conversation's summary.
 func (d *Datastore) GetRelatedSummaryMemories(ctx context.Context, userID uuid.UUID, queryEmbedding []float32, limit int, onlyChatID uuid.UUID) ([]*models.Memory, error) {
 	if limit <= 0 {
 		limit = 5
@@ -2473,7 +2493,11 @@ func (d *Datastore) GetRelatedSummaryMemories(ctx context.Context, userID uuid.U
 		memory.ScopeEQ(memory.ScopeSummary),
 	}
 	if onlyChatID != uuid.Nil {
-		summaryPreds = append(summaryPreds, memory.HasChatWith(entchat.ID(onlyChatID)))
+		ids, err := readableChatIDs(ctx, d.dbClient, userID, onlyChatID)
+		if err != nil {
+			return nil, err
+		}
+		summaryPreds = append(summaryPreds, memory.HasChatWith(entchat.IDIn(ids...)))
 	}
 	dbEmbeddings, err := d.dbClient.Embedding.Query().
 		Where(embedding.HasMemoryWith(summaryPreds...)).

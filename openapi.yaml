@@ -2852,6 +2852,132 @@ paths:
                 $ref: '#/components/schemas/Error'
 
   # Memory Management Endpoints
+  # Weaves (docs/adr/0x030-thread-weaves.md): sandboxed threads that may read each other.
+  /weaves:
+    get:
+      summary: List weaves
+      tags: [Weaves]
+      responses:
+        '200':
+          description: The user's weaves with their threads
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Weave'
+        '401':
+          description: Unauthorized
+    post:
+      summary: Weave threads together
+      description: >-
+        Joins at least two of the user's sandboxed threads with the same personality into a weave. Each member's
+        sandbox then also reads its peers (their Chat-scoped memories, checkpoint summaries and messages, each
+        labelled with its thread); writes stay in the thread that makes them. A thread is in at most one weave.
+      tags: [Weaves]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                chat_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+              required: [name, chat_ids]
+      responses:
+        '201':
+          description: Weave created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Weave'
+        '400':
+          description: A thread cannot be woven (not sandboxed, another personality, already in a weave), with the reason
+        '401':
+          description: Unauthorized
+        '404':
+          description: A thread is not the user's
+
+  /weaves/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Get a weave
+      tags: [Weaves]
+      responses:
+        '200':
+          description: The weave
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Weave'
+        '404':
+          description: Not found (including another account's weave)
+    delete:
+      summary: Delete a weave
+      description: Unweaves its threads, which read only themselves again, and removes the weave.
+      tags: [Weaves]
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          description: Not found
+
+  /weaves/{id}/chats/{chatId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: chatId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      summary: Add a thread to a weave
+      tags: [Weaves]
+      responses:
+        '200':
+          description: The weave with the thread added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Weave'
+        '400':
+          description: The thread cannot be woven, with the reason
+        '404':
+          description: Not found
+    delete:
+      summary: Remove a thread from a weave
+      description: The thread reads only itself again from its next turn, and its peers stop reading it.
+      tags: [Weaves]
+      responses:
+        '200':
+          description: The weave without the thread
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Weave'
+        '400':
+          description: The thread is not in this weave
+        '404':
+          description: Not found
+
   /memory:
     get:
       summary: List memories
@@ -8044,6 +8170,35 @@ components:
         - status
 
     # Chat Management Schemas
+    ChatRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+      required: [id, name]
+    Weave:
+      type: object
+      description: A named set of sandboxed threads that may read each other.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        chats:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatRef'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, name, chats, created_at, updated_at]
     Chat:
       type: object
       properties:
@@ -8103,6 +8258,13 @@ components:
             (the owner can enable any of these afterwards), and it is never given the owner's name or
             auto-selected moods. Chosen at creation: a thread can leave the sandbox (`account`) but never
             enter one later.
+        weave_id:
+          type: string
+          format: uuid
+          description: >-
+            The weave this thread belongs to, if any (see /weaves). A sandboxed thread in a weave may also read
+            its weave peers: their Chat-scoped memories, checkpoint summaries and messages. It still writes only
+            to itself.
         created_at:
           type: string
           format: date-time
@@ -10798,6 +10960,8 @@ components:
         - sections
 
 tags:
+  - name: Weaves
+    description: Sandboxed threads woven together so they may read each other
   - name: System
     description: System health and status endpoints
   - name: Provider Keys

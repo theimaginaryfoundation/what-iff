@@ -989,6 +989,7 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 			chat_personality uuid,
 			chat_active_mood uuid,
 			context_scope text NOT NULL DEFAULT 'account',
+			weave_id uuid,
 			user_chats uuid NOT NULL
 		)`,
 		`CREATE TABLE personalities (
@@ -1041,6 +1042,15 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 	// A summary's provenance depends on whether its chat is a Discord relay thread
 	// (externalRelayChat), so every schema with chats and memories has the relay tables too.
 	createDiscordTestTables(t, db)
+	// A sandboxed chat's reads widen to its weave peers (weavePeers), so the weave table too.
+	_, err := db.Exec(`CREATE TABLE weaves (
+		id uuid PRIMARY KEY,
+		created_at datetime NOT NULL,
+		updated_at datetime NOT NULL,
+		name text NOT NULL,
+		user_weaves uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE
+	)`)
+	require.NoError(t, err)
 }
 
 func buildZipReaderForTest(t *testing.T, entries map[string]string) *zip.Reader {

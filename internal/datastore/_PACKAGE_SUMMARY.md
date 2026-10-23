@@ -173,7 +173,10 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Sandboxed chats:** the SQL side of the sandbox.
   `GetRelatedMemories` scopes a sandboxed chat to its own Chat-scoped memories in the `WHERE` clause (so it still gets a full set of matches), and `GetRelatedSummaryMemories` takes the one chat whose summary may be searched.
   `ListMemoryMergeEvents` takes `OnlyChatID` (fold events whose survivor memory was created in that chat; link events are excluded).
-  `MemoryIDsCreatedInChat` re-checks persisted memory ids against the chat's own memories.
+  `MemoryIDsCreatedInChat` re-checks persisted memory ids against the chat's own memories; `MemoryIDsReadableInChat`, which the agent's replay filter uses, also accepts those of its weave peers.
+- **Weaves (`weave.go`, ADR 0x030):** owner-scoped weaves of sandboxed threads of one personality (`chats.weave_id`, one weave per thread).
+  `weavePeers` is the read-time peer list (still sandboxed, same personality: fail closed), `readableChatIDs` the chat plus its peers; `GetChat` loads `Chat.WeavePeers`, and `relatedMemoryReadable` (its `weavePeers` argument) and `GetRelatedSummaryMemories` widen to the set.
+  Only reads widen: writes, merges and moves still guard with `memoryOfChat`.
   `toChatModel` blanks the personality scratchpad for a sandboxed chat, so neither a turn nor `GetChatContext` (the owner's context panel) sees it, and the chat handler refuses a scratchpad save for a sandbox.
   `CreateChat` and `UpdateChat` write `context_scope` (validated; `ErrInvalidRequestBody` for an unknown scope); `UpdateChat` writes it only when `SetContextScope` is true, so a stale copy saved by a turn cannot un-sandbox a chat.
   `CreateChat` honours `Chat.DisabledTools`, and gives a chat created sandboxed with no list of its own the registered sandbox defaults (`models.SandboxDefaultDisabledTools`), so every creation path starts a sandbox the same way.

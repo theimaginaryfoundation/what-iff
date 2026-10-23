@@ -44,6 +44,7 @@ import (
 	toolshandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/user"
 	versionhandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/version"
+	weavehandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/weave"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/webhook"
 	"github.com/theimaginaryfoundation/what-iff/internal/mcpoauth"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
@@ -351,6 +352,7 @@ func (s *Server) setupRoutes() {
 	fileAttachmentHandler := fileattachment.NewHandler(dataStore, s.logger, agent)
 	imageGalleryHandler := imagegallery.NewHandler(dataStore, s.logger, agent.FileStore(), agent)
 	moodHandler := moodhandler.NewHandler(dataStore, s.logger, agent.FileStore())
+	weaveHandler := weavehandler.NewHandler(dataStore, s.logger)
 	roleHandler := role.NewHandler(dataStore, s.logger)
 	webhookHandler := webhook.NewHandler(dataStore, agent, s.logger)
 	toolsHandler := toolshandler.NewHandler(s.logger, agent.FirstPartyWebSearch())
@@ -414,6 +416,7 @@ func (s *Server) setupRoutes() {
 	fileAttachmentHandler.RegisterRoutes(authRouter)
 	imageGalleryHandler.RegisterRoutes(authRouter)
 	moodHandler.RegisterRoutes(authRouter)
+	weaveHandler.RegisterRoutes(authRouter)
 	mountAccountKeyRoutes(authRouter, keyResolver, accountKeys)
 	toolsHandler.RegisterRoutes(authRouter)
 	searchHandler.RegisterRoutes(authRouter)

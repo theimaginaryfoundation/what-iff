@@ -3,8 +3,10 @@ package memoryutil
 import (
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -46,6 +48,25 @@ func FormatMemoryForContext(mem *models.Memory) string {
 		meta += " " + ExternalProvenanceNote(mem.SourceSpeaker)
 	}
 	return fmt.Sprintf("%s [%s]", mem.Content, meta)
+}
+
+// WeaveLabel is the provenance header of a memory a sandboxed chat read from a weave peer
+// (docs/adr/0x030-thread-weaves.md): "[weave: #thread] ", so the model sees whose thread a chunk
+// came from before it uses it. It is "" for the chat's own memories, a memory with no chat, or
+// a chat that is not sandboxed (which reads other chats' memories only through the User scope).
+func WeaveLabel(mem *models.Memory, chat *models.Chat) string {
+	if mem == nil || !chat.IsSandboxed() || mem.ChatID == uuid.Nil || mem.ChatID == chat.ID {
+		return ""
+	}
+	name := mem.ChatName
+	if p := chat.WeavePeer(mem.ChatID); p != nil && name == "" {
+		name = p.Name
+	}
+	name = strings.TrimPrefix(models.CleanSpeakerName(name), "#")
+	if name == "" {
+		name = "another thread"
+	}
+	return "[weave: #" + name + "] "
 }
 
 // ExternalProvenanceNote is the metadata note an external memory carries in model context: it

@@ -363,3 +363,30 @@ func TestSandbox_ExternalMemoriesStayInTheirRelayThread(t *testing.T) {
 	require.False(t, memoryReadableBy(chat, stray))
 	require.True(t, memoryReadableBy(ordinaryChat(), stray), "the owner's ordinary chats see it (marked unverified)")
 }
+
+// A weave (docs/adr/0x030-thread-weaves.md) widens a sandbox's reads to its weave peers: their
+// Chat memories, summaries and conversations. Files and every write stay the thread's own.
+func TestSandbox_WeavePeersAreReadable(t *testing.T) {
+	chat, peer, stranger := sandboxedChat(), uuid.New(), uuid.New()
+	chat.WeavePeers = []models.ChatRef{{ID: peer, Name: "Buzz · #town-square"}}
+
+	require.True(t, memoryReadableBy(chat, chatMem("the peer's", peer)))
+	require.True(t, memoryReadableBy(chat, &models.Memory{Level: models.MemoryLevelSummary, ChatID: peer}), "the peer's summary")
+	require.False(t, memoryReadableBy(chat, chatMem("a thread outside the weave", stranger)))
+	require.False(t, memoryReadableBy(chat, userMem("the owner's")), "the account stays out")
+	require.True(t, conversationReadable(chat, peer))
+	require.False(t, conversationReadable(chat, stranger))
+	require.False(t, fileInChatScope(chat, &models.FileAttachment{ChatID: &peer}), "files stay per thread")
+
+	// Recall reads the peer's conversation, and labels its memories with their thread.
+	store := &fakeRecallStore{messages: []*models.ChatMessage{{ID: uuid.New(), Message: "hello", Origin: models.MessageOriginUser, SentAt: time.Now()}}}
+	res := recallJSON(t, newTestRecallTool(store), chat, `{"mode":"conversation","target":"`+peer.String()+`"}`)
+	require.Empty(t, res.Error)
+	require.Equal(t, peer, store.lastMsgChatID)
+
+	mem := chatMem("bob ships on Fridays", peer)
+	mem.ChatName = "Buzz · #town-square"
+	lines := formatMemories(chat, []*models.Memory{mem, chatMem("own note", chat.ID)})
+	require.Contains(t, lines[0], "[weave: #Buzz · #town-square] bob ships on Fridays")
+	require.NotContains(t, lines[1], "[weave:", "its own memories carry no label")
+}

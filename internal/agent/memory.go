@@ -275,8 +275,14 @@ func (a *Agent) getMemories(ctx context.Context, userID uuid.UUID, chatID uuid.U
 		if len(dbMemories) > 0 {
 			memories = append(memories, memoryStalenessNote)
 		}
+		// A sandboxed chat in a weave also retrieves its peers' memories (datastore
+		// GetRelatedMemories); each carries its thread, so the model knows whose grain it is.
+		self := &models.Chat{ID: chatID}
+		if sandboxed {
+			self.ContextScope = models.ContextScopeSandbox
+		}
 		for _, dbMemory := range dbMemories {
-			memories = append(memories, formatMemoryForContext(dbMemory))
+			memories = append(memories, memoryutil.WeaveLabel(dbMemory, self)+formatMemoryForContext(dbMemory))
 		}
 	}
 

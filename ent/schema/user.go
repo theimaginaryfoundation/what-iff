@@ -100,6 +100,9 @@ func (User) Edges() []ent.Edge {
 		// them their bindings and message links. See ent/schema/discord.go.
 		edge.To("discord_bots", DiscordBot.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),
+		// Weaves: named sets of sandboxed threads that may read each other. See ent/schema/weave.go.
+		edge.To("weaves", Weave.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}, userPrivateEdges()...)
 }
 
