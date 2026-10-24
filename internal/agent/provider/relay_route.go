@@ -11,6 +11,7 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/shared"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 )
 
@@ -200,6 +201,12 @@ func (h chatCompletionStreamHooks) observed(onOutput func()) chatCompletionStrea
 // bad. Every relay error still falls back; only these trip the breaker, so one
 // user's oversized request cannot take the relay away from everyone.
 func countsAgainstRelay(err error) bool {
+	// No relay key for this caller is about the caller, not the relay: it must not
+	// switch routing off for everyone else.
+	var notConfigured *providerkeys.NotConfiguredError
+	if errors.As(err, &notConfigured) {
+		return false
+	}
 	var apiErr *openai.Error
 	if !errors.As(err, &apiErr) || apiErr == nil {
 		return true // transport failure

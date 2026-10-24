@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +15,7 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 )
 
 // relayTestServer answers every request with status and body, recording the
@@ -184,6 +187,13 @@ func TestRelayRoute_BadRequestFallsBackWithoutTrippingBreaker(t *testing.T) {
 	}
 	require.Equal(t, relayBreakerThreshold+1, relay.calls(), "a bad request says nothing about relay health")
 	require.True(t, route.breaker.allow("mistral-medium-3-5"))
+}
+
+func TestCountsAgainstRelay(t *testing.T) {
+	require.True(t, countsAgainstRelay(errors.New("connection refused")), "transport failure")
+	require.False(t, countsAgainstRelay(&providerkeys.NotConfiguredError{Provider: models.ModelProviderCheaperInference}),
+		"a caller without a relay key says nothing about the relay")
+	require.False(t, countsAgainstRelay(fmt.Errorf("wrapped: %w", &providerkeys.NotConfiguredError{})))
 }
 
 func TestRelayBreaker_SingleProbeWhileHalfOpen(t *testing.T) {
