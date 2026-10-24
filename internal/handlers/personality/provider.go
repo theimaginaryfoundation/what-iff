@@ -38,8 +38,9 @@ type Store interface {
 	DeleteFileAttachment(ctx context.Context, userID, id uuid.UUID) error
 	SetFileAttachmentS3Key(ctx context.Context, userID, id uuid.UUID, s3Key string) error
 
-	GetUserPreferences(ctx context.Context, userID uuid.UUID) (*models.UserPreferences, error)
-	UpdateUserPreferences(ctx context.Context, userID uuid.UUID, prefs models.UserPreferences) (*models.UserPreferences, error)
+	// SetDefaultPersonality writes only the default personality (the first-personality
+	// auto-default); a full preferences round trip would echo every other field back.
+	SetDefaultPersonality(ctx context.Context, userID, personalityID uuid.UUID) error
 
 	// Personality generation flow
 	GetOrCreateActiveFlow(ctx context.Context, userID uuid.UUID) (*models.PersonalityGenFlow, error)

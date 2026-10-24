@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ type createAgentJobToolArgs struct {
 	SkillIDs         []string `json:"skill_ids,omitempty"`
 	ModelOverride    string   `json:"model_override,omitempty"`
 	UseCurrentThread *bool    `json:"use_current_thread,omitempty"`
+	ThreadID         string   `json:"thread_id,omitempty"`
 }
 
 type createAgentJobToolResult struct {
@@ -36,6 +38,7 @@ type createAgentJobToolResult struct {
 	Timezone     string                      `json:"timezone,omitempty"`
 	HumanSummary string                      `json:"human_summary,omitempty"`
 	NextRunAt    *time.Time                  `json:"next_run_at,omitempty"`
+	ThreadID     string                      `json:"thread_id,omitempty"`
 	Error        string                      `json:"error,omitempty"`
 }
 
@@ -78,6 +81,30 @@ func (a *Agent) createAgentJobTool(ctx context.Context, chat *models.Chat, args 
 		})
 	}
 
+	// Where the job runs: thread_id names a conversation ("current", an id, or "new");
+	// use_current_thread is the older way to say "current" and still works on its own.
+	threadArg := strings.TrimSpace(toolArgs.ThreadID)
+	useCurrent := toolArgs.UseCurrentThread != nil && *toolArgs.UseCurrentThread
+	if threadArg == "" && useCurrent {
+		threadArg = jobThreadCurrent
+	}
+	thread, err := resolveJobThread(ctx, a.ds, chat, threadArg)
+	if err != nil {
+		if errors.Is(err, errJobThreadLookup) {
+			err = errors.New("could not check that conversation; try again")
+		}
+		return marshalAgentJobToolResult(createAgentJobToolResult{
+			Success: false,
+			Error:   err.Error(),
+		})
+	}
+	if useCurrent && (thread == nil || *thread != chat.ID) {
+		return marshalAgentJobToolResult(createAgentJobToolResult{
+			Success: false,
+			Error:   "use_current_thread and thread_id disagree; pass only thread_id",
+		})
+	}
+
 	tz := "UTC"
 	if clientTZ, ok := middleware.GetClientTimezoneFromContext(ctx); ok {
 		if s := strings.TrimSpace(clientTZ); s != "" {
@@ -113,10 +140,7 @@ func (a *Agent) createAgentJobTool(ctx context.Context, chat *models.Chat, args 
 		RunCount:      0,
 	}
 
-	if toolArgs.UseCurrentThread != nil && *toolArgs.UseCurrentThread {
-		chatID := chat.ID
-		newJob.ChatID = &chatID
-	}
+	newJob.ChatID = thread
 
 	chosenModel := strings.TrimSpace(toolArgs.ModelOverride)
 	if chosenModel != "" {
@@ -167,6 +191,9 @@ func (a *Agent) createAgentJobTool(ctx context.Context, chat *models.Chat, args 
 		Timezone:     created.Timezone,
 		HumanSummary: preview.HumanSummary,
 		NextRunAt:    created.NextRunAt,
+	}
+	if created.ChatID != nil {
+		result.ThreadID = created.ChatID.String()
 	}
 
 	return marshalAgentJobToolResult(result)

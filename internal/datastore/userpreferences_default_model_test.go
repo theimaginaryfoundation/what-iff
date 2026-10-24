@@ -40,7 +40,10 @@ func TestUpdateUserPreferences_SuppliedDefaultModelIsStillWritten(t *testing.T) 
 	modelID := uuid.New()
 
 	mock.ExpectBegin()
-	// assertUserCanUseModel runs first when a model is actually supplied.
+	// The stored record is read first: only a changed default is validated and written.
+	mock.ExpectQuery("SELECT .*user_preferences.*").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "default_model"}).AddRow(uuid.NewString(), uuid.NewString()))
+	// assertUserCanUseModel runs next, since the supplied model differs from the stored one.
 	mock.ExpectQuery("SELECT .*").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(modelID.String()))
 	mock.ExpectExec("UPDATE .*user_preferences.*").WillReturnResult(sqlmock.NewResult(0, 1))
@@ -71,4 +74,34 @@ func TestUpdateUserPreferences_OmittedDefaultModelSkipsPermissionCheck(t *testin
 		require.NotContains(t, strings.ToLower(q), "from `models`",
 			"no model lookup should happen when default_model_id was omitted")
 	}
+}
+
+func TestUpdateUserPreferences_UnchangedDefaultModelIsNotRevalidated(t *testing.T) {
+	// Every caller PUTs the whole record, so the stored default rides along with a theme or
+	// favorites save. Re-validating it meant a retired default (Deleted, so the model lookup
+	// finds nothing) failed every other preference save with a 500 (#347): no model lookup,
+	// and no default_model write, when the supplied value is the stored one.
+	ds, mock, captured, cleanup := newCapturingMockDatastore(t)
+	defer cleanup()
+
+	retired := uuid.New()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT .*user_preferences.*").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "default_model"}).AddRow(uuid.NewString(), retired.String()))
+	mock.ExpectExec("UPDATE .*user_preferences.*").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT .*user_preferences.*").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	_, _ = ds.UpdateUserPreferences(context.Background(), uuid.New(), models.UserPreferences{
+		Theme:          "light",
+		DefaultModelID: retired,
+	})
+
+	for _, q := range *captured {
+		require.NotContains(t, strings.ToLower(q), "from `models`",
+			"an unchanged default must not be looked up again")
+	}
+	updates := capturedUpdates(captured)
+	require.Contains(t, updates, "theme", "the rest of the save still goes through")
+	require.NotContains(t, updates, "default_model", "an unchanged default is not rewritten")
 }

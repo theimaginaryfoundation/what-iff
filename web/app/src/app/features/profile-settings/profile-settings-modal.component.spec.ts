@@ -186,6 +186,62 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     );
   });
 
+  it('shows the saved defaults in the selects, not the first option', async () => {
+    preferencesService.getUserPreferences.mockReturnValue(
+      of({
+        id: 'prefs-1',
+        user_id: 'user-1',
+        default_model_id: 'model-2',
+        default_personality_id: 'personality-1',
+        favorite_model_ids: [],
+      }),
+    );
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    await openAndWaitForProfile(fixture);
+
+    const modelSelect = fixture.nativeElement.querySelector('[data-testid="default-model-select"]') as HTMLSelectElement;
+    const personalitySelect = fixture.nativeElement.querySelector(
+      '[data-testid="default-personality-select"]',
+    ) as HTMLSelectElement;
+    expect(modelSelect.value).toBe('model-2');
+    expect(personalitySelect.value).toBe('personality-1');
+  });
+
+  it('shows a placeholder rather than another model when the saved default is not listed', async () => {
+    preferencesService.getUserPreferences.mockReturnValue(
+      of({ id: 'prefs-1', user_id: 'user-1', default_model_id: 'retired-model', favorite_model_ids: [] }),
+    );
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    await openAndWaitForProfile(fixture);
+
+    const modelSelect = fixture.nativeElement.querySelector('[data-testid="default-model-select"]') as HTMLSelectElement;
+    expect(modelSelect.value).toBe('');
+    expect(modelSelect.selectedOptions[0]?.textContent).toContain('Current default is unavailable');
+  });
+
+  it('merges a default change onto freshly read preferences so it cannot undo other writes', async () => {
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    const component = fixture.componentInstance;
+    await openAndWaitForProfile(fixture);
+    // Another writer (theme toggle, model-picker favorites) changed the record after the modal loaded.
+    preferencesService.getUserPreferences.mockReturnValue(
+      of({
+        id: 'prefs-1',
+        user_id: 'user-1',
+        default_model_id: 'model-1',
+        default_personality_id: 'personality-1',
+        theme: 'light',
+        favorite_model_ids: ['model-2'],
+      }),
+    );
+
+    await component.onDefaultModelChange('model-2');
+
+    expect(preferencesService.updateUserPreferences).toHaveBeenLastCalledWith(
+      expect.objectContaining({ default_model_id: 'model-2', theme: 'light', favorite_model_ids: ['model-2'] }),
+    );
+  });
+
   it('clears the default personality by omitting it from the serialized update', async () => {
     const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
     const component = fixture.componentInstance;

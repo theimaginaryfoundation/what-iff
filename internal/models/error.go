@@ -53,6 +53,9 @@ const (
 	ErrCodeQuotaExceeded       = "quota_exceeded"
 	ErrCodeSystemPromptTooLong = "system_prompt_too_long"
 
+	// ErrCodeProviderNotConfigured: the request needed a model provider the
+	// account has no key for. Details is {"provider": "<name>"}.
+	ErrCodeProviderNotConfigured = "provider_not_configured"
 	// ErrCodeReauthenticationRequired: the action needs the account owner to
 	// confirm it (for example with the current password), and that confirmation
 	// was missing or wrong. Answered with 403, not 401: the session is valid.
@@ -85,6 +88,7 @@ var AllErrorCodes = []string{
 	ErrCodeMessageTooLong,
 	ErrCodeQuotaExceeded,
 	ErrCodeSystemPromptTooLong,
+	ErrCodeProviderNotConfigured,
 	ErrCodeReauthenticationRequired,
 }
 

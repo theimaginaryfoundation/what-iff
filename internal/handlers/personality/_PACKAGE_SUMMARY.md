@@ -8,6 +8,8 @@ HTTP API for **personalities** — CRUD, defaults, file attachments, and persona
 
 - **`Handler`:** Core routes in `handler.go`; file attachment helpers in `fileattachment.go`; provider binding in `provider.go`.
 - Generation and default flows may invoke `internal/agent` (see `generate.go`, `create_default.go`).
+- **First-personality auto-default** (create, card import, generation accept) goes through `makeDefault` → `Store.SetDefaultPersonality`, a write of that one field.
+  The handler never reads or writes the rest of the user's preferences.
 - **Expressions:** slot CRUD in `expressions.go`; `POST .../expressions/generate-default-grid` (`expression_grid.go`) enqueues the default 3×3 grid; `POST .../expressions/generate-candidates` (`expression_candidates.go`) validates nine unique URL-safe keys + optional `reference_image_id` and enqueues an unassigned-candidates run (the UI's Generate modal assigns keepers via `PUT .../expressions/{key}`).
 - **Character cards:** `card.go` serves `POST /personality/import/sillytavern` (a SillyTavern `chara_card_v2`/`v3` card as a JSON or PNG body, 8 MB cap) and `GET /personality/{id}/export/sillytavern` (`?format=png` embeds the card in the personality's cover image).
   The conversion rules live in `internal/stcard`; the handler only validates, uniquifies the name (`Name (2)`), creates the personality with the passthrough blob, and makes it the default when it is the user's first.

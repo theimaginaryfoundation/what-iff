@@ -158,7 +158,8 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   Metadata remains encoded with its human-readable message for historical storage compatibility, but `ListAccountActivity` splits valid metadata into `AccountActivityEntry.Metadata`; an uninitialized datastore returns an error rather than appearing as an empty activity log.
 - **Actor on audit rows:** `actor_user_id` is filled from request context via `internal/apicontext` (middleware dual-writes the authenticated user id next to `middleware.UserIDKey` so datastore avoids an import cycle).
   Background jobs that propagate user id should use the same dual-write when building exec contexts.
-- **`UpdateUserPreferences` writes per field, not wholesale:** the DTO has no pointers, so each field picks its own rule and they are not consistent — `default_model` is written unconditionally, `default_personality` is **cleared** when the incoming value is `uuid.Nil`, and `theme` is skipped when empty.
+- **`UpdateUserPreferences` writes per field, not wholesale:** the DTO has no pointers, so each field picks its own rule and they are not consistent — `default_model` is validated and written only when it differs from the stored one (absent or unchanged leaves it alone, so a retired default does not block other saves), `default_personality` is **cleared** when the incoming value is `uuid.Nil`, `theme` is skipped when empty, and `image_generation_provider` is skipped when empty and left unset (NULL) when the incoming value is the default vendor and the column is unset, since reads report NULL as that default and callers echo it back.
+  `SetDefaultPersonality` is the targeted write for the first-personality auto-default; it touches nothing else.
   Adding a scalar field means choosing one of those and living with the ambiguity that a zero value cannot be distinguished from an omitted one.
   **`favorite_model_ids` sidesteps it**: a nil slice means "field omitted, leave the stored list alone" and an empty non-nil slice means "clear it", a distinction JSON gives slices for free.
   Prefer slice/map-shaped fields here when the semantics allow.
@@ -188,10 +189,10 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   `UpsertChatSummaryMemory` marks a Discord relay thread's summary external, and it stays so.
   `ListMemories` filters by `MemoryFilters.Provenance`, `UpdateMemory` accepts a provenance patch (the owner confirming a memory), and memory export/import carry both fields (the `user` default is not written).
 - **Discord relay (`discord.go`):** bots (token encrypted with the MCP token helper), bindings, message links and pending posts.
-- **`EncryptToken` / `DecryptToken`** expose the token helper to packages that keep their own tables but share the one key (`internal/accountkeys`).
   Methods taking a userID are owner-scoped; the relay's own (`FindDiscordBindingTarget`, `GetDiscordBindingTarget`, `ListActiveDiscordBotCredentials`, link and pending-post bookkeeping) act for the owner recorded on the bot.
   `IsExternalRelayChat` (any chat bound by one of the user's bots) and `ExternalSpeakerForMessage` (the Discord author of a saved message) back memory provenance in the agent.
   `CreateChat` honours `Chat.DisabledTools`, so a server-created relay thread never exists with its default-off tools on (the app's create route drops the field).
+- **`EncryptToken` / `DecryptToken`** expose the token helper to packages that keep their own tables but share the one key (`internal/accountkeys`).
 
 ## Testing
 

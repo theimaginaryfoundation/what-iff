@@ -85,13 +85,11 @@ func TestPersistUserTurnAndChatAfterInference_SkipsUserTurnUpdatesTriesChatUpdat
 	ds, mock, cleanup := newTestDatastore(t)
 	defer cleanup()
 
-	// persistUserTurnUpdate is false, so only the chat-continuity branch runs;
-	// UpdateChat's exists-check reports the chat missing, which the function
-	// only logs (best-effort), so no panic and no error surfaces.
-	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT .*").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
-	mock.ExpectRollback()
+	// persistUserTurnUpdate is false, so only the chat-continuity branch runs: one narrow UPDATE
+	// (never a whole-row UpdateChat of the turn-start copy, #347). It matches no row, which the
+	// function only logs (best-effort), so no panic and no error surfaces.
+	mock.ExpectExec("UPDATE `chats` SET `updated_at` = \\?, `response_id` = \\?, `last_message_time` = \\? WHERE `chats`.`id` = \\?").
+		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	a := newTestAgent(ds)
 	require.NotPanics(t, func() {

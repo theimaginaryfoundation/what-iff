@@ -1,10 +1,10 @@
 <header class="app-sidebar-header" [class.app-sidebar-header--collapsed]="collapsed()">
+  <img
+    class="app-sidebar-header__logo"
+    src="/dark-favicon.ico"
+    alt="WhatIff"
+  />
   @if (!collapsed()) {
-    <img
-      class="app-sidebar-header__logo"
-      src="/dark-favicon.ico"
-      alt="WhatIff"
-    />
     <span class="app-sidebar-header__brand" aria-label="WhatIff">WhatIff</span>
   }
   <div class="app-sidebar-header__actions">
@@ -21,13 +21,14 @@
     <app-nav-actions-outlet [collapsed]="collapsed()" />
     <button
       type="button"
-      class="app-sidebar-header__profile-trigger"
-      [attr.aria-label]="'Open profile for ' + displayName()"
-      uiTooltip="Profile & settings"
+      class="app-sidebar-header__collapse-toggle"
+      [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
+      [attr.aria-expanded]="!collapsed()"
+      [uiTooltip]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
       placement="right"
-      (click)="openProfile()"
+      (click)="toggleCollapsed()"
     >
-      <ui-user-icon [size]="15" />
+      <ui-panel-left-icon [size]="15" />
     </button>
   </div>
 </header>

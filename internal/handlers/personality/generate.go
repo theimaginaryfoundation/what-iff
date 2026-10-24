@@ -368,22 +368,8 @@ func (h *Handler) AcceptFlow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Auto-set as default if first personality.
-	if isFirstPersonality && personality != nil {
-		prefs, err := h.ds.GetUserPreferences(r.Context(), userID)
-		if err != nil {
-			h.logger.Warn("failed to fetch user preferences for auto-default personality",
-				zap.String("user_id", userID.String()),
-				zap.String("personality_id", personality.ID.String()),
-				zap.Error(err))
-		} else {
-			prefs.DefaultPersonalityID = personality.ID
-			if _, err := h.ds.UpdateUserPreferences(r.Context(), userID, *prefs); err != nil {
-				h.logger.Warn("failed to update user preferences for auto-default personality",
-					zap.String("user_id", userID.String()),
-					zap.String("personality_id", personality.ID.String()),
-					zap.Error(err))
-			}
-		}
+	if isFirstPersonality {
+		h.makeDefault(r.Context(), userID, personality)
 	}
 
 	// Link the flow to the personality.

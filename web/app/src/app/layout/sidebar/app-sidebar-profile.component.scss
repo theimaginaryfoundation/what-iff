@@ -1,0 +1,61 @@
+:host {
+  display: block;
+}
+
+.app-sidebar-profile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 120ms ease;
+
+  &:hover,
+  &:focus-visible {
+    background-color: var(--accent-bg);
+    color: var(--text-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+}
+
+.app-sidebar-profile--collapsed {
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  margin: 0 auto;
+}
+
+.app-sidebar-profile__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Matches the app's mobile-nav breakpoint and the Search… label's mobile size. */
+@media (max-width: 1023px) {
+  .app-sidebar-profile__name {
+    font-size: 1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-sidebar-profile {
+    transition: none;
+  }
+}

@@ -70,6 +70,7 @@ func credentialRules(endpoints []providerEndpoint, resolver providerkeys.Resolve
 	rules := make([]provider.CredentialRule, 0, len(endpoints))
 	for _, e := range endpoints {
 		rules = append(rules, provider.CredentialRule{
+			Provider:   e.provider,
 			BaseURL:    e.baseURL,
 			Style:      e.style,
 			PathScoped: e.pathScoped,

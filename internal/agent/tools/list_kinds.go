@@ -2,12 +2,14 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -222,6 +224,11 @@ func (t *ListTool) listConversations(ctx context.Context, chat *models.Chat, a l
 }
 
 func (t *ListTool) listJobs(ctx context.Context, chat *models.Chat, a listArgs) (string, error) {
+	// A job id as the filter reads that one job in full, whatever its status: rows otherwise show only
+	// the start of each prompt, and a model about to rewrite a prompt needs the whole of it.
+	if id, err := uuid.Parse(strings.TrimSpace(a.Filter)); err == nil {
+		return t.getJob(ctx, chat, id)
+	}
 	limit := clampLimit(a.Limit, listDefaultLimit)
 	pageNum := clampPage(a.Page)
 	filters := models.AgentJobFilters{}
@@ -242,29 +249,61 @@ func (t *ListTool) listJobs(ctx context.Context, chat *models.Chat, a listArgs) 
 		if !ok || j == nil {
 			continue
 		}
-		name := ""
-		if j.Title != nil {
-			name = *j.Title
-		}
-		item := listItem{
-			ID:     j.ID.String(),
-			Name:   name,
-			Status: string(j.Status),
-		}
-		// Next run only for jobs that still have a future — schedule_input ("in 5 minutes")
-		// is stale nonsense next to status=complete/failed.
-		if j.Status != models.AgentJobStatusComplete && j.Status != models.AgentJobStatusFailed {
-			item.NextRuntime = rfc3339Ptr(j.NextRunAt)
-		}
+		item := jobListItem(j)
+		item.Description = TruncateRunes(item.Description, listJobPromptRunes)
 		items = append(items, item)
 	}
 	meta := listPageMeta{Page: pageNum, Limit: limit, TotalCount: page.TotalCount}
 	activeNote := ""
 	if !a.IncludeCompleted {
-		activeNote = "Active jobs only; pass include_completed=true to also see finished/failed one-offs."
+		activeNote = "Active jobs only; pass include_completed=true to also see paused jobs and finished/failed one-offs."
 	}
-	note := joinNotes(activeNote, listTruncationNote("jobs", meta, len(items)))
+	note := joinNotes(activeNote, listJobPromptNote, listTruncationNote("jobs", meta, len(items)))
 	return t.okPaged(listKindJobs, items, note, meta)
+}
+
+// getJob lists the one job id names, with its whole prompt, model and skills.
+func (t *ListTool) getJob(ctx context.Context, chat *models.Chat, id uuid.UUID) (string, error) {
+	j, err := t.store.GetAgentJob(ctx, chat.UserID, id)
+	if errors.Is(err, datastore.ErrAgentJobNotFound) {
+		return t.ok(listKindJobs, nil, "No job has that id; list jobs (include_completed=true) to find it.")
+	}
+	if err != nil {
+		return t.fail(listKindJobs, fmt.Sprintf("failed to load job: %v", err))
+	}
+	item := jobListItem(j)
+	if j.ModelID != nil {
+		item.ModelID = j.ModelID.String()
+	}
+	for _, r := range j.Rituals {
+		if r != nil {
+			item.SkillIDs = append(item.SkillIDs, r.ID.String())
+		}
+	}
+	sort.Strings(item.SkillIDs)
+	return t.ok(listKindJobs, []listItem{item}, "The job in full: description is its whole prompt.")
+}
+
+// jobListItem is a job's row with its prompt uncut; the list view cuts it to a preview.
+func jobListItem(j *models.AgentJob) listItem {
+	item := listItem{
+		ID:          j.ID.String(),
+		Description: strings.TrimSpace(j.Prompt),
+		Status:      string(j.Status),
+		Schedule:    j.ScheduleInput,
+	}
+	if j.Title != nil {
+		item.Name = *j.Title
+	}
+	if j.ChatID != nil {
+		item.ThreadID = j.ChatID.String()
+	}
+	// Next run only for jobs that still have a future — schedule_input ("in 5 minutes")
+	// is stale nonsense next to status=complete/failed.
+	if j.Status != models.AgentJobStatusComplete && j.Status != models.AgentJobStatusFailed {
+		item.NextRuntime = rfc3339Ptr(j.NextRunAt)
+	}
+	return item
 }
 
 func (t *ListTool) listMCPServers(ctx context.Context, chat *models.Chat, scope MCPScopeFunc) (string, error) {

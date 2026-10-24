@@ -2,7 +2,7 @@ import { CanActivateChildFn, Router } from '@angular/router';
 import { inject } from '@angular/core';
 import { catchError, map, of } from 'rxjs';
 
-import { PersonalityService } from '../services/personality.service';
+import { PersonalityPresenceService } from '../services/personality-presence.service';
 
 /** Routes reachable before the user has created their first personality. */
 const EXEMPT_PATH_PREFIXES = [
@@ -35,17 +35,13 @@ export const personalitySetupGuard: CanActivateChildFn = (_route, state) => {
     return true;
   }
 
-  const personalityService = inject(PersonalityService);
+  const presence = inject(PersonalityPresenceService);
   const router = inject(Router);
 
-  return personalityService.listPersonalities(1, 1).pipe(
-    map(response => {
-      const count = response.total_count ?? response.results?.length ?? 0;
-      if (count > 0) {
-        return true;
-      }
-      return router.createUrlTree(['/personality'], { queryParams: { setup: '1' } });
-    }),
+  // Answers synchronously once a personality is known to exist, so ordinary navigations
+  // do not wait on the network (#348).
+  return presence.hasPersonality().pipe(
+    map(has => (has ? true : router.createUrlTree(['/personality'], { queryParams: { setup: '1' } }))),
     catchError(err => {
       console.error('personalitySetupGuard: failed to load personalities', err);
       return of(router.createUrlTree(['/personality'], { queryParams: { setup: '1' } }));

@@ -29,6 +29,20 @@ export class UserIconComponent {
 }
 
 @Component({
+  selector: 'ui-panel-left-icon',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.Eager,
+  template: `
+    <svg [attr.width]="size()" [attr.height]="size()" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/>
+    </svg>
+  `,
+})
+export class PanelLeftIconComponent {
+  readonly size = input(16);
+}
+
+@Component({
   selector: 'ui-users-icon',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.Eager,

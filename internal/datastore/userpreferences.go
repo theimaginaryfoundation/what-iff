@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
+	"github.com/theimaginaryfoundation/what-iff/ent/personality"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/ent/userpreference"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
@@ -113,20 +114,52 @@ func (d *Datastore) UpdateUserPreferences(ctx context.Context, userID uuid.UUID,
 	update := tx.UserPreference.Update().
 		Where(userpreference.HasUserWith(user.ID(userID)))
 
+	// The stored row, read at most once and only when a rule below needs it, so a plain
+	// theme or favorites save stays a single UPDATE.
+	var stored *ent.UserPreference
+	loadStored := func() (*ent.UserPreference, error) {
+		if stored != nil {
+			return stored, nil
+		}
+		row, err := tx.UserPreference.Query().
+			Where(userpreference.HasUserWith(user.ID(userID))).
+			Only(ctx)
+		if err != nil {
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			d.logger.Error(i18n.T1("query.failed", "Entity", "user preferences"), zap.Error(err))
+			return nil, err
+		}
+		stored = row
+		return stored, nil
+	}
+
 	// Only write the default model when the caller actually supplied one. default_model is
 	// a required foreign key, so writing the zero UUID unconditionally turned a request that
 	// merely omitted the field into a constraint violation and a 500 — the guard below ran
 	// after the value had already been staged, so it gated the permission check but not the
 	// write. Absent now means "leave the current default alone", matching how theme
 	// already behaves.
+	//
+	// Only a change is validated and written. Every caller sends the whole record back (PUT
+	// replaces it), so the stored default rides along with a theme, favorites or personality
+	// save; re-validating it then meant that once that model was retired, or the account lost
+	// experimental access, every other preference save failed too (#347).
 	if prefs.DefaultModelID != uuid.Nil {
-		if err := d.assertUserCanUseModel(ctx, tx, userID, prefs.DefaultModelID); err != nil {
-			if rerr := tx.Rollback(); rerr != nil {
-				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
-			}
+		stored, err := loadStored()
+		if err != nil {
 			return nil, err
 		}
-		update.SetModelID(prefs.DefaultModelID).SetDefaultModel(prefs.DefaultModelID)
+		if prefs.DefaultModelID != stored.DefaultModel {
+			if err := d.assertUserCanUseModel(ctx, tx, userID, prefs.DefaultModelID); err != nil {
+				if rerr := tx.Rollback(); rerr != nil {
+					d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+				}
+				return nil, err
+			}
+			update.SetModelID(prefs.DefaultModelID).SetDefaultModel(prefs.DefaultModelID)
+		}
 	}
 
 	if prefs.Theme == "dark" || prefs.Theme == "light" || prefs.Theme == "system" {
@@ -151,6 +184,12 @@ func (d *Datastore) UpdateUserPreferences(ctx context.Context, userID uuid.UUID,
 	// Absent ("") leaves the stored vendor alone, like theme. Unlike theme, an unknown
 	// value is refused rather than dropped: the caller is picking a vendor and should
 	// hear that the pick did not take.
+	//
+	// The default vendor over an unset (NULL) column also leaves it unset. Reads report
+	// NULL as the default, and every caller writes the whole record back, so without
+	// this a theme or favorites save stored "openai" for a user who never chose and
+	// pinned them to it if the default vendor ever changes (#347). An explicit pick of
+	// the default resolves the same as NULL today, so one rule covers both.
 	if prefs.ImageGenerationProvider != "" {
 		p := userpreference.ImageGenerationProvider(prefs.ImageGenerationProvider)
 		if err := userpreference.ImageGenerationProviderValidator(p); err != nil {
@@ -159,7 +198,17 @@ func (d *Datastore) UpdateUserPreferences(ctx context.Context, userID uuid.UUID,
 			}
 			return nil, fmt.Errorf("%w: unknown image_generation_provider %q", ErrInvalidRequestBody, prefs.ImageGenerationProvider)
 		}
-		update.SetImageGenerationProvider(p)
+		keepUnset := false
+		if string(p) == string(models.DefaultImageGenerationProvider) {
+			stored, err := loadStored()
+			if err != nil {
+				return nil, err
+			}
+			keepUnset = stored.ImageGenerationProvider == nil
+		}
+		if !keepUnset {
+			update.SetImageGenerationProvider(p)
+		}
 	}
 
 	_, err = update.Save(ctx)
@@ -186,4 +235,30 @@ func (d *Datastore) UpdateUserPreferences(ctx context.Context, userID uuid.UUID,
 	}
 
 	return toUserPreferencesModel(updatedPrefs), nil
+}
+
+// SetDefaultPersonality makes personalityID the user's default personality and writes nothing
+// else. Used for the auto-default when a user creates their first personality: going through
+// GetUserPreferences + UpdateUserPreferences instead echoed every other preference back in a
+// second transaction, which could undo a concurrent change and stored the default image
+// vendor for a user who never chose one (#347). ErrPersonalityNotFound unless the user owns it.
+func (d *Datastore) SetDefaultPersonality(ctx context.Context, userID, personalityID uuid.UUID) error {
+	owned, err := d.dbClient.Personality.Query().
+		Where(personality.ID(personalityID), personality.HasUserWith(user.ID(userID))).
+		Exist(ctx)
+	if err != nil {
+		d.logger.Error(i18n.T1("query.failed", "Entity", "personality"), zap.Error(err))
+		return err
+	}
+	if !owned {
+		return ErrPersonalityNotFound
+	}
+	if _, err := d.dbClient.UserPreference.Update().
+		Where(userpreference.HasUserWith(user.ID(userID))).
+		SetPersonalityID(personalityID).
+		Save(ctx); err != nil {
+		d.logger.Error(i18n.T1("update.failed", "Entity", "user preferences"), zap.Error(err))
+		return err
+	}
+	return nil
 }

@@ -477,6 +477,7 @@ func TestAcceptFlow_CreatesPersonality(t *testing.T) {
 	var createdName string
 	var createdPrompt string
 	var acceptedFlowID uuid.UUID
+	var defaultedTo uuid.UUID
 
 	store := &fakeStore{
 		getFlowFn: func(ctx context.Context, uid, fid uuid.UUID) (*models.PersonalityGenFlow, error) {
@@ -496,17 +497,9 @@ func TestAcceptFlow_CreatesPersonality(t *testing.T) {
 			createdPrompt = p.SystemPrompt
 			return &models.Personality{ID: personalityID, Name: p.Name, SystemPrompt: p.SystemPrompt}, nil
 		},
-		getUserPreferencesFn: func(ctx context.Context, uid uuid.UUID) (*models.UserPreferences, error) {
-			return &models.UserPreferences{
-				ID:                   uuid.New(),
-				UserID:               uid,
-				DefaultModelID:       uuid.New(),
-				DefaultPersonalityID: uuid.Nil,
-				Theme:                "dark",
-			}, nil
-		},
-		updateUserPrefsFn: func(ctx context.Context, uid uuid.UUID, prefs models.UserPreferences) (*models.UserPreferences, error) {
-			return &prefs, nil
+		setDefaultPersonalityFn: func(ctx context.Context, uid, pid uuid.UUID) error {
+			defaultedTo = pid
+			return nil
 		},
 		acceptFlowFn: func(ctx context.Context, uid, fid, pid uuid.UUID) (*models.PersonalityGenFlow, error) {
 			acceptedFlowID = fid
@@ -535,6 +528,9 @@ func TestAcceptFlow_CreatesPersonality(t *testing.T) {
 	}
 	if acceptedFlowID != flowID {
 		t.Fatalf("expected accepted flow id %s, got %s", flowID, acceptedFlowID)
+	}
+	if defaultedTo != personalityID {
+		t.Fatalf("expected the first personality %s to become the default, got %s", personalityID, defaultedTo)
 	}
 }
 

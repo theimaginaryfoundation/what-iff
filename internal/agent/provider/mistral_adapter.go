@@ -117,6 +117,7 @@ func (a *MistralAdapter) toGenerateResponse(resp *openai.ChatCompletion) *Genera
 		Text:         ExtractChatCompletionText(resp),
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
+		CreatedAt:    resp.Created,
 	}
 }
 

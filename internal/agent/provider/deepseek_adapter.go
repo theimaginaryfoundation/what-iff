@@ -117,6 +117,7 @@ func (a *DeepSeekAdapter) toGenerateResponse(resp *openai.ChatCompletion) *Gener
 		Text:         ExtractChatCompletionText(resp),
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
+		CreatedAt:    resp.Created,
 	}
 }
 

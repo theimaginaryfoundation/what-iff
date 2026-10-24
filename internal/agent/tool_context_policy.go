@@ -67,7 +67,8 @@ func toolContextPolicyFor(toolName string) toolContextPolicy {
 		tools.MoveFilesToolSpec.Name,
 		tools.UpdateScratchpadToolSpec.Name,
 		tools.ChangeMoodToolSpec.Name,
-		tools.CreateAgentJobToolSpec.Name:
+		tools.CreateAgentJobToolSpec.Name,
+		tools.UpdateAgentJobToolSpec.Name:
 		// Write/side-effect confirmations: small acknowledgements. Persisting them adds
 		// little value and their effect is captured elsewhere (scratchpad, memories,
 		// mood, jobs). Drop from cross-turn context.

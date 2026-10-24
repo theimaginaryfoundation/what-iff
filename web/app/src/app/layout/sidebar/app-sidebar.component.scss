@@ -97,6 +97,28 @@
   color: var(--accent-mode);
 }
 
+.app-sidebar__new-thread-fab {
+  &:hover .app-sidebar__new-thread-dot {
+    filter: brightness(1.08);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+}
+
+.app-sidebar__new-thread-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--cta, var(--accent));
+  color: var(--cta-text, #fff);
+}
+
 .app-sidebar__chat-controls {
   display: flex;
   flex-direction: column;
@@ -245,11 +267,24 @@
   transform: translateY(-50%);
   color: var(--text-muted);
   pointer-events: none;
+  display: inline-flex;
+}
+
+.app-sidebar__personality-chevron {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
 }
 
 .app-sidebar__personality-search {
   width: 100%;
-  padding: 5px 8px 5px 26px;
+  padding: 5px 26px 5px 26px;
   border-radius: 5px;
   box-sizing: border-box;
   border: 1px solid var(--border);
@@ -620,10 +655,17 @@
   text-align: center;
 }
 
-.app-sidebar__footer-search {
+.app-sidebar__footer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   padding: 6px 8px;
   border-top: 1px solid var(--border);
   margin-top: auto;
+}
+
+.app-sidebar__footer-search-icon {
+  align-self: center;
 }
 
 .app-sidebar__palette-launcher {
@@ -652,14 +694,6 @@
   opacity: 0.6;
 }
 
-.app-sidebar__collapse-handle {
-  position: absolute;
-  right: -11px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 2;
-}
-
 .app-sidebar__icon-btn {
   display: inline-flex;
   align-items: center;
@@ -684,13 +718,6 @@
   }
 }
 
-.app-sidebar__edge-toggle {
-  width: 22px;
-  height: 44px;
-  background: var(--bg-secondary, var(--bg-elevated));
-  border: 1px solid var(--border);
-}
-
 @media (max-width: 1023px) {
   .app-sidebar {
     box-shadow: 0 12px 30px rgb(0 0 0 / 0.3);
@@ -699,18 +726,10 @@
     overflow: hidden;
   }
 
-  .app-sidebar__collapse-handle {
-    display: none;
-  }
-
   .app-sidebar__personality-search,
   .app-sidebar__personality-option,
   .app-sidebar__palette-launcher-label {
     font-size: 1rem;
-  }
-
-  .app-sidebar:not(.app-sidebar--collapsed) .app-sidebar__collapse-handle {
-    right: -14px;
   }
 
   .app-sidebar--collapsed {

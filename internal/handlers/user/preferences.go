@@ -50,6 +50,10 @@ func (h *Handler) UpdateUserPreferences(w http.ResponseWriter, r *http.Request) 
 		handlerutils.RespondWithError(w, h.logger, http.StatusForbidden, handlerutils.CodeNotSet, "Experimental models are not enabled for this account", nil)
 		return
 	}
+	if errors.Is(err, datastore.ErrModelNotFound) {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "That model is not available", err)
+		return
+	}
 	if errors.Is(err, datastore.ErrInvalidRequestBody) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), err)
 		return

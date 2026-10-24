@@ -271,9 +271,10 @@ func TestExecuteToolUses_NotifiesPerToolGeneratedAttachments(t *testing.T) {
 	assert.Equal(t, []string{"fake_tool"}, seen)
 }
 
-// A file a tool only fetched for the model to look at (find_context's fetch mode) is shown to the
-// model but not saved onto the reply, so it is never re-published with it (gallery, Discord).
-func TestExecuteToolUses_DoesNotSaveContextOnlyAttachmentsOntoTheReply(t *testing.T) {
+// A file a tool only fetched for the model to look at (find_context's fetch mode) reaches the model
+// and is handed on with the reply's attachments, still marked ContextOnly, so saveAgentResponse
+// can show it to the person as a reference instead of a fresh copy.
+func TestExecuteToolUses_PassesContextOnlyAttachmentsOnStillMarked(t *testing.T) {
 	prevExtra := extraToolHandlersForChat
 	t.Cleanup(func() { extraToolHandlersForChat = prevExtra })
 	extraToolHandlersForChat = func(_ *Agent, _ *models.Chat) map[string]ExtraToolHandler {
@@ -291,8 +292,11 @@ func TestExecuteToolUses_DoesNotSaveContextOnlyAttachmentsOntoTheReply(t *testin
 	ctx := offering(&chatContext{chat: chat}, "fake_fetch")
 
 	results, _, attachments := a.executeToolUses(context.Background(), ctx, 0, []provider.ToolUse{{ID: "u1", Name: "fake_fetch", Input: []byte(`{}`)}})
-	require.Len(t, attachments, 1)
-	assert.Equal(t, "made.png", attachments[0].Name)
+	require.Len(t, attachments, 2, "the person sees what the model saw")
+	assert.Equal(t, "owner-photo.png", attachments[0].Name)
+	assert.True(t, attachments[0].ContextOnly)
+	assert.Equal(t, "made.png", attachments[1].Name)
+	assert.False(t, attachments[1].ContextOnly)
 	require.Len(t, results, 1)
 	assert.Len(t, results[0].Images, 2, "the model still sees both")
 }

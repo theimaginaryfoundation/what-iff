@@ -68,6 +68,7 @@ export class ChatSessionService implements OnDestroy {
     sendGate: this.sendGate,
     activeThreadId: () => this.activeThreadId,
     reportError: message => this._error.set(message),
+    onJobSettled: chatId => this.refreshThread(chatId),
   });
   /**
    * A tab-return sync that arrived while this tab's reply was still landing. Replayed once that
@@ -516,12 +517,38 @@ export class ChatSessionService implements OnDestroy {
     this.turn.cancelGeneration();
   }
 
+  /** Refetches the active thread's metadata (name, model, personality) without touching messages. */
+  private refreshThread(threadId: string): void {
+    this.subscriptions.add(
+      this.chatService.getChat(threadId).pipe(take(1)).subscribe({
+        next: chat => {
+          if (!this.isActiveThread(threadId)) return;
+          this._thread.set(chat);
+          this.threadList.rememberOpenedThread(chat);
+        },
+        error: () => {
+          // Best-effort: the next focus sync catches up.
+        },
+      }),
+    );
+  }
+
+  /**
+   * Switches the active thread's model. `_model` is only an overlay for the duration of the PATCH,
+   * so a thread refetch that lands mid-request cannot flicker the picker back; once the PATCH
+   * settles the thread's own model_id is the truth again. Keeping the overlay afterwards (as this
+   * used to) pinned the picker to the user's last pick, hiding later server-side changes such as
+   * a mode switch that moves the thread to its recommended model.
+   */
   setModel(model: Model): void {
     const chat = this._thread();
     if (!chat) {
       this._model.set(model);
       return;
     }
+    // `_thread` still holds the previous thread until the next one's getChat resolves; a pick in
+    // that window must not be written onto the thread the user just left.
+    if (!this.isActiveThread(chat.id)) return;
     const previousModel = this._model();
     const previousThread = { ...chat };
     const requestChatId = chat.id;
@@ -543,7 +570,7 @@ export class ChatSessionService implements OnDestroy {
             model_id: updated.model_id ?? model.id,
             model_name: updated.model_name ?? model.name,
           });
-          this._model.set(model);
+          this._model.set(null);
         },
         error: (error: unknown) => {
           if (this._thread()?.id !== requestChatId || this._model()?.id !== requestModelId) {

@@ -253,6 +253,14 @@ export class PersonalityGenerateComponent implements OnInit {
     return this.currentStep() === this.totalSteps - 1;
   }
 
+  /**
+   * True once at least one field has an answer. The phone footer's "Generate now" uses it to
+   * disable itself, and `finishAndGenerate()` checks it before generating, so both apply one rule.
+   */
+  canGenerate(): boolean {
+    return this.hasAtLeastOneAnswer(this.answers());
+  }
+
   jumpToStep(step: number): void {
     if (this.isReviewScreen() || step === this.currentStep()) return;
     this.currentStep.set(step);
@@ -301,7 +309,7 @@ export class PersonalityGenerateComponent implements OnInit {
     if (!f) return;
     const currentAnswers = this.answers();
 
-    if (!this.hasAtLeastOneAnswer(currentAnswers)) {
+    if (!this.canGenerate()) {
       this.errorMessage.set('You must set at least one field to generate a personality.');
       return;
     }

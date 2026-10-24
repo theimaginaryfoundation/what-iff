@@ -48,12 +48,25 @@ export class NavService {
    * `mode` signal will then recompute automatically from the new URL.
    */
   setMode(mode: NavMode): void {
-    if (mode === 'config') {
-      this.router.navigate(['/memories']);
-    } else {
-      this.router.navigate(['/chat']);
-    }
+    this.switchingMode = true;
+    const navigation = mode === 'config' ? this.router.navigate(['/memories']) : this.router.navigate(['/chat']);
+    // NavigationEnd fires before navigate() settles, so listeners see the flag for exactly
+    // this navigation; cancelled or failed navigations clear it too.
+    void Promise.resolve(navigation)
+      .catch(() => undefined)
+      .finally(() => (this.switchingMode = false));
   }
+
+  /**
+   * True while a navigation started by {@link setMode} is in flight. Switching modes only swaps
+   * the sidebar's menu, so the mobile drawer stays open for it instead of closing as it does for
+   * an ordinary page pick (#348).
+   */
+  get isSwitchingMode(): boolean {
+    return this.switchingMode;
+  }
+
+  private switchingMode = false;
 
   /** Toggles the collapsed flag and persists the new value. */
   toggleCollapsed(): void {

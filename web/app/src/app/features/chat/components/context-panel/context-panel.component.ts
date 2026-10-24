@@ -131,7 +131,10 @@ import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directiv
       .context-panel__header {
         align-items: center;
         border-bottom: 1px solid var(--color-border-base);
-        color: var(--color-text-muted);
+        /* Desktop: secondary (brighter than muted) so the shared tab title —
+           Scratchpad, Memories, Tools, etc. — reads as a panel label without
+           matching primary thread titles. Mobile keeps --color-text-primary. */
+        color: var(--color-text-secondary);
         display: flex;
         flex-shrink: 0;
         font-size: 0.625rem;

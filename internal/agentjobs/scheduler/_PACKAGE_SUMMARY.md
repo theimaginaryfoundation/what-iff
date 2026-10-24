@@ -25,6 +25,7 @@
   Scheduled runs create no `jobs` row, so they don't appear in the job-lifecycle metrics.
 - **Schedule failure on a recurring job:** if the next run can't be computed, the job is paused and `last_error` is prefixed with `ScheduleErrorMarker` (`job.go`).
   A user pause clears `last_error`, so paused + marker is how the web app (`scheduleFailureReason` in `job-status.helpers.ts`) shows "Paused: schedule error" with the reason instead of a plain pause.
+- **Run failure text:** `last_error` and the assistant message posted on a failed run use `providerkeys.FailureText`, so a missing provider key reads "No OpenAI API key is set." rather than the transport error.
   There is no separate status value or column; keep the marker and the helper in sync.
 - **MVP note:** `Config.EnableAgentJobsScheduler` gates whether the scheduler runs at all.
 

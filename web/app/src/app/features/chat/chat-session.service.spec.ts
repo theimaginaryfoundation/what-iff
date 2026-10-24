@@ -176,6 +176,17 @@ describe('ChatSessionService', () => {
         expect(sendGate.refresh).toHaveBeenCalled();
     });
 
+    it('refetches the thread when a chat job finishes, so turn-side changes reach the header and picker', async () => {
+        service.setActive('chat-1');
+        // The turn generated a title and a mode switch moved the thread to another model.
+        chatService.getChat.mockReturnValue(of({ ...chat, name: 'Lighthouse story', model_id: 'model-9' }) as any);
+
+        await service.sendMessage('hello');
+
+        expect(service.thread()?.name).toBe('Lighthouse story');
+        expect(service.thread()?.model_id).toBe('model-9');
+    });
+
     it('stops expecting a reply when job polling finalizes without assistant message', async () => {
         service.setActive('chat-1');
         await service.sendMessage('hello');
@@ -532,11 +543,42 @@ describe('ChatSessionService', () => {
         service.setModel({ id: 'model-1', name: 'm', display_name: 'Model', description: '', tool_support: true });
 
         expect(chatService.patchChat).toHaveBeenCalledWith('chat-1', { model_id: 'model-1' });
-        expect(service.model()?.id).toBe('model-1');
         expect(service.thread()?.model_id).toBe('model-1');
+        // The overlay only lives while the PATCH is in flight; afterwards the thread is the truth.
+        expect(service.model()).toBeNull();
+    });
+
+    it('shows the pick while the PATCH is in flight, then follows the thread', () => {
+        const patch$ = new Subject<any>();
+        chatService.patchChat.mockReturnValue(patch$ as any);
+        service.setActive('chat-1');
+        service.setModel({ id: 'model-1', name: 'm', display_name: 'Model', description: '', tool_support: true });
+        expect(service.model()?.id).toBe('model-1');
+
+        patch$.next({ ...chat, model_id: 'model-1', model_name: 'm' });
+        expect(service.model()).toBeNull();
+
+        // A later server-side change (e.g. a mode switch moved the thread to its recommended model)
+        // must reach the picker instead of being masked by the user's earlier pick.
+        chatService.getChat.mockReturnValue(of({ ...chat, model_id: 'model-9', model_name: 'm9' }) as any);
+        service.syncActiveThread(true);
+        expect(service.model()?.id ?? service.thread()?.model_id).toBe('model-9');
+    });
+
+    it('does not patch the previous thread while the next one is still loading', () => {
+        service.setActive('chat-1');
+        chatService.getChat.mockReturnValue(new Subject<any>() as any);
+        service.setActive('chat-2');
+        chatService.patchChat.mockClear();
+
+        service.setModel({ id: 'model-1', name: 'm', display_name: 'Model', description: '', tool_support: true });
+
+        expect(chatService.patchChat).not.toHaveBeenCalled();
     });
 
     it('resets the optimistic model selection when switching threads', () => {
+        const patch$ = new Subject<any>();
+        chatService.patchChat.mockReturnValue(patch$ as any);
         service.setActive('chat-1');
         service.setModel({ id: 'model-1', name: 'm', display_name: 'Model', description: '', tool_support: true });
         expect(service.model()?.id).toBe('model-1');
@@ -554,7 +596,7 @@ describe('ChatSessionService', () => {
         service.setModel({ id: 'model-2', name: 'glm-5.2', display_name: 'GLM-5.2', description: '', tool_support: true });
 
         expect(service.error()).toBe('Failed to update model. Please try again.');
-        expect(service.model()?.id).toBe('model-1');
+        expect(service.model()).toBeNull();
         expect(service.thread()?.model_id).toBe('model-1');
     });
 

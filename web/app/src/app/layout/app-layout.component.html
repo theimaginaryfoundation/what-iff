@@ -1,6 +1,11 @@
+@if (navigating()) {
+  <div class="app-layout__nav-progress" role="progressbar" aria-label="Loading page"></div>
+}
 <div class="app-layout" [class.app-layout--collapsed]="nav.collapsed()">
   <app-sidebar
+    id="app-sidebar"
     class="app-layout__sidebar"
+    [attr.inert]="isMobileNav() && nav.collapsed() ? '' : null"
     (newThread)="openPersonaPicker()"
     (generatePersonality)="openGeneratePersonality()"
   />
@@ -12,11 +17,13 @@
       (click)="closeMobileSidebar()"
     ></button>
   }
-  <main class="app-layout__main" id="main-content">
+  <main class="app-layout__main" id="main-content" tabindex="-1">
     @if (isMobileNav()) {
       <button
+        #mobileMenu
         type="button"
         class="app-layout__mobile-menu"
+        aria-controls="app-sidebar"
         [attr.aria-label]="nav.collapsed() ? 'Open navigation menu' : 'Close navigation menu'"
         [attr.aria-expanded]="!nav.collapsed()"
         (click)="toggleMobileSidebar()"
@@ -58,8 +65,16 @@
       <h2 id="generate-personality-modal-title" class="text-lg font-semibold text-(--color-text-primary)">Generate Personality</h2>
     </div>
     <app-personality-generate #generateFlow [modalMode]="true" (closeModal)="closeGeneratePersonality()" />
-    @if (!generateFlow.isLoading() && generateFlow.flow() && !generateFlow.isReviewScreen() && !generateFlow.isGenerating()) {
-      <div modal-footer class="w-full flex items-center justify-between">
+    @if (!generateFlow.isLoading() && generateFlow.flow() && (generateFlow.isReviewScreen() || !generateFlow.isGenerating())) {
+      <!--
+        A single root element is required here: ui-modal only projects an @if block into the
+        [modal-footer] slot when the block has exactly one root. Desktop and phone footers are
+        therefore siblings inside this wrapper and switch on the `sm` breakpoint.
+      -->
+      <div modal-footer class="w-full">
+      @if (!generateFlow.isReviewScreen()) {
+      <!-- Desktop / tablet footer (>= sm). Phones use the stacked footer below. -->
+      <div class="w-full hidden sm:flex items-center justify-between">
         <div class="flex items-center gap-2">
           <button
             type="button"
@@ -133,6 +148,139 @@
             </button>
           }
         </div>
+      </div>
+
+      <!--
+        Phone footer (< sm). Row 1: Generate now (primary). Row 2: Start Over |< (icon), Previous <,
+        Next > (equal width). Previous/Next/Generate are always shown and only enable/disable;
+        Start Over is shown only once there is progress to discard (same rule as desktop) and its
+        slot is kept so Previous/Next never shift. All buttons are min-h-11 (44px).
+      -->
+      <div class="w-full flex flex-col gap-2 sm:hidden">
+        <button
+          type="button"
+          (click)="generateFlow.finishAndGenerate()"
+          [disabled]="generateFlow.isSaving() || generateFlow.isResetting() || !generateFlow.canGenerate()"
+          class="inline-flex w-full min-h-11 items-center justify-center gap-2 px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-center leading-tight text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Generate now
+          <svg aria-hidden="true" class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+          </svg>
+        </button>
+        <div class="grid grid-cols-[2.75rem_minmax(0,1fr)_minmax(0,1fr)] items-stretch gap-2" role="group" aria-label="Wizard navigation">
+          @if (generateFlow.hasProgress()) {
+            <button
+              type="button"
+              aria-label="Start over"
+              (click)="generateFlow.resetDraft()"
+              [disabled]="generateFlow.isSaving() || generateFlow.isResetting()"
+              class="inline-flex min-h-11 min-w-11 items-center justify-center border border-amber-300 dark:border-amber-700 shadow-sm rounded-md text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg aria-hidden="true" class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20L9 12l10-8v16zM5 19V5"></path>
+              </svg>
+            </button>
+          } @else {
+            <!-- Keeps the first grid cell so Previous/Next stay put when Start Over is hidden. -->
+            <span aria-hidden="true"></span>
+          }
+          <button
+            type="button"
+            aria-label="Previous step"
+            (click)="generateFlow.goBack()"
+            [disabled]="!generateFlow.canGoBack() || generateFlow.isSaving() || generateFlow.isResetting()"
+            class="inline-flex min-h-11 items-center justify-center border border-gray-300 dark:border-gray-600 shadow-sm rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <svg aria-hidden="true" class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+            </svg>
+          </button>
+          <button
+            type="button"
+            aria-label="Next step"
+            (click)="generateFlow.goNext()"
+            [disabled]="generateFlow.isLastPage() || generateFlow.isSaving() || generateFlow.isResetting()"
+            class="inline-flex min-h-11 items-center justify-center border border-transparent shadow-sm rounded-md text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <svg aria-hidden="true" class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+      } @else {
+      <!--
+        Phone review footer (< sm). On >= sm the review actions stay in the page body, so nothing
+        is rendered here. Row 1: Accept & create (primary). Row 2: Start Over |< (icon), Previous <
+        (back to the answers), Regenerate. Same grid as the wizard footer, so slots keep their meaning.
+      -->
+      <div class="w-full flex flex-col gap-2 sm:hidden">
+        <button
+          type="button"
+          (click)="generateFlow.accept()"
+          [disabled]="generateFlow.isGenerating() || generateFlow.isAccepting()"
+          class="inline-flex w-full min-h-11 items-center justify-center gap-2 px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-center leading-tight text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          @if (generateFlow.isAccepting()) {
+            <svg aria-hidden="true" class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Creating...
+          } @else {
+            <svg aria-hidden="true" class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
+            </svg>
+            Accept &amp; create
+          }
+        </button>
+        <div class="grid grid-cols-[2.75rem_minmax(0,1fr)_minmax(0,1fr)] items-stretch gap-2" role="group" aria-label="Review actions">
+          <button
+            type="button"
+            aria-label="Start over"
+            (click)="generateFlow.resetDraft()"
+            [disabled]="generateFlow.isGenerating() || generateFlow.isAccepting() || generateFlow.isResetting()"
+            class="inline-flex min-h-11 min-w-11 items-center justify-center border border-amber-300 dark:border-amber-700 shadow-sm rounded-md text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <svg aria-hidden="true" class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20L9 12l10-8v16zM5 19V5"></path>
+            </svg>
+          </button>
+          <button
+            type="button"
+            aria-label="Previous step: edit your answers"
+            (click)="generateFlow.goBackToEdit()"
+            [disabled]="generateFlow.isGenerating() || generateFlow.isAccepting() || generateFlow.isResetting()"
+            class="inline-flex min-h-11 items-center justify-center border border-gray-300 dark:border-gray-600 shadow-sm rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <svg aria-hidden="true" class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+            </svg>
+          </button>
+          <button
+            type="button"
+            (click)="generateFlow.regenerate()"
+            [disabled]="generateFlow.isGenerating() || generateFlow.isAccepting()"
+            class="inline-flex min-h-11 items-center justify-center gap-1.5 px-1.5 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium text-center leading-tight rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <!-- The icon is dropped below 360px so the label fits the equal-width slot. -->
+            @if (generateFlow.isGenerating()) {
+              <svg aria-hidden="true" class="hidden min-[360px]:block animate-spin h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Regenerating...
+            } @else {
+              <svg aria-hidden="true" class="hidden min-[360px]:block h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v6h6M20 20v-6h-6M5.6 15a8 8 0 0013.6 2.4M18.4 9A8 8 0 004.8 6.6"></path>
+              </svg>
+              Regenerate
+            }
+          </button>
+        </div>
+      </div>
+      }
       </div>
     }
   </ui-modal>

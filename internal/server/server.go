@@ -38,6 +38,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/model"
 	moodhandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/mood"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/personality"
+	"github.com/theimaginaryfoundation/what-iff/internal/handlers/provideraccess"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/ritual"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/role"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/search"
@@ -416,6 +417,7 @@ func (s *Server) setupRoutes() {
 	imageGalleryHandler.RegisterRoutes(authRouter)
 	moodHandler.RegisterRoutes(authRouter)
 	mountAccountKeyRoutes(authRouter, keyResolver, accountKeys)
+	provideraccess.NewHandler(keyResolver, s.logger).RegisterRoutes(authRouter)
 	toolsHandler.RegisterRoutes(authRouter)
 	searchHandler.RegisterRoutes(authRouter)
 
