@@ -63,6 +63,8 @@ export interface ChatMessage {
   tool_calls?: ToolCall[];
   /** Set when async generation failed for this user turn; cleared after a successful reply. */
   last_error_message?: string | null;
+  /** Stable code for last_error_message when it has one (e.g. provider_not_configured). */
+  last_error_code?: string | null;
   /** When scratchpad + memory + summary checkpoint completed after this assistant reply (if any). */
   checkpoint_completed_at?: string | null;
   /** Per-turn model-context composition captured at generation time (assistant messages). */

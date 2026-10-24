@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 
-export type ProfileSettingsTab = 'profile' | 'subscription' | 'usage' | 'billing';
+export type ProfileSettingsTab = 'profile' | 'api-keys' | 'subscription' | 'usage' | 'billing';
 
 const BILLING_RELATED_TABS = new Set<ProfileSettingsTab>(['subscription', 'usage', 'billing']);
 

@@ -14,6 +14,7 @@ export { ModeEditModalPage } from './mode-edit-modal.page';
 export { PersonalitiesPage } from './personalities.page';
 export { PersonalityDetailPage } from './personality-detail.page';
 export { ProfileSettingsModal } from './profile-settings.modal';
+export { ProviderKeyPrompt, ProviderKeysTab } from './provider-keys';
 export { RegisterPage, type RegistrationDetails } from './register.page';
 export { SkillsPage } from './skills.page';
 export { ThreadListPanel } from './thread-list-panel.page';

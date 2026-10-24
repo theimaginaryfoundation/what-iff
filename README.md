@@ -77,16 +77,18 @@ Want the story behind it? Read the [Imagination Foundry blog](https://imaginatio
 
 The fastest way to run the full stack locally is Docker Compose.
 
-**Prerequisites:** Docker, and at least one model provider API key (e.g. OpenAI).
+**Prerequisites:** Docker, and an OpenAI API key, which you add in the app.
 
 ```bash
-# 1. Set your model provider key.
-export OPENAI_API_KEY="your-api-key-here"
-
-# 2. Start the stack. On first run it generates this install's secrets, runs
-#    migrations, and seeds the model catalog.
+# Start the stack. On first run it generates this install's secrets, runs
+# migrations, and seeds the model catalog.
 docker compose up --build
 ```
+
+Then open http://localhost:8081, create an account, and add your OpenAI key when the
+app asks (it lives in **Profile & Settings → API keys**, where you can add other
+providers' keys too). Keys belong to your account and are stored encrypted; there is
+nothing to put in `.env`.
 
 The JWT and token-encryption secrets are generated once per install and kept in a
 Docker volume; nothing is shipped in the repository. Values you set in your shell or
@@ -126,7 +128,7 @@ Configuration is via environment variables. The essentials:
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` | Model provider key (required for AI features; add other providers' keys as needed) |
+| `OPENAI_API_KEY` and other provider keys | Not used by default: each account adds its own keys in the app. A deployment that supplies keys for everyone binds `providerkeys.New` to these instead |
 | `JWT_SECRET`, `JWT_REFRESH_SECRET` | JWT access/refresh token signing (≥32 chars). Generated automatically under Docker Compose |
 | `TOKEN_ENCRYPTION_SECRET` | Encryption key for at-rest secrets (≥32 chars). Generated automatically under Docker Compose |
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | PostgreSQL connection |

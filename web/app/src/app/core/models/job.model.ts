@@ -15,6 +15,8 @@ export interface Job {
   reference: string;
   status: JobStatus;
   error?: string;
+  /** Stable code for error when it has one (e.g. provider_not_configured). */
+  error_code?: string;
   result_id?: string;
   progress_current?: number;
   progress_total?: number;
