@@ -7799,7 +7799,9 @@ components:
         subscription_tier:
           type: string
           enum: [low, medium, high, ultra]
-          description: Minimum plan tier for free-chat access (ultra = overage only, never free)
+          description: >-
+            The model's billing grade, lowest to highest. Present only where the
+            deployment bills by tier; omitted where tiers have no effect.
         deleted:
           type: boolean
           description: Whether the model is soft deleted
@@ -7815,7 +7817,6 @@ components:
         - tool_support
         - vision_support
         - base_credits_per_slab
-        - subscription_tier
         - deleted
         - is_default
       example:

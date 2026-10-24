@@ -41,7 +41,7 @@ func (Model) Fields() []ent.Field {
 		field.Enum("subscription_tier").
 			Values("low", "medium", "high", "ultra").
 			Default("high").
-			Comment("Minimum tier required for free-chat access on this model"),
+			Comment("Billing grade a linked meter may use; it has no effect without one"),
 		field.Bool("deleted").
 			Default(false).
 			Comment("Whether the model is soft deleted"),

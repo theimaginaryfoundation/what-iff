@@ -114,3 +114,8 @@ type Usage struct {
 // environment it needs at construction time. The core passes only the datastore
 // and logger, so no implementation settings cross this boundary.
 var New func(ds *datastore.Datastore, logger *zap.Logger) Meter
+
+// Linked reports whether this build links a metering implementation. Model
+// subscription tiers mean something only to a linked meter: NoopMeter ignores
+// them, so a build without one has no use for showing them.
+func Linked() bool { return New != nil }

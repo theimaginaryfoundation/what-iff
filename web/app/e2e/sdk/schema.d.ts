@@ -10951,10 +10951,10 @@ export interface components {
              */
             base_credits_per_slab: number;
             /**
-             * @description Minimum plan tier for free-chat access (ultra = overage only, never free)
+             * @description The model's billing grade, lowest to highest. Present only where the deployment bills by tier; omitted where tiers have no effect.
              * @enum {string}
              */
-            subscription_tier: "low" | "medium" | "high" | "ultra";
+            subscription_tier?: "low" | "medium" | "high" | "ultra";
             /** @description Whether the model is soft deleted */
             deleted: boolean;
             /** @description Whether this is the application-wide default model (at most one active model) */

@@ -29,6 +29,7 @@ Defines the implementation-independent metering contract used by the agent.
   It exists so an implementation can persist a link from a recorded turn to the message whose Context X-ray it paid for; `NoopMeter` ignores it and the core reads it back nowhere.
 - `source.go` carries where a turn was started from: the entry points set it (`WithTurnSource`: the app, the webhook, or a plugin's own name such as `discord` from `plugins.UserTurn.Source`), the agent copies it onto the turn's own context, and an implementation reads it in `Check` (`TurnSourceFromContext`) and gets it in `Usage.Source`, so turns strangers start through a relay can be metered apart from the owner's own chat traffic.
 - `New` is intentionally nil when no implementation is linked.
+- `Linked()` reports `New != nil`. Model subscription tiers mean something only to a linked meter, so the model list sends them only when it is true.
   `Agent.NewAgent` then chooses `NoopMeter`, so removing the production meter does not require agent or server changes.
 
 ## Testing
