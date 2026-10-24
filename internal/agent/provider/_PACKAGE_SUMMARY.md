@@ -40,6 +40,13 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 - **User-attached images (chat):** `ModelContextSegment.UserImages` + `AppendUserMessage`.
   Every renderer sends **`UserMessageImage.RawBytes`** inline: OpenAI Responses as an `input_image` data URL, Claude as a base64 block, the Chat Completions vendors as a data URL (the chat path fills the bytes via **`loadImageBytesForVision`**).
   An image without bytes is left out; **`renderClaudeContext`** keeps that turn text-only.
+- **Discounted inference routing (`relay_route.go`, ADR 0x029):** `RelayRoute` sends Chat Completions calls for models in `CheaperInferenceModels` through the Cheaper Inference relay, mapping our model name to the relay's id.
+  The Gemini, Mistral, DeepSeek, Qwen and Xiaomi providers hold one shared route (`SetRelayRoute`) and call `relay.chatCompletionsNew` / `relay.chatCompletionsStream`; a nil route goes straight to the provider's own client.
+  A call is routed only when its context carries a `RelayTurn` (`WithRelayTurn`; the user opted in), the turn has not fallen back, and the model's breaker allows it.
+  Any relay error falls back to the provider's own endpoint with our model id, and the rest of that turn stays direct; a stream that already delivered output is not retried.
+  The per-model breaker opens after three unhealthy failures (transport, 5xx, 401/402/403/404/408/429) for two minutes, then lets one probe through; a 400 counts as healthy so one bad request cannot trip it.
+  `RelayTurn.Route` reports `cheaperinference`, `mixed` or `""` for the turn's metering, and each fallback counts on `whatiff.gen_ai.retries` with reason `relay_fallback`.
+  The relay client sets `zdr: true` on every request when zero data retention is on (the default).
 - **Xiaomi MiMo (Chat Completions):** `XiaomiAdapter` always reasons, streams it as the non-standard `reasoning_content`, and honors **neither** `budget_tokens` nor `reasoning_effort` — only `thinking: {"type":"disabled"}`.
   The adapter raises `MaxCompletionTokens` to `ReasoningMaxOutputTokens`, and when a call finishes with `finish_reason: "length"` and no reply text it is discarded and re-issued once with thinking disabled (which then stays off for the rest of the turn).
   `GenerateResponse.StopReason` carries `finish_reason`.

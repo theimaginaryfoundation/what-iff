@@ -139,6 +139,10 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   Not quota-metered.
   Partial runs can leave a mix of set keys; safe to retry (upsert per key).
   Exposed via personality HTTP + expressions UI; create/accept flows do not auto-call.
+- **Discounted inference routing (`relay_routing.go`, ADR 0x029):** `buildRelayRoute` hands one `provider.RelayRoute` to every Chat Completions provider when a relay key is configured.
+  `prepareChatContext` sets `chatCtx.relayTurn` via `relayTurnFor` only when the model is routed and the user has `InferenceRelayOptIn`; the user row is loaded only in that case.
+  The Gemini and Chat Completions generation paths put the turn on their context (`provider.WithRelayTurn`), and both usage records carry `Usage.Route` from it.
+  Subagents, summaries, memory and naming calls are not routed.
 - **Always-on reasoning models & truncated turns:** On the zai path `generateAssistantForMessageClaude` applies `provider.ApplyZAIReasoningEffort` (`high`) and installs a `SetTruncationFallback` that logs and drops to `low`; `XiaomiAdapter` handles its own thinking-off retry.
   If a turn still ends with no text, `assertGenerationProducedOutput` maps `max_tokens` / `max_output_tokens` / `length` (`isTruncationStopReason`) to the clearer "cut off at the length limit" error.
   `saveAgentResponse` persists `GenerateResponse.Reasoning` to `ChatMessage.ModelReasoning` (`model_reasoning` column) for the chat UI's collapsed "Thought process" disclosure; the context builder never reads it.

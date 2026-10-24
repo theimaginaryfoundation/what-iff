@@ -55,6 +55,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 |--------|--------|
 | `NewDatastore` | Requires Ent client, `sql.DB`, logger, token encryption secret, and optional metrics (`nil` in tests). |
 | Methods on `Datastore` | Domain-specific; handlers depend on narrow interfaces where possible (`handlers/*/provider.go`). |
+| `AdminPatchUserExperimentalModels` / `AdminPatchUserInferenceRelay` | Admin toggles for a user's experimental-model access and discounted inference routing opt-in (ADR 0x029); both go through `adminPatchUserFlag`, which refuses super admins. |
 | `AdminImportAccountBackup` | Admin-only restore of an account packet containing chats, personalities, memories, moods, and agent jobs. |
 
 ## Dependencies

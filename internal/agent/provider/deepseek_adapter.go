@@ -17,6 +17,9 @@ const DefaultDeepSeekBaseURL = "https://api.deepseek.com/v1"
 type DeepSeekProvider struct {
 	client *openai.Client
 	tel    *telemetry.Telemetry
+	// relay, when set, sends opted-in turns for routed models through a discounted
+	// relay first (see RelayRoute).
+	relay *RelayRoute
 }
 
 // DeepSeekAdapter implements AgentAdapter for DeepSeek's OpenAI-compatible Chat
@@ -46,12 +49,12 @@ func NewDeepSeekProvider(apiKey, baseURL string, tel *telemetry.Telemetry, httpC
 }
 
 func (p *DeepSeekProvider) Call(ctx context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
-	return chatCompletionsNew(ctx, p.tel, telemetry.DependencyDeepSeek, p.client, params)
+	return p.relay.chatCompletionsNew(ctx, p.tel, telemetry.DependencyDeepSeek, p.client, params)
 }
 
 // CallStreaming streams a Chat Completions request, forwarding text deltas to onTextDelta.
 func (p *DeepSeekProvider) CallStreaming(ctx context.Context, params openai.ChatCompletionNewParams, onTextDelta func(delta string)) (*openai.ChatCompletion, error) {
-	resp, err := chatCompletionsStream(ctx, p.tel, telemetry.DependencyDeepSeek, p.client, params, chatCompletionStreamHooks{onTextDelta: onTextDelta})
+	resp, err := p.relay.chatCompletionsStream(ctx, p.tel, telemetry.DependencyDeepSeek, p.client, params, chatCompletionStreamHooks{onTextDelta: onTextDelta})
 	if err != nil {
 		return nil, err
 	}
@@ -125,3 +128,6 @@ func (a *DeepSeekAdapter) toGenerateResponse(resp *openai.ChatCompletion) *Gener
 func (a *DeepSeekAdapter) ScopeTools(hidden func(name string) bool) {
 	a.params.Tools = a.tools.scope(hidden)
 }
+
+// SetRelayRoute routes this provider's opted-in calls through r (nil turns routing off).
+func (p *DeepSeekProvider) SetRelayRoute(r *RelayRoute) { p.relay = r }

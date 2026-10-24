@@ -49,21 +49,22 @@ const (
 // Plugins linked into the server may declare their own names under the same rules: a short,
 // fixed, lowercase string per vendor.
 const (
-	DependencyPostgres  = "postgres"
-	DependencyS3        = "s3"
-	DependencyLocalFS   = "local_fs"
-	DependencySES       = "ses"
-	DependencyParallel  = "parallel"
-	DependencyOpenAI    = "openai"
-	DependencyAnthropic = "anthropic"
-	DependencyZAI       = "zai"
-	DependencyGemini    = "gemini"
-	DependencyDeepSeek  = "deepseek"
-	DependencyMistral   = "mistral"
-	DependencyQwen      = "qwen"
-	DependencyXiaomi    = "xiaomi"
-	DependencyLocalLLM  = "local_llm"
-	DependencyOther     = "other"
+	DependencyPostgres         = "postgres"
+	DependencyS3               = "s3"
+	DependencyLocalFS          = "local_fs"
+	DependencySES              = "ses"
+	DependencyParallel         = "parallel"
+	DependencyOpenAI           = "openai"
+	DependencyAnthropic        = "anthropic"
+	DependencyZAI              = "zai"
+	DependencyGemini           = "gemini"
+	DependencyDeepSeek         = "deepseek"
+	DependencyMistral          = "mistral"
+	DependencyQwen             = "qwen"
+	DependencyXiaomi           = "xiaomi"
+	DependencyCheaperInference = "cheaperinference"
+	DependencyLocalLLM         = "local_llm"
+	DependencyOther            = "other"
 )
 
 // Token types for AttrGenAITokenType. "input" and "output" are semconv; cached input and

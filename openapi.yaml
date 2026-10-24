@@ -7422,6 +7422,13 @@ components:
         theme:
           type: string
           enum: [light, dark, system]
+        inference_relay_opt_in:
+          type: boolean
+          readOnly: true
+          description: >-
+            Whether this account's chat turns on eligible models may be served through
+            the discounted inference relay, falling back to the model's own provider
+            (ADR 0x029). Set by administrators; not writable through this API.
         created_at:
           type: string
           format: date-time

@@ -47,20 +47,22 @@ func (c *Config) providerEndpoints() []providerEndpoint {
 		{appmodels.ModelProviderDeepSeek, orDefault(c.DeepSeekBaseURL, provider.DefaultDeepSeekBaseURL), provider.BearerAuthorization, false},
 		{appmodels.ModelProviderQwen, orDefault(c.QwenBaseURL, provider.DefaultQwenBaseURL), provider.BearerAuthorization, false},
 		{appmodels.ModelProviderXiaomi, orDefault(c.XiaomiBaseURL, provider.DefaultXiaomiBaseURL), provider.BearerAuthorization, false},
+		{appmodels.ModelProviderCheaperInference, orDefault(c.CheaperInferenceBaseURL, provider.DefaultCheaperInferenceBaseURL), provider.BearerAuthorization, false},
 	}
 }
 
 // configuredProviderKeys is the credentials this deployment was started with.
 func (c *Config) configuredProviderKeys() map[appmodels.ModelProvider]string {
 	return map[appmodels.ModelProvider]string{
-		appmodels.ModelProviderOpenAI:    c.OpenAIKey,
-		appmodels.ModelProviderAnthropic: c.AnthropicKey,
-		appmodels.ModelProviderZAI:       c.ZAIKey,
-		appmodels.ModelProviderGoogle:    c.GeminiKey,
-		appmodels.ModelProviderMistral:   c.MistralKey,
-		appmodels.ModelProviderDeepSeek:  c.DeepSeekKey,
-		appmodels.ModelProviderQwen:      c.QwenKey,
-		appmodels.ModelProviderXiaomi:    c.XiaomiKey,
+		appmodels.ModelProviderOpenAI:           c.OpenAIKey,
+		appmodels.ModelProviderAnthropic:        c.AnthropicKey,
+		appmodels.ModelProviderZAI:              c.ZAIKey,
+		appmodels.ModelProviderGoogle:           c.GeminiKey,
+		appmodels.ModelProviderMistral:          c.MistralKey,
+		appmodels.ModelProviderDeepSeek:         c.DeepSeekKey,
+		appmodels.ModelProviderQwen:             c.QwenKey,
+		appmodels.ModelProviderXiaomi:           c.XiaomiKey,
+		appmodels.ModelProviderCheaperInference: c.CheaperInferenceKey,
 	}
 }
 

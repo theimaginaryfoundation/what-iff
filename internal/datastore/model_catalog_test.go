@@ -110,6 +110,27 @@ func TestAdminPatchUserExperimentalModels_TogglesFlag(t *testing.T) {
 	require.False(t, updated.EnableExperimentalModels)
 }
 
+// The relay opt-in shares the experimental toggle's write path; it must flip only
+// its own flag.
+func TestAdminPatchUserInferenceRelay_TogglesOnlyItsFlag(t *testing.T) {
+	ds, cleanup := newModelCatalogRoleTestDatastore(t)
+	defer cleanup()
+
+	userID := createCatalogTestUser(t, ds)
+
+	updated, err := ds.AdminPatchUserInferenceRelay(context.Background(), userID, true)
+	require.NoError(t, err)
+	require.True(t, updated.InferenceRelayOptIn)
+	require.False(t, updated.EnableExperimentalModels)
+
+	updated, err = ds.AdminPatchUserInferenceRelay(context.Background(), userID, false)
+	require.NoError(t, err)
+	require.False(t, updated.InferenceRelayOptIn)
+
+	_, err = ds.AdminPatchUserInferenceRelay(context.Background(), uuid.New(), true)
+	require.ErrorIs(t, err, ErrUserNotFound)
+}
+
 func TestAdminPatchUserExperimentalModels_UserNotFound(t *testing.T) {
 	ds, cleanup := newModelCatalogRoleTestDatastore(t)
 	defer cleanup()

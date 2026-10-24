@@ -77,7 +77,7 @@ Notes on these metrics:
   For streamed responses this measures time to the response headers; full LLM call time is in
   `gen_ai.client.operation.duration`.
 - **`dependency` values:** `postgres`, `s3`, `local_fs`, `ses`, `parallel`, `openai`, `anthropic`,
-  `zai`, `gemini`, `deepseek`, `mistral`, `qwen`, `xiaomi`, `local_llm`, `other`.
+  `zai`, `gemini`, `deepseek`, `mistral`, `qwen`, `xiaomi`, `cheaperinference`, `local_llm`, `other`.
   Plugins linked into the server can add their own vendor names.
 - **DB:**
   - `db.operation.name` is `query`, `create`, `update` or `delete`.
@@ -94,7 +94,7 @@ Notes on these metrics:
 | `whatiff.gen_ai.time_to_first_token` | histogram, s | slow | provider, model, `call_path` |
 | `gen_ai.client.token.usage` | histogram, {token} | tokens (16–1M) | provider, `gen_ai.token.type`, `call_path` |
 | `whatiff.gen_ai.tokens` | counter, {token} | — | provider, model, `gen_ai.token.type`, `call_path` |
-| `whatiff.gen_ai.retries` | counter | — | provider, model, `reason` (rate_limited, server_error, network, truncated, length) |
+| `whatiff.gen_ai.retries` | counter | — | provider, model, `reason` (rate_limited, server_error, network, truncated, length, relay_fallback) |
 | `whatiff.gen_ai.safety_blocks` | counter | — | provider, model, `call_path` |
 | `whatiff.gen_ai.context.tokens` | histogram, {token} | tokens | `segment`, `call_path` |
 

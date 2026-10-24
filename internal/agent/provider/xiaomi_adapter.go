@@ -19,6 +19,9 @@ const DefaultXiaomiBaseURL = "https://api.xiaomimimo.com/v1"
 type XiaomiProvider struct {
 	client *openai.Client
 	tel    *telemetry.Telemetry
+	// relay, when set, sends opted-in turns for routed models through a discounted
+	// relay first (see RelayRoute).
+	relay *RelayRoute
 }
 
 // XiaomiAdapter implements AgentAdapter for Xiaomi MiMo's OpenAI-compatible Chat
@@ -67,7 +70,7 @@ func NewXiaomiProvider(apiKey, baseURL string, tel *telemetry.Telemetry, httpCli
 // Call issues a non-streaming request and returns the response plus its
 // reasoning_content (MiMo always reasons unless thinking is disabled).
 func (p *XiaomiProvider) Call(ctx context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, string, error) {
-	resp, err := chatCompletionsNew(ctx, p.tel, telemetry.DependencyXiaomi, p.client, params)
+	resp, err := p.relay.chatCompletionsNew(ctx, p.tel, telemetry.DependencyXiaomi, p.client, params)
 	if err != nil {
 		return nil, "", err
 	}
@@ -81,7 +84,7 @@ func (p *XiaomiProvider) Call(ctx context.Context, params openai.ChatCompletionN
 // replayed and live reasoning cannot be duplicated by a transport retry.)
 func (p *XiaomiProvider) CallStreaming(ctx context.Context, params openai.ChatCompletionNewParams, onTextDelta func(delta string), onReasoningDelta func(delta string)) (*openai.ChatCompletion, string, error) {
 	var reasoning strings.Builder
-	resp, err := chatCompletionsStream(ctx, p.tel, telemetry.DependencyXiaomi, p.client, params, chatCompletionStreamHooks{
+	resp, err := p.relay.chatCompletionsStream(ctx, p.tel, telemetry.DependencyXiaomi, p.client, params, chatCompletionStreamHooks{
 		onTextDelta: onTextDelta,
 		onReasoningDelta: func(d string) {
 			reasoning.WriteString(d)
@@ -210,3 +213,6 @@ func (a *XiaomiAdapter) toGenerateResponse(resp *openai.ChatCompletion) *Generat
 func (a *XiaomiAdapter) ScopeTools(hidden func(name string) bool) {
 	a.params.Tools = a.tools.scope(hidden)
 }
+
+// SetRelayRoute routes this provider's opted-in calls through r (nil turns routing off).
+func (p *XiaomiProvider) SetRelayRoute(r *RelayRoute) { p.relay = r }

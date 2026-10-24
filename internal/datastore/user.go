@@ -69,6 +69,7 @@ func toUserModel(u *ent.User) *models.UserResponse {
 		Timezone:                 u.Timezone,
 		Status:                   string(u.Status),
 		EnableExperimentalModels: u.EnableExperimentalModels,
+		InferenceRelayOptIn:      u.InferenceRelayOptIn,
 		CreatedAt:                u.CreatedAt,
 		UpdatedAt:                u.UpdatedAt,
 	}
