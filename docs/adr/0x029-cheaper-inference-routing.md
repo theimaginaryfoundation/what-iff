@@ -4,7 +4,7 @@
 - **Date:** 2026-10-24
 - **Deciders:** What Iff maintainers
 - **Issue:** none
-- **PR:** TBD
+- **PR:** #377
 
 ## Context
 
