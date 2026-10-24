@@ -10641,6 +10641,8 @@ export interface components {
             status: "active" | "inactive";
             /** @enum {string} */
             theme?: "light" | "dark" | "system";
+            /** @description Whether this account's chat turns on eligible models may be served through the discounted inference relay, falling back to the model's own provider (ADR 0x029). Set by administrators; not writable through this API. */
+            readonly inference_relay_opt_in?: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */

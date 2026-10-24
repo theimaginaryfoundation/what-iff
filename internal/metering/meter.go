@@ -81,6 +81,11 @@ type Usage struct {
 	Metadata map[string]interface{}
 	// SubagentRun marks the usage as originating from a subagent job.
 	SubagentRun bool
+	// Route says how an opted-in chat turn was served (ADR 0x029): "" for the model's
+	// own provider, "cheaperinference" when every call went through the discounted
+	// relay, "mixed" when the turn fell back part way. An implementation may discount
+	// relay-served usage; NoopMeter ignores it.
+	Route string
 	// Source is where the turn was started from (TurnSourceApp, TurnSourceWebhook, or a plugin's
 	// own name such as "discord"); "" when the entry point did not say. See TurnSource.
 	Source string

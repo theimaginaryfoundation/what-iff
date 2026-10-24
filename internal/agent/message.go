@@ -142,6 +142,9 @@ type Agent struct {
 	// keyResolver answers which vendors the caller holds a key for; nil (an Agent
 	// built without NewAgent) treats every registered image generator as usable.
 	keyResolver providerkeys.Resolver
+	// relayRoute sends opted-in chat turns on routed models through the discounted
+	// inference relay (relay_routing.go). Nil when no relay key is configured.
+	relayRoute *provider.RelayRoute
 	// pushEnabled is true when a real push implementation was wired (a non-nil
 	// PushNotifier). It lets the completion hook skip spawning a detached
 	// goroutine when push is off (the open-source default).
@@ -257,6 +260,10 @@ type AgentConfig struct {
 	QwenBaseURL string
 	// XiaomiBaseURL overrides Xiaomi MiMo's OpenAI-compatible base URL; optional.
 	XiaomiBaseURL string
+	// CheaperInferenceBaseURL overrides the discounted inference relay's base URL; optional.
+	CheaperInferenceBaseURL string
+	// CheaperInferenceZDR sends every relay request with zero data retention.
+	CheaperInferenceZDR bool
 }
 
 // NewAgent creates a new agent wired to every provider this deployment can
@@ -377,6 +384,7 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 
 	a.imageGenerators = buildImageGenerators(cfg, a)
 	a.keyResolver = cfg.KeyResolver
+	a.relayRoute = a.buildRelayRoute(cfg, tel, logger)
 
 	if a.localLLM {
 		// LocalProvider deliberately does NOT use cfg.HTTPClient: under
@@ -860,6 +868,9 @@ type chatContext struct {
 	// expressionsEnabled mirrors personality.ExpressionsEnabled; when false,
 	// expression picking is skipped for this turn.
 	expressionsEnabled bool
+	// relayTurn is set when this turn may be served through the discounted inference
+	// relay (the user opted in and the model is routed); see relay_routing.go.
+	relayTurn *provider.RelayTurn
 	// webSearchCount is the turn's billable web searches (see turnWebSearchCount).
 	webSearchCount int
 	// toolProgress records the live tool timeline into the chat job's Progress. Nil when the
@@ -1417,6 +1428,7 @@ func (a *Agent) generateAssistantForMessageGemini(ctx context.Context, userID uu
 		return nil, nil, fmt.Errorf("Gemini model %q requested but GEMINI_API_KEY is not configured", chatCtx.model)
 	}
 
+	ctx = provider.WithRelayTurn(ctx, chatCtx.relayTurn)
 	geminiParams := visionRenderContext(chatCtx, modelContext).BuildGeminiParams(chatCtx.model)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
@@ -1506,6 +1518,7 @@ func (a *Agent) generateAssistantForMessageLocal(ctx context.Context, userID uui
 // OpenAI-compatible Chat Completions API (Mistral, DeepSeek, Qwen, Xiaomi MiMo).
 // Gemini uses a separate path for tool-call compatibility.
 func (a *Agent) generateAssistantForMessageOpenAIChatCompletions(ctx context.Context, userID uuid.UUID, chatJob *models.Job, chatMessage *models.ChatMessage, chatCtx *chatContext, modelContext *provider.ModelContext) (*models.ChatMessage, *provider.GenerateResponse, error) {
+	ctx = provider.WithRelayTurn(ctx, chatCtx.relayTurn)
 	params := buildOpenAIChatCompletionsParams(chatCtx, modelContext)
 
 	policy := a.buildTurnToolPolicy(ctx, chatCtx, userID, chatMessage)
@@ -2080,6 +2093,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 		mcpSessions:            make(map[string]string),
 		memoryProvenance:       a.memoryProvenanceForChat(ctx, userID, parentChat),
 		triggerMessageID:       chatMessage.ID,
+		relayTurn:              a.relayTurnFor(ctx, userID, resolved),
 	}, nil
 }
 
@@ -2670,6 +2684,7 @@ func (a *Agent) postMessageProcessing(ctx context.Context, userID uuid.UUID, cha
 			Tokens:     chatMessage.Tokens,
 			MessageID:  messageID,
 			Source:     metering.TurnSourceFromContext(ctx),
+			Route:      chatCtx.relayTurn.Route(),
 		})
 
 		if usage, ok := a.webSearchUsage(userID, chatMessage.ChatID, chatCtx, actionType); ok {
@@ -3206,6 +3221,7 @@ func (a *Agent) recordCancelledChatUsage(
 		ChatID:     userMessage.ChatID.String(),
 		Tokens:     inputTokens,
 		Metadata:   metadata,
+		Route:      chatCtx.relayTurn.Route(),
 	})
 	if partialMsg == nil || !outputKnown {
 		return

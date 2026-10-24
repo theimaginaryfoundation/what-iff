@@ -71,6 +71,7 @@ func TestHTTPTransportDependencyMapping(t *testing.T) {
 		"https://dashscope-us.aliyuncs.com/compatible-mode/v1/x":       telemetry.DependencyQwen,
 		"https://API.DEEPSEEK.COM/v1/chat":                             telemetry.DependencyDeepSeek,
 		"https://api.xiaomimimo.com/v1/chat":                           telemetry.DependencyXiaomi,
+		"https://api.cheaperinference.com/v1/chat/completions":         telemetry.DependencyCheaperInference,
 		"https://api.parallel.ai/v1/search":                            telemetry.DependencyParallel,
 		"https://user-supplied.example.com/some/path?id=123":           telemetry.DependencyOther,
 	}

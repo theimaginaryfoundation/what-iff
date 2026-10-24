@@ -24,6 +24,9 @@ type GeminiProvider struct {
 	client       *openai.Client
 	tokenCounter *TokenCounter
 	tel          *telemetry.Telemetry
+	// relay, when set, sends opted-in turns for routed models through a discounted
+	// relay first (see RelayRoute).
+	relay *RelayRoute
 }
 
 // NewGeminiProvider creates a GeminiProvider backed by the given API key. baseURL
@@ -52,7 +55,7 @@ func NewGeminiProvider(apiKey, baseURL string, tel *telemetry.Telemetry, httpCli
 // completionsNew is the single entry point for Gemini Chat Completions HTTP calls; it
 // records the call's duration and token-usage metrics.
 func (c *GeminiProvider) completionsNew(ctx context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
-	return chatCompletionsNew(ctx, c.tel, telemetry.DependencyGemini, c.client, params)
+	return c.relay.chatCompletionsNew(ctx, c.tel, telemetry.DependencyGemini, c.client, params)
 }
 
 // geminiCompletionTokenUsage is an alias for chatCompletionTokenUsage (defined in
@@ -86,7 +89,7 @@ func (c *GeminiProvider) Call(ctx context.Context, params openai.ChatCompletionN
 // than mis-associating.
 func (c *GeminiProvider) CallStreaming(ctx context.Context, params openai.ChatCompletionNewParams, onTextDelta func(delta string)) (*openai.ChatCompletion, map[int64]string, error) {
 	thoughtSignatures := map[int64]string{}
-	resp, err := chatCompletionsStream(ctx, c.tel, telemetry.DependencyGemini, c.client, params, chatCompletionStreamHooks{
+	resp, err := c.relay.chatCompletionsStream(ctx, c.tel, telemetry.DependencyGemini, c.client, params, chatCompletionStreamHooks{
 		onTextDelta: onTextDelta,
 		onToolCallDelta: func(index int64, raw string) {
 			if _, seen := thoughtSignatures[index]; seen {
@@ -143,3 +146,6 @@ func (c *GeminiProvider) CountTokens(text string) (int, error) {
 func (c *GeminiProvider) SelectCarryOverTurns(recent []*models.ChatMessage, maxTurns, maxTokens int) [][2]*models.ChatMessage {
 	return c.tokenCounter.SelectCarryOverTurns(recent, maxTurns, maxTokens)
 }
+
+// SetRelayRoute routes this provider's opted-in calls through r (nil turns routing off).
+func (c *GeminiProvider) SetRelayRoute(r *RelayRoute) { c.relay = r }

@@ -21,6 +21,7 @@ var defaultDependencyHosts = map[string]string{
 	"dashscope-intl.aliyuncs.com":       DependencyQwen,
 	"dashscope.aliyuncs.com":            DependencyQwen,
 	"api.xiaomimimo.com":                DependencyXiaomi,
+	"api.cheaperinference.com":          DependencyCheaperInference,
 	"api.parallel.ai":                   DependencyParallel,
 }
 

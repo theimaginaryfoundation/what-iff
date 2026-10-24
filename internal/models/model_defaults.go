@@ -48,6 +48,11 @@ const (
 	// ModelProviderXiaomi routes through Xiaomi MiMo's OpenAI-compatible Chat
 	// Completions API.
 	ModelProviderXiaomi ModelProvider = "xiaomi"
+	// ModelProviderCheaperInference is the Cheaper Inference relay. It is a route,
+	// not a catalog provider: no model row names it, and it is absent from
+	// ModelProviders. It exists so the relay's credential resolves like any other
+	// (ADR 0x029).
+	ModelProviderCheaperInference ModelProvider = "cheaperinference"
 )
 
 // ModelConfig represents a model's configuration

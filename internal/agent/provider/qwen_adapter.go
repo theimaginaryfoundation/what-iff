@@ -19,6 +19,9 @@ const DefaultQwenBaseURL = "https://dashscope-intl.aliyuncs.com/compatible-mode/
 type QwenProvider struct {
 	client *openai.Client
 	tel    *telemetry.Telemetry
+	// relay, when set, sends opted-in turns for routed models through a discounted
+	// relay first (see RelayRoute).
+	relay *RelayRoute
 }
 
 // QwenAdapter implements AgentAdapter for Qwen's OpenAI-compatible Chat
@@ -48,12 +51,12 @@ func NewQwenProvider(apiKey, baseURL string, tel *telemetry.Telemetry, httpClien
 }
 
 func (p *QwenProvider) Call(ctx context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
-	return chatCompletionsNew(ctx, p.tel, telemetry.DependencyQwen, p.client, params)
+	return p.relay.chatCompletionsNew(ctx, p.tel, telemetry.DependencyQwen, p.client, params)
 }
 
 // CallStreaming streams a Chat Completions request, forwarding text deltas to onTextDelta.
 func (p *QwenProvider) CallStreaming(ctx context.Context, params openai.ChatCompletionNewParams, onTextDelta func(delta string)) (*openai.ChatCompletion, error) {
-	resp, err := chatCompletionsStream(ctx, p.tel, telemetry.DependencyQwen, p.client, params, chatCompletionStreamHooks{onTextDelta: onTextDelta})
+	resp, err := p.relay.chatCompletionsStream(ctx, p.tel, telemetry.DependencyQwen, p.client, params, chatCompletionStreamHooks{onTextDelta: onTextDelta})
 	if err != nil {
 		return nil, err
 	}
@@ -125,3 +128,6 @@ func (a *QwenAdapter) toGenerateResponse(resp *openai.ChatCompletion) *GenerateR
 func (a *QwenAdapter) ScopeTools(hidden func(name string) bool) {
 	a.params.Tools = a.tools.scope(hidden)
 }
+
+// SetRelayRoute routes this provider's opted-in calls through r (nil turns routing off).
+func (p *QwenProvider) SetRelayRoute(r *RelayRoute) { p.relay = r }

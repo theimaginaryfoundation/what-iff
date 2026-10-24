@@ -46,6 +46,9 @@ func (User) Fields() []ent.Field {
 		field.Bool("enable_experimental_models").
 			Default(false).
 			Comment("When true, user can see and use google/zai (Gemini/GLM) models"),
+		field.Bool("inference_relay_opt_in").
+			Default(false).
+			Comment("When true, this account's chat turns on routed models may be served through the discounted inference relay, falling back to the model's own provider (ADR 0x029)"),
 		field.Time("last_login").
 			Optional().
 			Nillable(),

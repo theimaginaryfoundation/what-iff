@@ -74,6 +74,13 @@ type Config struct {
 	QwenBaseURL     string
 	XiaomiKey       string
 	XiaomiBaseURL   string
+	// CheaperInferenceKey/BaseURL configure the discounted inference relay (ADR 0x029).
+	CheaperInferenceKey     string
+	CheaperInferenceBaseURL string
+	// CheaperInferenceZDR sends every relay request with zdr: true. On unless
+	// CHEAPER_INFERENCE_ZDR=false, because without it the relay may serve a request
+	// through a third-party seller's cloud account.
+	CheaperInferenceZDR bool
 	// First-party web search (ADR 0x021). An empty key leaves the tools off.
 	ParallelAPIKey               string
 	ParallelSearchMode           string
@@ -209,6 +216,9 @@ func NewConfig() *Config {
 	qwenBaseURL := strings.TrimSpace(os.Getenv("QWEN_BASE_URL"))
 	xiaomiKey := os.Getenv("XIAOMI_API_KEY")
 	xiaomiBaseURL := strings.TrimSpace(os.Getenv("XIAOMI_BASE_URL"))
+	cheaperInferenceKey := os.Getenv("CHEAPER_INFERENCE_API_KEY")
+	cheaperInferenceBaseURL := strings.TrimSpace(os.Getenv("CHEAPER_INFERENCE_BASE_URL"))
+	cheaperInferenceZDR := strings.TrimSpace(os.Getenv("CHEAPER_INFERENCE_ZDR")) != "false"
 	parallelAPIKey := strings.TrimSpace(os.Getenv("PARALLEL_API_KEY"))
 	parallelSearchMode := strings.TrimSpace(os.Getenv("PARALLEL_SEARCH_MODE"))
 	tokenEncryptionSecret := strings.TrimSpace(os.Getenv("TOKEN_ENCRYPTION_SECRET"))
@@ -374,6 +384,9 @@ func NewConfig() *Config {
 		QwenBaseURL:                         qwenBaseURL,
 		XiaomiKey:                           xiaomiKey,
 		XiaomiBaseURL:                       xiaomiBaseURL,
+		CheaperInferenceKey:                 cheaperInferenceKey,
+		CheaperInferenceBaseURL:             cheaperInferenceBaseURL,
+		CheaperInferenceZDR:                 cheaperInferenceZDR,
 		ParallelAPIKey:                      parallelAPIKey,
 		ParallelSearchMode:                  parallelSearchMode,
 		TokenEncryptionSecret:               tokenEncryptionSecret,

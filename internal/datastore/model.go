@@ -216,6 +216,22 @@ func (d *Datastore) assertUserCanUseModel(ctx context.Context, tx *ent.Tx, userI
 
 // AdminPatchUserExperimentalModels toggles experimental model access for a user.
 func (d *Datastore) AdminPatchUserExperimentalModels(ctx context.Context, userID uuid.UUID, enabled bool) (*models.UserResponse, error) {
+	return d.adminPatchUserFlag(ctx, userID, func(u *ent.UserUpdateOne) *ent.UserUpdateOne {
+		return u.SetEnableExperimentalModels(enabled)
+	})
+}
+
+// AdminPatchUserInferenceRelay opts a user in or out of discounted inference
+// routing (ADR 0x029).
+func (d *Datastore) AdminPatchUserInferenceRelay(ctx context.Context, userID uuid.UUID, enabled bool) (*models.UserResponse, error) {
+	return d.adminPatchUserFlag(ctx, userID, func(u *ent.UserUpdateOne) *ent.UserUpdateOne {
+		return u.SetInferenceRelayOptIn(enabled)
+	})
+}
+
+// adminPatchUserFlag applies set to a user's row and returns the updated user.
+// Super admins cannot be modified this way.
+func (d *Datastore) adminPatchUserFlag(ctx context.Context, userID uuid.UUID, set func(*ent.UserUpdateOne) *ent.UserUpdateOne) (*models.UserResponse, error) {
 	tx, err := d.dbClient.Tx(ctx)
 	if err != nil {
 		d.logger.Error(i18n.T("tx.start_failed"), zap.Error(err))
@@ -257,9 +273,7 @@ func (d *Datastore) AdminPatchUserExperimentalModels(ctx context.Context, userID
 		}
 	}
 
-	if _, err := tx.User.UpdateOneID(userID).
-		SetEnableExperimentalModels(enabled).
-		Save(ctx); err != nil {
+	if _, err := set(tx.User.UpdateOneID(userID)).Save(ctx); err != nil {
 		d.logger.Error(i18n.T1("update.failed", "Entity", "user"), zap.Error(err))
 		if rerr := tx.Rollback(); rerr != nil {
 			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))

@@ -33,9 +33,12 @@ type UserResponse struct {
 	Role                     string    `json:"role"`
 	Status                   string    `json:"status"`
 	EnableExperimentalModels bool      `json:"enable_experimental_models"`
-	Theme                    string    `json:"theme,omitempty"`
-	CreatedAt                time.Time `json:"created_at"`
-	UpdatedAt                time.Time `json:"updated_at"`
+	// InferenceRelayOptIn routes this account's eligible chat turns through the
+	// discounted inference relay (ADR 0x029). Set by admins for now.
+	InferenceRelayOptIn bool      `json:"inference_relay_opt_in"`
+	Theme               string    `json:"theme,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 // TokenPair represents a pair of access and refresh tokens

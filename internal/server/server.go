@@ -220,16 +220,18 @@ func (s *Server) setupRoutes() {
 		MockLLMMode:      s.config.MockLLMMode,
 		MockLLMFixedResponses: append([]string(nil),
 			s.config.MockLLMFixedResponses...),
-		MockLLMStreamDelay: s.config.MockLLMStreamDelay,
-		LocalLLMBaseURL:    s.config.LocalLLMBaseURL,
-		LocalLLMModel:      s.config.LocalLLMModel,
-		LLMCallTimeouts:    callTimeouts,
-		ZAIBaseURL:         s.config.ZAIBaseURL,
-		GeminiBaseURL:      s.config.GeminiBaseURL,
-		MistralBaseURL:     s.config.MistralBaseURL,
-		DeepSeekBaseURL:    s.config.DeepSeekBaseURL,
-		QwenBaseURL:        s.config.QwenBaseURL,
-		XiaomiBaseURL:      s.config.XiaomiBaseURL,
+		MockLLMStreamDelay:      s.config.MockLLMStreamDelay,
+		LocalLLMBaseURL:         s.config.LocalLLMBaseURL,
+		LocalLLMModel:           s.config.LocalLLMModel,
+		LLMCallTimeouts:         callTimeouts,
+		ZAIBaseURL:              s.config.ZAIBaseURL,
+		GeminiBaseURL:           s.config.GeminiBaseURL,
+		MistralBaseURL:          s.config.MistralBaseURL,
+		DeepSeekBaseURL:         s.config.DeepSeekBaseURL,
+		QwenBaseURL:             s.config.QwenBaseURL,
+		XiaomiBaseURL:           s.config.XiaomiBaseURL,
+		CheaperInferenceBaseURL: s.config.CheaperInferenceBaseURL,
+		CheaperInferenceZDR:     s.config.CheaperInferenceZDR,
 	}
 	if s.config.LLMBackend == "vendor" {
 		// ErrNotConfigured (no PARALLEL_API_KEY) leaves vendor-native search in place; any
@@ -477,6 +479,7 @@ func (s *Server) dependencyHosts() []telemetry.HTTPTransportOption {
 		telemetry.WithDependencyHost(s.config.DeepSeekBaseURL, telemetry.DependencyDeepSeek),
 		telemetry.WithDependencyHost(s.config.QwenBaseURL, telemetry.DependencyQwen),
 		telemetry.WithDependencyHost(s.config.XiaomiBaseURL, telemetry.DependencyXiaomi),
+		telemetry.WithDependencyHost(s.config.CheaperInferenceBaseURL, telemetry.DependencyCheaperInference),
 	}
 }
 

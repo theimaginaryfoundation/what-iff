@@ -50,6 +50,10 @@ func TestProviderEndpoints_FollowConfiguredBaseURLs(t *testing.T) {
 	require.Equal(t, "https://llm-proxy.example/zai", byProvider[appmodels.ModelProviderZAI].baseURL)
 	require.Equal(t, provider.DefaultGeminiBaseURL, byProvider[appmodels.ModelProviderGoogle].baseURL, "unset base URLs fall back to the provider default")
 	require.Equal(t, provider.AnthropicAPIKey, byProvider[appmodels.ModelProviderZAI].style, "z.ai speaks the Anthropic Messages API")
+	// The relay is credentialed by its own host, so a routed call never carries the
+	// model vendor's key and the fallback never carries the relay's (ADR 0x029).
+	require.Equal(t, provider.DefaultCheaperInferenceBaseURL, byProvider[appmodels.ModelProviderCheaperInference].baseURL)
+	require.Equal(t, provider.BearerAuthorization, byProvider[appmodels.ModelProviderCheaperInference].style)
 
 	require.Len(t, scoped, 1, "only Gemini's native API needs a path-scoped rule")
 	require.Equal(t, appmodels.ModelProviderGoogle, scoped[0].provider)
