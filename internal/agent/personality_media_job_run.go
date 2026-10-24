@@ -79,6 +79,8 @@ func (a *Agent) runPersonalityMediaJob(
 			a.logger.Error("personality media job: failed to mark failed",
 				zap.String("job_id", jobID.String()),
 				zap.Error(failErr))
+		} else {
+			a.recordJobFailureCode(runCtx, userID, jobID, err)
 		}
 		a.logger.Error("personality media job failed",
 			zap.String("job_id", jobID.String()),

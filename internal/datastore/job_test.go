@@ -31,6 +31,7 @@ func createJobTestSchema(t *testing.T, db *sql.DB) {
 		reference text NOT NULL,
 		status text NOT NULL DEFAULT 'pending',
 		error text,
+		error_code text,
 		result_id uuid,
 		draft_deltas json,
 		draft_reasoning json,
@@ -793,7 +794,7 @@ func TestFinalizeFailedChatJobWithPartial_NoDraftDeltasNoMessage(t *testing.T) {
 	created, err := ds.CreateJob(ctx, userID, jobModel)
 	require.NoError(t, err)
 
-	gotJob, resultID, err := ds.FinalizeFailedChatJobWithPartial(ctx, userID, created.ID, chatID, "gpt-test", "Vix", "provider timeout", nil)
+	gotJob, resultID, err := ds.FinalizeFailedChatJobWithPartial(ctx, userID, created.ID, chatID, "gpt-test", "Vix", "provider timeout", "", nil)
 	require.NoError(t, err)
 	require.Equal(t, models.JobStatusFailed, gotJob.Status)
 	require.Equal(t, "provider timeout", gotJob.Error)
@@ -821,7 +822,7 @@ func TestFinalizeFailedChatJobWithPartial_WhitespaceOnlyDraftTreatedAsEmpty(t *t
 	created, err := ds.CreateJob(ctx, userID, jobModel)
 	require.NoError(t, err)
 
-	gotJob, resultID, err := ds.FinalizeFailedChatJobWithPartial(ctx, userID, created.ID, chatID, "", "", "boom", nil)
+	gotJob, resultID, err := ds.FinalizeFailedChatJobWithPartial(ctx, userID, created.ID, chatID, "", "", "boom", "", nil)
 	require.NoError(t, err)
 	require.Equal(t, models.JobStatusFailed, gotJob.Status)
 	require.Nil(t, resultID)
@@ -871,7 +872,7 @@ func TestFinalizeChatJobWithPartial_IdempotentOnAlreadyTerminalJobWithoutResult(
 	created, err := ds.CreateJob(ctx, userID, jobModel)
 	require.NoError(t, err)
 
-	gotJob, gotResultID, err := ds.FinalizeFailedChatJobWithPartial(ctx, userID, created.ID, chatID, "", "", "still broken", nil)
+	gotJob, gotResultID, err := ds.FinalizeFailedChatJobWithPartial(ctx, userID, created.ID, chatID, "", "", "still broken", "", nil)
 	require.NoError(t, err)
 	require.Equal(t, models.JobStatusFailed, gotJob.Status)
 	require.Nil(t, gotResultID)
@@ -961,7 +962,7 @@ func TestFinalizeChatJobWithPartial_UnsupportedTerminalStatus(t *testing.T) {
 	created, err := ds.CreateJob(ctx, userID, jobModel)
 	require.NoError(t, err)
 
-	_, _, err = ds.finalizeChatJobWithPartial(ctx, userID, created.ID, chatID, "", "", nil, job.StatusPending, "")
+	_, _, err = ds.finalizeChatJobWithPartial(ctx, userID, created.ID, chatID, "", "", nil, job.StatusPending, "", "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unsupported partial-response terminal status")
 }
@@ -1087,7 +1088,7 @@ func TestFinalizeFailedChatJobWithPartial_PersistsDraftAndFailure(t *testing.T) 
 	require.NoError(t, ds.AppendJobDraftDeltas(ctx, user.ID, created.ID, []string{"A partial ", "answer."}))
 
 	updated, resultID, err := ds.FinalizeFailedChatJobWithPartial(
-		ctx, user.ID, created.ID, chat.ID, "claude-sonnet", "Scribe", "provider rejected a later tool step", nil,
+		ctx, user.ID, created.ID, chat.ID, "claude-sonnet", "Scribe", "provider rejected a later tool step", "", nil,
 	)
 	require.NoError(t, err)
 	require.Equal(t, models.JobStatusFailed, updated.Status)
@@ -1128,6 +1129,7 @@ func createPartialJobTestTables(t *testing.T, ds *Datastore) {
 			reference text NOT NULL,
 			status text NOT NULL,
 			error text,
+			error_code text,
 			result_id uuid,
 			draft_deltas json,
 			draft_reasoning json,
@@ -1149,6 +1151,7 @@ func createPartialJobTestTables(t *testing.T, ds *Datastore) {
 			generation_expression_reasoning text,
 			model_reasoning text,
 			last_error_message text,
+			last_error_code text,
 			checkpoint_completed_at datetime,
 			context_breakdown json,
 			bookmarked boolean NOT NULL DEFAULT false,
@@ -1313,4 +1316,46 @@ func TestStopHelpers_ClearEveryActiveChatJobInThread(t *testing.T) {
 	st, err = ds.JobStatus(ctx, userID, otherThread.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.JobStatusProcessing, st)
+}
+
+func TestFinalizeFailedChatJobWithPartial_RecordsTheCode(t *testing.T) {
+	ds, cleanup := newFinalizeChatJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createJobTestUser(t, ds)
+	chatID := createJobTestChat(t, ds, userID, createJobTestModel(t, ds))
+	jobModel := baseJobModel()
+	jobModel.JobType = "chat_message"
+	jobModel.Status = models.JobStatusProcessing
+	created, err := ds.CreateJob(ctx, userID, jobModel)
+	require.NoError(t, err)
+
+	got, _, err := ds.FinalizeFailedChatJobWithPartial(ctx, userID, created.ID, chatID, "", "", "No OpenAI API key is set.", models.ErrCodeProviderNotConfigured, nil)
+	require.NoError(t, err)
+	require.Equal(t, models.ErrCodeProviderNotConfigured, got.ErrorCode)
+
+	read, err := ds.GetJob(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ErrCodeProviderNotConfigured, read.ErrorCode)
+}
+
+func TestSetJobErrorCode(t *testing.T) {
+	ds, cleanup := newFinalizeChatJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createJobTestUser(t, ds)
+	created, err := ds.CreateJob(ctx, userID, baseJobModel())
+	require.NoError(t, err)
+	_, err = ds.UpdateJobStatus(ctx, userID, created.ID, models.JobStatusFailed, "No OpenAI API key is set.")
+	require.NoError(t, err)
+
+	require.NoError(t, ds.SetJobErrorCode(ctx, userID, created.ID, models.ErrCodeProviderNotConfigured))
+	read, err := ds.GetJob(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, "No OpenAI API key is set.", read.Error)
+	require.Equal(t, models.ErrCodeProviderNotConfigured, read.ErrorCode)
+
+	require.ErrorIs(t, ds.SetJobErrorCode(ctx, createJobTestUser(t, ds), created.ID, "x"), ErrJobNotFound, "another account's job")
 }

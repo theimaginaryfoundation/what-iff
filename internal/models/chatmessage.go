@@ -94,6 +94,9 @@ type ChatMessage struct {
 	ModelReasoning *string `json:"model_reasoning,omitempty"`
 	// LastErrorMessage is set when async generation failed for this user turn; cleared on successful delivery.
 	LastErrorMessage *string `json:"last_error_message,omitempty"`
+	// LastErrorCode is a stable code for LastErrorMessage when it has one (for
+	// example provider_not_configured); set and cleared with it.
+	LastErrorCode *string `json:"last_error_code,omitempty"`
 	// CheckpointCompletedAt is set on assistant messages after a successful checkpoint (scratchpad, memories, summary).
 	CheckpointCompletedAt *time.Time `json:"checkpoint_completed_at,omitempty"`
 	// Bookmarked is a user-flagged marker for navigating long threads. Either origin can be bookmarked.
