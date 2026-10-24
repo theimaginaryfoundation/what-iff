@@ -132,18 +132,19 @@
           <div class="mb-6">
             <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">Name</h3>
             <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-              <div class="flex items-center justify-between gap-3">
+              <!-- Wraps on narrow cards: the counter and buttons drop below the name instead of overflowing. -->
+              <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2" data-testid="generated-name-row">
                 @if (isManualNameMode()) {
                   <input type="text"
                          [ngModel]="manualName()"
                          (ngModelChange)="manualName.set($event)"
                          placeholder="Set a custom name"
-                         class="flex-1 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm font-semibold" />
+                         class="min-w-0 flex-1 basis-40 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm font-semibold" />
                 } @else {
-                  <span class="text-lg font-semibold text-gray-900 dark:text-white">{{ selectedName() }}</span>
+                  <span class="min-w-0 break-words text-lg font-semibold text-gray-900 dark:text-white">{{ selectedName() }}</span>
                 }
 
-                <div class="flex items-center gap-2">
+                <div class="ml-auto flex shrink-0 items-center gap-2">
                   @if (generatedNames().length > 1) {
                     <span class="text-xs text-gray-400 dark:text-gray-500">{{ (selectedNameIndex() % generatedNames().length) + 1 }}/{{ generatedNames().length }}</span>
                     <button (click)="prevName()"
@@ -197,8 +198,9 @@
             </div>
           </details>
 
-          <!-- Actions -->
-          <div class="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
+          <!-- Actions. In the modal on phones the host renders these in its sticky footer instead. -->
+          <div class="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700"
+               [class.max-sm:hidden]="modalMode()">
             <div class="flex items-center gap-2">
               <button (click)="goBackToEdit()"
                       [disabled]="isGenerating() || isAccepting() || isResetting()"

@@ -2,17 +2,20 @@ import type { MockedObject } from "vitest";
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, UrlTree } from '@angular/router';
-import { firstValueFrom, isObservable, of, throwError } from 'rxjs';
+import { Subject, firstValueFrom, isObservable, of, throwError } from 'rxjs';
 
 import { personalitySetupGuard } from './personality-setup.guard';
-import { PersonalityService } from '../services/personality.service';
+import { PersonalityChange, PersonalityService } from '../services/personality.service';
 
 describe('personalitySetupGuard', () => {
     let personalityService: Pick<MockedObject<PersonalityService>, 'listPersonalities'>;
+    let changes: Subject<PersonalityChange>;
 
     beforeEach(() => {
+        changes = new Subject<PersonalityChange>();
         personalityService = {
-            listPersonalities: vi.fn().mockName("PersonalityService.listPersonalities")
+            listPersonalities: vi.fn().mockName("PersonalityService.listPersonalities"),
+            changes$: changes.asObservable(),
         } as unknown as Pick<MockedObject<PersonalityService>, 'listPersonalities'>;
 
         TestBed.configureTestingModule({
@@ -63,6 +66,37 @@ describe('personalitySetupGuard', () => {
 
         const value = await runGuard('/chat');
         expect(value).toBe(true);
+    });
+
+    it('lets later navigations through without asking the API again once a personality exists (#348)', async () => {
+        personalityService.listPersonalities.mockReturnValue(of({ results: [{ id: 'p-1' } as any], total_count: 1, page: 1 }));
+
+        await runGuard('/chat');
+        const result = TestBed.runInInjectionContext(() => personalitySetupGuard({} as any, { url: '/gallery' } as any));
+
+        expect(await firstValueFrom(result as any)).toBe(true);
+        expect(personalityService.listPersonalities).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps checking while the user has no personality, and lets them in once they create one', async () => {
+        personalityService.listPersonalities.mockReturnValue(of({ results: [], total_count: 0, page: 1 }));
+        expect(await runGuard('/chat')).toBeInstanceOf(UrlTree);
+
+        personalityService.listPersonalities.mockReturnValue(of({ results: [{ id: 'p-1' } as any], total_count: 1, page: 1 }));
+        expect(await runGuard('/chat')).toBe(true);
+        expect(personalityService.listPersonalities).toHaveBeenCalledTimes(2);
+    });
+
+    it('checks again after a personality is deleted, since it may have been the last one', async () => {
+        personalityService.listPersonalities.mockReturnValue(of({ results: [{ id: 'p-1' } as any], total_count: 1, page: 1 }));
+        await runGuard('/chat');
+
+        changes.next({ kind: 'deleted', id: 'p-1' });
+        personalityService.listPersonalities.mockReturnValue(of({ results: [], total_count: 0, page: 1 }));
+
+        const value = await runGuard('/chat');
+        expect((value as UrlTree).toString()).toBe('/personality?setup=1');
+        expect(personalityService.listPersonalities).toHaveBeenCalledTimes(2);
     });
 
     it('redirects when the personality API fails', async () => {

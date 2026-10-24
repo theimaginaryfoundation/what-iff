@@ -181,6 +181,18 @@ describe('PersonalitiesPageComponent', () => {
         expect(component.defaultPersonalityId()).toBe('p-2');
     });
 
+    it('set-default merges onto freshly read preferences, not the copy loaded with the page', async () => {
+        // The profile modal changed the default model after this page loaded its copy.
+        userPrefsService.getUserPreferences.mockReturnValue(of({ ...preferences, default_model_id: 'model-new' } as UserPreferences));
+        userPrefsService.updateUserPreferences.mockImplementation((prefs: UserPreferences) => of(prefs));
+
+        await component.makeDefault(personalities[1]);
+
+        expect(userPrefsService.updateUserPreferences).toHaveBeenLastCalledWith(
+            expect.objectContaining({ default_model_id: 'model-new', default_personality_id: 'p-2' }),
+        );
+    });
+
     it('delete confirms before deleting', async () => {
         confirmation.confirm.mockResolvedValue(false);
         await component.deletePersonality(personalities[0]);

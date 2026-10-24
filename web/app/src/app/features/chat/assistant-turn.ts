@@ -19,6 +19,13 @@ export interface AssistantTurnDeps {
   /** The thread the session is showing; every write is scoped to the turn's own thread. */
   activeThreadId: () => string | null;
   reportError: (message: string) => void;
+  /**
+   * Called once a polled job ends (complete, failed or cancelled, post-inference phases included)
+   * while its thread is still the active one. The turn may have changed the thread server-side
+   * (generated title, a mode switch that moved it to the mode's recommended model), and nothing
+   * else refetches it until the tab next regains focus.
+   */
+  onJobSettled?: (chatId: string) => void;
 }
 
 /**
@@ -223,6 +230,7 @@ export class AssistantTurn {
           finalize(() => {
             sendGate.refresh();
             if (!this.isActiveThread(chatId)) return;
+            this.deps.onJobSettled?.(chatId);
             if (this._activeChatJobId() === jobId) {
               this._liveToolCalls.set([]);
     this._waitingOn.set(null);

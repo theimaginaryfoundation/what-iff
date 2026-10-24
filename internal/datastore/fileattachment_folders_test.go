@@ -292,3 +292,41 @@ func TestReferenceCopiesNeverCarryAFolderGetCountedOrBlockAMove(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, moved)
 }
+
+func TestRenameGalleryFile(t *testing.T) {
+	f := newFolderFixture(t)
+	ctx := context.Background()
+
+	name, err := f.ds.RenameGalleryFile(ctx, f.user, f.ids["hrv.png"], "  oura-hrv-week-41 ")
+	require.NoError(t, err)
+	assert.Equal(t, "oura-hrv-week-41.png", name, "trimmed, and the extension is kept")
+	att, err := f.ds.GetFileAttachment(ctx, f.user, f.ids["hrv.png"])
+	require.NoError(t, err)
+	assert.Equal(t, "oura-hrv-week-41.png", att.Name)
+	assert.Equal(t, "charts/oura", att.Folder, "renaming does not move")
+	assert.Equal(t, "k/hrv.png", att.S3Key, "the stored object keeps its key")
+
+	_, err = f.ds.RenameGalleryFile(ctx, f.user, f.ids["art.png"], "a/b")
+	assert.ErrorIs(t, err, models.ErrInvalidFileName)
+
+	_, err = f.ds.RenameGalleryFile(ctx, f.user, uuid.New(), "x")
+	assert.ErrorIs(t, err, ErrFileAttachmentNotFound)
+
+	other := createFATestUser(t, f.ds)
+	_, err = f.ds.RenameGalleryFile(ctx, other, f.ids["art.png"], "mine")
+	assert.ErrorIs(t, err, ErrFileAttachmentNotFound, "someone else's file is not renamed")
+}
+
+func TestRenameGalleryFileByACopyRenamesTheOriginal(t *testing.T) {
+	f := newFolderFixture(t)
+	ctx := context.Background()
+	ref, err := f.ds.CreateFileAttachmentReference(ctx, f.user, f.ids["sleep.png"])
+	require.NoError(t, err)
+
+	name, err := f.ds.RenameGalleryFile(ctx, f.user, ref.ID, "sleep-score.png")
+	require.NoError(t, err)
+	assert.Equal(t, "sleep-score.png", name)
+	att, err := f.ds.GetFileAttachment(ctx, f.user, f.ids["sleep.png"])
+	require.NoError(t, err)
+	assert.Equal(t, "sleep-score.png", att.Name, "the gallery original carries the new name")
+}

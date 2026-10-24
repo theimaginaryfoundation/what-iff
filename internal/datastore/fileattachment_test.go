@@ -36,6 +36,7 @@ func createFileAttachmentTestSchema(t *testing.T, db *sql.DB) {
 			chunk_status text,
 			s3_key text,
 			folder text NOT NULL DEFAULT '',
+			context_only bool NOT NULL DEFAULT false,
 			created_at datetime NOT NULL,
 			chat_message_file_attachments uuid,
 			mood_images uuid,

@@ -82,9 +82,63 @@ func (d *Datastore) MoveFileAttachmentsToFolder(ctx context.Context, userID uuid
 	if len(ids) == 0 {
 		return 0, nil
 	}
+	match, err := d.galleryOriginalsOf(ctx, userID, ids)
+	if err != nil {
+		d.logger.Error("failed to resolve files to move", zap.Error(err))
+		return 0, err
+	}
+	moved, err := d.dbClient.FileAttachment.Update().
+		Where(galleryFiles(userID, models.GalleryKindAll)...).
+		Where(match).
+		SetFolder(folder).
+		Save(ctx)
+	if err != nil {
+		d.logger.Error("failed to move files to a folder", zap.Error(err))
+		return 0, err
+	}
+	return moved, nil
+}
+
+// RenameGalleryFile sets the display name of the user's gallery file id and returns the name it
+// stored. Like a move, an id naming a chat-reuse copy renames the original it shares a stored object
+// with. name is a requested name, normalized with models.NormalizeFileName against the current one
+// (so a name without an extension keeps the file's). Only the label changes; the stored object keeps
+// its key. It returns ErrFileAttachmentNotFound when id is not one of the user's files.
+func (d *Datastore) RenameGalleryFile(ctx context.Context, userID, id uuid.UUID, name string) (string, error) {
+	match, err := d.galleryOriginalsOf(ctx, userID, []uuid.UUID{id})
+	if err != nil {
+		d.logger.Error("failed to resolve the file to rename", zap.Error(err))
+		return "", err
+	}
+	scope := append(galleryFiles(userID, models.GalleryKindAll), match)
+	current, err := d.dbClient.FileAttachment.Query().
+		Where(scope...).
+		Order(ent.Asc(entfileattachment.FieldCreatedAt)).
+		First(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			return "", ErrFileAttachmentNotFound
+		}
+		return "", err
+	}
+	stored, err := models.NormalizeFileName(name, current.Name)
+	if err != nil {
+		return "", err
+	}
+	if _, err := d.dbClient.FileAttachment.Update().Where(scope...).SetName(stored).Save(ctx); err != nil {
+		d.logger.Error("failed to rename a file", zap.Error(err))
+		return "", err
+	}
+	return stored, nil
+}
+
+// galleryOriginalsOf matches the files ids name, plus every file sharing a stored object with one
+// of them, so a chat-reuse copy's id reaches its original. Combine it with galleryFiles to act on
+// the originals only.
+func (d *Datastore) galleryOriginalsOf(ctx context.Context, userID uuid.UUID, ids []uuid.UUID) (predicate.FileAttachment, error) {
 	// Only rows that have a key can name its reference copies. s3_key is NULL for legacy rows and for
 	// files that never live in S3 (code-interpreter documents), and a NULL cannot scan into a string,
-	// so leave those out of the read; they are still moved by id below.
+	// so leave those out of the read; they are still matched by id below.
 	named, err := d.dbClient.FileAttachment.Query().
 		Where(
 			entfileattachment.HasOwnerWith(user.ID(userID)),
@@ -95,23 +149,13 @@ func (d *Datastore) MoveFileAttachmentsToFolder(ctx context.Context, userID uuid
 		Select(entfileattachment.FieldS3Key).
 		Strings(ctx)
 	if err != nil {
-		d.logger.Error("failed to resolve files to move", zap.Error(err))
-		return 0, err
+		return nil, err
 	}
 	match := []predicate.FileAttachment{entfileattachment.IDIn(ids...)}
 	if len(named) > 0 {
 		match = append(match, entfileattachment.S3KeyIn(named...))
 	}
-	moved, err := d.dbClient.FileAttachment.Update().
-		Where(galleryFiles(userID, models.GalleryKindAll)...).
-		Where(entfileattachment.Or(match...)).
-		SetFolder(folder).
-		Save(ctx)
-	if err != nil {
-		d.logger.Error("failed to move files to a folder", zap.Error(err))
-		return 0, err
-	}
-	return moved, nil
+	return entfileattachment.Or(match...), nil
 }
 
 // maxFolderMovePasses bounds how many times a folder rename re-reads what is left under the old

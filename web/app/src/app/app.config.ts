@@ -1,5 +1,5 @@
 import { APP_INITIALIZER, ApplicationConfig, SecurityContext, provideZonelessChangeDetection } from '@angular/core';
-import { provideRouter } from '@angular/router';
+import { PreloadAllModules, provideRouter, withPreloading } from '@angular/router';
 import { provideHttpClient, withInterceptors, withXhr } from '@angular/common/http';
 import { MARKED_EXTENSIONS, SANITIZE, provideMarkdown } from 'ngx-markdown';
 
@@ -17,7 +17,9 @@ import { threadAutomationProviders } from './extensions/thread-automations.provi
 export const appConfig: ApplicationConfig = {
   providers: [
     provideZonelessChangeDetection(),
-    provideRouter(routes),
+    // Fetch the lazy route chunks in the background after boot, so the first tap on a nav item
+    // does not wait on a chunk download before anything happens (#348).
+    provideRouter(routes, withPreloading(PreloadAllModules)),
     provideHttpClient(withXhr(), withInterceptors([authInterceptor, ...extraHttpInterceptors])),
     provideMarkdown({
       sanitize: { provide: SANITIZE, useValue: SecurityContext.HTML },

@@ -23,6 +23,7 @@ var sandboxedToolSurface = map[string]struct {
 	agenttools.UpdateScratchpadToolSpec.Name:  {false, "writes the personality-wide scratchpad shared with the owner's other chats"},
 	agenttools.MoveFilesToolSpec.Name:         {false, "sorts the owner's account-wide gallery images into folders"},
 	agenttools.CreateAgentJobToolSpec.Name:    {false, "schedules a job in a new ordinary chat and can attach the owner's skills and their MCP servers"},
+	agenttools.UpdateAgentJobToolSpec.Name:    {false, "changes the owner's jobs, which run outside the sandbox and can attach skills and MCP servers"},
 	agenttools.CreateMemoryToolSpec.Name:      {true, "always writes a Chat-scoped memory in a sandbox"},
 	agenttools.ListToolSpec.Name:              {true, "jobs, skills and personalities are refused; conversations is just this one; only this conversation's own files"},
 	agenttools.ListMoodsToolSpec.Name:         {true, "this chat's own personality moods"},

@@ -608,6 +608,9 @@ export class AuthService {
           import('../../features/chat/services/model-favorites.service').then(({ ModelFavoritesService }) => {
             const modelFavoritesService = this.injector.get(ModelFavoritesService);
             modelFavoritesService.clearCache();
+          }),
+          import('./personality-presence.service').then(({ PersonalityPresenceService }) => {
+            this.injector.get(PersonalityPresenceService).clearCache();
           })
         ]).catch(() => {
           // Ignore if services can't be loaded

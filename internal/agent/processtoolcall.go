@@ -90,6 +90,10 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 			out, err := a.createAgentJobTool(ctx, chatCtx.chat, input)
 			return out, nil, err
 		},
+		tools.UpdateAgentJobToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.updateAgentJobTool(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
 		tools.LoadToolsToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
 			out, err := a.loadMCPToolsTool(ctx, chatCtx, input)
 			return out, nil, err

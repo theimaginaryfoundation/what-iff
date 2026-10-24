@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -85,6 +89,14 @@ func (f *fakeListStore) ListAgentJobs(_ context.Context, _ uuid.UUID, pageNum, p
 	f.lastJobFilters = filters
 	f.lastPageNum, f.lastPageSize = pageNum, pageSize
 	return paginatePage(toAny(f.jobs), pageNum, pageSize), nil
+}
+func (f *fakeListStore) GetAgentJob(_ context.Context, _, id uuid.UUID) (*models.AgentJob, error) {
+	for _, j := range f.jobs {
+		if j.ID == id {
+			return j, nil
+		}
+	}
+	return nil, datastore.ErrAgentJobNotFound
 }
 func (f *fakeListStore) ListChatMCPServers(_ context.Context, _, chatID uuid.UUID) ([]*models.MCPServer, error) {
 	f.lastMCPChatID = chatID
@@ -308,6 +320,70 @@ func TestListJobsOmitsNextRunWhenTerminal(t *testing.T) {
 	}
 	if res.Items[0].Status != string(models.AgentJobStatusComplete) {
 		t.Fatalf("unexpected status: %+v", res.Items[0])
+	}
+}
+
+// A job row carries enough to find the job to change (schedule, thread, the start of the prompt),
+// and the note says where to read a prompt in full.
+func TestListJobsShowsSchedulePromptPreviewAndThread(t *testing.T) {
+	title := "check-in"
+	thread := uuid.New()
+	prompt := "  " + strings.Repeat("é", listJobPromptRunes+50) + "  "
+	store := &fakeListStore{jobs: []*models.AgentJob{
+		{ID: uuid.New(), Title: &title, Status: models.AgentJobStatusActive, ScheduleInput: "every day at 8am", Prompt: prompt, ChatID: &thread},
+	}}
+	res := runList(t, newTestListTool(store), `{"kind":"jobs"}`)
+	if res.Count != 1 {
+		t.Fatalf("expected 1 job, got %+v", res)
+	}
+	item := res.Items[0]
+	if item.Schedule != "every day at 8am" || item.ThreadID != thread.String() {
+		t.Fatalf("schedule/thread missing: %+v", item)
+	}
+	if !strings.HasPrefix(item.Description, "é") || utf8.RuneCountInString(item.Description) > listJobPromptRunes+1 {
+		t.Fatalf("prompt preview should be trimmed and cut to %d runes, got %q", listJobPromptRunes, item.Description)
+	}
+	if !strings.Contains(res.Note, "job's id as filter") {
+		t.Fatalf("note should say how to read a prompt in full: %q", res.Note)
+	}
+}
+
+// A job id as the filter reads that one job in full, whatever its status: the whole prompt (rows
+// only show its start), its model and skills.
+func TestListJobsByIDReadsTheWholeJob(t *testing.T) {
+	title := "check-in"
+	model, skillA, skillB := uuid.New(), uuid.New(), uuid.New()
+	prompt := strings.Repeat("Ask about sleep, dreams and the journal. ", 20)
+	paused := &models.AgentJob{
+		ID: uuid.New(), Title: &title, Status: models.AgentJobStatusPaused, ScheduleInput: "every day at 8am",
+		Prompt: prompt, ModelID: &model, Rituals: []*models.Ritual{{ID: skillB}, {ID: skillA}},
+	}
+	store := &fakeListStore{jobs: []*models.AgentJob{paused, {ID: uuid.New(), Status: models.AgentJobStatusActive}}}
+
+	res := runList(t, newTestListTool(store), fmt.Sprintf(`{"kind":"jobs","filter":" %s "}`, paused.ID))
+
+	if res.Count != 1 {
+		t.Fatalf("expected just the one job, got %+v", res)
+	}
+	item := res.Items[0]
+	if item.Description != strings.TrimSpace(prompt) {
+		t.Fatalf("expected the whole prompt, got %d runes", utf8.RuneCountInString(item.Description))
+	}
+	if item.Status != string(models.AgentJobStatusPaused) || item.ModelID != model.String() {
+		t.Fatalf("a paused job is read too, with its model: %+v", item)
+	}
+	want := []string{skillA.String(), skillB.String()}
+	sort.Strings(want)
+	if strings.Join(item.SkillIDs, ",") != strings.Join(want, ",") {
+		t.Fatalf("skills: got %v want %v", item.SkillIDs, want)
+	}
+	if store.lastJobFilters.Query != nil {
+		t.Fatal("an id is a lookup, not a text search")
+	}
+
+	res = runList(t, newTestListTool(store), fmt.Sprintf(`{"kind":"jobs","filter":%q}`, uuid.New()))
+	if res.Count != 0 || !strings.Contains(res.Note, "No job has that id") || res.Error != "" {
+		t.Fatalf("an unknown id is an empty result with a note: %+v", res)
 	}
 }
 
@@ -581,6 +657,10 @@ func TestListSkillsStoreError(t *testing.T) {
 type erroringListStore struct{}
 
 var errListStoreBoom = errors.New("boom")
+
+func (e *erroringListStore) GetAgentJob(_ context.Context, _, _ uuid.UUID) (*models.AgentJob, error) {
+	return nil, errListStoreBoom
+}
 
 func (e *erroringListStore) ListFileAttachmentsInChatScope(_ context.Context, _, _ uuid.UUID, _ *uuid.UUID, _ int) ([]*models.FileAttachment, error) {
 	return nil, errListStoreBoom

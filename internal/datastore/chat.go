@@ -420,6 +420,50 @@ func (d *Datastore) ClearChatResponseID(ctx context.Context, userID, chatID uuid
 	return tx.Commit()
 }
 
+// UpdateChatContinuity records what a finished turn produced: the provider response the next turn
+// chains from and the last-message time the thread list sorts by. Nothing else is written.
+//
+// Turns run on the chat they loaded when they started. Saving that whole copy back through
+// UpdateChat rewrote every user-editable field (model, personality, pinned mode, disabled tools,
+// tags, favorite, archived) to its turn-start value, so a change made while the reply was
+// generating silently reverted when the turn saved (#347). A nil lastMessageTime leaves it alone.
+func (d *Datastore) UpdateChatContinuity(ctx context.Context, userID, chatID uuid.UUID, responseID string, lastMessageTime *time.Time) error {
+	update := d.dbClient.Chat.Update().
+		Where(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))).
+		SetResponseID(responseID)
+	if lastMessageTime != nil {
+		update.SetLastMessageTime(*lastMessageTime)
+	}
+	n, err := update.Save(ctx)
+	if err != nil {
+		d.logger.Error(i18n.T1("update.failed", "Entity", "chat"), zap.Error(err))
+		return err
+	}
+	if n == 0 {
+		return ErrChatNotFound
+	}
+	return nil
+}
+
+// RenameChatIfNamed sets the chat's name only while it is still one of the given names (the
+// placeholder a new thread starts with), so a generated title never overwrites a name the user
+// typed while the first reply was generating. Like UpdateChatContinuity it writes nothing else.
+// It reports whether the name was written.
+func (d *Datastore) RenameChatIfNamed(ctx context.Context, userID, chatID uuid.UUID, name string, currentNames ...string) (bool, error) {
+	if len(currentNames) == 0 {
+		return false, nil
+	}
+	n, err := d.dbClient.Chat.Update().
+		Where(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID)), entchat.NameIn(currentNames...)).
+		SetName(name).
+		Save(ctx)
+	if err != nil {
+		d.logger.Error(i18n.T1("update.failed", "Entity", "chat"), zap.Error(err))
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // UpdateChatCheckpointStateAndClearResponseID atomically updates the stored checkpoint state and clears the
 // stored OpenAI response ID so the next user message starts a new Responses thread.
 //

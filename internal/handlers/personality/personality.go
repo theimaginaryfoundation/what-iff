@@ -97,21 +97,14 @@ func (h *Handler) hasNoPersonalities(ctx context.Context, userID uuid.UUID) bool
 }
 
 // makeDefault sets p as the user's default personality, logging (not failing) on error. Used when
-// the personality just created is the user's first.
+// the personality just created is the user's first. It writes only that field: reading the
+// preferences and writing them all back stored the default image vendor for users who never
+// chose one and could undo a change made in between (#347).
 func (h *Handler) makeDefault(ctx context.Context, userID uuid.UUID, p *models.Personality) {
 	if p == nil {
 		return
 	}
-	prefs, err := h.ds.GetUserPreferences(ctx, userID)
-	if err != nil {
-		h.logger.Warn("failed to fetch user preferences for auto-default personality",
-			zap.String("user_id", userID.String()),
-			zap.String("personality_id", p.ID.String()),
-			zap.Error(err))
-		return
-	}
-	prefs.DefaultPersonalityID = p.ID
-	if _, err := h.ds.UpdateUserPreferences(ctx, userID, *prefs); err != nil {
+	if err := h.ds.SetDefaultPersonality(ctx, userID, p.ID); err != nil {
 		h.logger.Warn("failed to update user preferences for auto-default personality",
 			zap.String("user_id", userID.String()),
 			zap.String("personality_id", p.ID.String()),

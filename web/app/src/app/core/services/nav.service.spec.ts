@@ -84,6 +84,28 @@ describe('NavService', () => {
         expect(routerStub.navigate).toHaveBeenCalledWith(['/chat']);
     });
 
+    it('reports a mode switch only while its navigation is in flight', async () => {
+        let finish!: (ok: boolean) => void;
+        routerStub.navigate.mockReturnValue(new Promise<boolean>(resolve => (finish = resolve)));
+        const service = TestBed.inject(NavService);
+        expect(service.isSwitchingMode).toBe(false);
+
+        service.setMode('config');
+        expect(service.isSwitchingMode).toBe(true);
+
+        finish(true);
+        await vi.waitFor(() => expect(service.isSwitchingMode).toBe(false));
+    });
+
+    it('clears the mode-switch flag when the navigation fails', async () => {
+        routerStub.navigate.mockReturnValue(Promise.reject(new Error('blocked')));
+        const service = TestBed.inject(NavService);
+
+        service.setMode('app');
+
+        await vi.waitFor(() => expect(service.isSwitchingMode).toBe(false));
+    });
+
     it('toggleCollapsed flips the signal and persists to localStorage', () => {
         const service = TestBed.inject(NavService);
         expect(service.collapsed()).toBe(false);

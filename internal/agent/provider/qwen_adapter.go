@@ -117,6 +117,7 @@ func (a *QwenAdapter) toGenerateResponse(resp *openai.ChatCompletion) *GenerateR
 		Text:         ExtractChatCompletionText(resp),
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
+		CreatedAt:    resp.Created,
 	}
 }
 

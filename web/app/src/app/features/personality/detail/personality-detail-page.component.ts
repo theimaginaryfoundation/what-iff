@@ -300,16 +300,19 @@ export class PersonalityDetailPageComponent implements OnInit {
     const prefs = this.preferences();
     if (!personality || !prefs) return;
     if (this.isDefault()) return;
-    const updated: UserPreferences = { ...prefs, default_personality_id: personality.id };
-    this.userPreferencesService.updateUserPreferences(updated).subscribe({
-      error: async err => {
-        console.error('Failed to make default', err);
-        await this.confirmation.alert({
-          message: 'Failed to update default personality. Please try again.',
-          type: 'danger',
-        });
-      },
-    });
+    try {
+      // PUT replaces the whole record; merge onto a fresh read so a change made elsewhere since the
+      // cached copy loaded (another tab, a failed refresh) is not written back over.
+      const current = await firstValueFrom(this.userPreferencesService.getUserPreferences());
+      const updated: UserPreferences = { ...current, default_personality_id: personality.id };
+      await firstValueFrom(this.userPreferencesService.updateUserPreferences(updated));
+    } catch (err) {
+      console.error('Failed to make default', err);
+      await this.confirmation.alert({
+        message: 'Failed to update default personality. Please try again.',
+        type: 'danger',
+      });
+    }
   }
 
   /**

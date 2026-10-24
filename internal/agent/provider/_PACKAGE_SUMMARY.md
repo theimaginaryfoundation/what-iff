@@ -56,6 +56,9 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 - **`GenerateResponse`:** Normalized completion type from either provider.
   Carries **`StopReason`** — the provider's own verbatim account of why generation ended (`end_turn`, `max_tokens`, `refusal`, `incomplete`, …), sourced from `Message.StopReason` on Anthropic and from `IncompleteDetails.Reason` (falling back to `Status`) on the Responses API, and from `finish_reason` on the Xiaomi Chat Completions adapter (`length` = truncated).
   The agent's empty-turn guard reads it to surface a clearer truncation message.
+  **`CreatedAt`** is the provider's Unix timestamp (the Chat Completions adapters copy `created`; Claude uses now).
+  The agent writes the chat's `last_message_time` from it through `CreatedTime()`, which falls back to now when it is zero.
+  A zero there once stamped threads 1970-01-01 and sank them to the bottom of every thread list (#367).
   Also carries **`Reasoning`** (see "Model reasoning capture").
 - **`TokenCounter` + carry-over selection:** Token budget and `SelectCarryOverTurns` for history trimming.
 - **Inference metrics (`genai_metrics.go`):** every vendor call goes through one wrapper, and each wrapper records through a `genAICall` (`startGenAICall`, then `end(err)`) on `tel.Metrics`.

@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { filter, map } from 'rxjs/operators';
 import { FormsModule } from '@angular/forms';
 
@@ -440,22 +441,21 @@ export class PersonalitiesPageComponent implements OnInit {
     if (this.defaultPersonalityId() === personality.id) return;
 
     this.isUpdatingDefaultId.set(personality.id);
-    const updated: UserPreferences = { ...prefs, default_personality_id: personality.id };
-
-    this.userPreferencesService.updateUserPreferences(updated).subscribe({
-      next: next => {
-        this.preferences.set(next);
-        this.isUpdatingDefaultId.set(null);
-      },
-      error: async err => {
-        console.error('Failed to update default personality', err);
-        this.isUpdatingDefaultId.set(null);
-        await this.confirmationService.alert({
-          message: 'Failed to set default personality. Please try again.',
-          type: 'danger',
-        });
-      },
-    });
+    try {
+      // PUT replaces the whole record, and this page's copy dates from when it loaded: the profile
+      // modal (opened over this page) may have changed the default model since. Merge onto a fresh read.
+      const current = await firstValueFrom(this.userPreferencesService.getUserPreferences());
+      const updated: UserPreferences = { ...current, default_personality_id: personality.id };
+      this.preferences.set(await firstValueFrom(this.userPreferencesService.updateUserPreferences(updated)));
+    } catch (err) {
+      console.error('Failed to update default personality', err);
+      await this.confirmationService.alert({
+        message: 'Failed to set default personality. Please try again.',
+        type: 'danger',
+      });
+    } finally {
+      this.isUpdatingDefaultId.set(null);
+    }
   }
 }
 

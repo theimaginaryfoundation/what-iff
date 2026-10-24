@@ -1,20 +1,19 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
 
-import { AuthService } from '../../core/services/auth.service';
-import { ProfileSettingsModalService } from '../../features/profile-settings/profile-settings-modal.service';
+import { NavService } from '../../core/services/nav.service';
 import { HelpActionService } from '../../extensions/help-action.service';
 import { NavActionsOutletComponent } from '../../extensions/nav-actions-outlet.component';
-import { CircleHelpIconComponent, UserIconComponent } from '../../shared/ui/icons/icons';
+import { CircleHelpIconComponent, PanelLeftIconComponent } from '../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 
 /**
  * Sidebar header: help trigger, extension actions (see NavActionsOutletComponent)
- * and profile trigger.
+ * and the desktop collapse/expand toggle.
  */
 @Component({
   selector: 'app-sidebar-header',
   standalone: true,
-  imports: [TooltipDirective, CircleHelpIconComponent, UserIconComponent, NavActionsOutletComponent],
+  imports: [TooltipDirective, CircleHelpIconComponent, PanelLeftIconComponent, NavActionsOutletComponent],
   templateUrl: './app-sidebar-header.component.html',
   styleUrl: './app-sidebar-header.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -22,22 +21,14 @@ import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 export class AppSidebarHeaderComponent {
   readonly collapsed = input(false);
 
-  private readonly auth = inject(AuthService);
-  private readonly profileSettingsModal = inject(ProfileSettingsModalService);
+  private readonly nav = inject(NavService);
   private readonly helpAction = inject(HelpActionService);
-
-  readonly displayName = computed(() => {
-    const user = this.auth.currentUser();
-    if (!user) return 'Guest';
-    const composed = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
-    return composed || user.username || user.email || 'Guest';
-  });
 
   openHelp(): void {
     this.helpAction.trigger();
   }
 
-  openProfile(): void {
-    this.profileSettingsModal.open('profile');
+  toggleCollapsed(): void {
+    this.nav.toggleCollapsed();
   }
 }

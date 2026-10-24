@@ -27,8 +27,7 @@
               type="button"
               class="app-sidebar__tab"
               [class.app-sidebar__tab--active]="isChatView()"
-              [attr.aria-label]="item.label"
-              [attr.aria-pressed]="isThreadManagerView()"
+              [attr.aria-label]="chatNavAriaLabel()"
               [uiTooltip]="navTooltip(item.label, item.hint, mode() === 'app')"
               placement="bottom"
               (click)="toggleThreadManager()"
@@ -90,8 +89,7 @@
             type="button"
             class="app-sidebar__icon-link"
             [class.app-sidebar__icon-link--active]="isChatView()"
-            [attr.aria-label]="item.label"
-            [attr.aria-pressed]="isThreadManagerView()"
+            [attr.aria-label]="chatNavAriaLabel()"
             [uiTooltip]="navTooltip(item.label, item.hint, false)"
             placement="right"
             (click)="toggleThreadManager()"
@@ -124,6 +122,20 @@
           <ui-gear-icon [size]="14" />
         </button>
       }
+      @if (isChatView()) {
+        <button
+          type="button"
+          class="app-sidebar__icon-link app-sidebar__new-thread-fab"
+          aria-label="New thread"
+          uiTooltip="New thread"
+          placement="right"
+          (click)="startNewThread()"
+        >
+          <span class="app-sidebar__new-thread-dot">
+            <ui-plus-icon [size]="12" />
+          </span>
+        </button>
+      }
     </div>
   }
 
@@ -133,7 +145,7 @@
         <button
           type="button"
           class="app-sidebar__pill app-sidebar__pill--active"
-          aria-label="All threads"
+          aria-label="Open Thread Manager"
           uiTooltip="Open Thread Manager"
           placement="right"
           (click)="clearPersonalityFilters(); navigateToThreadManager()"
@@ -172,17 +184,30 @@
       <div class="app-sidebar__personality-filter-block">
         <div class="app-sidebar__personality-picker">
           <span class="app-sidebar__personality-search-icon" aria-hidden="true">
-            <ui-search-icon [size]="11" />
+            <ui-users-icon [size]="12" />
           </span>
           <input
+            #personalitySearch
             type="text"
             class="app-sidebar__personality-search"
-            placeholder="Add more…"
+            placeholder="Pick Personalities"
+            aria-label="Pick personalities"
+            [attr.aria-expanded]="personalityDropdownOpen()"
             [value]="personalityQuery()"
             (input)="onPersonalityQueryChange($any($event.target).value)"
             (focus)="openPersonalityDropdown()"
             (blur)="closePersonalityDropdown()"
+            (keydown.escape)="onPersonalitySearchEscape($event)"
           />
+          <span
+            class="app-sidebar__personality-chevron"
+            aria-hidden="true"
+            (mousedown)="$event.preventDefault(); personalitySearch.focus(); openPersonalityDropdown()"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </span>
           @if (personalityDropdownOpen()) {
             <div class="app-sidebar__personality-dropdown">
               @for (personality of filteredPersonalityOptions(); track personality.id) {
@@ -332,6 +357,7 @@
             type="text"
             class="app-sidebar__personality-search"
             placeholder="Filter by personality…"
+            aria-label="Filter by personality"
             [value]="galleryPersonalityQuery()"
             (input)="onGalleryPersonalityQueryChange($any($event.target).value)"
             (focus)="openGalleryPersonalityDropdown()"
@@ -446,6 +472,7 @@
             type="text"
             class="app-sidebar__personality-search"
             placeholder="Filter by personality…"
+            aria-label="Filter by personality"
             [value]="modePersonalityQuery()"
             (input)="onModePersonalityQueryChange($any($event.target).value)"
             (focus)="openModePersonalityDropdown()"
@@ -571,6 +598,7 @@
             type="text"
             class="app-sidebar__personality-search"
             placeholder="Filter by personality…"
+            aria-label="Filter by personality"
             [value]="memoryPersonalityQuery()"
             (input)="onMemoryPersonalityQueryChange($any($event.target).value)"
             (focus)="openMemoryPersonalityDropdown()"
@@ -696,6 +724,7 @@
             type="text"
             class="app-sidebar__personality-search"
             placeholder="Filter by personality…"
+            aria-label="Filter by personality"
             [value]="skillPersonalityQuery()"
             (input)="onSkillPersonalityQueryChange($any($event.target).value)"
             (focus)="openSkillPersonalityDropdown()"
@@ -955,39 +984,36 @@
     </div>
   }
 
-  @if (!collapsed()) {
-    <div class="app-sidebar__footer-search">
+  <div class="app-sidebar__footer">
+    @if (!collapsed()) {
+      <div class="app-sidebar__footer-search">
+        <button
+          type="button"
+          class="app-sidebar__palette-launcher"
+          aria-label="Open command palette"
+          aria-keyshortcuts="Meta+K Control+K"
+          uiTooltip="Search threads, personalities, skills, memories and images"
+          placement="top"
+          (click)="openPalette()"
+        >
+          <ui-search-icon [size]="12" />
+          <span class="app-sidebar__palette-launcher-label">Search…</span>
+          <span class="app-sidebar__palette-launcher-shortcut" aria-hidden="true">⌘K</span>
+        </button>
+      </div>
+    } @else {
       <button
         type="button"
-        class="app-sidebar__palette-launcher"
+        class="app-sidebar__icon-btn app-sidebar__footer-search-icon"
         aria-label="Open command palette"
         aria-keyshortcuts="Meta+K Control+K"
-        uiTooltip="Search threads, personalities, skills, memories and images"
-        placement="top"
+        uiTooltip="Search (⌘K)"
+        placement="right"
         (click)="openPalette()"
       >
-        <ui-search-icon [size]="12" />
-        <span class="app-sidebar__palette-launcher-label">Search…</span>
-        <span class="app-sidebar__palette-launcher-shortcut" aria-hidden="true">⌘K</span>
+        <ui-search-icon [size]="15" />
       </button>
-    </div>
-  }
-
-  <div class="app-sidebar__collapse-handle">
-    <button
-      type="button"
-      class="app-sidebar__icon-btn app-sidebar__edge-toggle"
-      [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
-      [attr.aria-expanded]="!collapsed()"
-      [uiTooltip]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
-      placement="right"
-      (click)="toggleCollapsed()"
-    >
-      @if (collapsed()) {
-        <ui-arrow-right-icon [size]="14" />
-      } @else {
-        <ui-arrow-left-icon [size]="14" />
-      }
-    </button>
+    }
+    <app-sidebar-profile [collapsed]="collapsed()" />
   </div>
 </aside>

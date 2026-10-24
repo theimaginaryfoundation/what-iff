@@ -41,12 +41,9 @@ func newCardStore() *cardStore {
 			p.ID = uuid.New()
 			return &p, nil
 		},
-		getUserPreferencesFn: func(context.Context, uuid.UUID) (*models.UserPreferences, error) {
-			return &models.UserPreferences{}, nil
-		},
-		updateUserPrefsFn: func(_ context.Context, _ uuid.UUID, prefs models.UserPreferences) (*models.UserPreferences, error) {
-			cs.defaultedTo = prefs.DefaultPersonalityID
-			return &prefs, nil
+		setDefaultPersonalityFn: func(_ context.Context, _ uuid.UUID, personalityID uuid.UUID) error {
+			cs.defaultedTo = personalityID
+			return nil
 		},
 	}
 	return cs

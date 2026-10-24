@@ -43,6 +43,9 @@ func (FileAttachment) Fields() []ent.Field {
 			Default("").
 			MaxLen(255).
 			Comment("Gallery folder path, e.g. \"charts/oura\"; \"\" is the top level. A label only: the S3 key is unaffected by moves."),
+		field.Bool("context_only").
+			Default(false).
+			Comment("A reference row shown with an assistant reply for an existing file the agent fetched to look at (find_context). Not a new output: kept out of the gallery and not relayed."),
 		field.Time("created_at").
 			Immutable().
 			Default(time.Now),

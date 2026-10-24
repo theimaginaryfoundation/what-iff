@@ -1,0 +1,14 @@
+<button
+  type="button"
+  class="app-sidebar-profile"
+  [class.app-sidebar-profile--collapsed]="collapsed()"
+  [attr.aria-label]="'Open profile for ' + fullName()"
+  [uiTooltip]="collapsed() ? fullName() : ''"
+  placement="right"
+  (click)="openProfile()"
+>
+  <ui-user-icon [size]="15" />
+  @if (!collapsed()) {
+    <span class="app-sidebar-profile__name" aria-hidden="true">{{ shortName() }}</span>
+  }
+</button>

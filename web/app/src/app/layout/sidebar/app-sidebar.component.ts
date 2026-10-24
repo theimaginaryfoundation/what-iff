@@ -21,12 +21,12 @@ import { ModeViewService } from '../../core/services/mode-view.service';
 import { RitualViewService } from '../../core/services/ritual-view.service';
 import {
   ArrowLeftIconComponent,
-  ArrowRightIconComponent,
   GearIconComponent,
   PlusIconComponent,
   SearchIconComponent,
   SparkleIconComponent,
   UserIconComponent,
+  UsersIconComponent,
 } from '../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { AuthImagePipe } from '../../core/pipes/auth-image.pipe';
@@ -36,6 +36,7 @@ import { personalityAccent, personalityAccentSurface } from '../../features/pers
 import { AvatarComponent } from '../../shared/ui/avatar/avatar.component';
 import { PersonaAccentScopeComponent } from '../../features/personality/picker/persona-accent-scope.component';
 import { AppSidebarHeaderComponent } from './app-sidebar-header.component';
+import { AppSidebarProfileComponent } from './app-sidebar-profile.component';
 import { APP_MODE_HINT, CONFIG_MODE_HINT, appNavItems, configNavItems, NavItem, navTooltip } from './nav.helpers';
 
 const PORTRAIT_SOURCE_WIDTH = 200;
@@ -55,8 +56,9 @@ const SIDEBAR_LONG_PRESS_CLICK_WINDOW_MS = 700;
 const SIDEBAR_MOBILE_QUERY = '(max-width: 1023px)';
 
 /**
- * Concept-D dual-sidebar shell. Composes the header, the active nav list, the
- * mode-switch gear, the collapse toggle, and the palette launcher row. Mode
+ * Concept-D dual-sidebar shell. Composes the header (with the collapse toggle),
+ * the active nav list, the mode-switch gear, and the footer (palette launcher
+ * and profile). Mode
  * is route-derived (see {@link NavService}); this component is presentation
  * only.
  */
@@ -72,13 +74,14 @@ const SIDEBAR_MOBILE_QUERY = '(max-width: 1023px)';
     PersonaAccentScopeComponent,
     NgComponentOutlet,
     AppSidebarHeaderComponent,
+    AppSidebarProfileComponent,
     ArrowLeftIconComponent,
-    ArrowRightIconComponent,
     GearIconComponent,
     PlusIconComponent,
     SearchIconComponent,
     SparkleIconComponent,
     UserIconComponent,
+    UsersIconComponent,
     TooltipDirective,
   ],
   templateUrl: './app-sidebar.component.html',
@@ -448,10 +451,6 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
     this.nav.setMode(this.mode() === 'config' ? 'app' : 'config');
   }
 
-  toggleCollapsed(): void {
-    this.nav.toggleCollapsed();
-  }
-
   openPalette(): void {
     this.palette.open();
   }
@@ -468,6 +467,14 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
   /** True when the chat section is showing the Thread Manager (no specific thread open). */
   isThreadManagerView(): boolean {
     return this.isChatView() && !this.threads.activeThreadId();
+  }
+
+  /** Accessible name for the Chat control: reflects Thread Manager open/return, not a silent pressed state. */
+  chatNavAriaLabel(): string {
+    if (this.isThreadManagerView()) {
+      return this.threadManagerReturnId ? 'Back to thread' : 'Chat';
+    }
+    return 'Open Thread Manager';
   }
 
   /**
@@ -640,6 +647,12 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
     }
     this.threads.setActiveThreadId(threadId);
     void this.router.navigate(['/chat', threadId]);
+    if (this.isMobileViewport()) {
+      this.nav.setCollapsed(true);
+      setTimeout(() => {
+        (this.document.getElementById('main-content') as HTMLElement | null)?.focus();
+      }, 0);
+    }
   }
 
   threadAvatarMeta(threadId: string): { coverUrl: string | null; transform: string | null; accentColor: string | null; accentSurface: string | null } {
@@ -692,6 +705,18 @@ export class AppSidebarComponent implements OnInit, OnDestroy {
 
   closePersonalityDropdown(): void {
     setTimeout(() => this.personalityDropdownOpen.set(false), 100);
+  }
+
+  /** Escape clears the query and closes the combobox (matches thread search / persona picker). */
+  onPersonalitySearchEscape(event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.personalityQuery.set('');
+    this.personalityDropdownOpen.set(false);
+    const target = event.target;
+    if (target instanceof HTMLElement) {
+      target.blur();
+    }
   }
 
   togglePersonalityFilter(personalityId: string, event?: Event): void {

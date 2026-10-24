@@ -79,6 +79,16 @@ export class ProfileSettingsModalComponent {
     return chosen && offered.includes(chosen) ? chosen : (offered[0] ?? '');
   });
   readonly models = signal<readonly Model[]>([]);
+  /**
+   * True when the saved default model is not one the model list offers (retired or no longer
+   * available to this account). The select then shows a placeholder instead of silently
+   * displaying the first model, which reads as the save not having stuck.
+   */
+  readonly defaultModelUnlisted = computed(() => {
+    const id = this.preferences()?.default_model_id;
+    const models = this.models();
+    return !!id && models.length > 0 && !models.some((model) => model.id === id);
+  });
   readonly personalities = signal<readonly Personality[]>([]);
   readonly themeMode = signal<ThemeMode>('system');
   /**
@@ -296,11 +306,14 @@ export class ProfileSettingsModalComponent {
     patch: Partial<Pick<UserPreferences, 'default_model_id' | 'default_personality_id' | 'image_generation_provider'>>,
     successMessage: string,
   ): Promise<void> {
-    const current = this.preferences();
-    if (!current) return;
+    if (!this.preferences()) return;
     this.loadingAction.set(true);
     this.message.set(null);
     try {
+      // PUT replaces the whole record, so merge onto a fresh read rather than the copy loaded
+      // when the modal opened: the theme toggle above and the model picker's favorites write
+      // preferences through their own read-modify-write, and a stale copy would undo them.
+      const current = await firstValueFrom(this.preferencesService.getUserPreferences());
       const updatedPreferences = { ...current, ...patch };
       if ('default_personality_id' in patch && patch.default_personality_id === undefined) {
         delete updatedPreferences.default_personality_id;

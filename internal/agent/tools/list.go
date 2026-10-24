@@ -40,6 +40,8 @@ const (
 	listMaxLimit       = 200
 	listDiscoveryLimit = 100 // personalities / skills (small, stable sets)
 	listToolName       = "list"
+	listJobPromptRunes = 200 // a job's prompt is shown cut to this, enough to tell jobs apart
+	listJobPromptNote  = "Each description is the start of the job's prompt; pass a job's id as filter to read it in full."
 )
 
 // ListDescription is the agent-facing description. One tool, one `kind` verb, so the model stops
@@ -51,7 +53,7 @@ const ListDescription = `List your available resources. Pick a kind:
 - skills — skills you can attach to a subagent or scheduled job (id, name, description).
 - files — your uploaded files, most-recent first. Filter with file_type (e.g. "image", "pdf"), scope ("personality" docs, "conversation" attachments, or "all") and folder. Images dominate most libraries, so pass file_type to cut through them. Files, images and documents alike, can be filed in gallery folders (e.g. "charts/oura"); folder lists that folder and everything beneath it, and each row shows its folder.
 - conversations — your past conversations, including archived imports, that have messages, most-recent first (id, name). Pass an id to find_context (mode="conversation"/"origin") to read one.
-- jobs — your scheduled jobs (id, name, status, next_runtime for still-active ones). Active by default; set include_completed=true to also see finished/failed one-offs.
+- jobs — your scheduled jobs (id, name, status, schedule, thread_id, next_runtime for still-active ones, and the start of each prompt as description). Active by default; set include_completed=true to also see paused jobs and finished/failed one-offs. Pass a job's id as filter to read that job in full: its whole prompt, model_id and skill_ids.
 - mcp_servers — MCP servers available to the current conversation (attached to it, or linked to a skill that is active now), with discoverable MCP tools and currently loaded tools for this chat.
 
 Use filter for a free-text name/content match (files, conversations, jobs). Use limit to cap page size and page (1-based) to walk further results when has_more is true.`
@@ -69,7 +71,7 @@ var ListToolSpec = FunctionToolSpec{
 		},
 		"filter": map[string]interface{}{
 			"type":        "string",
-			"description": "Free-text name/content match. Applies to files, conversations, and jobs.",
+			"description": "Free-text name/content match. Applies to files, conversations, and jobs; for jobs, a job id reads that one job in full.",
 		},
 		"file_type": map[string]interface{}{
 			"type":        "string",
@@ -116,6 +118,7 @@ type listStore interface {
 	ListFileAttachmentsInChatScope(ctx context.Context, userID, chatID uuid.UUID, personalityID *uuid.UUID, limit int) ([]*models.FileAttachment, error)
 	ListChats(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.ChatFilters) (*models.PaginatedResponse, error)
 	ListAgentJobs(ctx context.Context, userID uuid.UUID, pageNum, pageSize int, filters models.AgentJobFilters) (*models.PaginatedResponse, error)
+	GetAgentJob(ctx context.Context, userID, id uuid.UUID) (*models.AgentJob, error)
 	ListChatMCPServers(ctx context.Context, userID, chatID uuid.UUID) ([]*models.MCPServer, error)
 	ListChatMCPLoadedTools(ctx context.Context, userID, chatID uuid.UUID) (map[uuid.UUID][]string, error)
 }
@@ -169,6 +172,10 @@ type listItem struct {
 	MCPTools     []string `json:"tools,omitempty"`         // mcp_servers
 	LoadedTools  []string `json:"loaded_tools,omitempty"`  // mcp_servers
 	NextRuntime  string   `json:"next_runtime,omitempty"`  // jobs (omitted when complete/failed)
+	Schedule     string   `json:"schedule,omitempty"`      // jobs: the schedule as it was asked for
+	ThreadID     string   `json:"thread_id,omitempty"`     // jobs that run in a set conversation
+	ModelID      string   `json:"model_id,omitempty"`      // a job read in full, when it overrides the model
+	SkillIDs     []string `json:"skill_ids,omitempty"`     // a job read in full
 	UpdatedAt    string   `json:"updated_at,omitempty"`    // personalities, conversations
 	URL          string   `json:"url,omitempty"`           // mcp_servers
 	Archived     *bool    `json:"archived,omitempty"`      // conversations

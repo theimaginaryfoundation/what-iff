@@ -109,6 +109,7 @@ func (a *LocalAdapter) toGenerateResponse(resp *openai.ChatCompletion) *Generate
 		Text:         ExtractChatCompletionText(resp),
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
+		CreatedAt:    resp.Created,
 	}
 }
 

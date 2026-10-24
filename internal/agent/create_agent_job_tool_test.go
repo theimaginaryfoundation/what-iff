@@ -35,3 +35,13 @@ func TestCreateAgentJobToolArgs_UseCurrentThreadOmittedDefaultsNil(t *testing.T)
 	require.Nil(t, args.UseCurrentThread)
 	require.Empty(t, args.ModelOverride)
 }
+
+func TestCreateAgentJobToolArgs_ParsesThreadID(t *testing.T) {
+	t.Parallel()
+
+	raw := `{"schedule_input":"every day at 8am","prompt":"check in","thread_id":"current"}`
+	var args createAgentJobToolArgs
+	require.NoError(t, json.Unmarshal([]byte(raw), &args))
+	require.Equal(t, "current", args.ThreadID)
+	require.Nil(t, args.UseCurrentThread)
+}

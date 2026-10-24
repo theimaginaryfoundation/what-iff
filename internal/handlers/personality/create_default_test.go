@@ -29,8 +29,7 @@ type fakeStore struct {
 	listExpressionsFn                    func(ctx context.Context, userID, personalityID uuid.UUID) ([]models.PersonalityExpression, error)
 	upsertExpressionFn                   func(ctx context.Context, userID, personalityID uuid.UUID, key string, req models.UpdatePersonalityExpressionRequest) (*models.PersonalityExpression, error)
 	deleteExpressionFn                   func(ctx context.Context, userID, personalityID uuid.UUID, key string) error
-	getUserPreferencesFn                 func(ctx context.Context, userID uuid.UUID) (*models.UserPreferences, error)
-	updateUserPrefsFn                    func(ctx context.Context, userID uuid.UUID, prefs models.UserPreferences) (*models.UserPreferences, error)
+	setDefaultPersonalityFn              func(ctx context.Context, userID, personalityID uuid.UUID) error
 	getOrCreateActiveFlowFn              func(ctx context.Context, userID uuid.UUID) (*models.PersonalityGenFlow, error)
 	getFlowFn                            func(ctx context.Context, userID, flowID uuid.UUID) (*models.PersonalityGenFlow, error)
 	updateFlowFn                         func(ctx context.Context, userID uuid.UUID, flowID uuid.UUID, req models.UpdateFlowRequest) (*models.PersonalityGenFlow, error)
@@ -138,11 +137,11 @@ func (f *fakeStore) DeleteFileAttachment(ctx context.Context, userID, id uuid.UU
 func (f *fakeStore) SetFileAttachmentS3Key(ctx context.Context, userID, id uuid.UUID, s3Key string) error {
 	return errors.New("not implemented")
 }
-func (f *fakeStore) GetUserPreferences(ctx context.Context, userID uuid.UUID) (*models.UserPreferences, error) {
-	return f.getUserPreferencesFn(ctx, userID)
-}
-func (f *fakeStore) UpdateUserPreferences(ctx context.Context, userID uuid.UUID, prefs models.UserPreferences) (*models.UserPreferences, error) {
-	return f.updateUserPrefsFn(ctx, userID, prefs)
+func (f *fakeStore) SetDefaultPersonality(ctx context.Context, userID, personalityID uuid.UUID) error {
+	if f.setDefaultPersonalityFn != nil {
+		return f.setDefaultPersonalityFn(ctx, userID, personalityID)
+	}
+	return errors.New("not implemented")
 }
 func (f *fakeStore) GetOrCreateActiveFlow(ctx context.Context, userID uuid.UUID) (*models.PersonalityGenFlow, error) {
 	if f.getOrCreateActiveFlowFn != nil {
@@ -209,18 +208,9 @@ func TestCreatePersonality_FirstPersonality_SetsDefaultPreference(t *testing.T) 
 		createPersonalityFn: func(ctx context.Context, uid uuid.UUID, p models.Personality) (*models.Personality, error) {
 			return &models.Personality{ID: newPersonalityID, Name: p.Name, SystemPrompt: p.SystemPrompt}, nil
 		},
-		getUserPreferencesFn: func(ctx context.Context, uid uuid.UUID) (*models.UserPreferences, error) {
-			return &models.UserPreferences{
-				ID:                   uuid.New(),
-				UserID:               uid,
-				DefaultModelID:       uuid.New(),
-				DefaultPersonalityID: uuid.Nil,
-				Theme:                "dark",
-			}, nil
-		},
-		updateUserPrefsFn: func(ctx context.Context, uid uuid.UUID, prefs models.UserPreferences) (*models.UserPreferences, error) {
-			updatedDefault = prefs.DefaultPersonalityID
-			return &prefs, nil
+		setDefaultPersonalityFn: func(ctx context.Context, uid, pid uuid.UUID) error {
+			updatedDefault = pid
+			return nil
 		},
 	}
 
@@ -251,29 +241,18 @@ func TestCreatePersonality_FirstPersonality_SetsDefaultPreference(t *testing.T) 
 	}
 }
 
-// Creating the first personality reads the user's preferences, changes one field, and
-// writes the whole struct back. Any field this handler does not know about rides along in
-// that round trip, so a field dropped here is silently destroyed by an unrelated feature.
-// Favorites are the current example; the assertion is really about the pattern.
-func TestCreatePersonality_FirstPersonality_PreservesUnrelatedPreferences(t *testing.T) {
+// Creating the first personality used to read the user's preferences, change one field and
+// write the whole struct back: every other field rode along, so a change made in between was
+// undone, and the default image vendor got stored for users who never chose one (#347). The
+// auto-default is now one targeted write, for the creating user and the new personality only.
+func TestCreatePersonality_FirstPersonality_WritesOnlyTheDefaultPersonality(t *testing.T) {
 	t.Parallel()
 
 	userID := uuid.New()
 	newPersonalityID := uuid.New()
 
-	// Every field is populated so the equality check below has something to catch. A new
-	// preference field added without extending this fixture still fails the comparison the
-	// moment the handler drops it, which is the point.
-	stored := models.UserPreferences{
-		ID:                   uuid.New(),
-		UserID:               userID,
-		DefaultModelID:       uuid.New(),
-		DefaultPersonalityID: uuid.Nil,
-		Theme:                "dark",
-		FavoriteModelIDs:     []string{"model-a", "model-b"},
-	}
-
-	var written models.UserPreferences
+	type call struct{ user, personality uuid.UUID }
+	var calls []call
 	store := &fakeStore{
 		listPersonalitiesFn: func(ctx context.Context, uid uuid.UUID, pageNum, pageSize int, filters models.PersonalityFilters) (*models.PaginatedResponse, error) {
 			return &models.PaginatedResponse{Results: []any{}, TotalCount: 0, Page: 1}, nil
@@ -281,13 +260,9 @@ func TestCreatePersonality_FirstPersonality_PreservesUnrelatedPreferences(t *tes
 		createPersonalityFn: func(ctx context.Context, uid uuid.UUID, p models.Personality) (*models.Personality, error) {
 			return &models.Personality{ID: newPersonalityID, Name: p.Name, SystemPrompt: p.SystemPrompt}, nil
 		},
-		getUserPreferencesFn: func(ctx context.Context, uid uuid.UUID) (*models.UserPreferences, error) {
-			prefs := stored
-			return &prefs, nil
-		},
-		updateUserPrefsFn: func(ctx context.Context, uid uuid.UUID, prefs models.UserPreferences) (*models.UserPreferences, error) {
-			written = prefs
-			return &prefs, nil
+		setDefaultPersonalityFn: func(ctx context.Context, uid, pid uuid.UUID) error {
+			calls = append(calls, call{uid, pid})
+			return nil
 		},
 	}
 
@@ -304,16 +279,9 @@ func TestCreatePersonality_FirstPersonality_PreservesUnrelatedPreferences(t *tes
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
 	}
-
-	// Compare the whole struct rather than naming fields: the hazard is a field being
-	// dropped, and listing them here would miss exactly the ones added after this was
-	// written. Only default_personality_id may differ.
-	want := stored
-	want.DefaultPersonalityID = newPersonalityID
-
-	if !reflect.DeepEqual(written, want) {
-		t.Fatalf("preferences changed beyond the default personality during read-modify-write:\n got: %+v\nwant: %+v",
-			written, want)
+	want := []call{{userID, newPersonalityID}}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("auto-default writes: got %+v, want exactly %+v", calls, want)
 	}
 }
 
@@ -331,13 +299,9 @@ func TestCreatePersonality_NotFirstPersonality_DoesNotUpdateDefaultPreference(t 
 		createPersonalityFn: func(ctx context.Context, uid uuid.UUID, p models.Personality) (*models.Personality, error) {
 			return &models.Personality{ID: newPersonalityID, Name: p.Name, SystemPrompt: p.SystemPrompt}, nil
 		},
-		getUserPreferencesFn: func(ctx context.Context, uid uuid.UUID) (*models.UserPreferences, error) {
-			t.Fatalf("GetUserPreferences should not be called when not first personality")
-			return nil, nil
-		},
-		updateUserPrefsFn: func(ctx context.Context, uid uuid.UUID, prefs models.UserPreferences) (*models.UserPreferences, error) {
+		setDefaultPersonalityFn: func(ctx context.Context, uid, pid uuid.UUID) error {
 			updated = true
-			return &prefs, nil
+			return nil
 		},
 	}
 
@@ -354,6 +318,6 @@ func TestCreatePersonality_NotFirstPersonality_DoesNotUpdateDefaultPreference(t 
 		t.Fatalf("expected %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
 	}
 	if updated {
-		t.Fatalf("did not expect UpdateUserPreferences to be called")
+		t.Fatalf("did not expect SetDefaultPersonality to be called")
 	}
 }
