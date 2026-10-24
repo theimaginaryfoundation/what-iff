@@ -53,6 +53,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
 	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
+	"github.com/theimaginaryfoundation/what-iff/internal/reauth"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"github.com/theimaginaryfoundation/what-iff/internal/userhooks"
@@ -197,7 +198,7 @@ func (s *Server) setupRoutes() {
 	// applied at the transport they all still share. It sits directly on the
 	// base transport, so the timeouts and instrumentation below wrap the
 	// credentialed request exactly as they wrap any other.
-	accountKeys := accountkeys.New(s.db, dataStore, s.logger)
+	accountKeys := accountkeys.New(s.db, dataStore, reauth.New(dataStore), s.logger)
 	keyResolver := providerkeys.New(
 		providerkeys.NewDeploymentResolver(s.config.configuredProviderKeys()),
 		accountKeys,

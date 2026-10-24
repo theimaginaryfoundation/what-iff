@@ -21,7 +21,7 @@ func servesKeyRoutes(router *mux.Router) bool {
 // The key routes follow the resolver: served when requests take their keys
 // from accounts, absent when the deployment supplies them.
 func TestMountAccountKeyRoutes_FollowsTheChosenResolver(t *testing.T) {
-	keys := accountkeys.New(nil, nil, zap.NewNop())
+	keys := accountkeys.New(nil, nil, nil, zap.NewNop())
 
 	router := mux.NewRouter()
 	require.False(t, mountAccountKeyRoutes(router, providerkeys.NewDeploymentResolver(nil), keys))
@@ -38,7 +38,7 @@ type wrapped struct{ providerkeys.Resolver }
 // The gate asks the resolver rather than checking its type, so a resolver
 // that wraps the account resolver still mounts the routes.
 func TestMountAccountKeyRoutes_SeesThroughAWrapper(t *testing.T) {
-	keys := accountkeys.New(nil, nil, zap.NewNop())
+	keys := accountkeys.New(nil, nil, nil, zap.NewNop())
 
 	router := mux.NewRouter()
 	require.True(t, mountAccountKeyRoutes(router, wrapped{keys}, keys))
@@ -48,7 +48,7 @@ func TestMountAccountKeyRoutes_SeesThroughAWrapper(t *testing.T) {
 // With the default New, the server takes the deployment's keys and serves no
 // key routes.
 func TestDefaultResolverServesNoKeyRoutes(t *testing.T) {
-	keys := accountkeys.New(nil, nil, zap.NewNop())
+	keys := accountkeys.New(nil, nil, nil, zap.NewNop())
 	resolver := providerkeys.New(providerkeys.NewDeploymentResolver(nil), keys)
 
 	router := mux.NewRouter()

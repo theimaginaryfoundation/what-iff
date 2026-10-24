@@ -1673,7 +1673,7 @@ export interface paths {
         get?: never;
         /**
          * Store the account's key for a provider
-         * @description Stores the key, encrypted at rest, replacing any key already stored for this provider. The key is never returned.
+         * @description Stores the key, encrypted at rest, replacing any key already stored for this provider. The key is never returned. Requires the account's current password.
          */
         put: {
             parameters: {
@@ -1711,6 +1711,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The current password was missing or wrong. `code` is `reauthentication_required`; the session itself is still valid. */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -11542,6 +11551,11 @@ export interface components {
         SetProviderKeyRequest: {
             /** @description The provider API key, 8 to 512 characters. Leading and trailing whitespace is trimmed; whitespace inside the key is rejected. */
             key: string;
+            /**
+             * Format: password
+             * @description The account's current password. Holding a session is not enough to change where the account's conversations are sent.
+             */
+            current_password: string;
         };
         WebhookToken: {
             /** Format: uuid */
@@ -12669,7 +12683,7 @@ export interface components {
          *       on a generic code — use the HTTP status instead.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "provider_not_configured";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "provider_not_configured" | "reauthentication_required";
         /** @description A single hit inside a search section. */
         SearchResult: {
             /**
