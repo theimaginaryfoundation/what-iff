@@ -98,6 +98,13 @@ const CodeNotSet = ""
 // carries driver and constraint text that should not reach a client. The
 // response body says only what the handler chose to say via message.
 func RespondWithError(w http.ResponseWriter, logger *zap.Logger, statusCode int, code, message string, err error) {
+	RespondWithErrorDetails(w, logger, statusCode, code, message, nil, err)
+}
+
+// RespondWithErrorDetails is RespondWithError with structured metadata in the envelope's
+// details, for an error the client acts on (the join terms to accept, say). details is
+// omitted when nil.
+func RespondWithErrorDetails(w http.ResponseWriter, logger *zap.Logger, statusCode int, code, message string, details any, err error) {
 	// Trimmed rather than compared to CodeNotSet directly: a caller passing " "
 	// or a stray tab means the same thing as passing nothing, and Code has no
 	// omitempty, so letting whitespace through would put it on the wire.
@@ -122,6 +129,7 @@ func RespondWithError(w http.ResponseWriter, logger *zap.Logger, statusCode int,
 		Error:   message,
 		Message: message,
 		Code:    code,
+		Details: details,
 	}
 
 	RespondWithJSON(w, logger, statusCode, response)

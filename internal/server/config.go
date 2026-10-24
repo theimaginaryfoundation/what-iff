@@ -99,6 +99,7 @@ type Config struct {
 	//   80920031 AGENTJOBS_SCHEDULER_LOCK_KEY        agent job scheduler leadership
 	//   80920032 reserved: DISCORD_GATEWAY_LOCK_KEY  Discord relay gateway leader (private overlay; held for the leader's lifetime)
 	//   80920033 MEMORY_EMBEDDING_BACKFILL_LOCK_KEY  memory embedding backfill pass
+	//   80920034 BUZZ_GATEWAY_LOCK_KEY               Buzz relay gateway leader (internal/buzzplugin; held for the leader's lifetime)
 	AgentJobsSchedulerLockKey int64
 	// MemoryEmbeddingBackfillLockKey is the Postgres advisory lock key that lets
 	// exactly one instance run each memory embedding backfill pass.

@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"unicode"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/relaykit"
 )
 
 // InboundMessage is the part of a Discord message the relay needs. The gateway
@@ -63,10 +64,7 @@ func Triggered(m InboundMessage, botUserID string) (TriggerReason, bool) {
 // Allowed applies a binding's allow and deny lists to a Discord user id. Deny
 // always wins; an empty allow list means anyone who is not denied.
 func Allowed(authorID string, allow, deny []string) bool {
-	if slices.Contains(deny, authorID) {
-		return false
-	}
-	return len(allow) == 0 || slices.Contains(allow, authorID)
+	return relaykit.Allowed(authorID, allow, deny)
 }
 
 // BindingChannelID is the channel a message is bound through: the thread's
@@ -113,30 +111,9 @@ func PromptText(m InboundMessage, botUserID, channelName string) string {
 	return b.String()
 }
 
-// speakerLabel is a display name as it may appear at the start of a relayed line.
-// Names are chosen by whoever posts, so the characters that make up the
-// "name (Discord, #channel):" label are removed: a nickname cannot pose as another
-// speaker's label or end its own early. An empty result reads "someone".
-func speakerLabel(name string) string {
-	name = strings.Map(func(r rune) rune {
-		switch r {
-		case '(', ')', ':', '[', ']', '"':
-			return ' '
-		}
-		if unicode.IsControl(r) {
-			return ' '
-		}
-		return r
-	}, name)
-	name = strings.Join(strings.Fields(name), " ")
-	if r := []rune(name); len(r) > 64 {
-		name = string(r[:64])
-	}
-	if name == "" {
-		return "someone"
-	}
-	return name
-}
+// speakerLabel is a display name as it may appear at the start of a relayed line
+// (relaykit.SpeakerLabel): a nickname cannot pose as another speaker's label.
+func speakerLabel(name string) string { return relaykit.SpeakerLabel(name) }
 
 // stripMention removes <@id> and <@!id> mentions of the bot and tidies spaces.
 func stripMention(content, botUserID string) string {

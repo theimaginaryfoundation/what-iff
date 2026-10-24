@@ -26,7 +26,7 @@ It talks to Discord through a small `Discord` interface (REST via discordgo), an
 ## Dependencies
 
 - **Inbound:** `internal/discordplugin` builds the `Service` and wires it to the gateway and the reply hook.
-- **Outbound:** `internal/models`, `internal/plugins` (turn starter, attachment ingester), `internal/replyhook` (`Event`), `internal/agent/tools` (tool names for the defaults), `github.com/bwmarrin/discordgo`, `zap`.
+- **Outbound:** `internal/models`, `internal/plugins` (turn starter, attachment ingester), `internal/replyhook` (`Event`), `internal/relaykit` (turn queue, reply bookkeeping, busy throttle, speaker labels, allow lists, public-address guard), `internal/agent/tools` (tool names for the defaults), `github.com/bwmarrin/discordgo`, `zap`.
 
 ## Non-obvious decisions
 
@@ -37,7 +37,8 @@ It talks to Discord through a small `Discord` interface (REST via discordgo), an
 - **A reply can beat its inbound link.**
   The turn starter returns after the turn starts, so the link is attached late; a reply that finds no link while a relay turn runs in its thread is kept (`keepOrphan`) and posted once the link is attached.
   A waiting tag also stops waiting when its job completes, so the queue never stalls on a lost hook.
-- **Queues are race-free:** a tag is enqueued under the lock the idle worker takes before retiring, and tuning defaults are set once.
+- **Queues are race-free:** a tag is enqueued under the lock the idle worker takes before retiring (`relaykit.TurnQueue`), and tuning defaults are set once.
+  The queue, the reply bookkeeping (`relaykit.Replies`) and the busy throttle are shared with the Buzz relay; the thin unexported wrappers (`enqueue`, `setWaiter`, `release`, `keepOrphan`, `takeOrphan`) keep this package's tests and call sites unchanged.
 - **No pings.** Every post sets `allowed_mentions` to parse nothing except the replied-to user.
 - **Neutral notices.** A failed turn or a full queue posts `NoticeFailed` or `NoticeBusy`, which reveal nothing about the owner's account.
 - **A reply can finish before its waiter registers** (the turn starter returns after the job starts), so `release` remembers early replies for the turn timeout.

@@ -752,6 +752,379 @@ paths:
         '404': { $ref: '#/components/responses/DiscordNotFound' }
         '500': { $ref: '#/components/responses/DiscordServerError' }
 
+  # Buzz relay (docs/adr/0x028-buzz-relay.md), experimental. Every route is a 404 unless
+  # BUZZ_RELAY_ENABLED=true, and, in a build with a per-user experimental gate, for a user the
+  # feature is not turned on for.
+  /buzz/agents:
+    get:
+      summary: List Buzz identities
+      description: Returns the user's personas that have a Buzz identity, each with the communities it is in. A secret key is never returned.
+      tags: [Buzz]
+      responses:
+        '200':
+          description: Buzz identities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BuzzAgent'
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+    post:
+      summary: Give a persona a Buzz identity
+      description: Generates a keypair for the persona. The secret key stays on the server, encrypted; the public key is shown as an npub so people can add the persona in Buzz.
+      tags: [Buzz]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuzzAgentCreateRequest'
+      responses:
+        '201':
+          description: Identity created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzAgent'
+        '400': { $ref: '#/components/responses/BuzzBadRequest' }
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '409': { $ref: '#/components/responses/BuzzConflict' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  /buzz/agents/{id}:
+    parameters:
+      - $ref: '#/components/parameters/BuzzID'
+    patch:
+      summary: Pause or resume a Buzz identity
+      tags: [Buzz]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+              required: [enabled]
+      responses:
+        '200':
+          description: Updated identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzAgent'
+        '400': { $ref: '#/components/responses/BuzzBadRequest' }
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+    delete:
+      summary: Remove a Buzz identity
+      description: Removes the identity and its communities and bindings. The key is gone for good, so Buzz will see a new member if the persona is connected again.
+      tags: [Buzz]
+      responses:
+        '204':
+          description: Identity removed
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  /buzz/agents/{id}/sync-profile:
+    parameters:
+      - $ref: '#/components/parameters/BuzzID'
+    post:
+      summary: Publish the persona's name and portrait
+      description: Republishes the persona's Buzz profile (name, portrait, bot flag) to every community it is in.
+      tags: [Buzz]
+      responses:
+        '200':
+          description: Where the profile was published
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  published:
+                    type: integer
+                  failed:
+                    type: array
+                    items:
+                      type: string
+                required: [published, failed]
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  /buzz/agents/{id}/communities:
+    parameters:
+      - $ref: '#/components/parameters/BuzzID'
+    post:
+      summary: Join a persona to a community
+      description: >-
+        Reads the community, verifies an owner attestation when one is given, claims an invite
+        when one is given (after the owner accepted the community's join terms for the persona),
+        records the community, publishes the persona's profile and checks whether it is let in.
+        A 409 with code terms_required carries the terms to show and accept.
+      tags: [Buzz]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuzzCommunityCreateRequest'
+      responses:
+        '201':
+          description: Community added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzCommunity'
+        '400': { $ref: '#/components/responses/BuzzBadRequest' }
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '409':
+          description: The community has join terms to accept first, or the persona is already in it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzTermsRequired'
+        '502': { $ref: '#/components/responses/BuzzUpstreamError' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  /buzz/policy:
+    get:
+      summary: Preview a community's join terms
+      tags: [Buzz]
+      parameters:
+        - name: relay_url
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The community and its join terms (policy is null when it has none)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  relay_url:
+                    type: string
+                  policy:
+                    $ref: '#/components/schemas/BuzzJoinPolicy'
+                required: [name, relay_url]
+        '400': { $ref: '#/components/responses/BuzzBadRequest' }
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '502': { $ref: '#/components/responses/BuzzUpstreamError' }
+
+  /buzz/communities/{id}:
+    parameters:
+      - $ref: '#/components/parameters/BuzzID'
+    patch:
+      summary: Update a community
+      description: Pauses or resumes the persona there, replaces or removes the attestation, claims an invite, or checks access again.
+      tags: [Buzz]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuzzCommunityUpdateRequest'
+      responses:
+        '200':
+          description: Updated community
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzCommunity'
+        '400': { $ref: '#/components/responses/BuzzBadRequest' }
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '409':
+          description: The community has join terms to accept first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzTermsRequired'
+        '502': { $ref: '#/components/responses/BuzzUpstreamError' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+    delete:
+      summary: Leave a community
+      description: Removes the community and its bindings from What Iff. Nothing is deleted in Buzz.
+      tags: [Buzz]
+      responses:
+        '204':
+          description: Community removed
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  /buzz/communities/{id}/channels:
+    parameters:
+      - $ref: '#/components/parameters/BuzzID'
+    get:
+      summary: List a community's channels
+      description: The message channels the persona is in, and the public ones it could join.
+      tags: [Buzz]
+      responses:
+        '200':
+          description: Channels, the persona's own first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BuzzChannel'
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '502': { $ref: '#/components/responses/BuzzUpstreamError' }
+
+  /buzz/communities/{id}/channels/{channelId}/join:
+    parameters:
+      - $ref: '#/components/parameters/BuzzID'
+      - name: channelId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      summary: Join a public channel
+      description: Sends a join request for the persona (NIP-29).
+      tags: [Buzz]
+      responses:
+        '204':
+          description: Join requested
+        '400': { $ref: '#/components/responses/BuzzBadRequest' }
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '502': { $ref: '#/components/responses/BuzzUpstreamError' }
+
+  /buzz/bindings:
+    get:
+      summary: List Buzz channel bindings
+      tags: [Buzz]
+      responses:
+        '200':
+          description: Bindings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BuzzBinding'
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+    post:
+      summary: Connect a channel to a thread
+      description: >-
+        Binds a community channel to a relay thread. Without chat_id a new sandboxed relay thread
+        is created. Binding an existing thread that is not sandboxed needs allow_unrestricted.
+      tags: [Buzz]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuzzBindingCreateRequest'
+      responses:
+        '201':
+          description: Channel connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzBinding'
+        '400': { $ref: '#/components/responses/BuzzBadRequest' }
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '409': { $ref: '#/components/responses/BuzzConflict' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  /buzz/bindings/{id}:
+    parameters:
+      - $ref: '#/components/parameters/BuzzID'
+    patch:
+      summary: Update a binding
+      tags: [Buzz]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuzzBindingUpdateRequest'
+      responses:
+        '200':
+          description: Updated binding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzBinding'
+        '400': { $ref: '#/components/responses/BuzzBadRequest' }
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+    delete:
+      summary: Disconnect a channel
+      tags: [Buzz]
+      responses:
+        '204':
+          description: Channel disconnected
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  /buzz/chats/{chatId}:
+    parameters:
+      - $ref: '#/components/parameters/BuzzChatID'
+    get:
+      summary: A thread's Buzz state
+      description: The thread's bindings, which of them will post the next reply, and the recent messages that crossed between the thread and Buzz.
+      tags: [Buzz]
+      responses:
+        '200':
+          description: Buzz state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzChatState'
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  /buzz/chats/{chatId}/pending/{bindingId}:
+    parameters:
+      - $ref: '#/components/parameters/BuzzChatID'
+      - name: bindingId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      summary: Post the next reply to a Buzz channel
+      description: Arms the composer toggle. The next reply in the thread is posted to the binding's channel; the request expires after 30 minutes.
+      tags: [Buzz]
+      responses:
+        '204':
+          description: Armed
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+    delete:
+      summary: Do not post the next reply to Buzz
+      tags: [Buzz]
+      responses:
+        '204':
+          description: Disarmed
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
   /webhook-tokens:
     get:
       summary: List webhook API tokens
@@ -7234,6 +7607,20 @@ components:
       schema:
         type: string
         format: uuid
+    BuzzID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BuzzChatID:
+      name: chatId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
 
   responses:
     DiscordBadRequest:
@@ -7268,6 +7655,42 @@ components:
             $ref: '#/components/schemas/Error'
     DiscordServerError:
       description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BuzzBadRequest:
+      description: "Invalid request (an address that is not a Buzz community, a refused invite, an attestation not signed for this key, a bad pubkey)"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BuzzUnauthorized:
+      description: "Unauthorized"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BuzzNotFound:
+      description: "Not found (including another account's identity, community, binding, thread or personality)"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BuzzConflict:
+      description: "The personality already has a Buzz identity, is already in that community, or the channel is already bound"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BuzzUpstreamError:
+      description: "The community refused the request or could not be reached"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BuzzServerError:
+      description: "Internal server error"
       content:
         application/json:
           schema:
@@ -10047,6 +10470,346 @@ components:
           items:
             $ref: '#/components/schemas/DiscordMessageLink'
       required: [bindings, pending_binding_ids, links]
+
+    BuzzAgent:
+      type: object
+      description: A personality's Buzz identity, with the communities it is in.
+      properties:
+        id:
+          type: string
+          format: uuid
+        personality_id:
+          type: string
+          format: uuid
+        persona_name:
+          type: string
+        pubkey:
+          type: string
+          description: The public key, lowercase hex
+        npub:
+          type: string
+          description: The public key as a NIP-19 npub, for people to find and add the persona in Buzz
+        status:
+          type: string
+          enum: [active, disabled]
+        last_error:
+          type: string
+        communities:
+          type: array
+          items:
+            $ref: '#/components/schemas/BuzzCommunity'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, personality_id, pubkey, npub, status, created_at, updated_at]
+
+    BuzzAgentCreateRequest:
+      type: object
+      properties:
+        personality_id:
+          type: string
+          format: uuid
+      required: [personality_id]
+
+    BuzzCommunity:
+      type: object
+      description: One community a persona is in, or is trying to get into.
+      properties:
+        id:
+          type: string
+          format: uuid
+        agent_id:
+          type: string
+          format: uuid
+        relay_url:
+          type: string
+          description: The community's WebSocket address (wss://host)
+        name:
+          type: string
+        relay_pubkey:
+          type: string
+        attested:
+          type: boolean
+          description: Whether the owner gave an attestation for the persona's key
+        owner_pubkey:
+          type: string
+        policy_version:
+          type: string
+          description: The join terms version the owner accepted for the persona
+        status:
+          type: string
+          enum: [active, needs_access, error, disabled]
+        last_error:
+          type: string
+        last_connected_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, agent_id, relay_url, name, relay_pubkey, attested, status, created_at, updated_at]
+
+    BuzzCommunityCreateRequest:
+      type: object
+      properties:
+        relay_url:
+          type: string
+          description: The community's address, or an invite link to it
+        invite:
+          type: string
+          description: An invite link or code, when relay_url is not already one
+        attestation:
+          type: string
+          description: The owner's NIP-OA attestation for the persona's key, as its JSON auth tag
+        accept_terms_version:
+          type: string
+          description: The join terms version the owner read and accepted for the persona
+        confirm_age:
+          type: boolean
+          description: The owner's confirmation of the community's age requirement, when it has one
+      required: [relay_url]
+
+    BuzzCommunityUpdateRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        attestation:
+          type: string
+          description: Replaces the attestation; an empty string removes it
+        invite:
+          type: string
+        accept_terms_version:
+          type: string
+        confirm_age:
+          type: boolean
+        recheck:
+          type: boolean
+          description: Check access again (after an admin added the persona, say)
+
+    BuzzJoinPolicy:
+      type: object
+      nullable: true
+      properties:
+        terms_markdown:
+          type: string
+        privacy_markdown:
+          type: string
+        age_attestation_required:
+          type: boolean
+        version:
+          type: string
+
+    BuzzTermsRequired:
+      description: The error envelope (code buzz_terms_required) with the community's join terms in details.policy
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            details:
+              type: object
+              properties:
+                policy:
+                  $ref: '#/components/schemas/BuzzJoinPolicy'
+
+    BuzzChannel:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        about:
+          type: string
+        public:
+          type: boolean
+        member:
+          type: boolean
+          description: Whether the persona is in the channel
+        archived:
+          type: boolean
+      required: [id, name, public, member]
+
+    BuzzBinding:
+      type: object
+      description: One community channel bound to a relay thread.
+      properties:
+        id:
+          type: string
+          format: uuid
+        community_id:
+          type: string
+          format: uuid
+        community_name:
+          type: string
+        chat_id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+        channel_name:
+          type: string
+        inbound_enabled:
+          type: boolean
+          description: Whether mentioning the persona in the channel starts a turn
+        allow_pubkeys:
+          type: array
+          items:
+            type: string
+          description: Pubkeys (hex) that may mention the persona; empty means anyone not denied
+        deny_pubkeys:
+          type: array
+          items:
+            type: string
+          description: Pubkeys (hex) that may never mention the persona; deny always wins
+        answer_agents:
+          type: boolean
+          description: Whether other agents (events carrying an owner attestation) may start turns
+        allow_unrestricted:
+          type: boolean
+          description: The owner's acknowledgement that the bound thread is not sandboxed
+        chat_sandboxed:
+          type: boolean
+          description: Whether the bound thread is sandboxed right now (computed)
+        status:
+          type: string
+          enum: [active, broken]
+        last_error:
+          type: string
+        last_activity_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, community_id, chat_id, channel_id, channel_name, inbound_enabled, allow_pubkeys, deny_pubkeys, answer_agents, allow_unrestricted, status, created_at, updated_at]
+
+    BuzzBindingCreateRequest:
+      type: object
+      properties:
+        community_id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+        channel_name:
+          type: string
+        chat_id:
+          type: string
+          format: uuid
+          description: Binds an existing thread; omitted creates a new sandboxed relay thread
+        inbound_enabled:
+          type: boolean
+        allow_pubkeys:
+          type: array
+          items:
+            type: string
+          description: Pubkeys as npub or hex
+        deny_pubkeys:
+          type: array
+          items:
+            type: string
+        answer_agents:
+          type: boolean
+        allow_unrestricted:
+          type: boolean
+      required: [community_id, channel_id]
+
+    BuzzBindingUpdateRequest:
+      type: object
+      properties:
+        chat_id:
+          type: string
+          format: uuid
+        inbound_enabled:
+          type: boolean
+        allow_pubkeys:
+          type: array
+          items:
+            type: string
+        deny_pubkeys:
+          type: array
+          items:
+            type: string
+        answer_agents:
+          type: boolean
+        channel_name:
+          type: string
+        allow_unrestricted:
+          type: boolean
+        reactivate:
+          type: boolean
+          description: Clears a broken status
+
+    BuzzMessageLink:
+      type: object
+      description: One message that crossed between a relay thread and its Buzz channel.
+      properties:
+        id:
+          type: string
+          format: uuid
+        binding_id:
+          type: string
+          format: uuid
+        direction:
+          type: string
+          enum: [inbound, outbound]
+        chat_message_id:
+          type: string
+          format: uuid
+        event_id:
+          type: string
+        thread_root:
+          type: string
+        posted_event_ids:
+          type: array
+          items:
+            type: string
+        author_pubkey:
+          type: string
+        author_name:
+          type: string
+        reply_to_link_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [received, pending, sent, failed]
+        error:
+          type: string
+        attempts:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+      required: [id, binding_id, direction, thread_root, posted_event_ids, status, attempts, created_at]
+
+    BuzzChatState:
+      type: object
+      properties:
+        bindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/BuzzBinding'
+        pending_binding_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/BuzzMessageLink'
+      required: [bindings, pending_binding_ids, links]
     MemoryCreateRequest:
       type: object
       properties:
@@ -10730,6 +11493,7 @@ components:
         - message_too_long
         - quota_exceeded
         - system_prompt_too_long
+        - buzz_terms_required
 
     # Cross-resource search schemas (GET /search)
     SearchResult:
@@ -10830,6 +11594,8 @@ tags:
     description: User memory storage and retrieval operations
   - name: Discord
     description: The Discord relay - personalities answering in Discord channels as their own bots
+  - name: Buzz
+    description: The Buzz relay - personalities as members of Buzz communities under their own keys
   - name: Personality Management
     description: Custom AI personality creation and management
   - name: Ritual Management

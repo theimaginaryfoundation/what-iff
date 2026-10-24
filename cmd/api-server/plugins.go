@@ -9,4 +9,7 @@ import (
 	// The Discord relay: personas answer in Discord channels as their own bots.
 	// Set DISCORD_RELAY_ENABLED=false to switch it off (docs/adr/0x025-discord-relay.md).
 	_ "github.com/theimaginaryfoundation/what-iff/internal/discordplugin"
+	// The Buzz relay: personas are members of Buzz communities under their own keys.
+	// Experimental: off unless BUZZ_RELAY_ENABLED=true (docs/adr/0x028-buzz-relay.md).
+	_ "github.com/theimaginaryfoundation/what-iff/internal/buzzplugin"
 )
