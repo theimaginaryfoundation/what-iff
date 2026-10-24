@@ -100,6 +100,13 @@
         (save)="onSavePrompt($event)"
       />
 
+      <app-personality-prompt-history
+        [personalityId]="personality.id"
+        [personalityName]="personality.name"
+        [currentPrompt]="personality.system_prompt"
+        (restored)="onPromptRestored()"
+      />
+
       <section class="flex flex-col gap-3 rounded-2xl border border-(--color-border-default) bg-(--color-surface-card) p-4">
         <h2 class="inline-flex items-center gap-1 text-base font-semibold text-(--color-text-primary)">
           Scratchpad

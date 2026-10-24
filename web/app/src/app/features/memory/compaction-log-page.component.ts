@@ -1,11 +1,10 @@
 import { CommonModule, DatePipe, UpperCasePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, inject, input, OnInit, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import { forkJoin, map, of } from 'rxjs';
 
 import { CheckpointSnapshot, CompactionEvent, CompactionLoadedMemory, MemoryMergeEvent } from '../../core/models/memory.model';
 import { Chat } from '../../core/models/chat.model';
-import { Personality, PersonalityPromptChange } from '../../core/models/personality.model';
+import { Personality } from '../../core/models/personality.model';
 import { ChatService } from '../../core/services/chat.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { MemoryService } from '../../core/services/memory.service';
@@ -13,8 +12,6 @@ import { PersonalityService } from '../../core/services/personality.service';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { memoryScopeLabel, mergeTypeDescription, mergeTypeLabel } from './helpers/memory-vm.helpers';
-
-type PromptAuditEntry = PersonalityPromptChange & { personality_name: string };
 
 @Component({
   selector: 'app-compaction-log-page',
@@ -35,10 +32,6 @@ export class CompactionLogPageComponent implements OnInit {
   readonly embedded = input(false);
 
   readonly events = signal<CompactionEvent[]>([]);
-  readonly promptChanges = signal<PromptAuditEntry[]>([]);
-  readonly promptChangesLoading = signal(false);
-  readonly promptChangesError = signal<string | null>(null);
-  readonly promptChangesExpanded = signal(false);
   readonly chats = signal<readonly Chat[]>([]);
   readonly personalities = signal<readonly Personality[]>([]);
   readonly selectedChatID = signal('');
@@ -50,7 +43,6 @@ export class CompactionLogPageComponent implements OnInit {
   readonly collapsedMemoryIds = signal<Set<string>>(new Set());
   readonly collapsedLoadedMemoryIds = signal<Set<string>>(new Set());
   readonly revertingId = signal<string | null>(null);
-  readonly revertingPromptChangeId = signal<string | null>(null);
   readonly revertedIds = signal<Set<string>>(new Set());
   readonly notice = signal<string | null>(null);
   readonly page = signal(1);
@@ -61,12 +53,7 @@ export class CompactionLogPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.chatService.listChats(1, 100).subscribe({ next: response => this.chats.set(response.results ?? []) });
-    this.personalityService.listPersonalities(1, 100).subscribe({
-      next: response => {
-        this.personalities.set(response.results ?? []);
-        this.loadPromptChanges();
-      },
-    });
+    this.personalityService.listPersonalities(1, 100).subscribe({ next: response => this.personalities.set(response.results ?? []) });
     this.load(1);
   }
 
@@ -93,73 +80,10 @@ export class CompactionLogPageComponent implements OnInit {
       });
   }
 
-  private loadPromptChanges(): void {
-    const personalities = this.personalities();
-    const selected = this.selectedPersonalityID();
-    const targets = selected ? personalities.filter(item => item.id === selected) : [...personalities];
-
-    if (targets.length === 0) {
-      this.promptChanges.set([]);
-      this.promptChangesLoading.set(false);
-      return;
-    }
-
-    this.promptChangesLoading.set(true);
-    this.promptChangesError.set(null);
-    const requests = targets.map(personality =>
-      this.personalityService
-        .listPromptChanges(personality.id)
-        .pipe(map(changes => changes.map(change => ({ ...change, personality_name: personality.name })))),
-    );
-
-    (requests.length ? forkJoin(requests) : of([] as PromptAuditEntry[][])).subscribe({
-      next: groups => {
-        const changes = groups.flat().sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
-        this.promptChanges.set(changes);
-        this.promptChangesLoading.set(false);
-      },
-      error: err => {
-        this.promptChangesError.set(err instanceof Error ? err.message : 'Failed to load personality prompt changes');
-        this.promptChangesLoading.set(false);
-      },
-    });
-  }
-
-  togglePromptChanges(): void {
-    this.promptChangesExpanded.update(expanded => !expanded);
-  }
-
   updateFilters(chatID: string, personalityID: string): void {
     this.selectedChatID.set(chatID);
     this.selectedPersonalityID.set(personalityID);
     this.load(1);
-    this.loadPromptChanges();
-  }
-
-  async revertPromptChange(change: PromptAuditEntry): Promise<void> {
-    if (this.revertingPromptChangeId()) return;
-    const confirmed = await this.confirmation.confirm({
-      title: 'Restore personality prompt?',
-      message: `Restore ${change.personality_name} to the prompt from before this change? The restore will be recorded as a new audit entry.`,
-      type: 'warning',
-      confirmText: 'Restore',
-      cancelText: 'Cancel',
-    });
-    if (!confirmed) return;
-
-    this.revertingPromptChangeId.set(change.id);
-    this.notice.set(null);
-    this.personalityService.revertPromptChange(change.personality_id, change.id).subscribe({
-      next: () => {
-        this.revertingPromptChangeId.set(null);
-        this.notice.set(`Prompt restored for ${change.personality_name}.`);
-        this.loadPromptChanges();
-      },
-      error: err => {
-        this.revertingPromptChangeId.set(null);
-        this.promptChangesError.set(err instanceof Error ? err.message : 'Failed to restore personality prompt');
-      },
-    });
   }
 
   checkpointReasonLabel(reason: string | null | undefined): string {

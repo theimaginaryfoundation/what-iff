@@ -133,7 +133,7 @@ describe('PersonalityDetailPageComponent', () => {
     it('explains each section with a help hint next to its heading', () => {
         fixture.detectChanges();
         const host = fixture.nativeElement as HTMLElement;
-        for (const label of ['What is the system prompt?', 'What is the scratchpad?', 'What are attachments?', 'What are expressions?']) {
+        for (const label of ['What is the system prompt?', 'What are prompt changes?', 'What is the scratchpad?', 'What are attachments?', 'What are expressions?']) {
             expect(host.querySelector(`h2 ui-help-hint button[aria-label="${label}"]`), label).toBeTruthy();
         }
     });
@@ -252,5 +252,26 @@ describe('PersonalityDetailPageComponent', () => {
         const request = vi.mocked(personalityService.updatePersonality).mock.lastCall![1];
         expect(request.name).toBe('Renamed via header');
         expect(request.scratchpad).toBe('New scratchpad body');
+    });
+
+    it('shows the prompt change history next to the system prompt editor', () => {
+        fixture.detectChanges();
+        const host = fixture.nativeElement as HTMLElement;
+        const editor = host.querySelector('app-personality-system-prompt-editor');
+        const history = host.querySelector('app-personality-prompt-history');
+        expect(history).toBeTruthy();
+        expect(editor?.nextElementSibling).toBe(history);
+    });
+
+    it('reloads the prompt after a restore without discarding other unsaved draft fields', () => {
+        fixture.detectChanges();
+        fixture.componentInstance.setDraftField('name', 'Half-typed name');
+        personalityService.getPersonality.mockReturnValue(of(makePersonality({ system_prompt: 'Restored prompt' })));
+
+        fixture.componentInstance.onPromptRestored();
+
+        expect(personalityService.getPersonality).toHaveBeenLastCalledWith('p-1');
+        expect(fixture.componentInstance.systemPromptValue().systemPrompt).toBe('Restored prompt');
+        expect(fixture.componentInstance.editorDraft()?.name).toBe('Half-typed name');
     });
 });

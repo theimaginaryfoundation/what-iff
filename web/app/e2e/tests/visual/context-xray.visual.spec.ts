@@ -29,7 +29,7 @@ type BoundingBox = { x: number; y: number; width: number; height: number };
  * #49 so the private build can swap it for credit costs.
  *
  * Geometric rather than pixel-identical, for the same reason as
- * `compaction-log.visual.spec.ts`: every number on this screen — token total,
+ * `personality-prompt-history.visual.spec.ts`: every number on this screen — token total,
  * budget fill, capture time, and the cost itself — is derived from a live
  * turn, so a committed PNG would encode one run's token count and fail on the
  * next. What the outlet extraction can actually regress is *placement*: the
