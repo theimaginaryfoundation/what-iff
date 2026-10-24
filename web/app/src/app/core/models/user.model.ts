@@ -20,6 +20,8 @@ export interface UserResponse {
   first_name?: string;
   last_name?: string;
   timezone?: string;
+  /** Timezone the user's browser last reported; jobs that follow the user run in it. */
+  current_timezone?: string;
   theme?: 'light' | 'dark' | 'system';
   created_at: string;
   updated_at: string;

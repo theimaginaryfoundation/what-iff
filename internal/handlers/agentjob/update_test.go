@@ -24,6 +24,7 @@ type fakeAgentJobProvider struct {
 	updatePromptCalled      bool
 	lastOverridesPatch      models.SetAgentJobOverridesPatch
 	setAgentJobOverridesErr error
+	lastFollow              *bool
 }
 
 func (f *fakeAgentJobProvider) CreateAgentJob(ctx context.Context, userID uuid.UUID, jobModel models.AgentJob) (*models.AgentJob, error) {
@@ -53,6 +54,15 @@ func (f *fakeAgentJobProvider) UpdateAgentJobStatus(ctx context.Context, userID,
 }
 func (f *fakeAgentJobProvider) SetAgentJobChat(ctx context.Context, userID, id uuid.UUID, chatID *uuid.UUID) (*models.AgentJob, error) {
 	return nil, errors.New("not implemented")
+}
+func (f *fakeAgentJobProvider) SetAgentJobFollowUserTimezone(ctx context.Context, userID, id uuid.UUID, follow bool) (*models.AgentJob, error) {
+	f.lastFollow = &follow
+	if f.job == nil {
+		return nil, errors.New("job not set")
+	}
+	updated := *f.job
+	updated.FollowUserTimezone = follow
+	return &updated, nil
 }
 func (f *fakeAgentJobProvider) SetAgentJobOverrides(ctx context.Context, userID, id uuid.UUID, patch models.SetAgentJobOverridesPatch) (*models.AgentJob, error) {
 	f.lastOverridesPatch = patch
@@ -181,5 +191,48 @@ func TestUpdateAgentJob_InvalidOverridesReturns400(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusBadRequest, w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateAgentJob_SetsFollowUserTimezone(t *testing.T) {
+	t.Parallel()
+
+	userID := uuid.New()
+	jobID := uuid.New()
+	provider := &fakeAgentJobProvider{job: &models.AgentJob{ID: jobID, UserID: userID, Prompt: "p", Timezone: "America/New_York"}}
+	h := NewHandler(provider, nil, nil, zap.NewNop())
+
+	req := httptest.NewRequest(http.MethodPut, "/agent-job/"+jobID.String(), strings.NewReader(`{"follow_user_timezone":true}`))
+	req = mux.SetURLVars(req, map[string]string{"id": jobID.String()})
+	req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, userID))
+	w := httptest.NewRecorder()
+	h.UpdateAgentJob(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+	if provider.lastFollow == nil || !*provider.lastFollow {
+		t.Fatalf("expected follow_user_timezone=true to be stored, got %v", provider.lastFollow)
+	}
+	var got models.AgentJob
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !got.FollowUserTimezone {
+		t.Fatal("expected the response to show the job following the user's timezone")
+	}
+
+	// Leaving the field out does not touch it.
+	provider.lastFollow = nil
+	req = httptest.NewRequest(http.MethodPut, "/agent-job/"+jobID.String(), strings.NewReader(`{}`))
+	req = mux.SetURLVars(req, map[string]string{"id": jobID.String()})
+	req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, userID))
+	w = httptest.NewRecorder()
+	h.UpdateAgentJob(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+	if provider.lastFollow != nil {
+		t.Fatal("expected follow_user_timezone to be left alone when omitted")
 	}
 }

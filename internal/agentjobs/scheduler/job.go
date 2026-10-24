@@ -39,6 +39,8 @@ type executionOptions struct {
 	allowPaused        bool
 	deferredRetryCount int
 	recurrenceHint     recurrenceBucket
+	// catchUp marks a run in place of a slot a timezone change skipped (no planned time).
+	catchUp bool
 }
 
 func (m *Manager) cleanupScheduledAgentJob(agentJobID uuid.UUID) {
@@ -53,8 +55,8 @@ func (m *Manager) cleanupScheduledAgentJob(agentJobID uuid.UUID) {
 	m.mu.Unlock()
 }
 
-func (m *Manager) recordAgentJobRunAttempt(ctx context.Context, userID, agentJobID uuid.UUID, runAt time.Time, nextRunAt *time.Time, errText string, statusUpdate *models.AgentJobStatus) {
-	if _, err := m.ds.RecordAgentJobRun(ctx, userID, agentJobID, runAt, nextRunAt, errText, statusUpdate); err != nil {
+func (m *Manager) recordAgentJobRunAttempt(ctx context.Context, userID, agentJobID uuid.UUID, runAt time.Time, runTZ string, nextRunAt *time.Time, errText string, statusUpdate *models.AgentJobStatus) {
+	if _, err := m.ds.RecordAgentJobRun(ctx, userID, agentJobID, runAt, runTZ, nextRunAt, errText, statusUpdate); err != nil {
 		m.logger.Error("failed to record agent job run",
 			zap.String("agent_job_id", agentJobID.String()),
 			zap.Error(err),
@@ -233,7 +235,7 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 		m.logger.Warn("failed to compute next run time",
 			zap.String("agent_job_id", agentJobID.String()),
 			zap.String("schedule_type", string(job.ScheduleType)),
-			zap.String("timezone", job.Timezone),
+			zap.String("timezone", job.ScheduleTimezone()),
 			zap.String("schedule", func() string {
 				if job.Schedule == nil {
 					return ""
@@ -263,7 +265,7 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 		if job.ScheduleType == models.AgentJobScheduleTypeAt {
 			nextRunAt = nil
 		}
-		m.recordAgentJobRunAttempt(ctx, userID, agentJobID, runAt, nextRunAt, errText, statusUpdate)
+		m.recordAgentJobRunAttempt(ctx, userID, agentJobID, runAt, job.ScheduleTimezone(), nextRunAt, errText, statusUpdate)
 
 		// If we paused the job due to schedule misconfiguration, stop the in-memory schedule immediately.
 		if scheduleErrText != "" && job.ScheduleType == models.AgentJobScheduleTypeCron {
@@ -284,10 +286,13 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 	execCtx := apicontext.WithUserID(ctx, userID)
 	execCtx = context.WithValue(execCtx, middleware.UserIDKey, userID)
 
-	// Use the user's saved timezone for execution context (LLM "now", timestamps, etc.).
-	// Fall back to the job's stored timezone, then UTC.
+	// Use the user's saved timezone for execution context (LLM "now", timestamps, etc.); a job
+	// that follows the user uses the timezone it is running in. Fall back to the job's stored
+	// timezone, then UTC.
 	userTZ := ""
-	if u, err := m.ds.GetUserByID(ctx, userID); err == nil && u != nil {
+	if job.FollowUserTimezone {
+		userTZ = job.ScheduleTimezone()
+	} else if u, err := m.ds.GetUserByID(ctx, userID); err == nil && u != nil {
 		userTZ = strings.TrimSpace(u.Timezone)
 	}
 	if userTZ == "" {
@@ -328,7 +333,7 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 		nextRunAt = nil
 	}
 
-	m.recordAgentJobRunAttempt(ctx, userID, agentJobID, runAt, nextRunAt, errText, statusUpdate)
+	m.recordAgentJobRunAttempt(ctx, userID, agentJobID, runAt, job.ScheduleTimezone(), nextRunAt, errText, statusUpdate)
 
 	// If we paused the job due to schedule misconfiguration, stop the in-memory schedule immediately.
 	if scheduleErrText != "" && job.ScheduleType == models.AgentJobScheduleTypeCron {
@@ -549,17 +554,7 @@ func buildTrigger(j models.AgentJob, now time.Time) (quartz.Trigger, error) {
 		return quartz.NewRunOnceTrigger(delay), nil
 
 	case models.AgentJobScheduleTypeCron:
-		if j.Schedule == nil || strings.TrimSpace(*j.Schedule) == "" {
-			return nil, fmt.Errorf("schedule is required for schedule_type=cron")
-		}
-
-		loc := time.UTC
-		if tz := strings.TrimSpace(j.Timezone); tz != "" {
-			if loaded, err := time.LoadLocation(tz); err == nil && loaded != nil {
-				loc = loaded
-			}
-		}
-		return quartz.NewCronTriggerWithLoc(strings.TrimSpace(*j.Schedule), loc)
+		return cronTrigger(j)
 
 	default:
 		return nil, fmt.Errorf("unsupported schedule_type %q", j.ScheduleType)
@@ -575,16 +570,7 @@ func computeNextRunAt(j models.AgentJob, after time.Time) (*time.Time, error) {
 	case models.AgentJobScheduleTypeAt:
 		return nil, nil
 	case models.AgentJobScheduleTypeCron:
-		if j.Schedule == nil || strings.TrimSpace(*j.Schedule) == "" {
-			return nil, fmt.Errorf("schedule is required for schedule_type=cron")
-		}
-		loc := time.UTC
-		if tz := strings.TrimSpace(j.Timezone); tz != "" {
-			if loaded, err := time.LoadLocation(tz); err == nil && loaded != nil {
-				loc = loaded
-			}
-		}
-		trigger, err := quartz.NewCronTriggerWithLoc(strings.TrimSpace(*j.Schedule), loc)
+		trigger, err := cronTrigger(j)
 		if err != nil {
 			return nil, err
 		}

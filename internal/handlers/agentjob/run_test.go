@@ -228,3 +228,7 @@ func TestRunAgentJobNow_NotFoundReturnsNotFound(t *testing.T) {
 		t.Fatalf("expected runner not to be called")
 	}
 }
+
+func (f *fakeAgentJobRunProvider) SetAgentJobFollowUserTimezone(ctx context.Context, userID, id uuid.UUID, follow bool) (*models.AgentJob, error) {
+	return nil, errors.New("not implemented")
+}

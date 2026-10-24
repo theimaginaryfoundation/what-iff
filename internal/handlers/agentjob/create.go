@@ -26,6 +26,8 @@ type createAgentJobRequest struct {
 	ChatID        *string `json:"chat_id,omitempty"`
 	PersonalityID *string `json:"personality_id,omitempty"`
 	ModelID       *string `json:"model_id,omitempty"`
+	// FollowUserTimezone runs a recurring schedule in the user's current timezone.
+	FollowUserTimezone bool `json:"follow_user_timezone,omitempty"`
 }
 
 func (h *Handler) CreateAgentJob(w http.ResponseWriter, r *http.Request) {
@@ -95,16 +97,17 @@ func (h *Handler) CreateAgentJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	newJob := models.AgentJob{
-		Title:         titlePtr,
-		Prompt:        prompt,
-		ScheduleInput: scheduleInput,
-		ScheduleType:  preview.ScheduleType,
-		Schedule:      preview.Schedule,
-		RunAt:         preview.RunAt,
-		Timezone:      preview.Timezone,
-		Status:        models.AgentJobStatusActive,
-		NextRunAt:     nextRunAt,
-		RunCount:      0,
+		Title:              titlePtr,
+		Prompt:             prompt,
+		ScheduleInput:      scheduleInput,
+		ScheduleType:       preview.ScheduleType,
+		Schedule:           preview.Schedule,
+		RunAt:              preview.RunAt,
+		Timezone:           preview.Timezone,
+		FollowUserTimezone: req.FollowUserTimezone,
+		Status:             models.AgentJobStatusActive,
+		NextRunAt:          nextRunAt,
+		RunCount:           0,
 	}
 
 	if req.ChatID != nil {

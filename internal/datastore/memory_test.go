@@ -957,6 +957,7 @@ func createMemoryImportTestSchema(t *testing.T, db *sql.DB) {
 			first_name text,
 			last_name text,
 			timezone text NOT NULL DEFAULT 'America/New_York',
+			current_timezone text,
 			status text NOT NULL DEFAULT 'active',
 			enable_experimental_models bool NOT NULL DEFAULT false,
 			last_login datetime,

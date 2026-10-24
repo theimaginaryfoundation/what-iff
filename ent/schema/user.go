@@ -39,6 +39,10 @@ func (User) Fields() []ent.Field {
 			Default("America/New_York").
 			MaxLen(64).
 			Comment("IANA timezone for scheduling (e.g. America/New_York)"),
+		field.String("current_timezone").
+			Optional().
+			MaxLen(64).
+			Comment("IANA timezone the user's browser last reported (best effort). Jobs with follow_user_timezone run in it instead of their own timezone."),
 		field.Enum("status").
 			Values("active", "inactive").
 			Default("active").

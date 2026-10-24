@@ -99,4 +99,37 @@ describe('JobFormComponent', () => {
 
         expect(component.hasUnsavedEdits()).toBe(false);
     });
+    it('leaves following the user off by default and sends the toggle on save', () => {
+        const emitSpy = vi.spyOn(component.save, 'emit').mockReturnValue(undefined);
+        expect(component.followUserTimezone()).toBe(false);
+
+        const box = (fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>('[data-testid="job-follow-user-timezone"]');
+        expect(box).not.toBeNull();
+        component.followUserTimezone.set(true);
+        expect(component.hasUnsavedEdits()).toBe(true);
+
+        component.submit();
+        expect(emitSpy).toHaveBeenCalledWith(expect.objectContaining({ follow_user_timezone: true }));
+    });
+
+    it('shows the timezone a following job runs in while it differs from its own', async () => {
+        fixture.componentRef.setInput('job', {
+            ...job,
+            updated_at: '2025-01-02T00:00:00Z',
+            timezone: 'America/New_York',
+            follow_user_timezone: true,
+            effective_timezone: 'America/Los_Angeles',
+        });
+        fixture.detectChanges();
+        await fixture.whenStable();
+
+        const host = fixture.nativeElement as HTMLElement;
+        expect(component.followUserTimezone()).toBe(true);
+        expect(host.querySelector('[data-testid="job-travel-timezone"]')?.textContent).toContain('America/Los_Angeles');
+
+        fixture.componentRef.setInput('job', { ...job, follow_user_timezone: true, effective_timezone: 'UTC', updated_at: '2025-01-03T00:00:00Z' });
+        fixture.detectChanges();
+        await fixture.whenStable();
+        expect(host.querySelector('[data-testid="job-travel-timezone"]')).toBeNull();
+    });
 });

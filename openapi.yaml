@@ -289,6 +289,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /user/current-timezone:
+    put:
+      summary: Report the user's current timezone
+      description: |
+        Records the IANA timezone the user's browser is in. Jobs with follow_user_timezone run in it,
+        so they keep their local time while the user travels. The user's own timezone is unchanged.
+        Writes only when the value differs from the stored one.
+      tags: [User Management]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                timezone:
+                  type: string
+                  maxLength: 64
+                  description: IANA timezone, e.g. America/Los_Angeles
+              required:
+                - timezone
+      responses:
+        '204':
+          description: Current timezone recorded
+        '400':
+          description: Missing or invalid timezone
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /user/password:
     put:
       summary: Update user password
@@ -7377,6 +7414,10 @@ components:
           type: string
           maxLength: 64
           description: IANA timezone (e.g. America/New_York) for scheduling
+        current_timezone:
+          type: string
+          maxLength: 64
+          description: IANA timezone the user's browser last reported (best effort). Jobs with follow_user_timezone run in it.
         role:
           type: string
           enum: [user, admin, super_admin]
@@ -7925,6 +7966,12 @@ components:
           nullable: true
         timezone:
           type: string
+        follow_user_timezone:
+          type: boolean
+          description: When true, a recurring schedule runs in the user's current timezone (when known) instead of timezone.
+        effective_timezone:
+          type: string
+          description: Timezone the schedule runs in right now — the user's current timezone for a job that follows it, else timezone.
         status:
           $ref: '#/components/schemas/AgentJobStatus'
         next_run_at:
@@ -7958,6 +8005,8 @@ components:
         schedule: "0 0 8 ? * *"
         run_at: null
         timezone: "America/Los_Angeles"
+        follow_user_timezone: false
+        effective_timezone: "America/Los_Angeles"
         status: "active"
         next_run_at: "2026-02-24T16:00:00Z"
         last_run_at: null
@@ -8033,6 +8082,9 @@ components:
           type: string
           nullable: true
           description: Optional IANA timezone (used when schedule_input is provided)
+        follow_user_timezone:
+          type: boolean
+          description: When present, sets whether a recurring schedule runs in the user's current timezone.
 
     UpdateAgentJobStatusRequest:
       type: object

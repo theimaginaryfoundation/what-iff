@@ -67,6 +67,7 @@ func toUserModel(u *ent.User) *models.UserResponse {
 		FirstName:                u.FirstName,
 		LastName:                 u.LastName,
 		Timezone:                 u.Timezone,
+		CurrentTimezone:          u.CurrentTimezone,
 		Status:                   string(u.Status),
 		EnableExperimentalModels: u.EnableExperimentalModels,
 		CreatedAt:                u.CreatedAt,
@@ -356,6 +357,43 @@ func (d *Datastore) GetUserByID(ctx context.Context, userID uuid.UUID) (*models.
 	}
 
 	return toUserModel(u), nil
+}
+
+// SetUserCurrentTimezone records the IANA timezone the user's browser reports. It writes only
+// when the value differs from the stored one and reports whether it changed.
+func (d *Datastore) SetUserCurrentTimezone(ctx context.Context, userID uuid.UUID, tz string) (bool, error) {
+	tz = strings.TrimSpace(tz)
+	if tz == "" {
+		return false, ErrInvalidTimezone
+	}
+	if err := validateIANATimezone(tz); err != nil {
+		return false, err
+	}
+
+	affected, err := d.dbClient.User.Update().
+		Where(
+			user.ID(userID),
+			user.Or(user.CurrentTimezoneIsNil(), user.CurrentTimezoneNEQ(tz)),
+		).
+		SetCurrentTimezone(tz).
+		Save(ctx)
+	if err != nil {
+		d.logger.Error(i18n.T1("update.failed", "Entity", "user current timezone"), zap.Error(err))
+		return false, err
+	}
+	if affected > 0 {
+		return true, nil
+	}
+
+	exists, err := d.dbClient.User.Query().Where(user.ID(userID)).Exist(ctx)
+	if err != nil {
+		d.logger.Error(i18n.T1("query.failed", "Entity", "user"), zap.Error(err))
+		return false, err
+	}
+	if !exists {
+		return false, ErrUserNotFound
+	}
+	return false, nil
 }
 
 // UpdateUserProfile updates a user's profile

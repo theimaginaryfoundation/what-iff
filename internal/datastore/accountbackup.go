@@ -611,6 +611,7 @@ func (d *Datastore) importBackupAgentJobs(ctx context.Context, targetUserID uuid
 			SetScheduleInput(rec.ScheduleInput).
 			SetScheduleType(agentjob.ScheduleType(rec.ScheduleType)).
 			SetTimezone(rec.Timezone).
+			SetFollowUserTimezone(rec.FollowUserTimezone).
 			SetStatus(agentjob.Status(rec.Status)).
 			SetRunCount(rec.RunCount).
 			SetCreatedAt(rec.CreatedAt).

@@ -179,6 +179,8 @@ type listItem struct {
 	UpdatedAt    string   `json:"updated_at,omitempty"`    // personalities, conversations
 	URL          string   `json:"url,omitempty"`           // mcp_servers
 	Archived     *bool    `json:"archived,omitempty"`      // conversations
+	// FollowsUserTimezone is set (true) on jobs whose schedule follows the user's current timezone.
+	FollowsUserTimezone *bool `json:"follows_user_timezone,omitempty"`
 }
 
 type listResult struct {

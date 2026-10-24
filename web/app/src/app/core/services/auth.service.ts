@@ -19,6 +19,7 @@ import {
 } from '../models/user.model';
 import { LoggerService } from './logger.service';
 import { ThemeService, THEME_STORAGE_KEY } from './theme.service';
+import { CurrentTimezoneService } from './current-timezone.service';
 import { getPasswordPolicyDescription } from '../utils/password-policy';
 import { apiErrorMessage } from '../utils/api-error.helpers';
 
@@ -556,9 +557,13 @@ export class AuthService {
         console.warn('Failed to apply theme from user object:', error);
       }
     }
+
+    // Jobs that follow the user run in the timezone the browser reports.
+    this.injector.get(CurrentTimezoneService).start(user);
   }
 
   private clearAuthState(): void {
+    this.injector.get(CurrentTimezoneService).stop();
     this.clearTokens();
     this.currentUserSubject.next(null);
     this.currentUser.set(null);

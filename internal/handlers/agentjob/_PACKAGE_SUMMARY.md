@@ -17,6 +17,9 @@ HTTP API for **agent jobs** — async/scheduled assistant work: CRUD, prompt/tit
 ## Non-obvious decisions
 
 - Schedule strings and timezones interact with `internal/agentjobs/schedule` — keep error messages aligned with UI.
+- `follow_user_timezone` (create, and update when present) makes a recurring job run in the user's current timezone.
+  It is never turned on by default.
+  Jobs report `effective_timezone`; `timezone` stays the job's own zone, which the job falls back to.
 
 ## Testing
 

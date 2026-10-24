@@ -103,13 +103,15 @@ type AccountBackupAgentJob struct {
 	Schedule      *string              `json:"schedule,omitempty"`
 	RunAt         *time.Time           `json:"run_at,omitempty"`
 	Timezone      string               `json:"timezone"`
-	Status        AgentJobStatus       `json:"status"`
-	NextRunAt     *time.Time           `json:"next_run_at,omitempty"`
-	LastRunAt     *time.Time           `json:"last_run_at,omitempty"`
-	LastError     string               `json:"last_error,omitempty"`
-	RunCount      int                  `json:"run_count"`
-	CreatedAt     time.Time            `json:"created_at"`
-	UpdatedAt     time.Time            `json:"updated_at"`
+	// FollowUserTimezone is omitted by packets written before the field existed (false).
+	FollowUserTimezone bool           `json:"follow_user_timezone,omitempty"`
+	Status             AgentJobStatus `json:"status"`
+	NextRunAt          *time.Time     `json:"next_run_at,omitempty"`
+	LastRunAt          *time.Time     `json:"last_run_at,omitempty"`
+	LastError          string         `json:"last_error,omitempty"`
+	RunCount           int            `json:"run_count"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
 }
 
 // AccountBackupRitual is a user-owned ritual (skill). Chat-message and MCP
