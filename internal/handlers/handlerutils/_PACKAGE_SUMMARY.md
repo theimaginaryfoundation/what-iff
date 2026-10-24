@@ -51,8 +51,12 @@
 - **`CodeNotSet` is also the progress marker.**
   Its occurrence count is how many call sites still lack a specific code, so `grep -c` measures what remains of ADR 0x020's phase 2.
 
+- **Error details:** `RespondWithErrorDetails` is `RespondWithError` plus `models.ErrorResponse.Details`, for a specific code whose contract includes structured details; the envelope is still built only in `httpresponse.go`.
+- **Missing provider key:** `RespondIfProviderNotConfigured` answers an error caused by `providerkeys.NotConfiguredError` with 409, code `provider_not_configured` and `details.provider`, and reports whether it did; handlers call it before their generic failure response.
+
 ## Testing
 
+- `provider_errors_test.go` — the 409 envelope through wrapping, with no transport detail in the body; other errors are left to the caller.
 - `fileattachment_test.go` — multipart and edge cases.
 - `fileattachment_ingest_test.go` — `ProcessUpload` without HTTP (type, size, normalization including WebP to PNG, provider failure) and `StoreChatAttachment` (key routing, thumbnail, rollback, cleanup).
 - `fileattachment_failures_test.go` — the failure paths: unparseable/partial multipart, unreadable source, undecodable image, an unsaved S3 key, and what `TriggerAsyncFileChunking` does with files it will not chunk.

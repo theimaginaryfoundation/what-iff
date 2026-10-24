@@ -52,6 +52,10 @@ const (
 	ErrCodeMessageTooLong      = "message_too_long"
 	ErrCodeQuotaExceeded       = "quota_exceeded"
 	ErrCodeSystemPromptTooLong = "system_prompt_too_long"
+
+	// ErrCodeProviderNotConfigured: the request needed a model provider the
+	// account has no key for. Details is {"provider": "<name>"}.
+	ErrCodeProviderNotConfigured = "provider_not_configured"
 )
 
 // AllErrorCodes is every code this API can emit. It is the source the
@@ -80,6 +84,7 @@ var AllErrorCodes = []string{
 	ErrCodeMessageTooLong,
 	ErrCodeQuotaExceeded,
 	ErrCodeSystemPromptTooLong,
+	ErrCodeProviderNotConfigured,
 }
 
 // genericErrorCodes maps HTTP statuses to their generic code.

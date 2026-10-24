@@ -862,6 +862,31 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /provider-access:
+    get:
+      summary: Which model providers this account can reach
+      description: >-
+        Where the account's provider keys come from (`deployment`: the server's
+        own configuration, the same for everyone; `account`: each account adds
+        its own) and which providers it has a key for right now. Names
+        providers only, never keys.
+      tags: [Provider Keys]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The account's provider access
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderAccess'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /provider-keys:
     get:
       summary: List the account's provider keys
@@ -3776,6 +3801,15 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >-
+            The account has no key for the provider that embeds imported
+            memories. `code` is `provider_not_configured` and
+            `details.provider` names the provider.
           content:
             application/json:
               schema:
@@ -8752,6 +8786,19 @@ components:
       type: string
       description: A model provider.
       enum: [openai, anthropic, zai, google, mistral, deepseek, qwen, xiaomi]
+    ProviderAccess:
+      type: object
+      required: [keys_from, providers]
+      properties:
+        keys_from:
+          type: string
+          enum: [deployment, account]
+          description: Where provider keys come from. With `account`, the provider-key routes are served.
+        providers:
+          type: array
+          description: Providers the account has a key for right now, in provider order. Empty when none.
+          items:
+            $ref: '#/components/schemas/ModelProvider'
     ProviderKeySummary:
       type: object
       description: A stored provider key, without the key.
@@ -10730,6 +10777,7 @@ components:
         - message_too_long
         - quota_exceeded
         - system_prompt_too_long
+        - provider_not_configured
 
     # Cross-resource search schemas (GET /search)
     SearchResult:
