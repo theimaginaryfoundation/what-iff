@@ -7,19 +7,21 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
-// A sandboxed chat (models.Chat.Sandboxed) cannot read anything outside itself, and has a
-// locked-down tool set. Every tool that can read the user's account data asks this file, not the
+// A sandboxed chat (models.Chat.Sandboxed) cannot read anything outside itself (and its weave
+// peers, when it is in a weave: models.Chat.ReadableChatIDs, docs/adr/0x030-thread-weaves.md), and
+// has a locked-down tool set. Every tool that can read the user's account data asks this file, not the
 // chat's raw flag, so the rules live in one place:
 //
-//   - memories: only those created in this conversation (a Chat-scoped memory or its own
+//   - memories: only those created in this conversation or a weave peer (a Chat-scoped memory or a
 //     checkpoint summary); the owner's User-scoped memories and other conversations' memories are
 //     not readable (memoryReadableBy, and the SQL scoping in the datastore for searches);
-//   - conversations: only this one (conversationReadable);
+//   - conversations: only this one and its weave peers (conversationReadable);
 //   - files: only the files uploaded to this conversation (fileInChatScope), not the personality's
 //     documents or the account's library;
 //   - the personality-wide scratchpad is not readable or writable, and account-wide listings
 //     (jobs, skills, personalities, other conversations) are not available;
-//   - memories it creates are always Chat-scoped, so nothing it learns reaches the account.
+//   - memories it creates are always Chat-scoped to itself, so nothing it learns reaches the
+//     account or its peers (a weave widens reads only).
 //
 // Tools build their refusal text with sandboxedNote so the model gets one consistent message.
 
@@ -31,8 +33,8 @@ func sandboxedNote(what string) string {
 
 // memoryReadableBy reports whether chat may read m, looked up by id. A chat that is not sandboxed
 // reads everything it owns. A sandboxed chat reads only a Chat-scoped memory or checkpoint summary
-// of this conversation; anything else (a User-scoped memory, another conversation's memory or
-// summary, an unknown scope) is refused.
+// of this conversation or a weave peer; anything else (a User-scoped memory, another
+// conversation's memory or summary, an unknown scope) is refused.
 func memoryReadableBy(chat *models.Chat, m *models.Memory) bool {
 	if m == nil {
 		return false
@@ -42,7 +44,7 @@ func memoryReadableBy(chat *models.Chat, m *models.Memory) bool {
 	}
 	switch memoryScopeOf(m) {
 	case MemoryScopeChat, memoryScopeSummary:
-		return m.ChatID == chat.ID
+		return m.ChatID != uuid.Nil && chat.CanReadChat(m.ChatID)
 	default:
 		return false
 	}
@@ -69,8 +71,9 @@ func memoryScopeOf(m *models.Memory) string {
 	return ""
 }
 
-// sandboxChatID is the one conversation a sandboxed chat may search the summaries of (its own), or
-// uuid.Nil when the chat is not sandboxed and may search all of them.
+// sandboxChatID is the conversation whose readable set a sandboxed chat's summary search is scoped
+// to (its own; the datastore adds its weave peers), or uuid.Nil when the chat is not sandboxed and
+// may search all of them.
 func sandboxChatID(chat *models.Chat) uuid.UUID {
 	if chat.IsSandboxed() {
 		return chat.ID
@@ -80,9 +83,9 @@ func sandboxChatID(chat *models.Chat) uuid.UUID {
 
 // conversationReadable reports whether chat may read conversationID (its messages, bookmarks, or
 // the source turns of a memory). A chat that is not sandboxed always may; a sandboxed chat may read
-// only itself.
+// only itself and its weave peers.
 func conversationReadable(chat *models.Chat, conversationID uuid.UUID) bool {
-	return !chat.IsSandboxed() || conversationID == chat.ID
+	return chat.CanReadChat(conversationID)
 }
 
 // fileInChatScope reports whether fa is within what a sandboxed chat may read: a file uploaded to

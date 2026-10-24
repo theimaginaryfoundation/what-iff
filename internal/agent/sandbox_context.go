@@ -56,7 +56,7 @@ func (b *messageContextBuilder) persistedMemoryFilter(ctx context.Context, userI
 	if len(ids) > 0 {
 		lookup := b.memoryIDLookup
 		if lookup == nil && b.ds != nil {
-			lookup = b.ds.MemoryIDsCreatedInChat
+			lookup = b.ds.MemoryIDsReadableInChat
 		}
 		if lookup != nil {
 			found, err := lookup(ctx, userID, chat.ID, ids)

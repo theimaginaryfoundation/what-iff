@@ -4535,6 +4535,273 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/weaves": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List weaves */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The user's weaves with their threads */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Weave"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Weave threads together
+         * @description Joins at least two of the user's sandboxed threads with the same personality into a weave. Each member's sandbox then also reads its peers (their Chat-scoped memories, checkpoint summaries and messages, each labelled with its thread); writes stay in the thread that makes them. A thread is in at most one weave.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name: string;
+                        chat_ids: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Weave created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Weave"];
+                    };
+                };
+                /** @description A thread cannot be woven (not sandboxed, another personality, already in a weave), with the reason */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A thread is not the user's */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/weaves/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get a weave */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The weave */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Weave"];
+                    };
+                };
+                /** @description Not found (including another account's weave) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /**
+         * Delete a weave
+         * @description Unweaves its threads, which read only themselves again, and removes the weave.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/weaves/{id}/chats/{chatId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                chatId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Add a thread to a weave */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The weave with the thread added */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Weave"];
+                    };
+                };
+                /** @description The thread cannot be woven, with the reason */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Remove a thread from a weave
+         * @description The thread reads only itself again from its next turn, and its peers stop reading it.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The weave without the thread */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Weave"];
+                    };
+                };
+                /** @description The thread is not in this weave */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory": {
         parameters: {
             query?: never;
@@ -11051,6 +11318,22 @@ export interface components {
             /** @enum {string} */
             status: "active" | "paused";
         };
+        ChatRef: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        /** @description A named set of sandboxed threads that may read each other. */
+        Weave: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            chats: components["schemas"]["ChatRef"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
         /**
          * @example {
          *       "id": "123e4567-e89b-12d3-a456-426614174000",
@@ -11097,6 +11380,11 @@ export interface components {
              * @enum {string}
              */
             context_scope?: "account" | "sandbox";
+            /**
+             * Format: uuid
+             * @description The weave this thread belongs to, if any (see /weaves). A sandboxed thread in a weave may also read its weave peers: their Chat-scoped memories, checkpoint summaries and messages. It still writes only to itself.
+             */
+            weave_id?: string;
             /** Format: date-time */
             created_at?: string;
             /** Format: date-time */

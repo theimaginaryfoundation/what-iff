@@ -64,6 +64,12 @@ type Chat struct {
 	// without this flag they cannot write back a stale value over a change the user made while
 	// the turn ran. Only the chat HTTP handlers set it.
 	SetContextScope bool `json:"-"`
+	// WeaveID is the weave the chat belongs to, if any (models.Weave). A sandboxed chat in a
+	// weave may also read its weave peers; see ReadableChatIDs.
+	WeaveID *uuid.UUID `json:"weave_id,omitempty"`
+	// WeavePeers are the other sandboxed chats of the same owner in the chat's weave, loaded with
+	// the chat (datastore.GetChat) only when it is sandboxed and in a weave. Never serialised.
+	WeavePeers []ChatRef `json:"-"`
 	// RehydrationState tracks lazy summarization of imported threads on unarchive:
 	// "" (none) / "pending" / "processing" / "ready" / "failed". Surfaced read-only so the UI can
 	// show a "preparing thread" affordance while the summary is generated.
@@ -80,6 +86,49 @@ type Chat struct {
 // without touching the call sites.
 func (c *Chat) IsSandboxed() bool {
 	return c != nil && c.ContextScope == ContextScopeSandbox
+}
+
+// ReadableChatIDs is the set of conversations the chat may read: every conversation when it is
+// not sandboxed (nil), otherwise itself and its weave peers. Every sandbox read rule (memories,
+// summaries, conversations) widens through this one place (docs/adr/0x030-thread-weaves.md).
+func (c *Chat) ReadableChatIDs() []uuid.UUID {
+	if !c.IsSandboxed() {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, 1+len(c.WeavePeers))
+	ids = append(ids, c.ID)
+	for _, p := range c.WeavePeers {
+		ids = append(ids, p.ID)
+	}
+	return ids
+}
+
+// CanReadChat reports whether the chat may read conversation id: always when it is not
+// sandboxed, otherwise only itself and its weave peers.
+func (c *Chat) CanReadChat(id uuid.UUID) bool {
+	if !c.IsSandboxed() {
+		return true
+	}
+	return id == c.ID || c.WeavePeer(id) != nil
+}
+
+// WeavePeer returns the weave peer with id, or nil when id is not a peer.
+func (c *Chat) WeavePeer(id uuid.UUID) *ChatRef {
+	if c == nil {
+		return nil
+	}
+	for i := range c.WeavePeers {
+		if c.WeavePeers[i].ID == id {
+			return &c.WeavePeers[i]
+		}
+	}
+	return nil
+}
+
+// ChatRef names a chat: its id and its name.
+type ChatRef struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
 }
 
 // ChatFilters defines filters for listing chats

@@ -182,7 +182,7 @@ func (t *RecallTool) search(ctx context.Context, chat *models.Chat, a recallArgs
 	res := recallResult{
 		Mode:       recallModeSearch,
 		SearchType: "semantic",
-		Memories:   formatMemories(r.memories),
+		Memories:   formatMemories(chat, r.memories),
 		Chunks:     r.chunks,
 		TimeScope:  timeScopeReceipt(a.TimeScope, window, now),
 		Note:       joinRecallNotes(recallSearchSemanticNote, r.note),
@@ -224,7 +224,7 @@ func (t *RecallTool) investigate(ctx context.Context, chat *models.Chat, a recal
 	if t.distiller == nil {
 		return t.ok(recallResult{
 			Mode:      recallModeInvestigate,
-			Memories:  formatMemories(r.memories),
+			Memories:  formatMemories(chat, r.memories),
 			Chunks:    r.chunks,
 			Sources:   sources,
 			TimeScope: scopeReceipt,
@@ -237,7 +237,7 @@ func (t *RecallTool) investigate(ctx context.Context, chat *models.Chat, a recal
 		t.logger.Warn("recall: distillation failed; returning raw material", zap.Error(err))
 		return t.ok(recallResult{
 			Mode:      recallModeInvestigate,
-			Memories:  formatMemories(r.memories),
+			Memories:  formatMemories(chat, r.memories),
 			Chunks:    r.chunks,
 			Sources:   sources,
 			TimeScope: scopeReceipt,
@@ -271,7 +271,7 @@ func (t *RecallTool) fetch(ctx context.Context, chat *models.Chat, a recallArgs)
 		}
 		return t.ok(recallResult{
 			Mode:     recallModeFetch,
-			Memories: formatMemories([]*models.Memory{mem}),
+			Memories: formatMemories(chat, []*models.Memory{mem}),
 		}, []*models.Memory{mem}, nil)
 	}
 
@@ -308,7 +308,7 @@ func (t *RecallTool) fetch(ctx context.Context, chat *models.Chat, a recallArgs)
 		if mem, err := t.store.GetMemory(ctx, chat.UserID, id); err == nil && mem != nil && memoryReadableBy(chat, mem) {
 			return t.ok(recallResult{
 				Mode:     recallModeFetch,
-				Memories: formatMemories([]*models.Memory{mem}),
+				Memories: formatMemories(chat, []*models.Memory{mem}),
 			}, []*models.Memory{mem}, nil)
 		}
 		// Then a file attachment by ID.
@@ -559,7 +559,7 @@ func (t *RecallTool) related(ctx context.Context, chat *models.Chat, a recallArg
 	res := recallResult{
 		Mode:       recallModeRelated,
 		SearchType: "semantic",
-		Memories:   formatMemories(out),
+		Memories:   formatMemories(chat, out),
 		Note:       recallSearchSemanticNote,
 	}
 	if len(out) == 0 {
@@ -579,14 +579,14 @@ func (t *RecallTool) origin(ctx context.Context, chat *models.Chat, a recallArgs
 	if mem.ChatID != uuid.Nil && !conversationReadable(chat, mem.ChatID) {
 		return t.ok(recallResult{
 			Mode:     recallModeOrigin,
-			Memories: formatMemories([]*models.Memory{mem}),
+			Memories: formatMemories(chat, []*models.Memory{mem}),
 			Note:     sandboxedNote("The source conversation of this memory"),
 		}, []*models.Memory{mem}, nil)
 	}
 	if mem.ChatID == uuid.Nil {
 		return t.ok(recallResult{
 			Mode:     recallModeOrigin,
-			Memories: formatMemories([]*models.Memory{mem}),
+			Memories: formatMemories(chat, []*models.Memory{mem}),
 			Note:     "This memory has no originating conversation (user-scoped with no source chat).",
 		}, []*models.Memory{mem}, nil)
 	}
@@ -617,7 +617,7 @@ func (t *RecallTool) origin(ctx context.Context, chat *models.Chat, a recallArgs
 
 	res := recallResult{
 		Mode:          recallModeOrigin,
-		Memories:      formatMemories([]*models.Memory{mem}),
+		Memories:      formatMemories(chat, []*models.Memory{mem}),
 		Conversations: []recallConversation{conv},
 	}
 	res.setPageCursor(page, maxMsgs, total)

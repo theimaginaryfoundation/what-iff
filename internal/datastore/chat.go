@@ -60,6 +60,7 @@ func toChatModel(e *ent.Chat) *models.Chat {
 	}
 	chatModel.RehydrationState = e.RehydrationState
 	chatModel.ContextScope = models.ContextScope(e.ContextScope).OrDefault()
+	chatModel.WeaveID = e.WeaveID
 
 	if e.ResponseID != "" {
 		chatModel.ResponseID = &e.ResponseID
@@ -607,7 +608,17 @@ func (d *Datastore) GetChat(ctx context.Context, userID, id uuid.UUID) (*models.
 		return nil, err
 	}
 
-	return toChatModel(entChat), nil
+	chatModel := toChatModel(entChat)
+	// A sandboxed chat in a weave also reads its weave peers (models.Chat.ReadableChatIDs); the
+	// peers are loaded with the chat so every read rule sees the same set for the whole turn.
+	if chatModel.IsSandboxed() && chatModel.WeaveID != nil {
+		peers, err := weavePeers(ctx, d.dbClient, userID, id)
+		if err != nil {
+			return nil, err
+		}
+		chatModel.WeavePeers = peers
+	}
+	return chatModel, nil
 }
 
 // GetChatContext returns the current scratchpad/summary for a chat.
