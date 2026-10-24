@@ -33,6 +33,15 @@ func withBuzzToolStore(t *testing.T, s buzzToolStore) {
 	orig := buzzToolStoreFor
 	buzzToolStoreFor = func(*Agent) buzzToolStore { return s }
 	t.Cleanup(func() { buzzToolStoreFor = orig })
+	allowBuzz(t, true)
+}
+
+// allowBuzz decides whether every owner may use the (experimental) relay for the test.
+func allowBuzz(t *testing.T, ok bool) {
+	t.Helper()
+	orig := buzzMayUse
+	buzzMayUse = func(context.Context, uuid.UUID) bool { return ok }
+	t.Cleanup(func() { buzzMayUse = orig })
 }
 
 func buzzBinding(community, channel string) models.BuzzBinding {
@@ -58,7 +67,18 @@ func TestBuzzToolIsInTheCatalogAndNeedsChannels(t *testing.T) {
 	assert.True(t, additionalDisabledToolsForChat(&Agent{}, chat)[buzzPostToolName], "broken bindings are not offered")
 }
 
+func TestBuzzToolIsOffWhereTheRelayIsOff(t *testing.T) {
+	store := &fakeBuzzToolStore{bindings: []models.BuzzBinding{buzzBinding("Acme", "general")}}
+	withBuzzToolStore(t, store)
+	chat := testChat()
+	assert.False(t, additionalDisabledToolsForChat(&Agent{}, chat)[buzzPostToolName])
+
+	allowBuzz(t, false)
+	assert.True(t, additionalDisabledToolsForChat(&Agent{}, chat)[buzzPostToolName], "an owner without the experimental feature gets no Buzz tool")
+}
+
 func TestBuzzPostMarksTheChosenChannel(t *testing.T) {
+	allowBuzz(t, true)
 	gen, ops := buzzBinding("Acme", "general"), buzzBinding("Acme", "ops")
 	store := &fakeBuzzToolStore{bindings: []models.BuzzBinding{gen, ops}}
 	chat := testChat()
@@ -76,6 +96,7 @@ func TestBuzzPostMarksTheChosenChannel(t *testing.T) {
 }
 
 func TestBuzzSameNamedChannelsAreQualifiedByCommunity(t *testing.T) {
+	allowBuzz(t, true)
 	a, b := buzzBinding("Acme", "general"), buzzBinding("Globex", "general")
 	store := &fakeBuzzToolStore{bindings: []models.BuzzBinding{a, b}}
 	chat := testChat()
@@ -87,6 +108,7 @@ func TestBuzzSameNamedChannelsAreQualifiedByCommunity(t *testing.T) {
 }
 
 func TestBuzzSandboxedOrRelayThreadsReachOnlyTheirOwnChannel(t *testing.T) {
+	allowBuzz(t, true)
 	chat := testChat()
 	own, other := buzzBinding("Acme", "general"), buzzBinding("Acme", "secret-plans")
 	own.ChatID = chat.ID

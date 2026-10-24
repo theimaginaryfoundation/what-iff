@@ -8,7 +8,7 @@ Linked by a blank import in `cmd/api-server/plugins.go`.
 ## Responsibilities
 
 - **`init`:** registers the reply hook (which does nothing until the plugin is applied) and the plugin.
-- **`apply`:** reads `BUZZ_RELAY_ENABLED` (off for `false`, `0` or `off`) and `BUZZ_ALLOW_PRIVATE_RELAYS`, mounts the routes, builds the `buzzrelay.Service`, and starts a `relaykit.Supervisor` over `ListActiveBuzzConnections` (lock key `DefaultLockKey` = 80920034, `BUZZ_GATEWAY_LOCK_KEY`, `BUZZ_GATEWAY_SINGLE_INSTANCE`).
+- **`apply`:** returns at once unless `buzzrelay.Enabled()` (the relay is experimental: `BUZZ_RELAY_ENABLED=true`), reads `BUZZ_ALLOW_PRIVATE_RELAYS`, mounts the routes, builds the `buzzrelay.Service`, and starts a `relaykit.Supervisor` over `ListActiveBuzzConnections` (lock key `DefaultLockKey` = 80920034, `BUZZ_GATEWAY_LOCK_KEY`, `BUZZ_GATEWAY_SINGLE_INSTANCE`).
 - **Gateway (`plugin.go`):** one `buzzrelay.Session` per community row, a subscription per bound channel (`b:<binding id>`); connection states are recorded on the community, and a subscription the relay closes for access marks its binding broken.
 - **`Handler` (`handlers.go`):** identities (generate the persona's key, pause, remove, publish the profile), communities (join by open relay, invite with join terms, or an admin adding the npub; optional owner attestation; check again; pause), channels (list, join a public one), bindings (create with a sandboxed relay thread or an acknowledged existing one), a thread's Buzz state and the composer toggle.
   After a change it kicks the supervisor so the gateway reconciles at once.
@@ -23,6 +23,10 @@ Linked by a blank import in `cmd/api-server/plugins.go`.
 - **Outbound:** `internal/buzzrelay` (and `nostr`), `internal/relaykit`, `internal/datastore`, `internal/plugins`, `internal/replyhook`, `internal/handlers/handlerutils`, `internal/middleware`, `internal/storage`, `internal/models`.
 
 ## Non-obvious decisions
+
+- **The relay is experimental, gated per user where a build says so.**
+  Every route goes through `experimentalOnly`, which answers 404 unless `buzzrelay.UserMayUse` (the switch plus the per-user policy a build may link, `featuregate.ExperimentalEnabled`); the web app reads a 404 as off.
+  The supervisor lists connections through `mayUse`, so turning the feature off for a user closes their personas' connections at the next reconcile.
 
 - **The server holds the persona's key, never the person's.**
   The secret is generated here, stored encrypted, and never returned; an owner attestation is pasted (verified for the persona's key) and stored encrypted too.

@@ -117,7 +117,12 @@ ADR 0x025 §7 applies as written, with Buzz as a second source:
 
 ### 9. Configuration and surfaces
 
-- `BUZZ_RELAY_ENABLED=false` (or `0`, `off`) switches the relay off, and then `/api/buzz` is not routed; it is on by default, like Discord.
+- The relay is an **experimental feature** (`models.ExperimentalFeatureBuzzRelay`, `buzz_relay`), off by default.
+  `BUZZ_RELAY_ENABLED=true` (or `1`, `on`) switches it on for the server; otherwise `/api/buzz` is not routed, the gateway does not start and `post_to_buzz` is never offered.
+- On top of that switch, a build may link a per-user experimental policy (`featuregate.NewExperimental`).
+  The open-source build links none, so the switch decides for everyone.
+  The stock policy, `featuregate.UserFlagExperimentalGate`, turns a feature on for the users an admin listed it for (`User.experimental_features`) and for super admins; a deployment links it to release the relay to a few testers first.
+  For anyone else the routes answer 404 (the web app then hides its Buzz surfaces, as when the switch is off), the gateway drops their personas' connections at its next reconcile, and the tool is not offered (`buzzrelay.UserMayUse`).
 - `BUZZ_GATEWAY_LOCK_KEY`, `BUZZ_GATEWAY_SINGLE_INSTANCE` as in §3.
 - `BUZZ_ALLOW_PRIVATE_RELAYS=true` lets a persona connect to relays on loopback or private addresses, and over `ws://`/`http://`.
   It is for local development: without it, the server connects only to public addresses (checked after DNS on every connection, the Discord CDN fetcher's guard, now `relaykit.PublicOnlyControl`), over TLS, because a relay URL is user input and the server would otherwise connect wherever it points.
@@ -178,6 +183,8 @@ The relay can be tried end to end without the Buzz desktop app:
 ## Not done yet
 
 - Hosting: running our own multi-community relay per customer group (host = community, NIP-FI letting What Iff mint identity assertions), as sketched in the 2026-10-22 design notes. This ADR only connects to relays that exist.
+  The likely path is to run a Buzz server alongside What Iff and let users create communities on it.
+  The order is: a small group of testers first (behind the per-user experimental flag, §9), then users creating their own communities, which needs a way to create a community, connect it and manage it from the app.
 - Moving data into or out of a sandbox on purpose (ADR 0x025's open item), which Buzz makes more pressing: promoting a room's learnings to the owner's account, and giving a room a curated brief.
 - Agent-to-agent conversation and its loop guards, shared with the Discord follow-up.
 - DMs, reactions, edits and deletes from Buzz, forum channels, canvases and artifacts, and NIP-AE engrams.

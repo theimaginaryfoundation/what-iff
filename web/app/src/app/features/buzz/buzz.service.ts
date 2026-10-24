@@ -203,8 +203,9 @@ export class BuzzService {
   private availability$: Observable<boolean> | null = null;
 
   /**
-   * Whether the server runs the relay. An operator can switch it off (BUZZ_RELAY_ENABLED=false),
-   * and then /api/buzz is not routed: a 404 here means off. Any other outcome means on (an error
+   * Whether the relay is on for this user. It is experimental: off unless the operator switches it
+   * on (BUZZ_RELAY_ENABLED=true), and a build may turn it on per user. Where it is off, /api/buzz
+   * answers 404: a 404 here means off. Any other outcome means on (an error
    * then shows where the user can see it). Asked once per session.
    */
   available(): Observable<boolean> {

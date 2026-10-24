@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
+	"github.com/theimaginaryfoundation/what-iff/internal/buzzrelay"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -42,6 +43,10 @@ type buzzToolStore interface {
 	ListBuzzBindingsForPersonality(ctx context.Context, userID, personalityID uuid.UUID) ([]models.BuzzBinding, error)
 	SetBuzzPendingPost(ctx context.Context, userID, bindingID, chatID uuid.UUID, source models.BuzzPendingPostSource) error
 }
+
+// buzzMayUse is whether the owner may use the (experimental) relay at all
+// (buzzrelay.UserMayUse); tests replace it.
+var buzzMayUse = buzzrelay.UserMayUse
 
 // buzzToolStoreFor is how the tool reaches storage; tests replace it.
 var buzzToolStoreFor = func(a *Agent) buzzToolStore {
@@ -118,7 +123,7 @@ func init() {
 // chat may reach every channel its persona is bound to; a sandboxed chat, or a relay thread,
 // only the channel(s) bound to this very thread.
 func buzzChannelsFor(ctx context.Context, store buzzToolStore, chat *models.Chat) []models.BuzzBinding {
-	if store == nil || chat == nil || chat.PersonalityID == uuid.Nil {
+	if store == nil || chat == nil || chat.PersonalityID == uuid.Nil || !buzzMayUse(ctx, chat.UserID) {
 		return nil
 	}
 	bindings, err := store.ListBuzzBindingsForPersonality(ctx, chat.UserID, chat.PersonalityID)

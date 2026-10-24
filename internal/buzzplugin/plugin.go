@@ -5,7 +5,7 @@
 //
 // Configuration (environment):
 //
-//	BUZZ_RELAY_ENABLED=false            turn the whole feature off (default on; false/0/off disable it)
+//	BUZZ_RELAY_ENABLED=true             turn the experimental feature on (default off)
 //	BUZZ_GATEWAY_LOCK_KEY=<int64>       advisory-lock key for gateway leadership (default 80920034)
 //	BUZZ_GATEWAY_SINGLE_INSTANCE=true   lead without a lock (one process only)
 //	BUZZ_ALLOW_PRIVATE_RELAYS=true      allow relays on loopback/private addresses and plain ws/http
@@ -18,6 +18,7 @@ package buzzplugin
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -26,8 +27,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/mux"
 	"github.com/theimaginaryfoundation/what-iff/internal/buzzrelay"
 	"github.com/theimaginaryfoundation/what-iff/internal/buzzrelay/nostr"
+	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
+	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
 	"github.com/theimaginaryfoundation/what-iff/internal/relaykit"
@@ -63,19 +67,13 @@ func envFlag(name string) bool {
 	return v == "true" || v == "1" || v == "on"
 }
 
-// enabled reads BUZZ_RELAY_ENABLED: on unless false, 0 or off.
-func enabled() bool {
-	v := strings.TrimSpace(strings.ToLower(os.Getenv("BUZZ_RELAY_ENABLED")))
-	return v != "false" && v != "0" && v != "off"
-}
-
 func apply(d plugins.Deps) {
-	if !enabled() {
+	if !buzzrelay.Enabled() {
 		if unregisterHook != nil {
 			unregisterHook()
 		}
 		if d.Logger != nil {
-			d.Logger.Info("buzz relay: disabled by BUZZ_RELAY_ENABLED")
+			d.Logger.Info("buzz relay: off (experimental; set BUZZ_RELAY_ENABLED=true to turn it on)")
 		}
 		return
 	}
@@ -90,7 +88,9 @@ func apply(d plugins.Deps) {
 	client := buzzrelay.NewClient(allowPrivate)
 
 	h := &Handler{Store: d.DataStore, Relay: client, Files: d.FileStore, Logger: logger, AllowPrivate: allowPrivate}
-	h.Register(d.AuthRouter.PathPrefix("/buzz").Subrouter())
+	routes := d.AuthRouter.PathPrefix("/buzz").Subrouter()
+	routes.Use(experimentalOnly(logger))
+	h.Register(routes)
 
 	if d.Turns == nil || d.Lifecycle == nil {
 		logger.Warn("buzz relay: no turn starter or lifecycle; replies to mentions are disabled")
@@ -109,7 +109,7 @@ func apply(d plugins.Deps) {
 	sup := &relaykit.Supervisor[models.BuzzConnection]{
 		Name:        "buzz gateway",
 		Locker:      locker(d, logger),
-		List:        d.DataStore.ListActiveBuzzConnections,
+		List:        mayUse(d.DataStore.ListActiveBuzzConnections),
 		Key:         func(c models.BuzzConnection) uuid.UUID { return c.Community.ID },
 		Fingerprint: fingerprint,
 		Dial:        gw.dial,
@@ -147,6 +147,47 @@ func fingerprint(c models.BuzzConnection) string {
 	}
 	sort.Strings(ids)
 	return c.Agent.PubKey + "|" + c.Community.RelayURL + "|" + c.AuthTag + "|" + strings.Join(ids, ",")
+}
+
+// experimentalOnly answers 404 on every /api/buzz route for a user the per-user experimental
+// policy has the relay off for, exactly as when the relay is switched off, so the web app hides
+// its Buzz surfaces for them.
+func experimentalOnly(logger *zap.Logger) mux.MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			userID, ok := middleware.GetUserIDFromContext(r.Context())
+			if !ok || !buzzrelay.UserMayUse(r.Context(), userID) {
+				handlerutils.RespondWithError(w, logger, http.StatusNotFound, handlerutils.CodeNotSet, "Not found", nil)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// mayUse keeps the gateway to the connections of owners the relay is on for, so turning the
+// feature off for a user closes their personas' connections at the next reconcile.
+func mayUse(list func(context.Context) ([]models.BuzzConnection, error)) func(context.Context) ([]models.BuzzConnection, error) {
+	return func(ctx context.Context) ([]models.BuzzConnection, error) {
+		all, err := list(ctx)
+		if err != nil {
+			return nil, err
+		}
+		allowed := map[uuid.UUID]bool{}
+		out := all[:0]
+		for _, c := range all {
+			owner := c.Agent.OwnerID
+			ok, seen := allowed[owner]
+			if !seen {
+				ok = buzzrelay.UserMayUse(ctx, owner)
+				allowed[owner] = ok
+			}
+			if ok {
+				out = append(out, c)
+			}
+		}
+		return out, nil
+	}
 }
 
 // subPrefix names a binding's subscription: "b:<binding id>".
