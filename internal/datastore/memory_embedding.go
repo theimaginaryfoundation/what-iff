@@ -266,7 +266,15 @@ func (d *Datastore) BackfillMemoryEmbeddings(ctx context.Context, batchSize int,
 		last := candidates[len(candidates)-1]
 		afterCreatedAt, afterID = last.CreatedAt, last.MemoryID
 
-		for _, group := range groupMemoryCandidatesByOwner(candidates) {
+		groups, ownerless := groupMemoryCandidatesByOwner(candidates)
+		if len(ownerless) > 0 {
+			// The schema requires an owner, so this means the owner edge was not
+			// loaded. Run them as no one rather than as the zero account.
+			d.logger.Warn("memory embedding backfill: candidates without an owner; skipping",
+				zap.Int("count", len(ownerless)))
+			stats.Failed += len(ownerless)
+		}
+		for _, group := range groups {
 			if err := d.backfillOwnerGroup(apicontext.WithUserID(ctx, group[0].OwnerID), group, createEmbeddings, &stats); err != nil {
 				return stats, err
 			}
@@ -279,11 +287,15 @@ func (d *Datastore) BackfillMemoryEmbeddings(ctx context.Context, batchSize int,
 }
 
 // groupMemoryCandidatesByOwner splits a page into one group per account, each
-// in the page's order.
-func groupMemoryCandidatesByOwner(candidates []models.MemoryEmbeddingCandidate) [][]models.MemoryEmbeddingCandidate {
+// in the page's order. Candidates with no owner are returned apart, never as
+// a group of their own.
+func groupMemoryCandidatesByOwner(candidates []models.MemoryEmbeddingCandidate) (groups [][]models.MemoryEmbeddingCandidate, ownerless []models.MemoryEmbeddingCandidate) {
 	index := map[uuid.UUID]int{}
-	var groups [][]models.MemoryEmbeddingCandidate
 	for _, c := range candidates {
+		if c.OwnerID == uuid.Nil {
+			ownerless = append(ownerless, c)
+			continue
+		}
 		i, ok := index[c.OwnerID]
 		if !ok {
 			i = len(groups)
@@ -292,7 +304,7 @@ func groupMemoryCandidatesByOwner(candidates []models.MemoryEmbeddingCandidate) 
 		}
 		groups[i] = append(groups[i], c)
 	}
-	return groups
+	return groups, ownerless
 }
 
 // backfillOwnerGroup embeds and stores one account's memories from a page. An

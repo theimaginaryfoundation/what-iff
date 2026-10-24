@@ -58,7 +58,11 @@ export class ProviderKeysSectionComponent implements OnInit {
     return PROVIDERS.map(info => ({ info, key: byProvider.get(info.id) ?? null }));
   });
 
-  readonly hasRequiredKey = computed(() => this.stored().some(k => k.provider === 'openai'));
+  /** Every provider marked required in PROVIDERS has a stored key. */
+  readonly hasRequiredKey = computed(() => {
+    const stored = new Set(this.stored().map(k => k.provider));
+    return PROVIDERS.filter(p => p.required).every(p => stored.has(p.id));
+  });
 
   async ngOnInit(): Promise<void> {
     await Promise.all([this.load(), this.checkOnboarding()]);

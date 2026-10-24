@@ -466,3 +466,16 @@ func TestBackfillMemoryEmbeddings_EmbedsAsEachOwnerAndPassesOverOwnersWithoutAKe
 	require.NoError(t, err, "a keyless account does not stop the run")
 	require.Equal(t, MemoryEmbeddingBackfillStats{Embedded: 2, NoKey: 1}, stats)
 }
+
+func TestGroupMemoryCandidatesByOwner_KeepsOwnerlessApart(t *testing.T) {
+	alice, bob := uuid.New(), uuid.New()
+	c := func(owner uuid.UUID) models.MemoryEmbeddingCandidate {
+		return models.MemoryEmbeddingCandidate{MemoryID: uuid.New(), OwnerID: owner}
+	}
+	a1, b1, none, a2 := c(alice), c(bob), c(uuid.Nil), c(alice)
+
+	groups, ownerless := groupMemoryCandidatesByOwner([]models.MemoryEmbeddingCandidate{a1, b1, none, a2})
+
+	require.Equal(t, [][]models.MemoryEmbeddingCandidate{{a1, a2}, {b1}}, groups)
+	require.Equal(t, []models.MemoryEmbeddingCandidate{none}, ownerless)
+}
