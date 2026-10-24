@@ -112,8 +112,8 @@ interface AccessDraft {
         <span>
           Answer other agents
           <span class="block text-gray-500 dark:text-gray-400">
-            Off by default. Agents that mention each other are not yet stopped from looping, so turn this on only for agents you trust to
-            stop.
+            Off by default. Agents may mention the persona a few times in a row; then it wraps up, and a person has to speak before it
+            answers agents again.
           </span>
         </span>
       </label>

@@ -3,12 +3,22 @@
 ## Role
 
 The machinery the chat relays share: the Discord relay (ADR 0x025) and the Buzz relay (ADR 0x028).
+How they pace turns (batching, the agent loop guard) is ADR 0x031.
 Each relay keeps its own storage, wire format and trigger rules; what is the same for both lives here, so it is written and fixed once.
 
 ## Responsibilities
 
-- **`TurnQueue`:** one inbound turn at a time per relay thread, with a bounded queue behind it.
+- **`TurnQueue`:** one inbound turn at a time per relay thread, batching what arrives meanwhile.
+  An idle thread's first message runs at once, alone.
+  Messages that arrive while a turn runs wait in one batch per place (`Place`: where the reply goes), held for a short gather window, and each batch runs as one turn.
+  At most `Max` messages wait per thread (`DefaultBatchMax`, 8); `Enqueue` refuses the rest.
   A thread's worker starts on first use and retires once idle; `Active` tells whether a relay turn is running in a thread.
+- **`LoopGuard`, `Policy`, `BatchPrompt`:** the agent-to-agent loop guard and the batch prompt.
+  `Depth` gives a message its agent depth from the binding's previous one (0 for a person), `Allows` caps it (`DefaultAgentMaxDepth`, 3), `Hint` is the wrap-up note near the cap, and `TakeAgentTurn` rate-limits agent-started turns per binding (`DefaultAgentTurnsPerHour`, 20).
+  `Batch` runs all of that over a batch, oldest first, so both relays apply it the same way.
+  `PolicyFromEnv` reads `RELAY_BATCH_MAX`, `RELAY_AGENT_MAX_DEPTH` and `RELAY_AGENT_TURNS_PER_HOUR`.
+  `BatchPrompt` joins a batch's relayed lines under a note that they get one reply.
+- **`Clock`:** the time source of the queue and the guard (`RealClock`), so tests use a fake one.
 - **`Replies`:** matches finished replies (the reply hook) with the inbound turns waiting for them.
   It remembers a release that came before its waiter, and keeps a reply whose inbound link is not attached yet (an orphan) until the relay can post it.
 - **`Throttle`:** at most one action per key per interval (the "busy" notice).
@@ -22,7 +32,7 @@ Each relay keeps its own storage, wire format and trigger rules; what is the sam
 
 ## Key types and entry points
 
-- `TurnQueue`, `Replies`, `Throttle`, `Supervisor`, `Lock`, `Locker`, `Conn`, `AdvisoryLocker`, `SingleInstanceLocker`, `PublicOnlyControl`, `IsPublicIP`, `SpeakerLabel`, `Allowed`, `SleepCtx`.
+- `TurnQueue`, `LoopGuard`, `LastInbound`, `Policy`, `PolicyFromEnv`, `BatchPrompt`, `Clock`, `Replies`, `Throttle`, `Supervisor`, `Lock`, `Locker`, `Conn`, `AdvisoryLocker`, `SingleInstanceLocker`, `PublicOnlyControl`, `IsPublicIP`, `SpeakerLabel`, `Allowed`, `SleepCtx`.
 
 ## Dependencies
 
@@ -33,8 +43,11 @@ Each relay keeps its own storage, wire format and trigger rules; what is the sam
 
 - **Generic, not interface-based.**
   The supervisor and queue take the relay's own types (`Supervisor[gateway.Bot]`, `TurnQueue[inboundWork]`), so each relay keeps its existing structs and tests.
-- **Enqueue is race-free:** an item is sent under the lock the idle worker takes before retiring, so it can never land in a queue whose worker just exited.
+- **Enqueue is race-free:** an item is added under the lock the idle worker takes before retiring, so it can never land in a thread whose worker just exited.
+- **Overflow is dropped, not rolled over:** past `Max` the relay posts its throttled busy notice (never to an agent), which keeps memory bounded and the channel quiet.
+- **The loop guard keeps no depth of its own:** the relays persist each message's depth on its inbound link and hand the newest back (`LastInbound`), so a restart does not reset a loop.
+  Only the hourly rate limit is in memory.
 
 ## Testing
 
-- `relaykit_test.go` covers serialisation and the queue bound, early releases and orphans, the throttle, labels and lists, the address guard, and reconciling on fingerprints.
+- `relaykit_test.go` covers serialisation and the queue bound, batching by place and the gather window (fake clock), the loop guard's depths, hints, batches and rate limit, the batch prompt, the env policy, early releases and orphans, the throttle, labels and lists, the address guard, and reconciling on fingerprints.

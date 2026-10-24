@@ -30,6 +30,10 @@ type Store interface {
 	SetBuzzBindingStatus(ctx context.Context, id uuid.UUID, status models.BuzzBindingStatus, lastError string) error
 	WithdrawBuzzBindingAcknowledgement(ctx context.Context, id uuid.UUID) error
 	TouchBuzzBinding(ctx context.Context, id uuid.UUID) error
+	// LastInboundBuzzLink is the binding's newest inbound message since a time, for the loop
+	// guard; RenameBuzzChannel records a channel's current name on a binding.
+	LastInboundBuzzLink(ctx context.Context, bindingID uuid.UUID, since time.Time) (*models.BuzzMessageLink, error)
+	RenameBuzzChannel(ctx context.Context, bindingID uuid.UUID, name string) error
 	SetBuzzCommunityState(ctx context.Context, id uuid.UUID, status models.BuzzCommunityStatus, lastError string) error
 	GetChatMessage(ctx context.Context, userID, id uuid.UUID) (*models.ChatMessage, error)
 	GetJob(ctx context.Context, userID, id uuid.UUID) (*models.Job, error)
@@ -89,8 +93,9 @@ type Service struct {
 	PollEvery time.Duration
 	// TurnTimeout bounds how long one inbound turn holds its thread's queue.
 	TurnTimeout time.Duration
-	// QueueDepth bounds the mentions waiting behind a running turn, per thread.
-	QueueDepth int
+	// Policy paces turns: how many mentions may wait as the next batch, and the agent-to-agent
+	// loop guard (relaykit.Policy; zero fields take the defaults).
+	Policy relaykit.Policy
 	// PostRetries is how many times a failed publish is retried (transient errors only).
 	PostRetries int
 	// RetryBackoff is the wait before the first retry; it doubles each time.
@@ -98,14 +103,19 @@ type Service struct {
 
 	once    sync.Once
 	turns   relaykit.TurnQueue[inboundWork]
+	guard   *relaykit.LoopGuard
 	replies relaykit.Replies
 	busy    relaykit.Throttle
 	names   nameCache
+	// channels remembers when each binding's channel name was last checked.
+	channels channelCheck
 }
 
 type inboundWork struct {
 	target models.BuzzBindingTarget
 	ev     nostr.Event
+	// agent: the author is an agent (an owner attestation, or a bot profile).
+	agent bool
 }
 
 func (s *Service) defaults() { s.once.Do(s.setDefaults) }
@@ -120,9 +130,6 @@ func (s *Service) setDefaults() {
 	if s.TurnTimeout <= 0 {
 		s.TurnTimeout = 10 * time.Minute
 	}
-	if s.QueueDepth <= 0 {
-		s.QueueDepth = 5
-	}
 	if s.PostRetries < 0 {
 		s.PostRetries = 0
 	} else if s.PostRetries == 0 {
@@ -134,11 +141,15 @@ func (s *Service) setDefaults() {
 	if s.Logger == nil {
 		s.Logger = zap.NewNop()
 	}
-	s.turns.Depth = s.QueueDepth
+	s.turns.Max = s.Policy.BatchMax
+	// A thread's mentions batch together, and so do the channel's top-level ones (root "").
+	s.turns.Place = func(w inboundWork) string { return w.target.Binding.ID.String() + "/" + ThreadOf(w.ev).Root }
 	s.turns.Run = s.runInbound
+	s.guard = s.Policy.Guard()
 	s.replies.TTL = s.TurnTimeout
 	s.busy.Every = busyNoticeEvery
 	s.names.ttl = 10 * time.Minute
+	s.channels.ttl = 10 * time.Minute
 }
 
 // SignerFor is who the relay acts as for a persona: its key, with its owner's attestation when
@@ -165,58 +176,81 @@ func EndpointFor(c models.BuzzCommunity) (Endpoint, error) {
 }
 
 // HandleEvent is called for every event a binding's subscription delivers. It returns at once;
-// accepted mentions are queued behind any turn already running in the relay thread.
+// an accepted mention starts a turn, or, while one runs in the relay thread, waits with the
+// other mentions of its thread to be answered together (relaykit.TurnQueue).
 func (s *Service) HandleEvent(ctx context.Context, bindingID uuid.UUID, ev nostr.Event) {
 	s.defaults()
 	target, err := s.Store.GetBuzzBindingTarget(ctx, bindingID)
 	if err != nil || target == nil {
 		return
 	}
-	if !s.accepts(ctx, *target, ev) {
+	agent, ok := s.admits(ctx, *target, ev)
+	if !ok || !s.threadOpen(ctx, *target) {
 		return
 	}
-	if s.turns.Enqueue(ctx, target.Binding.ChatID, inboundWork{target: *target, ev: ev}) {
+	if s.turns.Enqueue(ctx, target.Binding.ChatID, inboundWork{target: *target, ev: ev, agent: agent}) {
 		return
 	}
 	s.Logger.Warn("buzz relay: queue full; dropping mention",
 		zap.String("binding_id", bindingID.String()), zap.String("event_id", ev.ID))
-	if s.busy.Due(bindingID) {
+	// Never to an agent: a notice it answers would feed the flood.
+	if !agent && s.busy.Due(bindingID) {
 		go s.notice(context.WithoutCancel(ctx), *target, ev, NoticeBusy)
 	}
 }
 
-// accepts applies the trigger rules to an event on a binding: a message in the bound channel,
-// newer than the binding, not the persona's own, from someone the lists allow (and not an
-// agent unless the binding answers agents), that mentions the persona or continues a
-// conversation with it; and the bound thread must be open.
-func (s *Service) accepts(ctx context.Context, t models.BuzzBindingTarget, ev nostr.Event) bool {
+// admits applies the trigger rules to an event on a binding: a message in the bound channel,
+// newer than the binding, not the persona's own, from someone the lists allow, that mentions
+// the persona or continues a conversation with it, and not from an agent unless the binding
+// answers agents. It reports whether the author is an agent. The bound thread is checked
+// apart (threadOpen).
+func (s *Service) admits(ctx context.Context, t models.BuzzBindingTarget, ev nostr.Event) (agent, ok bool) {
 	b := t.Binding
 	if !IsChannelMessage(ev, b.ChannelID) || ev.PubKey == t.Agent.PubKey {
-		return false
+		return false, false
 	}
 	if !b.InboundEnabled || b.Status != models.BuzzBindingActive {
-		return false
+		return false, false
 	}
 	if time.Unix(ev.CreatedAt, 0).Before(b.CreatedAt.Add(-bindingSkew)) {
-		return false // said before the channel was bound
-	}
-	if FromAgent(ev) && !b.AnswerAgents {
-		return false
+		return false, false // said before the channel was bound
 	}
 	if !relaykit.Allowed(ev.PubKey, b.AllowPubKeys, b.DenyPubKeys) {
-		return false
+		return false, false
 	}
 	if !Mentions(ev, t.Agent.PubKey) {
 		thread := ThreadOf(ev)
 		if thread.Root == "" {
-			return false
+			return false, false
 		}
 		ok, err := s.Store.BuzzThreadContinues(ctx, b.ID, thread.Root, thread.Parent, ev.PubKey)
 		if err != nil || !ok {
-			return false
+			return false, false
 		}
 	}
-	return s.threadOpen(ctx, t)
+	agent = s.isAgent(ctx, t, ev)
+	if agent && !b.AnswerAgents {
+		return true, false
+	}
+	return agent, true
+}
+
+// isAgent reports whether ev's author is an agent: the event carries an owner attestation
+// (FromAgent), or the author's profile says bot (NIP-24; What Iff personas publish it, and
+// so does a persona joined by invite, which has no attestation).
+func (s *Service) isAgent(ctx context.Context, t models.BuzzBindingTarget, ev nostr.Event) bool {
+	if FromAgent(ev) {
+		return true
+	}
+	ep, err := EndpointFor(t.Community)
+	if err != nil {
+		return false
+	}
+	signer, err := SignerFor(t.Agent, t.AuthTag)
+	if err != nil {
+		return false
+	}
+	return s.names.profile(ctx, s.Relay, ep, signer, ev.PubKey).bot
 }
 
 // threadOpen is the fail-closed check on the bound thread (relaykit.ThreadOpen).
@@ -243,161 +277,6 @@ func (s *Service) threadOpen(ctx context.Context, t models.BuzzBindingTarget) bo
 			zap.String("binding_id", b.ID.String()), zap.String("chat_id", b.ChatID.String()), zap.Error(err))
 	}
 	return open
-}
-
-// runInbound turns one mention into a turn and waits for its reply to be posted (or the turn
-// to fail), keeping the typing indicator up meanwhile.
-func (s *Service) runInbound(ctx context.Context, w inboundWork) {
-	ev := w.ev
-	log := s.Logger.With(zap.String("binding_id", w.target.Binding.ID.String()), zap.String("event_id", ev.ID))
-
-	// The mention may have waited behind a running turn; re-check against the binding and
-	// thread as they are now. A binding repointed to another thread meanwhile drops it.
-	fresh, err := s.Store.GetBuzzBindingTarget(ctx, w.target.Binding.ID)
-	if err != nil || fresh == nil || fresh.Binding.ChatID != w.target.Binding.ChatID || !s.accepts(ctx, *fresh, ev) {
-		log.Info("buzz relay: binding or thread no longer open; dropping queued mention")
-		return
-	}
-	t := *fresh
-	b := t.Binding
-	ep, err := EndpointFor(t.Community)
-	if err != nil {
-		log.Error("buzz relay: stored relay URL unusable", zap.Error(err))
-		return
-	}
-	signer, err := SignerFor(t.Agent, t.AuthTag)
-	if err != nil {
-		log.Error("buzz relay: persona key unusable", zap.Error(err))
-		return
-	}
-
-	thread := ThreadOf(ev)
-	root := thread.Root
-	if root == "" {
-		root = ev.ID
-	}
-	author := s.names.name(ctx, s.Relay, ep, signer, ev.PubKey)
-	link, created, err := s.Store.RecordInboundBuzzMessage(ctx, models.BuzzInbound{
-		BindingID: b.ID, EventID: ev.ID, ThreadRoot: root, AuthorPubKey: ev.PubKey, AuthorName: author,
-	})
-	if err != nil {
-		log.Error("buzz relay: record inbound", zap.Error(err))
-		return
-	}
-	if !created {
-		return // already answered (a redelivered event)
-	}
-
-	personaName := ""
-	if p, err := s.Store.GetPersonality(ctx, t.Agent.OwnerID, t.Agent.PersonalityID); err == nil && p != nil {
-		personaName = p.Name
-	}
-	npub, _ := nostr.EncodeNPub(t.Agent.PubKey)
-	quoteAuthor, quote := s.quoted(ctx, ep, signer, t.Agent.PubKey, ev, thread)
-	attachments, notes := s.ingestInbound(ctx, ep, signer, t.Agent.OwnerID, b.ChatID, ev)
-	prompt := PromptText(ev.Content, author, b.ChannelName, personaName, npub, quoteAuthor, quote)
-	if len(notes) > 0 {
-		prompt += "\n" + strings.Join(notes, "\n")
-	}
-
-	done := make(chan struct{})
-	resp, err := s.Turns.StartUserTurn(ctx, plugins.UserTurn{
-		// No timezone: the turn's timestamps use the server default, so the owner's local time
-		// zone is not shown to whoever mentioned the persona.
-		UserID: t.Agent.OwnerID,
-		Source: TurnSource,
-		Message: models.ChatMessage{
-			ChatID:      b.ChatID,
-			Message:     prompt,
-			Attachments: attachments,
-		},
-	})
-	if err != nil {
-		log.Warn("buzz relay: start turn", zap.Error(err))
-		_ = s.Store.DeleteBuzzLink(ctx, link.ID)
-		s.notice(ctx, t, ev, NoticeFailed)
-		return
-	}
-	s.replies.Wait(resp.ID, done)
-	defer s.replies.Forget(resp.ID)
-	if err := s.Store.AttachBuzzLinkMessage(ctx, link.ID, resp.ID); err != nil {
-		log.Error("buzz relay: attach inbound message", zap.Error(err))
-	}
-	_ = s.Store.TouchBuzzBinding(ctx, b.ID)
-	// A reply that finished before the link was attached found no link; post it now.
-	if orphan, ok := s.replies.TakeOrphan(resp.ID); ok {
-		s.OnReply(ctx, orphan)
-	}
-
-	jobID, _ := uuid.Parse(resp.JobID)
-	s.waitForReply(ctx, t, ep, signer, ev, jobID, done)
-}
-
-// quoted is the message ev replies to, when that is someone else's (the persona's own is
-// already the previous reply in the thread): its author's name and text. Lookup failures
-// quote nothing.
-func (s *Service) quoted(ctx context.Context, ep Endpoint, signer Signer, agentPub string, ev nostr.Event, thread ThreadRef) (string, string) {
-	if thread.Parent == "" || thread.Parent == ev.ID {
-		return "", ""
-	}
-	events, err := s.Relay.Query(ctx, ep, signer, Filter{"ids": []string{thread.Parent}, "limit": 1})
-	if err != nil || len(events) == 0 {
-		return "", ""
-	}
-	parent := events[0]
-	if parent.Verify() != nil || parent.PubKey == agentPub || parent.Kind != KindStreamMessage {
-		return "", ""
-	}
-	return s.names.name(ctx, s.Relay, ep, signer, parent.PubKey), parent.Content
-}
-
-func (s *Service) waitForReply(ctx context.Context, t models.BuzzBindingTarget, ep Endpoint, signer Signer, ev nostr.Event, jobID uuid.UUID, done <-chan struct{}) {
-	reply := ReplyThread(ev)
-	s.typing(ctx, ep, signer, t.Binding.ChannelID, &reply)
-	typing := time.NewTicker(s.TypingEvery)
-	defer typing.Stop()
-	poll := time.NewTicker(s.PollEvery)
-	defer poll.Stop()
-	deadline := time.NewTimer(s.TurnTimeout)
-	defer deadline.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-done:
-			return
-		case <-deadline.C:
-			s.Logger.Warn("buzz relay: turn timed out", zap.String("job_id", jobID.String()))
-			return
-		case <-typing.C:
-			s.typing(ctx, ep, signer, t.Binding.ChannelID, &reply)
-		case <-poll.C:
-			if jobID == uuid.Nil {
-				continue
-			}
-			job, err := s.Store.GetJob(ctx, t.Agent.OwnerID, jobID)
-			if err != nil || job == nil {
-				continue
-			}
-			if job.Status == models.JobStatusFailed || job.Status == models.JobStatusCancelled {
-				s.notice(ctx, t, ev, NoticeFailed)
-				return
-			}
-			if job.Status == models.JobStatusComplete {
-				return // the reply hook posts it; the thread's next mention need not wait
-			}
-		}
-	}
-}
-
-func (s *Service) typing(ctx context.Context, ep Endpoint, signer Signer, channelID string, thread *ThreadRef) {
-	ev, err := TypingEvent(signer, channelID, thread)
-	if err != nil {
-		return
-	}
-	if err := s.Relay.Publish(ctx, ep, signer, ev); err != nil {
-		s.Logger.Debug("buzz relay: typing pulse failed", zap.Error(err))
-	}
 }
 
 // OnReply is the reply hook: it publishes a finished reply when the turn came from Buzz (back
@@ -602,48 +481,4 @@ func (s *Service) notice(ctx context.Context, t models.BuzzBindingTarget, ev nos
 	if err := s.Relay.Publish(ctx, ep, signer, msg); err != nil {
 		s.Logger.Debug("buzz relay: notice failed", zap.Error(err))
 	}
-}
-
-// nameCache remembers authors' display names (kind 0) for a while, so a busy channel does not
-// look every author up on every mention.
-type nameCache struct {
-	ttl time.Duration
-
-	mu    sync.Mutex
-	names map[string]cachedName
-}
-
-type cachedName struct {
-	name string
-	at   time.Time
-}
-
-// name is pubkey's display name in the community, or a short npub when it has no profile.
-func (c *nameCache) name(ctx context.Context, relay Relay, ep Endpoint, signer Signer, pubkey string) string {
-	key := ep.Host() + "|" + pubkey
-	c.mu.Lock()
-	if n, ok := c.names[key]; ok && time.Since(n.at) < c.ttl {
-		c.mu.Unlock()
-		return n.name
-	}
-	c.mu.Unlock()
-
-	name := ""
-	events, err := relay.Query(ctx, ep, signer, Filter{"kinds": []int{KindProfile}, "authors": []string{pubkey}, "limit": 1})
-	if err == nil && len(events) > 0 && events[0].Verify() == nil && events[0].PubKey == pubkey {
-		name = ParseProfile(events[0]).Label()
-	}
-	if strings.TrimSpace(name) == "" {
-		name = ShortNPub(pubkey)
-	}
-	c.mu.Lock()
-	if c.names == nil {
-		c.names = map[string]cachedName{}
-	}
-	if len(c.names) > 5000 {
-		c.names = map[string]cachedName{}
-	}
-	c.names[key] = cachedName{name: name, at: time.Now()}
-	c.mu.Unlock()
-	return name
 }

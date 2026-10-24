@@ -214,7 +214,10 @@ type BuzzMessageLink struct {
 	Status         BuzzLinkStatus `json:"status"`
 	Error          *string        `json:"error,omitempty"`
 	Attempts       int            `json:"attempts"`
-	CreatedAt      time.Time      `json:"created_at"`
+	// AgentDepth (inbound): consecutive agent-started turns on the binding, this one
+	// included; 0 when a person wrote it.
+	AgentDepth int       `json:"agent_depth"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // BuzzInbound is a Buzz event about to become a user message.
@@ -224,6 +227,7 @@ type BuzzInbound struct {
 	ThreadRoot   string
 	AuthorPubKey string
 	AuthorName   string
+	AgentDepth   int
 }
 
 // BuzzPendingPostSource is what asked for the next reply to be posted.

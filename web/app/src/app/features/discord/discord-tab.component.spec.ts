@@ -31,6 +31,7 @@ const binding: DiscordBinding = {
   inbound_enabled: true,
   allow_user_ids: [],
   deny_user_ids: [],
+  answer_agents: false,
   allow_unrestricted: false,
   status: 'active',
   created_at: '',
@@ -226,6 +227,16 @@ describe('DiscordTabComponent', () => {
       expect(q(fixture, 'discord-binding-sandboxed')).toBeTruthy();
       expect(q(fixture, 'discord-binding-ack')).toBeNull();
     });
+  });
+
+  it('answers other bots only once the owner turns it on', async () => {
+    const fixture = await create();
+    const box = (fixture.nativeElement as HTMLElement).querySelector('[data-testid=discord-binding-agents]') as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    box.checked = true;
+    box.dispatchEvent(new Event('change'));
+    await settle();
+    expect(discord['updateBinding']).toHaveBeenCalledWith('b1', { answer_agents: true });
   });
 
   describe('empty allow list', () => {

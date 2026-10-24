@@ -96,7 +96,7 @@ func apply(d plugins.Deps) {
 		logger.Warn("buzz relay: no turn starter or lifecycle; replies to mentions are disabled")
 		return
 	}
-	svc := &buzzrelay.Service{Store: d.DataStore, Relay: client, Turns: d.Turns, Logger: logger}
+	svc := &buzzrelay.Service{Store: d.DataStore, Relay: client, Turns: d.Turns, Logger: logger, Policy: relaykit.PolicyFromEnv(logger)}
 	if d.FileStore != nil {
 		svc.Files = d.FileStore
 	}

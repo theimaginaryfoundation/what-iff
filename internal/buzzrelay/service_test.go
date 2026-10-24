@@ -32,6 +32,7 @@ type fakeStore struct {
 	bindError  string
 	community  models.BuzzCommunityStatus
 	continues  bool
+	renamed    string
 }
 
 func (f *fakeStore) GetBuzzBindingTarget(_ context.Context, id uuid.UUID) (*models.BuzzBindingTarget, error) {
@@ -54,7 +55,8 @@ func (f *fakeStore) RecordInboundBuzzMessage(_ context.Context, in models.BuzzIn
 	}
 	id := in.EventID
 	l := &models.BuzzMessageLink{ID: uuid.New(), BindingID: in.BindingID, Direction: "inbound", EventID: &id,
-		ThreadRoot: in.ThreadRoot, AuthorPubKey: in.AuthorPubKey, AuthorName: in.AuthorName, Status: models.BuzzLinkReceived}
+		ThreadRoot: in.ThreadRoot, AuthorPubKey: in.AuthorPubKey, AuthorName: in.AuthorName, Status: models.BuzzLinkReceived,
+		AgentDepth: in.AgentDepth, CreatedAt: time.Now()}
 	f.links = append(f.links, l)
 	return l, true, nil
 }
@@ -80,13 +82,46 @@ func (f *fakeStore) DeleteBuzzLink(_ context.Context, id uuid.UUID) error {
 func (f *fakeStore) FindInboundBuzzLink(_ context.Context, msgID uuid.UUID) (*models.BuzzMessageLink, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for _, l := range f.links {
+	for _, l := range slices.Backward(f.links) {
 		if l.Direction == "inbound" && l.ChatMessageID != nil && *l.ChatMessageID == msgID {
 			c := *l
 			return &c, nil
 		}
 	}
 	return nil, nil
+}
+
+func (f *fakeStore) LastInboundBuzzLink(_ context.Context, _ uuid.UUID, since time.Time) (*models.BuzzMessageLink, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, l := range slices.Backward(f.links) {
+		if l.Direction == "inbound" && l.CreatedAt.After(since) {
+			c := *l
+			return &c, nil
+		}
+	}
+	return nil, nil
+}
+
+func (f *fakeStore) RenameBuzzChannel(_ context.Context, _ uuid.UUID, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.renamed = name
+	f.target.Binding.ChannelName = name
+	return nil
+}
+
+// inboundAttached counts inbound links attached to a saved message.
+func (f *fakeStore) inboundAttached() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, l := range f.links {
+		if l.Direction == "inbound" && l.ChatMessageID != nil {
+			n++
+		}
+	}
+	return n
 }
 
 func (f *fakeStore) BuzzThreadContinues(context.Context, uuid.UUID, string, string, string) (bool, error) {
@@ -189,7 +224,9 @@ type fakeRelay struct {
 	profiles  map[string]Profile
 	events    map[string]nostr.Event
 	keys      map[string]*nostr.Keys
-	err       error
+	// metadata answers channel metadata (kind 39000) queries.
+	metadata []nostr.Event
+	err      error
 }
 
 func (r *fakeRelay) Publish(_ context.Context, _ Endpoint, _ Signer, ev *nostr.Event) error {
@@ -223,6 +260,9 @@ func (r *fakeRelay) Query(_ context.Context, _ Endpoint, _ Signer, filters ...Fi
 			return []nostr.Event{ev}, nil
 		}
 		return nil, nil
+	}
+	if kinds, ok := f["kinds"].([]int); ok && slices.Contains(kinds, KindGroupMetadata) {
+		return append([]nostr.Event(nil), r.metadata...), nil
 	}
 	if authors, ok := f["authors"].([]string); ok {
 		p, ok := r.profiles[authors[0]]
@@ -566,4 +606,125 @@ func TestParseEndpoint(t *testing.T) {
 	local, _, err := ParseEndpoint("http://localhost:3000", true)
 	require.NoError(t, err)
 	assert.Equal(t, Endpoint{WS: "ws://localhost:3000", HTTP: "http://localhost:3000"}, local)
+}
+
+// person adds a community member with a profile.
+func (h *harness) person(name string, bot bool) *nostr.Keys {
+	k, _ := nostr.GenerateKeys()
+	h.relay.mu.Lock()
+	h.relay.profiles[k.PublicKey()] = Profile{DisplayName: name, Bot: bot}
+	h.relay.keys[k.PublicKey()] = k
+	h.relay.mu.Unlock()
+	return k
+}
+
+func TestMentionsThatWaitAreAnsweredInOneBatch(t *testing.T) {
+	h := newHarness(t)
+	h.svc.turns.Gather = -1
+	h.svc.TurnTimeout = time.Hour // each turn holds the thread until its reply
+	bob, carol := h.person("bob", false), h.person("carol", false)
+	mention := h.agent.PublicKey()
+
+	h.svc.HandleEvent(h.ctx, h.target.Binding.ID, h.say(t, h.alice, "first", nil, mention))
+	require.Eventually(t, func() bool { return h.turns.count() == 1 }, time.Second, 5*time.Millisecond)
+	h.svc.HandleEvent(h.ctx, h.target.Binding.ID, h.say(t, bob, "second", nil, mention))
+	last := h.say(t, carol, "third", nil, mention)
+	h.svc.HandleEvent(h.ctx, h.target.Binding.ID, last)
+	time.Sleep(30 * time.Millisecond)
+	require.Equal(t, 1, h.turns.count(), "the burst waits")
+
+	require.Eventually(t, func() bool { return h.store.inboundAttached() == 1 }, time.Second, 5*time.Millisecond)
+	h.replyTo(t, 0, "one")
+	require.Eventually(t, func() bool { return h.turns.count() == 2 }, time.Second, 5*time.Millisecond)
+	h.turns.mu.Lock()
+	prompt := h.turns.turns[1].Message.Message
+	h.turns.mu.Unlock()
+	assert.Contains(t, prompt, "(Relay note: 2 messages arrived")
+	assert.Contains(t, prompt, "bob (Buzz, #general): second\ncarol (Buzz, #general): third")
+
+	require.Eventually(t, func() bool { return h.store.inboundAttached() == 3 }, time.Second, 5*time.Millisecond)
+	h.replyTo(t, 1, "both of you")
+	msgs := h.relay.messages()
+	require.Len(t, msgs, 2, "one reply for the batch")
+	assert.Equal(t, ThreadRef{Root: last.ID, Parent: last.ID}, ThreadOf(msgs[1]), "in the newest mention's thread")
+	assert.Equal(t, []string{carol.PublicKey()}, msgs[1].Tags.Values("p"), "only the newest asker is notified")
+}
+
+func TestAgentsAndTheLoopGuard(t *testing.T) {
+	tests := []struct {
+		name         string
+		answerAgents bool
+		prev         int // the binding's newest recorded depth; -1 for none
+		wantTurn     bool
+		wantDepth    int
+		wantHint     string
+	}{
+		{name: "a bot profile counts as an agent", prev: -1},
+		{name: "answered when the binding allows it", answerAgents: true, prev: -1, wantTurn: true, wantDepth: 1},
+		{name: "wrap-up hint near the cap", answerAgents: true, prev: 1, wantTurn: true, wantDepth: 2, wantHint: "Start wrapping up"},
+		{name: "past the cap", answerAgents: true, prev: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.store.target.Binding.AnswerAgents = tt.answerAgents
+			nova := h.person("Nova", true) // a persona joined by invite: no attestation, a bot profile
+			if tt.prev >= 0 {
+				_, _, err := h.store.RecordInboundBuzzMessage(h.ctx, models.BuzzInbound{BindingID: h.target.Binding.ID, EventID: "before", AgentDepth: tt.prev})
+				require.NoError(t, err)
+			}
+			h.svc.HandleEvent(h.ctx, h.target.Binding.ID, h.say(t, nova, "hey Vix", nil, h.agent.PublicKey()))
+			if !tt.wantTurn {
+				time.Sleep(30 * time.Millisecond)
+				assert.Equal(t, 0, h.turns.count())
+				assert.Empty(t, h.relay.messages(), "nothing is posted to an agent")
+				return
+			}
+			require.Eventually(t, func() bool { return h.turns.count() == 1 }, time.Second, 5*time.Millisecond)
+			last, err := h.store.LastInboundBuzzLink(h.ctx, h.target.Binding.ID, time.Now().Add(-time.Hour))
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantDepth, last.AgentDepth)
+			h.turns.mu.Lock()
+			prompt := h.turns.turns[0].Message.Message
+			h.turns.mu.Unlock()
+			if tt.wantHint == "" {
+				assert.NotContains(t, prompt, "Relay note")
+			} else {
+				assert.Contains(t, prompt, tt.wantHint)
+			}
+		})
+	}
+}
+
+func TestARenamedChannelIsRecordedOnTheBinding(t *testing.T) {
+	relayKeys, _ := nostr.GenerateKeys()
+	stranger, _ := nostr.GenerateKeys()
+	tests := []struct {
+		name     string
+		signer   *nostr.Keys
+		relayPub string
+		want     string
+	}{
+		{name: "relay-signed metadata", signer: relayKeys, relayPub: relayKeys.PublicKey(), want: "lounge"},
+		{name: "metadata someone else signed is ignored", signer: stranger, relayPub: relayKeys.PublicKey(), want: "general"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.store.target.Community.RelayPubKey = tt.relayPub
+			meta := &nostr.Event{Kind: KindGroupMetadata, Tags: nostr.Tags{{"d", "chan-1"}, {"name", "lounge"}}, CreatedAt: time.Now().Unix()}
+			require.NoError(t, meta.Sign(tt.signer))
+			h.relay.metadata = []nostr.Event{*meta}
+
+			h.svc.HandleEvent(h.ctx, h.target.Binding.ID, h.say(t, h.alice, "hi", nil, h.agent.PublicKey()))
+			require.Eventually(t, func() bool { return h.turns.count() == 1 }, time.Second, 5*time.Millisecond)
+			h.turns.mu.Lock()
+			prompt := h.turns.turns[0].Message.Message
+			h.turns.mu.Unlock()
+			assert.Contains(t, prompt, "(Buzz, #"+tt.want+")")
+			h.store.mu.Lock()
+			assert.Equal(t, tt.want, h.store.target.Binding.ChannelName)
+			h.store.mu.Unlock()
+		})
+	}
 }

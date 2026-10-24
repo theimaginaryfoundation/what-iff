@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	entsql "entgo.io/ent/dialect/sql"
@@ -468,6 +470,23 @@ func (d *Datastore) SetBuzzBindingStatus(ctx context.Context, id uuid.UUID, stat
 	return err
 }
 
+// RenameBuzzChannel records a channel's current name (relay-signed kind 39000) on a binding,
+// when it changed.
+func (d *Datastore) RenameBuzzChannel(ctx context.Context, bindingID uuid.UUID, name string) error {
+	name = strings.TrimPrefix(strings.TrimSpace(name), "#")
+	if name == "" {
+		return nil
+	}
+	_, err := d.dbClient.BuzzBinding.Update().
+		Where(buzzbinding.ID(bindingID), buzzbinding.ChannelNameNEQ(name)).
+		SetChannelName(name).
+		Save(ctx)
+	if err != nil {
+		return fmt.Errorf("rename buzz channel: %w", err)
+	}
+	return nil
+}
+
 // TouchBuzzBinding records activity on a binding.
 func (d *Datastore) TouchBuzzBinding(ctx context.Context, id uuid.UUID) error {
 	return d.dbClient.BuzzBinding.UpdateOneID(id).SetLastActivityAt(time.Now()).Exec(ctx)
@@ -589,6 +608,7 @@ func (d *Datastore) RecordInboundBuzzMessage(ctx context.Context, in models.Buzz
 		SetThreadRoot(in.ThreadRoot).
 		SetAuthorPubkey(in.AuthorPubKey).
 		SetAuthorName(in.AuthorName).
+		SetAgentDepth(in.AgentDepth).
 		SetStatus(buzzmessagelink.StatusReceived).
 		Save(ctx)
 	if err != nil {
@@ -612,6 +632,8 @@ func (d *Datastore) DeleteBuzzLink(ctx context.Context, linkID uuid.UUID) error 
 }
 
 // FindInboundBuzzLink returns the inbound link for a saved user message, if it came from Buzz.
+// A batched turn's message has a link per event; the newest is returned, since the reply
+// answers it.
 func (d *Datastore) FindInboundBuzzLink(ctx context.Context, chatMessageID uuid.UUID) (*models.BuzzMessageLink, error) {
 	row, err := d.dbClient.BuzzMessageLink.Query().
 		Where(
@@ -619,6 +641,7 @@ func (d *Datastore) FindInboundBuzzLink(ctx context.Context, chatMessageID uuid.
 			buzzmessagelink.DirectionEQ(buzzmessagelink.DirectionInbound),
 		).
 		WithBinding().
+		Order(ent.Desc(buzzmessagelink.FieldCreatedAt)).
 		First(ctx)
 	if err != nil {
 		if ent.IsNotFound(err) {
@@ -627,6 +650,26 @@ func (d *Datastore) FindInboundBuzzLink(ctx context.Context, chatMessageID uuid.
 		return nil, fmt.Errorf("find inbound buzz link: %w", err)
 	}
 	return buzzLinkModel(row, row.Edges.Binding.ID), nil
+}
+
+// LastInboundBuzzLink returns the binding's newest inbound link created after since, or nil:
+// the loop guard's previous message (relaykit.LastInbound).
+func (d *Datastore) LastInboundBuzzLink(ctx context.Context, bindingID uuid.UUID, since time.Time) (*models.BuzzMessageLink, error) {
+	row, err := d.dbClient.BuzzMessageLink.Query().
+		Where(
+			buzzmessagelink.CreatedAtGT(since),
+			buzzmessagelink.HasBindingWith(buzzbinding.ID(bindingID)),
+			buzzmessagelink.DirectionEQ(buzzmessagelink.DirectionInbound),
+		).
+		Order(ent.Desc(buzzmessagelink.FieldCreatedAt)).
+		First(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("last inbound buzz link: %w", err)
+	}
+	return buzzLinkModel(row, bindingID), nil
 }
 
 // BuzzThreadContinues reports whether a message in a bound channel continues a conversation
@@ -823,27 +866,36 @@ func externalBuzzChat(ctx context.Context, client *ent.Client, userID, chatID uu
 		Exist(ctx)
 }
 
-// buzzSpeakerForTurn is ExternalSpeakerForTurn for Buzz relay threads: the display name of the
-// author of the message the turn answers, falling back (while the turn is starting) to the
-// chat's inbound link that has no message yet.
+// buzzSpeakerForTurn is ExternalSpeakerForTurn for Buzz relay threads: the display names of the
+// authors of the messages the turn answers, falling back (while the turn is starting) to the
+// chat's inbound links that have no message yet.
 func (d *Datastore) buzzSpeakerForTurn(ctx context.Context, userID, chatID, chatMessageID uuid.UUID) (string, error) {
 	owned := buzzmessagelink.HasBindingWith(buzzBindingOwnedBy(userID))
 	inbound := buzzmessagelink.DirectionEQ(buzzmessagelink.DirectionInbound)
-	if chatMessageID != uuid.Nil {
-		row, err := d.dbClient.BuzzMessageLink.Query().
-			Where(buzzmessagelink.ChatMessageID(chatMessageID), inbound, owned).
-			First(ctx)
-		if err == nil {
-			return row.AuthorName, nil
+	names := func(rows []*ent.BuzzMessageLink) string {
+		out := make([]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, r.AuthorName)
 		}
-		if !ent.IsNotFound(err) {
+		return joinSpeakers(out)
+	}
+	if chatMessageID != uuid.Nil {
+		rows, err := d.dbClient.BuzzMessageLink.Query().
+			Where(buzzmessagelink.ChatMessageID(chatMessageID), inbound, owned).
+			Order(ent.Asc(buzzmessagelink.FieldCreatedAt)).
+			Limit(maxBatchSpeakers).
+			All(ctx)
+		if err != nil {
 			return "", fmt.Errorf("find buzz speaker: %w", err)
+		}
+		if len(rows) > 0 {
+			return names(rows), nil
 		}
 	}
 	if chatID == uuid.Nil {
 		return "", nil
 	}
-	row, err := d.dbClient.BuzzMessageLink.Query().
+	rows, err := d.dbClient.BuzzMessageLink.Query().
 		Where(
 			buzzmessagelink.ChatMessageIDIsNil(),
 			inbound,
@@ -851,14 +903,13 @@ func (d *Datastore) buzzSpeakerForTurn(ctx context.Context, userID, chatID, chat
 			owned,
 		).
 		Order(ent.Desc(buzzmessagelink.FieldCreatedAt)).
-		First(ctx)
+		Limit(maxBatchSpeakers).
+		All(ctx)
 	if err != nil {
-		if ent.IsNotFound(err) {
-			return "", nil
-		}
 		return "", fmt.Errorf("find buzz speaker: %w", err)
 	}
-	return row.AuthorName, nil
+	slices.Reverse(rows)
+	return names(rows), nil
 }
 
 // RelayPlatformForChat names the platform a relay thread is relayed from ("Discord", "Buzz"),
@@ -1001,6 +1052,7 @@ func buzzLinkModel(r *ent.BuzzMessageLink, bindingID uuid.UUID) *models.BuzzMess
 		Status:         models.BuzzLinkStatus(r.Status),
 		Error:          r.Error,
 		Attempts:       r.Attempts,
+		AgentDepth:     r.AgentDepth,
 		CreatedAt:      r.CreatedAt,
 	}
 }

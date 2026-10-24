@@ -12891,6 +12891,8 @@ export interface components {
             allow_user_ids: string[];
             /** @description Discord user ids that may never tag the bot; deny always wins */
             deny_user_ids: string[];
+            /** @description Let other bots (other personas' among them) start turns. Off by default; the relay's loop guard caps consecutive bot-started turns and asks the persona to wrap up near the cap (ADR 0x031). */
+            answer_agents: boolean;
             /** @description The owner's acknowledgement that the bound thread is not sandboxed, so it can read the account. Without it the relay answers only sandboxed threads. */
             allow_unrestricted: boolean;
             /** @description Whether the bound thread is sandboxed right now (computed; absent when the thread could not be read) */
@@ -12921,6 +12923,8 @@ export interface components {
             inbound_enabled: boolean;
             allow_user_ids?: string[];
             deny_user_ids?: string[];
+            /** @default false */
+            answer_agents: boolean;
             /** @description Acknowledge binding an existing thread that is not sandboxed */
             allow_unrestricted?: boolean;
         };
@@ -12932,6 +12936,7 @@ export interface components {
             deny_user_ids?: string[];
             channel_name?: string;
             guild_name?: string;
+            answer_agents?: boolean;
             allow_unrestricted?: boolean;
             /** @description Clear a broken status after fixing the bot's access */
             reactivate?: boolean;
@@ -12957,6 +12962,8 @@ export interface components {
             status: "received" | "pending" | "sent" | "failed";
             error?: string;
             attempts: number;
+            /** @description Inbound only. Consecutive bot-started turns on the binding, this message included; 0 when a person wrote it (the loop guard, ADR 0x031) */
+            agent_depth?: number;
             /** Format: date-time */
             created_at: string;
         };
@@ -13140,6 +13147,8 @@ export interface components {
             status: "received" | "pending" | "sent" | "failed";
             error?: string;
             attempts: number;
+            /** @description Inbound only. Consecutive bot-started turns on the binding, this message included; 0 when a person wrote it (the loop guard, ADR 0x031) */
+            agent_depth?: number;
             /** Format: date-time */
             created_at: string;
         };

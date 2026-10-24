@@ -33,6 +33,8 @@ type fakeStore struct {
 	chats      map[uuid.UUID]*models.Chat // by chat id; absent = a sandboxed thread
 	getChatErr error
 	withdrawn  []uuid.UUID // bindings whose "not sandboxed" acknowledgement was withdrawn
+	recorded   int         // links recorded, for their created_at order
+	renames    []string    // "botID/channelID=name"
 }
 
 func newFakeStore(owner uuid.UUID) *fakeStore {
@@ -82,8 +84,10 @@ func (f *fakeStore) RecordInboundDiscordMessage(_ context.Context, in models.Dis
 		}
 	}
 	id := in.DiscordMessageID
+	f.recorded++
 	l := &models.DiscordMessageLink{ID: uuid.New(), BindingID: in.BindingID, Direction: "inbound", DiscordMessageID: &id,
-		DiscordChannelID: in.DiscordChannelID, AuthorID: in.AuthorID, AuthorName: in.AuthorName, Status: models.DiscordLinkReceived}
+		DiscordChannelID: in.DiscordChannelID, AuthorID: in.AuthorID, AuthorName: in.AuthorName, Status: models.DiscordLinkReceived,
+		AgentDepth: in.AgentDepth, CreatedAt: time.Now().Add(time.Duration(f.recorded) * time.Microsecond)}
 	f.links[l.ID] = l
 	return l, true, nil
 }
@@ -105,13 +109,45 @@ func (f *fakeStore) DeleteDiscordLink(_ context.Context, id uuid.UUID) error {
 func (f *fakeStore) FindInboundDiscordLink(_ context.Context, msgID uuid.UUID) (*models.DiscordMessageLink, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	var newest *models.DiscordMessageLink
 	for _, l := range f.links {
-		if l.Direction == "inbound" && l.ChatMessageID != nil && *l.ChatMessageID == msgID {
-			c := *l
-			return &c, nil
+		if l.Direction == "inbound" && l.ChatMessageID != nil && *l.ChatMessageID == msgID && (newest == nil || l.CreatedAt.After(newest.CreatedAt)) {
+			newest = l
 		}
 	}
-	return nil, nil
+	if newest == nil {
+		return nil, nil
+	}
+	c := *newest
+	return &c, nil
+}
+
+func (f *fakeStore) LastInboundDiscordLink(_ context.Context, bindingID uuid.UUID, since time.Time) (*models.DiscordMessageLink, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var newest *models.DiscordMessageLink
+	for _, l := range f.links {
+		if l.Direction == "inbound" && l.BindingID == bindingID && l.CreatedAt.After(since) && (newest == nil || l.CreatedAt.After(newest.CreatedAt)) {
+			newest = l
+		}
+	}
+	if newest == nil {
+		return nil, nil
+	}
+	c := *newest
+	return &c, nil
+}
+
+func (f *fakeStore) RenameDiscordChannel(_ context.Context, botID uuid.UUID, channelID, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.renames = append(f.renames, botID.String()+"/"+channelID+"="+name)
+	for _, t := range f.targets {
+		if t.Bot.ID == botID && t.Binding.ChannelID == channelID {
+			t.Binding.ChannelName = name
+		}
+	}
+	return nil
 }
 
 func (f *fakeStore) StartOutboundDiscordLink(_ context.Context, bindingID, msgID uuid.UUID, channelID string, replyTo *uuid.UUID) (*models.DiscordMessageLink, bool, error) {
@@ -300,6 +336,7 @@ type fakeTurns struct {
 	mu    sync.Mutex
 	store *fakeStore
 	turns []plugins.UserTurn
+	ids   []uuid.UUID // the saved user message of each started turn
 	err   error
 }
 
@@ -311,6 +348,7 @@ func (t *fakeTurns) StartUserTurn(_ context.Context, turn plugins.UserTurn) (*mo
 	}
 	t.turns = append(t.turns, turn)
 	msgID, jobID := uuid.New(), uuid.New()
+	t.ids = append(t.ids, msgID)
 	t.store.mu.Lock()
 	t.store.jobs[jobID] = &models.Job{ID: jobID, Status: models.JobStatusProcessing}
 	t.store.mu.Unlock()
@@ -348,11 +386,10 @@ func newHarness(t *testing.T) *harness {
 	turns := &fakeTurns{store: store}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	return &harness{
-		svc: &Service{Store: store, Discord: d, Turns: turns, Logger: zap.NewNop(),
-			TypingEvery: time.Hour, PollEvery: 10 * time.Millisecond, TurnTimeout: 2 * time.Second, RetryBackoff: time.Millisecond},
-		store: store, discord: d, turns: turns, target: target, ctx: ctx,
-	}
+	svc := &Service{Store: store, Discord: d, Turns: turns, Logger: zap.NewNop(),
+		TypingEvery: time.Hour, PollEvery: 10 * time.Millisecond, TurnTimeout: 2 * time.Second, RetryBackoff: time.Millisecond}
+	svc.turns.Gather = -1 // batches run as soon as the turn before ends
+	return &harness{svc: svc, store: store, discord: d, turns: turns, target: target, ctx: ctx}
 }
 
 func (h *harness) tag(id string) InboundMessage {
@@ -667,7 +704,7 @@ func TestAnUnreadableThreadFailsClosed(t *testing.T) {
 func TestAQueuedTagIsRecheckedWhenItsTurnComes(t *testing.T) {
 	h := newHarness(t)
 	h.setSandboxed(false) // raised while the tag waited in the queue
-	h.svc.runInbound(h.ctx, inboundWork{target: *h.target, msg: h.tag("m1")})
+	h.svc.runInbound(h.ctx, []inboundWork{{target: *h.target, msg: h.tag("m1")}})
 	h.noTurnStarted(t)
 	h.store.mu.Lock()
 	assert.Empty(t, h.store.links)
@@ -716,7 +753,7 @@ func TestAQueuedTagForABindingRepointedMeanwhileIsDropped(t *testing.T) {
 	h.store.mu.Lock()
 	h.store.targets[h.target.Binding.ID].Binding.ChatID = uuid.New() // repointed while the tag waited
 	h.store.mu.Unlock()
-	h.svc.runInbound(h.ctx, inboundWork{target: queued, msg: h.tag("m1")})
+	h.svc.runInbound(h.ctx, []inboundWork{{target: queued, msg: h.tag("m1")}})
 	h.noTurnStarted(t)
 }
 
@@ -751,4 +788,164 @@ func sandboxScope(sandboxed bool) models.ContextScope {
 		return models.ContextScopeSandbox
 	}
 	return models.ContextScopeAccount
+}
+
+// replyToTurn simulates the agent finishing the n-th started turn, once its links are attached.
+func (h *harness) replyToTurn(t *testing.T, n int, text string) {
+	t.Helper()
+	var trigger uuid.UUID
+	require.Eventually(t, func() bool {
+		h.turns.mu.Lock()
+		if len(h.turns.ids) <= n {
+			h.turns.mu.Unlock()
+			return false
+		}
+		trigger = h.turns.ids[n]
+		h.turns.mu.Unlock()
+		link, _ := h.store.FindInboundDiscordLink(h.ctx, trigger)
+		return link != nil
+	}, time.Second, 5*time.Millisecond)
+	replyID := uuid.New()
+	h.store.mu.Lock()
+	h.store.messages[replyID] = &models.ChatMessage{ID: replyID, ChatID: h.target.Binding.ChatID, Message: text}
+	h.store.mu.Unlock()
+	h.svc.OnReply(h.ctx, replyhook.Event{UserID: h.target.Bot.OwnerID, ChatID: h.target.Binding.ChatID, MessageID: replyID, TriggerMessageID: &trigger})
+}
+
+func (h *harness) tagFrom(id, author string, bot bool) InboundMessage {
+	m := h.tag(id)
+	m.AuthorID, m.AuthorName, m.AuthorIsBot = author, author, bot
+	return m
+}
+
+func TestTagsThatWaitAreAnsweredInOneBatch(t *testing.T) {
+	h := newHarness(t)
+	h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, h.tagFrom("m1", "alice", false))
+	require.Eventually(t, func() bool { return len(h.turns.started()) == 1 }, time.Second, 5*time.Millisecond)
+	for i, who := range []string{"bob", "carol", "bob"} {
+		h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, h.tagFrom(fmt.Sprintf("m%d", i+2), who, false))
+	}
+	time.Sleep(30 * time.Millisecond)
+	assert.Len(t, h.turns.started(), 1, "the burst waits for the running turn")
+
+	h.replyToTurn(t, 0, "first")
+	require.Eventually(t, func() bool { return len(h.turns.started()) == 2 }, time.Second, 5*time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
+	require.Len(t, h.turns.started(), 2, "one turn for the whole burst")
+	prompt := h.turns.started()[1].Message.Message
+	assert.Contains(t, prompt, "(Relay note: 3 messages arrived")
+	assert.Contains(t, prompt, "bob (Discord, #general): hello\ncarol (Discord, #general): hello\nbob (Discord, #general): hello")
+
+	h.replyToTurn(t, 1, "to all of you")
+	require.Eventually(t, func() bool { return len(h.discord.allPosts()) == 2 }, time.Second, 5*time.Millisecond)
+	assert.Equal(t, post{channel: "c", replyTo: "m4", parts: []string{"to all of you"}}, h.discord.allPosts()[1],
+		"one reply, to the newest tag")
+}
+
+func TestBatchesPastTheCapAreRefusedWithOneNotice(t *testing.T) {
+	h := newHarness(t)
+	h.svc.Policy.BatchMax = 2
+	h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, h.tag("m1"))
+	require.Eventually(t, func() bool { return len(h.turns.started()) == 1 }, time.Second, 5*time.Millisecond)
+	for _, id := range []string{"m2", "m3", "m4", "m5"} {
+		h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, h.tag(id))
+	}
+	require.Eventually(t, func() bool { return len(h.discord.allPosts()) == 1 }, time.Second, 5*time.Millisecond)
+	assert.Equal(t, post{channel: "c", replyTo: "m4", parts: []string{NoticeBusy}}, h.discord.allPosts()[0], "throttled to one notice")
+}
+
+func TestBotsAreAnsweredOnlyWhenTheBindingAllowsIt(t *testing.T) {
+	h := newHarness(t)
+	h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, h.tagFrom("m1", "nova", true))
+	time.Sleep(30 * time.Millisecond)
+	assert.Empty(t, h.turns.started(), "off by default")
+
+	h.store.mu.Lock()
+	h.target.Binding.AnswerAgents = true
+	h.store.mu.Unlock()
+	h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, h.tagFrom("m2", "nova", true))
+	require.Eventually(t, func() bool { return len(h.turns.started()) == 1 }, time.Second, 5*time.Millisecond)
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+	for _, l := range h.store.links {
+		assert.Equal(t, 1, l.AgentDepth, "the depth is recorded on the link")
+	}
+}
+
+func TestTheLoopGuardBoundsBotExchanges(t *testing.T) {
+	tests := []struct {
+		name string
+		// prev is the binding's newest recorded message (depth), -1 for none.
+		prev      int
+		bot       bool
+		wantTurn  bool
+		wantDepth int
+		wantHint  string
+	}{
+		{name: "a bot after a person", prev: 0, bot: true, wantTurn: true, wantDepth: 1},
+		{name: "near the cap the persona is told to wrap up", prev: 1, bot: true, wantTurn: true, wantDepth: 2, wantHint: "Start wrapping up"},
+		{name: "the last reply says so", prev: 2, bot: true, wantTurn: true, wantDepth: 3, wantHint: "your last reply"},
+		{name: "past the cap nothing is answered", prev: 3, bot: true},
+		{name: "a person resets the chain", prev: 3, bot: false, wantTurn: true, wantDepth: 0},
+		{name: "a first bot", prev: -1, bot: true, wantTurn: true, wantDepth: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.svc.TurnTimeout = 10 * time.Millisecond // nobody replies; runInbound returns
+			h.target.Binding.AnswerAgents = true
+			if tt.prev >= 0 {
+				_, _, err := h.store.RecordInboundDiscordMessage(h.ctx, models.DiscordInbound{BindingID: h.target.Binding.ID, DiscordMessageID: "before", AgentDepth: tt.prev})
+				require.NoError(t, err)
+			}
+			h.svc.runInbound(h.ctx, []inboundWork{{target: *h.target, msg: h.tagFrom("m1", "nova", tt.bot)}})
+			if !tt.wantTurn {
+				assert.Empty(t, h.turns.started())
+				assert.Empty(t, h.discord.allPosts(), "nothing is posted to a bot")
+				return
+			}
+			require.Len(t, h.turns.started(), 1)
+			last, err := h.store.LastInboundDiscordLink(h.ctx, h.target.Binding.ID, time.Now().Add(-time.Hour))
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantDepth, last.AgentDepth)
+			prompt := h.turns.started()[0].Message.Message
+			if tt.wantHint == "" {
+				assert.NotContains(t, prompt, "Relay note")
+			} else {
+				assert.Contains(t, prompt, tt.wantHint)
+			}
+		})
+	}
+}
+
+func TestBotStartedTurnsAreRateLimited(t *testing.T) {
+	h := newHarness(t)
+	h.target.Binding.AnswerAgents = true
+	h.svc.TurnTimeout = 10 * time.Millisecond
+	h.svc.Policy.AgentTurnsPerHour = 1
+	h.svc.runInbound(h.ctx, []inboundWork{{target: *h.target, msg: h.tagFrom("m1", "nova", true)}})
+	// A person in between resets the depth, but not the hourly budget.
+	h.svc.runInbound(h.ctx, []inboundWork{{target: *h.target, msg: h.tagFrom("m2", "alice", false)}})
+	h.svc.runInbound(h.ctx, []inboundWork{{target: *h.target, msg: h.tagFrom("m3", "nova", true)}})
+	assert.Len(t, h.turns.started(), 2, "the second bot-started turn is over budget")
+}
+
+func TestARenamedChannelIsRecordedOnTheBinding(t *testing.T) {
+	h := newHarness(t)
+	msg := h.tag("m1")
+	msg.BindingChannelName = "lounge"
+	h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, msg)
+	require.Eventually(t, func() bool { return len(h.turns.started()) == 1 }, time.Second, 5*time.Millisecond)
+	assert.Contains(t, h.turns.started()[0].Message.Message, "(Discord, #lounge)", "the turn already uses the new name")
+	h.store.mu.Lock()
+	assert.Equal(t, []string{h.target.Bot.ID.String() + "/c=lounge"}, h.store.renames)
+	h.store.mu.Unlock()
+
+	untagged := h.tag("m2")
+	untagged.MentionUserIDs = nil
+	untagged.BindingChannelName = "lounge"
+	h.svc.HandleInbound(h.ctx, h.target.Bot.ID, testBotUser, untagged)
+	h.store.mu.Lock()
+	assert.Len(t, h.store.renames, 1, "an unchanged name writes nothing")
+	h.store.mu.Unlock()
 }

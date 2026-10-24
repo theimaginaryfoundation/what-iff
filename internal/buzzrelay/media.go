@@ -220,8 +220,9 @@ func MediaOf(ev nostr.Event) []MediaRef {
 
 // ingestInbound saves the files posted with a mention to the relay thread, so the persona sees
 // them with the message. Files that cannot be added are named in notes for the persona to pass
-// on, rather than dropped silently.
-func (s *Service) ingestInbound(ctx context.Context, ep Endpoint, signer Signer, ownerID, chatID uuid.UUID, ev nostr.Event) (atts []*models.FileAttachment, notes []string) {
+// on, rather than dropped silently. room is how many more files the turn takes (a batched turn
+// shares MaxInboundAttachments across its mentions).
+func (s *Service) ingestInbound(ctx context.Context, ep Endpoint, signer Signer, ownerID, chatID uuid.UUID, ev nostr.Event, room int) (atts []*models.FileAttachment, notes []string) {
 	media := MediaOf(ev)
 	if len(media) == 0 {
 		return nil, nil
@@ -234,8 +235,8 @@ func (s *Service) ingestInbound(ctx context.Context, ep Endpoint, signer Signer,
 	}
 	for i, m := range media {
 		switch {
-		case len(atts) >= MaxInboundAttachments:
-			skip(m, fmt.Sprintf("at most %d files are added per message", MaxInboundAttachments))
+		case len(atts) >= room:
+			skip(m, fmt.Sprintf("at most %d files are added at a time", MaxInboundAttachments))
 			continue
 		case m.Size > MaxInboundFileBytes:
 			skip(m, "too large")

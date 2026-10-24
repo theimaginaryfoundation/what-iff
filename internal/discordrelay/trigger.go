@@ -21,11 +21,16 @@ type InboundMessage struct {
 	ParentChannelID string
 	AuthorID        string
 	AuthorName      string
-	AuthorIsBot     bool
+	// AuthorIsBot: another bot (another persona's, say) wrote it. Answered only when the
+	// binding answers agents, within the loop guard.
+	AuthorIsBot bool
 	// WebhookID is set for messages posted by a webhook (never answered).
 	WebhookID      string
 	Content        string
 	MentionUserIDs []string
+	// BindingChannelName is the current name of the bound channel (BindingChannelID), from
+	// the gateway's cache; "" when unknown. A differing name is recorded on the binding.
+	BindingChannelName string
 	// Attachments are the files posted with the message.
 	Attachments []Attachment
 	// Referenced* describe the message this one replies to, if any.
@@ -46,10 +51,11 @@ const (
 )
 
 // Triggered reports whether m tags the bot (by @mention, or by replying to one of
-// its messages). Messages from bots and webhooks, including the bot's own, never
-// trigger, so a persona cannot answer itself or another bot in a loop.
+// its messages). The bot's own messages and webhooks never trigger, so a persona cannot
+// answer itself. Other bots may: the binding decides (AnswerAgents), and the relay's loop
+// guard bounds the exchange.
 func Triggered(m InboundMessage, botUserID string) (TriggerReason, bool) {
-	if botUserID == "" || m.AuthorIsBot || m.WebhookID != "" || m.AuthorID == botUserID {
+	if botUserID == "" || m.WebhookID != "" || m.AuthorID == botUserID {
 		return "", false
 	}
 	if slices.Contains(m.MentionUserIDs, botUserID) {

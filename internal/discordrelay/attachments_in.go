@@ -122,8 +122,9 @@ func (f *CDNFetcher) Fetch(ctx context.Context, rawURL string, max int64) ([]byt
 // ingestInbound saves the files posted with a tag to the relay thread, so the persona
 // sees them with the message. Files that cannot be added (a type the app does not take,
 // too large, too many, a failed download) are named in notes for the persona to pass on,
-// rather than dropped silently.
-func (s *Service) ingestInbound(ctx context.Context, ownerID, chatID uuid.UUID, msg InboundMessage) (atts []*models.FileAttachment, notes []string) {
+// rather than dropped silently. room is how many more files the turn takes (a batched turn
+// shares MaxInboundAttachments across its tags).
+func (s *Service) ingestInbound(ctx context.Context, ownerID, chatID uuid.UUID, msg InboundMessage, room int) (atts []*models.FileAttachment, notes []string) {
 	if len(msg.Attachments) == 0 {
 		return nil, nil
 	}
@@ -135,8 +136,8 @@ func (s *Service) ingestInbound(ctx context.Context, ownerID, chatID uuid.UUID, 
 	}
 	for i, a := range msg.Attachments {
 		switch {
-		case len(atts) >= MaxInboundAttachments:
-			skip(a, fmt.Sprintf("at most %d files are added per message", MaxInboundAttachments))
+		case len(atts) >= room:
+			skip(a, fmt.Sprintf("at most %d files are added at a time", MaxInboundAttachments))
 			continue
 		case a.Size > MaxInboundFileBytes:
 			skip(a, "too large")

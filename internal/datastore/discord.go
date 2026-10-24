@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -203,6 +205,7 @@ func (d *Datastore) CreateDiscordBinding(ctx context.Context, userID, botID uuid
 		SetInboundEnabled(in.InboundEnabled).
 		SetAllowUserIds(nonNilStrings(in.AllowUserIDs)).
 		SetDenyUserIds(nonNilStrings(in.DenyUserIDs)).
+		SetAnswerAgents(in.AnswerAgents).
 		SetAllowUnrestricted(in.AllowUnrestricted).
 		Save(ctx)
 	if err != nil {
@@ -306,6 +309,27 @@ func (d *Datastore) SetDiscordBindingStatus(ctx context.Context, id uuid.UUID, s
 	return err
 }
 
+// RenameDiscordChannel records a Discord channel's new name on the bot's bindings of it,
+// when it changed (the gateway saw a rename, or a tag carried the current name).
+func (d *Datastore) RenameDiscordChannel(ctx context.Context, botID uuid.UUID, channelID, name string) error {
+	name = strings.TrimPrefix(strings.TrimSpace(name), "#")
+	if name == "" {
+		return nil
+	}
+	_, err := d.dbClient.DiscordBinding.Update().
+		Where(
+			discordbinding.ChannelID(channelID),
+			discordbinding.ChannelNameNEQ(name),
+			discordbinding.HasBotWith(discordbot.ID(botID)),
+		).
+		SetChannelName(name).
+		Save(ctx)
+	if err != nil {
+		return fmt.Errorf("rename discord channel: %w", err)
+	}
+	return nil
+}
+
 // TouchDiscordBinding records activity on a binding.
 func (d *Datastore) TouchDiscordBinding(ctx context.Context, id uuid.UUID) error {
 	return d.dbClient.DiscordBinding.UpdateOneID(id).SetLastActivityAt(time.Now()).Exec(ctx)
@@ -330,6 +354,9 @@ func (d *Datastore) patchDiscordBinding(ctx context.Context, id uuid.UUID, p mod
 	}
 	if p.DenyUserIDs != nil {
 		upd.SetDenyUserIds(nonNilStrings(*p.DenyUserIDs))
+	}
+	if p.AnswerAgents != nil {
+		upd.SetAnswerAgents(*p.AnswerAgents)
 	}
 	if p.AllowUnrestricted != nil {
 		upd.SetAllowUnrestricted(*p.AllowUnrestricted)
@@ -427,6 +454,7 @@ func (d *Datastore) RecordInboundDiscordMessage(ctx context.Context, in models.D
 		SetDiscordChannelID(in.DiscordChannelID).
 		SetAuthorID(in.AuthorID).
 		SetAuthorName(in.AuthorName).
+		SetAgentDepth(in.AgentDepth).
 		SetStatus(discordmessagelink.StatusReceived).
 		Save(ctx)
 	if err != nil {
@@ -450,7 +478,8 @@ func (d *Datastore) DeleteDiscordLink(ctx context.Context, linkID uuid.UUID) err
 }
 
 // FindInboundDiscordLink returns the inbound link for a saved user message, if
-// that message came from Discord.
+// that message came from Discord. A batched turn's message has a link per Discord
+// message; the newest is returned, since the reply answers it.
 func (d *Datastore) FindInboundDiscordLink(ctx context.Context, chatMessageID uuid.UUID) (*models.DiscordMessageLink, error) {
 	row, err := d.dbClient.DiscordMessageLink.Query().
 		Where(
@@ -458,6 +487,7 @@ func (d *Datastore) FindInboundDiscordLink(ctx context.Context, chatMessageID uu
 			discordmessagelink.DirectionEQ(discordmessagelink.DirectionInbound),
 		).
 		WithBinding().
+		Order(ent.Desc(discordmessagelink.FieldCreatedAt)).
 		First(ctx)
 	if err != nil {
 		if ent.IsNotFound(err) {
@@ -466,6 +496,26 @@ func (d *Datastore) FindInboundDiscordLink(ctx context.Context, chatMessageID uu
 		return nil, fmt.Errorf("find inbound discord link: %w", err)
 	}
 	return discordLinkModel(row, row.Edges.Binding.ID), nil
+}
+
+// LastInboundDiscordLink returns the binding's newest inbound link created after since, or
+// nil: the loop guard's previous message (relaykit.LastInbound).
+func (d *Datastore) LastInboundDiscordLink(ctx context.Context, bindingID uuid.UUID, since time.Time) (*models.DiscordMessageLink, error) {
+	row, err := d.dbClient.DiscordMessageLink.Query().
+		Where(
+			discordmessagelink.CreatedAtGT(since),
+			discordmessagelink.HasBindingWith(discordbinding.ID(bindingID)),
+			discordmessagelink.DirectionEQ(discordmessagelink.DirectionInbound),
+		).
+		Order(ent.Desc(discordmessagelink.FieldCreatedAt)).
+		First(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("last inbound discord link: %w", err)
+	}
+	return discordLinkModel(row, bindingID), nil
 }
 
 // StartOutboundDiscordLink records that a reply is being posted to a binding. If
@@ -672,43 +722,67 @@ func (d *Datastore) ExternalSpeakerForTurn(ctx context.Context, userID, chatID, 
 	return d.buzzSpeakerForTurn(ctx, userID, chatID, chatMessageID)
 }
 
+// maxBatchSpeakers bounds the links read for a turn's speakers (a batched turn answers a
+// relay's whole batch; relaykit.DefaultBatchMax is 8).
+const maxBatchSpeakers = 16
+
+// joinSpeakers lists a turn's speakers once each, in order: "alice", or "alice, bob" for a
+// batched turn.
+func joinSpeakers(names []string) string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if n == "" || seen[n] {
+			continue
+		}
+		seen[n] = true
+		out = append(out, n)
+	}
+	return strings.Join(out, ", ")
+}
+
 // discordSpeakerForTurn is ExternalSpeakerForTurn for Discord relay threads.
 func (d *Datastore) discordSpeakerForTurn(ctx context.Context, userID, chatID, chatMessageID uuid.UUID) (string, error) {
 	owned := discordmessagelink.HasBindingWith(discordbinding.HasBotWith(discordbot.HasOwnerWith(user.ID(userID))))
-	if chatMessageID != uuid.Nil {
-		row, err := d.dbClient.DiscordMessageLink.Query().
-			Where(
-				discordmessagelink.ChatMessageID(chatMessageID),
-				discordmessagelink.DirectionEQ(discordmessagelink.DirectionInbound),
-				owned,
-			).
-			First(ctx)
-		if err == nil {
-			return row.AuthorName, nil
+	inbound := discordmessagelink.DirectionEQ(discordmessagelink.DirectionInbound)
+	names := func(rows []*ent.DiscordMessageLink) string {
+		out := make([]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, r.AuthorName)
 		}
-		if !ent.IsNotFound(err) {
+		return joinSpeakers(out)
+	}
+	if chatMessageID != uuid.Nil {
+		rows, err := d.dbClient.DiscordMessageLink.Query().
+			Where(discordmessagelink.ChatMessageID(chatMessageID), inbound, owned).
+			Order(ent.Asc(discordmessagelink.FieldCreatedAt)).
+			Limit(maxBatchSpeakers).
+			All(ctx)
+		if err != nil {
 			return "", fmt.Errorf("find discord speaker: %w", err)
+		}
+		if len(rows) > 0 {
+			return names(rows), nil
 		}
 	}
 	if chatID == uuid.Nil {
 		return "", nil
 	}
-	row, err := d.dbClient.DiscordMessageLink.Query().
+	rows, err := d.dbClient.DiscordMessageLink.Query().
 		Where(
 			discordmessagelink.ChatMessageIDIsNil(),
-			discordmessagelink.DirectionEQ(discordmessagelink.DirectionInbound),
+			inbound,
 			discordmessagelink.HasBindingWith(discordbinding.ChatID(chatID)),
 			owned,
 		).
 		Order(ent.Desc(discordmessagelink.FieldCreatedAt)).
-		First(ctx)
+		Limit(maxBatchSpeakers).
+		All(ctx)
 	if err != nil {
-		if ent.IsNotFound(err) {
-			return "", nil
-		}
 		return "", fmt.Errorf("find discord speaker: %w", err)
 	}
-	return row.AuthorName, nil
+	slices.Reverse(rows)
+	return names(rows), nil
 }
 
 // requireOwnedPersonality is ErrPersonalityNotFound unless the persona is the user's.
@@ -802,6 +876,7 @@ func discordBindingModel(r *ent.DiscordBinding, botID uuid.UUID) *models.Discord
 		InboundEnabled:    r.InboundEnabled,
 		AllowUserIDs:      nonNilStrings(r.AllowUserIds),
 		DenyUserIDs:       nonNilStrings(r.DenyUserIds),
+		AnswerAgents:      r.AnswerAgents,
 		AllowUnrestricted: r.AllowUnrestricted,
 		Status:            models.DiscordBindingStatus(r.Status),
 		LastError:         r.LastError,
@@ -826,6 +901,7 @@ func discordLinkModel(r *ent.DiscordMessageLink, bindingID uuid.UUID) *models.Di
 		Status:           models.DiscordLinkStatus(r.Status),
 		Error:            r.Error,
 		Attempts:         r.Attempts,
+		AgentDepth:       r.AgentDepth,
 		CreatedAt:        r.CreatedAt,
 	}
 }
