@@ -266,6 +266,18 @@ interface AccessDraft {
                       <input type="checkbox" [checked]="b.inbound_enabled" (change)="setInbound(b, $any($event.target).checked)" />
                       Answer when tagged
                     </label>
+                    <label
+                      class="inline-flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300"
+                      title="Off by default. Bots may tag the persona a few times in a row, then a person has to speak again."
+                    >
+                      <input
+                        type="checkbox"
+                        [checked]="b.answer_agents"
+                        (change)="setAnswerAgents(b, $any($event.target).checked)"
+                        data-testid="discord-binding-agents"
+                      />
+                      Answer other bots
+                    </label>
                     @if (b.status === 'broken') {
                       <button
                         class="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium dark:border-gray-600 dark:text-gray-200"
@@ -635,6 +647,13 @@ export class DiscordTabComponent implements OnInit {
   async setInbound(b: DiscordBinding, on: boolean): Promise<void> {
     await this.run(
       async () => this.replaceBinding(await firstValueFrom(this.discord.updateBinding(b.id, { inbound_enabled: on }))),
+      'Could not update the channel.',
+    );
+  }
+
+  async setAnswerAgents(b: DiscordBinding, on: boolean): Promise<void> {
+    await this.run(
+      async () => this.replaceBinding(await firstValueFrom(this.discord.updateBinding(b.id, { answer_agents: on }))),
       'Could not update the channel.',
     );
   }

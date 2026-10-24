@@ -172,6 +172,9 @@ func (BuzzMessageLink) Fields() []ent.Field {
 		field.Enum("status").Values("received", "pending", "sent", "failed").Default("received"),
 		field.String("error").Optional().Nillable(),
 		field.Int("attempts").Default(0),
+		// Inbound: how many turns in a row agents have started on the binding, this one
+		// included (0 when a person wrote it). The loop guard reads the newest (docs/adr/0x031).
+		field.Int("agent_depth").Default(0),
 	}
 }
 
@@ -185,6 +188,9 @@ func (BuzzMessageLink) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("event_id").Edges("binding").Unique(),
 		index.Fields("chat_message_id"),
+		// The binding's newest inbound message within the loop guard's chain gap (a recent range of
+		// created_at, then the binding).
+		index.Fields("created_at").Edges("binding"),
 	}
 }
 

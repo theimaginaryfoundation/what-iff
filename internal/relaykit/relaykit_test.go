@@ -21,7 +21,7 @@ func TestTurnQueueRunsOneAtATimePerThreadAndBoundsTheQueue(t *testing.T) {
 	defer cancel()
 	release := make(chan struct{})
 	var running, maxRunning, ran atomic.Int32
-	q := &TurnQueue[int]{Depth: 2, Idle: 50 * time.Millisecond, Run: func(context.Context, int) {
+	q := &TurnQueue[int]{Max: 2, Gather: -1, Idle: 50 * time.Millisecond, Run: func(_ context.Context, batch []int) {
 		n := running.Add(1)
 		for {
 			m := maxRunning.Load()
@@ -31,7 +31,7 @@ func TestTurnQueueRunsOneAtATimePerThreadAndBoundsTheQueue(t *testing.T) {
 		}
 		<-release
 		running.Add(-1)
-		ran.Add(1)
+		ran.Add(int32(len(batch)))
 	}}
 	chat := uuid.New()
 	require.True(t, q.Enqueue(ctx, chat, 1)) // taken by the worker
@@ -45,6 +45,277 @@ func TestTurnQueueRunsOneAtATimePerThreadAndBoundsTheQueue(t *testing.T) {
 	require.Eventually(t, func() bool { return ran.Load() == 3 }, time.Second, time.Millisecond)
 	assert.Equal(t, int32(1), maxRunning.Load(), "never two turns of one thread at once")
 	require.Eventually(t, func() bool { return !q.Active(chat) }, time.Second, 5*time.Millisecond, "an idle worker retires")
+}
+
+// fakeClock is a Clock that moves only when told to.
+type fakeClock struct {
+	mu      sync.Mutex
+	now     time.Time
+	waiters []fakeWaiter
+}
+
+type fakeWaiter struct {
+	at time.Time
+	ch chan time.Time
+}
+
+func newFakeClock() *fakeClock {
+	return &fakeClock{now: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) After(d time.Duration) <-chan time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ch := make(chan time.Time, 1)
+	c.waiters = append(c.waiters, fakeWaiter{at: c.now.Add(d), ch: ch})
+	return ch
+}
+
+// Advance moves the clock and fires the timers it passes.
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+	kept := c.waiters[:0]
+	for _, w := range c.waiters {
+		if w.at.After(c.now) {
+			kept = append(kept, w)
+			continue
+		}
+		w.ch <- c.now
+	}
+	c.waiters = kept
+}
+
+// batchRecorder runs batches until told to finish each, recording what ran.
+type batchRecorder struct {
+	mu      sync.Mutex
+	batches [][]string
+	release chan struct{}
+}
+
+func (r *batchRecorder) run(_ context.Context, batch []string) {
+	r.mu.Lock()
+	r.batches = append(r.batches, append([]string(nil), batch...))
+	r.mu.Unlock()
+	<-r.release
+}
+
+func (r *batchRecorder) ran() [][]string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([][]string(nil), r.batches...)
+}
+
+func TestTurnQueueBatches(t *testing.T) {
+	place := func(s string) string { return strings.SplitN(s, ":", 2)[0] }
+	tests := []struct {
+		name string
+		max  int
+		// pings arrive while the first one's turn runs.
+		pings    []string
+		want     [][]string
+		refused  []string
+		withKeys bool
+	}{
+		{
+			name:  "the first runs alone, the rest wait as one batch",
+			pings: []string{"a", "b", "c", "d"},
+			want:  [][]string{{"a"}, {"b", "c", "d"}},
+		},
+		{
+			name:    "past the cap, pings are refused",
+			max:     2,
+			pings:   []string{"a", "b", "c", "d", "e"},
+			want:    [][]string{{"a"}, {"b", "c"}},
+			refused: []string{"d", "e"},
+		},
+		{
+			name:     "a batch holds one place; places run in arrival order",
+			pings:    []string{"x:1", "y:2", "x:3", "z:4", "y:5"},
+			withKeys: true,
+			want:     [][]string{{"x:1"}, {"y:2", "y:5"}, {"x:3"}, {"z:4"}},
+		},
+		{
+			name:     "the cap counts every place",
+			max:      2,
+			pings:    []string{"x:1", "y:2", "x:3", "z:4"},
+			withKeys: true,
+			want:     [][]string{{"x:1"}, {"y:2"}, {"x:3"}},
+			refused:  []string{"z:4"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			clock := newFakeClock()
+			rec := &batchRecorder{release: make(chan struct{})}
+			q := &TurnQueue[string]{Max: tt.max, Gather: time.Second, Clock: clock, Run: rec.run}
+			if tt.withKeys {
+				q.Place = place
+			}
+			chat := uuid.New()
+			require.True(t, q.Enqueue(ctx, chat, tt.pings[0]))
+			require.Eventually(t, func() bool { return len(rec.ran()) == 1 }, time.Second, time.Millisecond, "the first ping starts at once, without gathering")
+			var refused []string
+			for _, p := range tt.pings[1:] {
+				if !q.Enqueue(ctx, chat, p) {
+					refused = append(refused, p)
+				}
+			}
+			assert.Equal(t, tt.refused, refused)
+			close(rec.release)
+			// The gather window of the waiting batches passes. The clock creeps on, since the
+			// worker may set its timer just after a step.
+			require.Eventually(t, func() bool {
+				clock.Advance(100 * time.Millisecond)
+				return len(rec.ran()) == len(tt.want)
+			}, time.Second, time.Millisecond)
+			assert.Equal(t, tt.want, rec.ran())
+		})
+	}
+}
+
+func TestTurnQueueGathersABurstAfterAShortTurn(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	clock := newFakeClock()
+	rec := &batchRecorder{release: make(chan struct{})}
+	q := &TurnQueue[string]{Gather: 2 * time.Second, Clock: clock, Run: rec.run}
+	chat := uuid.New()
+	require.True(t, q.Enqueue(ctx, chat, "a"))
+	require.Eventually(t, func() bool { return len(rec.ran()) == 1 }, time.Second, time.Millisecond)
+	require.True(t, q.Enqueue(ctx, chat, "b"))
+	close(rec.release) // the first turn ends at once; "b" waits out its gather window
+
+	clock.Advance(time.Second)
+	require.True(t, q.Enqueue(ctx, chat, "c"))
+	time.Sleep(20 * time.Millisecond)
+	assert.Len(t, rec.ran(), 1, "the batch waits for its window")
+
+	require.Eventually(t, func() bool {
+		clock.Advance(10 * time.Millisecond)
+		return len(rec.ran()) == 2
+	}, time.Second, time.Millisecond)
+	assert.Equal(t, []string{"b", "c"}, rec.ran()[1], "the burst lands in one batch")
+
+	require.Eventually(t, func() bool {
+		clock.Advance(DefaultWorkerIdle)
+		return !q.Active(chat)
+	}, time.Second, time.Millisecond, "an idle worker retires")
+	require.True(t, q.Enqueue(ctx, chat, "d"))
+	require.Eventually(t, func() bool { return len(rec.ran()) == 3 }, time.Second, time.Millisecond, "an idle thread's first ping runs at once again")
+}
+
+func TestLoopGuardDepthAndHints(t *testing.T) {
+	clock := newFakeClock()
+	g := &LoopGuard{MaxDepth: 3, Clock: clock}
+	recent := &LastInbound{Depth: 2, At: clock.Now().Add(-time.Minute)}
+	stale := &LastInbound{Depth: 2, At: clock.Now().Add(-time.Hour)}
+	tests := []struct {
+		name      string
+		fromAgent bool
+		prev      *LastInbound
+		want      int
+		allowed   bool
+		hint      string
+	}{
+		{"a person resets the chain", false, recent, 0, true, ""},
+		{"an agent first", true, nil, 1, true, ""},
+		{"an agent after a person", true, &LastInbound{Depth: 0, At: clock.Now()}, 1, true, ""},
+		{"an agent near the cap is told to wrap up", true, &LastInbound{Depth: 1, At: clock.Now()}, 2, true, "1 more time"},
+		{"the last allowed reply says so", true, recent, 3, true, "last reply"},
+		{"past the cap is not answered", true, &LastInbound{Depth: 3, At: clock.Now()}, 4, false, "last reply"},
+		{"a quiet binding starts over", true, stale, 1, true, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := g.Depth(tt.fromAgent, tt.prev)
+			assert.Equal(t, tt.want, d)
+			assert.Equal(t, tt.allowed, g.Allows(d))
+			if tt.hint == "" {
+				assert.Empty(t, g.Hint(d))
+			} else {
+				assert.Contains(t, g.Hint(d), tt.hint)
+			}
+		})
+	}
+}
+
+func TestLoopGuardBatch(t *testing.T) {
+	tests := []struct {
+		name      string
+		fromAgent []bool
+		prev      *LastInbound
+		budget    int
+		want      []int
+		turnDepth int
+		ok        bool
+	}{
+		{name: "a person's message", fromAgent: []bool{false}, want: []int{0}, ok: true},
+		{name: "agents chain within the batch", fromAgent: []bool{true, true}, prev: &LastInbound{Depth: 1}, want: []int{2, 3}, turnDepth: 2, ok: true},
+		{name: "past the cap is dropped, the rest kept", fromAgent: []bool{true, true, true}, prev: &LastInbound{Depth: 2}, want: []int{3, -1, -1}, turnDepth: 3, ok: true},
+		{name: "a person in the batch resets it", fromAgent: []bool{true, false, true}, prev: &LastInbound{Depth: 3}, want: []int{-1, 0, 1}, turnDepth: 0, ok: true},
+		{name: "nothing left", fromAgent: []bool{true}, prev: &LastInbound{Depth: 3}, want: []int{-1}},
+		{name: "agents only, over budget", fromAgent: []bool{true}, budget: -1, want: []int{1}},
+		{name: "a person's turn spends no budget", fromAgent: []bool{false, true}, budget: -1, want: []int{0, 1}, ok: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clock := newFakeClock()
+			g := &LoopGuard{MaxDepth: 3, TurnsPerHour: 1, Clock: clock}
+			if tt.prev != nil {
+				tt.prev.At = clock.Now()
+			}
+			binding := uuid.New()
+			if tt.budget < 0 {
+				require.True(t, g.TakeAgentTurn(binding)) // spend the hour's one turn
+			}
+			depths, turnDepth, ok := g.Batch(binding, tt.fromAgent, tt.prev)
+			assert.Equal(t, tt.want, depths)
+			assert.Equal(t, tt.ok, ok)
+			if ok {
+				assert.Equal(t, tt.turnDepth, turnDepth)
+			}
+		})
+	}
+}
+
+func TestLoopGuardRateLimitsAgentTurns(t *testing.T) {
+	clock := newFakeClock()
+	g := &LoopGuard{TurnsPerHour: 2, Clock: clock}
+	a, b := uuid.New(), uuid.New()
+	assert.True(t, g.TakeAgentTurn(a))
+	clock.Advance(10 * time.Minute)
+	assert.True(t, g.TakeAgentTurn(a))
+	assert.False(t, g.TakeAgentTurn(a), "the hour's budget is spent")
+	assert.True(t, g.TakeAgentTurn(b), "per binding")
+	clock.Advance(51 * time.Minute)
+	assert.True(t, g.TakeAgentTurn(a), "the first turn left the window")
+	assert.False(t, g.TakeAgentTurn(a))
+}
+
+func TestBatchPrompt(t *testing.T) {
+	assert.Equal(t, "alice (Discord): hi", BatchPrompt([]string{"alice (Discord): hi"}))
+	got := BatchPrompt([]string{"alice (Discord): hi", "bob (Discord): yo"})
+	assert.True(t, strings.HasPrefix(got, "(Relay note: 2 messages arrived"))
+	assert.True(t, strings.HasSuffix(got, "\nalice (Discord): hi\nbob (Discord): yo"))
+}
+
+func TestPolicyFromEnv(t *testing.T) {
+	t.Setenv("RELAY_BATCH_MAX", "6")
+	t.Setenv("RELAY_AGENT_MAX_DEPTH", "nope")
+	t.Setenv("RELAY_AGENT_TURNS_PER_HOUR", "")
+	p := PolicyFromEnv(zap.NewNop())
+	assert.Equal(t, Policy{BatchMax: 6}, p)
+	assert.Equal(t, DefaultAgentMaxDepth, p.Guard().maxDepth())
 }
 
 func TestRepliesEarlyReleaseAndOrphans(t *testing.T) {

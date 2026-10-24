@@ -8,7 +8,7 @@ Linked by a blank import in `cmd/api-server/plugins.go`.
 ## Responsibilities
 
 - **`init`:** registers the reply hook (which does nothing until the plugin is applied) and the plugin.
-- **`apply`:** returns at once unless `buzzrelay.Enabled()` (the relay is experimental: `BUZZ_RELAY_ENABLED=true`), reads `BUZZ_ALLOW_PRIVATE_RELAYS`, mounts the routes, builds the `buzzrelay.Service`, and starts a `relaykit.Supervisor` over `ListActiveBuzzConnections` (lock key `DefaultLockKey` = 80920034, `BUZZ_GATEWAY_LOCK_KEY`, `BUZZ_GATEWAY_SINGLE_INSTANCE`).
+- **`apply`:** returns at once unless `buzzrelay.Enabled()` (the relay is experimental: `BUZZ_RELAY_ENABLED=true`), reads `BUZZ_ALLOW_PRIVATE_RELAYS`, mounts the routes, builds the `buzzrelay.Service` with the turn policy from the environment (`relaykit.PolicyFromEnv`, ADR 0x031), and starts a `relaykit.Supervisor` over `ListActiveBuzzConnections` (lock key `DefaultLockKey` = 80920034, `BUZZ_GATEWAY_LOCK_KEY`, `BUZZ_GATEWAY_SINGLE_INSTANCE`).
 - **Gateway (`plugin.go`):** one `buzzrelay.Session` per community row, a subscription per bound channel (`b:<binding id>`); connection states are recorded on the community, and a subscription the relay closes for access marks its binding broken.
 - **`Handler` (`handlers.go`):** identities (generate the persona's key, pause, remove, publish the profile), communities (join by open relay, invite with join terms, or an admin adding the npub; optional owner attestation; check again; pause), channels (list, join a public one), bindings (create with a sandboxed relay thread or an acknowledged existing one), a thread's Buzz state and the composer toggle.
   After a change it kicks the supervisor so the gateway reconciles at once.

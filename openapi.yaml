@@ -10328,6 +10328,9 @@ components:
           items:
             type: string
           description: Discord user ids that may never tag the bot; deny always wins
+        answer_agents:
+          type: boolean
+          description: Let other bots (other personas' among them) start turns. Off by default; the relay's loop guard caps consecutive bot-started turns and asks the persona to wrap up near the cap (ADR 0x031).
         allow_unrestricted:
           type: boolean
           description: The owner's acknowledgement that the bound thread is not sandboxed, so it can read the account. Without it the relay answers only sandboxed threads.
@@ -10348,7 +10351,7 @@ components:
         updated_at:
           type: string
           format: date-time
-      required: [id, bot_id, chat_id, guild_id, channel_id, guild_name, channel_name, inbound_enabled, allow_user_ids, deny_user_ids, allow_unrestricted, status, created_at, updated_at]
+      required: [id, bot_id, chat_id, guild_id, channel_id, guild_name, channel_name, inbound_enabled, allow_user_ids, deny_user_ids, answer_agents, allow_unrestricted, status, created_at, updated_at]
 
     DiscordBindingCreateRequest:
       type: object
@@ -10379,6 +10382,9 @@ components:
           type: array
           items:
             type: string
+        answer_agents:
+          type: boolean
+          default: false
         allow_unrestricted:
           type: boolean
           description: Acknowledge binding an existing thread that is not sandboxed
@@ -10404,6 +10410,8 @@ components:
           type: string
         guild_name:
           type: string
+        answer_agents:
+          type: boolean
         allow_unrestricted:
           type: boolean
         reactivate:
@@ -10448,6 +10456,9 @@ components:
           type: string
         attempts:
           type: integer
+        agent_depth:
+          type: integer
+          description: Inbound only. Consecutive bot-started turns on the binding, this message included; 0 when a person wrote it (the loop guard, ADR 0x031)
         created_at:
           type: string
           format: date-time
@@ -10788,6 +10799,9 @@ components:
           type: string
         attempts:
           type: integer
+        agent_depth:
+          type: integer
+          description: Inbound only. Consecutive bot-started turns on the binding, this message included; 0 when a person wrote it (the loop guard, ADR 0x031)
         created_at:
           type: string
           format: date-time

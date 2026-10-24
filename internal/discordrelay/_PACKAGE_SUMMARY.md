@@ -7,9 +7,12 @@ It talks to Discord through a small `Discord` interface (REST via discordgo), an
 
 ## Responsibilities
 
-- **Inbound (`Service.HandleInbound`):** decides whether a message tags the bot (`Triggered`: an @mention, or a reply to one of its messages; bots and webhooks never), applies the binding's allow and deny lists (`Allowed`), and re-checks the bound thread before every tag (`threadOpen`).
-  Accepted tags queue per relay thread (one turn at a time, 5 waiting), are recorded once (`RecordInboundDiscordMessage`, the dedupe key), and start a turn through `plugins.TurnStarter` with the text `name (Discord, #channel): text` (`PromptText`).
-- **Attachments in (`attachments_in.go`):** fetches files posted with a tag from Discord's CDN only (`CDNFetcher`: HTTPS, an allow-listed host, public addresses checked after DNS on every connection) and saves them through `plugins.AttachmentIngester`.
+- **Inbound (`Service.HandleInbound`):** decides whether a message tags the bot (`Triggered`: an @mention, or a reply to one of its messages; webhooks and the bot itself never), answers other bots only when the binding has `answer_agents`, applies the binding's allow and deny lists (`Allowed`), and re-checks the bound thread before every tag (`threadOpen`).
+  The first tag of an idle relay thread starts a turn at once; tags that arrive while it runs wait as one batch per Discord channel or thread (`relaykit.TurnQueue`, `Policy.BatchMax`) and are answered in one turn (ADR 0x031).
+  Each tag is recorded once (`RecordInboundDiscordMessage`, the dedupe key) with its agent depth, and the turn starts through `plugins.TurnStarter` with the text `name (Discord, #channel): text` (`PromptText`), a batch under a relay note (`relaykit.BatchPrompt`).
+- **Loop guard (`guardBatch`):** gives each tag its agent depth from the binding's newest inbound link (`LastInboundDiscordLink`), drops bot tags past the cap, adds the wrap-up note near it, and rate-limits bot-started turns (`relaykit.LoopGuard`).
+- **Channel renames:** a tag carries the bound channel's current name from the gateway's cache (`InboundMessage.BindingChannelName`), and `ChannelRenamed` (called by the gateway on `CHANNEL_UPDATE`, too) records it on the binding (`RenameDiscordChannel`).
+- **Attachments in (`attachments_in.go`):** fetches files posted with a tag (a batched turn shares one per-message budget) from Discord's CDN only (`CDNFetcher`: HTTPS, an allow-listed host, public addresses checked after DNS on every connection) and saves them through `plugins.AttachmentIngester`.
 - **Outbound (`Service.OnReply`, the reply hook):** posts a reply back to where the tag came from, and to any binding a composer toggle or `post_to_discord` armed (`ConsumeDiscordPendingPosts`); at most once per message and binding, with retries for transient errors.
 - **Formatting (`SplitForDiscord`):** 2000-character parts on paragraph and line boundaries, never splitting a code block without closing and reopening it; Markdown tables become code blocks.
 - **New relay thread defaults:** a server-created relay thread is a sandbox (`models.ContextScopeSandbox`), and the sandbox brings its own defaults (`models.SandboxDefaultDisabledTools`, applied by `datastore.CreateChat`); the relay keeps no list of its own.
@@ -37,6 +40,9 @@ It talks to Discord through a small `Discord` interface (REST via discordgo), an
 - **A reply can beat its inbound link.**
   The turn starter returns after the turn starts, so the link is attached late; a reply that finds no link while a relay turn runs in its thread is kept (`keepOrphan`) and posted once the link is attached.
   A waiting tag also stops waiting when its job completes, so the queue never stalls on a lost hook.
+- **One reply per batch.**
+  Every tag of a batch gets its own inbound link, all attached to the turn's one saved message; the reply goes to the newest tag (`FindInboundDiscordLink` returns it) and pings only its author.
+- **Nothing is posted to a bot:** no busy or failure notice, and nothing past the loop guard's cap, since a bot would answer it.
 - **Queues are race-free:** a tag is enqueued under the lock the idle worker takes before retiring (`relaykit.TurnQueue`), and tuning defaults are set once.
   The queue, the reply bookkeeping (`relaykit.Replies`) and the busy throttle are shared with the Buzz relay; the thin unexported wrappers (`enqueue`, `setWaiter`, `release`, `keepOrphan`, `takeOrphan`) keep this package's tests and call sites unchanged.
 - **No pings.** Every post sets `allowed_mentions` to parse nothing except the replied-to user.

@@ -21,7 +21,7 @@ func TestTriggered(t *testing.T) {
 		"mention":                {with(human, func(m *InboundMessage) { m.MentionUserIDs = []string{"999", botID} }), TriggerMention, true},
 		"reply to the bot":       {with(human, func(m *InboundMessage) { m.ReferencedMessageID = "r"; m.ReferencedAuthorID = botID }), TriggerReply, true},
 		"reply to someone else":  {with(human, func(m *InboundMessage) { m.ReferencedMessageID = "r"; m.ReferencedAuthorID = "333" }), "", false},
-		"another bot mentioning": {with(human, func(m *InboundMessage) { m.AuthorIsBot = true; m.MentionUserIDs = []string{botID} }), "", false},
+		"another bot mentioning": {with(human, func(m *InboundMessage) { m.AuthorIsBot = true; m.MentionUserIDs = []string{botID} }), TriggerMention, true}, // the binding decides
 		"webhook mentioning":     {with(human, func(m *InboundMessage) { m.WebhookID = "w"; m.MentionUserIDs = []string{botID} }), "", false},
 		"the bot itself":         {with(human, func(m *InboundMessage) { m.AuthorID = botID; m.MentionUserIDs = []string{botID} }), "", false},
 	}

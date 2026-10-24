@@ -3,6 +3,7 @@ package discordrelay
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +32,10 @@ type Store interface {
 	WithdrawDiscordBindingAcknowledgement(ctx context.Context, id uuid.UUID) error
 	SetDiscordBotStatus(ctx context.Context, id uuid.UUID, status models.DiscordBotStatus, lastError string) error
 	TouchDiscordBinding(ctx context.Context, id uuid.UUID) error
+	// LastInboundDiscordLink is the binding's newest inbound message since a time, for the
+	// loop guard; RenameDiscordChannel records a channel's current name on the bot's bindings.
+	LastInboundDiscordLink(ctx context.Context, bindingID uuid.UUID, since time.Time) (*models.DiscordMessageLink, error)
+	RenameDiscordChannel(ctx context.Context, botID uuid.UUID, channelID, name string) error
 	GetChatMessage(ctx context.Context, userID, id uuid.UUID) (*models.ChatMessage, error)
 	GetJob(ctx context.Context, userID, id uuid.UUID) (*models.Job, error)
 	// GetChat reads the bound thread, for the sandbox check on every tag.
@@ -91,16 +96,19 @@ type Service struct {
 	PollEvery time.Duration
 	// TurnTimeout bounds how long one inbound turn holds its thread's queue.
 	TurnTimeout time.Duration
-	// QueueDepth bounds the tags waiting behind a running turn, per thread.
-	QueueDepth int
+	// Policy paces turns: how many tags may wait as the next batch, and the agent-to-agent
+	// loop guard (relaykit.Policy; zero fields take the defaults).
+	Policy relaykit.Policy
 	// PostRetries is how many times a failed post is retried (transient errors only).
 	PostRetries int
 	// RetryBackoff is the wait before the first retry; it doubles each time.
 	RetryBackoff time.Duration
 
 	once sync.Once
-	// turns runs one inbound turn at a time per relay thread.
+	// turns runs one inbound turn at a time per relay thread, batching the tags that wait.
 	turns relaykit.TurnQueue[inboundWork]
+	// guard bounds exchanges with other bots.
+	guard *relaykit.LoopGuard
 	// replies matches finished replies with the inbound turns waiting for them.
 	replies relaykit.Replies
 	// busy throttles NoticeBusy per binding.
@@ -128,9 +136,6 @@ func (s *Service) setDefaults() {
 	if s.TurnTimeout <= 0 {
 		s.TurnTimeout = 10 * time.Minute
 	}
-	if s.QueueDepth <= 0 {
-		s.QueueDepth = 5
-	}
 	if s.PostRetries < 0 {
 		s.PostRetries = 0
 	} else if s.PostRetries == 0 {
@@ -139,15 +144,17 @@ func (s *Service) setDefaults() {
 	if s.RetryBackoff <= 0 {
 		s.RetryBackoff = 2 * time.Second
 	}
-	s.turns.Depth = s.QueueDepth
+	s.turns.Max = s.Policy.BatchMax
+	s.turns.Place = func(w inboundWork) string { return w.target.Binding.ID.String() + "/" + w.msg.ChannelID }
 	s.turns.Run = s.runInbound
+	s.guard = s.Policy.Guard()
 	s.replies.TTL = s.TurnTimeout
 	s.busy.Every = busyNoticeEvery
 }
 
 // HandleInbound is called for every message a connected bot sees. It returns at
-// once; accepted tags are queued behind any turn already running in the relay
-// thread, one turn at a time.
+// once; an accepted tag starts a turn, or, while one runs in the relay thread, waits
+// with the other tags of its place to be answered together (relaykit.TurnQueue).
 func (s *Service) HandleInbound(ctx context.Context, botID uuid.UUID, botUserID string, msg InboundMessage) {
 	s.defaults()
 	if _, ok := Triggered(msg, botUserID); !ok {
@@ -159,7 +166,11 @@ func (s *Service) HandleInbound(ctx context.Context, botID uuid.UUID, botUserID 
 		return
 	}
 	b := target.Binding
+	s.refreshChannelName(ctx, *target, msg)
 	if !b.InboundEnabled || b.Status != models.DiscordBindingActive {
+		return
+	}
+	if msg.AuthorIsBot && !b.AnswerAgents {
 		return
 	}
 	if !Allowed(msg.AuthorID, b.AllowUserIDs, b.DenyUserIDs) {
@@ -174,8 +185,29 @@ func (s *Service) HandleInbound(ctx context.Context, botID uuid.UUID, botUserID 
 	}
 	s.Logger.Warn("discord relay: queue full; dropping tag",
 		zap.String("binding_id", b.ID.String()), zap.String("discord_message_id", msg.ID))
-	if s.busyNoticeDue(b.ID) {
+	// Never to a bot: a notice it answers would feed the flood.
+	if !msg.AuthorIsBot && s.busyNoticeDue(b.ID) {
 		go s.notice(ctx, target.Bot.Token, msg.ChannelID, msg.ID, NoticeBusy)
+	}
+}
+
+// refreshChannelName records the bound channel's current name when a message carries one that
+// differs from the binding's (the channel was renamed in Discord). Renames are also caught as
+// they happen (ChannelRenamed); this catches those missed while no gateway was connected.
+func (s *Service) refreshChannelName(ctx context.Context, t models.DiscordBindingTarget, msg InboundMessage) {
+	name := strings.TrimPrefix(msg.BindingChannelName, "#")
+	if name == "" || name == t.Binding.ChannelName {
+		return
+	}
+	s.ChannelRenamed(ctx, t.Bot.ID, t.Binding.ChannelID, name)
+}
+
+// ChannelRenamed records a Discord channel's new name on the bot's bindings of it, so the app
+// and the relayed speaker labels show it. The gateway calls it on CHANNEL_UPDATE.
+func (s *Service) ChannelRenamed(ctx context.Context, botID uuid.UUID, channelID, name string) {
+	s.defaults()
+	if err := s.Store.RenameDiscordChannel(ctx, botID, channelID, name); err != nil {
+		s.Logger.Warn("discord relay: record channel rename", zap.String("discord_channel_id", channelID), zap.Error(err))
 	}
 }
 
@@ -218,44 +250,86 @@ func (s *Service) enqueue(ctx context.Context, chatID uuid.UUID, w inboundWork) 
 	return s.turns.Enqueue(ctx, chatID, w)
 }
 
-// runInbound turns one tag into a turn and waits for its reply to be posted (or
-// the turn to fail), keeping the typing indicator up meanwhile.
-func (s *Service) runInbound(ctx context.Context, w inboundWork) {
-	msg := w.msg
-	log := s.Logger.With(zap.String("binding_id", w.target.Binding.ID.String()), zap.String("discord_message_id", msg.ID))
+// runInbound turns a batch of tags (one, or those that waited together) into one turn, and
+// waits for its reply to be posted (or the turn to fail), keeping the typing indicator up
+// meanwhile. Each tag passes the loop guard first; the reply answers the newest.
+func (s *Service) runInbound(ctx context.Context, batch []inboundWork) {
+	s.defaults()
+	newest := batch[len(batch)-1]
+	log := s.Logger.With(zap.String("binding_id", newest.target.Binding.ID.String()), zap.String("discord_message_id", newest.msg.ID),
+		zap.Int("batch", len(batch)))
 
-	// The tag may have waited behind a running turn for minutes; re-check against the
+	// The tags may have waited behind a running turn for minutes; re-check against the
 	// binding and thread as they are now, and act on that state from here on. A binding
-	// repointed to another thread meanwhile drops the tag: it was accepted for this one.
-	fresh, err := s.Store.GetDiscordBindingTarget(ctx, w.target.Binding.ID)
-	if err != nil || fresh == nil || fresh.Binding.ChatID != w.target.Binding.ChatID ||
+	// repointed to another thread meanwhile drops them: they were accepted for this one.
+	fresh, err := s.Store.GetDiscordBindingTarget(ctx, newest.target.Binding.ID)
+	if err != nil || fresh == nil || fresh.Binding.ChatID != newest.target.Binding.ChatID ||
 		!fresh.Binding.InboundEnabled || fresh.Binding.Status != models.DiscordBindingActive ||
-		!Allowed(msg.AuthorID, fresh.Binding.AllowUserIDs, fresh.Binding.DenyUserIDs) ||
 		!s.threadOpen(ctx, *fresh) {
-		log.Info("discord relay: binding or thread no longer open; dropping queued tag")
+		log.Info("discord relay: binding or thread no longer open; dropping queued tags")
 		return
 	}
 	b, bot := fresh.Binding, fresh.Bot
 
-	link, created, err := s.Store.RecordInboundDiscordMessage(ctx, models.DiscordInbound{
-		BindingID:        b.ID,
-		DiscordMessageID: msg.ID,
-		DiscordChannelID: msg.ChannelID,
-		AuthorID:         msg.AuthorID,
-		AuthorName:       msg.AuthorName,
-	})
-	if err != nil {
-		log.Error("discord relay: record inbound", zap.Error(err))
+	msgs := make([]InboundMessage, 0, len(batch))
+	for _, w := range batch {
+		if (w.msg.AuthorIsBot && !b.AnswerAgents) || !Allowed(w.msg.AuthorID, b.AllowUserIDs, b.DenyUserIDs) {
+			continue
+		}
+		msgs = append(msgs, w.msg)
+	}
+	depths, turnDepth, ok := s.guardBatch(ctx, b.ID, msgs, log)
+	if !ok {
 		return
 	}
-	if !created {
-		return // already answered (a redelivered event)
-	}
 
-	attachments, notes := s.ingestInbound(ctx, bot.OwnerID, b.ChatID, msg)
-	prompt := PromptText(msg, bot.BotUserID, b.ChannelName)
-	if len(notes) > 0 {
-		prompt += "\n" + strings.Join(notes, "\n")
+	type recorded struct {
+		msg  InboundMessage
+		link *models.DiscordMessageLink
+	}
+	var tags []recorded
+	for i, msg := range msgs {
+		if depths[i] < 0 {
+			continue // past the loop guard's cap
+		}
+		link, created, err := s.Store.RecordInboundDiscordMessage(ctx, models.DiscordInbound{
+			BindingID:        b.ID,
+			DiscordMessageID: msg.ID,
+			DiscordChannelID: msg.ChannelID,
+			AuthorID:         msg.AuthorID,
+			AuthorName:       msg.AuthorName,
+			AgentDepth:       depths[i],
+		})
+		if err != nil {
+			log.Error("discord relay: record inbound", zap.Error(err))
+			continue
+		}
+		if !created {
+			continue // already answered (a redelivered event)
+		}
+		tags = append(tags, recorded{msg: msg, link: link})
+	}
+	if len(tags) == 0 {
+		return
+	}
+	last := tags[len(tags)-1].msg
+
+	var (
+		lines       []string
+		attachments []*models.FileAttachment
+	)
+	for _, tag := range tags {
+		atts, notes := s.ingestInbound(ctx, bot.OwnerID, b.ChatID, tag.msg, MaxInboundAttachments-len(attachments))
+		attachments = append(attachments, atts...)
+		line := PromptText(tag.msg, bot.BotUserID, b.ChannelName)
+		if len(notes) > 0 {
+			line += "\n" + strings.Join(notes, "\n")
+		}
+		lines = append(lines, line)
+	}
+	prompt := relaykit.BatchPrompt(lines)
+	if hint := s.guard.Hint(turnDepth); hint != "" {
+		prompt += "\n" + hint
 	}
 	done := make(chan struct{})
 	resp, err := s.Turns.StartUserTurn(ctx, plugins.UserTurn{
@@ -272,23 +346,54 @@ func (s *Service) runInbound(ctx context.Context, w inboundWork) {
 	})
 	if err != nil {
 		log.Warn("discord relay: start turn", zap.Error(err))
-		_ = s.Store.DeleteDiscordLink(ctx, link.ID)
-		s.notice(ctx, bot.Token, msg.ChannelID, msg.ID, NoticeFailed)
+		for _, tag := range tags {
+			_ = s.Store.DeleteDiscordLink(ctx, tag.link.ID)
+		}
+		if !last.AuthorIsBot {
+			s.notice(ctx, bot.Token, last.ChannelID, last.ID, NoticeFailed)
+		}
 		return
 	}
 	s.setWaiter(resp.ID, done)
 	defer s.clearWaiter(resp.ID)
-	if err := s.Store.AttachDiscordLinkMessage(ctx, link.ID, resp.ID); err != nil {
-		log.Error("discord relay: attach inbound message", zap.Error(err))
+	for _, tag := range tags {
+		if err := s.Store.AttachDiscordLinkMessage(ctx, tag.link.ID, resp.ID); err != nil {
+			log.Error("discord relay: attach inbound message", zap.Error(err))
+		}
 	}
 	_ = s.Store.TouchDiscordBinding(ctx, b.ID)
-	// A reply that finished before the link was attached found no link; post it now.
+	// A reply that finished before the links were attached found none; post it now.
 	if ev, ok := s.takeOrphan(resp.ID); ok {
 		s.OnReply(ctx, ev)
 	}
 
 	jobID, _ := uuid.Parse(resp.JobID)
-	s.waitForReply(ctx, bot, msg, jobID, done)
+	s.waitForReply(ctx, bot, last, jobID, done)
+}
+
+// guardBatch applies the loop guard to a batch's tags (relaykit.LoopGuard.Batch), from the
+// binding's newest inbound link: each tag's agent depth, or -1 when it is dropped past the cap.
+func (s *Service) guardBatch(ctx context.Context, bindingID uuid.UUID, msgs []InboundMessage, log *zap.Logger) (depths []int, turnDepth int, ok bool) {
+	var prev *relaykit.LastInbound
+	if last, err := s.Store.LastInboundDiscordLink(ctx, bindingID, s.guard.Since()); err != nil {
+		log.Warn("discord relay: read the loop guard's previous message", zap.Error(err))
+	} else if last != nil {
+		prev = &relaykit.LastInbound{Depth: last.AgentDepth, At: last.CreatedAt}
+	}
+	fromBot := make([]bool, len(msgs))
+	for i, m := range msgs {
+		fromBot[i] = m.AuthorIsBot
+	}
+	depths, turnDepth, ok = s.guard.Batch(bindingID, fromBot, prev)
+	for i, d := range depths {
+		if d < 0 {
+			log.Info("discord relay: loop guard: too many bot turns in a row; dropping tag", zap.String("dropped_message_id", msgs[i].ID))
+		}
+	}
+	if !ok && slices.ContainsFunc(depths, func(d int) bool { return d > 0 }) {
+		log.Info("discord relay: loop guard: hourly budget of bot-started turns spent; dropping tags")
+	}
+	return depths, turnDepth, ok
 }
 
 func (s *Service) waitForReply(ctx context.Context, bot models.DiscordBotCredentials, msg InboundMessage, jobID uuid.UUID, done <-chan struct{}) {
@@ -319,7 +424,9 @@ func (s *Service) waitForReply(ctx context.Context, bot models.DiscordBotCredent
 				continue
 			}
 			if job.Status == models.JobStatusFailed || job.Status == models.JobStatusCancelled {
-				s.notice(ctx, bot.Token, msg.ChannelID, msg.ID, NoticeFailed)
+				if !msg.AuthorIsBot {
+					s.notice(ctx, bot.Token, msg.ChannelID, msg.ID, NoticeFailed)
+				}
 				return
 			}
 			if job.Status == models.JobStatusComplete {

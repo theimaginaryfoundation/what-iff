@@ -79,6 +79,7 @@ func createBuzzTestTables(t *testing.T, db *sql.DB) {
 			status text NOT NULL DEFAULT 'received',
 			error text,
 			attempts integer NOT NULL DEFAULT 0,
+			agent_depth integer NOT NULL DEFAULT 0,
 			buzz_binding_links uuid NOT NULL REFERENCES buzz_bindings(id) ON DELETE CASCADE,
 			UNIQUE (event_id, buzz_binding_links)
 		)`,
@@ -353,4 +354,42 @@ func TestBuzzPendingPostsAndCascade(t *testing.T) {
 	bindings, err := f.ds.ListBuzzBindings(ctx, f.owner)
 	require.NoError(t, err)
 	assert.Empty(t, bindings, "removing the identity removes its bindings")
+}
+
+func TestBuzzBatchLinksLoopDepthAndRenames(t *testing.T) {
+	f := newBuzzFixture(t)
+	ctx := context.Background()
+	a := f.agent(t)
+	c := f.community(t, a.ID)
+	b := f.binding(t, c.ID, "chan-1")
+	start := time.Now().Add(-time.Minute)
+
+	msgID := uuid.New()
+	for _, in := range []models.BuzzInbound{
+		{BindingID: b.ID, EventID: "ev1", ThreadRoot: "ev1", AuthorPubKey: "alice", AuthorName: "Alice"},
+		{BindingID: b.ID, EventID: "ev2", ThreadRoot: "ev2", AuthorPubKey: "nova", AuthorName: "Nova", AgentDepth: 1},
+	} {
+		link, created, err := f.ds.RecordInboundBuzzMessage(ctx, in)
+		require.NoError(t, err)
+		require.True(t, created)
+		require.NoError(t, f.ds.AttachBuzzLinkMessage(ctx, link.ID, msgID))
+		time.Sleep(2 * time.Millisecond)
+	}
+	found, err := f.ds.FindInboundBuzzLink(ctx, msgID)
+	require.NoError(t, err)
+	require.NotNil(t, found)
+	assert.Equal(t, "ev2", *found.EventID, "the reply answers the newest event")
+	speaker, err := f.ds.ExternalSpeakerForMessage(ctx, f.owner, msgID)
+	require.NoError(t, err)
+	assert.Equal(t, "Alice, Nova", speaker)
+
+	last, err := f.ds.LastInboundBuzzLink(ctx, b.ID, start)
+	require.NoError(t, err)
+	require.NotNil(t, last)
+	assert.Equal(t, 1, last.AgentDepth)
+
+	require.NoError(t, f.ds.RenameBuzzChannel(ctx, b.ID, "#lounge"))
+	got, err := f.ds.GetBuzzBinding(ctx, f.owner, b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "lounge", got.ChannelName)
 }

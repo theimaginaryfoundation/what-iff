@@ -415,7 +415,7 @@ describe('BuzzTabComponent', () => {
     it('toggles mentions and answering other agents, which starts off', async () => {
       const { tick, q, root } = await create();
       expect(q<HTMLInputElement>('buzz-binding-agents')!.checked).toBe(false);
-      expect(root.textContent).toContain('not yet stopped from looping');
+      expect(root.textContent).toContain('a person has to speak');
       await tick('buzz-binding-agents');
       expect(buzz['updateBinding']).toHaveBeenCalledWith('b1', { answer_agents: true });
       await tick('buzz-binding-inbound', false);

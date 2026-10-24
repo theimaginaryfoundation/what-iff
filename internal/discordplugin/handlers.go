@@ -431,6 +431,8 @@ type createBindingRequest struct {
 	InboundEnabled *bool      `json:"inbound_enabled"`
 	AllowUserIDs   []string   `json:"allow_user_ids"`
 	DenyUserIDs    []string   `json:"deny_user_ids"`
+	// AnswerAgents lets other bots start turns (within the relay's loop guard).
+	AnswerAgents bool `json:"answer_agents"`
 	// AllowUnrestricted acknowledges binding an existing thread that is not sandboxed.
 	// Without it such a thread is refused with a 400.
 	AllowUnrestricted bool `json:"allow_unrestricted"`
@@ -494,6 +496,7 @@ func (h *Handler) createBinding(w http.ResponseWriter, r *http.Request) {
 		InboundEnabled: inbound,
 		AllowUserIDs:   cleanIDs(req.AllowUserIDs),
 		DenyUserIDs:    cleanIDs(req.DenyUserIDs),
+		AnswerAgents:   req.AnswerAgents,
 
 		AllowUnrestricted: allowUnrestricted,
 	})
@@ -532,6 +535,7 @@ type updateBindingRequest struct {
 	DenyUserIDs    *[]string  `json:"deny_user_ids"`
 	ChannelName    *string    `json:"channel_name"`
 	GuildName      *string    `json:"guild_name"`
+	AnswerAgents   *bool      `json:"answer_agents"`
 	// AllowUnrestricted acknowledges (true) or withdraws (false) the owner's
 	// acknowledgement that the thread is not sandboxed. Repointing to
 	// such a thread requires it; sending it alone acknowledges the current thread.
@@ -555,7 +559,7 @@ func (h *Handler) updateBinding(w http.ResponseWriter, r *http.Request) {
 	}
 	p := models.DiscordBindingPatch{
 		ChatID: req.ChatID, InboundEnabled: req.InboundEnabled,
-		ChannelName: req.ChannelName, GuildName: req.GuildName,
+		ChannelName: req.ChannelName, GuildName: req.GuildName, AnswerAgents: req.AnswerAgents,
 	}
 	if req.AllowUserIDs != nil {
 		ids := cleanIDs(*req.AllowUserIDs)

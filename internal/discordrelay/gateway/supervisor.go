@@ -45,11 +45,19 @@ type BotSource interface {
 	ActiveBots(ctx context.Context) ([]Bot, error)
 }
 
-// Sink receives a message seen by a bot. It is called on the connection's event
-// goroutine, so it must return quickly (hand work off) and be safe for
-// concurrent use across bots.
+// Sink receives what a bot sees: messages, and renames of channels. It is called on the
+// connection's event goroutine, so it must return quickly (hand work off) and be safe
+// for concurrent use across bots.
 type Sink interface {
 	HandleInbound(ctx context.Context, bot Bot, msg discordrelay.InboundMessage)
+	ChannelRenamed(ctx context.Context, bot Bot, channelID, name string)
+}
+
+// Handlers are a connection's event callbacks.
+type Handlers struct {
+	Message func(discordrelay.InboundMessage)
+	// ChannelRenamed is told a channel's new name (CHANNEL_UPDATE).
+	ChannelRenamed func(channelID, name string)
 }
 
 // Lock, Locker and Conn are relaykit's.
@@ -59,8 +67,8 @@ type (
 	Conn   = relaykit.Conn
 )
 
-// Dialer opens a connection for bot and delivers its messages to onMessage.
-type Dialer func(ctx context.Context, bot Bot, onMessage func(discordrelay.InboundMessage)) (Conn, error)
+// Dialer opens a connection for bot and delivers its events to on.
+type Dialer func(ctx context.Context, bot Bot, on Handlers) (Conn, error)
 
 // Supervisor keeps the connection set in line with BotSource while it leads. It is the
 // Discord face of relaykit.Supervisor: one connection per active bot, reopened when the
@@ -99,8 +107,11 @@ func (s *Supervisor) inner() *relaykit.Supervisor[Bot] {
 				return b.fingerprint()
 			},
 			Dial: func(ctx context.Context, bot Bot) (relaykit.Conn, error) {
-				return s.Dial(ctx, bot, func(msg discordrelay.InboundMessage) {
-					s.Sink.HandleInbound(ctx, bot, msg)
+				return s.Dial(ctx, bot, Handlers{
+					Message: func(msg discordrelay.InboundMessage) { s.Sink.HandleInbound(ctx, bot, msg) },
+					ChannelRenamed: func(channelID, name string) {
+						s.Sink.ChannelRenamed(ctx, bot, channelID, name)
+					},
 				})
 			},
 			Logger:         s.Logger,

@@ -34,6 +34,8 @@ export interface DiscordBinding {
   inbound_enabled: boolean;
   allow_user_ids: string[];
   deny_user_ids: string[];
+  /** Whether other bots (other personas' among them) may start turns, within the relay's loop guard. */
+  answer_agents: boolean;
   /**
    * The owner's acknowledgement that the bound thread is not sandboxed: anyone allowed to tag the
    * bot can use what it reads. Without it the relay answers only sandboxed threads.
@@ -97,6 +99,7 @@ export interface UpdateDiscordBindingRequest {
   inbound_enabled?: boolean;
   allow_user_ids?: string[];
   deny_user_ids?: string[];
+  answer_agents?: boolean;
   /** Acknowledge (true) or withdraw (false) that the bound thread is not sandboxed. */
   allow_unrestricted?: boolean;
   reactivate?: boolean;
