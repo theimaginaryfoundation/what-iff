@@ -8,9 +8,15 @@
 //	buzz-rig say      -relay <url> -as <hex secret> -channel <id> -text <text> [-mention <npub|hex>]... [-reply <event id>] [-file <path>]
 //	buzz-rig watch    -relay <url> -as <hex secret> -channel <id> [-for 60s]  print the channel's messages as they arrive
 //	buzz-rig channels -relay <url> -as <hex secret>                          list channels
-//	buzz-rig profile  -relay <url> -as <hex secret> -name <display name>     publish a profile (so the persona sees a name)
+//	buzz-rig profile  -relay <url> -as <hex secret> -name <display name> [-bot]  publish a profile (so the persona sees a name)
+//	buzz-rig add-member -relay <url> -owner <hex secret> -channel <id> -add <npub|hex>...  add members to a channel
+//	buzz-rig wait     -relay <url> -as <hex secret> -channel <id> -match <regexp> [-for 10m]
+//	                  wait for a new message that mentions this key or matches the pattern (case-insensitive),
+//	                  print it as JSON and exit 0; exit 3 on timeout. For driving an agent from a script.
 //
 // -relay accepts http:// and ws:// (local relays). BUZZ_RIG_OWNER / BUZZ_RIG_AS supply -owner / -as.
+// -auth (or BUZZ_RIG_AUTH) is a NIP-OA attestation (the JSON auth tag, from attest) carried on
+// everything signed with -as, so the key acts as its owner's agent.
 package main
 
 import (
@@ -21,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -51,6 +58,11 @@ func main() {
 	file := fs.String("file", "", "a file to attach (uploaded to the community's media store)")
 	conditions := fs.String("conditions", "", "NIP-OA conditions (e.g. created_at<1900000000)")
 	watchFor := fs.Duration("for", time.Minute, "how long to watch")
+	authTag := fs.String("auth", os.Getenv("BUZZ_RIG_AUTH"), "NIP-OA attestation (JSON auth tag) for -as")
+	bot := fs.Bool("bot", false, "mark the profile as a bot")
+	since := fs.Duration("since", 10*time.Minute, "how far back watch starts")
+	fullIDs := fs.Bool("ids", false, "print full event ids (watch)")
+	match := fs.String("match", "", "pattern a message must match (wait)")
 	var add, mention multi
 	fs.Var(&add, "add", "member to add (repeatable)")
 	fs.Var(&mention, "mention", "pubkey to mention (repeatable)")
@@ -61,6 +73,17 @@ func main() {
 	c := buzzrelay.NewClient(true)
 	ep, _, err := buzzrelay.ParseEndpoint(*relay, true)
 	check(err)
+	// actor is who -as signs as, with the attestation when one was given.
+	actor := func() buzzrelay.Signer {
+		s := buzzrelay.Signer{Keys: keys(*as, "-as")}
+		if strings.TrimSpace(*authTag) != "" {
+			att, err := nostr.ParseAttestation(*authTag)
+			check(err)
+			check(att.Verify(s.Keys.PublicKey()))
+			s.Attestation = att
+		}
+		return s
+	}
 
 	switch cmd {
 	case "attest":
@@ -88,8 +111,7 @@ func main() {
 		check(err)
 		fmt.Println(u)
 	case "say":
-		k := keys(*as, "-as")
-		s := buzzrelay.Signer{Keys: k}
+		s := actor()
 		var mentions []string
 		for _, m := range mention {
 			pub, err := nostr.NormalizePubKey(m)
@@ -119,10 +141,10 @@ func main() {
 		check(c.Publish(ctx, ep, s, ev))
 		fmt.Println(ev.ID)
 	case "watch":
-		s := buzzrelay.Signer{Keys: keys(*as, "-as")}
+		s := actor()
 		names := map[string]string{}
 		session := c.Open(ctx, buzzrelay.SessionConfig{
-			Endpoint: ep, Signer: s, Start: time.Now().Add(-10 * time.Minute),
+			Endpoint: ep, Signer: s, Start: time.Now().Add(-*since),
 			Subs: map[string]buzzrelay.Filter{"c": {"kinds": []int{buzzrelay.KindStreamMessage}, "#h": []string{*channel}}},
 			OnEvent: func(_ string, ev nostr.Event) {
 				who, ok := names[ev.PubKey]
@@ -140,7 +162,11 @@ func main() {
 				if t.Root != "" {
 					where = " (in thread " + t.Root[:8] + ")"
 				}
-				fmt.Printf("%s %s%s [%s]: %s\n", time.Unix(ev.CreatedAt, 0).Format("15:04:05"), who, where, ev.ID[:8], ev.Content)
+				id := ev.ID[:8]
+				if *fullIDs {
+					id = ev.ID
+				}
+				fmt.Printf("%s %s%s [%s]: %s\n", time.Unix(ev.CreatedAt, 0).Format("15:04:05"), who, where, id, ev.Content)
 			},
 			OnState: func(st buzzrelay.SessionState, detail string) { fmt.Fprintf(os.Stderr, "[%s] %s\n", st, detail) },
 		})
@@ -150,13 +176,64 @@ func main() {
 		if *name == "" {
 			fail("-name is required")
 		}
-		s := buzzrelay.Signer{Keys: keys(*as, "-as")}
-		ev, err := buzzrelay.ProfileEvent(s, buzzrelay.Profile{Name: *name, DisplayName: *name})
+		s := actor()
+		ev, err := buzzrelay.ProfileEvent(s, buzzrelay.Profile{Name: *name, DisplayName: *name, Bot: *bot})
 		check(err)
 		check(c.Publish(ctx, ep, s, ev))
 		fmt.Println(ev.ID)
+	case "add-member":
+		s := buzzrelay.Signer{Keys: keys(*owner, "-owner")}
+		for _, m := range add {
+			pub, err := nostr.NormalizePubKey(m)
+			check(err)
+			publish(ctx, c, ep, s, buzzrelay.KindPutUser, nostr.Tags{{"h", *channel}, {"p", pub}})
+		}
+	case "wait":
+		s := actor()
+		me := s.Keys.PublicKey()
+		var re *regexp.Regexp
+		if *match != "" {
+			compiled, err := regexp.Compile("(?i)" + *match)
+			if err != nil {
+				fail("-match is not a valid pattern: " + err.Error())
+			}
+			re = compiled
+		}
+		start := time.Now()
+		found := make(chan nostr.Event, 1)
+		session := c.Open(ctx, buzzrelay.SessionConfig{
+			Endpoint: ep, Signer: s, Start: start,
+			Subs: map[string]buzzrelay.Filter{"c": {"kinds": []int{buzzrelay.KindStreamMessage}, "#h": []string{*channel}}},
+			OnEvent: func(_ string, ev nostr.Event) {
+				if ev.PubKey == me || ev.CreatedAt < start.Unix() {
+					return
+				}
+				if buzzrelay.Mentions(ev, me) || (re != nil && re.MatchString(ev.Content)) {
+					select {
+					case found <- ev:
+					default:
+					}
+				}
+			},
+		})
+		defer session.Close()
+		select {
+		case ev := <-found:
+			who := buzzrelay.ShortNPub(ev.PubKey)
+			if p, err := c.Query(ctx, ep, s, buzzrelay.Filter{"kinds": []int{0}, "authors": []string{ev.PubKey}, "limit": 1}); err == nil && len(p) > 0 {
+				if l := buzzrelay.ParseProfile(p[0]).Label(); l != "" {
+					who = l
+				}
+			}
+			out, _ := json.Marshal(map[string]any{"id": ev.ID, "author": who, "pubkey": ev.PubKey,
+				"agent": buzzrelay.FromAgent(ev), "thread": buzzrelay.ThreadOf(ev), "content": ev.Content})
+			fmt.Println(string(out))
+		case <-time.After(*watchFor):
+			fmt.Fprintln(os.Stderr, "buzz-rig: nothing matched")
+			os.Exit(3)
+		}
 	case "channels":
-		s := buzzrelay.Signer{Keys: keys(*as, "-as")}
+		s := actor()
 		info, err := c.Info(ctx, ep)
 		check(err)
 		chans, err := buzzrelay.ListChannels(ctx, c, ep, s, info.Self)
@@ -195,6 +272,6 @@ func fail(msg string) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: buzz-rig attest|channel|invite|say|watch|channels|profile [flags] (see the package comment)")
+	fmt.Fprintln(os.Stderr, "usage: buzz-rig attest|channel|add-member|invite|say|watch|wait|channels|profile [flags] (see the package comment)")
 	os.Exit(2)
 }
