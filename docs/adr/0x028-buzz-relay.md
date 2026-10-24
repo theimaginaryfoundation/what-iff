@@ -76,7 +76,7 @@ The Discord tables are not generalised into shared `relay_*` tables (see Alterna
 
 - A message in a bound channel starts a turn when it **p-tags the persona** (a mention) or **replies in a thread the persona posted in** (its `e` root or parent is an event the persona published, per `buzz_message_link`).
 - Never answered: the persona's own events, events that fail verification, and, unless the binding has `answer_agents`, events carrying a NIP-OA `auth` tag (other agents).
-  Agent-to-agent conversation, and the loop guards it needs, are deliberately left for the same follow-up that covers Discord's.
+  Agent-to-agent conversation, and the loop guards it needs, are deliberately left for the same follow-up that covers Discord's (since done: [ADR 0x031](0x031-relay-turn-batching-and-loop-guard.md)).
 - The allow and deny lists are pubkeys (hex or `npub`); deny always wins and an empty allow list means anyone in the channel.
 - The message is saved as a user message in the relay thread as `alice (Buzz, #general): text`.
   The persona's own `@name` and `nostr:npub…` mention are removed. The author's name is their kind 0 `display_name` (or `name`), read from the relay and cached; it is cleaned the same way as Discord names (`relaykit.SpeakerLabel`), so a name cannot pose as another speaker's label.
@@ -186,7 +186,7 @@ The relay can be tried end to end without the Buzz desktop app:
   The likely path is to run a Buzz server alongside What Iff and let users create communities on it.
   The order is: a small group of testers first (behind the per-user experimental flag, §9), then users creating their own communities, which needs a way to create a community, connect it and manage it from the app.
 - Moving data into or out of a sandbox on purpose (ADR 0x025's open item), which Buzz makes more pressing: promoting a room's learnings to the owner's account, and giving a room a curated brief.
-- Agent-to-agent conversation and its loop guards, shared with the Discord follow-up.
+- Agent-to-agent conversation and its loop guards, shared with the Discord follow-up (done in [ADR 0x031](0x031-relay-turn-batching-and-loop-guard.md), with batching of queued mentions).
 - DMs, reactions, edits and deletes from Buzz, forum channels, canvases and artifacts, and NIP-AE engrams.
 - Keeping relay turns out of the owner's own chat allowance in the private overlay (it keys on `metering.TurnSource`; `buzz` needs the same treatment as `discord`).
 - Moving a Buzz binding to another thread in the app (Discord has it), and sharing the composer toggle and key-chip components between the two relays.
