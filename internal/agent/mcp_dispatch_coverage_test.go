@@ -116,6 +116,10 @@ func TestDispatchMCPToolUse_ReturnsGeneratedAttachments(t *testing.T) {
 	require.Equal(t, tinyPNG, atts[0].FileContent)
 }
 
+// A successful call keeps its text and generated media; a tool-reported failure (isError) reaches
+// the model as its text with the error flag and persisted ToolError, and its media is dropped, the
+// same as any other tool that errors. The reply also carries structuredContent, which must not be
+// appended to text that is already there.
 func TestExecuteToolUses_MCPResultsPreserveStatusAndContent(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
@@ -183,12 +187,10 @@ func TestExecuteToolUses_MCPResultsPreserveStatusAndContent(t *testing.T) {
 				Name:  fullToolName,
 				Input: json.RawMessage(`{"metric":"cpu"}`),
 			}})
-			require.Len(t, atts, 1)
 			require.Len(t, results, 1)
 			require.Equal(t, tt.isError, results[0].IsErr)
 			require.Equal(t, "mcp-img", results[0].ID)
-			require.Contains(t, results[0].Output, "graph result\nStructured content:\n")
-			require.JSONEq(t, `{"count":0,"enabled":false}`, strings.SplitN(results[0].Output, "Structured content:\n", 2)[1])
+			require.Equal(t, "graph result", results[0].Output, "text only: structuredContent is not repeated after it")
 			require.Len(t, calls, 1)
 			if tt.isError {
 				require.Equal(t, results[0].Output, calls[0].ToolError)
@@ -197,6 +199,12 @@ func TestExecuteToolUses_MCPResultsPreserveStatusAndContent(t *testing.T) {
 				require.Equal(t, results[0].Output, calls[0].ToolOutput)
 				require.Empty(t, calls[0].ToolError)
 			}
+			if tt.isError {
+				require.Empty(t, atts, "media in an error result is not kept")
+				require.Empty(t, results[0].Images)
+				return
+			}
+			require.Len(t, atts, 1)
 			require.Len(t, results[0].Images, 1)
 			require.Equal(t, "image/png", results[0].Images[0].MediaType)
 			require.NotEmpty(t, results[0].Images[0].RawBytes)

@@ -26,10 +26,18 @@ func TestParseToolCallResult_Output(t *testing.T) {
 			output: "done",
 		},
 		{
-			name:       "structured content alongside text",
+			// The text already is the model-facing rendering (the spec has servers repeat the JSON
+			// there), so the structured payload is kept on the result but not appended to Output.
+			name:       "structured content alongside text is not appended",
 			input:      `{"content":[{"type":"text","text":"created"}],"structuredContent":{"id":"new","count":0,"enabled":false}}`,
-			output:     "created\nStructured content:\n{\"id\":\"new\",\"count\":0,\"enabled\":false}",
+			output:     "created",
 			structured: `{"id":"new","count":0,"enabled":false}`,
+		},
+		{
+			name:       "structured content alongside an image only",
+			input:      `{"content":[{"type":"image","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==","mimeType":"image/png"}],"structuredContent":{"id":"new"}}`,
+			output:     "Structured content:\n{\"id\":\"new\"}",
+			structured: `{"id":"new"}`,
 		},
 		{
 			name:       "structured content without text",
@@ -44,9 +52,16 @@ func TestParseToolCallResult_Output(t *testing.T) {
 			isError: true,
 		},
 		{
-			name:       "error with text and structured content",
+			name:       "error with text and structured content keeps the text",
 			input:      `{"content":[{"type":"text","text":"rejected"}],"isError":true,"structuredContent":{"code":"conflict"}}`,
-			output:     "rejected\nStructured content:\n{\"code\":\"conflict\"}",
+			output:     "rejected",
+			isError:    true,
+			structured: `{"code":"conflict"}`,
+		},
+		{
+			name:       "error with structured content only reports the structured details",
+			input:      `{"content":[],"isError":true,"structuredContent":{"code":"conflict"}}`,
+			output:     "Structured content:\n{\"code\":\"conflict\"}",
 			isError:    true,
 			structured: `{"code":"conflict"}`,
 		},

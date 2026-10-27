@@ -11,7 +11,8 @@ import (
 const toolErrorFallback = "MCP tool reported an error"
 
 // CallToolResult retains MCP tool status, structured data and generated media.
-// Output includes text and structured content for consumers of string tool results.
+// Output is the model-facing text; structured content is folded into it only when the result
+// carries no text of its own.
 type CallToolResult struct {
 	Output               string
 	IsError              bool
@@ -60,7 +61,12 @@ func (c *Client) parseToolCallResult(result json.RawMessage) (CallToolResult, bo
 			}
 		}
 	}
-	if len(parsed.StructuredContent) > 0 {
+	// The spec has a tool that returns structuredContent also return it serialized in a text
+	// block, and servers that render for the model (mcp-ts-core, for one) send a formatted summary
+	// instead. Either way the text is what the model should read, so appending the JSON as well
+	// only duplicates it (2x to 9x the tokens on real replies). Use it only when there is no text;
+	// it stays available on CallToolResult.StructuredContent either way.
+	if len(parsed.StructuredContent) > 0 && len(textParts) == 0 {
 		textParts = append(textParts, "Structured content:\n"+string(parsed.StructuredContent))
 	}
 	callResult.Output = strings.Join(textParts, "\n")
