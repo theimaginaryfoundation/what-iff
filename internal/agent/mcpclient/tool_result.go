@@ -2,7 +2,6 @@ package mcpclient
 
 import (
 	"encoding/json"
-	"errors"
 	"strings"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -20,16 +19,27 @@ type CallToolResult struct {
 	GeneratedAttachments []*models.FileAttachment
 }
 
-// Err reports a tool-level failure separately from transport and protocol errors.
-// Detailed invocation methods return these failures in CallToolResult, not their error value.
+// ToolReportedError is a failure the MCP server reported in a successful reply (isError: true),
+// as opposed to a transport or protocol error. It is the model's to read and recover from, not
+// a fault in this system, so callers can tell it apart (errors.As) and log it accordingly. Its
+// message is whatever the server wrote and can echo user data: do not log it.
+type ToolReportedError struct {
+	Message string
+}
+
+func (e *ToolReportedError) Error() string { return e.Message }
+
+// Err reports a tool-level failure separately from transport and protocol errors, as a
+// *ToolReportedError. Detailed invocation methods return these failures in CallToolResult, not
+// their error value.
 func (r CallToolResult) Err() error {
 	if !r.IsError {
 		return nil
 	}
 	if r.Output == "" {
-		return errors.New(toolErrorFallback)
+		return &ToolReportedError{Message: toolErrorFallback}
 	}
-	return errors.New(r.Output)
+	return &ToolReportedError{Message: r.Output}
 }
 
 func (c *Client) parseToolCallResult(result json.RawMessage) (CallToolResult, bool) {

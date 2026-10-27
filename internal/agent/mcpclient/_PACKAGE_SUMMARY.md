@@ -19,6 +19,7 @@ In-process MCP runtime client for connector tool discovery and invocation.
 - `DiscoverTools`: resolves tool manifests for eligible connectors.
 - `CallToolByFullName`: resolves connector/tool target and performs MCP invocation.
 - `CallToolResult`: detailed result with tool status, structured data, model-visible output, attachments, and `Err()` for tool-level failures.
+- `ToolReportedError`: the typed error `Err()` returns for a failure the server reported (`isError`). Callers distinguish it with `errors.As` from transport and protocol errors (the agent logs it at Warn, without its text).
 
 ## Dependencies
 

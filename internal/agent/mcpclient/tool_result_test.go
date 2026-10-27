@@ -96,6 +96,16 @@ func TestCallToolResult_ErrWithoutOutput(t *testing.T) {
 	require.EqualError(t, (CallToolResult{IsError: true}).Err(), "MCP tool reported an error")
 }
 
+// Callers tell a failure the server reported (the model's to recover from) from a transport or
+// protocol error by type, so they can log the two differently.
+func TestCallToolResult_ErrIsATypedToolReportedError(t *testing.T) {
+	var reported *ToolReportedError
+	require.ErrorAs(t, (CallToolResult{IsError: true, Output: "rejected"}).Err(), &reported)
+	require.Equal(t, "rejected", reported.Message)
+	require.ErrorAs(t, (CallToolResult{IsError: true}).Err(), &reported, "the fallback message is typed too")
+	require.NoError(t, (CallToolResult{Output: "fine"}).Err())
+}
+
 func TestParseToolCallResult_RawFallback(t *testing.T) {
 	for _, input := range []string{`{"status":"ok"}`, `{"content":[{"type":"unknown"}]}`, `not json`} {
 		_, ok := New(nil, nil).parseToolCallResult(json.RawMessage(input))

@@ -92,7 +92,7 @@ func TestExecuteToolUse_UnknownToolRecordsOtherWithError(t *testing.T) {
 	a, tm := newMetricsAgent(t)
 	chatCtx := &chatContext{chat: &models.Chat{}}
 
-	res, _ := a.executeToolUseWithRecovery(context.Background(), chatCtx, provider.ToolUse{ID: "t1", Name: "hallucinated_tool_42"})
+	res, _, _ := a.executeToolUseWithRecovery(context.Background(), chatCtx, provider.ToolUse{ID: "t1", Name: "hallucinated_tool_42"})
 	require.True(t, res.IsErr)
 
 	name := telemetry.ToolDuration.Name
