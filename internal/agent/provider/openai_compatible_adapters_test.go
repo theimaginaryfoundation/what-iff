@@ -133,6 +133,8 @@ func TestOpenAICompatibleAdapters_Call_TextResponse(t *testing.T) {
 			require.Equal(t, "hello there", resp.Text)
 			require.Equal(t, int64(5), resp.InputTokens)
 			require.Equal(t, int64(7), resp.OutputTokens)
+			// The chat's last_message_time comes from CreatedAt; left at zero it read 1970 (#367).
+			require.Equal(t, int64(1), resp.CreatedAt)
 			require.Zero(t, a.WebSearchCompletedCount())
 		})
 	}
@@ -298,6 +300,7 @@ func TestOpenAICompatibleAdapters_SetTextDeltaHandlerEnablesStreaming(t *testing
 			require.Empty(t, toolUses)
 			require.Equal(t, []string{"Hi", " there"}, deltas)
 			require.Equal(t, "Hi there", resp.Text)
+			require.Equal(t, int64(1), resp.CreatedAt)
 		})
 	}
 }

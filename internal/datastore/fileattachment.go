@@ -43,6 +43,7 @@ func toFileAttachmentModel(e *ent.FileAttachment) *models.FileAttachment {
 		Description: e.Description,
 		S3Key:       e.S3Key,
 		Folder:      e.Folder,
+		ContextOnly: e.ContextOnly,
 		CreatedAt:   e.CreatedAt,
 	}
 
@@ -110,8 +111,11 @@ func classifyFileAttachmentSource(e *ent.FileAttachment) models.FileAttachmentSo
 // clones (whose chat/personality links differ from the original, so they
 // classify differently) and per-page dedupe cannot see across page boundaries.
 // Rows with an empty/NULL s3_key never match and are always kept.
+//
+// Context-only rows (CreateContextReference) are reference copies by definition and are always
+// left out, even once the original is deleted and they are the earliest row for their key.
 func excludeReferenceCopies() predicate.FileAttachment {
-	return func(s *sql.Selector) {
+	notACopy := func(s *sql.Selector) {
 		s.Where(sql.P(func(b *sql.Builder) {
 			b.WriteString("NOT EXISTS (SELECT 1 FROM ")
 			b.WriteString(entfileattachment.Table)
@@ -140,6 +144,7 @@ func excludeReferenceCopies() predicate.FileAttachment {
 			b.WriteString(")))")
 		}))
 	}
+	return entfileattachment.And(entfileattachment.ContextOnly(false), notACopy)
 }
 
 // CreateFileAttachment persists a new file attachment to the datastore
@@ -214,6 +219,10 @@ func (d *Datastore) CreateFileAttachment(ctx context.Context, userID uuid.UUID, 
 
 	if fileAttachment.PersonalityID != nil {
 		create.SetPersonalityID(*fileAttachment.PersonalityID)
+	}
+
+	if fileAttachment.ContextOnly {
+		create.SetContextOnly(true)
 	}
 
 	entFileAttachment, err := create.Save(ctx)
@@ -459,6 +468,10 @@ func (d *Datastore) ListFileAttachments(ctx context.Context, userID uuid.UUID, p
 		}
 		query = query.Where(entfileattachment.And(predicates...))
 	}
+
+	// A context-only row is a file already listed in its own right, shown again on a reply that
+	// fetched it; it loads with that reply, never as a file of its own.
+	query = query.Where(entfileattachment.ContextOnly(false))
 
 	if filters.Folder != nil {
 		query = query.Where(entfileattachment.FolderEQ(*filters.Folder))
@@ -789,21 +802,50 @@ func (d *Datastore) CreateFileAttachmentReference(ctx context.Context, userID, s
 		FileID:   src.FileID,
 		S3Key:    src.S3Key,
 	}
-	// Derive a fallback key for legacy records that predate the s3_key column.
-	// Prefer original chat path when available, otherwise fall back to image path.
-	// Note: this only affects the new reference row; source attachment remains unchanged.
 	if ref.S3Key == "" {
-		if src.ChatID != nil && *src.ChatID != uuid.Nil {
-			ref.S3Key = storage.FileKeyForChat(userID, *src.ChatID, src.ID, src.Name)
-		} else {
-			ref.S3Key = storage.FileKeyForImage(userID, src.ID, src.Name)
-		}
-		d.logger.Warn("file attachment reference: synthesized legacy s3_key",
-			zap.String("source_attachment_id", src.ID.String()),
-			zap.String("synthesized_s3_key", ref.S3Key))
+		ref.S3Key = d.legacyReferenceKey(userID, src)
 	}
 
 	return d.CreateFileAttachment(ctx, userID, ref)
+}
+
+// legacyReferenceKey derives the object key of a legacy record that predates the s3_key column,
+// for a reference row to share. It prefers the original chat path when available, otherwise the
+// image path. Only the new reference row gets it; the source attachment remains unchanged.
+func (d *Datastore) legacyReferenceKey(userID uuid.UUID, src *models.FileAttachment) string {
+	var key string
+	if src.ChatID != nil && *src.ChatID != uuid.Nil {
+		key = storage.FileKeyForChat(userID, *src.ChatID, src.ID, src.Name)
+	} else {
+		key = storage.FileKeyForImage(userID, src.ID, src.Name)
+	}
+	d.logger.Warn("file attachment reference: synthesized legacy s3_key",
+		zap.String("source_attachment_id", src.ID.String()),
+		zap.String("synthesized_s3_key", key))
+	return key
+}
+
+// CreateContextReference saves the user's existing file srcID onto the assistant reply
+// chatMessageID as a context-only reference row (see models.FileAttachment.ContextOnly): it
+// shares srcID's stored object, so the reply shows the file the agent fetched without uploading
+// a copy, and it never appears in the gallery or the Discord relay.
+func (d *Datastore) CreateContextReference(ctx context.Context, userID, srcID, chatMessageID uuid.UUID) (*models.FileAttachment, error) {
+	src, err := d.GetFileAttachment(ctx, userID, srcID)
+	if err != nil {
+		return nil, err
+	}
+	key := src.S3Key
+	if key == "" {
+		key = d.legacyReferenceKey(userID, src)
+	}
+	return d.CreateFileAttachment(ctx, userID, models.FileAttachment{
+		UserID:        userID,
+		Name:          src.Name,
+		FileType:      src.FileType,
+		S3Key:         key,
+		ChatMessageID: &chatMessageID,
+		ContextOnly:   true,
+	})
 }
 
 // ChatHasSearchableFiles reports whether a chat has files successfully indexed in pgvector.

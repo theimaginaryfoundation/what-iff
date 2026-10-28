@@ -2,11 +2,14 @@ package scheduler
 
 import (
 	"errors"
+	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 )
 
 func TestBuildTrigger_RunOnce(t *testing.T) {
@@ -85,5 +88,20 @@ func TestDeriveStatusAndErrorText_RecurringScheduleFailurePausesWithMarker(t *te
 	_, errText = deriveStatusAndErrorText(&job, errors.New("agent blew up"), scheduleErrText)
 	if !strings.HasPrefix(errText, "agent blew up") || !strings.Contains(errText, ScheduleErrorMarker) {
 		t.Fatalf("expected run error followed by the marked schedule error, got %q", errText)
+	}
+}
+
+// A run that failed for want of a provider key records that plainly, not the
+// transport error wrapping it.
+func TestDeriveStatusAndErrorText_MissingKeyIsStatedPlainly(t *testing.T) {
+	job := models.AgentJob{ScheduleType: models.AgentJobScheduleTypeCron, Status: models.AgentJobStatusActive}
+	runErr := fmt.Errorf("OpenAI API call failed: %w", &url.Error{
+		Op: "Post", URL: "https://api.openai.com/v1/responses",
+		Err: &providerkeys.NotConfiguredError{Provider: models.ModelProviderOpenAI},
+	})
+
+	_, errText := deriveStatusAndErrorText(&job, runErr, "")
+	if errText != "No OpenAI API key is set." {
+		t.Fatalf("expected the missing key stated plainly, got %q", errText)
 	}
 }

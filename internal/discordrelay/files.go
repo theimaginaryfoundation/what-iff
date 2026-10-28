@@ -43,14 +43,15 @@ func toFiles(files []outFile) []File {
 // loadReplyFiles reads the files saved with a reply (generated images, say) for
 // upload, within Discord's limits. Files left out, whether too many, too large or
 // unreadable, are returned by name so the post can say so instead of dropping
-// them silently.
+// them silently. Existing files the agent only fetched to look at (ContextOnly)
+// are not the reply's output and are not posted or mentioned.
 func (s *Service) loadReplyFiles(ctx context.Context, reply *models.ChatMessage) (files []outFile, skipped []string) {
 	if s.Files == nil {
 		return nil, nil
 	}
 	total := 0
 	for _, att := range reply.Attachments {
-		if att == nil || att.S3Key == "" {
+		if att == nil || att.S3Key == "" || att.ContextOnly {
 			continue
 		}
 		if len(files) >= MaxUploadFiles {

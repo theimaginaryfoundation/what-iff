@@ -24,6 +24,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/apicontext"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/reauth"
 )
 
 // prefixSealer stands in for the token key: reversible, and visibly not the key.
@@ -74,7 +75,7 @@ func newFixture(t *testing.T, sealer Sealer) fixture {
 	}
 	client := ent.NewClient(ent.Driver(entsql.OpenDB(dialect.SQLite, db)))
 	t.Cleanup(func() { _ = client.Close() })
-	f.keys = New(client, sealer, zap.NewNop())
+	f.keys = New(client, sealer, ownerPassword{}, zap.NewNop())
 	return f
 }
 
@@ -256,9 +257,32 @@ func TestConfigured_EveryProvider(t *testing.T) {
 
 // --- Routes
 
-// keyBody is a PUT body carrying key.
+// testOwnerPassword is what ownerPassword accepts as the owner's confirmation.
+const testOwnerPassword = "owner-password"
+
+// ownerPassword confirms when the proof is testOwnerPassword, and fails with
+// errConfirmBroken when it is "break".
+type ownerPassword struct{}
+
+var errConfirmBroken = errors.New("password store unavailable")
+
+func (ownerPassword) Confirm(_ context.Context, _ uuid.UUID, proof string) error {
+	switch proof {
+	case testOwnerPassword:
+		return nil
+	case "break":
+		return errConfirmBroken
+	}
+	return reauth.ErrNotConfirmed
+}
+
+// keyBody is a PUT body carrying key, confirmed with the owner's password.
 func keyBody(key string) string {
-	b, _ := json.Marshal(map[string]string{"key": key})
+	return keyBodyWith(key, testOwnerPassword)
+}
+
+func keyBodyWith(key, password string) string {
+	b, _ := json.Marshal(map[string]string{"key": key, "current_password": password})
 	return string(b)
 }
 
@@ -301,7 +325,7 @@ func TestRoutes_RejectBadInput(t *testing.T) {
 
 	rec := serve(t, f, &f.alice, http.MethodPut, "/provider-keys/acme", keyBody("sk-test-abcd1234"))
 	require.Equal(t, http.StatusNotFound, rec.Code)
-	rec = serve(t, f, &f.alice, http.MethodPut, "/provider-keys/openai", `{"key":"short"}`)
+	rec = serve(t, f, &f.alice, http.MethodPut, "/provider-keys/openai", keyBody("short"))
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	rec = serve(t, f, &f.alice, http.MethodPut, "/provider-keys/openai", `not json`)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -320,4 +344,37 @@ func TestRoutes_RequireAnAccount(t *testing.T) {
 	var n int
 	require.NoError(t, f.db.QueryRow(`SELECT count(*) FROM account_provider_keys`).Scan(&n))
 	require.Zero(t, n)
+}
+
+// Setting a key needs the owner's confirmation: a session alone could otherwise
+// redirect the account's conversations to someone else's provider account.
+func TestRoutes_SetRequiresTheOwnersConfirmation(t *testing.T) {
+	f := newFixture(t, prefixSealer{})
+
+	for name, password := range map[string]string{"missing": "", "wrong": "not-the-password"} {
+		rec := serve(t, f, &f.alice, http.MethodPut, "/provider-keys/openai", keyBodyWith("sk-test-abcd1234", password))
+		require.Equal(t, http.StatusForbidden, rec.Code, name)
+		var body models.ErrorResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		require.Equal(t, models.ErrCodeReauthenticationRequired, body.Code, name)
+	}
+	list, err := f.keys.List(context.Background(), f.alice)
+	require.NoError(t, err)
+	require.Empty(t, list, "an unconfirmed key is not stored")
+
+	rec := serve(t, f, &f.alice, http.MethodPut, "/provider-keys/openai", keyBodyWith("sk-test-abcd1234", "break"))
+	require.Equal(t, http.StatusInternalServerError, rec.Code, "a failed check is not a rejection")
+
+	rec = serve(t, f, &f.alice, http.MethodPut, "/provider-keys/openai", keyBody("sk-test-abcd1234"))
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+// Removing a key only breaks things visibly, so it needs no password.
+func TestRoutes_DeleteNeedsNoPassword(t *testing.T) {
+	f := newFixture(t, prefixSealer{})
+	_, err := f.keys.Set(context.Background(), f.alice, models.ModelProviderOpenAI, "sk-test-abcd1234")
+	require.NoError(t, err)
+
+	rec := serve(t, f, &f.alice, http.MethodDelete, "/provider-keys/openai", "")
+	require.Equal(t, http.StatusNoContent, rec.Code)
 }

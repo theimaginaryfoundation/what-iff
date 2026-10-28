@@ -2465,7 +2465,8 @@ func resolveTimezoneLocation(tz string) *time.Location {
 // the job failed and sets last_error_message on the user's message.
 //
 // Attachment-only turns are legitimate: an image ritual can answer with a generated
-// image and no prose, so a turn with attachments is never treated as empty.
+// image and no prose, so a turn with attachments is never treated as empty. A file the model
+// only fetched to look at (ContextOnly) is not something it produced, so it does not count.
 func (a *Agent) assertGenerationProducedOutput(providerName string, chatCtx *chatContext, result *provider.GenerateResponse, generatedAttachments []*models.FileAttachment) error {
 	if result == nil {
 		return fmt.Errorf("%s generation returned no response", providerName)
@@ -2474,7 +2475,7 @@ func (a *Agent) assertGenerationProducedOutput(providerName string, chatCtx *cha
 		return nil
 	}
 	for _, att := range generatedAttachments {
-		if att != nil {
+		if att != nil && !att.ContextOnly {
 			return nil
 		}
 	}
@@ -2569,8 +2570,13 @@ func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID,
 	persistAttempts := 0
 	persistSuccesses := 0
 	var persistFirstErr error
+	shownForContext := map[uuid.UUID]bool{}
 	for _, a0 := range generatedAttachments {
 		if a0 == nil {
+			continue
+		}
+		if a0.ContextOnly {
+			a.linkContextAttachment(ctx, userID, agentMessage.ID, a0, shownForContext)
 			continue
 		}
 		content := strings.TrimSpace(a0.FileContent)
@@ -2662,6 +2668,23 @@ func (a *Agent) saveAgentResponse(ctx context.Context, userID, chatID uuid.UUID,
 		return agentMessage, fmt.Errorf("failed to persist all tool-generated attachments: %w", persistFirstErr)
 	}
 	return agentMessage, nil
+}
+
+// linkContextAttachment shows an existing file the model fetched to look at (ContextOnly) on the
+// reply, as a reference row sharing the original's stored object rather than a fresh copy. A file
+// fetched more than once in a turn is shown once. It is best effort: the reply stands without it,
+// so a failure is logged and does not count against the turn's generated attachments.
+func (a *Agent) linkContextAttachment(ctx context.Context, userID, replyID uuid.UUID, att *models.FileAttachment, shown map[uuid.UUID]bool) {
+	if att.ID == uuid.Nil || shown[att.ID] {
+		return
+	}
+	shown[att.ID] = true
+	if _, err := a.ds.CreateContextReference(ctx, userID, att.ID, replyID); err != nil {
+		a.logger.Warn("failed to show a fetched file on the reply",
+			zap.String("chat_message_id", replyID.String()),
+			zap.String("source_attachment_id", att.ID.String()),
+			zap.Error(err))
+	}
 }
 
 func (a *Agent) resolvePersonalityName(ctx context.Context, userID, personalityID uuid.UUID) string {
@@ -3126,7 +3149,7 @@ func (a *Agent) setJobStatusFailedWithPartial(
 			generationPersonality = a.resolvePersonalityName(ctx, chatJob.UserID, chatCtx.chat.PersonalityID)
 		}
 	}
-	failureMessage := strings.TrimSpace(cause.Error())
+	failureMessage := strings.TrimSpace(providerkeys.FailureText(cause))
 	updated, _, err := a.ds.FinalizeFailedChatJobWithPartial(
 		ctx,
 		chatJob.UserID,
@@ -3157,7 +3180,7 @@ func (a *Agent) setJobStatusFailed(ctx context.Context, chatJob *models.Job, cau
 	}
 	toSave := *chatJob
 	toSave.Status = models.JobStatusFailed
-	toSave.Error = cause.Error()
+	toSave.Error = providerkeys.FailureText(cause)
 	updated, uerr := a.ds.UpdateJob(ctx, chatJob.UserID, toSave)
 	if uerr != nil {
 		a.logger.Error("failed to update job", zap.Error(uerr))
@@ -3179,7 +3202,7 @@ func (a *Agent) setJobStatusFailed(ctx context.Context, chatJob *models.Job, cau
 	if perr != nil {
 		return
 	}
-	errText := strings.TrimSpace(cause.Error())
+	errText := strings.TrimSpace(providerkeys.FailureText(cause))
 	if errText == "" {
 		return
 	}

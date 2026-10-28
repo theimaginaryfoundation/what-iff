@@ -219,6 +219,7 @@ func (a *XiaomiAdapter) toGenerateResponse(resp *openai.ChatCompletion) *Generat
 		Text:         ExtractChatCompletionText(resp),
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
+		CreatedAt:    resp.Created,
 		StopReason:   chatCompletionFinishReason(resp),
 		Reasoning:    a.reasoning.String(),
 	}

@@ -44,6 +44,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   - Models: `model.go`.
   - Safety violations: `safety_violation_event.go`.
   - Tool call persistence: `toolcall.go`.
+- **`CheckUserPassword`** reports whether a password is the account's current one (false for identity-provider accounts); it backs `reauth`'s default confirmation.
 - **`errors.go`:** Sentinel errors for handlers and agent.
 - **DB metrics** (`dbmetrics.go`): **`InstrumentEntClient`** adds an ent interceptor and hook that record `db.client.operation.duration` for every query and mutation, with `db.collection.name` = snake_case entity (`chat_message`) and `db.operation.name` = `query`/`create`/`update`/`delete`.
   `internal/server` calls it once at startup; calling it twice double-counts.
@@ -192,10 +193,10 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   `UpsertChatSummaryMemory` marks a Discord relay thread's summary external, and it stays so.
   `ListMemories` filters by `MemoryFilters.Provenance`, `UpdateMemory` accepts a provenance patch (the owner confirming a memory), and memory export/import carry both fields (the `user` default is not written).
 - **Discord relay (`discord.go`):** bots (token encrypted with the MCP token helper), bindings, message links and pending posts.
-- **`EncryptToken` / `DecryptToken`** expose the token helper to packages that keep their own tables but share the one key (`internal/accountkeys`).
   Methods taking a userID are owner-scoped; the relay's own (`FindDiscordBindingTarget`, `GetDiscordBindingTarget`, `ListActiveDiscordBotCredentials`, link and pending-post bookkeeping) act for the owner recorded on the bot.
   `IsExternalRelayChat` (any chat bound by one of the user's bots) and `ExternalSpeakerForMessage` (the Discord author of a saved message) back memory provenance in the agent.
   `CreateChat` honours `Chat.DisabledTools`, so a server-created relay thread never exists with its default-off tools on (the app's create route drops the field).
+- **`EncryptToken` / `DecryptToken`** expose the token helper to packages that keep their own tables but share the one key (`internal/accountkeys`).
 
 ## Testing
 

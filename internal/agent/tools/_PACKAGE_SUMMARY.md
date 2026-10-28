@@ -14,6 +14,7 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
   - `ScratchpadTool` — update scratchpad (`scratchpad.go`, `update_scratchpad.go`); read-only scratchpad tool was removed because scratchpad is already injected into context.
   - `list` — unified resource listing (`list.go`, `list_kinds.go`; tests in `list_test.go`).
   - `create_memory`, `generate_image`, `create_agent_job` — named files for those flows.
+    `UpdateAgentJobToolSpec` (`update_agent_job`) sits beside the create spec in `toolconstants.go`; its handler is in `internal/agent`.
   - `move_files` — files gallery files (images, documents, any upload) in a folder or back at the top level (`move_files.go`; tests in `move_files_test.go`).
     A personality's documents stay attached to it; only the folder label changes.
   - `RecallTool` — unified context retrieval (`recall.go`, `recall_modes.go`, `recall_memory_id.go`, `recall_time.go`; see ADR 0x017).
@@ -53,6 +54,8 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
   An invalid folder is reported to the model without querying.
 - **Folders for generated images:** `generate_image` takes an optional `folder`, validated before any image is generated (and paid for), and echoes where the images went.
   `move_files` takes up to 100 ids from `list`, reports how many moved, and notes when some were skipped.
+  It also renames: an optional `name` with exactly one id sets that file's display name (`Datastore.RenameGalleryFile`, via `models.NormalizeFileName`, which keeps the current extension when the new name has none; a chat-reuse copy's id renames its original).
+  `folder` is optional too, but a call needs one of the two; a bad name is refused before anything moves.
 - **`list` pagination:** Files/conversations/jobs (and personalities/skills) accept `page` + `limit`; results include `page`/`total_count`/`has_more` and a note that suggests `page=N+1` when more remain.
 - **Human vs agent descriptions:** Built-in user-toggleable tools provide `FunctionToolDefinition.HumanDescription` for presentation.
   `internal/agent.GetAvailableTools` trims and prefers that field, but falls back to `FunctionToolSpec.Description` when a runtime/external tool omits it or supplies only whitespace.
@@ -70,7 +73,8 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
   Refusals share `sandboxedNote`, so the model gets one consistent message.
 - **Memory provenance:** `CreateMemoryToolWithOrigin` writes the origin the agent computed for the turn (external in a Discord relay thread); its optional `speaker` argument names the Discord user a memory came from and is ignored elsewhere.
   `find_context` shows external memories through the shared formatter (`source=external(...)`) and marks a relay thread's summary chunks with `provenance`; distillation material carries the same note.
-- **`find_context` images are context-only:** an image fetched in fetch mode is returned with `FileAttachment.ContextOnly`, so the agent shows it to the model without saving it onto the reply.
+- **`find_context` images are context-only:** an image fetched in fetch mode is returned with `FileAttachment.ContextOnly`.
+  The model sees it, and the reply shows it to the person as a reference row (`Datastore.CreateContextReference`) instead of a fresh copy, so it adds nothing to the gallery and the Discord relay does not post it.
 
 ## Testing
 

@@ -59,7 +59,7 @@ Nothing writes a separate "Discord version" of a reply.
 - `post_to_discord(channel)` takes no text: it marks the reply being written, and the finished reply is posted as written. It is offered only when the persona's bot has an active binding, and its channels are listed in the agent's instructions, so the model cannot invent a destination. A sandboxed thread may post only to its own channel and never learns the owner's other channels.
 - Posts go out as the bot through the REST API with `allowed_mentions: {"parse": [], "replied_user": true}`: model output can never ping `@everyone`, roles or users.
 - Replies are split at 2000 characters on paragraph, then line boundaries, never inside a code block; Markdown tables become code blocks. Files saved with the reply are uploaded within Discord's limits, and anything left out is named in a note.
-- Only files the reply produced are saved with it. A file a tool merely fetched for the model to look at (`find_context`'s fetch mode) is marked context-only and is not saved onto the reply, so the owner's existing files are never re-published to a channel.
+- Only files the reply produced are posted with it. A file a tool merely fetched for the model to look at (`find_context`'s fetch mode) is marked context-only: the reply shows it in the app as a reference row sharing the original's stored object (`file_attachments.context_only`), but the relay skips those rows, so the owner's existing files are never re-published to a channel.
 - Delivery is asynchronous through the reply hook, never delays or fails the turn, retries transient errors, and is idempotent on the link row. A rejected token marks the bot `invalid_token`; a channel the bot can no longer post to marks the binding `broken`.
 
 ### 5. Inbound

@@ -78,3 +78,16 @@ func TestImageGenerationProviders_ListsOnlyConfiguredVendorsInOrder(t *testing.T
 	})
 	require.Equal(t, []string{"openai", "qwen"}, imageGenerationProviders(context.Background(), resolver))
 }
+
+// Every rule names its provider, including path-scoped ones, so a request with
+// no key fails with an error that says which key is missing.
+func TestCredentialRulesNameTheirProvider(t *testing.T) {
+	cfg := &Config{}
+	endpoints := cfg.providerEndpoints()
+	rules := credentialRules(endpoints, providerkeys.NewDeploymentResolver(nil))
+	require.Len(t, rules, len(endpoints))
+	for i, r := range rules {
+		require.Equal(t, endpoints[i].provider, r.Provider, r.BaseURL)
+		require.NotEmpty(t, r.Provider, r.BaseURL)
+	}
+}

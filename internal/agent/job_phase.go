@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -91,7 +90,7 @@ func (a *Agent) persistUserTurnAndChatAfterInference(ctx context.Context, userID
 
 	if chat != nil && result != nil {
 		chat.ResponseID = &result.ID
-		lastMessageTime := time.Unix(result.CreatedAt, 0)
+		lastMessageTime := result.CreatedTime()
 		chat.LastMessageTime = &lastMessageTime
 		// Continuity only: chat is the turn-start copy, and saving it whole reverted any model,
 		// personality or setting change the user made while the turn ran (#347).

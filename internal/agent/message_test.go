@@ -242,6 +242,15 @@ func TestAssertGenerationProducedOutput(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	// A file the model only fetched to look at is not something it produced.
+	t.Run("a fetched file alone does not count as output", func(t *testing.T) {
+		err := a.assertGenerationProducedOutput("anthropic", chatCtx,
+			&provider.GenerateResponse{ID: "msg_5b", StopReason: "end_turn"},
+			[]*models.FileAttachment{{Name: "portrait.png", FileType: "image/png", ContextOnly: true}})
+
+		require.Error(t, err)
+	})
+
 	t.Run("nil attachment entries do not count as output", func(t *testing.T) {
 		err := a.assertGenerationProducedOutput("openai", chatCtx,
 			&provider.GenerateResponse{ID: "msg_6"}, []*models.FileAttachment{nil})

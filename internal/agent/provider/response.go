@@ -14,8 +14,9 @@ type GenerateResponse struct {
 	ID           string
 	InputTokens  int64
 	OutputTokens int64
-	// CreatedAt is a Unix timestamp. OpenAI supplies this from the response; Claude
-	// providers set it to time.Now() since the Messages API does not return a timestamp.
+	// CreatedAt is a Unix timestamp. OpenAI and the Chat Completions providers supply it from
+	// the response; Claude providers set it to time.Now() since the Messages API does not return
+	// a timestamp. It can still be zero (a provider that omits it), so read it through CreatedTime.
 	CreatedAt int64
 	Text      string
 	// StopReason is the provider's own account of why generation ended, verbatim and
@@ -50,6 +51,16 @@ func (r *reasoningLog) add(text string) {
 // String joins the rounds with a blank line between them.
 func (r *reasoningLog) String() string {
 	return strings.Join(r.parts, "\n\n")
+}
+
+// CreatedTime is when the response was generated: CreatedAt, or now when the provider left it
+// unset. The chat's last_message_time is written from it, and a zero there stamped threads
+// 1970-01-01 and sank them below every other thread in the list (#367).
+func (r *GenerateResponse) CreatedTime() time.Time {
+	if r.CreatedAt <= 0 {
+		return time.Now()
+	}
+	return time.Unix(r.CreatedAt, 0)
 }
 
 // OpenAIToGenerateResponse converts an OpenAI Responses API response into a GenerateResponse.

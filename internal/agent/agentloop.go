@@ -177,17 +177,12 @@ func (a *Agent) executeToolUses(ctx context.Context, chatCtx *chatContext, round
 		modelToolCalls[i] = tc
 	}
 
-	// Files a tool only fetched for the model to look at (ContextOnly) are not saved onto the
-	// reply: they already exist, and saving them would publish a copy with the reply (to the
-	// gallery, or to Discord through the relay).
+	// Files a tool only fetched for the model to look at (ContextOnly) ride along too, so the
+	// person sees what the model saw: saveAgentResponse links them to the reply as reference rows
+	// instead of saving copies, which keeps them out of the gallery and the Discord relay.
 	flatAttachments := make([]*models.FileAttachment, 0)
 	for _, perTool := range generatedAttachments {
-		for _, att := range perTool {
-			if att != nil && att.ContextOnly {
-				continue
-			}
-			flatAttachments = append(flatAttachments, att)
-		}
+		flatAttachments = append(flatAttachments, perTool...)
 	}
 	return results, modelToolCalls, flatAttachments
 }

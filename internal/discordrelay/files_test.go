@@ -122,3 +122,18 @@ func TestOnlyTenFilesGoInOneMessage(t *testing.T) {
 	assert.Len(t, h.discord.files[0], MaxUploadFiles)
 	assert.Contains(t, h.discord.allPosts()[0].parts[0], "Couldn't attach")
 }
+
+// An existing file the agent only fetched to look at (find_context) is shown on the reply in the
+// app, but it is not the reply's output, so the relay neither posts nor mentions it.
+func TestAFileTheAgentOnlyLookedAtIsNotPosted(t *testing.T) {
+	h := newHarness(t)
+	id := h.replyWithFiles("Oh, I remember this one", map[string]int{"portrait.png": 10})
+	h.store.messages[id].Attachments[0].ContextOnly = true
+
+	h.svc.post(h.ctx, *h.target, id, "c", "", nil)
+
+	posts := h.discord.allPosts()
+	require.Len(t, posts, 1)
+	assert.Equal(t, []string{"Oh, I remember this one"}, posts[0].parts, "no skipped-file note")
+	assert.Equal(t, [][]string{nil}, h.discord.files, "nothing was uploaded")
+}

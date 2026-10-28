@@ -159,6 +159,7 @@ func (a *reasoningChatAdapter) toGenerateResponse(resp *openai.ChatCompletion) *
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
 		StopReason:   chatCompletionFinishReason(resp),
+		CreatedAt:    resp.Created,
 		Reasoning:    a.reasoning.String(),
 	}
 }
