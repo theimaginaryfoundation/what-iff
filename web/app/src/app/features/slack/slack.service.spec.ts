@@ -29,6 +29,12 @@ describe('SlackService', () => {
       http.expectNone(`${base}/bindings`);
     });
 
+    it('is off when no answer can be read (network error, CORS), so it fails closed', async () => {
+      const result = firstValueFrom(service.available());
+      http.expectOne(`${base}/bindings`).error(new ProgressEvent('error'), { status: 0, statusText: 'Unknown Error' });
+      expect(await result).toBe(false);
+    });
+
     it('is off when /slack answers 404 (switched off, or not on for this user)', async () => {
       const result = firstValueFrom(service.available());
       http.expectOne(`${base}/bindings`).flush({ message: 'not found' }, { status: 404, statusText: 'Not Found' });
