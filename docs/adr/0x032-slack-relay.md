@@ -16,7 +16,7 @@ The maintainers' own Slack relay has no code of its own; it is assembled from ge
 
 - inbound, a Slack trigger calls What Iff's webhook API (`POST /api/webhooks/chat/{chatId}/messages` with a `wht_` token), one thread per channel, set up channel by channel;
 - outbound, the persona has a Slack MCP connector holding a bot token, and its instructions and memories say when and where to post;
-- so replies come from one shared bot, not the persona; a reply is only posted when the model remembers to call the connector; reading what happened means polling; and files cannot be posted at all, because the Slack MCP cannot upload bytes (charts go out as signed links instead).
+- so replies come from one shared bot, not the persona; a reply is only posted when the model remembers to call the connector; reading what happened means polling; and files cannot be posted at all, because the Slack MCP cannot upload bytes (images go out as links instead).
 
 Slack differs from Discord and Buzz in ways that decide the design:
 
@@ -151,7 +151,7 @@ To retire the manual setup once this is on for the maintainers' accounts:
 2. Bind each channel the old setup served, to its existing thread (with the unrestricted acknowledgement if that thread is not sandboxed) or to a new sandboxed one.
 3. Turn off the Slack trigger or workflow that calls the webhook API, and revoke the `wht_` webhook token it used (Integrations → Webhooks).
 4. Detach the Slack MCP connector from the persona, and remove the posting rules from its instructions and memories; `post_to_slack` replaces them.
-5. Keep the signed chart links (`/i/…`) for now: they are still useful in messages, but a reply's images are now uploaded as files.
+5. Image links that tools already return keep working in messages; a reply's own images are now uploaded as files.
 
 ## Trying it
 
