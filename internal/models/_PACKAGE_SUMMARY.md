@@ -59,6 +59,7 @@
   `TurnSettingKeys` / `KeepOmittedTurnSettings` let a PUT route keep a setting its body omitted.
   The per-provider model-family tables (which models always think, take a budget, reject `none`, take Qwen's `reasoning_effort`, and so on) live in `reasoning_models.go`, read by both `ReasoningSupportFor` and the provider mappings.
   `ReasoningSupportFor(provider, name)` derives a model's effort support from code (none/optional/toggle/always), so admin-added models are covered; an admin's `Model.ReasoningSupportOverride` wins over it (`ReasoningSupportWithOverride`); `EffectiveReasoningEffort` maps a selection onto it.
+  `NativeReasoningEffort` is the level a model reasons at when nothing is sent (from the same tables; off where the docs state none), and `ReasoningEffortAboveNative` keeps an effort only above it, for metering.
   `WithJobTurnSettings` / `CopyJobTurnSettings` carry an agent job's values on the run's context.
   `Chat.SetReasoningEffort` / `SetAgentLoop` mark explicit changes on `UpdateChat`, like `SetContextScope`.
   `ChatTurnProgress` carries an Advanced run's `Step` and `Plan` (`PlanItem`).

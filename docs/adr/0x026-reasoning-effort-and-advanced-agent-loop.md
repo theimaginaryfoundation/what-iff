@@ -149,7 +149,7 @@ The local backend (`LLM_BACKEND=local`) keeps its own pipeline and always runs S
 
 `metering.Usage` gains public fields that a deployment's meter may price:
 
-- `ReasoningEffort`: the effort when one was explicitly selected; empty otherwise (including always-on models with no selection).
+- `ReasoningEffort`: the effort as sent, when one was explicitly selected and it is above the model's native level (`models.NativeReasoningEffort`: what the model reasons at when the request sends no control, from each provider's docs, off where they state none); empty otherwise. A selection at or below that level (low on Claude Opus 5.5, which reasons at medium unasked; any level on GLM) costs the model no more than no selection, so it reports nothing, and a meter that prices effort never charges more for asking for less.
 - `AgentLoop`: `standard` or `advanced`.
 - `Calls`: the usage of each model call the record covers (`CallUsage`: the call's model, input including cached and cache-written tokens, cached input, cache writes, output including reasoning, and reasoning where the provider reports it separately). Standard turns and sub-agent runs report every call they made.
 - `CallsReported`: `Calls` is the complete account of what the record covers, including when it is empty (an Advanced turn's final record after every call was in a step record: nothing left to charge). A meter must then not price `Tokens` on top. When it is false, per-call usage is unknown and `Tokens` is the whole basis.

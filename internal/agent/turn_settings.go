@@ -74,17 +74,15 @@ func (a *Agent) threadActiveMood(ctx context.Context, chatCtx *chatContext) *mod
 }
 
 // withTurnSettingsUsage completes a turn's final usage record (ADR 0x026): the reasoning effort
-// (only when one was selected and the model honours it, so turns without a selection are metered
-// as before), the agent loop, the turn id, and the calls not yet metered, which it then marks as
+// (only when one was selected and it asks for more than the model's native level, so turns without
+// a selection, or with one the model reasons at anyway, are metered as before), the agent loop, the turn id, and the calls not yet metered, which it then marks as
 // metered. An Advanced run has metered its finished steps already (recordAdvancedStep), so its
 // final record carries only the rest.
 func withTurnSettingsUsage(chatCtx *chatContext, u metering.Usage) metering.Usage {
 	if chatCtx == nil {
 		return u
 	}
-	if chatCtx.turnSettings.ReasoningEffortSource != models.SettingSourceUnset {
-		u.ReasoningEffort = string(chatCtx.reasoningEffort)
-	}
+	u.ReasoningEffort = chatCtx.meteredReasoningEffort()
 	u.AgentLoop = string(models.AgentLoopStandard)
 	if chatCtx.turnSettings.Advanced() {
 		u.AgentLoop = string(models.AgentLoopAdvanced)
@@ -144,9 +142,7 @@ func (a *Agent) recordAdvancedStep(ctx context.Context, chatCtx *chatContext, st
 		Step:          step,
 		TurnID:        chatCtx.turnID,
 	}
-	if chatCtx.turnSettings.ReasoningEffortSource != models.SettingSourceUnset {
-		u.ReasoningEffort = string(chatCtx.reasoningEffort)
-	}
+	u.ReasoningEffort = chatCtx.meteredReasoningEffort()
 	// The calls are marked metered above, so this Record must not fail because Stop or a
 	// shutdown has just cancelled the turn's context (the step would then never be billed).
 	a.meter.Record(context.WithoutCancel(ctx), chatCtx.meterDecision, u)
@@ -186,6 +182,15 @@ func (c *chatContext) meteredActionType() string {
 
 // reasoningSupport is the turn model's reasoning support: the model row's (with any admin
 // override) when known, else derived from the provider and name.
+// meteredReasoningEffort is the effort a usage record carries (metering.Usage.ReasoningEffort):
+// the selected effort as sent, only when it asks for more reasoning than the model does unasked.
+func (c *chatContext) meteredReasoningEffort() string {
+	if c.turnSettings.ReasoningEffortSource == models.SettingSourceUnset {
+		return ""
+	}
+	return string(models.ReasoningEffortAboveNative(c.modelProvider, c.model, c.reasoningEffort))
+}
+
 func (c *chatContext) reasoningSupport() models.ReasoningSupport {
 	if c.modelReasoningSupport.Valid() {
 		return c.modelReasoningSupport
