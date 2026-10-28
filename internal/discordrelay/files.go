@@ -3,8 +3,6 @@ package discordrelay
 import (
 	"bytes"
 	"context"
-	"fmt"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -55,9 +53,7 @@ func withNote(parts []string, note string) []string {
 }
 
 // skippedNote tells the channel which files could not be attached.
-func skippedNote(names []string) string {
-	return fmt.Sprintf("Couldn't attach to Discord (too large, too many, or unavailable): %s", strings.Join(names, ", "))
-}
+func skippedNote(names []string) string { return relaykit.SkippedNote("Discord", names) }
 
 // noPermissionNote is added when Discord refuses the files but takes the text.
 const noPermissionNote = "I don't have permission to attach files in this channel, so the files are only in What Iff."

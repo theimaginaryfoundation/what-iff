@@ -148,7 +148,7 @@ func TestSlackTokensAreEncryptedAndOwnerScoped(t *testing.T) {
 	assert.ErrorIs(t, err, ErrSlackAppNotFound)
 
 	for name, in := range map[string]models.SlackAppCreate{
-		"the same app twice": {PersonalityID: f.persona, TeamID: "T2", AppID: "A1", BotUserID: "U", BotToken: "x", AppToken: "y"},
+		"the same app twice":                            {PersonalityID: f.persona, TeamID: "T2", AppID: "A1", BotUserID: "U", BotToken: "x", AppToken: "y"},
 		"a second app for the persona in one workspace": {PersonalityID: f.persona, TeamID: "T1", AppID: "A9", BotUserID: "U", BotToken: "x", AppToken: "y"},
 	} {
 		_, err := f.ds.CreateSlackApp(ctx, f.owner, in)

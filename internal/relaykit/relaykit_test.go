@@ -441,3 +441,14 @@ func TestSupervisorKickReconcilesAtOnce(t *testing.T) {
 	s.Kick()
 	s.Kick() // never blocks
 }
+
+func TestSplitTextTakesThePlatformsLimit(t *testing.T) {
+	text := strings.Repeat("word ", 30) + "\n\n" + strings.Repeat("more ", 30)
+	for _, limit := range []int{40, 200, 4000} {
+		for _, p := range SplitText(text, limit) {
+			assert.LessOrEqual(t, len([]rune(p)), limit)
+		}
+	}
+	assert.Len(t, SplitText(text, 4000), 1)
+	assert.Equal(t, "Couldn't attach to Slack (too large, too many, or unavailable): a.png, b.pdf", SkippedNote("Slack", []string{"a.png", "b.pdf"}))
+}

@@ -285,6 +285,4 @@ func (s *Service) uploadReplyFiles(ctx context.Context, ep Endpoint, signer Sign
 }
 
 // skippedNote tells the channel which files could not be attached.
-func skippedNote(names []string) string {
-	return fmt.Sprintf("Couldn't attach to Buzz (too large, too many, or unavailable): %s", strings.Join(names, ", "))
-}
+func skippedNote(names []string) string { return relaykit.SkippedNote("Buzz", names) }

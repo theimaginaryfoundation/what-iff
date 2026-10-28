@@ -2,6 +2,8 @@ package relaykit
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
@@ -54,4 +56,10 @@ func LoadReplyFiles(ctx context.Context, files FileReader, reply *models.ChatMes
 		out = append(out, ReplyFile{Name: att.Name, ContentType: att.FileType, Data: data})
 	}
 	return out, skipped
+}
+
+// SkippedNote names the reply's files that could not be posted to platform ("Discord"),
+// for the note added to the posted text.
+func SkippedNote(platform string, names []string) string {
+	return fmt.Sprintf("Couldn't attach to %s (too large, too many, or unavailable): %s", platform, strings.Join(names, ", "))
 }
