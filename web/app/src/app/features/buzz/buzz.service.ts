@@ -220,12 +220,14 @@ export class BuzzService {
   /**
    * Whether the relay is on for this user. It is experimental: off unless the operator switches it
    * on (BUZZ_RELAY_ENABLED=true), and a build may turn it on per user. Where it is off, /api/buzz
-   * answers 404: a 404 here means off. Any other outcome means on (an error
-   * then shows where the user can see it). Asked once per session.
+   * answers 404: a 404 here means off. So does a request that never got an answer (status 0: the
+   * network, or a response the browser would not let us read), because an experimental feature
+   * should stay hidden when we cannot tell. Any other error means on, so it shows where the user
+   * can see it. Asked once per session.
    */
   available(): Observable<boolean> {
     if (!this.availability$) {
-      this.availability$ = relayAvailability(this.http, `${this.base}/bindings`);
+      this.availability$ = relayAvailability(this.http, `${this.base}/bindings`, { failClosed: true });
     }
     return this.availability$;
   }

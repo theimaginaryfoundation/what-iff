@@ -35,6 +35,12 @@ describe('BuzzService', () => {
       expect(await result).toBe(false);
     });
 
+    it('is off when no answer can be read (network error, CORS), so it fails closed', async () => {
+      const result = firstValueFrom(service.available());
+      http.expectOne(`${base}/bindings`).error(new ProgressEvent('error'), { status: 0, statusText: 'Unknown Error' });
+      expect(await result).toBe(false);
+    });
+
     it('stays on for other errors, so they surface where the user can see them', async () => {
       const result = firstValueFrom(service.available());
       http.expectOne(`${base}/bindings`).flush({ message: 'boom' }, { status: 500, statusText: 'Server Error' });
