@@ -45,7 +45,7 @@ Slack differs from Discord and Buzz in ways that decide the design:
   Neither is ever returned by the API.
 - One What Iff connection per Slack app (`app_id` is unique), and one app per persona per workspace; a persona can be in several workspaces through several apps.
 - The avatar cannot be set through Slack's API (bots have no `users.setPhoto`, and manifests carry no icon).
-  The app's settings page is linked from the tab, with the persona's portrait to download and upload there.
+  The tab links the app's settings page, where the owner uploads the persona's portrait as the app's icon.
   The name is set by the manifest; renaming the persona later means renaming the app in Slack.
 
 Required bot scopes, and why:
@@ -160,7 +160,7 @@ There is no local Slack to run against, so trying the relay needs a real workspa
 1. Run What Iff with `SLACK_RELAY_ENABLED=true` and `TOKEN_ENCRYPTION_SECRET` set; locally, `SLACK_GATEWAY_SINGLE_INSTANCE=true`.
    No public URL is needed: the gateway connects out to Slack.
 2. In Integrations → Slack, pick a persona and follow "Create the Slack app" (the manifest link), install the app, create the app-level token, and paste both tokens.
-3. Upload the persona's portrait as the app's icon (the tab links the app's settings page).
+3. Upload the persona's portrait as the app's icon in the app's settings (the tab links them).
 4. Invite the persona to a channel (`/invite @Vix`, or "Join" for a public channel), bind it, and mention the persona there.
 
 ## Alternatives considered
@@ -202,6 +202,7 @@ There is no local Slack to run against, so trying the relay needs a real workspa
 - Edits and deletes from Slack, and editing a posted reply when the What Iff message is regenerated.
 - A shared quick-start app (Alternatives), and creating the app from the manifest API.
 - Showing "via Slack · alice" on relayed messages in the app.
+- Offering the persona's portrait as a download next to the app's settings link (the portrait URL needs the owner's session, so a plain link does not work).
 - Keeping relay turns out of the owner's own chat allowance in the private overlay (it keys on `metering.TurnSource`; `slack` needs the same treatment as `discord` and `buzz`).
 - The note an external memory carries in model context still says `said by <name> on Discord` whatever the relay (`memoryutil.ExternalProvenanceNote`); the memory stores the speaker but not the platform.
   That predates this ADR (Buzz memories read the same) and needs the platform recorded on the memory, or a platform-neutral wording.
