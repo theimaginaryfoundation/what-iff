@@ -208,7 +208,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
   A job id as its `filter` reads that one job in full (whole prompt, model, skills, any status), which is how the model sees a prompt before rewriting it.
   Auto mood selection does not run in a sandboxed chat (`autoMoodSelectionSkipped`); its `change_mood` picks only its own personality's modes, refuses `model_override`, and mood rituals are not loaded.
   In every chat, dispatch refuses a tool the model was not offered that turn (`setOfferedTools`, recorded on every generation path including the sub-agent loops).
-- **Memory provenance (relay threads, Discord or Buzz):** `memory_provenance.go`.
+- **Memory provenance (relay threads, Discord, Buzz or Slack):** `memory_provenance.go`.
   `prepareChatContext` records `chatContext.memoryProvenance` (`memoryProvenanceForChat`: external for any chat bound to a Discord channel, sandboxed or not, `datastore.IsExternalRelayChat`; a failed lookup in a sandboxed chat reads as external) and the trigger message id.
   `create_memory` writes with `createMemoryOrigin` (the Discord author of the message being answered, read when the tool runs; the tool's `speaker` argument overrides it).
   Checkpoint extraction in such a thread uses the `ExtractedRelayMemory` schema (a `speaker` per memory) and `relayMemoryExtractionNote` (the speakers are users of the platform named by `chatContext.relayPlatform`, labelled by name, not the owner); `stampExtractedProvenance` marks every extracted memory external, and the merge plan carries the new members' combined origin (`memoryFoldPlan.NewOrigin`, link members' `Origin`) to the datastore.
@@ -216,6 +216,7 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 - **Discord relay tool (`discord_post_tool.go`):** `post_to_discord` registers through the extension seams (`tools.AdditionalFunctionToolCatalog`, `extraToolHandlersForChat`, `additionalDisabledToolsForChat`, `additionalDeveloperContextForChat`), wrapping whatever another build already set there.
   It is offered only when the chat's persona has a bot with an active binding (hidden otherwise), marks the reply for posting rather than sending text, and in a sandboxed chat reaches only that thread's own channel.
 - **Buzz relay tool (`buzz_post_tool.go`, ADR 0x028):** `post_to_buzz` is the twin of `post_to_discord` through the same seams: offered only where the relay is on for the owner (`buzzrelay.UserMayUse`, experimental) and the persona has an active Buzz binding, channels labelled `Community/#channel` when ambiguous, and a sandboxed chat or relay thread reaches only its own channel.
+- **Slack relay tool (`slack_post_tool.go`, ADR 0x032):** `post_to_slack`, the same tool for Slack: offered only where the relay is on for the owner (`slackrelay.UserMayUse`, experimental) and the persona's app has an active binding, channels labelled `Workspace/#channel` when ambiguous, and a sandboxed chat or relay thread reaches only its own channel.
 
 ## Testing
 
