@@ -221,6 +221,7 @@
             [isAutoMood]="session.thread()?.is_auto_mood ?? true"
             [threadReasoningEffort]="session.thread()?.reasoning_effort ?? null"
             [threadAgentLoop]="session.thread()?.agent_loop ?? null"
+            [inheritedTurnSettings]="inheritedTurnSettings()"
             [threadArchived]="session.thread()?.archived === true"
             [composerPlaceholder]="sendGate.composerPlaceholder(selectedPersonalityName())"
             [disabled]="session.thread()?.archived === true || sendGate.blocked()"

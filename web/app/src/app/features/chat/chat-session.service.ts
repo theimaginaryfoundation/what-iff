@@ -589,12 +589,12 @@ export class ChatSessionService implements OnDestroy {
     );
   }
 
-  /** Changes the active thread's own reasoning effort; null clears it (the model's default). */
+  /** Changes the active thread's own reasoning effort; null clears it, so turns inherit it again. */
   setReasoningEffort(effort: ReasoningEffort | null): void {
     this.setTurnSettings({ reasoning_effort: effort });
   }
 
-  /** Changes the active thread's own agent loop; null clears it (Standard). */
+  /** Changes the active thread's own agent loop; null clears it, so turns inherit it again. */
   setAgentLoop(loop: AgentLoop | null): void {
     this.setTurnSettings({ agent_loop: loop });
   }

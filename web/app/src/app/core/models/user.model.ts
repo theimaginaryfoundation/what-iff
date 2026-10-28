@@ -85,11 +85,11 @@ export interface UserPreferences {
   /** Read-only: the image vendors this deployment has keys for, in display order. */
   image_generation_providers?: ImageGenerationProvider[];
   /**
-   * Account-default reasoning effort (ADR 0x026): seeds a new thread whose personality sets none.
-   * Null when not set (the model's default).
+   * Account-default reasoning effort (ADR 0x026): used at each turn whose job, mode, thread and
+   * personality set none (never in a sandboxed thread). Null when not set (the model's default).
    */
   reasoning_effort?: ReasoningEffort | null;
-  /** Account-default agent loop: seeds a new thread whose personality sets none. Null when not set (standard). */
+  /** Account-default agent loop, used like `reasoning_effort`. Null when not set (standard). */
   agent_loop?: AgentLoop | null;
 }
 

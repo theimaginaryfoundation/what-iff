@@ -227,7 +227,46 @@ describe('MoodListComponent', () => {
         expect(vm.formReasoningEffort()).toBe('');
         expect(vm.formAgentLoop()).toBe('');
         vm.saveEditMood();
-        expect(moodServiceSpy.updateMood).toHaveBeenLastCalledWith('mode-1', expect.objectContaining({ reasoning_effort: null, agent_loop: null }));
+        // The loop was unset and stays unset, so it is left out (the server keeps an omitted field).
+        const cleared = moodServiceSpy.updateMood.mock.lastCall![1];
+        expect(cleared.reasoning_effort).toBeNull();
+        expect('agent_loop' in cleared).toBe(false);
+    });
+
+    it('leaves a turn setting it does not recognise out of the save, so it is not cleared', () => {
+        moodServiceSpy.getMood.mockReturnValue(of({
+            id: 'mode-1',
+            name: 'Focused',
+            description: '',
+            prompt_snippet: '',
+            reasoning_effort: 'xhigh',
+            agent_loop: 'swarm',
+            image_ids: [],
+            ritual_ids: [],
+            personality_ids: [],
+            created_at: '',
+            updated_at: '',
+        } as any));
+        vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+        const fixture = TestBed.createComponent(MoodListComponent);
+        fixture.detectChanges();
+        const vm = fixture.componentInstance.vm;
+
+        vm.openEditMoodModal('mode-1', false);
+        vm.formName.set('Renamed');
+        vm.saveEditMood();
+        const renamed = moodServiceSpy.updateMood.mock.lastCall![1];
+        expect(renamed.name).toBe('Renamed');
+        expect('reasoning_effort' in renamed).toBe(false);
+        expect('agent_loop' in renamed).toBe(false);
+
+        // Changing one of them sends that one only.
+        vm.openEditMoodModal('mode-1', false);
+        vm.setFormAgentLoop('advanced');
+        vm.saveEditMood();
+        const changed = moodServiceSpy.updateMood.mock.lastCall![1];
+        expect(changed.agent_loop).toBe('advanced');
+        expect('reasoning_effort' in changed).toBe(false);
     });
 
     it('sends turn settings when creating a mode', () => {

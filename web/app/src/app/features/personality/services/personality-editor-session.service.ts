@@ -15,7 +15,7 @@ export interface PersonalityEditDraft {
   accent_color: string | null;
   cover_image_id: string | null;
   thumbnail_circle: PersonalityThumbnailCircle | null;
-  /** Seeds new threads with this personality (ADR 0x026); null = use the account default. */
+  /** Used by this personality's threads that set none of their own (ADR 0x026); null = use the account default. */
   reasoning_effort: ReasoningEffort | null;
   agent_loop: AgentLoop | null;
 }

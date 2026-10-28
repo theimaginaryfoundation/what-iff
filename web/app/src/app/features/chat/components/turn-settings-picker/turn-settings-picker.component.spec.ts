@@ -26,6 +26,22 @@ describe('TurnSettingsPickerComponent', () => {
         fixture.detectChanges();
     }
 
+    /** An element's text with its child elements' text joined by spaces, whitespace collapsed. */
+    function text(el: Element | null | undefined): string | undefined {
+        if (!el) return undefined;
+        const parts: string[] = [];
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) parts.push(walker.currentNode.textContent ?? '');
+        return parts.join(' ').replace(/\s+/g, ' ').trim();
+    }
+
+    function optionLabels(): (string | undefined)[] {
+        return [...host.querySelectorAll<HTMLInputElement>('input[type=radio]')].map(radio => {
+            const label = radio.closest('label')!;
+            return text(label.querySelector('.turn-settings__option-label') ?? label);
+        });
+    }
+
     it('shows the thread effort and loop, and emits the thread changes', () => {
         fixture.componentRef.setInput('reasoningSupport', 'optional');
         fixture.componentRef.setInput('threadReasoningEffort', 'high');
@@ -45,11 +61,21 @@ describe('TurnSettingsPickerComponent', () => {
             const label = radio.closest('label')!;
             return (label.querySelector('.turn-settings__option-label') ?? label).textContent?.trim();
         });
-        expect(labels).toEqual(['Model default', 'Off', 'Low', 'Medium', 'High', 'Standard', 'Advanced']);
+        expect(labels.map(label => label?.replace(/\s+/g, ' '))).toEqual([
+            'Inherit (model default)',
+            'Off',
+            'Low',
+            'Medium',
+            'High',
+            'Inherit',
+            'Standard',
+            'Advanced',
+        ]);
         radios[0].click();
+        radios[6].click();
         radios[5].click();
         expect(efforts).toEqual([null]);
-        expect(loops).toEqual(['standard']);
+        expect(loops).toEqual(['standard', null]);
     });
 
     it('hides the reasoning part when the model has no effort control', () => {
@@ -156,8 +182,8 @@ describe('TurnSettingsPickerComponent', () => {
         fixture.componentInstance.reasoningEffortChange.subscribe(value => efforts.push(value));
         open();
         const radios = [...host.querySelectorAll<HTMLInputElement>('input[type=radio]')];
-        const labels = radios.slice(0, 4).map(radio => radio.closest('label')?.textContent?.trim());
-        expect(labels).toEqual(['Model default', 'Low', 'Medium', 'High']);
+        const labels = radios.slice(0, 4).map(radio => text(radio.closest('label')));
+        expect(labels).toEqual(['Inherit (model default)', 'Low', 'Medium', 'High']);
         expect(radios[1].checked).toBe(true);
         radios[3].click();
         expect(efforts).toEqual(['high']);
@@ -172,8 +198,8 @@ describe('TurnSettingsPickerComponent', () => {
         expect(fixture.componentInstance.triggerTooltip()).toBe('Reasoning effort and agent loop for this thread');
 
         open();
-        const checked = host.querySelector<HTMLInputElement>('input[type=radio]:checked');
-        expect(checked?.closest('label')?.textContent?.trim()).toBe('Model default');
+        const checked = [...host.querySelectorAll<HTMLInputElement>('input[type=radio]:checked')];
+        expect(checked.map(radio => text(radio.closest('label')))).toEqual(['Inherit (model default)', 'Inherit Standard']);
     });
 
     it('highlights the trigger for an advanced loop even without an effort control', () => {
@@ -198,10 +224,10 @@ describe('TurnSettingsPickerComponent', () => {
         fixture.componentInstance.agentLoopChange.subscribe(value => loops.push(value));
         open();
         expect(host.querySelector('.turn-settings__mode-note')?.textContent).toContain('Research mode sets Advanced');
-        // The thread's own loop (unset → Standard) stays checked; picking edits the thread.
+        // The thread's own loop (unset → Inherit) stays checked; picking edits the thread.
         const radios = [...host.querySelectorAll<HTMLInputElement>('input[type=radio]')];
         expect(radios[0].checked).toBe(true);
-        radios[1].click();
+        radios[2].click();
         expect(loops).toEqual(['advanced']);
     });
 
@@ -221,5 +247,79 @@ describe('TurnSettingsPickerComponent', () => {
         expect(fixture.componentInstance.modeOverrideTooltip()).toContain('The active mode sets this');
         open();
         expect(host.querySelector('.turn-settings__mode-note')?.textContent).toContain('This mode sets Low');
+    });
+
+    describe('inherited values', () => {
+        it('shows a personality value as effective, says where it comes from, and offers Inherit', () => {
+            fixture.componentRef.setInput('reasoningSupport', 'optional');
+            fixture.componentRef.setInput('inherited', {
+                personality: { reasoning_effort: 'high', agent_loop: 'advanced' },
+                account: { reasoning_effort: 'low' },
+            });
+            fixture.detectChanges();
+
+            expect(text(trigger())).toBe('High · Advanced · from personality');
+            expect(trigger().getAttribute('aria-label')).toBe('Thread settings: reasoning High, agent loop Advanced, from personality');
+            expect(fixture.componentInstance.triggerTooltip()).toContain("uses its personality's setting");
+
+            open();
+            expect(optionLabels()).toEqual(['Inherit (High, from personality)', 'Off', 'Low', 'Medium', 'High', 'Inherit', 'Standard', 'Advanced']);
+            const checked = [...host.querySelectorAll<HTMLInputElement>('input[type=radio]:checked')];
+            expect(checked.map(radio => text(radio.closest('label')))).toEqual([
+                'Inherit (High, from personality)',
+                'Inherit Advanced, from personality',
+            ]);
+        });
+
+        it('falls back to the account default, and the thread value wins over both', () => {
+            fixture.componentRef.setInput('reasoningSupport', 'optional');
+            fixture.componentRef.setInput('inherited', { personality: null, account: { reasoning_effort: 'off', agent_loop: 'standard' } });
+            fixture.detectChanges();
+            expect(text(trigger())).toBe('Off · account default');
+            expect(fixture.componentInstance.triggerTooltip()).toContain('your account default');
+
+            fixture.componentRef.setInput('threadReasoningEffort', 'medium');
+            fixture.detectChanges();
+            expect(text(trigger())).toBe('Medium');
+            open();
+            // The Inherit hint still says what clearing the thread's value would give.
+            expect(optionLabels()[0]).toBe('Inherit (Off, account default)');
+        });
+
+        it('names no source when the thread sets part of what is shown', () => {
+            fixture.componentRef.setInput('reasoningSupport', 'optional');
+            fixture.componentRef.setInput('threadReasoningEffort', 'low');
+            fixture.componentRef.setInput('inherited', { personality: { agent_loop: 'advanced' } });
+            fixture.detectChanges();
+            expect(text(trigger())).toBe('Low · Advanced');
+        });
+
+        it('keeps "set by mode" over an inherited value', () => {
+            fixture.componentRef.setInput('reasoningSupport', 'optional');
+            fixture.componentRef.setInput('activeMode', { name: 'Deep work', reasoning_effort: 'high' });
+            fixture.componentRef.setInput('inherited', { personality: { reasoning_effort: 'low' } });
+            fixture.detectChanges();
+            expect(text(trigger())).toBe('High · set by mode');
+        });
+
+        it('uses only the thread value in a sandboxed thread, ignoring mode, personality and account', () => {
+            fixture.componentRef.setInput('reasoningSupport', 'optional');
+            fixture.componentRef.setInput('activeMode', { name: 'Deep work', reasoning_effort: 'high', agent_loop: 'advanced' });
+            fixture.componentRef.setInput('inherited', {
+                personality: { reasoning_effort: 'medium', agent_loop: 'advanced' },
+                account: { reasoning_effort: 'low' },
+                sandboxed: true,
+            });
+            fixture.detectChanges();
+            expect(text(trigger())).toBe('Default');
+
+            open();
+            expect(host.querySelector('.turn-settings__mode-note')).toBeNull();
+            expect(optionLabels()).toEqual(['Model default', 'Off', 'Low', 'Medium', 'High', 'Default', 'Standard', 'Advanced']);
+
+            fixture.componentRef.setInput('threadAgentLoop', 'advanced');
+            fixture.detectChanges();
+            expect(text(trigger())).toBe('Default · Advanced');
+        });
     });
 });

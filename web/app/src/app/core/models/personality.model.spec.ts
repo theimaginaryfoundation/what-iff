@@ -20,12 +20,15 @@ describe('buildPersonalityUpdateRequest', () => {
     expect(request.image_style).toBe('watercolor');
   });
 
-  it('carries the turn settings, which the PUT would otherwise clear', () => {
-    const withSettings = makeTestPersonality({ reasoning_effort: 'high', agent_loop: 'advanced' });
+  it('leaves the turn settings out unless an override names them, so the server keeps them', () => {
+    const withSettings = makeTestPersonality({ reasoning_effort: 'xhigh' as never, agent_loop: 'advanced' });
     const request = buildPersonalityUpdateRequest(withSettings, { name: 'Renamed' });
-    expect(request.reasoning_effort).toBe('high');
-    expect(request.agent_loop).toBe('advanced');
-    expect(buildPersonalityUpdateRequest(personality).reasoning_effort).toBeNull();
+    expect('reasoning_effort' in request).toBe(false);
+    expect('agent_loop' in request).toBe(false);
+
+    const change = buildPersonalityUpdateRequest(withSettings, { agent_loop: null });
+    expect(change.agent_loop).toBeNull();
+    expect('reasoning_effort' in change).toBe(false);
   });
 
   it('lets an override clear a field explicitly', () => {

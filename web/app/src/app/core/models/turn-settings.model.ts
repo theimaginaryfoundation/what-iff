@@ -3,8 +3,9 @@
  * tool loop drives it (`agent_loop`). Both are nullable at every level (account default,
  * personality, thread, mode, agent job); null means "not set at this level".
  *
- * Precedence for a turn is agent job → active mode → thread. The thread's values are seeded at
- * creation from the personality, then the account default, and are thread-local after that.
+ * Precedence for a turn is agent job → active mode → thread → personality → account default, read
+ * at each turn (see {@link resolveEffectiveTurnSettings}). A sandboxed thread uses only its own
+ * values (and a job's); the mode, personality and account default do not apply there.
  */
 
 export const REASONING_EFFORTS = ['off', 'low', 'medium', 'high'] as const;
@@ -153,7 +154,7 @@ export function reasoningEffortLabel(
 }
 
 /** Which level an effective value came from; null when no level sets it. */
-export type TurnSettingSource = 'thread' | 'mode';
+export type TurnSettingSource = 'job' | 'mode' | 'thread' | 'personality' | 'account';
 
 export interface ResolvedTurnSetting<T> {
   value: T | null;
@@ -165,23 +166,47 @@ export interface ResolvedTurnSettings {
   agentLoop: ResolvedTurnSetting<AgentLoop>;
 }
 
-/**
- * Resolves what a thread's next turn uses, the way the server does (an agent job's own values
- * are not part of a chat turn): the active mode's value wins, then the thread's. Invalid stored
- * values are skipped. An unset loop runs Standard; an unset effort is the model's default.
- */
-export function resolveEffectiveTurnSettings(
-  thread: TurnSettingValues | null | undefined,
-  mode: TurnSettingValues | null | undefined,
-): ResolvedTurnSettings {
-  return {
-    reasoningEffort: resolveLevel(parseReasoningEffort(mode?.reasoning_effort), parseReasoningEffort(thread?.reasoning_effort)),
-    agentLoop: resolveLevel(parseAgentLoop(mode?.agent_loop), parseAgentLoop(thread?.agent_loop)),
-  };
+/** Every level a turn's settings can come from; any may be absent. */
+export interface TurnSettingLevels {
+  /** The agent job driving the turn, if any (not part of a chat turn). */
+  job?: TurnSettingValues | null;
+  /** The thread's active mode. */
+  mode?: TurnSettingValues | null;
+  /** The thread's own values. */
+  thread?: TurnSettingValues | null;
+  /** The thread's personality. */
+  personality?: TurnSettingValues | null;
+  /** The account defaults (`UserPreferences`). */
+  account?: TurnSettingValues | null;
+  /** A sandboxed thread (`Chat.context_scope === 'sandbox'`): only the job and thread levels apply. */
+  sandboxed?: boolean;
 }
 
-function resolveLevel<T>(mode: T | null, thread: T | null): ResolvedTurnSetting<T> {
-  if (mode !== null) return { value: mode, source: 'mode' };
-  if (thread !== null) return { value: thread, source: 'thread' };
-  return { value: null, source: null };
+/** The levels below the thread that a thread setting nothing of its own inherits from. */
+export type InheritedTurnSettings = Pick<TurnSettingLevels, 'personality' | 'account' | 'sandboxed'>;
+
+/** Highest precedence first, as the server resolves a turn. */
+const LEVEL_ORDER: readonly TurnSettingSource[] = ['job', 'mode', 'thread', 'personality', 'account'];
+const SANDBOX_LEVELS: ReadonlySet<TurnSettingSource> = new Set(['job', 'thread']);
+
+/**
+ * Resolves what a turn uses, per setting, the way the server does: agent job → active mode →
+ * thread → personality → account default, the first level that sets a valid value winning. In a
+ * sandboxed thread only the job and the thread apply. Invalid stored values are skipped. An unset
+ * loop runs Standard; an unset effort is the model's default.
+ */
+export function resolveEffectiveTurnSettings(levels: TurnSettingLevels): ResolvedTurnSettings {
+  const applicable = LEVEL_ORDER.filter(level => !levels.sandboxed || SANDBOX_LEVELS.has(level));
+  const resolve = <T>(read: (values: TurnSettingValues) => T | null): ResolvedTurnSetting<T> => {
+    for (const level of applicable) {
+      const values = levels[level];
+      const value = values ? read(values) : null;
+      if (value !== null) return { value, source: level };
+    }
+    return { value: null, source: null };
+  };
+  return {
+    reasoningEffort: resolve(values => parseReasoningEffort(values.reasoning_effort)),
+    agentLoop: resolve(values => parseAgentLoop(values.agent_loop)),
+  };
 }

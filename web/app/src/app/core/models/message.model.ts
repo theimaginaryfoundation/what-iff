@@ -35,17 +35,22 @@ export interface ContextBreakdown {
   captured_at: string;
 }
 
-/** One note an Advanced run's model wrote within a step: `reasoning` (native reasoning) or `text`. Open-ended. */
-export interface AgentRunNote {
-  kind: 'reasoning' | 'text' | (string & {});
-  text: string;
+/**
+ * One thing that happened within a step of a saved Advanced run: `reasoning` (native reasoning) or
+ * `text` (text the model wrote) carry `text`; `tool_call` carries the id of one of the message's
+ * tool_calls. Open-ended: readers skip kinds they do not know.
+ */
+export interface AgentRunEvent {
+  kind: 'reasoning' | 'text' | 'tool_call' | (string & {});
+  text?: string;
+  tool_call_id?: string;
 }
 
-/** What the model wrote in one step of a saved Advanced run, before its final reply. */
+/** What happened in one step of a saved Advanced run, in order, before its final reply. */
 export interface AgentRunStep {
   /** The step, 1-based; the message's tool_calls carry the same number. */
   step: number;
-  notes?: AgentRunNote[];
+  events?: AgentRunEvent[];
 }
 
 /** One item of a saved Advanced run's plan. The status is open-ended: render unknown values generically. */
@@ -58,10 +63,12 @@ export interface AgentRunPlanItem {
 export type AgentRunEndReason = 'done' | 'stalled' | 'duration_limit' | 'step_limit' | 'quota' | 'cancelled' | 'failed' | (string & {});
 
 /**
- * A saved Advanced run (ADR 0x026) on the assistant message it produced: the working notes per
- * step, the plan as it stood at the end, and why the run ended. The message text is the final reply.
+ * A saved Advanced run (ADR 0x026) on the assistant message it produced: what happened per step
+ * (notes and tool calls), the plan as it stood at the end, and why the run ended. The message text is the final reply.
  */
 export interface AgentRun {
+  /** The record's format (1). Readers render what they know of a newer version rather than reject it. */
+  version?: number;
   steps?: AgentRunStep[];
   plan?: AgentRunPlanItem[];
   end_reason?: AgentRunEndReason;

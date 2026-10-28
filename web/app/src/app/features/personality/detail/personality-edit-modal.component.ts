@@ -681,9 +681,11 @@ export class PersonalityEditModalComponent {
       memory_search_prompt: personality.memory_search_prompt,
       memory_write_prompt: personality.memory_write_prompt,
       archival_model: personality.archival_model,
-      reasoning_effort: draft.reasoning_effort,
-      agent_loop: draft.agent_loop,
     };
+    // The server keeps an omitted turn setting, so send only the ones the user changed: a value
+    // this client does not know is then never written back or cleared.
+    if (draft.reasoning_effort !== (personality.reasoning_effort ?? null)) request.reasoning_effort = draft.reasoning_effort;
+    if (draft.agent_loop !== (personality.agent_loop ?? null)) request.agent_loop = draft.agent_loop;
     this.saving.set(true);
     this.personalityService.updatePersonality(personality.id, request).subscribe({
       next: updated => {

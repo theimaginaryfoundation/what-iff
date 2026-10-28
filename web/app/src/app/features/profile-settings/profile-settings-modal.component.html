@@ -166,7 +166,7 @@
               <option value="advanced" [selected]="preferences()?.agent_loop === 'advanced'">{{ agentLoopLabels.advanced }}</option>
             </select>
           </label>
-          <small>Reasoning effort and agent loop seed each new thread; a personality's own setting wins, and you can change them in any thread.</small>
+          <small>Reasoning effort and agent loop apply to every thread that doesn't set its own, unless its personality does. Changes reach existing threads too; sandboxed threads don't use them.</small>
         </fieldset>
 
         @if (imageGenerationProviders().length > 1) {

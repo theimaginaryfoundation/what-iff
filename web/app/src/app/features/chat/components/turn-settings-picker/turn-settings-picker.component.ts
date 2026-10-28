@@ -16,9 +16,11 @@ import {
   AGENT_LOOP_LABELS,
   AGENT_LOOP_OPTIONS,
   AgentLoop,
+  InheritedTurnSettings,
   REASONING_EFFORT_DESCRIPTION,
   ReasoningEffort,
   ReasoningSupport,
+  TurnSettingSource,
   TurnSettingValues,
   effectiveReasoningEffort,
   reasoningEffortLabel,
@@ -29,13 +31,31 @@ import { BrainIconComponent } from '../../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 import { MODE_SINGULAR } from '../../../mood/mode-ui.labels';
 
+type InheritedSource = Extract<TurnSettingSource, 'personality' | 'account'>;
+
+const INHERITED_SOURCE_LABELS: Record<InheritedSource, string> = {
+  personality: 'from personality',
+  account: 'account default',
+};
+
+const INHERITED_SOURCE_TOOLTIPS: Record<InheritedSource, string> = {
+  personality: "This thread sets none of its own, so it uses its personality's setting.",
+  account: 'This thread and its personality set none, so it uses your account default.',
+};
+
+function isInheritedSource(source: TurnSettingSource | null): source is InheritedSource {
+  return source === 'personality' || source === 'account';
+}
+
 /** The active mode as far as turn settings go: its name and the values it overrides. */
 export type TurnSettingsMode = TurnSettingValues & { name: string };
 
 /**
  * Composer control for the thread's reasoning effort and agent loop (ADR 0x026). The trigger
- * shows what the next turn uses (the active mode's value over the thread's); the popover edits
- * the thread's own values. The reasoning part is hidden when the model has no effort control.
+ * shows what the next turn uses (mode → thread → personality → account default; only the thread's
+ * own values in a sandboxed thread) and where an inherited or mode value comes from; the popover
+ * edits the thread's own values, with "Inherit" clearing them. The reasoning part is hidden when
+ * the model has no effort control.
  */
 @Component({
   selector: 'app-turn-settings-picker',
@@ -59,6 +79,8 @@ export type TurnSettingsMode = TurnSettingValues & { name: string };
         <span class="turn-settings__trigger-label">{{ triggerLabel() }}</span>
         @if (setByMode()) {
           <span class="turn-settings__trigger-mode">· set by {{ modeNoun }}</span>
+        } @else if (inheritedSource(); as source) {
+          <span class="turn-settings__trigger-mode">· {{ sourceLabels[source] }}</span>
         }
       </button>
       @if (open()) {
@@ -74,7 +96,12 @@ export type TurnSettingsMode = TurnSettingValues & { name: string };
               }
               <label class="turn-settings__option">
                 <input type="radio" [name]="panelId + '-effort'" [checked]="threadEffortChoice() === null" (change)="pickEffort(null)" />
-                <span>Model default</span>
+                <span>
+                  {{ sandboxed() ? 'Model default' : 'Inherit' }}
+                  @if (!sandboxed()) {
+                    <span class="turn-settings__option-hint">({{ inheritedEffortHint() }})</span>
+                  }
+                </span>
               </label>
               @for (option of effortOptions(); track option.value) {
                 <label class="turn-settings__option">
@@ -96,12 +123,19 @@ export type TurnSettingsMode = TurnSettingValues & { name: string };
                 {{ modeName() }} {{ modeNoun }} sets {{ effectiveLoopLabel() }} while it's active.
               </p>
             }
+            <label class="turn-settings__option turn-settings__option--described">
+              <input type="radio" [name]="panelId + '-loop'" [checked]="threadAgentLoop() === null" (change)="pickLoop(null)" />
+              <span>
+                <span class="turn-settings__option-label">{{ sandboxed() ? 'Default' : 'Inherit' }}</span>
+                <span class="turn-settings__option-desc">{{ inheritedLoopHint() }}</span>
+              </span>
+            </label>
             @for (option of loopOptions; track option.value) {
               <label class="turn-settings__option turn-settings__option--described">
                 <input
                   type="radio"
                   [name]="panelId + '-loop'"
-                  [checked]="(threadAgentLoop() ?? 'standard') === option.value"
+                  [checked]="threadAgentLoop() === option.value"
                   (change)="pickLoop(option.value)"
                 />
                 <span>
@@ -243,6 +277,11 @@ export type TurnSettingsMode = TurnSettingValues & { name: string };
         font-weight: 600;
       }
 
+      .turn-settings__option-hint {
+        color: var(--color-text-muted);
+        font-size: 0.6875rem;
+      }
+
       .turn-settings__option-desc {
         color: var(--color-text-muted);
         display: block;
@@ -261,6 +300,11 @@ export class TurnSettingsPickerComponent {
   readonly threadAgentLoop = input<AgentLoop | null>(null);
   /** The active mode, when one is; its values override the thread's while it is active. */
   readonly activeMode = input<TurnSettingsMode | null>(null);
+  /**
+   * What the thread inherits where it sets nothing (personality, then account default). In a
+   * sandboxed thread none of that applies, and neither does the mode.
+   */
+  readonly inherited = input<InheritedTurnSettings | null>(null);
   /** The selected model's effort support; `none` or unknown hides the reasoning part. */
   readonly reasoningSupport = input<ReasoningSupport | null>(null);
   readonly disabled = input(false);
@@ -274,10 +318,19 @@ export class TurnSettingsPickerComponent {
   readonly effortDescription = REASONING_EFFORT_DESCRIPTION;
   readonly loopOptions = AGENT_LOOP_OPTIONS;
   readonly loopDescriptions = AGENT_LOOP_DESCRIPTIONS;
+  readonly sourceLabels = INHERITED_SOURCE_LABELS;
 
+  readonly sandboxed = computed(() => this.inherited()?.sandboxed === true);
+  /** What the next turn uses, from every level. */
   readonly resolved = computed(() =>
-    resolveEffectiveTurnSettings({ reasoning_effort: this.threadReasoningEffort(), agent_loop: this.threadAgentLoop() }, this.activeMode()),
+    resolveEffectiveTurnSettings({
+      ...this.inherited(),
+      mode: this.activeMode(),
+      thread: { reasoning_effort: this.threadReasoningEffort(), agent_loop: this.threadAgentLoop() },
+    }),
   );
+  /** What the thread falls back to without values of its own (the "Inherit" choice), mode aside. */
+  private readonly fallback = computed(() => resolveEffectiveTurnSettings({ ...this.inherited() }));
   readonly effortOptions = computed(() => reasoningEffortOptions(this.reasoningSupport()));
   /** The thread's effort as this model runs it, so the matching choice is checked (e.g. High → On). */
   readonly threadEffortChoice = computed(() => effectiveReasoningEffort(this.reasoningSupport(), this.threadReasoningEffort()));
@@ -290,6 +343,29 @@ export class TurnSettingsPickerComponent {
   readonly setByMode = computed(() => {
     const { reasoningEffort, agentLoop } = this.resolved();
     return agentLoop.source === 'mode' || (reasoningEffort.source === 'mode' && this.effortOptions().length > 0);
+  });
+  /**
+   * Where the values the trigger shows come from when all of them are inherited (personality or
+   * account default); null when the thread or the mode sets any of them, or nothing does.
+   */
+  readonly inheritedSource = computed((): InheritedSource | null => {
+    const { reasoningEffort, agentLoop } = this.resolved();
+    const shown: (TurnSettingSource | null)[] = [];
+    if (this.effortOptions().length > 0) shown.push(reasoningEffort.source);
+    if (this.effortOptions().length === 0 || agentLoop.value === 'advanced') shown.push(agentLoop.source);
+    const sources = shown.filter(source => source !== null);
+    if (sources.length === 0 || sources.some(source => !isInheritedSource(source))) return null;
+    return sources.includes('personality') ? 'personality' : 'account';
+  });
+  readonly inheritedEffortHint = computed(() => {
+    const { value, source } = this.fallback().reasoningEffort;
+    const label = reasoningEffortLabel(this.reasoningSupport(), value);
+    return label && isInheritedSource(source) ? `${label}, ${INHERITED_SOURCE_LABELS[source]}` : 'model default';
+  });
+  readonly inheritedLoopHint = computed(() => {
+    const { value, source } = this.fallback().agentLoop;
+    const label = AGENT_LOOP_LABELS[value ?? 'standard'];
+    return value && isInheritedSource(source) ? `${label}, ${INHERITED_SOURCE_LABELS[source]}` : label;
   });
   readonly highlighted = computed(
     () =>
@@ -309,15 +385,23 @@ export class TurnSettingsPickerComponent {
       `Changing it here changes the thread's own setting, which applies when the ${this.modeNoun} is off.`,
   );
 
-  readonly triggerTooltip = computed(() =>
-    this.setByMode() ? this.modeOverrideTooltip() : 'Reasoning effort and agent loop for this thread',
-  );
+  readonly triggerTooltip = computed(() => {
+    if (this.setByMode()) return this.modeOverrideTooltip();
+    const source = this.inheritedSource();
+    if (source) return `${INHERITED_SOURCE_TOOLTIPS[source]} Picking a value here sets this thread's own.`;
+    return 'Reasoning effort and agent loop for this thread';
+  });
 
   readonly triggerAriaLabel = computed(() => {
     const parts: string[] = [];
     if (this.effortOptions().length > 0) parts.push(`reasoning ${this.effectiveEffortLabel()}`);
     parts.push(`agent loop ${this.effectiveLoopLabel()}`);
-    const suffix = this.setByMode() ? `, set by the ${this.activeMode()?.name?.trim() || 'active'} ${this.modeNoun}` : '';
+    const source = this.inheritedSource();
+    const suffix = this.setByMode()
+      ? `, set by the ${this.activeMode()?.name?.trim() || 'active'} ${this.modeNoun}`
+      : source
+        ? `, ${INHERITED_SOURCE_LABELS[source]}`
+        : '';
     return `Thread settings: ${parts.join(', ')}${suffix}`;
   });
 
@@ -330,7 +414,7 @@ export class TurnSettingsPickerComponent {
     this.reasoningEffortChange.emit(effort);
   }
 
-  pickLoop(loop: AgentLoop): void {
+  pickLoop(loop: AgentLoop | null): void {
     this.agentLoopChange.emit(loop);
   }
 

@@ -62,27 +62,74 @@ describe('parseReasoningEffort / parseAgentLoop', () => {
 
 describe('resolveEffectiveTurnSettings', () => {
   it('uses the mode value over the thread value, per setting', () => {
-    const resolved = resolveEffectiveTurnSettings(
-      { reasoning_effort: 'low', agent_loop: 'advanced' },
-      { reasoning_effort: 'high', agent_loop: null },
-    );
+    const resolved = resolveEffectiveTurnSettings({
+      thread: { reasoning_effort: 'low', agent_loop: 'advanced' },
+      mode: { reasoning_effort: 'high', agent_loop: null },
+    });
     expect(resolved.reasoningEffort).toEqual({ value: 'high', source: 'mode' });
     expect(resolved.agentLoop).toEqual({ value: 'advanced', source: 'thread' });
   });
 
-  it('falls back to the thread, then to not set', () => {
-    expect(resolveEffectiveTurnSettings({ reasoning_effort: 'off' }, null).reasoningEffort).toEqual({ value: 'off', source: 'thread' });
-    expect(resolveEffectiveTurnSettings(null, undefined)).toEqual({
+  it('follows job → mode → thread → personality → account, per setting', () => {
+    const levels = {
+      job: { reasoning_effort: 'off' as const },
+      mode: { agent_loop: 'advanced' as const },
+      thread: { reasoning_effort: 'low' as const, agent_loop: 'standard' as const },
+      personality: { reasoning_effort: 'medium' as const, agent_loop: 'standard' as const },
+      account: { reasoning_effort: 'high' as const, agent_loop: 'advanced' as const },
+    };
+    expect(resolveEffectiveTurnSettings(levels)).toEqual({
+      reasoningEffort: { value: 'off', source: 'job' },
+      agentLoop: { value: 'advanced', source: 'mode' },
+    });
+    expect(resolveEffectiveTurnSettings({ ...levels, job: null, mode: null })).toEqual({
+      reasoningEffort: { value: 'low', source: 'thread' },
+      agentLoop: { value: 'standard', source: 'thread' },
+    });
+    expect(resolveEffectiveTurnSettings({ ...levels, job: null, mode: null, thread: { agent_loop: null } })).toEqual({
+      reasoningEffort: { value: 'medium', source: 'personality' },
+      agentLoop: { value: 'standard', source: 'personality' },
+    });
+    expect(resolveEffectiveTurnSettings({ account: levels.account, personality: { reasoning_effort: null } })).toEqual({
+      reasoningEffort: { value: 'high', source: 'account' },
+      agentLoop: { value: 'advanced', source: 'account' },
+    });
+  });
+
+  it('uses only the job and the thread in a sandboxed thread', () => {
+    const inherited = {
+      mode: { reasoning_effort: 'high' as const, agent_loop: 'advanced' as const },
+      personality: { reasoning_effort: 'medium' as const, agent_loop: 'advanced' as const },
+      account: { reasoning_effort: 'low' as const, agent_loop: 'advanced' as const },
+      sandboxed: true,
+    };
+    expect(resolveEffectiveTurnSettings(inherited)).toEqual({
+      reasoningEffort: { value: null, source: null },
+      agentLoop: { value: null, source: null },
+    });
+    expect(resolveEffectiveTurnSettings({ ...inherited, thread: { reasoning_effort: 'off' } }).reasoningEffort).toEqual({
+      value: 'off',
+      source: 'thread',
+    });
+    expect(resolveEffectiveTurnSettings({ ...inherited, job: { agent_loop: 'standard' } }).agentLoop).toEqual({
+      value: 'standard',
+      source: 'job',
+    });
+  });
+
+  it('falls back to not set when no level sets a value', () => {
+    expect(resolveEffectiveTurnSettings({})).toEqual({
       reasoningEffort: { value: null, source: null },
       agentLoop: { value: null, source: null },
     });
   });
 
   it('skips invalid stored values', () => {
-    const resolved = resolveEffectiveTurnSettings(
-      { reasoning_effort: 'medium' },
-      { reasoning_effort: 'bogus' as never, agent_loop: '' as never },
-    );
+    const resolved = resolveEffectiveTurnSettings({
+      thread: { reasoning_effort: 'medium' },
+      mode: { reasoning_effort: 'bogus' as never, agent_loop: '' as never },
+      account: { agent_loop: 'turbo' as never },
+    });
     expect(resolved.reasoningEffort).toEqual({ value: 'medium', source: 'thread' });
     expect(resolved.agentLoop).toEqual({ value: null, source: null });
   });

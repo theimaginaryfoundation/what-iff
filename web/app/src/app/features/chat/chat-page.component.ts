@@ -21,6 +21,7 @@ import {
   pendingAttachmentKey,
 } from '../../core/models/file-attachment.model';
 import { Personality, PersonalityExpression } from '../../core/models/personality.model';
+import { UserPreferencesService } from '../../core/services/user-preferences.service';
 import { ToolCall } from '../../core/models/toolcall.model';
 import { ChatComposerComponent } from './components/chat-composer/chat-composer.component';
 import { MessageListComponent } from './components/message-list/message-list.component';
@@ -44,7 +45,7 @@ import { ChatSessionService } from './chat-session.service';
 import { isChatSendFailed, isChatSendSucceeded } from './chat-send-result';
 import { ChatSendGate } from './services/chat-send-gate';
 import { Mood } from '../../core/models/mood.model';
-import { effectiveReasoningEffort, resolveEffectiveTurnSettings } from '../../core/models/turn-settings.model';
+import { InheritedTurnSettings, effectiveReasoningEffort, resolveEffectiveTurnSettings } from '../../core/models/turn-settings.model';
 import { ChatSendOutletComponent } from '../../extensions/chat-send-outlet.component';
 import { DiscordComposerToggleComponent } from '../discord/discord-composer-toggle.component';
 import { ThreadListService } from '../../core/services/thread-list.service';
@@ -319,7 +320,7 @@ export class ChatPageComponent implements OnInit, OnDestroy {
     this.bookmarks.set([]);
     if (threadId) this.refreshBookmarks(threadId);
   });
-  /** The thread's active mode as the composer loaded it; its turn settings override the thread's. */
+  /** The thread's active mode as the composer loaded it; its turn settings override the thread's (not in a sandboxed thread). */
   readonly activeMode = signal<Mood | null>(null);
   private readonly activeModel = computed(() => {
     const modelId = this.session.model()?.id ?? this.session.thread()?.model_id ?? null;
@@ -328,8 +329,19 @@ export class ChatPageComponent implements OnInit, OnDestroy {
   private readonly syncActiveModel = effect(() => {
     this.sendGate.setActiveModel(this.activeModel());
   });
+  private readonly accountPreferences = toSignal(inject(UserPreferencesService).preferences$, { initialValue: null });
+  /** What a thread that sets no turn setting of its own inherits (ADR 0x026), for the composer's picker. */
+  readonly inheritedTurnSettings = computed((): InheritedTurnSettings => ({
+    personality: this.selectedPersonality(),
+    account: this.accountPreferences(),
+    sandboxed: isSandboxed(this.session.thread()),
+  }));
   private readonly syncActiveTurnSettings = effect(() => {
-    const resolved = resolveEffectiveTurnSettings(this.session.thread(), this.activeMode());
+    const resolved = resolveEffectiveTurnSettings({
+      ...this.inheritedTurnSettings(),
+      mode: this.activeMode(),
+      thread: this.session.thread(),
+    });
     this.sendGate.setActiveTurnSettings({
       reasoningEffort: effectiveReasoningEffort(this.activeModel()?.reasoning_support, resolved.reasoningEffort.value),
       agentLoop: resolved.agentLoop.value,

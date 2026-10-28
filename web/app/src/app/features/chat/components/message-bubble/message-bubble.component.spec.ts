@@ -145,12 +145,33 @@ describe('MessageBubbleComponent', () => {
         const details = () => fixture.nativeElement.querySelector('details.bubble__reasoning') as HTMLDetailsElement | null;
 
         it('shows the working notes per step, the plan and the stop reason in the collapsed disclosure', () => {
+            const toolCall = (id: string, tool_name: string, tool_error: string) => ({
+                id,
+                chat_message_id: 'm',
+                tool_name,
+                tool_input: '{}',
+                tool_output: '{}',
+                tool_error,
+                step: 1,
+                created_at: '2026-01-01T00:00:00Z',
+                updated_at: '2026-01-01T00:00:00Z',
+            });
             fixture.componentRef.setInput('message', {
                 ...message('Assistant'),
+                tool_calls: [toolCall('tc-1', 'web_search', ''), toolCall('tc-2', 'fetch_url', 'timeout'), toolCall('tc-3', 'save_memory', '')],
                 agent_run: {
+                    version: 1,
                     steps: [
-                        { step: 1, notes: [{ kind: 'reasoning', text: 'Weigh the options.' }, { kind: 'text', text: 'Searching now.' }] },
-                        { step: 2, notes: [{ kind: 'text', text: 'Found it.' }] },
+                        {
+                            step: 1,
+                            events: [
+                                { kind: 'reasoning', text: 'Weigh the options.' },
+                                { kind: 'text', text: 'Searching now.' },
+                                { kind: 'tool_call', tool_call_id: 'tc-1' },
+                                { kind: 'tool_call', tool_call_id: 'tc-2' },
+                            ],
+                        },
+                        { step: 2, events: [{ kind: 'text', text: 'Found it.' }] },
                     ],
                     plan: [
                         { content: 'Search', status: 'completed' },
@@ -171,6 +192,12 @@ describe('MessageBubbleComponent', () => {
             expect(firstNotes.map(n => n.textContent)).toEqual(['Weigh the options.', 'Searching now.']);
             expect(firstNotes[0].classList).toContain('agent-run__note--reasoning');
             expect(firstNotes[1].classList).toContain('agent-run__note--text');
+            const tools = [...steps[0].querySelectorAll('.agent-run__tool')];
+            expect(tools.map(t => t.querySelector('.agent-run__tool-name')?.textContent)).toEqual(['web search', 'fetch url']);
+            expect(tools[0].querySelector('.agent-run__tool-error')).toBeNull();
+            expect(tools[1].classList).toContain('agent-run__tool--error');
+            expect(tools[1].querySelector('.agent-run__tool-error')?.textContent).toBe('failed');
+            expect(steps[0].lastElementChild).toBe(tools[1]);
             const plan = [...box.querySelectorAll('.agent-run__plan li')];
             expect(plan.map(li => li.querySelector('.advanced-run__content')?.textContent)).toEqual(['Search', 'Summarise']);
             expect(plan[1].classList).toContain('advanced-run__item--in_progress');
@@ -184,7 +211,7 @@ describe('MessageBubbleComponent', () => {
 
             fixture.componentRef.setInput('message', {
                 ...message('Assistant'),
-                agent_run: { steps: [{ step: 1, notes: [{ kind: 'text', text: 'Done.' }] }], end_reason: 'done' },
+                agent_run: { steps: [{ step: 1, events: [{ kind: 'text', text: 'Done.' }] }], end_reason: 'done' },
             });
             fixture.detectChanges();
             expect(details()?.querySelector('.agent-run__stop')).toBeNull();
@@ -196,7 +223,7 @@ describe('MessageBubbleComponent', () => {
             fixture.detectChanges();
             expect(details()).toBeNull();
 
-            const run = { steps: [{ step: 1, notes: [{ kind: 'text', text: 'x' }] }] };
+            const run = { steps: [{ step: 1, events: [{ kind: 'text', text: 'x' }] }] };
             fixture.componentRef.setInput('message', { ...message('User'), agent_run: run });
             fixture.detectChanges();
             expect(details()).toBeNull();
@@ -210,7 +237,7 @@ describe('MessageBubbleComponent', () => {
 
             fixture.componentRef.setInput('message', {
                 ...message('Assistant'),
-                agent_run: { steps: [{ step: 1, notes: [{ kind: 'reasoning', text: 'Thinking live' }] }], end_reason: 'done' },
+                agent_run: { steps: [{ step: 1, events: [{ kind: 'reasoning', text: 'Thinking live' }] }], end_reason: 'done' },
             });
             fixture.componentRef.setInput('displayContent', 'Final answer');
             fixture.detectChanges();

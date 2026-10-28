@@ -358,9 +358,12 @@ export class MoodListFacade {
       recommended_model: this.formRecommendedModel(),
       image_ids: this.formImageIds(),
       ritual_ids: this.formRitualIds(),
-      reasoning_effort: this.formReasoningEffort() || null,
-      agent_loop: this.formAgentLoop() || null,
     };
+    // The server keeps an omitted turn setting, so send only the ones the user changed: a stored
+    // value this client does not recognise is then left as it is rather than cleared.
+    const snap = this.editFormSnapshot();
+    if (!snap || this.formReasoningEffort() !== snap.reasoningEffort) updateReq.reasoning_effort = this.formReasoningEffort() || null;
+    if (!snap || this.formAgentLoop() !== snap.agentLoop) updateReq.agent_loop = this.formAgentLoop() || null;
     this.moodService.updateMood(moodID, updateReq).subscribe({
       next: updated => {
         this.moods.update(current =>

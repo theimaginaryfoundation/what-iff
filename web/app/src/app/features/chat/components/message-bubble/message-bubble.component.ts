@@ -523,7 +523,7 @@ export class MessageBubbleComponent {
   /** A saved Advanced reply's run (ADR 0x026), reduced to what is shown; null hides it. */
   readonly agentRun = computed((): AgentRunView | null => {
     const m = this.message();
-    return m.origin === 'Assistant' ? agentRunView(m.agent_run) : null;
+    return m.origin === 'Assistant' ? agentRunView(m.agent_run, m.tool_calls) : null;
   });
 
   /** Reasoning is still streaming: pending placeholder with no reply text yet. */

@@ -14,8 +14,9 @@ import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 
 /**
  * The personality's reasoning effort and agent loop (ADR 0x026), shared by the compact edit modal
- * and the full-page editor. They seed new threads with this personality, over the account default;
- * null ("Use account default") leaves it to the account.
+ * and the full-page editor. Threads with this personality that set none of their own use them at
+ * each turn, over the account default (not sandboxed threads); null ("Use account default") leaves
+ * it to the account.
  */
 @Component({
   selector: 'app-personality-turn-settings-fields',
@@ -53,7 +54,7 @@ import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
       </label>
     </div>
     <p class="mt-1 text-[11px] text-(--color-text-muted)">
-      New threads with this personality start with these; each thread can change them later.
+      Used by this personality's threads that don't set their own, so changes reach existing threads too. Sandboxed threads don't use them.
     </p>
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,

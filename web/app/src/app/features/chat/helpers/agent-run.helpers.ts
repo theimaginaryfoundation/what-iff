@@ -1,5 +1,7 @@
 import { CHAT_TURN_PLAN_STATUSES, ChatTurnPlanItem, ChatTurnPlanStatus } from '../../../core/models/job.model';
-import { AgentRun, AgentRunEndReason } from '../../../core/models/message.model';
+import { AgentRun, AgentRunEndReason, AgentRunEvent } from '../../../core/models/message.model';
+import { ToolCall } from '../../../core/models/toolcall.model';
+import { toolCallDisplayName, toolCallFailed } from './tool-call-format.helpers';
 
 const PLAN_STATUSES = new Set<string>(CHAT_TURN_PLAN_STATUSES);
 
@@ -24,15 +26,16 @@ export function normalizePlanItems(raw: unknown, unknownStatusAs?: ChatTurnPlanS
   return items;
 }
 
-/** One note of a saved Advanced step, as shown: unknown kinds read as plain text. */
-export interface AgentRunNoteView {
-  kind: 'reasoning' | 'text';
-  text: string;
-}
+/**
+ * One event of a saved Advanced step, as shown: a note (reasoning or text), or a reference to one
+ * of the message's tool calls.
+ */
+export type AgentRunEventView =
+  { kind: 'reasoning' | 'text'; text: string } | { kind: 'tool_call'; toolCall: ToolCall; name: string; failed: boolean };
 
 export interface AgentRunStepView {
   step: number;
-  notes: AgentRunNoteView[];
+  events: AgentRunEventView[];
 }
 
 /** A saved Advanced run reduced to what the message bubble shows. */
@@ -60,18 +63,44 @@ export function agentRunStopLabel(reason: AgentRunEndReason | null | undefined):
 }
 
 /**
- * What to show for a saved Advanced run: steps that have notes (empty notes dropped), the plan, and
- * a stop label. Null when there is nothing to show, so the bubble can skip the disclosure.
+ * One saved event as shown, or null to skip it: an empty note, a tool call the message does not
+ * carry, or a kind this client does not know (a newer format may add kinds).
  */
-export function agentRunView(run: AgentRun | null | undefined): AgentRunView | null {
-  if (!run) return null;
+function eventView(event: AgentRunEvent | null | undefined, toolCalls: ReadonlyMap<string, ToolCall>): AgentRunEventView | null {
+  if (!event || typeof event !== 'object') return null;
+  switch (event.kind) {
+    case 'reasoning':
+    case 'text': {
+      const text = typeof event.text === 'string' ? event.text.trim() : '';
+      return text ? { kind: event.kind === 'reasoning' ? 'reasoning' : 'text', text } : null;
+    }
+    case 'tool_call': {
+      const toolCall = typeof event.tool_call_id === 'string' ? toolCalls.get(event.tool_call_id) : undefined;
+      return toolCall
+        ? { kind: 'tool_call', toolCall, name: toolCallDisplayName(toolCall.tool_name), failed: toolCallFailed(toolCall) }
+        : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * What to show for a saved Advanced run: each step's events in order (skipped events dropped, and
+ * steps left empty with them), the plan, and a stop label. Tool-call events resolve against the
+ * message's `toolCalls`. A newer `version` is rendered as far as its known parts go. Null when there
+ * is nothing to show, so the bubble can skip the disclosure.
+ */
+export function agentRunView(run: AgentRun | null | undefined, toolCalls: readonly ToolCall[] = []): AgentRunView | null {
+  if (!run || typeof run !== 'object') return null;
+  const callsById = new Map(toolCalls.map(call => [call.id, call]));
   const steps: AgentRunStepView[] = [];
   for (const step of Array.isArray(run.steps) ? run.steps : []) {
     if (!step || typeof step.step !== 'number') continue;
-    const notes = (Array.isArray(step.notes) ? step.notes : [])
-      .filter(note => !!note && typeof note.text === 'string' && note.text.trim() !== '')
-      .map((note): AgentRunNoteView => ({ kind: note.kind === 'reasoning' ? 'reasoning' : 'text', text: note.text.trim() }));
-    if (notes.length > 0) steps.push({ step: step.step, notes });
+    const events = (Array.isArray(step.events) ? step.events : [])
+      .map(event => eventView(event, callsById))
+      .filter((event): event is AgentRunEventView => event !== null);
+    if (events.length > 0) steps.push({ step: step.step, events });
   }
   const plan = normalizePlanItems(run.plan, 'pending');
   const stopLabel = agentRunStopLabel(run.end_reason);

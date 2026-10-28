@@ -36,7 +36,7 @@ import { RitualService } from '../../../../core/services/ritual.service';
 import { MoodService } from '../../../../core/services/mood.service';
 import { ImageGalleryService } from '../../../../core/services/image-gallery.service';
 import { Mood } from '../../../../core/models/mood.model';
-import { AgentLoop, ReasoningEffort } from '../../../../core/models/turn-settings.model';
+import { AgentLoop, InheritedTurnSettings, ReasoningEffort } from '../../../../core/models/turn-settings.model';
 import { MODE_PLURAL, MODE_SINGULAR } from '../../../mood/mode-ui.labels';
 import { AuthImagePipe } from '../../../../core/pipes/auth-image.pipe';
 import { MAX_FILE_SIZE_BYTES, isMimeOrExtensionAllowedForChatUpload } from '../../chat.constants';
@@ -293,6 +293,7 @@ let nextPreviewId = 0;
               [threadReasoningEffort]="threadReasoningEffort()"
               [threadAgentLoop]="threadAgentLoop()"
               [activeMode]="activeMode()"
+              [inherited]="inheritedTurnSettings()"
               [reasoningSupport]="selectedModelReasoningSupport()"
               [disabled]="modelPickerDisabled()"
               (reasoningEffortChange)="reasoningEffortSelected.emit($event)"
@@ -1394,6 +1395,8 @@ export class ChatComposerComponent {
   /** The thread's own turn settings (ADR 0x026); the active mode's values override them per turn. */
   readonly threadReasoningEffort = input<ReasoningEffort | null>(null);
   readonly threadAgentLoop = input<AgentLoop | null>(null);
+  /** What the thread inherits where it sets nothing (personality, account default; none when sandboxed). */
+  readonly inheritedTurnSettings = input<InheritedTurnSettings | null>(null);
 
   readonly draftChange = output<string>();
   readonly send = output<string>();

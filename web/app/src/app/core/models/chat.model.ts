@@ -47,12 +47,13 @@ export interface Chat {
    */
   context_scope?: ContextScope;
   /**
-   * The thread's reasoning effort (ADR 0x026), seeded at creation from the personality, then the
-   * account default, and thread-local after. An active mode's value overrides it for a turn.
-   * Null when not set (the model's default).
+   * The thread's own reasoning effort (ADR 0x026). Null when the thread sets none: each turn then
+   * uses its personality's, then the account default (neither in a sandboxed thread). An active
+   * mode's value overrides it for a turn (not in a sandboxed thread), and an agent job's overrides
+   * everything. See `resolveEffectiveTurnSettings`.
    */
   reasoning_effort?: ReasoningEffort | null;
-  /** The thread's agent loop, seeded like `reasoning_effort`. Null when not set (standard). */
+  /** The thread's own agent loop, resolved like `reasoning_effort`. Null when the thread sets none. */
   agent_loop?: AgentLoop | null;
   created_at: string;
   updated_at: string;
@@ -85,9 +86,9 @@ export interface CreateChatRequest {
   is_favorite?: boolean;
   /** Optional. `sandbox` creates the thread sandboxed; the default is `account`. */
   context_scope?: ContextScope;
-  /** Optional. Omit to seed it from the personality, then the account default. */
+  /** Optional: the new thread's own value. Omit to leave it unset, so turns inherit it. */
   reasoning_effort?: ReasoningEffort | null;
-  /** Optional. Omit to seed it from the personality, then the account default. */
+  /** Optional: the new thread's own value. Omit to leave it unset, so turns inherit it. */
   agent_loop?: AgentLoop | null;
 }
 

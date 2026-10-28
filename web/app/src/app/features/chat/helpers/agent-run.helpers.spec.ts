@@ -1,3 +1,4 @@
+import { ToolCall } from '../../../core/models/toolcall.model';
 import { agentRunStopLabel, agentRunView, normalizePlanItems } from './agent-run.helpers';
 
 describe('agent-run helpers', () => {
@@ -48,41 +49,102 @@ describe('agent-run helpers', () => {
   });
 
   describe('agentRunView', () => {
+    const call = (id: string, tool_name: string, tool_error = ''): ToolCall => ({
+      id,
+      chat_message_id: 'm1',
+      tool_name,
+      tool_input: '{}',
+      tool_output: '{}',
+      tool_error,
+      step: 1,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    });
+
     it('is null when there is no run or nothing to show', () => {
       expect(agentRunView(undefined)).toBeNull();
       expect(agentRunView(null)).toBeNull();
       expect(agentRunView({})).toBeNull();
-      expect(agentRunView({ steps: [{ step: 1, notes: [{ kind: 'text', text: '  ' }] }], end_reason: 'done' })).toBeNull();
+      expect(agentRunView({ version: 1, steps: [{ step: 1, events: [{ kind: 'text', text: '  ' }] }], end_reason: 'done' })).toBeNull();
     });
 
-    it('keeps steps with notes, trims notes and reads unknown kinds as text', () => {
-      const view = agentRunView({
-        steps: [
-          {
-            step: 1,
-            notes: [
-              { kind: 'reasoning', text: ' Think. ' },
-              { kind: 'text', text: 'Let me search.' },
-            ],
-          },
-          { step: 2 },
-          { step: 3, notes: [{ kind: 'summary', text: 'Odd kind' }] },
-        ],
-        end_reason: 'done',
-      });
+    it("keeps each step's events in order, trims notes and resolves tool calls by id", () => {
+      const search = call('tc-1', 'web_search');
+      const fetch = call('tc-2', 'fetch_url', 'timeout');
+      const view = agentRunView(
+        {
+          version: 1,
+          steps: [
+            {
+              step: 1,
+              events: [
+                { kind: 'reasoning', text: ' Think. ' },
+                { kind: 'text', text: 'Let me search.' },
+                { kind: 'tool_call', tool_call_id: 'tc-1' },
+                { kind: 'tool_call', tool_call_id: 'tc-2' },
+              ],
+            },
+            { step: 2 },
+          ],
+          end_reason: 'done',
+        },
+        [search, fetch],
+      );
       expect(view).toEqual({
         steps: [
           {
             step: 1,
-            notes: [
+            events: [
               { kind: 'reasoning', text: 'Think.' },
               { kind: 'text', text: 'Let me search.' },
+              { kind: 'tool_call', toolCall: search, name: 'web search', failed: false },
+              { kind: 'tool_call', toolCall: fetch, name: 'fetch url', failed: true },
             ],
           },
-          { step: 3, notes: [{ kind: 'text', text: 'Odd kind' }] },
         ],
         plan: [],
         stopLabel: null,
+      });
+    });
+
+    it('skips unknown kinds and tool calls the message does not carry, dropping steps left empty', () => {
+      const view = agentRunView(
+        {
+          version: 1,
+          steps: [
+            {
+              step: 1,
+              events: [
+                { kind: 'summary', text: 'Odd kind' },
+                { kind: 'tool_call', tool_call_id: 'missing' },
+              ],
+            },
+            { step: 2, events: [{ kind: 'tool_call' }, { kind: 'text', text: 'Kept.' }] },
+          ],
+        },
+        [call('tc-1', 'web_search')],
+      );
+      expect(view?.steps).toEqual([{ step: 2, events: [{ kind: 'text', text: 'Kept.' }] }]);
+    });
+
+    it('renders the known parts of a newer version', () => {
+      const view = agentRunView({
+        version: 2,
+        steps: [
+          {
+            step: 1,
+            events: [
+              { kind: 'image', text: 'x' },
+              { kind: 'reasoning', text: 'Still here.' },
+            ],
+          },
+        ],
+        end_reason: 'quota',
+      });
+      expect(view).toEqual({
+        steps: [{ step: 1, events: [{ kind: 'reasoning', text: 'Still here.' }] }],
+        plan: [],
+        stopLabel: 'Stopped: credit limit reached',
       });
     });
 

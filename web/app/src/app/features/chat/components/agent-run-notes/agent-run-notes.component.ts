@@ -5,8 +5,9 @@ import { AdvancedRunPlanComponent } from '../advanced-run-progress/advanced-run-
 
 /**
  * A saved Advanced run's working notes (ADR 0x026), shown inside the message bubble's collapsed
- * reasoning disclosure: each step's notes (reasoning muted, text the model wrote in the body
- * colour), then the plan as it stood at the end, then why the run stopped if it ended early.
+ * reasoning disclosure: each step's events in order (reasoning muted, text the model wrote in the
+ * body colour, tool calls as a compact name with a failure marker; the full calls render in the
+ * tool-call group as usual), then the plan as it stood at the end, then why the run stopped if it ended early.
  */
 @Component({
   selector: 'app-agent-run-notes',
@@ -16,8 +17,18 @@ import { AdvancedRunPlanComponent } from '../advanced-run-progress/advanced-run-
     @for (step of run().steps; track step.step) {
       <section class="agent-run__step" [attr.aria-label]="'Step ' + step.step">
         <p class="agent-run__step-title">Step {{ step.step }}</p>
-        @for (note of step.notes; track $index) {
-          <p class="agent-run__note" [class]="'agent-run__note--' + note.kind">{{ note.text }}</p>
+        @for (event of step.events; track $index) {
+          @if (event.kind === 'tool_call') {
+            <p class="agent-run__tool" [class.agent-run__tool--error]="event.failed">
+              <span class="agent-run__tool-dot" aria-hidden="true"></span>
+              <span class="agent-run__tool-name">{{ event.name }}</span>
+              @if (event.failed) {
+                <span class="agent-run__tool-error">failed</span>
+              }
+            </p>
+          } @else {
+            <p class="agent-run__note" [class]="'agent-run__note--' + event.kind">{{ event.text }}</p>
+          }
         }
       </section>
     }
@@ -63,6 +74,36 @@ import { AdvancedRunPlanComponent } from '../advanced-run-progress/advanced-run-
 
       .agent-run__note--text {
         color: var(--color-text-primary);
+      }
+
+      .agent-run__tool {
+        align-items: center;
+        color: var(--color-text-muted);
+        display: flex;
+        font-size: 0.6875rem;
+        gap: 0.375rem;
+        margin: 0;
+      }
+
+      .agent-run__tool-dot {
+        background: var(--color-success, #22c55e);
+        border-radius: 999px;
+        flex-shrink: 0;
+        height: 0.375rem;
+        width: 0.375rem;
+      }
+
+      .agent-run__tool--error .agent-run__tool-dot {
+        background: var(--color-danger, #ef4444);
+      }
+
+      .agent-run__tool-name {
+        color: var(--color-text-primary);
+        font-weight: 600;
+      }
+
+      .agent-run__tool-error {
+        color: var(--color-danger, #ef4444);
       }
 
       .agent-run__stop {
