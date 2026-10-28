@@ -53,7 +53,7 @@ func TestFinalizeFailedChatJobWithPartial_AdvancedDraftBecomesMessage(t *testing
 	chatID := createJobTestChat(t, ds, userID, createJobTestModel(t, ds))
 	created, callID := advancedDraftJob(t, ds, userID)
 
-	gotJob, resultID, err := ds.FinalizeFailedChatJobWithPartial(ctx, userID, created.ID, chatID, "", "", "Interrupted by a server shutdown", nil)
+	gotJob, resultID, err := ds.FinalizeFailedChatJobWithPartial(ctx, userID, created.ID, chatID, "", "", "Interrupted by a server shutdown", "", nil)
 	require.NoError(t, err)
 	require.Equal(t, models.JobStatusFailed, gotJob.Status)
 	require.NotNil(t, resultID)
@@ -73,6 +73,25 @@ func TestFinalizeFailedChatJobWithPartial_AdvancedDraftBecomesMessage(t *testing
 	require.Equal(t, *resultID, call.Edges.ChatMessage.ID, "the draft tool call moved onto the partial")
 	require.Equal(t, 1, call.Step)
 	require.False(t, ds.dbClient.ToolCall.Query().Where(enttoolcall.ID(callID), enttoolcall.HasDraftJob()).ExistX(ctx))
+}
+
+// A failed Advanced run records the failure's stable code with its text, like any other turn.
+func TestFinalizeAdvancedDraft_RecordsFailureCode(t *testing.T) {
+	ds, cleanup := newFinalizeChatJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := createJobTestUser(t, ds)
+	chatID := createJobTestChat(t, ds, userID, createJobTestModel(t, ds))
+	created, _ := advancedDraftJob(t, ds, userID)
+
+	handled, err := ds.FinalizeAdvancedDraft(ctx, userID, created.ID, chatID, false, "No OpenAI API key is set.", models.ErrCodeProviderNotConfigured)
+	require.NoError(t, err)
+	require.True(t, handled)
+
+	got, err := ds.dbClient.Job.Get(ctx, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, entjob.StatusFailed, got.Status)
+	require.Equal(t, models.ErrCodeProviderNotConfigured, got.ErrorCode)
 }
 
 // A cancelled run's draft ends as cancelled; an empty draft makes no message.
@@ -98,7 +117,7 @@ func TestConsumeDraftAgentRun_CancelledAndEmpty(t *testing.T) {
 	empty, err := ds.CreateJob(ctx, userID, jobModel)
 	require.NoError(t, err)
 	require.NoError(t, ds.UpdateJobDraftAgentRun(ctx, userID, empty.ID, &modeltypes.AgentRunDraft{}))
-	_, resultID, err = ds.FinalizeFailedChatJobWithPartial(ctx, userID, empty.ID, chatID, "", "", "boom", nil)
+	_, resultID, err = ds.FinalizeFailedChatJobWithPartial(ctx, userID, empty.ID, chatID, "", "", "boom", "", nil)
 	require.NoError(t, err)
 	require.Nil(t, resultID, "a draft with nothing in it makes no message")
 }
