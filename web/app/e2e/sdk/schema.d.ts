@@ -2108,6 +2108,572 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/slack/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Slack app manifest for a personality
+         * @description The manifest of a Slack app that speaks as the personality (its name, Socket Mode on, token rotation off, and the scopes and events the relay uses), and the link that opens Slack's "create an app" flow with it filled in.
+         */
+        get: {
+            parameters: {
+                query: {
+                    personality_id: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Manifest */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackManifest"];
+                    };
+                };
+                400: components["responses"]["SlackBadRequest"];
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/slack/apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Slack apps
+         * @description Returns the user's personalities' Slack apps. Tokens are never returned.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Apps retrieved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackApp"][];
+                    };
+                };
+                401: components["responses"]["SlackUnauthorized"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        put?: never;
+        /**
+         * Connect a Slack app
+         * @description Checks the bot token with Slack (its workspace, bot user and app) and that the app-level token belongs to the same app (by opening a Socket Mode connection), then stores both, encrypted, for one of the user's personalities. One app per personality per workspace, and an app can be connected once. Needs TOKEN_ENCRYPTION_SECRET on the server.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SlackAppCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description App connected */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackApp"];
+                    };
+                };
+                400: components["responses"]["SlackBadRequest"];
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                409: components["responses"]["SlackConflict"];
+                500: components["responses"]["SlackServerError"];
+                502: components["responses"]["SlackUpstreamError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/slack/apps/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                id: components["parameters"]["SlackID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Disconnect a Slack app
+         * @description Removes the app's tokens and, with them, its channel bindings. The relay threads stay, and nothing changes in Slack.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                    id: components["parameters"]["SlackID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description App disconnected */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Update a Slack app
+         * @description Replaces either token (they must stay the same app's), re-reads the workspace's and bot's names from Slack, or pauses and resumes the app.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                    id: components["parameters"]["SlackID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SlackAppUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description App updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackApp"];
+                    };
+                };
+                400: components["responses"]["SlackBadRequest"];
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                500: components["responses"]["SlackServerError"];
+                502: components["responses"]["SlackUpstreamError"];
+            };
+        };
+        trace?: never;
+    };
+    "/slack/apps/{id}/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                id: components["parameters"]["SlackID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the workspace's channels
+         * @description The workspace's public channels and the private channels the app is in, without archived ones; `is_member` says whether the app is in each.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                    id: components["parameters"]["SlackID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Channels */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackChannel"][];
+                    };
+                };
+                400: components["responses"]["SlackBadRequest"];
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                502: components["responses"]["SlackUpstreamError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/slack/apps/{id}/channels/{channelId}/join": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                id: components["parameters"]["SlackID"];
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add the app to a public channel
+         * @description Private channels cannot be joined this way; invite the persona in Slack (`/invite`) instead (400).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                    id: components["parameters"]["SlackID"];
+                    channelId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Joined */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackChannel"];
+                    };
+                };
+                400: components["responses"]["SlackBadRequest"];
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                502: components["responses"]["SlackUpstreamError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/slack/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Slack channel bindings */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Bindings retrieved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackBinding"][];
+                    };
+                };
+                401: components["responses"]["SlackUnauthorized"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        put?: never;
+        /**
+         * Connect a Slack channel to a relay thread
+         * @description Binds a channel of the app's workspace to a thread. Without `chat_id` a new relay thread is created for the app's personality, sandboxed, with no MCP connectors and the sandbox's default-off tools. Binding an existing thread leaves its settings alone; a thread that is not sandboxed is refused unless `allow_unrestricted` is true.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SlackBindingCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Channel connected */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackBinding"];
+                    };
+                };
+                400: components["responses"]["SlackBadRequest"];
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                409: components["responses"]["SlackConflict"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/slack/bindings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                id: components["parameters"]["SlackID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Disconnect a Slack channel */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                    id: components["parameters"]["SlackID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Channel disconnected */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Update a Slack channel binding
+         * @description Repointing to a thread that is not sandboxed needs `allow_unrestricted`; the acknowledgement is only recorded while the thread is not sandboxed.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+                    id: components["parameters"]["SlackID"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SlackBindingUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description Binding updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackBinding"];
+                    };
+                };
+                400: components["responses"]["SlackBadRequest"];
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        trace?: never;
+    };
+    "/slack/chats/{chatId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The What Iff thread (chat) id */
+                chatId: components["parameters"]["SlackChatID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A thread's Slack state
+         * @description The thread's Slack bindings, which of them will post the next reply, and the recent messages that crossed between the thread and Slack.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The What Iff thread (chat) id */
+                    chatId: components["parameters"]["SlackChatID"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Slack state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SlackChatState"];
+                    };
+                };
+                401: components["responses"]["SlackUnauthorized"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/slack/chats/{chatId}/pending/{bindingId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The What Iff thread (chat) id */
+                chatId: components["parameters"]["SlackChatID"];
+                bindingId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Post the next reply to a Slack channel
+         * @description Arms the composer toggle. The next reply in the thread is posted to the binding's channel; the request expires after 30 minutes.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The What Iff thread (chat) id */
+                    chatId: components["parameters"]["SlackChatID"];
+                    bindingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Armed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        post?: never;
+        /** Do not post the next reply to a Slack channel */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The What Iff thread (chat) id */
+                    chatId: components["parameters"]["SlackChatID"];
+                    bindingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Disarmed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["SlackUnauthorized"];
+                404: components["responses"]["SlackNotFound"];
+                500: components["responses"]["SlackServerError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/webhook-tokens": {
         parameters: {
             query?: never;
@@ -13157,6 +13723,176 @@ export interface components {
             pending_binding_ids: string[];
             links: components["schemas"]["BuzzMessageLink"][];
         };
+        SlackManifest: {
+            /** @description The Slack app manifest (JSON), for pasting into "Create an app → From a manifest" */
+            manifest: {
+                [key: string]: unknown;
+            };
+            /** @description Opens Slack's "create an app" flow with the manifest filled in */
+            create_url: string;
+            /** @description The bot token scopes the app asks for */
+            scopes: string[];
+            /** @description The events the app subscribes to */
+            events: string[];
+        };
+        /** @description A personality's own Slack app in one workspace. Its bot and app-level tokens are never returned. */
+        SlackApp: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            personality_id: string;
+            team_id: string;
+            team_name: string;
+            team_url: string;
+            app_id: string;
+            /** @description The app's bot user, what people mention */
+            bot_user_id: string;
+            bot_id: string;
+            bot_name: string;
+            /** @enum {string} */
+            status: "active" | "invalid_token" | "disabled";
+            /** @description Why Slack refused the app, or why its connection is retrying */
+            last_error?: string;
+            /** Format: date-time */
+            last_connected_at?: string;
+            /** @description The app's settings page in Slack, where its icon is uploaded */
+            settings_url: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SlackAppCreateRequest: {
+            /** Format: uuid */
+            personality_id: string;
+            /** @description The Bot User OAuth Token (xoxb-) from OAuth & Permissions, after installing the app */
+            bot_token: string;
+            /** @description An app-level token (xapp-) with the connections:write scope, from Basic Information */
+            app_token: string;
+        };
+        SlackAppUpdateRequest: {
+            /** @description Replaces the bot token; it must belong to the same app and workspace */
+            bot_token?: string;
+            /** @description Replaces the app-level token; it must belong to the same app */
+            app_token?: string;
+            /** @description Re-read the workspace's and the bot's names from Slack */
+            refresh?: boolean;
+            /** @description Pause (false) or resume (true) the app */
+            enabled?: boolean;
+        };
+        SlackChannel: {
+            id: string;
+            name: string;
+            is_private: boolean;
+            /** @description Whether the app is in the channel (it only hears channels it is in) */
+            is_member: boolean;
+            is_archived: boolean;
+            num_members?: number;
+        };
+        /** @description One Slack channel of an app's workspace, bound to a relay thread. */
+        SlackBinding: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: uuid
+             * @description The Slack app row (not Slack's own app id)
+             */
+            app_id: string;
+            team_name?: string;
+            /** Format: uuid */
+            chat_id: string;
+            channel_id: string;
+            channel_name: string;
+            is_private: boolean;
+            /** @description Whether mentioning the persona in the channel starts a turn */
+            inbound_enabled: boolean;
+            /** @description Slack user ids (U…) that may mention the persona; empty means anyone not denied */
+            allow_user_ids: string[];
+            /** @description Slack user ids that may never mention the persona; deny always wins */
+            deny_user_ids: string[];
+            /** @description Let other apps' bots start turns, behind the relay's loop guard (ADR 0x031) */
+            answer_agents: boolean;
+            /** @description The owner's acknowledgement that the bound thread is not sandboxed. Without it the relay answers only sandboxed threads. */
+            allow_unrestricted: boolean;
+            /** @description Whether the bound thread is sandboxed right now (computed; absent when the thread could not be read) */
+            chat_sandboxed?: boolean;
+            /** @enum {string} */
+            status: "active" | "broken";
+            last_error?: string;
+            /** Format: date-time */
+            last_activity_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SlackBindingCreateRequest: {
+            /** Format: uuid */
+            app_id: string;
+            /** @description The Slack channel id (C… or G…) */
+            channel_id: string;
+            channel_name?: string;
+            is_private?: boolean;
+            /**
+             * Format: uuid
+             * @description Bind an existing thread; omit to create a new relay thread
+             */
+            chat_id?: string;
+            /** @default true */
+            inbound_enabled: boolean;
+            allow_user_ids?: string[];
+            deny_user_ids?: string[];
+            /** @default false */
+            answer_agents: boolean;
+            /** @description Acknowledge binding an existing thread that is not sandboxed */
+            allow_unrestricted?: boolean;
+        };
+        SlackBindingUpdateRequest: {
+            /** Format: uuid */
+            chat_id?: string;
+            inbound_enabled?: boolean;
+            allow_user_ids?: string[];
+            deny_user_ids?: string[];
+            channel_name?: string;
+            answer_agents?: boolean;
+            allow_unrestricted?: boolean;
+            /** @description Clear a broken status after fixing the app's access to the channel */
+            reactivate?: boolean;
+        };
+        /** @description One message that crossed between a relay thread and its Slack channel. */
+        SlackMessageLink: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            binding_id: string;
+            /** @enum {string} */
+            direction: "inbound" | "outbound";
+            /** Format: uuid */
+            chat_message_id?: string;
+            /** @description Inbound only. The Slack message's ts */
+            message_ts?: string;
+            /** @description The Slack thread the message is in */
+            thread_ts: string;
+            /** @description Outbound only. The ts of each message the reply was posted as */
+            posted_ts: string[];
+            author_user_id?: string;
+            author_name?: string;
+            /** Format: uuid */
+            reply_to_link_id?: string;
+            /** @enum {string} */
+            status: "received" | "pending" | "sent" | "failed";
+            error?: string;
+            attempts: number;
+            /** @description Inbound only. Consecutive bot-started turns on the binding, this message included; 0 when a person wrote it (ADR 0x031) */
+            agent_depth: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        SlackChatState: {
+            bindings: components["schemas"]["SlackBinding"][];
+            pending_binding_ids: string[];
+            links: components["schemas"]["SlackMessageLink"][];
+        };
         MemoryCreateRequest: {
             content: string;
             /** @enum {string} */
@@ -13684,12 +14420,70 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description Invalid request, or Slack rejected a token (a token of the wrong kind, a revoked one, two tokens of different apps) */
+        SlackBadRequest: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Unauthorized */
+        SlackUnauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Not found (including another account's app, binding, thread or personality) */
+        SlackNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The app is already connected, the personality already has an app in that workspace, or the channel is already bound */
+        SlackConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Slack refused the request or could not be reached */
+        SlackUpstreamError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Internal server error */
+        SlackServerError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
     };
     parameters: {
         DiscordBotID: string;
         DiscordChatID: string;
         BuzzID: string;
         BuzzChatID: string;
+        /** @description What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…) */
+        SlackID: string;
+        /** @description The What Iff thread (chat) id */
+        SlackChatID: string;
     };
     requestBodies: never;
     headers: never;
