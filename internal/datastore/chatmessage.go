@@ -152,6 +152,9 @@ func toChatMessageModel(e *ent.ChatMessage) *models.ChatMessage {
 
 	// context_breakdown is a typed jsonb column; ent unmarshals it for us. Only surface
 	// snapshots that actually carry segments (defends against an empty/legacy row).
+	if e.AgentRun != nil {
+		chatMessage.AgentRun = e.AgentRun
+	}
 	if e.ContextBreakdown != nil && len(e.ContextBreakdown.Segments) > 0 {
 		chatMessage.ContextBreakdown = e.ContextBreakdown
 	}
@@ -313,6 +316,9 @@ func (d *Datastore) CreateChatMessage(ctx context.Context, userID uuid.UUID, cha
 	}
 	if chatMessage.GenerationMoodID != nil && *chatMessage.GenerationMoodID != uuid.Nil {
 		create.SetGenerationMoodID(*chatMessage.GenerationMoodID)
+	}
+	if chatMessage.AgentRun != nil {
+		create.SetAgentRun(chatMessage.AgentRun)
 	}
 	if chatMessage.ModelReasoning != nil {
 		if r := strings.TrimSpace(*chatMessage.ModelReasoning); r != "" {

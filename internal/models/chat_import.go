@@ -84,7 +84,9 @@ type ImportConversation struct {
 	IsAutoMood                 bool
 	// ContextScope restores the chat's context scope from an account export; absent (an export
 	// from before scopes existed) reads as account.
-	ContextScope  ContextScope
+	ContextScope ContextScope
+	// TurnSettings restore the thread's reasoning effort and agent loop (ADR 0x026).
+	TurnSettings  TurnSettingValues
 	AccountExport bool
 	RestoreReady  bool
 }

@@ -260,6 +260,49 @@ refetch_count="$(jq --arg m "$MSG" '[.results[] | select(.origin == "Assistant" 
 [ "$refetch_count" -ge 1 ] || { echo "❌ assistant reply missing on re-fetch"; exit 1; }
 echo "echo reply persisted"
 
+# ── Turn settings + Advanced loop (ADR 0x026) ──────────────────────────────────
+step "setting the thread's reasoning effort and agent loop"
+patched="$(curl -fsS -X PATCH "${BASE}/api/chat/${CHAT_ID}" "${AUTH[@]}" \
+  -H 'Content-Type: application/json' -d '{"reasoning_effort":"high","agent_loop":"advanced"}')" \
+  || { echo "❌ PATCH chat turn settings failed"; exit 1; }
+[ "$(jq -r '.reasoning_effort' <<<"$patched" 2>/dev/null)" = "high" ] || { echo "❌ reasoning_effort not saved: $patched"; exit 1; }
+[ "$(jq -r '.agent_loop' <<<"$patched" 2>/dev/null)" = "advanced" ] || { echo "❌ agent_loop not saved: $patched"; exit 1; }
+
+ADV_MSG="Advanced mock-e2e ${RUN_ID}"
+step "sending an Advanced-loop message"
+adv_resp="$(curl -fsS -X POST "${BASE}/api/chat/${CHAT_ID}/chat-message" "${AUTH[@]}" \
+  -H 'Content-Type: application/json' \
+  -d "$(jq -n --arg m "$ADV_MSG" '{message:$m, origin:"User"}')")"
+ADV_JOB_ID="$(jq -r '.job_id // empty' <<<"$adv_resp" 2>/dev/null)" || ADV_JOB_ID=""
+[ -n "$ADV_JOB_ID" ] || { echo "❌ Advanced message did not return a job id: $adv_resp"; exit 1; }
+poll_job "$ADV_JOB_ID"
+adv_messages="$(curl -fsS "${BASE}/api/chat/${CHAT_ID}/chat-message?limit=50" "${AUTH[@]}")"
+adv_count="$(jq --arg m "$ADV_MSG" '[.results[] | select(.origin == "Assistant" and .message == $m)] | length' <<<"$adv_messages" 2>/dev/null)" || adv_count=0
+[ "$adv_count" -ge 1 ] || { echo "❌ Advanced reply not saved as the message; messages: $adv_messages"; exit 1; }
+echo "Advanced turn completed and saved its final reply"
+
+step "a new thread inherits the account default at each turn"
+prefs="$(curl -fsS "${BASE}/api/user/preferences" "${AUTH[@]}")" || { echo "❌ GET preferences failed"; exit 1; }
+prefs="$(jq '.reasoning_effort = "low" | .agent_loop = "advanced"' <<<"$prefs")"
+curl -fsS -X PUT "${BASE}/api/user/preferences" "${AUTH[@]}" -H 'Content-Type: application/json' -d "$prefs" >/dev/null \
+  || { echo "❌ PUT preferences failed"; exit 1; }
+inherit="$(curl -fsS -X POST "${BASE}/api/chat" "${AUTH[@]}" -H 'Content-Type: application/json' -d '{"name":"Inherits"}')"
+[ "$(jq -r '.reasoning_effort' <<<"$inherit" 2>/dev/null)" = "null" ] || { echo "❌ the account effort was copied onto the new thread: $inherit"; exit 1; }
+[ "$(jq -r '.agent_loop' <<<"$inherit" 2>/dev/null)" = "null" ] || { echo "❌ the account loop was copied onto the new thread: $inherit"; exit 1; }
+INHERIT_CHAT_ID="$(jq -r '.id' <<<"$inherit")"
+inherit_resp="$(curl -fsS -X POST "${BASE}/api/chat/${INHERIT_CHAT_ID}/chat-message" "${AUTH[@]}" \
+  -H 'Content-Type: application/json' -d '{"message":"inherit check","origin":"User"}')"
+INHERIT_JOB_ID="$(jq -r '.job_id // empty' <<<"$inherit_resp" 2>/dev/null)" || INHERIT_JOB_ID=""
+[ -n "$INHERIT_JOB_ID" ] || { echo "❌ inherit message did not return a job id: $inherit_resp"; exit 1; }
+poll_job "$INHERIT_JOB_ID"
+inherit_messages="$(curl -fsS "${BASE}/api/chat/${INHERIT_CHAT_ID}/chat-message?limit=10" "${AUTH[@]}")"
+jq -e '[.results[] | select(.origin == "Assistant" and .agent_run.version == 1)] | length >= 1' <<<"$inherit_messages" >/dev/null \
+  || { echo "❌ the turn did not run Advanced from the account default; messages: $inherit_messages"; exit 1; }
+models_resp="$(curl -fsS "${BASE}/api/model" "${AUTH[@]}")" || { echo "❌ GET models failed"; exit 1; }
+jq -e '[(if type == "array" then . else .results end)[] | select(.reasoning_support != null)] | length > 0' <<<"$models_resp" >/dev/null \
+  || { echo "❌ models carry no reasoning_support: $models_resp"; exit 1; }
+echo "turn settings inherited at each turn and models report reasoning support"
+
 # ── Gallery image: a PNG stored through the real save path ─────────────────────
 step "importing a PNG into the gallery"
 upload="${WORKDIR}/upload.png"

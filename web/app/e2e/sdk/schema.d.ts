@@ -6463,6 +6463,10 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
+                        /** @description The new thread's own reasoning effort. Omit to leave it unset, so each turn uses the personality's, then the account default. */
+                        reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+                        /** @description The new thread's own agent loop. Omit to leave it unset, so each turn uses the personality's, then the account default. */
+                        agent_loop?: components["schemas"]["AgentLoop"] | null;
                         /** @description Name of the chat session */
                         name: string;
                         /**
@@ -6864,6 +6868,16 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
+                        /**
+                         * @description Change the thread's reasoning effort. Omit to keep; an empty string clears it.
+                         * @enum {string}
+                         */
+                        reasoning_effort?: "" | "off" | "low" | "medium" | "high";
+                        /**
+                         * @description Change the thread's agent loop. Omit to keep; an empty string clears it.
+                         * @enum {string}
+                         */
+                        agent_loop?: "" | "standard" | "advanced";
                         /** @description Name of the chat session */
                         name: string;
                         /**
@@ -6997,6 +7011,16 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
+                        /**
+                         * @description Change the thread's reasoning effort. Omit to keep; an empty string clears it.
+                         * @enum {string}
+                         */
+                        reasoning_effort?: "" | "off" | "low" | "medium" | "high";
+                        /**
+                         * @description Change the thread's agent loop. Omit to keep; an empty string clears it.
+                         * @enum {string}
+                         */
+                        agent_loop?: "" | "standard" | "advanced";
                         /** @description Name of the chat session */
                         name?: string;
                         /**
@@ -10801,6 +10825,10 @@ export interface components {
          *     }
          */
         UserPreferences: {
+            /** @description Account-default reasoning effort (ADR 0x026), used by every turn whose job, mode, thread and personality set none (never in a sandboxed thread). Null when not set. */
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+            /** @description Account-default agent loop, used like reasoning_effort. Null when not set (standard). */
+            agent_loop?: components["schemas"]["AgentLoop"] | null;
             /**
              * Format: uuid
              * @description Unique identifier for the user preferences record
@@ -10845,6 +10873,28 @@ export interface components {
             readonly image_generation_providers?: components["schemas"]["ImageGenerationProvider"][];
         };
         /**
+         * @description How hard a turn asks the model to think (ADR 0x026). Not set means the model's own
+         *     default. `off` asks for no reasoning where the model allows it; a model that always
+         *     reasons runs it as `low`. Open-ended: values may be added, so a client must accept an
+         *     unknown value in a response (show it generically, and never save over it in its place).
+         * @enum {string}
+         */
+        ReasoningEffort: "off" | "low" | "medium" | "high";
+        /**
+         * @description How a turn drives tools (ADR 0x026): `standard` is the original tool loop; `advanced` is
+         *     the long-horizon loop that works in steps until its plan is done, showing its interim
+         *     output as reasoning. Not set means `standard`. Open-ended like ReasoningEffort.
+         * @enum {string}
+         */
+        AgentLoop: "standard" | "advanced";
+        /**
+         * @description How a model takes a reasoning effort: `none` (no control), `optional` (off and the
+         *     three levels), `toggle` (on or off only) or `always` (levels, no off). Open-ended like
+         *     ReasoningEffort.
+         * @enum {string}
+         */
+        ReasoningSupport: "none" | "optional" | "toggle" | "always";
+        /**
          * @description The vendor the generate_image tool and the image ritual call: OpenAI (GPT Image),
          *     Google (Gemini image), z.ai (GLM-Image) or Qwen (Qwen-Image). Defaults to `openai`
          *     for a user who never chose.
@@ -10869,6 +10919,16 @@ export interface components {
          *     }
          */
         UserPreferencesUpdateRequest: {
+            /**
+             * @description Account-default reasoning effort. Preserved when absent; an empty string clears it.
+             * @enum {string}
+             */
+            reasoning_effort?: "" | "off" | "low" | "medium" | "high";
+            /**
+             * @description Account-default agent loop. Preserved when absent; an empty string clears it.
+             * @enum {string}
+             */
+            agent_loop?: "" | "standard" | "advanced";
             /**
              * Format: uuid
              * @description ID of the user's preferred default AI model. Preserved when absent: omitting the
@@ -10925,6 +10985,9 @@ export interface components {
          *     }
          */
         Model: {
+            reasoning_support?: components["schemas"]["ReasoningSupport"];
+            /** @description An admin's override of reasoning_support; when set, reasoning_support is this value. Null derives reasoning_support from the provider and model name. */
+            reasoning_support_override?: components["schemas"]["ReasoningSupport"] | null;
             /**
              * Format: uuid
              * @description Unique identifier for the model
@@ -11004,7 +11067,7 @@ export interface components {
             result_id?: string;
             /** @description Incremental assistant text chunks emitted while inference is in progress. */
             draft_deltas?: string[];
-            /** @description Incremental model reasoning chunks emitted while inference is in progress (z.ai GLM, Xiaomi MiMo). Display-only. Unlike draft_deltas this can be reset (emptied and re-sent) when a truncated call is retried, so clients should render the whole array on each poll rather than appending by cursor. */
+            /** @description Incremental model reasoning chunks emitted while inference is in progress (z.ai GLM, Xiaomi MiMo, and OpenAI/Anthropic when a reasoning effort is selected). On an Advanced turn it carries everything the model writes before its final reply, with step headers, and the final reply streams here too until it is saved as the message (whose agent_run then holds the notes by step). Display-only. Unlike draft_deltas this can be reset (emptied and re-sent) when a truncated call is retried, so clients should render the whole array on each poll rather than appending by cursor. */
             draft_reasoning?: string[];
             /**
              * @description Optional JSON-encoded progress payload for long-running jobs. Opaque to clients except per
@@ -11016,7 +11079,10 @@ export interface components {
              *     `error`, `input`/`output` are truncated previews, and `output`/`finished_at` are set once the
              *     call finishes. It is display-only; the saved assistant message's `tool_calls` are authoritative.
              *     While the turn is queued behind an earlier turn in its chat the payload also carries
-             *     `waiting_on` (`reply`), absent once the turn runs.
+             *     `waiting_on` (`reply`), absent once the turn runs. On an Advanced turn (ADR 0x026) it also
+             *     carries `step` (the current step, 1-based) and `plan` (`[{content, status}]`, status
+             *     `pending`, `in_progress`, `completed` or `cancelled`), each tool call carries its `step`, and
+             *     only the newest 60 tool calls are kept.
              */
             progress?: string;
             /** Format: date-time */
@@ -11056,6 +11122,10 @@ export interface components {
          *     }
          */
         AgentJob: {
+            /** @description Reasoning effort for this job's runs; overrides the thread and mode. Null when not set. */
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+            /** @description Agent loop for this job's runs; overrides the thread and mode. Null when not set. */
+            agent_loop?: components["schemas"]["AgentLoop"] | null;
             /** Format: uuid */
             id?: string;
             /** Format: uuid */
@@ -11102,6 +11172,16 @@ export interface components {
             next_runs: string[];
         };
         UpdateAgentJobRequest: {
+            /**
+             * @description Reasoning effort for this job's runs. Preserved when absent; an empty string clears it.
+             * @enum {string}
+             */
+            reasoning_effort?: "" | "off" | "low" | "medium" | "high";
+            /**
+             * @description Agent loop for this job's runs. Preserved when absent; an empty string clears it.
+             * @enum {string}
+             */
+            agent_loop?: "" | "standard" | "advanced";
             /** @description Set to empty string or null to clear title */
             title?: string | null;
             /** @description Agent prompt text (must be non-empty when provided) */
@@ -11135,6 +11215,10 @@ export interface components {
          *     }
          */
         Chat: {
+            /** @description The thread's own reasoning effort. Null when the thread sets none; each turn then uses its personality's, then the account default (none of those in a sandboxed thread). An active mode's value overrides the thread's for a turn (not in a sandboxed thread), and an agent job's overrides everything. */
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+            /** @description The thread's own agent loop, resolved like reasoning_effort. Null when the thread sets none. */
+            agent_loop?: components["schemas"]["AgentLoop"] | null;
             /** Format: uuid */
             id?: string;
             /** Format: uuid */
@@ -11415,8 +11499,10 @@ export interface components {
             generation_expression_label?: string | null;
             /** @description Short classifier rationale for why this expression portrait was chosen */
             generation_expression_reasoning?: string | null;
-            /** @description Reasoning/thinking text the model reported for this assistant turn (e.g. z.ai GLM thinking blocks, Xiaomi MiMo reasoning_content), joined across the turn's tool rounds. Display-only; never replayed to the model. Omitted when the provider reported none. */
+            /** @description Reasoning/thinking text the model reported for this assistant turn (e.g. z.ai GLM thinking blocks, Xiaomi MiMo reasoning_content, OpenAI reasoning summaries and Anthropic thinking when a reasoning effort is selected), joined across the turn's tool rounds. Display-only; never replayed to the model. Omitted when the provider reported none, and on Advanced turns, whose working notes are in agent_run. */
             model_reasoning?: string | null;
+            /** @description The Advanced run (ADR 0x026) that produced this assistant message: its working notes per step, its plan and why it ended. The message text is the run's final reply. Absent on Standard turns. */
+            agent_run?: components["schemas"]["AgentRun"] | null;
             /** @description User-visible async generation failure for this user turn; cleared after a successful reply */
             last_error_message?: string | null;
             /**
@@ -11441,6 +11527,35 @@ export interface components {
             cacheable: boolean;
             /** @description Image payloads carried by this kind (token estimates do not account for images). */
             images?: number;
+        };
+        /** @description A saved Advanced run (ADR 0x026). Readers branch on version and must skip event kinds and render other enum-like values they do not know, rather than reject the message. */
+        AgentRun: {
+            /** @description The format of this record (1). */
+            version?: number;
+            /** @description Per step, in order, what happened before the final reply: the model's reasoning, the text it wrote between tool calls, and its tool calls. Notes are capped in size; tool-call events are always kept. */
+            steps?: {
+                /** @description The step, 1-based. */
+                step?: number;
+                events?: {
+                    /** @description `reasoning` (the model's native reasoning), `text` (text it wrote) or `tool_call` (a tool call, by tool_call_id). */
+                    kind?: string;
+                    /** @description The note, for `reasoning` and `text`. */
+                    text?: string;
+                    /**
+                     * Format: uuid
+                     * @description For `tool_call`, the id of one of the message's tool_calls.
+                     */
+                    tool_call_id?: string;
+                }[];
+            }[];
+            /** @description The run's plan as it stood when the run ended. */
+            plan?: {
+                content?: string;
+                /** @description `pending`, `in_progress`, `completed` or `cancelled`. */
+                status?: string;
+            }[];
+            /** @description Why the run ended: `done`, `stalled`, `duration_limit`, `step_limit`, `quota`, `cancelled` or `failed`. Open plan items of a run that ended for any reason other than `done`, at most a week ago, are shown to the thread's next Advanced turn. */
+            end_reason?: string;
         };
         /** @description Snapshot of the model context assembled for one assistant turn — "what was in the model's head" for that reply. The total uses vendor-reported input usage when available; named context buckets are estimates plus a reconciliation remainder. */
         ContextBreakdown: {
@@ -11802,6 +11917,8 @@ export interface components {
          *     }
          */
         ToolCall: {
+            /** @description Advanced-loop step (1-based) the call ran in; absent on Standard turns. */
+            step?: number;
             /** Format: uuid */
             id: string;
             tool_name: string;
@@ -11835,6 +11952,10 @@ export interface components {
          *     }
          */
         Personality: {
+            /** @description Reasoning effort for this personality's threads that set none of their own (over the account default; read at each turn). On update, omitting the field keeps it; null or an empty string clears it. */
+            reasoning_effort?: components["schemas"]["ReasoningEffort"] | null;
+            /** @description Agent loop for this personality's threads that set none of their own. On update, omitting the field keeps it; null or an empty string clears it. */
+            agent_loop?: components["schemas"]["AgentLoop"] | null;
             /** Format: uuid */
             id: string;
             /** @description Name of the personality */

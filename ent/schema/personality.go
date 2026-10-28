@@ -23,7 +23,7 @@ type PersonalityThumbnailCircle struct {
 
 // Fields of the Personality.
 func (Personality) Fields() []ent.Field {
-	return []ent.Field{
+	return append([]ent.Field{
 		field.UUID("id", uuid.UUID{}).
 			Default(uuid.New).
 			Immutable(),
@@ -68,7 +68,7 @@ func (Personality) Fields() []ent.Field {
 		field.String("image_style").
 			Default("auto").
 			Comment("Preferred image generation style (e.g. 'auto', 'anime', 'none'). Used for portrait and expression grid generation."),
-	}
+	}, turnSettingFields("personality")...)
 }
 
 // Edges of the Personality.

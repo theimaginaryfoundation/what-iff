@@ -44,6 +44,7 @@ func toMoodModel(e *ent.Mood) *models.Mood {
 	for _, p := range e.Edges.Personalities {
 		m.PersonalityIDs = append(m.PersonalityIDs, p.ID)
 	}
+	m.TurnSettingValues = turnSettingsFromEnt(e.ReasoningEffort, e.AgentLoop)
 
 	return &m
 }
@@ -101,7 +102,9 @@ func (d *Datastore) CreateMood(ctx context.Context, userID uuid.UUID, req models
 		SetName(req.Name).
 		SetDescription(req.Description).
 		SetPromptSnippet(req.PromptSnippet).
-		SetOwnerID(userID)
+		SetOwnerID(userID).
+		SetNillableReasoningEffort(entEffort[entmood.ReasoningEffort](req.ReasoningEffort)).
+		SetNillableAgentLoop(entLoop[entmood.AgentLoop](req.AgentLoop))
 
 	if len(req.ImageIDs) > 0 {
 		create.AddImageIDs(req.ImageIDs...)
@@ -263,6 +266,7 @@ func (d *Datastore) UpdateMood(ctx context.Context, userID, id uuid.UUID, req mo
 		SetDescription(req.Description).
 		SetPromptSnippet(req.PromptSnippet).
 		SetRecommendedModel(req.RecommendedModel)
+	applyTurnSettings[entmood.ReasoningEffort, entmood.AgentLoop](update, req.TurnSettingValues)
 
 	if req.ImageIDs != nil {
 		update.ClearImages().AddImageIDs(*req.ImageIDs...)

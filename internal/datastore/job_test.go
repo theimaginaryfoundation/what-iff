@@ -34,10 +34,25 @@ func createJobTestSchema(t *testing.T, db *sql.DB) {
 		result_id uuid,
 		draft_deltas json,
 		draft_reasoning json,
+		draft_agent_run json,
 		progress text,
 		user_jobs uuid NOT NULL,
 		FOREIGN KEY (user_jobs) REFERENCES users(id)
 	)`)
+	require.NoError(t, err)
+	// Advanced runs' draft tool calls hang off jobs (ADR 0x026), and the draft paths touch them.
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS tool_calls (
+			id uuid PRIMARY KEY,
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL,
+			tool_name text NOT NULL,
+			tool_input text,
+			tool_output text,
+			tool_error text,
+			chat_message_tool_calls uuid,
+			job_draft_tool_calls uuid,
+			step integer DEFAULT 0
+		)`)
 	require.NoError(t, err)
 }
 
@@ -1119,6 +1134,18 @@ func TestFinalizeFailedChatJobWithPartial_PersistsDraftAndFailure(t *testing.T) 
 func createPartialJobTestTables(t *testing.T, ds *Datastore) {
 	t.Helper()
 	for _, statement := range []string{
+		`CREATE TABLE IF NOT EXISTS tool_calls (
+				id uuid PRIMARY KEY,
+				created_at datetime NOT NULL,
+				updated_at datetime NOT NULL,
+				tool_name text NOT NULL,
+				tool_input text,
+				tool_output text,
+				tool_error text,
+				chat_message_tool_calls uuid,
+				job_draft_tool_calls uuid,
+				step integer DEFAULT 0
+			)`,
 		`ALTER TABLE chats ADD COLUMN source text`,
 		`ALTER TABLE chats ADD COLUMN import_hash text`,
 		`ALTER TABLE chats ADD COLUMN rehydration_state text`,
@@ -1131,6 +1158,7 @@ func createPartialJobTestTables(t *testing.T, ds *Datastore) {
 			result_id uuid,
 			draft_deltas json,
 			draft_reasoning json,
+			draft_agent_run json,
 			progress text,
 			created_at datetime NOT NULL,
 			updated_at datetime NOT NULL,
@@ -1148,6 +1176,7 @@ func createPartialJobTestTables(t *testing.T, ds *Datastore) {
 			generation_personality text,
 			generation_expression_reasoning text,
 			model_reasoning text,
+			agent_run json,
 			last_error_message text,
 			checkpoint_completed_at datetime,
 			context_breakdown json,

@@ -24,9 +24,12 @@ type Mood struct {
 	// ThumbnailData is a base64-encoded JPEG thumbnail (up to ~128×128), auto-generated
 	// from the attached image. Omitted from list responses; fetch via
 	// GET /api/mood/{id} or included inline in the personality response.
-	ThumbnailData string    `json:"thumbnail_data,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ThumbnailData string `json:"thumbnail_data,omitempty"`
+	// TurnSettingValues override the thread's reasoning effort and agent loop while this mood is
+	// the active mode (ADR 0x026); nil fields leave the thread's value in effect.
+	TurnSettingValues
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // MoodFilters defines optional filter criteria for listing moods.
@@ -43,6 +46,7 @@ type CreateMoodRequest struct {
 	PromptSnippet string      `json:"prompt_snippet"`
 	ImageIDs      []uuid.UUID `json:"image_ids,omitempty"`
 	RitualIDs     []uuid.UUID `json:"ritual_ids,omitempty"`
+	TurnSettingValues
 }
 
 // UpdateMoodRequest is the payload for PUT /api/mood/{id}.
@@ -55,6 +59,8 @@ type UpdateMoodRequest struct {
 	ImageIDs *[]uuid.UUID `json:"image_ids,omitempty"`
 	// When non-nil, replaces the mood's attached rituals entirely.
 	RitualIDs *[]uuid.UUID `json:"ritual_ids,omitempty"`
+	// TurnSettingValues replace the mood's settings (full replace: nil or "" clears).
+	TurnSettingValues
 }
 
 // AttachMoodToPersonalitiesRequest is the payload for POST /api/mood/{id}/personalities.

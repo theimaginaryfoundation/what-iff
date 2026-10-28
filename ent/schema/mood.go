@@ -16,7 +16,7 @@ type Mood struct {
 
 // Fields of the Mood.
 func (Mood) Fields() []ent.Field {
-	return []ent.Field{
+	return append([]ent.Field{
 		field.UUID("id", uuid.UUID{}).
 			Default(uuid.New).
 			Immutable(),
@@ -36,7 +36,7 @@ func (Mood) Fields() []ent.Field {
 			Optional().
 			Default("").
 			Comment("Optional model name to switch to when this mood becomes active; empty means no automatic model change"),
-	}
+	}, turnSettingFields("mode")...)
 }
 
 // Edges of the Mood.

@@ -64,11 +64,22 @@ func (a *Agent) persistInferencePhase(ctx context.Context, chatJob *models.Job, 
 	return nil
 }
 
+// turnContextTokens is the size of the context the turn started from, which drives checkpointing.
+// The final call's input says that for a Standard turn, but an Advanced run's final call also
+// carries everything the run did (tool results, notes) that the thread's next turn will not, so
+// its first call is used: otherwise a long run would checkpoint a thread that is not long.
+func turnContextTokens(chatCtx *chatContext, result *provider.GenerateResponse) int64 {
+	if chatCtx != nil && chatCtx.turnSettings.Advanced() && len(chatCtx.calls) > 0 && chatCtx.calls[0].InputTokens > 0 {
+		return chatCtx.calls[0].InputTokens
+	}
+	return result.InputTokens
+}
+
 // persistUserTurnAndChatAfterInference updates user-turn tokens/context and chat continuity after inference.
 // Errors are logged only; callers should have already marked the job inference-complete when required.
 func (a *Agent) persistUserTurnAndChatAfterInference(ctx context.Context, userID uuid.UUID, chatMessage *models.ChatMessage, chat *models.Chat, chatCtx *chatContext, result *provider.GenerateResponse, persistUserTurnUpdate bool) {
 	if persistUserTurnUpdate && chatMessage != nil && result != nil {
-		chatMessage.Tokens = result.InputTokens
+		chatMessage.Tokens = turnContextTokens(chatCtx, result)
 		if chatCtx != nil {
 			chatMessage.AdditionalContext = additionalContextItemsFromChatContext(chatCtx)
 		}
