@@ -17,6 +17,7 @@ It talks to the remote through a small `Remote` interface and to storage through
 - **Runs:** `Wake` runs the account if its last run is older than `WakeMinAge` (two minutes): the web app sends one when a session starts or comes back, which is how copies stay current without polling.
   Every wake and every run also calls `Store.RematchRemoteSyncPersonas`, so copies whose persona arrived later (created here, or imported) take it without a remote call.
   `Start` claims the lease and runs regardless of age ("sync now" and saves); `RunDue` runs every account due on the background interval; `Runner` calls it on a timer.
+  An account is due a jittered amount after the interval (up to a fifth of it, from `backgroundJitter` over the account and its last run), so servers that started together drift apart instead of calling the remote in step.
   A run records its outcome with `FinishRemoteSyncRun`, which also releases the lease.
 
 ## Key types and entry points

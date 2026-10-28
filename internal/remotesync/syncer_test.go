@@ -200,8 +200,10 @@ func (s *fakeStore) RematchRemoteSyncPersonas(context.Context, uuid.UUID) (int, 
 	return s.rematchN, nil
 }
 
-func (s *fakeStore) ListDueRemoteSyncs(context.Context, time.Time) ([]uuid.UUID, error) {
-	return []uuid.UUID{s.account.UserID}, nil
+func (s *fakeStore) ListDueRemoteSyncs(context.Context, time.Time) ([]models.RemoteSyncDue, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return []models.RemoteSyncDue{{UserID: s.account.UserID, LastRunAt: s.account.LastRunAt}}, nil
 }
 
 func (s *fakeStore) last() models.RemoteSyncRunResult {
@@ -455,4 +457,42 @@ func TestEveryWakeAndRunRematchesPersonas(t *testing.T) {
 	assert.False(t, res.Started)
 	assert.Equal(t, 3, res.Rematched)
 	assert.Equal(t, 2, store.rematches)
+}
+
+func TestBackgroundRunsAreSpreadOverAFifthOfTheInterval(t *testing.T) {
+	lastRun := time.Now()
+	seen := map[time.Duration]bool{}
+	for range 200 {
+		j := backgroundJitter(uuid.New(), lastRun, time.Hour)
+		assert.GreaterOrEqual(t, j, time.Duration(0))
+		assert.Less(t, j, 12*time.Minute)
+		seen[j/time.Minute] = true
+	}
+	assert.Len(t, seen, 12, "accounts last run at the same moment land all over the window")
+
+	id := uuid.New()
+	assert.Equal(t, backgroundJitter(id, lastRun, time.Hour), backgroundJitter(id, lastRun, time.Hour), "stable across ticks")
+	assert.Zero(t, backgroundJitter(id, lastRun, 0))
+}
+
+func TestRunDueWaitsOutTheAccountsJitter(t *testing.T) {
+	remote, store := newFakeRemote(), newFakeStore()
+	remote.addThread("t", 1, t0)
+	s := newTestSyncer(store, remote, Config{Interval: time.Hour})
+	ctx := context.Background()
+
+	// Just past the interval, yet before this account's own jitter: not yet.
+	lastRun := time.Now().Add(-time.Hour - time.Second)
+	for backgroundJitter(store.account.UserID, lastRun, time.Hour) < time.Minute {
+		lastRun = lastRun.Add(-time.Microsecond)
+	}
+	store.account.LastRunAt = &lastRun
+	s.RunDue(ctx)
+	assert.Empty(t, store.finished)
+
+	// Past the whole window: due whatever the jitter.
+	stale := time.Now().Add(-time.Hour * 6 / 5)
+	store.account.LastRunAt = &stale
+	s.RunDue(ctx)
+	require.Len(t, store.finished, 1)
 }

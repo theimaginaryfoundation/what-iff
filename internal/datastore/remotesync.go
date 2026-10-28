@@ -206,9 +206,9 @@ func (d *Datastore) ExtendRemoteSyncLease(ctx context.Context, userID uuid.UUID,
 	return nil
 }
 
-// ListDueRemoteSyncs returns the users whose enabled sync last ran before lastRunBefore (or
+// ListDueRemoteSyncs returns the accounts whose enabled sync last ran before lastRunBefore (or
 // never), is not waiting on its owner (needs_attention) and is not held by a run.
-func (d *Datastore) ListDueRemoteSyncs(ctx context.Context, lastRunBefore time.Time) ([]uuid.UUID, error) {
+func (d *Datastore) ListDueRemoteSyncs(ctx context.Context, lastRunBefore time.Time) ([]models.RemoteSyncDue, error) {
 	now := time.Now()
 	rows, err := d.dbClient.RemoteSync.Query().
 		Where(
@@ -222,10 +222,10 @@ func (d *Datastore) ListDueRemoteSyncs(ctx context.Context, lastRunBefore time.T
 	if err != nil {
 		return nil, fmt.Errorf("list due remote syncs: %w", err)
 	}
-	out := make([]uuid.UUID, 0, len(rows))
+	out := make([]models.RemoteSyncDue, 0, len(rows))
 	for _, r := range rows {
 		if r.Edges.Owner != nil {
-			out = append(out, r.Edges.Owner.ID)
+			out = append(out, models.RemoteSyncDue{UserID: r.Edges.Owner.ID, LastRunAt: r.LastRunAt})
 		}
 	}
 	return out, nil

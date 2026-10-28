@@ -159,6 +159,8 @@ The copy only matters when someone is about to read it, so that is when the remo
   When the wake started a run, the app follows it and refreshes the thread list if anything came over, so a thread continued on the phone is simply there.
 - **Background.** A slow sync for copies nobody is reading (backups, a server whose app is left open): `REMOTE_SYNC_INTERVAL`, default one hour, or `off` for wakes only.
   The first version polled every five minutes; for a hosted app serving many home servers that is a steady stream of requests that almost always find nothing.
+  Each background run is due up to a fifth of the interval late (60 to 72 minutes by default), by an amount derived from the account and its last run (`backgroundJitter`).
+  Without it, home servers that start together (after a release, or a power cut) would stay in step and reach the hosted app in the same minute every hour; with it they drift apart within a few cycles.
 - **Leases.** Every run, however started, first **claims a lease** with a conditional update (`lease_until < now`). Only the claimer runs it, so several API instances, several open tabs, or a wake racing the timer need no leader lock.
 - Accounts run one at a time per instance, with a per-request timeout and a cap on response size.
 - **401 or 403** sets `needs_attention` with a message that says which, and neither wakes nor the timer run that account until its settings are saved again: retrying a revoked token helps nobody.

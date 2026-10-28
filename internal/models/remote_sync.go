@@ -128,6 +128,13 @@ type RemoteSyncAccount struct {
 	FullWalk bool
 }
 
+// RemoteSyncDue is an account the background runner may sync, with when it last ran (nil:
+// never), so the runner can spread runs out.
+type RemoteSyncDue struct {
+	UserID    uuid.UUID
+	LastRunAt *time.Time
+}
+
 // RemoteSyncRunResult is what the syncer records at the end of a run.
 type RemoteSyncRunResult struct {
 	Status RemoteSyncStatus

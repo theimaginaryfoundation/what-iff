@@ -24,7 +24,7 @@ The design and the reasoning behind it are in [ADR 0x033](../adr/0x033-mullet-mo
 - Your server pulls your threads from whatiff.chat using a **read-only token** you create there.
   Copies show up as ordinary threads in your thread list.
 - It syncs **when you use it**: opening the app at home, or coming back to it after a while, fetches whatever is new.
-  It also syncs quietly once an hour in the background.
+  It also syncs quietly about once an hour in the background.
   There is a **Sync now** button for the impatient.
 - **Continue anywhere.** Reply to a copied thread at home and it just works; the first reply catches the persona up on the earlier conversation.
 - **Both sides is fine.** If you continue the same thread at home *and* on whatiff.chat, nothing is merged or lost: your home thread stays exactly as you left it, and the whatiff.chat continuation arrives as a second thread named like `Trip planning (from api.whatiff.chat)`.
@@ -111,7 +111,7 @@ Copies are one-way, from whatiff.chat to your server.
 | Variable | Default | What it does |
 |---|---|---|
 | `REMOTE_SYNC_ENABLED` | `false` (`true` in Docker Compose) | Turns mullet mode on for this server. When off, the Tools tab does not appear. |
-| `REMOTE_SYNC_INTERVAL` | `1h` | Background sync for copies nobody is looking at, on top of syncing when the app is used. At least `1m`, or `off` to sync only when the app is used. |
+| `REMOTE_SYNC_INTERVAL` | `1h` | Background sync for copies nobody is looking at, on top of syncing when the app is used. Each run is spread randomly over up to a fifth of the interval later (an hour means every 60 to 72 minutes), so servers do not all call whatiff.chat at once. At least `1m`, or `off` to sync only when the app is used. |
 | `REMOTE_SYNC_MAX_THREADS_PER_RUN` | `50` | Threads per sync; the rest come in the next one. |
 | `REMOTE_SYNC_ALLOW_LOCAL_NETWORK` | `false` | Allows `http://` and private addresses, for syncing from another What Iff server on your own network (or for development). Otherwise sync only connects to public `https` addresses. |
 

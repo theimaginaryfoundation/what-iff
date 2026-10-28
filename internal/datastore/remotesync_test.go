@@ -160,7 +160,9 @@ func TestRemoteSyncLeaseAndDueList(t *testing.T) {
 
 	due, err := f.ds.ListDueRemoteSyncs(ctx, time.Now())
 	require.NoError(t, err)
-	assert.Equal(t, []uuid.UUID{f.owner}, due, "never run is due")
+	require.Len(t, due, 1, "never run is due")
+	assert.Equal(t, f.owner, due[0].UserID)
+	assert.Nil(t, due[0].LastRunAt)
 
 	got, err := f.ds.ClaimRemoteSync(ctx, f.owner, time.Now().Add(time.Minute))
 	require.NoError(t, err)
@@ -195,7 +197,9 @@ func TestRemoteSyncLeaseAndDueList(t *testing.T) {
 	assert.Empty(t, due, "ran recently")
 	due, err = f.ds.ListDueRemoteSyncs(ctx, time.Now().Add(time.Minute))
 	require.NoError(t, err)
-	assert.Equal(t, []uuid.UUID{f.owner}, due)
+	require.Len(t, due, 1)
+	assert.Equal(t, f.owner, due[0].UserID)
+	assert.NotNil(t, due[0].LastRunAt, "the runner spreads runs out from it")
 
 	msg := "token refused"
 	require.NoError(t, f.ds.FinishRemoteSyncRun(ctx, f.owner, models.RemoteSyncRunResult{Status: models.RemoteSyncStatusNeedsAttention, Error: &msg}))

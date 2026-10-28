@@ -5,8 +5,10 @@ package remotesync
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"slices"
 	"time"
 
@@ -30,7 +32,7 @@ type Store interface {
 	ClaimRemoteSync(ctx context.Context, userID uuid.UUID, leaseUntil time.Time) (bool, error)
 	ExtendRemoteSyncLease(ctx context.Context, userID uuid.UUID, leaseUntil time.Time) error
 	FinishRemoteSyncRun(ctx context.Context, userID uuid.UUID, result models.RemoteSyncRunResult) error
-	ListDueRemoteSyncs(ctx context.Context, lastRunBefore time.Time) ([]uuid.UUID, error)
+	ListDueRemoteSyncs(ctx context.Context, lastRunBefore time.Time) ([]models.RemoteSyncDue, error)
 	RematchRemoteSyncPersonas(ctx context.Context, userID uuid.UUID) (int, error)
 }
 
@@ -44,7 +46,8 @@ type Remote interface {
 // Config tunes a Syncer. Zero values take the defaults below.
 type Config struct {
 	// Interval is how often an enabled account is synced in the background, on top of the syncs
-	// a wake starts. The plugin may not run the background runner at all (wake-only).
+	// a wake starts. Each run is due a little later than this, by up to a fifth of it (see
+	// backgroundJitter). The plugin may not run the background runner at all (wake-only).
 	Interval time.Duration
 	// Lease is how long a run holds an account before another may take it; renewed per thread.
 	Lease time.Duration
@@ -187,15 +190,20 @@ func (s *Syncer) Wake(ctx context.Context, userID uuid.UUID) (WakeResult, error)
 
 // RunDue runs every account that is due, one after another. The runner calls it on each tick.
 func (s *Syncer) RunDue(ctx context.Context) {
-	due, err := s.store.ListDueRemoteSyncs(ctx, time.Now().Add(-s.cfg.Interval))
+	now := time.Now()
+	due, err := s.store.ListDueRemoteSyncs(ctx, now.Add(-s.cfg.Interval))
 	if err != nil {
 		s.logger.Warn("remote sync: list due accounts", zap.Error(err))
 		return
 	}
-	for _, userID := range due {
+	for _, d := range due {
 		if ctx.Err() != nil {
 			return
 		}
+		if d.LastRunAt != nil && now.Before(d.LastRunAt.Add(s.cfg.Interval+backgroundJitter(d.UserID, *d.LastRunAt, s.cfg.Interval))) {
+			continue
+		}
+		userID := d.UserID
 		ok, err := s.store.ClaimRemoteSync(ctx, userID, time.Now().Add(s.cfg.Lease))
 		if err != nil {
 			s.logger.Warn("remote sync: claim", zap.String("user_id", userID.String()), zap.Error(err))
@@ -205,6 +213,24 @@ func (s *Syncer) RunDue(ctx context.Context) {
 			s.runClaimed(ctx, userID)
 		}
 	}
+}
+
+// backgroundJitter is how much later than interval an account's next background run is due: up
+// to a fifth of the interval, different for every account and every run.
+//
+// Without it, servers that start together (after a release, or a power cut) would stay in step
+// and all call the remote at the same moment every interval; with it they drift apart within a
+// few cycles. It is derived from the account and its last run rather than drawn on each tick, so
+// runs spread evenly over the window instead of bunching at its start.
+func backgroundJitter(userID uuid.UUID, lastRun time.Time, interval time.Duration) time.Duration {
+	spread := interval / 5
+	if spread <= 0 {
+		return 0
+	}
+	h := fnv.New64a()
+	_, _ = h.Write(userID[:])
+	_ = binary.Write(h, binary.LittleEndian, lastRun.UnixMicro())
+	return time.Duration(h.Sum64() % uint64(spread))
 }
 
 // runClaimed runs one claimed account and records the outcome, which also releases the lease.
