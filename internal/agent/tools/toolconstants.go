@@ -238,6 +238,10 @@ var CreateAgentJobToolSpec = FunctionToolSpec{
 			"type":        "string",
 			"description": "Where the job runs: \"current\" for this conversation, the id of another conversation (from list kind=\"conversations\"; not a sandboxed one), or \"new\" (the default when omitted) for a dedicated thread made on its first run.",
 		},
+		"follow_user_timezone": map[string]interface{}{
+			"type":        "boolean",
+			"description": "Only when the user asks for it: true makes a recurring job follow them when they travel, running at the same local time in whatever timezone they are in now (an 8am check-in stays at 8am on a trip). Leave it out otherwise; never set it on your own.",
+		},
 	},
 	Required: []string{"schedule_input", "prompt"},
 }
@@ -255,6 +259,7 @@ Notes:
 - model_override: a model name or id; "" goes back to the default model.
 - skill_ids replaces the job's skills with exactly this list; [] removes them all.
 - status: "paused" stops the job from running until it is set back to "active".
+- follow_user_timezone: set only when the user asks for a job to follow them (or stop following them) when they travel.
 - The result shows the job as it now stands.`
 
 var UpdateAgentJobToolSpec = FunctionToolSpec{
@@ -294,6 +299,10 @@ var UpdateAgentJobToolSpec = FunctionToolSpec{
 			"type":        "string",
 			"enum":        []string{"active", "paused"},
 			"description": "\"paused\" to stop the job running, \"active\" to resume it.",
+		},
+		"follow_user_timezone": map[string]interface{}{
+			"type":        "boolean",
+			"description": "Only when the user asks: true makes the job follow them when they travel (same local time in their current timezone), false pins it to its own timezone again.",
 		},
 	},
 	Required: []string{"job_id"},

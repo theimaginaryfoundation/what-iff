@@ -26,6 +26,26 @@ type mockUserStore struct {
 	attachmentRefs    []models.FileAttachment
 	prefs             *models.UserPreferences
 	updatePrefsErr    error
+	currentTimezone   string
+	pauseOnReport     bool
+	resumed           bool
+}
+
+func (m *mockUserStore) SetUserCurrentTimezone(_ context.Context, _ uuid.UUID, tz string) (models.CurrentTimezoneReport, error) {
+	if _, err := time.LoadLocation(tz); err != nil || tz == "" {
+		return models.CurrentTimezoneReport{}, datastore.ErrInvalidTimezone
+	}
+	if m.pauseOnReport {
+		now := time.Now()
+		return models.CurrentTimezoneReport{FollowingPausedAt: &now, PausedNow: true}, nil
+	}
+	m.currentTimezone = tz
+	return models.CurrentTimezoneReport{CurrentTimezone: tz}, nil
+}
+
+func (m *mockUserStore) ResumeTimezoneFollowing(context.Context, uuid.UUID) error {
+	m.resumed = true
+	return nil
 }
 
 func (m *mockUserStore) CreateUser(_ context.Context, req models.UserRegisterRequest) (*models.UserResponse, *models.TokenPair, error) {

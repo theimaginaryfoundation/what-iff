@@ -113,11 +113,13 @@ type AccountBackupAgentJob struct {
 	Schedule      *string              `json:"schedule,omitempty"`
 	RunAt         *time.Time           `json:"run_at,omitempty"`
 	Timezone      string               `json:"timezone"`
-	Status        AgentJobStatus       `json:"status"`
-	NextRunAt     *time.Time           `json:"next_run_at,omitempty"`
-	LastRunAt     *time.Time           `json:"last_run_at,omitempty"`
-	LastError     string               `json:"last_error,omitempty"`
-	RunCount      int                  `json:"run_count"`
+	// FollowUserTimezone is omitted by packets written before the field existed (false).
+	FollowUserTimezone bool           `json:"follow_user_timezone,omitempty"`
+	Status             AgentJobStatus `json:"status"`
+	NextRunAt          *time.Time     `json:"next_run_at,omitempty"`
+	LastRunAt          *time.Time     `json:"last_run_at,omitempty"`
+	LastError          string         `json:"last_error,omitempty"`
+	RunCount           int            `json:"run_count"`
 	// TurnSettingValues are the job's reasoning effort and agent loop (ADR 0x026).
 	TurnSettingValues
 	CreatedAt time.Time `json:"created_at"`

@@ -27,6 +27,8 @@ type agentJobUpdateStore interface {
 	UpdateAgentJobPrompt(ctx context.Context, userID, id uuid.UUID, prompt string) (*models.AgentJob, error)
 	SetAgentJobChat(ctx context.Context, userID, id uuid.UUID, chatID *uuid.UUID) (*models.AgentJob, error)
 	SetAgentJobOverrides(ctx context.Context, userID, id uuid.UUID, patch models.SetAgentJobOverridesPatch) (*models.AgentJob, error)
+	SetAgentJobFollowUserTimezone(ctx context.Context, userID, id uuid.UUID, follow bool) (*models.AgentJob, error)
+	SetAgentJobNextRunAt(ctx context.Context, userID, id uuid.UUID, nextRunAt *time.Time) (*models.AgentJob, error)
 	UpdateAgentJobSchedule(ctx context.Context, userID, id uuid.UUID, scheduleInput string, scheduleType models.AgentJobScheduleType, schedule *string, runAt *time.Time, timezone string, nextRunAt *time.Time) (*models.AgentJob, error)
 	UpdateAgentJobStatus(ctx context.Context, userID, id uuid.UUID, status models.AgentJobStatus, lastError string) (*models.AgentJob, error)
 	AddAgentJobRitual(ctx context.Context, userID, jobID, ritualID uuid.UUID) error
@@ -52,24 +54,28 @@ type updateAgentJobToolArgs struct {
 	ThreadID      *string   `json:"thread_id"`
 	SkillIDs      *[]string `json:"skill_ids"`
 	Status        *string   `json:"status"`
+	// FollowUserTimezone is set only when the user asks for the job to follow them (or stop).
+	FollowUserTimezone *bool `json:"follow_user_timezone"`
 }
 
 type updateAgentJobToolResult struct {
-	Success      bool       `json:"success"`
-	AgentJobID   string     `json:"agent_job_id,omitempty"`
-	Updated      []string   `json:"updated,omitempty"`
-	Title        string     `json:"title,omitempty"`
-	Prompt       string     `json:"prompt,omitempty"`
-	Schedule     string     `json:"schedule_input,omitempty"`
-	HumanSummary string     `json:"human_summary,omitempty"`
-	Timezone     string     `json:"timezone,omitempty"`
-	Status       string     `json:"status,omitempty"`
-	NextRunAt    *time.Time `json:"next_run_at,omitempty"`
-	ThreadID     string     `json:"thread_id,omitempty"`
-	ModelID      string     `json:"model_id,omitempty"`
-	SkillIDs     []string   `json:"skill_ids,omitempty"`
-	Note         string     `json:"note,omitempty"`
-	Error        string     `json:"error,omitempty"`
+	Success      bool     `json:"success"`
+	AgentJobID   string   `json:"agent_job_id,omitempty"`
+	Updated      []string `json:"updated,omitempty"`
+	Title        string   `json:"title,omitempty"`
+	Prompt       string   `json:"prompt,omitempty"`
+	Schedule     string   `json:"schedule_input,omitempty"`
+	HumanSummary string   `json:"human_summary,omitempty"`
+	Timezone     string   `json:"timezone,omitempty"`
+	// FollowsUserTimezone is true when the job follows the user's current timezone.
+	FollowsUserTimezone bool       `json:"follows_user_timezone,omitempty"`
+	Status              string     `json:"status,omitempty"`
+	NextRunAt           *time.Time `json:"next_run_at,omitempty"`
+	ThreadID            string     `json:"thread_id,omitempty"`
+	ModelID             string     `json:"model_id,omitempty"`
+	SkillIDs            []string   `json:"skill_ids,omitempty"`
+	Note                string     `json:"note,omitempty"`
+	Error               string     `json:"error,omitempty"`
 }
 
 func (a *Agent) updateAgentJobTool(ctx context.Context, chat *models.Chat, args []byte) (string, error) {
@@ -116,7 +122,7 @@ func (u *agentJobUpdater) update(ctx context.Context, chat *models.Chat, args []
 		return fail("job_id must be a job id from list (kind=\"jobs\")")
 	}
 	if a.Title == nil && a.Prompt == nil && a.ScheduleInput == nil && a.ModelOverride == nil &&
-		a.ThreadID == nil && a.SkillIDs == nil && a.Status == nil {
+		a.ThreadID == nil && a.SkillIDs == nil && a.Status == nil && a.FollowUserTimezone == nil {
 		return fail("nothing to update: pass at least one field to change (to read a job in full, use list with kind=\"jobs\" and the job's id as filter)")
 	}
 
@@ -238,6 +244,16 @@ func (u *agentJobUpdater) update(ctx context.Context, chat *models.Chat, args []
 		}
 		done = append(done, "skill_ids")
 	}
+	if a.FollowUserTimezone != nil {
+		if job, err = u.store.SetAgentJobFollowUserTimezone(ctx, userID, jobID, *a.FollowUserTimezone); err != nil {
+			return failWrite("follow_user_timezone", err)
+		}
+		// The job may now run in another timezone; report its next run there.
+		if job, err = schedule.StoreNextRun(ctx, u.store, job, time.Now()); err != nil {
+			return failWrite("follow_user_timezone", err)
+		}
+		done = append(done, "follow_user_timezone")
+	}
 	if preview != nil {
 		var nextRunAt *time.Time
 		if len(preview.NextRuns) > 0 {
@@ -309,14 +325,15 @@ func (u *agentJobUpdater) replaceSkills(ctx context.Context, userID, jobID uuid.
 // jobUpdateResult reports the job as it now stands, so the model can confirm the change.
 func jobUpdateResult(job *models.AgentJob, updated []string) updateAgentJobToolResult {
 	res := updateAgentJobToolResult{
-		Success:    true,
-		AgentJobID: job.ID.String(),
-		Updated:    updated,
-		Prompt:     job.Prompt,
-		Schedule:   job.ScheduleInput,
-		Timezone:   job.Timezone,
-		Status:     string(job.Status),
-		NextRunAt:  job.NextRunAt,
+		Success:             true,
+		AgentJobID:          job.ID.String(),
+		Updated:             updated,
+		Prompt:              job.Prompt,
+		Schedule:            job.ScheduleInput,
+		Timezone:            job.Timezone,
+		Status:              string(job.Status),
+		FollowsUserTimezone: job.FollowUserTimezone,
+		NextRunAt:           job.NextRunAt,
 	}
 	if job.Title != nil {
 		res.Title = *job.Title

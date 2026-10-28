@@ -45,6 +45,9 @@ func (AgentJob) Fields() []ent.Field {
 			Default("UTC").
 			NotEmpty().
 			Comment("IANA timezone used to interpret recurring schedules (cron). Absolute timestamps (run_at/next_run_at/last_run_at) are stored as UTC instants."),
+		field.Bool("follow_user_timezone").
+			Default(false).
+			Comment("When true, recurring schedules run in the owner's current_timezone (when known) instead of timezone, so a job follows the user while they travel"),
 		field.Enum("status").
 			Values("active", "paused", "complete", "failed").
 			Default("active").
@@ -57,6 +60,10 @@ func (AgentJob) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			Comment("Most recent run time"),
+		field.String("last_run_timezone").
+			Optional().
+			Nillable().
+			Comment("IANA timezone the schedule was in when the job last ran; used to avoid re-running a slot after the timezone changes"),
 		field.String("last_error").
 			Optional().
 			Nillable().

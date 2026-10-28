@@ -8,6 +8,7 @@ import (
 
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 
 	"go.uber.org/zap"
 )
@@ -59,8 +60,8 @@ func (h *Handler) ParseSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if tz != "" {
-		if _, err := time.LoadLocation(tz); err != nil {
-			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid timezone (expected IANA name like America/New_York)", err)
+		if !modeltypes.ValidTimezoneName(tz) {
+			handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid timezone (expected IANA name like America/New_York)", nil)
 			return
 		}
 	}

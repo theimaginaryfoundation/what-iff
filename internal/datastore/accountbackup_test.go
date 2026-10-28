@@ -136,9 +136,11 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			schedule text,
 			run_at datetime,
 			timezone text NOT NULL DEFAULT 'UTC',
+			follow_user_timezone bool NOT NULL DEFAULT false,
 			status text NOT NULL DEFAULT 'active',
 			next_run_at datetime,
 			last_run_at datetime,
+			last_run_timezone text,
 			last_error text,
 			run_count integer NOT NULL DEFAULT 0,
 			personality_id uuid,
@@ -792,7 +794,8 @@ func TestAdminImportAccountBackup_AgentJobFullFieldsAndDuplicate(t *testing.T) {
 				ID: agentJobID, ChatID: &chatID, PersonalityID: &personalityID, ModelName: m.Name,
 				Title: &title, Prompt: "summarize", ScheduleInput: "weekly",
 				ScheduleType: models.AgentJobScheduleTypeCron, Schedule: &schedule, Timezone: "UTC",
-				Status: models.AgentJobStatusActive, RunCount: 3, LastError: "previous failure",
+				FollowUserTimezone: true,
+				Status:             models.AgentJobStatusActive, RunCount: 3, LastError: "previous failure",
 				CreatedAt: now, UpdatedAt: now,
 			},
 			models.AccountBackupAgentJob{
@@ -817,6 +820,9 @@ func TestAdminImportAccountBackup_AgentJobFullFieldsAndDuplicate(t *testing.T) {
 	ok, err := ds.agentJobBelongsToUser(ctx, userID, agentJobID)
 	require.NoError(t, err)
 	require.True(t, ok)
+	imported, err := ds.dbClient.AgentJob.Get(ctx, agentJobID)
+	require.NoError(t, err)
+	require.True(t, imported.FollowUserTimezone)
 }
 
 func TestAdminImportAccountBackup_RitualWithPersonalityRef(t *testing.T) {

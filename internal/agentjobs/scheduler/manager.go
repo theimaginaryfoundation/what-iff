@@ -10,6 +10,7 @@ import (
 
 	"github.com/reugn/go-quartz/quartz"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
+	"github.com/theimaginaryfoundation/what-iff/internal/agentjobs/schedule"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 
@@ -64,13 +65,14 @@ type lockStore interface {
 // the in-memory quartz schedule.
 type reconciliationStore interface {
 	ListAgentJobsForScheduler(ctx context.Context) ([]*models.AgentJob, error)
+	SetAgentJobNextRunAt(ctx context.Context, userID, id uuid.UUID, nextRunAt *time.Time) (*models.AgentJob, error)
 }
 
 // executionStore contains methods used while executing individual AgentJobs.
 type executionStore interface {
 	GetAgentJob(ctx context.Context, userID, id uuid.UUID) (*models.AgentJob, error)
 	CountRecentSuccessfulAgentJobExecutions(ctx context.Context, userID uuid.UUID, since time.Time) (int, error)
-	RecordAgentJobRun(ctx context.Context, userID, id uuid.UUID, lastRunAt time.Time, nextRunAt *time.Time, runError string, newStatus *models.AgentJobStatus) (*models.AgentJob, error)
+	RecordAgentJobRun(ctx context.Context, userID, id uuid.UUID, lastRunAt time.Time, lastRunTimezone string, nextRunAt *time.Time, runError string, newStatus *models.AgentJobStatus) (*models.AgentJob, error)
 	SetAgentJobChat(ctx context.Context, userID, id uuid.UUID, chatID *uuid.UUID) (*models.AgentJob, error)
 	CreateChat(ctx context.Context, userID uuid.UUID, chat models.Chat) (*models.Chat, error)
 	GetUserByID(ctx context.Context, userID uuid.UUID) (*models.UserResponse, error)
@@ -128,6 +130,8 @@ type Manager struct {
 
 	schedulerFactory   func() (quartz.Scheduler, error)
 	lockHealthInterval time.Duration
+	// now is the clock reconcile reads (time.Now; tests fix it).
+	now func() time.Time
 }
 
 func NewManager(ds schedulerStore, a *agent.Agent, logger *zap.Logger, cfg Config) (*Manager, error) {
@@ -150,6 +154,7 @@ func NewManager(ds schedulerStore, a *agent.Agent, logger *zap.Logger, cfg Confi
 		inFlight:           map[uuid.UUID]bool{},
 		rng:                rand.New(rand.NewSource(time.Now().UnixNano())),
 		lockHealthInterval: schedulerLockHealthInterval,
+		now:                time.Now,
 	}
 	m.schedulerFactory = m.newQuartzScheduler
 	return m, nil
@@ -473,7 +478,8 @@ func (m *Manager) reconcileOnce(ctx context.Context) {
 			continue
 		}
 
-		if err := m.scheduleOrReschedule(ctx, j); err != nil {
+		next, err := m.scheduleOrReschedule(ctx, j)
+		if err != nil {
 			if errors.Is(err, ErrSchedulerNotActive) {
 				// Leadership can be lost during reconciliation; treat as transient and
 				// let the next active leader reconcile again.
@@ -490,22 +496,61 @@ func (m *Manager) reconcileOnce(ctx context.Context) {
 		m.mu.Lock()
 		m.fingerprints[j.ID] = fp
 		m.mu.Unlock()
+
+		// A job that follows the user moves when their timezone does, and nothing else updates its
+		// stored next run until it runs. Also on the first schedule after startup or a leader
+		// handover, in case the timezone changed in between; it writes only a changed value.
+		if j.FollowUserTimezone {
+			m.storeNextRunAt(ctx, j, next)
+		}
+		// Moving east can skip a run that had passed in the new timezone but not come up in the old
+		// one; run it once now. Checked on every (re)schedule, startup included: the run records the
+		// new timezone, so it does not repeat.
+		if j.FollowUserTimezone && schedule.LostSlotOnMove(j, m.now()) {
+			m.runCatchUp(ctx, j)
+		}
 	}
 }
 
-func (m *Manager) scheduleOrReschedule(ctx context.Context, j models.AgentJob) error {
+// runCatchUp runs a job once now, in place of a slot its timezone change skipped. Like a regular
+// firing it runs detached from reconcile (its context is not cancelled with reconcile's), so a slow
+// run does not hold up scheduling; the run's own limits apply as for any scheduled run.
+func (m *Manager) runCatchUp(ctx context.Context, j models.AgentJob) {
+	m.logger.Info("agent job catch-up run after timezone change",
+		zap.String("agent_job_id", j.ID.String()),
+		zap.String("timezone", j.ScheduleTimezone()),
+	)
+	go m.executeAgentJobDetached(context.WithoutCancel(ctx), j.UserID, j.ID, executionOptions{catchUp: true})
+}
+
+// storeNextRunAt writes the rescheduled job's next fire time when it differs from the stored one.
+func (m *Manager) storeNextRunAt(ctx context.Context, j models.AgentJob, next *time.Time) {
+	if next == nil || (j.NextRunAt != nil && j.NextRunAt.Equal(*next)) {
+		return
+	}
+	if _, err := m.ds.SetAgentJobNextRunAt(ctx, j.UserID, j.ID, next); err != nil {
+		m.logger.Warn("agent job scheduler reconcile: failed to store next run",
+			zap.String("agent_job_id", j.ID.String()),
+			zap.Error(err),
+		)
+	}
+}
+
+// scheduleOrReschedule (re)schedules the job and returns its next fire time (nil when unknown).
+func (m *Manager) scheduleOrReschedule(ctx context.Context, j models.AgentJob) (*time.Time, error) {
 	jobKey := quartz.NewJobKey(j.ID.String())
 	m.mu.RLock()
 	s := m.sched
 	m.mu.RUnlock()
 	if s == nil {
-		return ErrSchedulerNotActive
+		return nil, ErrSchedulerNotActive
 	}
 	_ = s.DeleteJob(jobKey)
 
-	trigger, err := buildTrigger(j, time.Now())
+	now := m.now()
+	trigger, err := buildTrigger(j, now)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	qJob := &agentJobQuartzJob{
@@ -514,10 +559,15 @@ func (m *Manager) scheduleOrReschedule(ctx context.Context, j models.AgentJob) e
 		userID:     j.UserID,
 	}
 	if err := s.ScheduleJob(quartz.NewJobDetail(qJob, jobKey), trigger); err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	var next *time.Time
+	if ns, err := trigger.NextFireTime(now.UnixNano()); err == nil {
+		t := time.Unix(0, ns).UTC()
+		next = &t
+	}
+	return next, nil
 }
 
 func (m *Manager) logMisfires(ch chan quartz.ScheduledJob) {
@@ -542,5 +592,5 @@ func fingerprint(j models.AgentJob) string {
 	if j.RunAt != nil {
 		runAt = j.RunAt.UTC().Format(time.RFC3339Nano)
 	}
-	return fmt.Sprintf("%s|%s|%s|%s", j.ScheduleType, sched, runAt, j.Timezone)
+	return fmt.Sprintf("%s|%s|%s|%s", j.ScheduleType, sched, runAt, j.ScheduleTimezone())
 }

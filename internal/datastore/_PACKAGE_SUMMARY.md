@@ -117,6 +117,11 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Checkpoint window:** `UpdateChatCheckpointStateAndClearResponseID` takes the `last_checkpoint_at` to store (the agent passes just after the checkpointed reply, #268; zero means now).
   `ClaimChatCheckpoint` / `ReleaseChatCheckpoint` (`chat_checkpoint_claim.go`) take and drop `chats.checkpoint_started_at` with one conditional update each, so only one checkpoint runs per chat at a time across instances; a claim older than the stale bound is taken over.
   `FirstChatMessageSentAtSince` finds the earliest message in a chat since a time, leaving out given ids, so the agent can tell whether a message arrived mid-turn.
+- **Jobs that follow the user:** `toAgentJobModel` sets `EffectiveTimezone` to the owner's `current_timezone` for a job with `follow_user_timezone`, else the job's `timezone`.
+  Every agent-job query loads the owner edge for this.
+  `SetUserCurrentTimezone` writes only when the zone changes, conditional on the zone it read so concurrent reports cannot both apply.
+  It keeps a day of changes (`current_timezone_changes`); when they look like devices disagreeing (`modeltypes.TimezoneFlapping`) and the user has a following job, it pauses following (`timezone_following_paused_at`, `current_timezone` cleared) until `ResumeTimezoneFollowing`.
+  `RecordAgentJobRun` also stores the run's timezone (`last_run_timezone`) for the scheduler's no-rerun guard.
 - **`SetAgentJobOverrides`:** `personality_id` must belong to the job owner; `model_id` must exist in the global model catalog.
   Partial updates use `models.SetAgentJobOverridesPatch` so omitted JSON fields are not overwritten.
   Invalid IDs return `ErrInvalidRequestBody`.

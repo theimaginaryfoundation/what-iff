@@ -66,28 +66,39 @@ func toAgentJobModel(e *ent.AgentJob) *models.AgentJob {
 		}
 	}
 
+	// A job that follows its owner runs in the owner's last-reported timezone once one is known.
+	effectiveTZ := e.Timezone
+	if e.FollowUserTimezone && e.Edges.Owner != nil {
+		if tz := strings.TrimSpace(e.Edges.Owner.CurrentTimezone); tz != "" {
+			effectiveTZ = tz
+		}
+	}
+
 	return &models.AgentJob{
-		ID:                e.ID,
-		UserID:            userID,
-		ChatID:            chatID,
-		PersonalityID:     personalityID,
-		ModelID:           modelID,
-		Title:             title,
-		Prompt:            e.Prompt,
-		ScheduleInput:     e.ScheduleInput,
-		ScheduleType:      models.AgentJobScheduleType(e.ScheduleType),
-		Schedule:          schedule,
-		RunAt:             runAt,
-		Timezone:          e.Timezone,
-		Status:            models.AgentJobStatus(e.Status),
-		NextRunAt:         nextRunAt,
-		LastRunAt:         lastRunAt,
-		LastError:         lastError,
-		RunCount:          e.RunCount,
-		Rituals:           rituals,
-		TurnSettingValues: turnSettingsFromEnt(e.ReasoningEffort, e.AgentLoop),
-		CreatedAt:         e.CreatedAt,
-		UpdatedAt:         e.UpdatedAt,
+		ID:                 e.ID,
+		UserID:             userID,
+		ChatID:             chatID,
+		PersonalityID:      personalityID,
+		ModelID:            modelID,
+		Title:              title,
+		Prompt:             e.Prompt,
+		ScheduleInput:      e.ScheduleInput,
+		ScheduleType:       models.AgentJobScheduleType(e.ScheduleType),
+		Schedule:           schedule,
+		RunAt:              runAt,
+		Timezone:           e.Timezone,
+		FollowUserTimezone: e.FollowUserTimezone,
+		EffectiveTimezone:  effectiveTZ,
+		LastRunTimezone:    e.LastRunTimezone,
+		Status:             models.AgentJobStatus(e.Status),
+		NextRunAt:          nextRunAt,
+		LastRunAt:          lastRunAt,
+		LastError:          lastError,
+		RunCount:           e.RunCount,
+		Rituals:            rituals,
+		TurnSettingValues:  turnSettingsFromEnt(e.ReasoningEffort, e.AgentLoop),
+		CreatedAt:          e.CreatedAt,
+		UpdatedAt:          e.UpdatedAt,
 	}
 }
 
@@ -122,6 +133,7 @@ func (d *Datastore) CreateAgentJob(ctx context.Context, userID uuid.UUID, jobMod
 		SetScheduleInput(jobModel.ScheduleInput).
 		SetScheduleType(agentjob.ScheduleType(jobModel.ScheduleType)).
 		SetTimezone(jobModel.Timezone).
+		SetFollowUserTimezone(jobModel.FollowUserTimezone).
 		SetStatus(agentjob.Status(jobModel.Status)).
 		SetRunCount(jobModel.RunCount).
 		SetNillableReasoningEffort(entEffort[agentjob.ReasoningEffort](jobModel.ReasoningEffort)).
@@ -535,6 +547,73 @@ func (d *Datastore) UpdateAgentJobTitle(ctx context.Context, userID, id uuid.UUI
 	return toAgentJobModel(entJob), nil
 }
 
+// SetAgentJobFollowUserTimezone sets whether the job's recurring schedule follows the owner's
+// current timezone.
+func (d *Datastore) SetAgentJobFollowUserTimezone(ctx context.Context, userID, id uuid.UUID, follow bool) (*models.AgentJob, error) {
+	return d.updateAgentJobField(ctx, userID, id, "agent job follow_user_timezone", func(u *ent.AgentJobUpdate) {
+		u.SetFollowUserTimezone(follow)
+	})
+}
+
+// SetAgentJobNextRunAt stores the scheduler's preview of the job's next run (nil clears it).
+func (d *Datastore) SetAgentJobNextRunAt(ctx context.Context, userID, id uuid.UUID, nextRunAt *time.Time) (*models.AgentJob, error) {
+	return d.updateAgentJobField(ctx, userID, id, "agent job next_run_at", func(u *ent.AgentJobUpdate) {
+		if nextRunAt == nil {
+			u.ClearNextRunAt()
+		} else {
+			u.SetNextRunAt(*nextRunAt)
+		}
+	})
+}
+
+// updateAgentJobField applies set to one owned AgentJob and returns the job as it now stands.
+func (d *Datastore) updateAgentJobField(ctx context.Context, userID, id uuid.UUID, entity string, set func(*ent.AgentJobUpdate)) (*models.AgentJob, error) {
+	tx, err := d.dbClient.Tx(ctx)
+	if err != nil {
+		d.logger.Error(i18n.T("tx.start_failed"), zap.Error(err))
+		return nil, normalizeAgentJobDatastoreUnexpectedError(err)
+	}
+	defer func() {
+		if v := recover(); v != nil {
+			tx.Rollback()
+			panic(v)
+		}
+	}()
+
+	update := tx.AgentJob.Update().
+		Where(agentjob.ID(id), agentjob.HasOwnerWith(user.ID(userID)))
+	set(update)
+
+	affected, err := update.Save(ctx)
+	if err != nil {
+		d.logger.Error(i18n.T1("update.failed", "Entity", entity), zap.Error(err))
+		tx.Rollback()
+		return nil, normalizeAgentJobDatastoreUnexpectedError(err)
+	}
+	if affected == 0 {
+		tx.Rollback()
+		return nil, ErrAgentJobNotFound
+	}
+
+	entJob, err := tx.AgentJob.Query().
+		Where(agentjob.ID(id)).
+		WithOwner().
+		WithChat().
+		Only(ctx)
+	if err != nil {
+		d.logger.Error(i18n.T("agentjob.relationships_load_failed"), zap.Error(err))
+		tx.Rollback()
+		return nil, normalizeAgentJobDatastoreUnexpectedError(err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		d.logger.Error(i18n.T("tx.commit_failed"), zap.Error(err))
+		return nil, normalizeAgentJobDatastoreUnexpectedError(err)
+	}
+
+	return toAgentJobModel(entJob), nil
+}
+
 // UpdateAgentJobPrompt updates the prompt of an AgentJob.
 func (d *Datastore) UpdateAgentJobPrompt(ctx context.Context, userID, id uuid.UUID, prompt string) (*models.AgentJob, error) {
 	tx, err := d.dbClient.Tx(ctx)
@@ -834,8 +913,9 @@ func (d *Datastore) ListAgentJobsForScheduler(ctx context.Context) ([]*models.Ag
 	return out, nil
 }
 
-// RecordAgentJobRun updates AgentJob run metadata after an execution attempt.
-func (d *Datastore) RecordAgentJobRun(ctx context.Context, userID, id uuid.UUID, lastRunAt time.Time, nextRunAt *time.Time, runError string, newStatus *models.AgentJobStatus) (*models.AgentJob, error) {
+// RecordAgentJobRun updates AgentJob run metadata after an execution attempt. lastRunTimezone is
+// the timezone the schedule ran in ("" leaves the stored one alone).
+func (d *Datastore) RecordAgentJobRun(ctx context.Context, userID, id uuid.UUID, lastRunAt time.Time, lastRunTimezone string, nextRunAt *time.Time, runError string, newStatus *models.AgentJobStatus) (*models.AgentJob, error) {
 	tx, err := d.dbClient.Tx(ctx)
 	if err != nil {
 		d.logger.Error(i18n.T("tx.start_failed"), zap.Error(err))
@@ -852,6 +932,9 @@ func (d *Datastore) RecordAgentJobRun(ctx context.Context, userID, id uuid.UUID,
 		Where(agentjob.ID(id), agentjob.HasOwnerWith(user.ID(userID))).
 		SetLastRunAt(lastRunAt).
 		AddRunCount(1)
+	if tz := strings.TrimSpace(lastRunTimezone); tz != "" {
+		update.SetLastRunTimezone(tz)
+	}
 
 	// Never "clear then set" next_run_at in one UPDATE.
 	if nextRunAt == nil {

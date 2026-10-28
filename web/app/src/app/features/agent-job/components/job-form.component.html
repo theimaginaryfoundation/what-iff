@@ -136,6 +136,36 @@
     </button>
   </div>
 
+  @if (isRecurring()) {
+    <label class="flex items-start gap-2 text-sm text-text-secondary">
+      <input
+        type="checkbox"
+        class="job-form__checkbox mt-0.5"
+        [ngModel]="followUserTimezone()"
+        (ngModelChange)="followUserTimezone.set($event)"
+        aria-describedby="follow-user-timezone-help"
+        data-testid="job-follow-user-timezone"
+        name="followUserTimezone" />
+      <span>
+        Follow me when I travel
+        <span id="follow-user-timezone-help" class="block text-xs text-text-muted">
+          Recurring runs keep their local time wherever you sign in from, so an 8am check-in stays at 8am on a trip. Uses the timezone above until your browser reports one.
+        </span>
+      </span>
+    </label>
+    @if (followUserTimezone() && timezoneFollowingPaused()) {
+      <p class="text-xs text-text-muted" data-testid="job-following-paused">
+        Following is paused because your devices kept reporting different timezones, so this job runs on the timezone above for now.
+        <button type="button" class="underline" (click)="resumeFollowing()">Resume following</button>
+        @if (resumeError(); as message) {
+          <span class="block text-danger">{{ message }}</span>
+        }
+      </p>
+    } @else if (travelTimezone(); as tz) {
+      <p class="text-xs text-text-muted" data-testid="job-travel-timezone">Following you: runs on {{ tz }} time right now.</p>
+    }
+  }
+
   <div id="schedule-parse-preview" class="rounded-xl border border-border-base bg-surface-base p-3 text-xs">
     @if (preview()) {
       <p class="font-medium text-text-primary">{{ preview()!.human_summary }}</p>

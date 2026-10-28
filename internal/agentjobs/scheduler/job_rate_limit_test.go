@@ -28,6 +28,10 @@ func (s *congestionStoreStub) ListAgentJobsForScheduler(ctx context.Context) ([]
 	return nil, nil
 }
 
+func (s *congestionStoreStub) SetAgentJobNextRunAt(ctx context.Context, userID, id uuid.UUID, nextRunAt *time.Time) (*models.AgentJob, error) {
+	return nil, nil
+}
+
 func (s *congestionStoreStub) GetAgentJob(ctx context.Context, userID, id uuid.UUID) (*models.AgentJob, error) {
 	return nil, nil
 }
@@ -36,7 +40,7 @@ func (s *congestionStoreStub) CountRecentSuccessfulAgentJobExecutions(ctx contex
 	return s.countToReturn, s.countErr
 }
 
-func (s *congestionStoreStub) RecordAgentJobRun(ctx context.Context, userID, id uuid.UUID, lastRunAt time.Time, nextRunAt *time.Time, runError string, newStatus *models.AgentJobStatus) (*models.AgentJob, error) {
+func (s *congestionStoreStub) RecordAgentJobRun(ctx context.Context, userID, id uuid.UUID, lastRunAt time.Time, lastRunTimezone string, nextRunAt *time.Time, runError string, newStatus *models.AgentJobStatus) (*models.AgentJob, error) {
 	return nil, nil
 }
 

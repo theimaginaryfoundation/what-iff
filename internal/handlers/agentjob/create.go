@@ -11,6 +11,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -26,6 +27,8 @@ type createAgentJobRequest struct {
 	ChatID        *string `json:"chat_id,omitempty"`
 	PersonalityID *string `json:"personality_id,omitempty"`
 	ModelID       *string `json:"model_id,omitempty"`
+	// FollowUserTimezone runs a recurring schedule in the user's current timezone.
+	FollowUserTimezone bool `json:"follow_user_timezone,omitempty"`
 	// TurnSettingValues override everything else for this job's runs (ADR 0x026).
 	models.TurnSettingValues
 }
@@ -71,8 +74,8 @@ func (h *Handler) CreateAgentJob(w http.ResponseWriter, r *http.Request) {
 	if tz == "" {
 		tz = "UTC"
 	}
-	if _, err := time.LoadLocation(tz); err != nil {
-		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid timezone (expected IANA name like America/New_York)", err)
+	if !modeltypes.ValidTimezoneName(tz) {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid timezone (expected IANA name like America/New_York)", nil)
 		return
 	}
 
@@ -97,16 +100,17 @@ func (h *Handler) CreateAgentJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	newJob := models.AgentJob{
-		Title:         titlePtr,
-		Prompt:        prompt,
-		ScheduleInput: scheduleInput,
-		ScheduleType:  preview.ScheduleType,
-		Schedule:      preview.Schedule,
-		RunAt:         preview.RunAt,
-		Timezone:      preview.Timezone,
-		Status:        models.AgentJobStatusActive,
-		NextRunAt:     nextRunAt,
-		RunCount:      0,
+		Title:              titlePtr,
+		Prompt:             prompt,
+		ScheduleInput:      scheduleInput,
+		ScheduleType:       preview.ScheduleType,
+		Schedule:           preview.Schedule,
+		RunAt:              preview.RunAt,
+		Timezone:           preview.Timezone,
+		FollowUserTimezone: req.FollowUserTimezone,
+		Status:             models.AgentJobStatusActive,
+		NextRunAt:          nextRunAt,
+		RunCount:           0,
 	}
 	if err := req.TurnSettingValues.Validate(); err != nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)

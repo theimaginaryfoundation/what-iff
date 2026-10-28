@@ -16,6 +16,10 @@ export interface AgentJob {
   schedule?: string | null;
   run_at?: string | null;
   timezone: string;
+  /** Recurring schedule runs in the user's current (browser-reported) timezone instead of `timezone`. */
+  follow_user_timezone?: boolean;
+  /** Timezone the schedule runs in right now: the user's current one for a following job, else `timezone`. */
+  effective_timezone?: string;
   status: AgentJobStatus;
   next_run_at?: string | null;
   last_run_at?: string | null;
@@ -41,6 +45,7 @@ export interface CreateAgentJobRequest {
   prompt: string;
   schedule_input: string;
   timezone?: string | null;
+  follow_user_timezone?: boolean;
   chat_id?: string | null;
   personality_id?: string | null;
   model_id?: string | null;
@@ -56,6 +61,7 @@ export interface UpdateAgentJobRequest {
   model_id?: string | null;
   schedule_input?: string | null;
   timezone?: string | null;
+  follow_user_timezone?: boolean;
   /** Omit to keep; `''` clears. */
   reasoning_effort?: ReasoningEffortUpdate;
   /** Omit to keep; `''` clears. */

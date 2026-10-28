@@ -20,6 +20,8 @@ type AgentJobProvider interface {
 	UpdateAgentJobStatus(ctx context.Context, userID, id uuid.UUID, status models.AgentJobStatus, lastError string) (*models.AgentJob, error)
 	SetAgentJobChat(ctx context.Context, userID, id uuid.UUID, chatID *uuid.UUID) (*models.AgentJob, error)
 	SetAgentJobOverrides(ctx context.Context, userID, id uuid.UUID, patch models.SetAgentJobOverridesPatch) (*models.AgentJob, error)
+	SetAgentJobFollowUserTimezone(ctx context.Context, userID, id uuid.UUID, follow bool) (*models.AgentJob, error)
+	SetAgentJobNextRunAt(ctx context.Context, userID, id uuid.UUID, nextRunAt *time.Time) (*models.AgentJob, error)
 	DeleteAgentJob(ctx context.Context, userID, id uuid.UUID) error
 	AddAgentJobRitual(ctx context.Context, userID, jobID, ritualID uuid.UUID) error
 	RemoveAgentJobRitual(ctx context.Context, userID, jobID, ritualID uuid.UUID) error

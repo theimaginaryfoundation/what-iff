@@ -22,6 +22,10 @@ export interface UserResponse {
   first_name?: string;
   last_name?: string;
   timezone?: string;
+  /** Timezone the user's browser last reported; jobs that follow the user run in it. */
+  current_timezone?: string;
+  /** Set (ISO time) while following the user's timezone is paused because their devices disagreed. */
+  timezone_following_paused_at?: string | null;
   theme?: 'light' | 'dark' | 'system';
   created_at: string;
   updated_at: string;
@@ -111,3 +115,12 @@ export const IMAGE_GENERATION_PROVIDER_LABELS: Record<ImageGenerationProvider, s
   zai: 'Z.ai (GLM-Image)',
   qwen: 'Qwen (Qwen-Image)',
 };
+
+/** The API's answer to a browser timezone report (ADR 0x027). */
+export interface CurrentTimezoneReport {
+  current_timezone?: string;
+  /** Set while following is paused; the report was not applied. */
+  timezone_following_paused_at?: string | null;
+  /** True when this report is the one that paused following. */
+  paused_now?: boolean;
+}

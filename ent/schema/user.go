@@ -6,6 +6,7 @@ import (
 	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 )
 
 // User holds the schema definition for the User entity.
@@ -39,6 +40,17 @@ func (User) Fields() []ent.Field {
 			Default("America/New_York").
 			MaxLen(64).
 			Comment("IANA timezone for scheduling (e.g. America/New_York)"),
+		field.String("current_timezone").
+			Optional().
+			MaxLen(64).
+			Comment("IANA timezone the user's browser last reported (best effort). Jobs with follow_user_timezone run in it instead of their own timezone."),
+		field.JSON("current_timezone_changes", []modeltypes.TimezoneChange{}).
+			Optional().
+			Comment("Recent changes of current_timezone (last 24h), used to notice devices that keep disagreeing"),
+		field.Time("timezone_following_paused_at").
+			Optional().
+			Nillable().
+			Comment("Set when current_timezone flapped between devices: reports are ignored and following jobs use their own timezone until the user resumes"),
 		field.Enum("status").
 			Values("active", "inactive").
 			Default("active").

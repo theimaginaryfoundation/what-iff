@@ -32,9 +32,9 @@ func recordRunDuration(ctx context.Context, outcome string, d time.Duration) {
 }
 
 // recordLateness records how long after its planned time a scheduled run started. Only regular
-// firings count: manual runs and deferred retries have no planned time to be late against.
+// firings count: manual runs, deferred retries and catch-up runs have no planned time to be late against.
 func recordLateness(ctx context.Context, planned *time.Time, startedAt time.Time, opts executionOptions) {
-	if planned == nil || planned.IsZero() || opts.allowPaused || opts.deferredRetryCount > 0 {
+	if planned == nil || planned.IsZero() || opts.allowPaused || opts.deferredRetryCount > 0 || opts.catchUp {
 		return
 	}
 	late := startedAt.Sub(*planned)

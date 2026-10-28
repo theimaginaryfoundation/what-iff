@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,3 +140,38 @@ func TestCreateAgentJob_RequiresPromptAndSchedule(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+func (f *fakeCreateAgentJobProvider) SetAgentJobFollowUserTimezone(ctx context.Context, userID, id uuid.UUID, follow bool) (*models.AgentJob, error) {
+	return nil, errors.New("not implemented")
+}
+
+func TestCreateAgentJob_FollowUserTimezoneIsOffUnlessAsked(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		body string
+		want bool
+	}{
+		{body: `{"prompt":"Morning check-in","schedule_input":"every day at 8am"}`, want: false},
+		{body: `{"prompt":"Morning check-in","schedule_input":"every day at 8am","follow_user_timezone":true}`, want: true},
+	} {
+		provider := &fakeCreateAgentJobProvider{}
+		handler := NewHandler(provider, &fakeScheduleParser{}, nil, zap.NewNop())
+
+		req := httptest.NewRequest(http.MethodPost, "/agent-job", strings.NewReader(tc.body))
+		req = req.WithContext(context.WithValue(req.Context(), middleware.UserIDKey, uuid.New()))
+		rec := httptest.NewRecorder()
+		handler.CreateAgentJob(rec, req)
+
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, rec.Code, rec.Body.String())
+		}
+		if provider.lastJob.FollowUserTimezone != tc.want {
+			t.Fatalf("body %s: follow_user_timezone = %v, want %v", tc.body, provider.lastJob.FollowUserTimezone, tc.want)
+		}
+	}
+}
+
+func (f *fakeCreateAgentJobProvider) SetAgentJobNextRunAt(ctx context.Context, userID, id uuid.UUID, nextRunAt *time.Time) (*models.AgentJob, error) {
+	return nil, errors.New("not implemented")
+}

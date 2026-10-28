@@ -8,12 +8,14 @@ import (
 	"time"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
+	"github.com/theimaginaryfoundation/what-iff/ent/agentjob"
 	entrole "github.com/theimaginaryfoundation/what-iff/ent/role"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/ent/userpreference"
 	"github.com/theimaginaryfoundation/what-iff/internal/auth"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -34,14 +36,13 @@ var (
 
 // validateIANATimezone checks that the given string is a valid IANA timezone name
 // (e.g. "America/New_York"). It uses the Go standard library's time.LoadLocation,
-// which relies on the IANA timezone database.
+// which relies on the IANA timezone database, and rejects "Local" (modeltypes.ValidTimezoneName).
 func validateIANATimezone(tz string) error {
 	tz = strings.TrimSpace(tz)
 	if tz == "" {
 		return nil
 	}
-	_, err := time.LoadLocation(tz)
-	if err != nil {
+	if !modeltypes.ValidTimezoneName(tz) {
 		return ErrInvalidTimezone
 	}
 	return nil
@@ -61,16 +62,18 @@ func (d *Datastore) getDefaultRoleID(ctx context.Context, tx *ent.Tx) (uuid.UUID
 // Convert from Ent entity to model
 func toUserModel(u *ent.User) *models.UserResponse {
 	e := models.UserResponse{
-		ID:                       u.ID,
-		Username:                 u.Username,
-		Email:                    u.Email,
-		FirstName:                u.FirstName,
-		LastName:                 u.LastName,
-		Timezone:                 u.Timezone,
-		Status:                   string(u.Status),
-		EnableExperimentalModels: u.EnableExperimentalModels,
-		CreatedAt:                u.CreatedAt,
-		UpdatedAt:                u.UpdatedAt,
+		ID:                        u.ID,
+		Username:                  u.Username,
+		Email:                     u.Email,
+		FirstName:                 u.FirstName,
+		LastName:                  u.LastName,
+		Timezone:                  u.Timezone,
+		CurrentTimezone:           u.CurrentTimezone,
+		TimezoneFollowingPausedAt: u.TimezoneFollowingPausedAt,
+		Status:                    string(u.Status),
+		EnableExperimentalModels:  u.EnableExperimentalModels,
+		CreatedAt:                 u.CreatedAt,
+		UpdatedAt:                 u.UpdatedAt,
 	}
 
 	// Get primary role from many-to-many relationship
@@ -356,6 +359,119 @@ func (d *Datastore) GetUserByID(ctx context.Context, userID uuid.UUID) (*models.
 	}
 
 	return toUserModel(u), nil
+}
+
+// SetUserCurrentTimezone records the IANA timezone the user's browser reports (ADR 0x027). It
+// writes only when the zone changes. Each change is kept for a day; when the day's changes look
+// like devices disagreeing rather than travel (modeltypes.TimezoneFlapping) and the user has a job
+// that follows their timezone, following is paused instead: current_timezone is cleared, so those
+// jobs go back to their own timezone, and reports are ignored until ResumeTimezoneFollowing.
+//
+// The read, the following-job check and the write run in one transaction, and the write is also
+// conditional on the zone and pause state read, so two devices reporting at once cannot both
+// apply: the one that loses is dropped, and its device reports again on its next visibility change.
+func (d *Datastore) SetUserCurrentTimezone(ctx context.Context, userID uuid.UUID, tz string) (models.CurrentTimezoneReport, error) {
+	tz = strings.TrimSpace(tz)
+	if tz == "" {
+		return models.CurrentTimezoneReport{}, ErrInvalidTimezone
+	}
+	if err := validateIANATimezone(tz); err != nil {
+		return models.CurrentTimezoneReport{}, err
+	}
+
+	tx, err := d.dbClient.Tx(ctx)
+	if err != nil {
+		d.logger.Error(i18n.T("tx.start_failed"), zap.Error(err))
+		return models.CurrentTimezoneReport{}, err
+	}
+	report, err := setUserCurrentTimezoneTx(ctx, tx, userID, tz, time.Now().UTC())
+	if err != nil {
+		_ = tx.Rollback()
+		if !errors.Is(err, ErrUserNotFound) {
+			d.logger.Error(i18n.T1("update.failed", "Entity", "user current timezone"), zap.Error(err))
+		}
+		return models.CurrentTimezoneReport{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		d.logger.Error(i18n.T("tx.commit_failed"), zap.Error(err))
+		return models.CurrentTimezoneReport{}, err
+	}
+	return report, nil
+}
+
+func setUserCurrentTimezoneTx(ctx context.Context, tx *ent.Tx, userID uuid.UUID, tz string, now time.Time) (models.CurrentTimezoneReport, error) {
+	u, err := tx.User.Get(ctx, userID)
+	if ent.IsNotFound(err) {
+		return models.CurrentTimezoneReport{}, ErrUserNotFound
+	}
+	if err != nil {
+		return models.CurrentTimezoneReport{}, err
+	}
+	report := models.CurrentTimezoneReport{CurrentTimezone: u.CurrentTimezone, FollowingPausedAt: u.TimezoneFollowingPausedAt}
+	if u.TimezoneFollowingPausedAt != nil || u.CurrentTimezone == tz {
+		return report, nil
+	}
+
+	changes := modeltypes.RecentTimezoneChanges(u.CurrentTimezoneChanges, now)
+	if u.CurrentTimezone != "" {
+		// A first report is not a change of zone.
+		changes = append(changes, models.TimezoneChange{Timezone: tz, At: now})
+	}
+	pause := false
+	if modeltypes.TimezoneFlapping(changes, now) {
+		if pause, err = tx.AgentJob.Query().
+			Where(agentjob.HasOwnerWith(user.ID(userID)), agentjob.FollowUserTimezone(true)).
+			Exist(ctx); err != nil {
+			return report, err
+		}
+	}
+
+	update := tx.User.Update().
+		Where(user.ID(userID), user.TimezoneFollowingPausedAtIsNil()).
+		SetCurrentTimezoneChanges(changes)
+	if u.CurrentTimezone == "" {
+		update.Where(user.Or(user.CurrentTimezoneIsNil(), user.CurrentTimezoneEQ("")))
+	} else {
+		update.Where(user.CurrentTimezoneEQ(u.CurrentTimezone))
+	}
+	if pause {
+		update.ClearCurrentTimezone().SetTimezoneFollowingPausedAt(now)
+	} else {
+		update.SetCurrentTimezone(tz)
+	}
+	affected, err := update.Save(ctx)
+	if err != nil || affected == 0 {
+		return report, err
+	}
+	if pause {
+		return models.CurrentTimezoneReport{FollowingPausedAt: &now, PausedNow: true}, nil
+	}
+	return models.CurrentTimezoneReport{CurrentTimezone: tz}, nil
+}
+
+// ResumeTimezoneFollowing ends a pause of following the user's timezone and forgets the recent
+// changes; the browser's next report sets the timezone again. It does nothing when following is
+// not paused, so a resume cannot wipe the history of changes that are still being counted.
+func (d *Datastore) ResumeTimezoneFollowing(ctx context.Context, userID uuid.UUID) error {
+	affected, err := d.dbClient.User.Update().
+		Where(user.ID(userID), user.TimezoneFollowingPausedAtNotNil()).
+		ClearTimezoneFollowingPausedAt().
+		ClearCurrentTimezoneChanges().
+		Save(ctx)
+	if err != nil {
+		d.logger.Error(i18n.T1("update.failed", "Entity", "user timezone following"), zap.Error(err))
+		return err
+	}
+	if affected == 0 {
+		exists, err := d.dbClient.User.Query().Where(user.ID(userID)).Exist(ctx)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return ErrUserNotFound
+		}
+	}
+	return nil
 }
 
 // UpdateUserProfile updates a user's profile
