@@ -7,7 +7,7 @@ import {
   OnInit,
   signal,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { filter, map } from 'rxjs/operators';
@@ -39,6 +39,7 @@ import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { SparkleIconComponent } from '../../shared/ui/icons/icons';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 import { PersonalityWelcomeComponent } from './personality-welcome/personality-welcome.component';
+import { RemoteSyncService } from '../remote-sync/remote-sync.service';
 import { PersonalityEditModalComponent } from './detail/personality-edit-modal.component';
 import { PersonalityEditorSessionService } from './services/personality-editor-session.service';
 import {
@@ -85,6 +86,8 @@ export class PersonalitiesPageComponent implements OnInit {
   private readonly generatePersonalityModal = inject(GeneratePersonalityModalService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly editorSession = inject(PersonalityEditorSessionService);
+  /** Whether this server runs mullet mode, so the first-run welcome can offer it. */
+  readonly mulletModeAvailable = toSignal(inject(RemoteSyncService).available(), { initialValue: false });
 
   readonly personalities = signal<Personality[]>([]);
   readonly totalCount = signal(0);
@@ -299,6 +302,10 @@ export class PersonalitiesPageComponent implements OnInit {
   /** Fresh users with an existing export/history can jump straight to Import & Export. */
   goToImport(): void {
     this.router.navigate(['/data']);
+  }
+
+  goToMulletMode(): void {
+    this.router.navigate(['/integrations'], { queryParams: { tab: 'remote-sync' } });
   }
 
   openCreate(): void {

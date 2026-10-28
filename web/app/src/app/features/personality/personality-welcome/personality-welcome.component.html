@@ -29,6 +29,12 @@
       Already have a WhatIff export, or chats from ChatGPT or Claude?
       <button type="button" class="welcome__inline-action" (click)="importData.emit()">Import them instead</button>
     </p>
+    @if (mulletModeAvailable()) {
+      <p class="welcome__import" data-testid="welcome-mullet-mode">
+        Talk on whatiff.chat too?
+        <button type="button" class="welcome__inline-action" (click)="openMulletMode.emit()">Keep a copy of those threads here</button>
+      </p>
+    }
   </div>
 
   @if (gettingStartedHref) {

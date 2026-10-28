@@ -185,6 +185,10 @@ func TestRemoteSyncLeaseAndDueList(t *testing.T) {
 	require.NotNil(t, s.LastRun)
 	assert.Equal(t, 7, s.LastRun.MessagesAdded)
 	assert.NotNil(t, s.LastSuccessAt)
+	acct, err := f.ds.GetRemoteSyncAccount(ctx, f.owner)
+	require.NoError(t, err)
+	assert.NotNil(t, acct.LastRunAt, "a wake reads it to skip fresh accounts")
+	assert.False(t, acct.FullWalk, "a clean run needs no full walk next time")
 
 	due, err = f.ds.ListDueRemoteSyncs(ctx, time.Now().Add(-time.Minute))
 	require.NoError(t, err)

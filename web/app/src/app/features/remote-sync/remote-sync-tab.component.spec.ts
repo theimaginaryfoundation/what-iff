@@ -134,6 +134,7 @@ describe('RemoteSyncTabComponent', () => {
     expect(text('remote-sync-status-badge')).toBe('In sync');
     expect(text('remote-sync-threads')).toBe('12');
     expect(text('remote-sync-last-run')).toContain('2 new threads, 1 updated thread, 40 messages');
+    expect(text('remote-sync-cadence')).toBe('Syncs when you open this app or come back to it, and every 5 minutes in the background.');
     expect((el('remote-sync-token') as HTMLInputElement).placeholder).toContain('wxyz');
 
     api.save.mockReturnValue(of(IN_SYNC));
@@ -177,5 +178,25 @@ describe('RemoteSyncTabComponent', () => {
     expect(api.remove).toHaveBeenCalled();
     expect(el('remote-sync-remove')).toBeNull();
     expect(text('remote-sync-status')).toContain('Read threads');
+  });
+});
+
+describe('RemoteSyncTabComponent cadence', () => {
+  it('says syncs are wake-only when the server runs no background syncs', async () => {
+    await TestBed.configureTestingModule({
+      imports: [RemoteSyncTabComponent],
+      providers: [
+        provideZonelessChangeDetection(),
+        { provide: RemoteSyncService, useValue: { get: () => of({ ...IN_SYNC, interval_seconds: undefined }) } },
+        { provide: ConfirmationService, useValue: {} },
+      ],
+    }).compileComponents();
+    const fixture = TestBed.createComponent(RemoteSyncTabComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const cadence = fixture.nativeElement.querySelector('[data-testid="remote-sync-cadence"]') as HTMLElement;
+    expect(cadence.textContent?.trim()).toBe('Syncs when you open this app or come back to it.');
+    fixture.destroy();
   });
 });

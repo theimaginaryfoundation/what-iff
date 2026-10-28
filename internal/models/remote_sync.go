@@ -117,6 +117,8 @@ type RemoteSyncAccount struct {
 	Token   string
 	Enabled bool
 	Status  RemoteSyncStatus
+	// LastRunAt is when the last run finished (nil: never), so a wake can skip a fresh account.
+	LastRunAt *time.Time
 	// FullWalk asks the syncer to list every remote thread instead of stopping at the first
 	// unchanged page: there has been no successful run yet, or the last one left threads for
 	// later, which may sit beyond pages that are already unchanged.

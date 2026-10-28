@@ -26,16 +26,18 @@ type Store interface {
 	GetRemoteSyncAccount(ctx context.Context, userID uuid.UUID) (*models.RemoteSyncAccount, error)
 }
 
-// Starter starts a run in the background (remotesync.Syncer).
+// Starter starts runs in the background (remotesync.Syncer).
 type Starter interface {
 	Start(ctx context.Context, userID uuid.UUID) error
-	Interval() time.Duration
+	Wake(ctx context.Context, userID uuid.UUID) (bool, error)
 }
 
 // Handler serves /api/remote-sync (behind auth).
 type Handler struct {
 	Store  Store
 	Syncer Starter
+	// Interval is the background sync interval, or 0 when only wakes start runs.
+	Interval time.Duration
 	// Check proves a token can read from a remote before it is saved.
 	Check func(ctx context.Context, baseURL, token string) error
 	// Lifecycle is the server's context: runs started from a request outlive the request.
@@ -50,6 +52,29 @@ func (h *Handler) Register(r *mux.Router) {
 	r.HandleFunc("", h.put).Methods(http.MethodPut)
 	r.HandleFunc("", h.delete).Methods(http.MethodDelete)
 	r.HandleFunc("/run", h.run).Methods(http.MethodPost)
+	r.HandleFunc("/wake", h.wake).Methods(http.MethodPost)
+}
+
+type wakeResponse struct {
+	// Started is true when the wake started a run; poll GET for its outcome.
+	Started bool `json:"started"`
+}
+
+// wake is the web app saying it is being used (opened, or back after a while). It starts a run
+// unless the account is off, needs its owner, ran moments ago or is running, and never fails
+// for those: a wake is a hint, not a command. An account with no sync answers started: false.
+func (h *Handler) wake(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.userID(w, r)
+	if !ok {
+		return
+	}
+	started, err := h.Syncer.Wake(h.Lifecycle, userID)
+	if err != nil && !errors.Is(err, datastore.ErrRemoteSyncNotFound) {
+		h.failed(w, "Could not start a sync.", err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	handlerutils.RespondWithJSON(w, h.Logger, http.StatusOK, wakeResponse{Started: started})
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +198,7 @@ func (h *Handler) respondSettings(w http.ResponseWriter, r *http.Request, userID
 		h.failed(w, "Could not read the sync settings.", err)
 		return
 	}
-	s.IntervalSeconds = int(h.Syncer.Interval() / time.Second)
+	s.IntervalSeconds = int(h.Interval / time.Second)
 	s.DefaultBaseURL = remotesync.DefaultBaseURL
 	s.AllowLocalNetwork = h.AllowLocalNetwork
 	w.Header().Set("Cache-Control", "no-store")

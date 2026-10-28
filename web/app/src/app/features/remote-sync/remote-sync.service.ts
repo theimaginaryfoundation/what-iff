@@ -102,4 +102,12 @@ export class RemoteSyncService {
   runNow(): Observable<RemoteSyncSettings> {
     return this.http.post<RemoteSyncSettings>(`${this.base}/run`, {});
   }
+
+  /**
+   * Tells the server the app is being used, so it syncs if the copy is stale. A hint: it starts
+   * nothing when sync is off, not set up, or ran moments ago.
+   */
+  wake(): Observable<{ started: boolean }> {
+    return this.http.post<{ started: boolean }>(`${this.base}/wake`, {});
+  }
 }

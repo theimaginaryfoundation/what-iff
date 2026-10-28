@@ -67,12 +67,18 @@ func (s *stubStore) GetRemoteSyncAccount(context.Context, uuid.UUID) (*models.Re
 }
 
 type stubSyncer struct {
-	err    error
-	starts int
+	woke    int
+	wakeErr error
+	wakeOK  bool
+	err     error
+	starts  int
 }
 
 func (s *stubSyncer) Start(context.Context, uuid.UUID) error { s.starts++; return s.err }
-func (s *stubSyncer) Interval() time.Duration                { return 5 * time.Minute }
+func (s *stubSyncer) Wake(context.Context, uuid.UUID) (bool, error) {
+	s.woke++
+	return s.wakeOK, s.wakeErr
+}
 
 type checkCall struct{ baseURL, token string }
 
@@ -81,7 +87,7 @@ func newTestHandler() (*Handler, *stubStore, *stubSyncer, *[]checkCall, *error) 
 	var calls []checkCall
 	var checkErr error
 	h := &Handler{
-		Store: store, Syncer: syncer, Lifecycle: context.Background(), Logger: zap.NewNop(),
+		Store: store, Syncer: syncer, Interval: 5 * time.Minute, Lifecycle: context.Background(), Logger: zap.NewNop(),
 		Check: func(_ context.Context, baseURL, token string) error {
 			calls = append(calls, checkCall{baseURL, token})
 			return checkErr
@@ -193,4 +199,27 @@ func TestUnauthenticatedRequestsAreRefused(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/remote-sync", nil))
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+func TestWakeIsAHintNeverAFailure(t *testing.T) {
+	h, _, syncer, _, _ := newTestHandler()
+
+	syncer.wakeOK = true
+	rec := do(t, h, http.MethodPost, "/remote-sync/wake", "")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `{"started":true}`, rec.Body.String())
+
+	// Nothing set up: not an error, just nothing started.
+	syncer.wakeOK, syncer.wakeErr = false, datastore.ErrRemoteSyncNotFound
+	rec = do(t, h, http.MethodPost, "/remote-sync/wake", "")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `{"started":false}`, rec.Body.String())
+	assert.Equal(t, 2, syncer.woke)
+}
+
+func TestWakeOnlyServersReportNoInterval(t *testing.T) {
+	h, _, _, _, _ := newTestHandler()
+	h.Interval = 0
+	rec := do(t, h, http.MethodGet, "/remote-sync", "")
+	assert.NotContains(t, rec.Body.String(), "interval_seconds", "omitted: syncs happen only when the app is used")
 }

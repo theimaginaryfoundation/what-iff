@@ -11,6 +11,9 @@ import { RemoteSyncService, RemoteSyncSettings, runSummary } from './remote-sync
 /** Where people create the token: the hosted app's Tools page. */
 export const HOSTED_TOOLS_URL = 'https://app.whatiff.chat/integrations';
 
+/** The mullet mode guide (docs/guides/mullet-mode.md). */
+export const MULLET_MODE_GUIDE_URL = 'https://github.com/theimaginaryfoundation/what-iff/blob/main/docs/guides/mullet-mode.md';
+
 /** How often the tab re-reads the status while a run is going. */
 const POLL_MS = 2000;
 
@@ -30,16 +33,18 @@ type Tone = 'success' | 'warning' | 'danger' | 'neutral' | 'info';
     <div class="space-y-6" data-testid="remote-sync-tab">
       <div>
         <h2 class="inline-flex items-center gap-1 text-lg font-semibold text-gray-900 dark:text-white">
-          Remote sync
-          <ui-help-hint label="What does remote sync copy?" heading="What comes over">
+          Mullet mode
+          <span class="text-sm font-normal text-gray-500 dark:text-gray-400">remote sync</span>
+          <ui-help-hint label="What does mullet mode copy?" heading="What comes over">
             Every thread's messages: what you said and what the persona said, with their times. Persona prompts, memories and attachments
             are not part of the copy; import an account export from the other server once to bring those. A thread's persona is matched here
             by name.
           </ui-help-hint>
         </h2>
         <p class="mt-1 max-w-3xl text-sm text-gray-600 dark:text-gray-400">
-          Keep a copy of your threads from another What Iff server, such as whatiff.chat. Talk there while you are out; everything you said
-          is here when you get home, ready to continue on this server.
+          Business up front, party in the back: talk on whatiff.chat (or another What Iff server) while you are out, and keep a copy of
+          every thread on this server. When you open this app, it fetches what is new, ready to continue here with your own models.
+          <a class="text-indigo-600 underline dark:text-indigo-400" [href]="guideUrl" target="_blank" rel="noopener">Read the guide</a>
         </p>
         <p class="mt-2 max-w-3xl text-sm text-gray-600 dark:text-gray-400" data-testid="remote-sync-fork-note">
           Nothing here is ever changed or deleted by sync, and nothing is sent back. If you continue the same thread in both places, the two
@@ -142,8 +147,12 @@ type Tone = 'success' | 'warning' | 'danger' | 'neutral' | 'info';
                 @if (lastRunSummary()) {
                   <p data-testid="remote-sync-last-run">Last run: {{ lastRunSummary() }}.</p>
                 }
-                @if (settings()!.enabled && settings()!.interval_seconds) {
-                  <p>Syncs every {{ intervalLabel() }} while this server is running.</p>
+                @if (settings()!.enabled) {
+                  <p data-testid="remote-sync-cadence">
+                    Syncs when you open this app or come back to it{{
+                      settings()!.interval_seconds ? ', and every ' + intervalLabel() + ' in the background' : ''
+                    }}.
+                  </p>
                 }
               </div>
             }
@@ -219,6 +228,7 @@ export class RemoteSyncTabComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly hostedToolsUrl = HOSTED_TOOLS_URL;
+  readonly guideUrl = MULLET_MODE_GUIDE_URL;
 
   readonly loading = signal(true);
   readonly busy = signal(false);
@@ -243,7 +253,10 @@ export class RemoteSyncTabComponent implements OnInit {
   readonly lastRunSummary = computed(() => runSummary(this.settings()?.last_run));
   readonly intervalLabel = computed(() => {
     const s = this.settings()?.interval_seconds ?? 0;
-    return s % 60 === 0 ? `${s / 60} minute${s === 60 ? '' : 's'}` : `${s} seconds`;
+    const unit = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+    if (s >= 3600 && s % 3600 === 0) return s === 3600 ? 'hour' : unit(s / 3600, 'hour');
+    if (s % 60 === 0) return s === 60 ? 'minute' : unit(s / 60, 'minute');
+    return unit(s, 'second');
   });
 
   readonly statusTone = computed<Tone>(() => {

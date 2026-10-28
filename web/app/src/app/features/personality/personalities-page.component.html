@@ -63,6 +63,8 @@
       (generate)="navigateGenerate()"
       (createManually)="openCreate()"
       (importData)="goToImport()"
+      [mulletModeAvailable]="mulletModeAvailable()"
+      (openMulletMode)="goToMulletMode()"
     />
   } @else {
     <div

@@ -969,6 +969,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/remote-sync/wake": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The app is being used
+         * @description The web app calls this when a signed-in session starts and when it comes back after a while (mullet mode, ADR 0x032). The server starts a sync if the last one is more than a couple of minutes old, and otherwise does nothing; sync being off, not set up, waiting on its owner or already running is not an error. This is what keeps copies current without polling.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Whether a sync was started */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            started: boolean;
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/remote-sync/run": {
         parameters: {
             query?: never;
@@ -13881,6 +13940,7 @@ export interface components {
             last_run?: components["schemas"]["RemoteSyncRunStats"];
             running: boolean;
             totals?: components["schemas"]["RemoteSyncTotals"];
+            /** @description Background sync interval; absent when syncs start only when the app is used */
             interval_seconds?: number;
             default_base_url?: string;
             allow_local_network?: boolean;

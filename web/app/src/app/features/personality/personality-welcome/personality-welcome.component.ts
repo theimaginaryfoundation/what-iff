@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 
 import { guideUrl } from '../../../core/constants/guides.constants';
 import { SparkleIconComponent } from '../../../shared/ui/icons/icons';
@@ -20,6 +20,9 @@ export class PersonalityWelcomeComponent {
   readonly generate = output<void>();
   readonly createManually = output<void>();
   readonly importData = output<void>();
+  /** Offers mullet mode (keeping a copy of whatiff.chat threads here) when the server runs it. */
+  readonly mulletModeAvailable = input(false);
+  readonly openMulletMode = output<void>();
 
   readonly gettingStartedHref = guideUrl('gettingStarted');
 

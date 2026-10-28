@@ -367,3 +367,56 @@ func TestCancelledRunsLeaveNoRecord(t *testing.T) {
 	assert.Empty(t, store.finished)
 	assert.True(t, errors.Is(remote.listErr, context.Canceled))
 }
+
+func TestWakeSyncsOnlyStaleAccountsThatCanRun(t *testing.T) {
+	remote, store := newFakeRemote(), newFakeStore()
+	remote.addThread("t", 1, t0)
+	s := newTestSyncer(store, remote, Config{WakeMinAge: time.Minute})
+	ctx := context.Background()
+	user := store.account.UserID
+	finished := func(n int) func() bool {
+		return func() bool {
+			store.mu.Lock()
+			defer store.mu.Unlock()
+			return len(store.finished) == n
+		}
+	}
+
+	// Never run: a wake starts one.
+	started, err := s.Wake(ctx, user)
+	require.NoError(t, err)
+	assert.True(t, started)
+	require.Eventually(t, finished(1), time.Second, 10*time.Millisecond)
+
+	// Ran moments ago: left alone.
+	recent := time.Now().Add(-10 * time.Second)
+	store.account.LastRunAt = &recent
+	started, err = s.Wake(ctx, user)
+	require.NoError(t, err)
+	assert.False(t, started)
+
+	// Stale again: runs.
+	stale := time.Now().Add(-2 * time.Minute)
+	store.account.LastRunAt = &stale
+	started, err = s.Wake(ctx, user)
+	require.NoError(t, err)
+	assert.True(t, started)
+	require.Eventually(t, finished(2), time.Second, 10*time.Millisecond)
+
+	// Off, or waiting on its owner: left alone, and neither is an error.
+	store.account.Enabled = false
+	started, err = s.Wake(ctx, user)
+	require.NoError(t, err)
+	assert.False(t, started)
+	store.account.Enabled, store.account.Status = true, models.RemoteSyncStatusNeedsAttention
+	started, err = s.Wake(ctx, user)
+	require.NoError(t, err)
+	assert.False(t, started)
+
+	// Already running: left alone.
+	store.account.Status = models.RemoteSyncStatusOK
+	store.leased = true
+	started, err = s.Wake(ctx, user)
+	require.NoError(t, err)
+	assert.False(t, started)
+}

@@ -42,13 +42,16 @@ type Remote interface {
 
 // Config tunes a Syncer. Zero values take the defaults below.
 type Config struct {
-	// Interval is how often an enabled account is synced.
+	// Interval is how often an enabled account is synced in the background, on top of the syncs
+	// a wake starts. The plugin may not run the background runner at all (wake-only).
 	Interval time.Duration
 	// Lease is how long a run holds an account before another may take it; renewed per thread.
 	Lease time.Duration
 	// Overlap is how far before the last copied message a pull re-reads, to catch a message
 	// that committed late with an earlier timestamp. Re-read messages are deduped.
 	Overlap time.Duration
+	// WakeMinAge is how old the last run must be before a wake starts another.
+	WakeMinAge time.Duration
 	// MaxThreadsPerRun bounds one run; the rest wait for the next.
 	MaxThreadsPerRun int
 	// MaxListPages and MaxMessagePages bound one walk, as a guard against a remote that never ends.
@@ -62,7 +65,7 @@ type Config struct {
 }
 
 const (
-	DefaultInterval         = 5 * time.Minute
+	DefaultInterval         = time.Hour
 	DefaultLease            = 15 * time.Minute
 	DefaultOverlap          = 2 * time.Minute
 	DefaultMaxThreadsPerRun = 50
@@ -73,6 +76,9 @@ const (
 func (c Config) withDefaults() Config {
 	if c.Interval <= 0 {
 		c.Interval = DefaultInterval
+	}
+	if c.WakeMinAge <= 0 {
+		c.WakeMinAge = DefaultWakeMinAge
 	}
 	if c.Lease <= 0 {
 		c.Lease = DefaultLease
@@ -134,6 +140,33 @@ func (s *Syncer) Start(ctx context.Context, userID uuid.UUID) error {
 	}
 	go s.runClaimed(ctx, userID)
 	return nil
+}
+
+// DefaultWakeMinAge is how old an account's last run must be before a wake starts another.
+const DefaultWakeMinAge = 2 * time.Minute
+
+// Wake is the local app saying "someone is using me": it starts a run when the account's last
+// one is older than the wake minimum age, and reports whether it did. This is how copies stay
+// current without polling: the remote is asked when the copy is about to be read, not on a
+// clock. An account that is off, needs its owner, was synced moments ago or is already
+// running is left alone; none of those is an error.
+func (s *Syncer) Wake(ctx context.Context, userID uuid.UUID) (bool, error) {
+	acct, err := s.store.GetRemoteSyncAccount(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if !acct.Enabled || acct.Status == models.RemoteSyncStatusNeedsAttention {
+		return false, nil
+	}
+	if acct.LastRunAt != nil && time.Since(*acct.LastRunAt) < s.cfg.WakeMinAge {
+		return false, nil
+	}
+	ok, err := s.store.ClaimRemoteSync(ctx, userID, time.Now().Add(s.cfg.Lease))
+	if err != nil || !ok {
+		return false, err
+	}
+	go s.runClaimed(ctx, userID)
+	return true, nil
 }
 
 // RunDue runs every account that is due, one after another. The runner calls it on each tick.

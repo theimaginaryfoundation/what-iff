@@ -168,12 +168,13 @@ func (d *Datastore) GetRemoteSyncAccount(ctx context.Context, userID uuid.UUID) 
 		return nil, fmt.Errorf("decrypt remote sync token: %w", err)
 	}
 	return &models.RemoteSyncAccount{
-		ID:      row.ID,
-		UserID:  userID,
-		BaseURL: row.BaseURL,
-		Token:   token,
-		Enabled: row.Enabled,
-		Status:  models.RemoteSyncStatus(row.Status),
+		ID:        row.ID,
+		UserID:    userID,
+		BaseURL:   row.BaseURL,
+		Token:     token,
+		Enabled:   row.Enabled,
+		Status:    models.RemoteSyncStatus(row.Status),
+		LastRunAt: row.LastRunAt,
 		FullWalk: row.LastSuccessAt == nil ||
 			models.RemoteSyncRunStatsFromMap(row.LastRun).ThreadsDeferred > 0,
 	}, nil

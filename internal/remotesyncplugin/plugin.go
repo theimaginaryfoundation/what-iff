@@ -5,7 +5,8 @@
 // Configuration (environment):
 //
 //	REMOTE_SYNC_ENABLED=true               turn the feature on (default off)
-//	REMOTE_SYNC_INTERVAL=5m                how often an enabled account syncs (Go duration, at least 1m)
+//	REMOTE_SYNC_INTERVAL=1h                how often an enabled account also syncs in the background
+//	                                       (Go duration, at least 1m; "off" syncs only when the app is used)
 //	REMOTE_SYNC_MAX_THREADS_PER_RUN=50     threads synced per run; the rest wait for the next
 //	REMOTE_SYNC_ALLOW_LOCAL_NETWORK=true   accept http:// and private or loopback addresses
 //	                                       (a server on your own network, or development)
@@ -57,8 +58,9 @@ func apply(d plugins.Deps) {
 	}
 
 	allowLocal := truthy("REMOTE_SYNC_ALLOW_LOCAL_NETWORK")
+	interval := intervalEnv(logger, "REMOTE_SYNC_INTERVAL", remotesync.DefaultInterval, time.Minute)
 	cfg := remotesync.Config{
-		Interval:          durationEnv(logger, "REMOTE_SYNC_INTERVAL", remotesync.DefaultInterval, time.Minute),
+		Interval:          interval,
 		MaxThreadsPerRun:  intEnv(logger, "REMOTE_SYNC_MAX_THREADS_PER_RUN", remotesync.DefaultMaxThreadsPerRun),
 		AllowLocalNetwork: allowLocal,
 	}
@@ -66,8 +68,9 @@ func apply(d plugins.Deps) {
 	httpClient := remotesync.NewHTTPClient(allowLocal)
 
 	h := &Handler{
-		Store:  d.DataStore,
-		Syncer: syncer,
+		Store:    d.DataStore,
+		Syncer:   syncer,
+		Interval: interval,
 		Check: func(ctx context.Context, baseURL, token string) error {
 			c, err := remotesync.NewClient(baseURL, token, httpClient)
 			if err != nil {
@@ -81,15 +84,23 @@ func apply(d plugins.Deps) {
 	}
 	h.Register(d.AuthRouter.PathPrefix("/remote-sync").Subrouter())
 
-	go (&remotesync.Runner{Syncer: syncer, Logger: logger}).Run(d.Lifecycle)
-	logger.Info("remote sync: routes registered, runner started",
-		zap.Duration("interval", syncer.Interval()), zap.Bool("allow_local_network", allowLocal))
+	// Syncs start when the app is used (POST /remote-sync/wake); the runner adds background
+	// syncs for copies nobody is reading, unless the operator switched those off.
+	if interval > 0 {
+		go (&remotesync.Runner{Syncer: syncer, Logger: logger}).Run(d.Lifecycle)
+	}
+	logger.Info("remote sync: routes registered",
+		zap.Duration("background_interval", interval), zap.Bool("allow_local_network", allowLocal))
 }
 
-func durationEnv(logger *zap.Logger, name string, def, floor time.Duration) time.Duration {
-	raw := strings.TrimSpace(os.Getenv(name))
-	if raw == "" {
+// intervalEnv reads the background interval: a Go duration of at least floor, or off (0).
+func intervalEnv(logger *zap.Logger, name string, def, floor time.Duration) time.Duration {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv(name)))
+	switch raw {
+	case "":
 		return def
+	case "off", "0", "false", "none":
+		return 0
 	}
 	v, err := time.ParseDuration(raw)
 	if err != nil {

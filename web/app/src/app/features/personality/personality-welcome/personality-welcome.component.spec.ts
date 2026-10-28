@@ -35,6 +35,19 @@ describe('PersonalityWelcomeComponent', () => {
     expect(emitted).toEqual(['generate', 'create', 'import']);
   });
 
+  it('offers mullet mode only when the server runs it', () => {
+    expect(host.querySelector('[data-testid="welcome-mullet-mode"]')).toBeNull();
+
+    fixture.componentRef.setInput('mulletModeAvailable', true);
+    fixture.detectChanges();
+    const offer = host.querySelector('[data-testid="welcome-mullet-mode"]') as HTMLElement;
+    expect(offer.textContent).toContain('whatiff.chat');
+    let opened = false;
+    fixture.componentInstance.openMulletMode.subscribe(() => (opened = true));
+    (offer.querySelector('button') as HTMLButtonElement).click();
+    expect(opened).toBe(true);
+  });
+
   it('links to the getting started guide in a new tab', () => {
     const link = host.querySelector('.welcome__guide') as HTMLAnchorElement;
     expect(link.href).toBe('https://whatiff.chat/guides/getting-started.html');
