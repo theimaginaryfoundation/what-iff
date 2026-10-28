@@ -2,6 +2,7 @@ package schema
 
 import (
 	"entgo.io/ent"
+	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/index"
@@ -60,6 +61,11 @@ func (Job) Edges() []ent.Edge {
 			Ref("jobs").
 			Unique().
 			Required(),
+		// draft_tool_calls are an in-progress Advanced run's tool calls (ADR 0x026), saved as each
+		// finishes and moved onto the reply (or the partial reply) when the run ends. Rows still
+		// linked here when the job is deleted never reached a message, so they go with it.
+		edge.To("draft_tool_calls", ToolCall.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}
 }
 

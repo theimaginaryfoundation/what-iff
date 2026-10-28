@@ -24,7 +24,8 @@ type fakeChatTurnStore struct {
 	listCalls int
 	touches   map[uuid.UUID]int
 	progress  map[uuid.UUID][]string // progress payloads written per job, in order
-	partials  []uuid.UUID            // jobs finalized through FinalizeFailedChatJobWithPartial
+	partials  []uuid.UUID            // jobs FinalizeAdvancedDraft was asked about
+	advanced  map[uuid.UUID]bool     // jobs holding an Advanced draft
 }
 
 func newFakeChatTurnStore() *fakeChatTurnStore {
@@ -152,13 +153,18 @@ func (f *fakeChatTurnStore) UpdateJobStatus(_ context.Context, _, id uuid.UUID, 
 	return &cp, nil
 }
 
-// FinalizeFailedChatJobWithPartial records the call and fails the job (the fake keeps no drafts).
-func (f *fakeChatTurnStore) FinalizeFailedChatJobWithPartial(ctx context.Context, userID, jobID, _ uuid.UUID, _, _, failureMessage string, _ *uuid.UUID) (*models.Job, *uuid.UUID, error) {
+// FinalizeAdvancedDraft records the call and, for a job marked as holding an Advanced draft,
+// fails it as the datastore would (after saving the partial).
+func (f *fakeChatTurnStore) FinalizeAdvancedDraft(ctx context.Context, userID, jobID, _ uuid.UUID, _ bool, failureMessage string) (bool, error) {
 	f.mu.Lock()
 	f.partials = append(f.partials, jobID)
+	advanced := f.advanced[jobID]
 	f.mu.Unlock()
-	j, err := f.UpdateJobStatus(ctx, userID, jobID, models.JobStatusFailed, failureMessage)
-	return j, nil, err
+	if !advanced {
+		return false, nil
+	}
+	_, err := f.UpdateJobStatus(ctx, userID, jobID, models.JobStatusFailed, failureMessage)
+	return true, err
 }
 
 // FinishTurnJobIfActive mirrors the datastore: a no-op on a terminal job, complete when the turn
@@ -605,7 +611,7 @@ func TestFailInFlightTurns_FinishesThisProcesssTurnJobs(t *testing.T) {
 
 	a.FailInFlightTurns(context.Background())
 	require.Equal(t, models.JobStatusFailed, store.status(running.ID))
-	require.Equal(t, []uuid.UUID{running.ID}, store.partials, "a failed turn keeps what it wrote as a partial reply")
+	require.Equal(t, []uuid.UUID{running.ID}, store.partials, "a failed turn is offered to the Advanced-draft path first")
 	require.Equal(t, models.JobStatusComplete, store.status(replied.ID), "a turn past its reply completes")
 	require.Equal(t, models.JobStatusCancelled, store.status(stopped.ID), "terminal jobs are left alone")
 	require.Equal(t, models.JobStatusProcessing, store.status(elsewhere.ID), "only this process's turns")
@@ -628,7 +634,7 @@ func TestBeginEphemeralChatTurn_UntrackedTurnHoldsATicket(t *testing.T) {
 			a.testHooks.ChatTurnStore = store
 			userID, chatID := uuid.New(), uuid.New()
 
-			end, err := a.beginEphemeralChatTurn(context.Background(), userID, chatID, nil)
+			end, _, err := a.beginEphemeralChatTurn(context.Background(), userID, chatID, nil)
 			require.NoError(t, err)
 			live, err := store.ListPendingTurnJobsForChat(context.Background(), userID, chatID, uuid.Nil)
 			require.NoError(t, err)
@@ -654,7 +660,7 @@ func TestBeginEphemeralChatTurn_TicketEndedAtTheReplyFreesTheChat(t *testing.T) 
 	a.testHooks.ChatTurnStore = store
 	userID, chatID := uuid.New(), uuid.New()
 
-	end, err := a.beginEphemeralChatTurn(context.Background(), userID, chatID, nil)
+	end, _, err := a.beginEphemeralChatTurn(context.Background(), userID, chatID, nil)
 	require.NoError(t, err)
 	live, err := store.ListPendingTurnJobsForChat(context.Background(), userID, chatID, uuid.Nil)
 	require.NoError(t, err)
@@ -683,7 +689,7 @@ func TestBeginEphemeralChatTurn_UntrackedTurnQueuesBehindLiveTurn(t *testing.T) 
 
 	started := make(chan func(error), 1)
 	go func() {
-		end, err := a.beginEphemeralChatTurn(context.Background(), userID, chatID, nil)
+		end, _, err := a.beginEphemeralChatTurn(context.Background(), userID, chatID, nil)
 		if err == nil {
 			started <- end
 		}
@@ -711,7 +717,7 @@ func TestBeginEphemeralChatTurn_TrackedTurnQueuesAsItsOwnJob(t *testing.T) {
 	userID, chatID := uuid.New(), uuid.New()
 	tracking := store.add(userID, chatID, models.JobStatusProcessing, time.Now())
 
-	end, err := a.beginEphemeralChatTurn(context.Background(), userID, chatID, tracking)
+	end, _, err := a.beginEphemeralChatTurn(context.Background(), userID, chatID, tracking)
 	require.NoError(t, err)
 	end(errors.New("ignored: the caller owns the tracking job's status"))
 	require.Equal(t, models.JobStatusProcessing, store.status(tracking.ID))

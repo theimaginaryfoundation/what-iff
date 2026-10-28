@@ -83,9 +83,11 @@ func TestAdvancedLoop_ContinuesWhilePlanHasOpenItems(t *testing.T) {
 
 	var recorded []int
 	var drafts []*models.AgentRunDraft
+	var saved []*models.ToolCall
 	hooks := testAdvancedHooks(tr)
 	hooks.recordStep = func(_ context.Context, step int) { recorded = append(recorded, step) }
 	hooks.saveDraft = func(d *models.AgentRunDraft) { drafts = append(drafts, d) }
+	hooks.saveToolCall = func(tc *models.ToolCall) error { saved = append(saved, tc); return nil }
 	result, toolCalls, _, run, err := a.handleAdvancedLoop(context.Background(), chatCtx, adapter, hooks)
 	require.NoError(t, err)
 	assert.Equal(t, "Here is the final report.", result.Text)
@@ -96,16 +98,25 @@ func TestAdvancedLoop_ContinuesWhilePlanHasOpenItems(t *testing.T) {
 	assert.Equal(t, 2, toolCalls[1].Step)
 	assert.Empty(t, result.Reasoning, "an Advanced run's notes are its agent_run, not reasoning")
 	assert.Equal(t, models.AgentRunEndDone, run.EndReason)
+	assert.Equal(t, models.AgentRunVersion, run.Version)
 	assert.Equal(t, []models.AgentRunStep{
-		{Step: 1, Notes: []models.AgentRunNote{{Kind: models.AgentRunNoteText, Text: "Let me plan."}, {Kind: models.AgentRunNoteText, Text: "Research done, writing next."}}},
-		{Step: 2, Notes: []models.AgentRunNote{{Kind: models.AgentRunNoteText, Text: "Wrapping up."}}},
-	}, run.Steps, "the final reply is not repeated as a note")
+		{Step: 1, Events: []models.AgentRunEvent{
+			{Kind: models.AgentRunEventText, Text: "Let me plan."},
+			{Kind: models.AgentRunEventToolCall, ToolCallID: toolCalls[0].ID.String()},
+			{Kind: models.AgentRunEventText, Text: "Research done, writing next."},
+		}},
+		{Step: 2, Events: []models.AgentRunEvent{
+			{Kind: models.AgentRunEventText, Text: "Wrapping up."},
+			{Kind: models.AgentRunEventToolCall, ToolCallID: toolCalls[1].ID.String()},
+		}},
+	}, run.Steps, "notes and tool calls in order; the final reply is not repeated")
+	require.Len(t, saved, 2, "each tool call is saved as a draft row as it finishes")
+	assert.True(t, toolCalls[0].JobDraft, "the reply moves the saved row instead of creating one")
 	require.Len(t, run.Plan, 2)
 	assert.Equal(t, []int{1, 2}, recorded, "each step is metered as it finishes")
 	require.Len(t, drafts, 1, "a draft is saved at each step boundary the run continues past")
 	assert.Equal(t, "research", drafts[0].Run.Plan[0].Content)
-	require.Len(t, drafts[0].ToolCalls, 1)
-	assert.Equal(t, 1, drafts[0].ToolCalls[0].Step)
+	assert.Len(t, drafts[0].Run.Steps[0].Events, 3, "the draft refers to the tool call rather than copying it")
 	assert.Len(t, chatCtx.calls, 4, "every model call is reported for metering")
 }
 
@@ -167,7 +178,7 @@ func TestAdvancedLoop_StepLimitReturnsLatestReply(t *testing.T) {
 	assert.Contains(t, conts[len(conts)-1], "the step limit")
 	assert.Contains(t, conts[len(conts)-1], "[pending] a")
 	assert.Equal(t, models.PlanItemPending, run.Plan[0].Status, "the open plan is kept for the next turn")
-	last := run.Steps[len(run.Steps)-1].Notes
+	last := run.Steps[len(run.Steps)-1].Events
 	assert.Equal(t, "reply 2", last[len(last)-1].Text, "the replaced reply stays as a note")
 }
 
@@ -182,9 +193,9 @@ func TestAdvancedLoop_QuotaDenialMidStepStopsBeforeNextCall(t *testing.T) {
 	chatCtx := advancedTestChatCtx()
 	hooks := testAdvancedHooks(newAdvancedTranscript(nil, nil))
 	var pendingSeen [][]provider.CallUsage
-	hooks.quotaAllowed = func(_ context.Context, pending []provider.CallUsage) bool {
+	hooks.quotaAllowed = func(_ context.Context, pending []provider.CallUsage) (bool, error) {
 		pendingSeen = append(pendingSeen, pending)
-		return false
+		return false, nil
 	}
 	var recorded []int
 	hooks.recordStep = func(_ context.Context, step int) { recorded = append(recorded, step) }
@@ -200,7 +211,7 @@ func TestAdvancedLoop_QuotaDenialMidStepStopsBeforeNextCall(t *testing.T) {
 	assert.Len(t, chatCtx.calls, 1, "the refused call was never made")
 	assert.Len(t, toolCalls, 1, "the step's tool call is kept")
 	assert.Equal(t, []int{1}, recorded, "the step's calls are metered")
-	assert.Equal(t, "Planning.", run.Steps[0].Notes[0].Text)
+	assert.Equal(t, "Planning.", run.Steps[0].Events[0].Text)
 	assert.Equal(t, models.PlanItemPending, run.Plan[0].Status, "the open plan is kept for the next turn")
 }
 
@@ -215,7 +226,7 @@ func TestAdvancedLoop_QuotaDenialBetweenStepsKeepsLatestAnswer(t *testing.T) {
 	hooks := testAdvancedHooks(newAdvancedTranscript(nil, nil))
 	hooks.recordStep = func(context.Context, int) { chatCtx.takeUnrecordedCalls() }
 	// Refuse only once nothing is pending: the step was recorded and the next one is starting.
-	hooks.quotaAllowed = func(_ context.Context, pending []provider.CallUsage) bool { return len(pending) > 0 }
+	hooks.quotaAllowed = func(_ context.Context, pending []provider.CallUsage) (bool, error) { return len(pending) > 0, nil }
 	a := &Agent{logger: zap.NewNop()}
 
 	result, _, _, run, err := a.handleAdvancedLoop(context.Background(), chatCtx, adapter, hooks)
@@ -280,10 +291,10 @@ func TestAdvancedTranscript_DiscardDropsOnlyCurrentCallReasoning(t *testing.T) {
 
 	assert.Equal(t, 1, resets)
 	assert.Equal(t, "thinking one\n\nnote one\n\nthinking two\n\nfinal reply", live.String())
-	assert.Equal(t, []models.AgentRunStep{{Step: 1, Notes: []models.AgentRunNote{
-		{Kind: models.AgentRunNoteReasoning, Text: "thinking one"},
-		{Kind: models.AgentRunNoteText, Text: "note one"},
-		{Kind: models.AgentRunNoteReasoning, Text: "thinking two"},
+	assert.Equal(t, []models.AgentRunStep{{Step: 1, Events: []models.AgentRunEvent{
+		{Kind: models.AgentRunEventReasoning, Text: "thinking one"},
+		{Kind: models.AgentRunEventText, Text: "note one"},
+		{Kind: models.AgentRunEventReasoning, Text: "thinking two"},
 	}}}, tr.run(2))
 }
 
@@ -393,7 +404,8 @@ func TestAdvancedLoop_CancelledBetweenSteps(t *testing.T) {
 	assert.Equal(t, models.AgentRunEndCancelled, run.EndReason)
 	require.NotNil(t, final, "the run so far is saved for the partial message")
 	assert.Equal(t, models.AgentRunEndCancelled, final.Run.EndReason)
-	assert.Equal(t, "partial", final.Run.Steps[0].Notes[0].Text, "with no final reply every note is kept")
+	ev := final.Run.Steps[0].Events
+	assert.Equal(t, "partial", ev[len(ev)-1].Text, "with no final reply every note is kept")
 }
 
 func TestAdvancedLoop_CompactionFailureContinuesUncompacted(t *testing.T) {
@@ -497,7 +509,11 @@ func TestUnfinishedRunPlan(t *testing.T) {
 	assert.Equal(t, models.AgentRunEndStepLimit, reason)
 	msg := openPlanContext(open, reason)
 	assert.Contains(t, msg, "step_limit")
-	assert.Contains(t, msg, "- [pending] b")
+	assert.Contains(t, msg, "> - [pending] b", "items are quoted from the earlier run")
+
+	old := &models.ChatMessage{SentAt: time.Now().Add(-advancedCarryOverMaxAge - time.Hour), AgentRun: &models.AgentRun{Plan: plan, EndReason: models.AgentRunEndStepLimit}}
+	stale, _ := unfinishedRunPlan(old)
+	assert.Empty(t, stale, "a run older than the cutoff carries nothing over")
 
 	open, _ = unfinishedRunPlan(&models.ChatMessage{AgentRun: &models.AgentRun{Plan: plan, EndReason: models.AgentRunEndDone}})
 	assert.Empty(t, open, "a finished run carries nothing over")
@@ -548,13 +564,14 @@ type pendingMeter struct {
 	metering.NoopMeter
 	pending []metering.Usage
 	allow   bool
+	err     error
 }
 
 func (m *pendingMeter) Check(ctx context.Context, _ uuid.UUID, _, _ string) metering.Decision {
 	if u, ok := metering.PendingUsageFromContext(ctx); ok {
 		m.pending = append(m.pending, u)
 	}
-	return metering.Decision{Allowed: m.allow}
+	return metering.Decision{Allowed: m.allow && m.err == nil, Err: m.err}
 }
 
 // The mid-run check hands the meter the unmetered calls, priced as they will be recorded.
@@ -568,7 +585,9 @@ func TestAdvancedQuotaAllowed_PassesPendingUsage(t *testing.T) {
 	chatCtx.reasoningEffort = models.ReasoningEffortHigh
 	pending := []provider.CallUsage{{InputTokens: 9_000, CachedInputTokens: 8_000, OutputTokens: 300}}
 
-	require.True(t, a.advancedQuotaAllowed(context.Background(), uuid.New(), chatCtx, pending))
+	allowed, err := a.advancedQuotaAllowed(context.Background(), uuid.New(), chatCtx, pending)
+	require.NoError(t, err)
+	require.True(t, allowed)
 	require.Len(t, m.pending, 1)
 	got := m.pending[0]
 	assert.Equal(t, "advanced", got.AgentLoop)
@@ -577,6 +596,186 @@ func TestAdvancedQuotaAllowed_PassesPendingUsage(t *testing.T) {
 	assert.Equal(t, "high", got.ReasoningEffort)
 	assert.Equal(t, pending, got.Calls)
 
+	assert.True(t, got.CallsReported)
+
 	m.allow = false
-	assert.False(t, a.advancedQuotaAllowed(context.Background(), uuid.New(), chatCtx, pending))
+	allowed, err = a.advancedQuotaAllowed(context.Background(), uuid.New(), chatCtx, pending)
+	require.NoError(t, err)
+	assert.False(t, allowed)
+
+	// A meter that cannot decide is retried once, then reported as an error, not a refusal.
+	m.err = errors.New("db down")
+	_, err = a.advancedQuotaAllowed(context.Background(), uuid.New(), chatCtx, pending)
+	require.Error(t, err)
+	assert.Equal(t, 4, len(m.pending), "the failing call was checked twice: once and its retry")
+}
+
+// N2: Stop while the step's tools run reaches the next beforeCall with a cancelled context; the
+// run ends cancelled, never as out of quota, and the meter is not asked.
+func TestAdvancedLoop_StopMidStepIsCancelledNotQuota(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	adapter := provider.NewMockAdapter(provider.MockAdapterConfig{Mode: provider.MockModeScripted, Script: []provider.MockScriptStep{
+		{ToolUses: []provider.ToolUse{planUse(t, "p", models.PlanItem{Content: "a", Status: models.PlanItemPending})}},
+		{Text: "never reached"},
+	}})
+	chatCtx := advancedTestChatCtx()
+	chatCtx.toolProgress = nil
+	hooks := testAdvancedHooks(newAdvancedTranscript(nil, nil))
+	asked := 0
+	hooks.quotaAllowed = func(context.Context, []provider.CallUsage) (bool, error) { asked++; return false, nil }
+	hooks.configure = func(ad provider.AgentAdapter) {
+		ad.SetTextDeltaHandler(func(string) {})
+		cancel() // Stop: the mock does not check ctx on a tool-only reply, so the step reaches its tool and the next beforeCall
+	}
+	a := &Agent{logger: zap.NewNop()}
+
+	_, _, _, run, err := a.handleAdvancedLoop(ctx, chatCtx, adapter, hooks)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, models.AgentRunEndCancelled, run.EndReason)
+	assert.Zero(t, asked)
+}
+
+// N2: a meter error mid-run fails the run (a partial is saved) instead of ending it as quota.
+func TestAdvancedLoop_MeterErrorFailsRunNotQuota(t *testing.T) {
+	adapter := provider.NewMockAdapter(provider.MockAdapterConfig{Mode: provider.MockModeScripted, Script: []provider.MockScriptStep{
+		{ToolUses: []provider.ToolUse{planUse(t, "p", models.PlanItem{Content: "a", Status: models.PlanItemPending})}},
+		{Text: "never reached"},
+	}})
+	hooks := testAdvancedHooks(newAdvancedTranscript(nil, nil))
+	hooks.quotaAllowed = func(context.Context, []provider.CallUsage) (bool, error) { return false, errors.New("db down") }
+	a := &Agent{logger: zap.NewNop()}
+
+	_, _, _, run, err := a.handleAdvancedLoop(context.Background(), advancedTestChatCtx(), adapter, hooks)
+	require.ErrorIs(t, err, errAdvancedQuotaCheck)
+	assert.Equal(t, models.AgentRunEndFailed, run.EndReason)
+}
+
+// N3: a call that fails mid-step (Stop, a provider error) keeps the tool calls the step already
+// ran in the saved draft.
+func TestAdvancedLoop_FailureMidStepKeepsStepToolCalls(t *testing.T) {
+	adapter := provider.NewMockAdapter(provider.MockAdapterConfig{Mode: provider.MockModeScripted, Script: []provider.MockScriptStep{
+		{ToolUses: []provider.ToolUse{unknownUse("u0")}},
+		{ToolUses: []provider.ToolUse{unknownUse("u1")}},
+		// the third call fails: the script is exhausted
+	}})
+	hooks := testAdvancedHooks(newAdvancedTranscript(nil, nil))
+	var final *models.AgentRunDraft
+	hooks.saveDraft = func(d *models.AgentRunDraft) { final = d }
+	a := &Agent{logger: zap.NewNop()}
+
+	_, _, _, run, err := a.handleAdvancedLoop(context.Background(), advancedTestChatCtx(), adapter, hooks)
+	require.Error(t, err)
+	assert.Equal(t, models.AgentRunEndFailed, run.EndReason)
+	require.NotNil(t, final)
+	var refs int
+	for _, ev := range final.Run.Steps[0].Events {
+		if ev.Kind == models.AgentRunEventToolCall {
+			refs++
+		}
+	}
+	assert.Equal(t, 2, refs, "both tool calls of the failed step are in the draft")
+}
+
+// overflowAdapter fails its failAt-th call (1-based) with a context-overflow error.
+type overflowAdapter struct {
+	*provider.MockAdapter
+	failAt, n int
+}
+
+func (o *overflowAdapter) Call(ctx context.Context) (*provider.GenerateResponse, []provider.ToolUse, error) {
+	o.n++
+	if o.n == o.failAt {
+		return nil, nil, errors.New("400: This model's maximum context length is 128000 tokens")
+	}
+	return o.MockAdapter.Call(ctx)
+}
+
+// N5: a call refused mid-step because the input outgrew the window compacts the run and carries
+// on; a second overflow straight after fails it.
+func TestAdvancedLoop_ContextOverflowMidStepCompacts(t *testing.T) {
+	first := &overflowAdapter{failAt: 2, MockAdapter: provider.NewMockAdapter(provider.MockAdapterConfig{Mode: provider.MockModeScripted, Script: []provider.MockScriptStep{
+		{ToolUses: []provider.ToolUse{unknownUse("u0")}},
+	}})}
+	second := provider.NewMockAdapter(provider.MockAdapterConfig{Mode: provider.MockModeScripted, Script: []provider.MockScriptStep{
+		{Text: "done after compacting"},
+	}})
+	hooks := testAdvancedHooks(newAdvancedTranscript(nil, nil))
+	hooks.modelContext = &provider.ModelContext{}
+	hooks.modelContext.AppendUserMessage(provider.RoleUser, "research", nil, false)
+	hooks.rebuild = func(*provider.ModelContext) (provider.AgentAdapter, error) { return second, nil }
+	a := &Agent{logger: zap.NewNop()}
+
+	result, toolCalls, _, run, err := a.handleAdvancedLoop(context.Background(), advancedTestChatCtx(), first, hooks)
+	require.NoError(t, err)
+	assert.Equal(t, "done after compacting", result.Text)
+	assert.Len(t, toolCalls, 1, "the step's tool call survives the compaction")
+	assert.Equal(t, models.AgentRunEndDone, run.EndReason)
+
+	again := &overflowAdapter{failAt: 1, MockAdapter: provider.NewMockAdapter(provider.MockAdapterConfig{Mode: provider.MockModeScripted})}
+	hooks.rebuild = func(*provider.ModelContext) (provider.AgentAdapter, error) { return again, nil }
+	first = &overflowAdapter{failAt: 2, MockAdapter: provider.NewMockAdapter(provider.MockAdapterConfig{Mode: provider.MockModeScripted, Script: []provider.MockScriptStep{
+		{ToolUses: []provider.ToolUse{unknownUse("u0")}},
+	}})}
+	_, _, _, run, err = a.handleAdvancedLoop(context.Background(), advancedTestChatCtx(), first, hooks)
+	require.Error(t, err, "an overflow right after compacting is not retried again")
+	assert.Equal(t, models.AgentRunEndFailed, run.EndReason)
+}
+
+func TestIsContextOverflowError(t *testing.T) {
+	assert.True(t, provider.IsContextOverflowError(errors.New("prompt is too long: 210000 tokens > 200000 maximum")))
+	assert.True(t, provider.IsContextOverflowError(fmt.Errorf("wrapped: %w", errors.New("context_length_exceeded"))))
+	assert.False(t, provider.IsContextOverflowError(errors.New("rate limited")))
+	assert.False(t, provider.IsContextOverflowError(nil))
+}
+
+// N5: the compacted work log keeps the newest notes, not the first ones.
+func TestTruncateRunesKeepTail(t *testing.T) {
+	assert.Equal(t, "short", truncateRunesKeepTail("short", 10))
+	got := truncateRunesKeepTail("first notes ... latest notes", 12)
+	assert.True(t, strings.HasSuffix(got, "latest notes"))
+	assert.True(t, strings.HasPrefix(got, "…[earlier notes omitted]"))
+}
+
+type limitingMeter struct {
+	metering.NoopMeter
+	limits metering.AdvancedLimits
+}
+
+func (m limitingMeter) AdvancedLimits(context.Context, uuid.UUID) metering.AdvancedLimits {
+	return m.limits
+}
+
+// A deployment's meter can set Advanced limits per account (metering.AdvancedLimiter); unset
+// fields keep the environment's, and every value stays within the hard bounds.
+func TestAdvancedLoopConfigFor_MeterLimits(t *testing.T) {
+	a := &Agent{logger: zap.NewNop(), meter: metering.NoopMeter{}}
+	assert.Equal(t, advancedLoopConfigFromEnv(zap.NewNop()), a.advancedLoopConfigFor(context.Background(), uuid.New()), "no limiter: the environment")
+
+	a.meter = limitingMeter{limits: metering.AdvancedLimits{MaxSteps: 12, MaxDuration: 100 * time.Hour}}
+	cfg := a.advancedLoopConfigFor(context.Background(), uuid.New())
+	assert.Equal(t, 12, cfg.maxSteps)
+	assert.Equal(t, maxAdvancedMaxDuration, cfg.maxDuration, "clamped to the hard bound")
+	assert.Equal(t, int64(defaultAdvancedCompactTokens), cfg.compactTokens, "unset keeps the default")
+}
+
+// When the limit summary calls a tool instead of answering, the run's latest answer is the reply,
+// and that answer's text is not also kept as a note.
+func TestAdvancedLoop_LimitSummaryFallbackIsNotDuplicated(t *testing.T) {
+	adapter := provider.NewMockAdapter(provider.MockAdapterConfig{Mode: provider.MockModeScripted, Script: []provider.MockScriptStep{
+		{ToolUses: []provider.ToolUse{planUse(t, "p", models.PlanItem{Content: "a", Status: models.PlanItemPending})}},
+		{Text: "latest answer"},
+		{ToolUses: []provider.ToolUse{unknownUse("summary-tool")}}, // the summary call misbehaves
+	}})
+	hooks := testAdvancedHooks(newAdvancedTranscript(nil, nil))
+	hooks.config.maxSteps = 1
+	a := &Agent{logger: zap.NewNop()}
+
+	result, _, _, run, err := a.handleAdvancedLoop(context.Background(), advancedTestChatCtx(), adapter, hooks)
+	require.NoError(t, err)
+	assert.Equal(t, "latest answer", result.Text)
+	for _, st := range run.Steps {
+		for _, ev := range st.Events {
+			assert.NotEqual(t, "latest answer", ev.Text, "the reply is not repeated as a note")
+		}
+	}
 }

@@ -12,5 +12,9 @@ func TestContextWindowFor(t *testing.T) {
 	assert.Equal(t, int64(1_000_000), ContextWindowFor("gpt-4.1-mini"))
 	assert.Equal(t, int64(128_000), ContextWindowFor("gpt-4o"))
 	assert.Equal(t, int64(1_000_000), ContextWindowFor("gemini-2.5-pro"))
-	assert.Zero(t, ContextWindowFor("some-local-model"))
+	assert.Equal(t, DefaultContextWindow, ContextWindowFor("some-local-model"), "unknown models get the conservative default")
+	assert.Equal(t, DefaultContextWindow, ContextWindowFor("mimo-v2.5-pro"))
+	assert.Equal(t, int64(128_000), ContextWindowFor("gpt-5-chat-latest"), "the chat alias is smaller than the gpt-5 family")
+	assert.Equal(t, int64(32_000), ContextWindowFor("qwen-max"))
+	assert.Equal(t, int64(32_000), ContextWindowFor("mistral-saba-latest"))
 }

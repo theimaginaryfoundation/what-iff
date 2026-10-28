@@ -175,7 +175,9 @@ func (d *Datastore) importBackupMoods(ctx context.Context, targetUserID uuid.UUI
 			SetRecommendedModel(rec.RecommendedModel).
 			SetOwnerID(targetUserID).
 			SetCreatedAt(rec.CreatedAt).
-			SetUpdatedAt(rec.UpdatedAt)
+			SetUpdatedAt(rec.UpdatedAt).
+			SetNillableReasoningEffort(entEffort[mood.ReasoningEffort](rec.ReasoningEffort)).
+			SetNillableAgentLoop(entLoop[mood.AgentLoop](rec.AgentLoop))
 		if _, err := create.Save(ctx); err != nil {
 			if ent.IsConstraintError(err) {
 				res.Duplicate++
@@ -224,6 +226,8 @@ func (d *Datastore) importBackupPersonalities(ctx context.Context, targetUserID 
 			SetMemorySearchPrompt(rec.MemorySearchPrompt).
 			SetMemoryWritePrompt(rec.MemoryWritePrompt).
 			SetAutoPinMemories(rec.AutoPinMemories).
+			SetNillableReasoningEffort(entEffort[personality.ReasoningEffort](rec.ReasoningEffort)).
+			SetNillableAgentLoop(entLoop[personality.AgentLoop](rec.AgentLoop)).
 			SetUserID(targetUserID).
 			SetCreatedAt(rec.CreatedAt).
 			SetUpdatedAt(rec.UpdatedAt).
@@ -385,7 +389,9 @@ func (d *Datastore) importBackupChats(ctx context.Context, targetUserID uuid.UUI
 			SetContextScope(entchat.ContextScope(rec.ContextScope.OrDefault())).
 			SetResponseID("").
 			SetCreatedAt(rec.CreatedAt).
-			SetUpdatedAt(rec.UpdatedAt)
+			SetUpdatedAt(rec.UpdatedAt).
+			SetNillableReasoningEffort(entEffort[entchat.ReasoningEffort](rec.ReasoningEffort)).
+			SetNillableAgentLoop(entLoop[entchat.AgentLoop](rec.AgentLoop))
 		if rec.LastMessageTime != nil {
 			create.SetLastMessageTime(*rec.LastMessageTime)
 		}
@@ -458,6 +464,9 @@ func (d *Datastore) importBackupChatMessages(ctx context.Context, targetUserID u
 			SetChatID(rec.ChatID).
 			SetSentAt(rec.SentAt).
 			SetTokens(rec.Tokens)
+		if rec.AgentRun != nil {
+			create.SetAgentRun(rec.AgentRun)
+		}
 		if rec.GenerationModel != "" {
 			create.SetGenerationModel(rec.GenerationModel)
 		}
@@ -571,6 +580,9 @@ func (d *Datastore) importBackupToolCalls(ctx context.Context, targetUserID uuid
 		if rec.ToolError != "" {
 			create.SetToolError(rec.ToolError)
 		}
+		if rec.Step > 0 {
+			create.SetStep(rec.Step)
+		}
 		if _, err := create.Save(ctx); err != nil {
 			if ent.IsConstraintError(err) {
 				res.Duplicate++
@@ -608,6 +620,8 @@ func (d *Datastore) importBackupAgentJobs(ctx context.Context, targetUserID uuid
 			SetID(rec.ID).
 			SetOwnerID(targetUserID).
 			SetPrompt(rec.Prompt).
+			SetNillableReasoningEffort(entEffort[agentjob.ReasoningEffort](rec.ReasoningEffort)).
+			SetNillableAgentLoop(entLoop[agentjob.AgentLoop](rec.AgentLoop)).
 			SetScheduleInput(rec.ScheduleInput).
 			SetScheduleType(agentjob.ScheduleType(rec.ScheduleType)).
 			SetTimezone(rec.Timezone).

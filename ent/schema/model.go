@@ -31,6 +31,11 @@ func (Model) Fields() []ent.Field {
 		field.Bool("tool_support").
 			Default(false).
 			Comment("Whether the model supports tool calling"),
+		field.Enum("reasoning_support_override").
+			Values("none", "optional", "toggle", "always").
+			Optional().
+			Nillable().
+			Comment("Admin override of how the model takes a reasoning effort (ADR 0x026). NULL derives it from the provider and name (models.ReasoningSupportFor), so a misclassified model is fixed without a deploy."),
 		field.Bool("vision_support").
 			Optional().
 			Nillable().

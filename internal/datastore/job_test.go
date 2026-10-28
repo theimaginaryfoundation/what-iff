@@ -40,6 +40,20 @@ func createJobTestSchema(t *testing.T, db *sql.DB) {
 		FOREIGN KEY (user_jobs) REFERENCES users(id)
 	)`)
 	require.NoError(t, err)
+	// Advanced runs' draft tool calls hang off jobs (ADR 0x026), and the draft paths touch them.
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS tool_calls (
+			id uuid PRIMARY KEY,
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL,
+			tool_name text NOT NULL,
+			tool_input text,
+			tool_output text,
+			tool_error text,
+			chat_message_tool_calls uuid,
+			job_draft_tool_calls uuid,
+			step integer DEFAULT 0
+		)`)
+	require.NoError(t, err)
 }
 
 // newJobTestDatastore composes the schema fragments job.go's plain CRUD queries need:
@@ -1120,6 +1134,18 @@ func TestFinalizeFailedChatJobWithPartial_PersistsDraftAndFailure(t *testing.T) 
 func createPartialJobTestTables(t *testing.T, ds *Datastore) {
 	t.Helper()
 	for _, statement := range []string{
+		`CREATE TABLE IF NOT EXISTS tool_calls (
+				id uuid PRIMARY KEY,
+				created_at datetime NOT NULL,
+				updated_at datetime NOT NULL,
+				tool_name text NOT NULL,
+				tool_input text,
+				tool_output text,
+				tool_error text,
+				chat_message_tool_calls uuid,
+				job_draft_tool_calls uuid,
+				step integer DEFAULT 0
+			)`,
 		`ALTER TABLE chats ADD COLUMN source text`,
 		`ALTER TABLE chats ADD COLUMN import_hash text`,
 		`ALTER TABLE chats ADD COLUMN rehydration_state text`,

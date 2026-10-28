@@ -47,6 +47,26 @@ func TestResolveTurnSettings_PrecedenceAndModelMapping(t *testing.T) {
 	a.resolveTurnSettings(context.Background(), nil, nil) // nil-safe
 }
 
+// N1: in a sandboxed thread (the Discord relay) the owner's mode cannot switch turns to Advanced
+// or a reasoning effort; only the thread's and a job's own values apply.
+func TestResolveTurnSettings_SandboxIgnoresMode(t *testing.T) {
+	a := &Agent{logger: zap.NewNop()}
+	chatCtx := &chatContext{model: "gpt-5.1", modelProvider: "openai", chat: &models.Chat{ContextScope: models.ContextScopeSandbox}}
+	deepResearch := &models.Mood{TurnSettingValues: models.TurnSettingValues{
+		ReasoningEffort: ptrOf(models.ReasoningEffortHigh),
+		AgentLoop:       ptrOf(models.AgentLoopAdvanced),
+	}}
+
+	a.resolveTurnSettings(context.Background(), chatCtx, deepResearch)
+	assert.Equal(t, models.TurnSettings{}, chatCtx.turnSettings)
+	assert.Empty(t, chatCtx.reasoningEffort)
+
+	chatCtx.chat.AgentLoop = ptrOf(models.AgentLoopAdvanced)
+	a.resolveTurnSettings(context.Background(), chatCtx, deepResearch)
+	assert.Equal(t, models.SettingSourceThread, chatCtx.turnSettings.AgentLoopSource, "the thread's own value still applies")
+	assert.Equal(t, models.SettingSourceUnset, chatCtx.turnSettings.ReasoningEffortSource)
+}
+
 func TestResolveTurnSettings_LocalBackendRunsStandard(t *testing.T) {
 	core, logs := observer.New(zap.WarnLevel)
 	a := &Agent{logger: zap.New(core), localLLM: true}

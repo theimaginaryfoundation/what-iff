@@ -190,6 +190,24 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 		subagentCtx = withSubagentReasoningEffort(subagentCtx, chatCtx.turnSettings.ReasoningEffort)
 	}
 	callResult, err := a.callSubagentModel(subagentCtx, chatCtx.chat.UserID, modelName, modelContext, ritualUUIDs, chatCtx.chat.IsSandboxed())
+	if callResult != nil && (err == nil || len(callResult.Calls) > 0) {
+		// The meter computes subagent LLM credits and records nothing when the charge rounds to
+		// zero (subagent job runs are never free chat). A sub-agent that failed after making
+		// calls is recorded too: the calls were made.
+		a.meter.Record(context.WithoutCancel(ctx), qd, metering.Usage{
+			UserID:          chatCtx.chat.UserID,
+			ActionType:      models.ActionTypeJobRun,
+			Model:           modelName,
+			ChatID:          chatCtx.chat.ID.String(),
+			Tokens:          callResult.InputTokens,
+			SubagentRun:     true,
+			ReasoningEffort: string(callResult.ReasoningEffort),
+			Calls:           callResult.Calls,
+			CallsReported:   len(callResult.Calls) > 0,
+			TurnID:          chatCtx.turnID,
+			Source:          metering.TurnSourceFromContext(ctx),
+		})
+	}
 	if err != nil {
 		return marshalSubagentToolResult(runSubagentToolResult{
 			Success:       false,
@@ -199,19 +217,6 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 			Error:         err.Error(),
 		})
 	}
-	// The meter computes subagent LLM credits and records nothing when the charge
-	// rounds to zero (subagent job runs are never free chat).
-	a.meter.Record(ctx, qd, metering.Usage{
-		UserID:          chatCtx.chat.UserID,
-		ActionType:      models.ActionTypeJobRun,
-		Model:           modelName,
-		ChatID:          chatCtx.chat.ID.String(),
-		Tokens:          callResult.InputTokens,
-		SubagentRun:     true,
-		ReasoningEffort: string(callResult.ReasoningEffort),
-		Calls:           callResult.Calls,
-	})
-
 	return marshalSubagentToolResult(runSubagentToolResult{
 		Success:       true,
 		Model:         modelName,
@@ -265,12 +270,22 @@ type subagentModelCapabilities struct {
 	Provider      string
 	ToolSupport   bool
 	VisionSupport bool
+	// ReasoningSupport is the model row's (with any admin override); "" derives it.
+	ReasoningSupport models.ReasoningSupport
+}
+
+// reasoningSupport is the sub-agent model's reasoning support.
+func (c subagentModelCapabilities) reasoningSupport(modelName string) models.ReasoningSupport {
+	if c.ReasoningSupport.Valid() {
+		return c.ReasoningSupport
+	}
+	return models.ReasoningSupportFor(c.Provider, modelName)
 }
 
 func (a *Agent) subagentModelCapabilities(ctx context.Context, modelName string) subagentModelCapabilities {
 	if a.ds != nil {
 		if m, err := a.ds.GetModelByName(ctx, modelName); err == nil && m != nil {
-			return subagentModelCapabilities{Provider: m.Provider, ToolSupport: m.ToolSupport, VisionSupport: m.VisionSupport}
+			return subagentModelCapabilities{Provider: m.Provider, ToolSupport: m.ToolSupport, VisionSupport: m.VisionSupport, ReasoningSupport: m.ReasoningSupport}
 		}
 	}
 	// No row: use the seed catalog, and otherwise assume the pre-existing behaviour
@@ -318,11 +333,10 @@ func openAIFunctionToolNames(toolParams []responses.ToolUnionParam) map[string]s
 // sandboxed is the parent chat's sandbox: the sub-agent's tool loop inherits it.
 func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelName string, modelContext *provider.ModelContext, ritualIDs []uuid.UUID, sandboxed bool) (*subagentCallResult, error) {
 	caps := a.subagentModelCapabilities(ctx, modelName)
-	modelProvider := caps.Provider
 	// This wrapper exists to derive the effort once: the parent turn's selected effort (carried on
 	// ctx by withSubagentReasoningEffort) mapped onto the sub-agent's own model. The call itself is
 	// callSubagentModelWithEffort; the effort is also reported back for metering.
-	effort := models.EffectiveReasoningEffort(models.ReasoningSupportFor(modelProvider, modelName), subagentReasoningEffort(ctx))
+	effort := models.EffectiveReasoningEffort(caps.reasoningSupport(modelName), subagentReasoningEffort(ctx))
 	result, err := a.callSubagentModelWithEffort(ctx, userID, caps, modelName, modelContext, ritualIDs, sandboxed, effort)
 	if result != nil {
 		result.ReasoningEffort = effort
@@ -370,7 +384,7 @@ func (a *Agent) callSubagentModelWithEffort(ctx context.Context, userID uuid.UUI
 			toolCtx := subagentToolContext(userID, modelName, sandboxed, mcpServers, offeredToolNames(mcpSpecs, nil))
 			resp, _, _, err := a.handleAgentLoop(ctx, toolCtx, adapter)
 			if err != nil {
-				return nil, provider.WrapSafetyViolationError(models.SafetyViolationProviderAnthropic, fmt.Errorf("Claude subagent MCP call failed: %w", err))
+				return &subagentCallResult{Calls: subagentCalls(adapter, nil)}, provider.WrapSafetyViolationError(models.SafetyViolationProviderAnthropic, fmt.Errorf("Claude subagent MCP call failed: %w", err))
 			}
 			if resp != nil {
 				return &subagentCallResult{
@@ -415,7 +429,7 @@ func (a *Agent) callSubagentModelWithEffort(ctx context.Context, userID uuid.UUI
 	}
 	final, _, _, err := a.handleAgentLoop(ctx, toolCtx, adapter)
 	if err != nil {
-		return nil, provider.WrapSafetyViolationError(models.SafetyViolationProviderOpenAI, fmt.Errorf("OpenAI subagent call failed: %w", err))
+		return &subagentCallResult{Calls: subagentCalls(adapter, nil)}, provider.WrapSafetyViolationError(models.SafetyViolationProviderOpenAI, fmt.Errorf("OpenAI subagent call failed: %w", err))
 	}
 	if final == nil {
 		return nil, fmt.Errorf("OpenAI subagent call returned no final response")
@@ -445,7 +459,7 @@ func (a *Agent) callSubagentChatCompletions(ctx context.Context, userID uuid.UUI
 func (a *Agent) runSubagentChatCompletions(ctx context.Context, userID uuid.UUID, caps subagentModelCapabilities, modelName string, modelContext *provider.ModelContext, mcpSpecs []agenttools.FunctionToolSpec, mcpServers []*models.MCPServer, sandboxed bool) (*subagentCallResult, error) {
 	providerName := models.ProviderForModel(caps.Provider, modelName)
 	renderCtx := &chatContext{model: modelName, modelProvider: caps.Provider, modelVisionSupport: caps.VisionSupport,
-		reasoningEffort: models.EffectiveReasoningEffort(models.ReasoningSupportFor(caps.Provider, modelName), subagentReasoningEffort(ctx))}
+		reasoningEffort: models.EffectiveReasoningEffort(caps.reasoningSupport(modelName), subagentReasoningEffort(ctx))}
 	params := buildOpenAIChatCompletionsParams(renderCtx, modelContext)
 
 	if len(mcpSpecs) > 0 && !caps.ToolSupport {
@@ -473,12 +487,17 @@ func (a *Agent) runSubagentChatCompletions(ctx context.Context, userID uuid.UUID
 		sv = models.SafetyViolationProvider(providerName)
 	}
 
+	if providerName == models.ModelProviderQwen && renderCtx.reasoningEffort != "" && renderCtx.reasoningEffort != models.ReasoningEffortOff {
+		// DashScope accepts enable_thinking=true only on streamed calls; a sub-agent call is
+		// otherwise non-streamed, so stream it (the deltas are not needed).
+		adapter.SetTextDeltaHandler(func(string) {})
+	}
 	toolCtx := subagentToolContext(userID, modelName, sandboxed, mcpServers, offeredToolNames(mcpSpecs, nil))
 	toolCtx.chat.ToolsEnabled = caps.ToolSupport
 	toolCtx.modelProvider = caps.Provider
 	final, _, _, err := a.handleAgentLoop(ctx, toolCtx, adapter)
 	if err != nil {
-		return nil, provider.WrapSafetyViolationError(sv, fmt.Errorf("%s subagent call failed: %w", providerName, err))
+		return &subagentCallResult{Calls: subagentCalls(adapter, nil)}, provider.WrapSafetyViolationError(sv, fmt.Errorf("%s subagent call failed: %w", providerName, err))
 	}
 	if final == nil {
 		return nil, fmt.Errorf("%s subagent call returned no final response", providerName)

@@ -868,6 +868,18 @@ type chatContext struct {
 	// step as it ends, so the turn's final record covers only the rest).
 	calls         []provider.CallUsage
 	recordedCalls int
+	// callsReported says calls is the complete per-call usage of the turn so far (the adapter
+	// reports it); metering.Usage.CallsReported.
+	callsReported bool
+	// callInFlight is set while an Advanced run's model call is running, so a Stop's usage record
+	// estimates that one call and nothing when Stop lands between calls.
+	callInFlight bool
+	// modelReasoningSupport is the model row's reasoning support (models.Model.ReasoningSupport,
+	// which honours an admin override); "" derives it from the provider and name.
+	modelReasoningSupport models.ReasoningSupport
+	// draftJob is the job an Advanced run keeps its draft on when the generation has no turn job
+	// of its own (a scheduled agent-job run's queue ticket). Nil means the turn job.
+	draftJob *models.Job
 	// agentRun is an Advanced turn's structured record, saved on the reply (nil on Standard turns).
 	agentRun *models.AgentRun
 	// meterDecision is the turn's Meter.Check result, passed back with every Record of the turn;
@@ -1130,7 +1142,7 @@ func (a *Agent) generateAssistantForMessage(ctx context.Context, userID uuid.UUI
 		// the Context X-ray shows it.
 		modelContext.InsertBeforeLastUserMessage(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, advancedLoopInstructions, false)
 		if open, reason := a.previousRunOpenPlan(ctx, userID, chatMessage.ChatID); len(open) > 0 {
-			modelContext.InsertBeforeLastUserMessage(provider.SegmentKindDeveloperContext, provider.RoleDeveloper, openPlanContext(open, reason), false)
+			modelContext.InsertBeforeLastUserMessage(provider.SegmentKindHistoryTurn, provider.RoleUser, openPlanContext(open, reason), false)
 		}
 	}
 	a.recordModelContextSegmentEstimates(ctx, modelContext)
@@ -1242,7 +1254,7 @@ func (a *Agent) runGeneration(ctx context.Context, userID uuid.UUID, chatJob *mo
 	// Every call the loop made, for metering (cached and output tokens included), also when the
 	// turn then fails: the calls were made.
 	if rep, ok := adapter.(provider.UsageReporter); ok {
-		chatCtx.calls = rep.CallUsage()
+		chatCtx.setCalls(rep.CallUsage())
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s agent loop failed: %w", opts.provider, err)
@@ -2201,6 +2213,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 		modelProvider:          resolved.provider,
 		modelSubscriptionTier:  resolved.subscriptionTier,
 		modelVisionSupport:     resolved.visionSupport,
+		modelReasoningSupport:  resolved.reasoningSupport,
 		expressionsEnabled:     expressionsEnabled,
 		memoryProgress:         memoryProgress,
 		mcpSessions:            make(map[string]string),
@@ -2217,6 +2230,9 @@ type resolvedChatModel struct {
 	// the meter classifies it for gating.
 	subscriptionTier string
 	visionSupport    bool
+	// reasoningSupport is the model row's reasoning support (its admin override, or derived);
+	// "" when there is no row, and derived from the name.
+	reasoningSupport models.ReasoningSupport
 }
 
 // resolveModelForChat loads the effective model for a chat turn. model_id on the
@@ -2268,6 +2284,7 @@ func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat
 			provider:         string(models.ProviderForModel(dbModel.Provider, dbModel.Name)),
 			subscriptionTier: dbModel.SubscriptionTier,
 			visionSupport:    dbModel.VisionSupport,
+			reasoningSupport: dbModel.ReasoningSupport,
 		}
 	}
 
@@ -3328,14 +3345,29 @@ func (a *Agent) recordCancelledChatUsage(
 		metadata["output_tokens"] = outputTokens
 	}
 	recordAction := models.ActionTypeChatMessage
-	a.meter.Record(ctx, qd, withTurnSettingsUsage(chatCtx, metering.Usage{
+	u := withTurnSettingsUsage(chatCtx, metering.Usage{
 		UserID:     chatJob.UserID,
 		ActionType: recordAction,
 		Model:      chatCtx.model,
 		ChatID:     userMessage.ChatID.String(),
 		Tokens:     inputTokens,
 		Metadata:   metadata,
-	}))
+	})
+	if chatCtx.turnSettings.Advanced() {
+		// An Advanced run is metered call by call (its steps are already recorded): add the one
+		// call Stop cut short, when there was one, as an estimate; nothing when Stop landed
+		// between calls.
+		u.Tokens = inputTokens
+		if chatCtx.callInFlight {
+			call := metering.CallUsage{Model: chatCtx.model, InputTokens: inputTokens}
+			if outputKnown {
+				call.OutputTokens = outputTokens
+			}
+			u.Calls = append(u.Calls, call)
+			metadata["in_flight_call_estimated"] = true
+		}
+	}
+	a.meter.Record(ctx, qd, u)
 	if partialMsg == nil || !outputKnown {
 		return
 	}

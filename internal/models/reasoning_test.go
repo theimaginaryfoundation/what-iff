@@ -17,24 +17,50 @@ func TestResolveTurnSettings_Precedence(t *testing.T) {
 	mode := TurnSettingLevel{ReasoningEffort: effortPtr(ReasoningEffortHigh)}
 	job := TurnSettingLevel{AgentLoop: loopPtr(AgentLoopAdvanced)}
 
-	got := ResolveTurnSettings(thread, mode, job)
+	got := ResolveTurnSettings(TurnSettingLevels{Job: job, Mode: mode, Thread: thread})
 	assert.Equal(t, ReasoningEffortHigh, got.ReasoningEffort, "mode overrides thread")
 	assert.Equal(t, SettingSourceMode, got.ReasoningEffortSource)
 	assert.Equal(t, AgentLoopAdvanced, got.AgentLoop, "job overrides everything")
 	assert.Equal(t, SettingSourceJob, got.AgentLoopSource)
 	assert.True(t, got.Advanced())
 
-	got = ResolveTurnSettings(thread, TurnSettingLevel{}, TurnSettingLevel{})
+	got = ResolveTurnSettings(TurnSettingLevels{Thread: thread})
 	assert.Equal(t, ReasoningEffortLow, got.ReasoningEffort)
 	assert.Equal(t, SettingSourceThread, got.ReasoningEffortSource)
 
-	got = ResolveTurnSettings(TurnSettingLevel{}, TurnSettingLevel{}, TurnSettingLevel{})
-	assert.Equal(t, TurnSettings{}, got, "nothing set anywhere is today's behaviour")
-	assert.False(t, got.Advanced())
+	assert.Equal(t, TurnSettings{}, ResolveTurnSettings(TurnSettingLevels{}), "nothing set anywhere is today's behaviour")
 
 	bad := ReasoningEffort("extreme")
-	got = ResolveTurnSettings(thread, TurnSettingLevel{ReasoningEffort: &bad}, TurnSettingLevel{})
+	got = ResolveTurnSettings(TurnSettingLevels{Thread: thread, Mode: TurnSettingLevel{ReasoningEffort: &bad}})
 	assert.Equal(t, ReasoningEffortLow, got.ReasoningEffort, "invalid stored values are skipped")
+}
+
+// A thread without a value of its own inherits, per setting, its personality's and then the
+// account default, at each turn.
+func TestResolveTurnSettings_Inherits(t *testing.T) {
+	personality := TurnSettingLevel{ReasoningEffort: effortPtr(ReasoningEffortHigh)}
+	account := TurnSettingLevel{ReasoningEffort: effortPtr(ReasoningEffortLow), AgentLoop: loopPtr(AgentLoopAdvanced)}
+
+	got := ResolveTurnSettings(TurnSettingLevels{Personality: personality, Account: account})
+	assert.Equal(t, ReasoningEffortHigh, got.ReasoningEffort)
+	assert.Equal(t, SettingSourcePersonality, got.ReasoningEffortSource)
+	assert.Equal(t, AgentLoopAdvanced, got.AgentLoop)
+	assert.Equal(t, SettingSourceAccount, got.AgentLoopSource)
+
+	got = ResolveTurnSettings(TurnSettingLevels{Thread: TurnSettingLevel{AgentLoop: loopPtr(AgentLoopStandard)}, Account: account})
+	assert.Equal(t, AgentLoopStandard, got.AgentLoop, "the thread's own choice wins over the default")
+}
+
+// In a sandbox only the job's and thread's own values apply: a mode, the personality or the
+// account default cannot start Advanced for the people talking in it.
+func TestResolveTurnSettings_SandboxIgnoresOwnerLevels(t *testing.T) {
+	advanced := TurnSettingLevel{ReasoningEffort: effortPtr(ReasoningEffortHigh), AgentLoop: loopPtr(AgentLoopAdvanced)}
+	got := ResolveTurnSettings(TurnSettingLevels{Mode: advanced, Personality: advanced, Account: advanced, Sandboxed: true})
+	assert.Equal(t, TurnSettings{}, got)
+
+	got = ResolveTurnSettings(TurnSettingLevels{Thread: advanced, Mode: TurnSettingLevel{AgentLoop: loopPtr(AgentLoopStandard)}, Sandboxed: true})
+	assert.Equal(t, AgentLoopAdvanced, got.AgentLoop, "an explicit thread value still applies")
+	assert.Equal(t, SettingSourceThread, got.AgentLoopSource)
 }
 
 func TestReasoningSupportFor(t *testing.T) {
@@ -43,7 +69,10 @@ func TestReasoningSupportFor(t *testing.T) {
 		want           ReasoningSupport
 	}{
 		{"openai", "gpt-5.1", ReasoningSupportOptional},
-		{"openai", "gpt-5-mini", ReasoningSupportOptional},
+		{"openai", "gpt-5-mini", ReasoningSupportAlways}, // minimal would rule out web_search
+		{"openai", "gpt-5", ReasoningSupportAlways},
+		{"openai", "gpt-5-codex", ReasoningSupportAlways},
+		{"openai", "gpt-5.1-codex-mini", ReasoningSupportAlways},
 		{"openai", "gpt-4o", ReasoningSupportNone},
 		{"anthropic", "claude-opus-5", ReasoningSupportOptional},
 		{"anthropic", "claude-haiku-4-5", ReasoningSupportOptional},
@@ -81,6 +110,17 @@ func TestReasoningSupportFor(t *testing.T) {
 		{"google", "gemini-9-ultra", ReasoningSupportNone},
 		{"deepseek", "deepseek-chat", ReasoningSupportNone},
 		{"deepseek", "deepseek-coder-v4", ReasoningSupportNone},
+		{"zai", "glm-5.3", ReasoningSupportAlways},
+		{"zai", "glm-4.6", ReasoningSupportAlways},
+		{"zai", "glm-4.5v", ReasoningSupportAlways},
+		{"zai", "glm-3-turbo", ReasoningSupportNone},
+		{"xiaomi", "mimo-v2.5-pro", ReasoningSupportToggle},
+		{"xiaomi", "mimo-audio", ReasoningSupportNone},
+		{"qwen", "qwen3-235b-a22b-thinking-2507", ReasoningSupportAlways},
+		{"qwen", "qwen3-235b-a22b-instruct-2507", ReasoningSupportNone},
+		{"qwen", "qwen3-coder-plus", ReasoningSupportNone},
+		{"openai", "o3-deep-research", ReasoningSupportNone},
+		{"anthropic", "claude-haiku-5-5", ReasoningSupportAlways},
 		{"mistral", "mistral-large-latest", ReasoningSupportNone},
 		{"", "claude-sonnet-5", ReasoningSupportOptional}, // provider from the seed catalog
 	}
@@ -115,12 +155,6 @@ func TestTurnSettingValues_JSONAndValidation(t *testing.T) {
 	assert.JSONEq(t, `{"reasoning_effort":null,"agent_loop":null}`, string(raw))
 }
 
-func TestFirstSet(t *testing.T) {
-	assert.Equal(t, ReasoningEffortHigh, *FirstSetReasoningEffort(nil, effortPtr(""), effortPtr(ReasoningEffortHigh), effortPtr(ReasoningEffortLow)))
-	assert.Nil(t, FirstSetReasoningEffort(nil, nil))
-	assert.Equal(t, AgentLoopAdvanced, *FirstSetAgentLoop(nil, loopPtr(AgentLoopAdvanced)))
-}
-
 func TestJobTurnSettingsContext(t *testing.T) {
 	ctx := WithJobTurnSettings(context.Background(), TurnSettingValues{AgentLoop: loopPtr(AgentLoopAdvanced)})
 	lvl := JobTurnSettingsFromContext(ctx)
@@ -152,4 +186,25 @@ func TestParseUpdates(t *testing.T) {
 	bad := "warp"
 	_, _, ok = ParseAgentLoopUpdate(&bad)
 	assert.False(t, ok)
+}
+
+func TestTurnSettingKeysAndKeepOmitted(t *testing.T) {
+	effort, loop := TurnSettingKeys([]byte(`{"name":"x","reasoning_effort":""}`))
+	assert.True(t, effort)
+	assert.False(t, loop)
+	effort, loop = TurnSettingKeys([]byte(`not json`))
+	assert.False(t, effort || loop)
+
+	stored := TurnSettingValues{ReasoningEffort: effortPtr(ReasoningEffortHigh), AgentLoop: loopPtr(AgentLoopAdvanced)}
+	got := KeepOmittedTurnSettings(TurnSettingValues{}, stored, true, false)
+	assert.Nil(t, got.ReasoningEffort, "sent (as a clear) wins")
+	assert.Equal(t, AgentLoopAdvanced, *got.AgentLoop, "omitted is kept")
+}
+
+func TestReasoningSupportWithOverride(t *testing.T) {
+	always := ReasoningSupportAlways
+	assert.Equal(t, ReasoningSupportAlways, ReasoningSupportWithOverride(&always, "openai", "gpt-4o"), "an admin override wins")
+	assert.Equal(t, ReasoningSupportNone, ReasoningSupportWithOverride(nil, "openai", "gpt-4o"))
+	bad := ReasoningSupport("maybe")
+	assert.Equal(t, ReasoningSupportOptional, ReasoningSupportWithOverride(&bad, "openai", "gpt-5.1"), "an invalid override is ignored")
 }

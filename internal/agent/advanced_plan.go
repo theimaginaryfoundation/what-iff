@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -88,16 +89,32 @@ func (a *Agent) previousRunOpenPlan(ctx context.Context, userID, chatID uuid.UUI
 	return unfinishedRunPlan(msg)
 }
 
+// advancedCarryOverMaxAge is how old an unfinished run can be for its open items to still reach
+// the next Advanced turn: older work is stale, and the thread has likely moved on.
+const advancedCarryOverMaxAge = 7 * 24 * time.Hour
+
 // unfinishedRunPlan returns a reply's open plan items and end reason when it is an Advanced run
-// that stopped before its work was done.
+// that stopped before its work was done, at most advancedCarryOverMaxAge ago.
 func unfinishedRunPlan(msg *models.ChatMessage) ([]models.PlanItem, models.AgentRunEnd) {
 	if msg == nil || msg.AgentRun == nil || !msg.AgentRun.EndReason.Unfinished() {
+		return nil, ""
+	}
+	if !msg.SentAt.IsZero() && time.Since(msg.SentAt) > advancedCarryOverMaxAge {
 		return nil, ""
 	}
 	return msg.AgentRun.OpenItems(), msg.AgentRun.EndReason
 }
 
-// openPlanContext tells an Advanced turn about the previous run's unfinished plan.
+// openPlanContext tells an Advanced turn about the previous run's unfinished plan. It goes in as
+// a user-role note before the new message, with the items quoted: they were written by the model
+// (possibly steered by tool output), so they are presented as data from the earlier run, not as
+// instructions at developer level.
 func openPlanContext(open []models.PlanItem, reason models.AgentRunEnd) string {
-	return fmt.Sprintf("Your previous run in this conversation stopped before it finished (%s). These items of its plan were still open:\n%s\n\nIf the user asks you to continue, pick these up: put them back in your plan with update_plan and carry on from where the run stopped. Otherwise, follow the user's new request.", reason, formatPlan(open))
+	var b strings.Builder
+	fmt.Fprintf(&b, "(Note from the app, not from me: your previous run in this conversation stopped before it finished (%s). Its plan still had these open items, quoted from that run:\n", reason)
+	for _, line := range strings.Split(formatPlan(open), "\n") {
+		b.WriteString("> " + line + "\n")
+	}
+	b.WriteString("If my message below asks you to continue, pick them up; otherwise follow my message.)")
+	return b.String()
 }

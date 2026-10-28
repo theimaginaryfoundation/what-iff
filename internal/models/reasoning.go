@@ -2,6 +2,7 @@ package models
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -74,9 +75,9 @@ func ReasoningSupportFor(provider, name string) ReasoningSupport {
 	case ModelProviderAnthropic:
 		return anthropicReasoningSupport(n)
 	case ModelProviderZAI:
-		return ReasoningSupportAlways
+		return zaiReasoningSupport(n)
 	case ModelProviderXiaomi:
-		return ReasoningSupportToggle
+		return xiaomiReasoningSupport(n)
 	case ModelProviderGoogle:
 		return geminiReasoningSupport(n)
 	case ModelProviderQwen:
@@ -118,10 +119,12 @@ func EffectiveReasoningEffort(support ReasoningSupport, effort ReasoningEffort) 
 type SettingSource string
 
 const (
-	SettingSourceUnset  SettingSource = ""
-	SettingSourceThread SettingSource = "thread"
-	SettingSourceMode   SettingSource = "mode"
-	SettingSourceJob    SettingSource = "job"
+	SettingSourceUnset       SettingSource = ""
+	SettingSourceAccount     SettingSource = "account"
+	SettingSourcePersonality SettingSource = "personality"
+	SettingSourceThread      SettingSource = "thread"
+	SettingSourceMode        SettingSource = "mode"
+	SettingSourceJob         SettingSource = "job"
 )
 
 // TurnSettings are a turn's resolved reasoning effort and agent loop, with the level each
@@ -142,15 +145,37 @@ type TurnSettingLevel struct {
 	AgentLoop       *AgentLoop
 }
 
-// ResolveTurnSettings applies ADR 0x026's precedence for a turn: the job's values win, then
-// the active mode's, then the thread's (which were seeded from the personality or account
-// default when the thread was created). Invalid stored values are skipped.
-func ResolveTurnSettings(thread, mode, job TurnSettingLevel) TurnSettings {
-	var s TurnSettings
-	for _, lvl := range []struct {
+// TurnSettingLevels are every level a turn's settings can come from, most specific first in
+// ResolveTurnSettings' order.
+type TurnSettingLevels struct {
+	Job, Mode, Thread, Personality, Account TurnSettingLevel
+	// Sandboxed restricts a turn in a sandboxed thread (e.g. the Discord relay, where other
+	// people start turns on the owner's account) to its job's and thread's own values: the
+	// owner's personality, account default and modes do not reach it.
+	Sandboxed bool
+}
+
+// ResolveTurnSettings applies ADR 0x026's precedence for a turn, per setting: job, then the
+// active mode, then the thread's own value, then its personality, then the account default.
+// Nothing is copied between levels, so each turn sees the current value at every level.
+// Invalid stored values are skipped.
+func ResolveTurnSettings(levels TurnSettingLevels) TurnSettings {
+	type level struct {
 		values TurnSettingLevel
 		source SettingSource
-	}{{job, SettingSourceJob}, {mode, SettingSourceMode}, {thread, SettingSourceThread}} {
+	}
+	order := []level{
+		{levels.Job, SettingSourceJob},
+		{levels.Mode, SettingSourceMode},
+		{levels.Thread, SettingSourceThread},
+		{levels.Personality, SettingSourcePersonality},
+		{levels.Account, SettingSourceAccount},
+	}
+	if levels.Sandboxed {
+		order = []level{{levels.Job, SettingSourceJob}, {levels.Thread, SettingSourceThread}}
+	}
+	var s TurnSettings
+	for _, lvl := range order {
 		if s.ReasoningEffortSource == SettingSourceUnset && lvl.values.ReasoningEffort != nil && lvl.values.ReasoningEffort.Valid() {
 			s.ReasoningEffort = *lvl.values.ReasoningEffort
 			s.ReasoningEffortSource = lvl.source
@@ -161,29 +186,6 @@ func ResolveTurnSettings(thread, mode, job TurnSettingLevel) TurnSettings {
 		}
 	}
 	return s
-}
-
-// FirstSetReasoningEffort returns the first valid value, for seeding a new thread from its
-// personality and then the account default. Nil when none is set.
-func FirstSetReasoningEffort(values ...*ReasoningEffort) *ReasoningEffort {
-	for _, v := range values {
-		if v != nil && v.Valid() {
-			out := *v
-			return &out
-		}
-	}
-	return nil
-}
-
-// FirstSetAgentLoop is FirstSetReasoningEffort for the agent loop.
-func FirstSetAgentLoop(values ...*AgentLoop) *AgentLoop {
-	for _, v := range values {
-		if v != nil && v.Valid() {
-			out := *v
-			return &out
-		}
-	}
-	return nil
 }
 
 // ParseReasoningEffortUpdate reads an update field: nil leaves the value alone (ok, no
@@ -306,4 +308,48 @@ func (v TurnSettingValues) Strings() (effort, loop string) {
 		loop = string(*n.AgentLoop)
 	}
 	return effort, loop
+}
+
+// TurnSettingKeys reports which turn-setting keys a JSON object body carries. A replacing (PUT)
+// route uses it to keep a stored value the client did not send: a client that predates these
+// settings (a cached bundle, an older SDK) must not clear them by saving. An unparseable body
+// reports neither.
+func TurnSettingKeys(body []byte) (effort, loop bool) {
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(body, &keys) != nil {
+		return false, false
+	}
+	_, effort = keys["reasoning_effort"]
+	_, loop = keys["agent_loop"]
+	return effort, loop
+}
+
+// KeepOmittedTurnSettings returns sent with each setting the body omitted (see TurnSettingKeys)
+// taken from stored instead.
+func KeepOmittedTurnSettings(sent, stored TurnSettingValues, effortSent, loopSent bool) TurnSettingValues {
+	if !effortSent {
+		sent.ReasoningEffort = stored.ReasoningEffort
+	}
+	if !loopSent {
+		sent.AgentLoop = stored.AgentLoop
+	}
+	return sent
+}
+
+// Valid reports whether s is a known support level.
+func (s ReasoningSupport) Valid() bool {
+	switch s {
+	case ReasoningSupportNone, ReasoningSupportOptional, ReasoningSupportToggle, ReasoningSupportAlways:
+		return true
+	}
+	return false
+}
+
+// ReasoningSupportWithOverride is ReasoningSupportFor unless an admin override is set (a valid
+// Model.ReasoningSupportOverride), which wins.
+func ReasoningSupportWithOverride(override *ReasoningSupport, provider, name string) ReasoningSupport {
+	if override != nil && override.Valid() {
+		return *override
+	}
+	return ReasoningSupportFor(provider, name)
 }

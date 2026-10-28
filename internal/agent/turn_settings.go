@@ -3,27 +3,41 @@ package agent
 import (
 	"context"
 
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
 
-// resolveTurnSettings fixes the turn's reasoning effort and agent loop (ADR 0x026): an agent
-// job's values (on ctx) win, then the active mode's, then the thread's own (seeded from the
-// personality or account default when the thread was created). mode is the turn's active mode
-// (nil for none). Call it once the model and the mode are final for the turn.
+// resolveTurnSettings fixes the turn's reasoning effort and agent loop (ADR 0x026), per
+// setting: an agent job's values (on ctx), then the active mode's, then the thread's own, then
+// its personality's, then the account default. Nothing is copied onto the thread, so the turn
+// sees each level's current value. A sandboxed thread takes only its job's and its own values
+// (models.TurnSettingLevels.Sandboxed). mode is the turn's active mode (nil for none). Call it
+// once the model, personality and mode are final for the turn.
 func (a *Agent) resolveTurnSettings(ctx context.Context, chatCtx *chatContext, mode *models.Mood) {
 	if chatCtx == nil {
 		return
 	}
-	var threadLevel, modeLevel models.TurnSettingLevel
+	levels := models.TurnSettingLevels{Job: models.JobTurnSettingsFromContext(ctx)}
 	if chatCtx.chat != nil {
-		threadLevel = chatCtx.chat.TurnSettingValues.Level()
+		levels.Thread = chatCtx.chat.TurnSettingValues.Level()
+		levels.Sandboxed = chatCtx.chat.IsSandboxed()
+		if !levels.Sandboxed && a.ds != nil {
+			fromPersonality, fromAccount, err := a.ds.InheritedTurnSettings(ctx, chatCtx.chat.UserID, chatCtx.chat.PersonalityID)
+			if err != nil {
+				// Fail to the thread's own values: nothing inherited is applied, which never
+				// starts Advanced or a reasoning effort the user did not ask for on this thread.
+				a.logger.Warn("failed to load inherited turn settings; using the thread's own", zap.Error(err))
+			}
+			levels.Personality = fromPersonality.Level()
+			levels.Account = fromAccount.Level()
+		}
 	}
-	if mode != nil {
-		modeLevel = mode.TurnSettingValues.Level()
+	if mode != nil && !levels.Sandboxed {
+		levels.Mode = mode.TurnSettingValues.Level()
 	}
-	settings := models.ResolveTurnSettings(threadLevel, modeLevel, models.JobTurnSettingsFromContext(ctx))
+	settings := models.ResolveTurnSettings(levels)
 	if settings.Advanced() && a.localLLM {
 		// The local backend keeps its own generation pipeline, which has no Advanced loop.
 		a.logger.Warn("Advanced agent loop selected but LLM_BACKEND=local has no Advanced loop; running Standard",
@@ -31,7 +45,7 @@ func (a *Agent) resolveTurnSettings(ctx context.Context, chatCtx *chatContext, m
 		settings.AgentLoop = models.AgentLoopStandard
 	}
 	chatCtx.turnSettings = settings
-	chatCtx.reasoningEffort = models.EffectiveReasoningEffort(models.ReasoningSupportFor(chatCtx.modelProvider, chatCtx.model), settings.ReasoningEffort)
+	chatCtx.reasoningEffort = models.EffectiveReasoningEffort(chatCtx.reasoningSupport(), settings.ReasoningEffort)
 	if settings.ReasoningEffort != "" || settings.AgentLoop != "" {
 		a.logger.Info("turn settings resolved",
 			zap.String("model", chatCtx.model),
@@ -76,8 +90,24 @@ func withTurnSettingsUsage(chatCtx *chatContext, u metering.Usage) metering.Usag
 		u.AgentLoop = string(models.AgentLoopAdvanced)
 	}
 	u.TurnID = chatCtx.turnID
+	if n := len(chatCtx.calls); n > 0 {
+		// Tokens is the final call's input on every path (metering.Usage.Tokens).
+		u.Tokens = chatCtx.calls[n-1].InputTokens
+	}
 	u.Calls = chatCtx.takeUnrecordedCalls()
+	u.CallsReported = chatCtx.callsReported
 	return u
+}
+
+// setCalls stores the turn's per-call usage so far, with each call's model filled in.
+func (c *chatContext) setCalls(calls []provider.CallUsage) {
+	for i := range calls {
+		if calls[i].Model == "" {
+			calls[i].Model = c.model
+		}
+	}
+	c.calls = calls
+	c.callsReported = true
 }
 
 // takeUnrecordedCalls returns the calls not yet metered and marks them metered.
@@ -102,20 +132,24 @@ func (a *Agent) recordAdvancedStep(ctx context.Context, chatCtx *chatContext, st
 		return
 	}
 	u := metering.Usage{
-		UserID:     chatCtx.chat.UserID,
-		ActionType: chatCtx.meteredActionType(),
-		Model:      chatCtx.model,
-		ChatID:     chatCtx.chat.ID.String(),
-		Source:     metering.TurnSourceFromContext(ctx),
-		AgentLoop:  string(models.AgentLoopAdvanced),
-		Calls:      calls,
-		Step:       step,
-		TurnID:     chatCtx.turnID,
+		UserID:        chatCtx.chat.UserID,
+		ActionType:    chatCtx.meteredActionType(),
+		Model:         chatCtx.model,
+		ChatID:        chatCtx.chat.ID.String(),
+		Tokens:        calls[len(calls)-1].InputTokens,
+		Source:        metering.TurnSourceFromContext(ctx),
+		AgentLoop:     string(models.AgentLoopAdvanced),
+		Calls:         calls,
+		CallsReported: true,
+		Step:          step,
+		TurnID:        chatCtx.turnID,
 	}
 	if chatCtx.turnSettings.ReasoningEffortSource != models.SettingSourceUnset {
 		u.ReasoningEffort = string(chatCtx.reasoningEffort)
 	}
-	a.meter.Record(ctx, chatCtx.meterDecision, u)
+	// The calls are marked metered above, so this Record must not fail because Stop or a
+	// shutdown has just cancelled the turn's context (the step would then never be billed).
+	a.meter.Record(context.WithoutCancel(ctx), chatCtx.meterDecision, u)
 }
 
 // withTurnAgentLoop marks an Advanced turn's context for Meter.Check (metering.WithAgentLoop).
@@ -148,4 +182,13 @@ func (c *chatContext) meteredActionType() string {
 		return models.ActionTypeChatMessage
 	}
 	return c.actionType
+}
+
+// reasoningSupport is the turn model's reasoning support: the model row's (with any admin
+// override) when known, else derived from the provider and name.
+func (c *chatContext) reasoningSupport() models.ReasoningSupport {
+	if c.modelReasoningSupport.Valid() {
+		return c.modelReasoningSupport
+	}
+	return models.ReasoningSupportFor(c.modelProvider, c.model)
 }

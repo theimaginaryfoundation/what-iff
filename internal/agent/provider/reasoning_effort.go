@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"os"
 	"strings"
+	"sync/atomic"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/openai/openai-go/v3"
@@ -27,8 +29,41 @@ func ApplyOpenAIReasoning(params *responses.ResponseNewParams, effort models.Rea
 		return
 	}
 	params.Reasoning.Effort = shared.ReasoningEffort(effort)
-	params.Reasoning.Summary = shared.ReasoningSummaryAuto
+	if OpenAIReasoningSummariesEnabled() {
+		params.Reasoning.Summary = shared.ReasoningSummaryAuto
+	}
 	raiseOpenAIOutputCap(params)
+}
+
+// openAIReasoningSummariesOff is set when reasoning summaries must not be requested: the operator
+// turned them off (OPENAI_REASONING_SUMMARIES=off), or OpenAI refused them because the
+// organization is not verified (see disableOpenAIReasoningSummaries). Process-wide: the
+// organization does not change while the process runs.
+var openAIReasoningSummariesOff atomic.Bool
+
+func init() {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("OPENAI_REASONING_SUMMARIES")), "off") {
+		openAIReasoningSummariesOff.Store(true)
+	}
+}
+
+// OpenAIReasoningSummariesEnabled reports whether OpenAI requests ask for reasoning summaries.
+func OpenAIReasoningSummariesEnabled() bool { return !openAIReasoningSummariesOff.Load() }
+
+// disableOpenAIReasoningSummaries stops asking for summaries; it reports whether this call
+// turned them off (so the caller logs it once).
+func disableOpenAIReasoningSummaries() bool {
+	return openAIReasoningSummariesOff.CompareAndSwap(false, true)
+}
+
+// isOpenAISummaryVerificationError reports whether OpenAI refused a request because reasoning
+// summaries need a verified organization (a 400 on reasoning.summary).
+func isOpenAISummaryVerificationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "must be verified") && strings.Contains(msg, "summar")
 }
 
 // openAINoReasoningEffort is the lowest effort a GPT-5-family model accepts: "none" from

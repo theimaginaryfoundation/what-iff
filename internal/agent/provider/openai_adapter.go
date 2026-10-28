@@ -67,6 +67,19 @@ func (a *OpenAIAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse,
 // send issues one Responses request (streaming when a delta handler is set) and records the
 // response: raw copy, web searches, usage and reasoning summaries.
 func (a *OpenAIAdapter) send(ctx context.Context) (*responses.Response, error) {
+	resp, err := a.sendOnce(ctx)
+	if err != nil && a.params.Reasoning.Summary != "" && isOpenAISummaryVerificationError(err) {
+		// Reasoning summaries need a verified OpenAI organization. Without one, drop them (for
+		// this process) and resend, rather than failing every turn that selects an effort.
+		disableOpenAIReasoningSummaries()
+		a.params.Reasoning.Summary = ""
+		resp, err = a.sendOnce(ctx)
+	}
+	return resp, err
+}
+
+// sendOnce issues the request once (CallWithRetry's transport retries aside).
+func (a *OpenAIAdapter) sendOnce(ctx context.Context) (*responses.Response, error) {
 	a.liveReasoning.beginCall()
 	var (
 		resp *responses.Response

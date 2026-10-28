@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -127,10 +128,15 @@ func (h *Handler) UpdateMood(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req models.UpdateMoodRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err == nil {
+		err = json.Unmarshal(body, &req)
+	}
+	if err != nil {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid request body", err)
 		return
 	}
+	effortSent, loopSent := models.TurnSettingKeys(body)
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Name is required", nil)
@@ -145,6 +151,12 @@ func (h *Handler) UpdateMood(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.TurnSettingValues = req.TurnSettingValues.Normalized()
+	if !effortSent || !loopSent {
+		// PUT replaces the mode, but a setting the client did not send is kept.
+		if stored, gerr := h.ds.GetMood(r.Context(), userID, id); gerr == nil && stored != nil {
+			req.TurnSettingValues = models.KeepOmittedTurnSettings(req.TurnSettingValues, stored.TurnSettingValues, effortSent, loopSent)
+		}
+	}
 
 	updated, err := h.ds.UpdateMood(r.Context(), userID, id, req)
 	if err != nil {

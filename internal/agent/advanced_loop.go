@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
+	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"go.uber.org/zap"
 )
@@ -51,6 +53,33 @@ type advancedLoopConfig struct {
 	maxSteps      int
 	maxDuration   time.Duration
 	compactTokens int64
+}
+
+// advancedLoopConfigFor is a run's limits: the environment's, with the account's own limits from
+// the meter (metering.AdvancedLimiter) in their place where it sets them, clamped to the same upper
+// bounds as the environment.
+func (a *Agent) advancedLoopConfigFor(ctx context.Context, userID uuid.UUID) advancedLoopConfig {
+	cfg := advancedLoopConfigFromEnv(a.logger)
+	limiter, ok := a.meter.(metering.AdvancedLimiter)
+	if !ok {
+		return cfg
+	}
+	return cfg.withLimits(limiter.AdvancedLimits(ctx, userID))
+}
+
+// withLimits applies an account's limits over cfg (zero fields keep cfg's), clamped to the upper
+// bounds.
+func (cfg advancedLoopConfig) withLimits(l metering.AdvancedLimits) advancedLoopConfig {
+	if l.MaxSteps > 0 {
+		cfg.maxSteps = min(l.MaxSteps, maxAdvancedMaxSteps)
+	}
+	if l.MaxDuration > 0 {
+		cfg.maxDuration = min(l.MaxDuration, maxAdvancedMaxDuration)
+	}
+	if l.CompactTokens > 0 {
+		cfg.compactTokens = min(l.CompactTokens, maxAdvancedCompactTokens)
+	}
+	return cfg
 }
 
 func advancedLoopConfigFromEnv(logger *zap.Logger) advancedLoopConfig {
@@ -123,13 +152,16 @@ type advancedLoopHooks struct {
 	// modelContext is the turn's original context, which compaction starts again from.
 	modelContext *provider.ModelContext
 	// quotaAllowed re-checks the account's quota before each model call after the first, given
-	// the calls made since the last step record (pending, not yet metered). Nil means always
-	// allowed.
-	quotaAllowed func(ctx context.Context, pending []provider.CallUsage) bool
+	// the calls made since the last step record (pending, not yet metered). An error means the
+	// meter could not decide (not a refusal). Nil means always allowed.
+	quotaAllowed func(ctx context.Context, pending []provider.CallUsage) (bool, error)
 	// recordStep meters a finished step's calls (recordAdvancedStep); saveDraft persists the run so
 	// far on its job. Either may be nil.
 	recordStep func(ctx context.Context, step int)
 	saveDraft  func(draft *models.AgentRunDraft)
+	// saveToolCall saves a finished tool call as a draft ToolCall row of the run's job, so the
+	// draft refers to it rather than copying it. Nil (no job) keeps calls in memory only.
+	saveToolCall func(tc *models.ToolCall) error
 	// contextWindow is the model's context window in tokens (0 when unknown), for compaction.
 	contextWindow int64
 	config        advancedLoopConfig
@@ -149,12 +181,12 @@ type advancedRun struct {
 	retiredUsage []provider.CallUsage
 	toolCalls    []*models.ToolCall
 	attachments  []*models.FileAttachment
-	// compactedAtCall is the last transcript call a compaction folded into the work log.
-	compactedAtCall int
 	// start is when the run began (the duration limit).
 	start time.Time
-	// last is the model's latest answer, the reply when the run stops between steps.
-	last *provider.GenerateResponse
+	// last is the model's latest answer, the reply when the run stops between steps; lastCall is
+	// the transcript call that produced it.
+	last     *provider.GenerateResponse
+	lastCall int
 	// pendingToolResults reports that the last step ended at the round cap with tool results not
 	// yet answered: stopping then needs one forced final answer.
 	pendingToolResults bool
@@ -163,6 +195,9 @@ type advancedRun struct {
 	// step is the current step; endReason is why the run stopped.
 	step      int
 	endReason models.AgentRunEnd
+	// overflowCompacted reports that the latest step ended in a context-overflow compaction, so
+	// an overflow right after it is not retried again (recoverFromOverflow).
+	overflowCompacted bool
 	// fixedReply reports that the reply is quotaStop's note, not the model's: the last call's text
 	// then stays a note in the run record.
 	fixedReply bool
@@ -183,12 +218,18 @@ func (a *Agent) handleAdvancedLoop(ctx context.Context, chatCtx *chatContext, ad
 			run.endReason = models.AgentRunEndCancelled
 		}
 		run.saveDraft()
-		return nil, nil, nil, run.record(-1), err
+		// The tool calls are returned with the error, for the caller's accounting (web searches).
+		return nil, run.toolCalls, nil, run.record(-1), err
 	}
 	run.attachments = a.appendPostToolLoopGeneratedAttachments(ctx, chatCtx, run.attachments)
 	finalCall := -1
 	if hooks.transcript != nil && !run.fixedReply {
 		finalCall = hooks.transcript.currentCall()
+		if result == run.last {
+			// The reply is an earlier answer (a failed limit summary, a quota stop): that call's
+			// text is the message, not the latest call's.
+			finalCall = run.lastCall
+		}
 	}
 	return result, run.toolCalls, run.attachments, run.record(finalCall), nil
 }
@@ -197,6 +238,7 @@ func (a *Agent) handleAdvancedLoop(ctx context.Context, chatCtx *chatContext, ad
 // out of the notes; -1 keeps every call (a run with no final answer).
 func (r *advancedRun) record(finalCall int) *models.AgentRun {
 	rec := &models.AgentRun{
+		Version:   models.AgentRunVersion,
 		Plan:      append([]models.PlanItem(nil), r.chatCtx.plan...),
 		EndReason: r.endReason,
 	}
@@ -212,13 +254,7 @@ func (r *advancedRun) saveDraft() {
 	if r.hooks.saveDraft == nil {
 		return
 	}
-	draft := &models.AgentRunDraft{Run: *r.record(-1)}
-	for _, tc := range r.toolCalls {
-		draft.ToolCalls = append(draft.ToolCalls, models.AgentRunToolCall{
-			ToolName: tc.ToolName, ToolInput: tc.ToolInput, ToolOutput: tc.ToolOutput, ToolError: tc.ToolError, Step: tc.Step,
-		})
-	}
-	r.hooks.saveDraft(draft)
+	r.hooks.saveDraft(&models.AgentRunDraft{Run: *r.record(-1)})
 }
 
 func (r *advancedRun) loop(ctx context.Context) (*provider.GenerateResponse, error) {
@@ -235,6 +271,7 @@ func (r *advancedRun) loop(ctx context.Context) (*provider.GenerateResponse, err
 			endStepAtCap:        true,
 			skipPostAttachments: true,
 			beforeCall:          func() error { return r.beforeCall(ctx) },
+			onToolCalls:         r.onToolCalls,
 			afterCall:           r.syncUsage,
 		})
 		r.syncUsage()
@@ -249,9 +286,15 @@ func (r *advancedRun) loop(ctx context.Context) (*provider.GenerateResponse, err
 			r.end(models.AgentRunEndQuota)
 			return r.quotaStop(len(calls) > 0), nil
 		}
+		if err != nil && r.recoverFromOverflow(ctx, step, err) {
+			// Compacted after the provider refused an input that outgrew the window mid-step
+			// (compaction otherwise runs only between steps); the run carries on from the work log.
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
+		r.overflowCompacted = false
 		r.pendingToolResults = capped
 
 		if capped {
@@ -259,6 +302,9 @@ func (r *advancedRun) loop(ctx context.Context) (*provider.GenerateResponse, err
 			r.stalls = 0
 		} else {
 			r.last = res
+			if r.hooks.transcript != nil {
+				r.lastCall = r.hooks.transcript.currentCall()
+			}
 			if end := r.judgeAnswer(len(calls) > 0, planBefore); end != "" {
 				r.end(end)
 				return res, nil
@@ -336,7 +382,10 @@ func (r *advancedRun) prepareNextStep(ctx context.Context, step int) {
 func (r *advancedRun) finish(ctx context.Context) (*provider.GenerateResponse, error) {
 	if r.pendingToolResults || r.last == nil {
 		if err := r.beforeCall(ctx); err != nil {
-			return r.quotaStop(true), nil
+			if errors.Is(err, errAdvancedQuota) {
+				return r.quotaStop(true), nil
+			}
+			return nil, err
 		}
 		final, err := r.adapter.ForceFinalResponse(ctx)
 		r.syncUsage()
@@ -350,7 +399,10 @@ func (r *advancedRun) finish(ctx context.Context) (*provider.GenerateResponse, e
 		scoper.ScopeTools(func(string) bool { return true })
 	}
 	if err := r.beforeCall(ctx); err != nil {
-		return r.last, nil
+		if errors.Is(err, errAdvancedQuota) {
+			return r.last, nil
+		}
+		return nil, err
 	}
 	res, uses, err := r.adapter.Call(ctx)
 	r.syncUsage()
@@ -392,23 +444,60 @@ func limitSummaryMessage(reason models.AgentRunEnd, plan []models.PlanItem) stri
 	return msg
 }
 
-// errAdvancedQuota stops a run before a model call the quota no longer covers.
-var errAdvancedQuota = errors.New("advanced run stopped: quota exhausted")
+// onToolCalls gives each finished tool call its id, saves it as a draft row of the run's job
+// (when there is one), and records it in the transcript where it happened.
+func (r *advancedRun) onToolCalls(calls []*models.ToolCall) {
+	for _, tc := range calls {
+		tc.ID = uuid.New()
+		if r.hooks.saveToolCall != nil {
+			if err := r.hooks.saveToolCall(tc); err != nil {
+				r.a.logger.Warn("failed to save an Advanced tool call draft; it is saved with the reply", zap.Error(err))
+			} else {
+				tc.JobDraft = true
+			}
+		}
+		if r.hooks.transcript != nil {
+			r.hooks.transcript.toolCall(tc.ID.String())
+		}
+	}
+}
+
+// errAdvancedQuota stops a run before a model call the quota no longer covers;
+// errAdvancedQuotaCheck fails it when the meter could not tell (Decision.Err).
+var (
+	errAdvancedQuota      = errors.New("advanced run stopped: quota exhausted")
+	errAdvancedQuotaCheck = errors.New("advanced run quota check failed")
+)
 
 // beforeCall runs before every model call of the run. After the first call it re-checks the
 // quota with the calls not yet metered (the current step's), and refuses the call
 // (errAdvancedQuota) when the meter does: a run then overshoots its quota by at most the call
 // that crossed it, not by a whole step. The turn's own Check covered the first call.
+//
+// A cancelled context returns its error first, so Stop is never mistaken for a quota refusal,
+// and a meter that cannot decide fails the run (errAdvancedQuotaCheck) instead of ending it as out
+// of quota.
 func (r *advancedRun) beforeCall(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if r.hooks.quotaAllowed != nil && len(r.chatCtx.calls) > 0 {
 		pending := r.chatCtx.calls[min(r.chatCtx.recordedCalls, len(r.chatCtx.calls)):]
-		if !r.hooks.quotaAllowed(ctx, pending) {
+		allowed, err := r.hooks.quotaAllowed(ctx, pending)
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			return fmt.Errorf("%w: %w", errAdvancedQuotaCheck, err)
+		}
+		if !allowed {
 			return errAdvancedQuota
 		}
 	}
 	if r.hooks.transcript != nil {
 		r.hooks.transcript.beginCall()
 	}
+	r.chatCtx.callInFlight = true
 	return nil
 }
 
@@ -429,7 +518,8 @@ func (r *advancedRun) quotaStop(workSinceAnswer bool) *provider.GenerateResponse
 
 // syncUsage refreshes the turn's per-call usage (metering) from every adapter so far.
 func (r *advancedRun) syncUsage() {
-	r.chatCtx.calls = r.callUsage()
+	r.chatCtx.callInFlight = false
+	r.chatCtx.setCalls(r.callUsage())
 }
 
 func (r *advancedRun) callUsage() []provider.CallUsage {
@@ -486,9 +576,6 @@ func (r *advancedRun) compact(ctx context.Context, step int) error {
 		r.hooks.configure(next)
 	}
 	r.adapter = next
-	if r.hooks.transcript != nil {
-		r.compactedAtCall = r.hooks.transcript.currentCall()
-	}
 	r.a.logger.Info("advanced loop compacted its context", zap.Int("step", step), zap.Int("tool_calls", len(r.toolCalls)))
 	return nil
 }
@@ -508,12 +595,12 @@ func (r *advancedRun) workLog(step int) string {
 	}
 	if r.hooks.transcript != nil {
 		if notes := r.hooks.transcript.textSince(0); notes != "" {
-			fmt.Fprintf(&b, "\nYour notes so far:\n%s\n", agenttools.TruncateRunes(notes, advancedWorkLogMaxChars/3))
+			fmt.Fprintf(&b, "\nYour notes so far:\n%s\n", truncateRunesKeepTail(notes, advancedWorkLogMaxChars/3))
 		}
 	}
 	budget := advancedWorkLogMaxChars - b.Len()
 	var lines []string
-	for i := len(r.toolCalls) - 1; i >= 0 && budget > 0; i-- {
+	for i := len(r.toolCalls) - 1; i >= 0; i-- {
 		tc := r.toolCalls[i]
 		result := tc.ToolOutput
 		if tc.ToolError != "" {
@@ -521,7 +608,10 @@ func (r *advancedRun) workLog(step int) string {
 		}
 		line := fmt.Sprintf("- step %d: %s(%s) → %s", tc.Step, tc.ToolName,
 			agenttools.TruncateRunes(tc.ToolInput, 300), agenttools.TruncateRunes(result, 600))
-		budget -= len(line)
+		if len(line)+1 > budget {
+			break
+		}
+		budget -= len(line) + 1
 		lines = append(lines, line)
 	}
 	if len(lines) > 0 {
@@ -536,6 +626,35 @@ func (r *advancedRun) workLog(step int) string {
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// recoverFromOverflow compacts the run when a call failed because its input no longer fits the
+// model's context window (provider.IsContextOverflowError), and reports whether the run can go
+// on. It recovers once per overflow: a second overflow straight after compacting, or a failed
+// compaction, ends the run with the error.
+func (r *advancedRun) recoverFromOverflow(ctx context.Context, step int, err error) bool {
+	if r.overflowCompacted || !provider.IsContextOverflowError(err) || r.hooks.rebuild == nil || r.hooks.modelContext == nil || ctx.Err() != nil {
+		return false
+	}
+	if cerr := r.compact(ctx, step); cerr != nil {
+		r.a.logger.Warn("advanced loop could not compact after a context overflow", zap.Error(cerr))
+		return false
+	}
+	r.a.logger.Info("advanced loop compacted after a context overflow", zap.Int("step", step))
+	r.overflowCompacted = true
+	r.pendingToolResults = false
+	r.saveDraft()
+	return true
+}
+
+// truncateRunesKeepTail keeps the last max runes of s, marking the cut: a compacted run resumes
+// from its most recent notes, which say where it is, rather than its first.
+func truncateRunesKeepTail(s string, max int) string {
+	r := []rune(s)
+	if max <= 0 || len(r) <= max {
+		return s
+	}
+	return "…[earlier notes omitted]\n" + string(r[len(r)-max:])
 }
 
 // continuationMessage asks the model to keep going on its open plan items.

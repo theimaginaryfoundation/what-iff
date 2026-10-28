@@ -213,13 +213,9 @@ func (d *Datastore) CreateChat(ctx context.Context, userID uuid.UUID, chat model
 		}
 	}
 
-	if err := seedChatTurnSettings(ctx, tx, &chat, chat.PersonalityID, userPreferences); err != nil {
-		d.logger.Error(i18n.T1("query.failed", "Entity", "personality"), zap.Error(err))
-		if rerr := tx.Rollback(); rerr != nil {
-			d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
-		}
-		return nil, err
-	}
+	// Only explicit turn settings are stored on the thread (ADR 0x026); inherited ones are
+	// resolved at each turn (InheritedTurnSettings).
+	chat.TurnSettingValues = chat.TurnSettingValues.Normalized()
 
 	normalizedTags, err := modeltypes.NormalizeAndValidateChatTags(chat.Tags)
 	if err != nil {

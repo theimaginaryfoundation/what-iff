@@ -82,7 +82,7 @@ type chatTurnStore interface {
 	ListPendingTurnJobsForChat(ctx context.Context, userID, chatID, excludeJobID uuid.UUID) ([]*models.Job, error)
 	CreateJob(ctx context.Context, userID uuid.UUID, job models.Job) (*models.Job, error)
 	UpdateJobStatus(ctx context.Context, userID, id uuid.UUID, status models.JobStatus, errorMsg string) (*models.Job, error)
-	FinalizeFailedChatJobWithPartial(ctx context.Context, userID, jobID, chatID uuid.UUID, generationModel, generationPersonality, failureMessage string, generationMoodID *uuid.UUID) (*models.Job, *uuid.UUID, error)
+	FinalizeAdvancedDraft(ctx context.Context, userID, jobID, chatID uuid.UUID, cancelled bool, failureMessage string) (bool, error)
 	JobStatus(ctx context.Context, userID, jobID uuid.UUID) (models.JobStatus, error)
 	FinishTurnJobIfActive(ctx context.Context, userID, jobID uuid.UUID, replied bool, failMsg string) (models.JobStatus, error)
 	TouchJob(ctx context.Context, userID, id uuid.UUID) error
@@ -353,13 +353,12 @@ func (a *Agent) FailInFlightTurns(ctx context.Context) {
 	}
 }
 
-// finishInterruptedTurn ends a turn the shutdown interrupted. A failed turn keeps what it had
-// written: its streamed text, or an Advanced run's saved steps (ADR 0x026), become a partial
-// reply, as they do when a turn fails or is stopped while the server runs. The generation
-// metadata comes from the job's draft.
+// finishInterruptedTurn ends a turn the shutdown interrupted. A failed Advanced run (ADR 0x026)
+// keeps the work in its draft as a partial reply, with the draft's generation metadata; any other
+// turn is ended as before (a Standard turn's failure banner offers a retry).
 func finishInterruptedTurn(ctx context.Context, store chatTurnStore, jobID uuid.UUID, turn inFlightTurn, status models.JobStatus, msg string) error {
 	if status == models.JobStatusFailed && turn.chatID != uuid.Nil {
-		if _, _, err := store.FinalizeFailedChatJobWithPartial(ctx, turn.userID, jobID, turn.chatID, "", "", msg, nil); err == nil {
+		if handled, err := store.FinalizeAdvancedDraft(ctx, turn.userID, jobID, turn.chatID, false, msg); err == nil && handled {
 			return nil
 		}
 	}
@@ -387,26 +386,28 @@ func (a *Agent) failChatTurnWait(ctx context.Context, job *models.Job, cause err
 // untracked one (a scheduled run) has no job row, so a ticket job is created to hold its place
 // and is finished by end. end must be called with the turn's outcome once the turn is over. A
 // ticket turn may end early, as soon as its reply is saved, and end is then a no-op the second time.
-func (a *Agent) beginEphemeralChatTurn(ctx context.Context, userID, chatID uuid.UUID, trackingJob *models.Job) (end func(error), err error) {
+// ticket is that ticket job (nil for a tracked turn): it also holds an untracked Advanced run's
+// draft (ADR 0x026).
+func (a *Agent) beginEphemeralChatTurn(ctx context.Context, userID, chatID uuid.UUID, trackingJob *models.Job) (end func(error), ticket *models.Job, err error) {
 	if trackingJob != nil {
 		release, err := a.awaitChatTurn(ctx, trackingJob, chatID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return func(error) { release() }, nil
+		return func(error) { release() }, nil, nil
 	}
 	g := a.chatTurnGate()
 	if g == nil {
-		return func(error) {}, nil
+		return func(error) {}, nil, nil
 	}
-	ticket, err := g.store.CreateJob(ctx, userID, models.Job{
+	ticket, err = g.store.CreateJob(ctx, userID, models.Job{
 		JobType:     JobTypeAgentJobRun,
 		Reference:   chatID.String(),
 		Status:      models.JobStatusPending,
 		DraftDeltas: []string{},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to queue turn: %w", err)
+		return nil, nil, fmt.Errorf("failed to queue turn: %w", err)
 	}
 	finish := func(outcome error) {
 		status, msg := models.JobStatusComplete, ""
@@ -426,7 +427,7 @@ func (a *Agent) beginEphemeralChatTurn(ctx context.Context, userID, chatID uuid.
 	release, err := a.awaitChatTurn(ctx, ticket, chatID)
 	if err != nil {
 		finish(err)
-		return nil, err
+		return nil, nil, err
 	}
 	if _, uerr := g.store.UpdateJobStatus(ctx, userID, ticket.ID, models.JobStatusProcessing, ""); uerr != nil {
 		a.logger.Warn("failed to mark turn ticket job processing", zap.String("job_id", ticket.ID.String()), zap.Error(uerr))
@@ -439,7 +440,7 @@ func (a *Agent) beginEphemeralChatTurn(ctx context.Context, userID, chatID uuid.
 			finish(outcome)
 			release()
 		})
-	}, nil
+	}, ticket, nil
 }
 
 // wait polls until no earlier live turn remains in chatID, returning how long it queued (zero

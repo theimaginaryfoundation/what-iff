@@ -32,13 +32,16 @@ type transcriptKind int
 const (
 	transcriptNative transcriptKind = iota
 	transcriptText
+	// transcriptToolCall marks where a tool call happened; toolCallID is its ToolCall row.
+	transcriptToolCall
 )
 
 type transcriptSegment struct {
-	kind transcriptKind
-	call int
-	step int
-	text string
+	kind       transcriptKind
+	call       int
+	step       int
+	text       string
+	toolCallID string
 }
 
 // Size caps on a saved run (the live stream is not capped): a note keeps its first
@@ -88,6 +91,15 @@ func (t *advancedTranscript) stepHeader(step int) {
 		}
 		out(header)
 	}
+}
+
+// toolCall records that a tool call (its ToolCall id) ran after the current call, so the saved
+// run keeps notes and tool calls in the order they happened. It is not streamed: the live view
+// shows tool calls from the job's progress timeline.
+func (t *advancedTranscript) toolCall(id string) {
+	t.mu.Lock()
+	t.segs = append(t.segs, transcriptSegment{kind: transcriptToolCall, call: t.call, step: t.step, toolCallID: id})
+	t.mu.Unlock()
 }
 
 func (t *advancedTranscript) appendDelta(kind transcriptKind, d string) {
@@ -143,8 +155,9 @@ func (t *advancedTranscript) discardCallNative() {
 	}
 }
 
-// run is the run's structured record: per step, its notes in order, without the reply text of
-// finalCall (the message itself), capped by advancedNoteMaxRunes and advancedRunMaxRunes.
+// run is the run's structured record: per step, its events in order (reasoning, text and tool
+// calls), without the reply text of finalCall (the message itself). Notes are capped by
+// advancedNoteMaxRunes and advancedRunMaxRunes; tool-call events are always kept.
 func (t *advancedTranscript) run(finalCall int) []models.AgentRunStep {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -156,31 +169,33 @@ func (t *advancedTranscript) run(finalCall int) []models.AgentRunStep {
 		if s.kind == transcriptText && s.call == finalCall {
 			continue
 		}
-		text := strings.TrimSpace(s.text)
-		if text == "" {
-			continue
+		var ev models.AgentRunEvent
+		switch s.kind {
+		case transcriptToolCall:
+			ev = models.AgentRunEvent{Kind: models.AgentRunEventToolCall, ToolCallID: s.toolCallID}
+		default:
+			text := strings.TrimSpace(s.text)
+			if text == "" || capped {
+				continue
+			}
+			if r := []rune(text); len(r) > advancedNoteMaxRunes {
+				text = string(r[:advancedNoteMaxRunes]) + "\n…[truncated]"
+			}
+			ev = models.AgentRunEvent{Kind: models.AgentRunEventText, Text: text}
+			if s.kind == transcriptNative {
+				ev.Kind = models.AgentRunEventReasoning
+			}
+			total += len([]rune(text))
+			if total > advancedRunMaxRunes {
+				capped = true
+				ev = models.AgentRunEvent{Kind: models.AgentRunEventText, Text: "…[later notes omitted: the run's notes exceeded the saved size]"}
+			}
 		}
 		if len(steps) == 0 || steps[len(steps)-1].Step != s.step {
 			steps = append(steps, models.AgentRunStep{Step: s.step})
 		}
 		cur := &steps[len(steps)-1]
-		if capped {
-			continue
-		}
-		if r := []rune(text); len(r) > advancedNoteMaxRunes {
-			text = string(r[:advancedNoteMaxRunes]) + "\n…[truncated]"
-		}
-		total += len([]rune(text))
-		if total > advancedRunMaxRunes {
-			capped = true
-			cur.Notes = append(cur.Notes, models.AgentRunNote{Kind: models.AgentRunNoteText, Text: "…[later notes omitted: the run's notes exceeded the saved size]"})
-			continue
-		}
-		kind := models.AgentRunNoteText
-		if s.kind == transcriptNative {
-			kind = models.AgentRunNoteReasoning
-		}
-		cur.Notes = append(cur.Notes, models.AgentRunNote{Kind: kind, Text: text})
+		cur.Events = append(cur.Events, ev)
 	}
 	return steps
 }

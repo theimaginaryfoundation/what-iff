@@ -18,7 +18,7 @@ import "strings"
 // anthropicAlwaysThinking are models that reject a request disabling thinking: effort is their
 // only control. Sonnet 5.5 can only switch thinking off with a "between_tools" mode the request
 // layer does not model; treating it as always-on keeps off at low effort, which it accepts.
-var anthropicAlwaysThinking = []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-fable", "claude-mythos"}
+var anthropicAlwaysThinking = []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable", "claude-mythos"}
 
 // anthropicSummarizesByDefault are models that return summarized thinking without a display
 // setting (the 4.6 generation), so none is sent.
@@ -73,13 +73,19 @@ var (
 	openAIAlwaysReasoning = []string{"o1", "o3", "o4"}
 	// openAINoEffort are names in those families without an effort control: chat-tuned aliases,
 	// the pro models (fixed at high), and the first o1 previews.
-	openAINoEffort = []string{"-chat", "-pro", "o1-mini", "o1-preview"}
+	// o3-deep-research takes only medium, so no setting can be offered for it.
+	openAINoEffort = []string{"-chat", "-pro", "o1-mini", "o1-preview", "deep-research"}
 )
 
 func openAIReasoningSupport(n string) ReasoningSupport {
 	switch {
 	case hasAny(n, openAINoEffort...):
 		return ReasoningSupportNone
+	case OpenAIRejectsNoneEffort(n), hasPrefix(n, openAIEffortModels) && strings.Contains(n, "-codex"):
+		// No usable off: the original GPT-5 models' lowest effort, "minimal", rules out the
+		// built-in tools (web_search, file_search), and the codex models take only
+		// low/medium/high. Off runs as low.
+		return ReasoningSupportAlways
 	case hasPrefix(n, openAIEffortModels):
 		return ReasoningSupportOptional
 	case hasPrefix(n, openAIAlwaysReasoning):
@@ -128,10 +134,13 @@ func geminiReasoningSupport(n string) ReasoningSupport {
 // --- Qwen (alibabacloud.com/help/en/model-studio/deep-thinking) ---
 
 var (
-	// qwenThinkingOnly cannot disable thinking.
-	qwenThinkingOnly = []string{"qwen3.8-2.4t", "qwen3.7-max-preview", "qwen3.7-max-2026-05-17"}
-	// qwenNoReasoning marks media, translation and embedding names.
-	qwenNoReasoning = []string{"image", "tts", "embedding", "-mt-", "-vl", "asr"}
+	// qwenThinkingOnly cannot disable thinking (enable_thinking=false is rejected), including the
+	// dated -thinking- releases of Qwen 3 (qwen3-235b-a22b-thinking-2507).
+	qwenThinkingOnly    = []string{"qwen3.8-2.4t", "qwen3.7-max-preview", "qwen3.7-max-2026-05-17"}
+	qwenThinkingMarkers = []string{"-thinking"}
+	// qwenNoReasoning marks media, translation and embedding names, and the instruct and coder
+	// releases, which do not think.
+	qwenNoReasoning = []string{"image", "tts", "embedding", "-mt-", "-vl", "asr", "-instruct", "coder"}
 	// qwenHybrid take enable_thinking (Qwen 3.x and the commercial qwen-plus / qwen-flash).
 	qwenHybrid = []string{"qwen3", "qwen-plus", "qwen-flash"}
 	// qwenEffort take reasoning_effort (low/medium/xhigh) instead of a thinking budget.
@@ -140,7 +149,7 @@ var (
 
 func qwenReasoningSupport(n string) ReasoningSupport {
 	switch {
-	case hasPrefix(n, qwenThinkingOnly):
+	case hasPrefix(n, qwenThinkingOnly), hasPrefix(n, qwenHybrid) && hasAny(n, qwenThinkingMarkers...):
 		return ReasoningSupportAlways
 	case hasAny(n, qwenNoReasoning...):
 		return ReasoningSupportNone
@@ -180,6 +189,28 @@ var mistralReasoning = []string{"mistral-small-4", "mistral-medium-3-5", "mistra
 
 func mistralReasoningSupport(n string) ReasoningSupport {
 	if hasPrefix(n, mistralReasoning) {
+		return ReasoningSupportToggle
+	}
+	return ReasoningSupportNone
+}
+
+// --- z.ai (docs.z.ai/guides/capabilities/thinking) and Xiaomi MiMo ---
+
+// zaiAlwaysThinking are the GLM families that always reason (effort is their only control).
+var zaiAlwaysThinking = []string{"glm-4.5", "glm-4.6", "glm-4.7", "glm-5"}
+
+func zaiReasoningSupport(n string) ReasoningSupport {
+	if hasPrefix(n, zaiAlwaysThinking) && !hasAny(n, "image", "embedding") {
+		return ReasoningSupportAlways
+	}
+	return ReasoningSupportNone
+}
+
+// xiaomiHybrid are the MiMo models that think by default and can switch it off (a toggle).
+var xiaomiHybrid = []string{"mimo-v2"}
+
+func xiaomiReasoningSupport(n string) ReasoningSupport {
+	if hasPrefix(n, xiaomiHybrid) {
 		return ReasoningSupportToggle
 	}
 	return ReasoningSupportNone

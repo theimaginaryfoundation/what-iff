@@ -122,7 +122,7 @@ type usageLog struct {
 }
 
 func (u *usageLog) addUsage(g genAIUsage) {
-	u.calls = append(u.calls, CallUsage{InputTokens: g.Input, CachedInputTokens: g.CachedInput, OutputTokens: g.Output, ReasoningTokens: g.Reasoning})
+	u.calls = append(u.calls, CallUsage{InputTokens: g.Input, CachedInputTokens: g.CachedInput, CacheWriteTokens: g.CacheWrite, OutputTokens: g.Output, ReasoningTokens: g.Reasoning})
 }
 
 // CallUsage returns a copy of every call's usage so far, in call order.

@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
@@ -187,4 +188,19 @@ func TestMergeChatExtraFields(t *testing.T) {
 	j := chatParamsJSON(t, p)
 	assert.Equal(t, float64(1), j["a"])
 	assert.Equal(t, float64(2), j["b"])
+}
+
+// Reasoning summaries need a verified OpenAI organization: OpenAI's refusal turns them off for the
+// process rather than failing every turn.
+func TestOpenAIReasoningSummaryFallback(t *testing.T) {
+	defer openAIReasoningSummariesOff.Store(false)
+	assert.True(t, isOpenAISummaryVerificationError(errors.New(`400 Bad Request: Your organization must be verified to generate reasoning summaries.`)))
+	assert.False(t, isOpenAISummaryVerificationError(errors.New("rate limited")))
+
+	assert.True(t, disableOpenAIReasoningSummaries())
+	assert.False(t, disableOpenAIReasoningSummaries(), "only the first call turns them off")
+	params := responses.ResponseNewParams{Model: "gpt-5.1"}
+	ApplyOpenAIReasoning(&params, models.ReasoningEffortHigh)
+	assert.Empty(t, params.Reasoning.Summary, "no summary is requested once they are off")
+	assert.Equal(t, shared.ReasoningEffort("high"), params.Reasoning.Effort)
 }

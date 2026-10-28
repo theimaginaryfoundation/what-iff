@@ -6,6 +6,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/ent/personality"
+	"github.com/theimaginaryfoundation/what-iff/ent/user"
+	"github.com/theimaginaryfoundation/what-iff/ent/userpreference"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -79,37 +81,33 @@ func setAgentLoop[E ~string, L ~string, B any](u turnSettingsSetter[E, L, B], v 
 	}
 }
 
-// seedChatTurnSettings fills a new chat's unset settings from its personality, then the
-// account default (ADR 0x026: seeded at creation, thread-local after).
-//
-// A sandboxed chat is not seeded: sandboxes are where other people can start turns on the
-// owner's account (the Discord relay), so they run Standard at the model's default effort unless
-// the chat is given a setting explicitly. Advanced and a high effort chosen for the owner's own
-// threads must not reach them by default.
-func seedChatTurnSettings(ctx context.Context, tx *ent.Tx, chat *models.Chat, personalityID uuid.UUID, pref *ent.UserPreference) error {
-	if chat.ContextScope.OrDefault() == models.ContextScopeSandbox {
-		chat.TurnSettingValues = chat.TurnSettingValues.Normalized()
-		return nil
-	}
-	var fromPersonality models.TurnSettingValues
+// InheritedTurnSettings returns what a thread inherits for the settings it does not set itself
+// (ADR 0x026): its personality's values and the account default. They are read at each turn,
+// not copied onto the thread, so the thread stores only explicit choices and later changes to the
+// personality or the default reach every thread that has no value of its own. A missing
+// personality or preference row reads as unset. Only the two columns are selected.
+func (d *Datastore) InheritedTurnSettings(ctx context.Context, userID, personalityID uuid.UUID) (fromPersonality, fromAccount models.TurnSettingValues, err error) {
 	if personalityID != uuid.Nil {
-		p, err := tx.Personality.Query().
-			Where(personality.ID(personalityID)).
+		p, err := d.dbClient.Personality.Query().
+			Where(personality.ID(personalityID), personality.HasUserWith(user.ID(userID))).
 			Select(personality.FieldReasoningEffort, personality.FieldAgentLoop).
 			Only(ctx)
 		if err != nil && !ent.IsNotFound(err) {
-			return err
+			return models.TurnSettingValues{}, models.TurnSettingValues{}, err
 		}
 		if p != nil {
 			fromPersonality = turnSettingsFromEnt(p.ReasoningEffort, p.AgentLoop)
 		}
 	}
-	var fromAccount models.TurnSettingValues
+	pref, err := d.dbClient.UserPreference.Query().
+		Where(userpreference.HasUserWith(user.ID(userID))).
+		Select(userpreference.FieldReasoningEffort, userpreference.FieldAgentLoop).
+		Only(ctx)
+	if err != nil && !ent.IsNotFound(err) {
+		return models.TurnSettingValues{}, models.TurnSettingValues{}, err
+	}
 	if pref != nil {
 		fromAccount = turnSettingsFromEnt(pref.ReasoningEffort, pref.AgentLoop)
 	}
-	given := chat.TurnSettingValues.Normalized()
-	chat.ReasoningEffort = models.FirstSetReasoningEffort(given.ReasoningEffort, fromPersonality.ReasoningEffort, fromAccount.ReasoningEffort)
-	chat.AgentLoop = models.FirstSetAgentLoop(given.AgentLoop, fromPersonality.AgentLoop, fromAccount.AgentLoop)
-	return nil
+	return fromPersonality, fromAccount, nil
 }

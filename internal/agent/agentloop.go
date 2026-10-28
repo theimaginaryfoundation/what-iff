@@ -39,6 +39,9 @@ type toolRoundsOptions struct {
 	// rounds before that call: runToolRounds returns it with the tool calls already made.
 	beforeCall func() error
 	afterCall  func()
+	// onToolCalls runs after each round's tools have run, with that round's tool calls (step
+	// already set), in the order the model asked for them.
+	onToolCalls func(calls []*models.ToolCall)
 }
 
 // runToolRounds is the tool loop: it calls the model until it answers without requesting tools,
@@ -78,7 +81,9 @@ func (a *Agent) runToolRounds(
 			opts.afterCall()
 		}
 		if err != nil {
-			return nil, nil, nil, false, err
+			// Return what the earlier rounds did with the error: an Advanced run saves those
+			// tool calls with its partial (Stop mid-step is the common case).
+			return nil, allToolCalls, allGeneratedAttachments, false, err
 		}
 		if result != nil && len(toolUses) > 0 {
 			return nil, nil, nil, false, fmt.Errorf("adapter invariant violated: Call returned both a result and tool uses")
@@ -93,6 +98,9 @@ func (a *Agent) runToolRounds(
 		toolResults, modelToolCalls, generatedAttachments := a.executeToolUses(ctx, chatCtx, round, toolUses)
 		for _, tc := range modelToolCalls {
 			tc.Step = opts.step
+		}
+		if opts.onToolCalls != nil {
+			opts.onToolCalls(modelToolCalls)
 		}
 		allToolCalls = append(allToolCalls, modelToolCalls...)
 		allGeneratedAttachments = append(allGeneratedAttachments, generatedAttachments...)

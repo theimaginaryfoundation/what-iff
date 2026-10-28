@@ -23,10 +23,11 @@ var (
 	ErrInvalidModelName            = errors.New("invalid model name")
 	ErrInvalidProvider             = errors.New("invalid model provider")
 	ErrInvalidSubscriptionTier     = errors.New("invalid model subscription tier")
+	ErrInvalidReasoningSupport     = errors.New("invalid model reasoning support override")
 )
 
 func toModelModel(e *ent.Model) *models.Model {
-	return &models.Model{
+	m := &models.Model{
 		ID:                 e.ID,
 		Name:               e.Name,
 		DisplayName:        e.DisplayName,
@@ -38,8 +39,15 @@ func toModelModel(e *ent.Model) *models.Model {
 		SubscriptionTier:   string(e.SubscriptionTier),
 		Deleted:            e.Deleted,
 		IsDefault:          e.IsDefault,
-		ReasoningSupport:   models.ReasoningSupportFor(string(e.Provider), e.Name),
 	}
+	if e.ReasoningSupportOverride != nil {
+		o := models.ReasoningSupport(*e.ReasoningSupportOverride)
+		if o.Valid() {
+			m.ReasoningSupportOverride = &o
+		}
+	}
+	m.ReasoningSupport = models.ReasoningSupportWithOverride(m.ReasoningSupportOverride, m.Provider, m.Name)
+	return m
 }
 
 // defaultBaseCreditsPerSlab is the fallback per-slab base credit for a model row
@@ -643,6 +651,18 @@ func (d *Datastore) AdminUpdateModel(ctx context.Context, id uuid.UUID, req mode
 	}
 	if req.VisionSupport != nil {
 		update.SetVisionSupport(*req.VisionSupport)
+	}
+	if req.ReasoningSupportOverride != nil {
+		if v := models.ReasoningSupport(*req.ReasoningSupportOverride); v == "" {
+			update.ClearReasoningSupportOverride()
+		} else if v.Valid() {
+			update.SetReasoningSupportOverride(entmodel.ReasoningSupportOverride(v))
+		} else {
+			if rerr := tx.Rollback(); rerr != nil {
+				d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
+			}
+			return nil, ErrInvalidReasoningSupport
+		}
 	}
 	if req.BaseCreditsPerSlab != nil {
 		update.SetBaseCreditsPerSlab(normalizeBaseCreditsPerSlab(*req.BaseCreditsPerSlab))

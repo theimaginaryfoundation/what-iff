@@ -52,6 +52,7 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			provider text NOT NULL DEFAULT 'openai',
 			tool_support bool NOT NULL DEFAULT false,
 			vision_support bool NULL,
+			reasoning_support_override text NULL,
 			base_credits_per_slab integer NOT NULL DEFAULT 1,
 			subscription_tier text NOT NULL DEFAULT 'high',
 			deleted bool NOT NULL DEFAULT false,
@@ -119,7 +120,8 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			tool_input text,
 			tool_output text,
 			tool_error text,
-			chat_message_tool_calls uuid NOT NULL,
+			chat_message_tool_calls uuid,
+			job_draft_tool_calls uuid,
 			step integer DEFAULT 0
 		)`,
 		`CREATE TABLE agent_jobs (
@@ -275,6 +277,7 @@ func TestAdminImportAccountBackup_HappyPath(t *testing.T) {
 	toolCallID := uuid.New()
 	agentJobID := uuid.New()
 
+	backupHigh, backupAdvanced := models.ReasoningEffortHigh, models.AgentLoopAdvanced
 	entries := map[string]string{
 		"manifest.json": `{"format_version":1}`,
 		"moods.jsonl": accountBackupJSONL(t, models.AccountBackupMood{
@@ -283,7 +286,8 @@ func TestAdminImportAccountBackup_HappyPath(t *testing.T) {
 		}),
 		"personalities.jsonl": accountBackupJSONL(t, models.AccountBackupPersonality{
 			ID: personalityID, Name: "Vix", SystemPrompt: "system prompt",
-			CreatedAt: now, UpdatedAt: now,
+			TurnSettingValues: models.TurnSettingValues{ReasoningEffort: &backupHigh},
+			CreatedAt:         now, UpdatedAt: now,
 		}),
 		"personality_moods.jsonl": accountBackupJSONL(t, models.AccountBackupPersonalityMood{
 			PersonalityID: personalityID, MoodID: moodID,
@@ -294,17 +298,19 @@ func TestAdminImportAccountBackup_HappyPath(t *testing.T) {
 		}),
 		"chats.jsonl": accountBackupJSONL(t, models.AccountBackupChat{
 			ID: chatID, Name: "Chat 1", PersonalityID: &personalityID, ActiveMoodID: &moodID,
-			CreatedAt: now, UpdatedAt: now,
+			TurnSettingValues: models.TurnSettingValues{AgentLoop: &backupAdvanced},
+			CreatedAt:         now, UpdatedAt: now,
 		}),
 		"chat_messages.jsonl": accountBackupJSONL(t, models.AccountBackupChatMessage{
 			ID: chatMessageID, ChatID: chatID, Message: "hello", Origin: models.MessageOriginUser,
 			ReadStatus: "read", SentAt: now,
+			AgentRun: &models.AgentRun{Version: models.AgentRunVersion, EndReason: models.AgentRunEndDone},
 		}),
 		"chat_message_context_items.jsonl": accountBackupJSONL(t, models.AccountBackupChatMessageContextItem{
 			ID: contextItemID, ChatMessageID: chatMessageID, Type: "note", Content: "ctx",
 		}),
 		"tool_calls.jsonl": accountBackupJSONL(t, models.AccountBackupToolCall{
-			ID: toolCallID, ChatMessageID: chatMessageID, ToolName: "search",
+			ID: toolCallID, ChatMessageID: chatMessageID, ToolName: "search", Step: 2,
 			CreatedAt: now, UpdatedAt: now,
 		}),
 		"agent_jobs.jsonl": accountBackupJSONL(t, models.AccountBackupAgentJob{
@@ -355,6 +361,18 @@ func TestAdminImportAccountBackup_HappyPath(t *testing.T) {
 	agentJobOK, err := ds.agentJobBelongsToUser(ctx, userID, agentJobID)
 	require.NoError(t, err)
 	require.True(t, agentJobOK)
+
+	// ADR 0x026 fields round-trip.
+	p := ds.dbClient.Personality.GetX(ctx, personalityID)
+	require.NotNil(t, p.ReasoningEffort)
+	require.Equal(t, "high", string(*p.ReasoningEffort))
+	c := ds.dbClient.Chat.Query().Where(entchat.ID(chatID)).Select(entchat.FieldAgentLoop).OnlyX(ctx)
+	require.NotNil(t, c.AgentLoop)
+	require.Equal(t, "advanced", string(*c.AgentLoop))
+	m := ds.dbClient.ChatMessage.GetX(ctx, chatMessageID)
+	require.NotNil(t, m.AgentRun)
+	require.Equal(t, models.AgentRunVersion, m.AgentRun.Version)
+	require.Equal(t, 2, ds.dbClient.ToolCall.GetX(ctx, toolCallID).Step)
 
 	linked, err := ds.dbClient.Personality.Query().
 		Where(personality.ID(personalityID), personality.HasMoodsWith(mood.ID(moodID))).

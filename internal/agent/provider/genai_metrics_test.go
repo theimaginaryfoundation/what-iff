@@ -136,7 +136,7 @@ func TestResponsesUsage_ReadsCachedAndReasoning(t *testing.T) {
 func TestAnthropicUsage_KeepsTotalInputAndSplitsCacheReads(t *testing.T) {
 	t.Parallel()
 	u := anthropic.Usage{InputTokens: 10, CacheReadInputTokens: 500, CacheCreationInputTokens: 90, OutputTokens: 40}
-	require.Equal(t, genAIUsage{Input: 600, Output: 40, CachedInput: 500}, anthropicUsage(u))
+	require.Equal(t, genAIUsage{Input: 600, Output: 40, CachedInput: 500, CacheWrite: 90}, anthropicUsage(u))
 }
 
 // The shared Chat Completions stream (all OpenAI-compatible providers) records duration, time

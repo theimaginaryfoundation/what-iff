@@ -1,38 +1,47 @@
 package modeltypes
 
+// AgentRunVersion is the current AgentRun format. A reader must render an unknown version
+// generically (or not at all) rather than misread it.
+const AgentRunVersion = 1
+
 // AgentRun is the durable record of an Advanced-loop turn (ADR 0x026), saved on the assistant
-// message it produced (ChatMessage.AgentRun). Each step holds what the model wrote during it,
-// in order: its own reasoning and the text it wrote between tool calls. The final reply is the
-// message itself and is not repeated here; the step's tool calls are the message's ToolCall rows
-// with the same Step.
+// message it produced (ChatMessage.AgentRun). Each step holds what happened during it, in order:
+// the model's reasoning, the text it wrote between tool calls, and its tool calls (by ToolCall
+// id, the message's ToolCall rows). The final reply is the message itself and is not repeated.
 type AgentRun struct {
-	Steps []AgentRunStep `json:"steps,omitempty"`
+	// Version is the format (AgentRunVersion).
+	Version int            `json:"version"`
+	Steps   []AgentRunStep `json:"steps,omitempty"`
 	// Plan is the run's last update_plan checklist.
 	Plan []PlanItem `json:"plan,omitempty"`
 	// EndReason is why the run stopped (AgentRunEnd*).
 	EndReason AgentRunEnd `json:"end_reason,omitempty"`
 }
 
-// AgentRunStep is one step of an Advanced run.
+// AgentRunStep is one step of an Advanced run: its events in the order they happened.
 type AgentRunStep struct {
-	Step  int            `json:"step"`
-	Notes []AgentRunNote `json:"notes,omitempty"`
+	Step   int             `json:"step"`
+	Events []AgentRunEvent `json:"events,omitempty"`
 }
 
-// AgentRunNoteKind says what a note is.
-type AgentRunNoteKind string
+// AgentRunEventKind says what an event is. Readers must skip kinds they do not know.
+type AgentRunEventKind string
 
 const (
-	// AgentRunNoteReasoning is the model's own reasoning (thinking, reasoning summaries).
-	AgentRunNoteReasoning AgentRunNoteKind = "reasoning"
-	// AgentRunNoteText is text the model wrote as output before its final reply.
-	AgentRunNoteText AgentRunNoteKind = "text"
+	// AgentRunEventReasoning is the model's own reasoning (thinking, reasoning summaries).
+	AgentRunEventReasoning AgentRunEventKind = "reasoning"
+	// AgentRunEventText is text the model wrote as output before its final reply.
+	AgentRunEventText AgentRunEventKind = "text"
+	// AgentRunEventToolCall is a tool call the model made; ToolCallID is its ToolCall row.
+	AgentRunEventToolCall AgentRunEventKind = "tool_call"
 )
 
-// AgentRunNote is one contiguous piece of a step's notes.
-type AgentRunNote struct {
-	Kind AgentRunNoteKind `json:"kind"`
-	Text string           `json:"text"`
+// AgentRunEvent is one thing that happened in a step: a contiguous note (Text) or a tool call
+// (ToolCallID).
+type AgentRunEvent struct {
+	Kind       AgentRunEventKind `json:"kind"`
+	Text       string            `json:"text,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
 }
 
 // AgentRunEnd is why an Advanced run stopped.
@@ -70,25 +79,15 @@ func (r *AgentRun) OpenItems() []PlanItem {
 
 // AgentRunDraft is an in-progress Advanced run persisted on its job (Job.DraftAgentRun) at every
 // step boundary, so a run that fails, is stopped, or dies with the server still leaves its work
-// behind: the partial message is built from it.
+// behind: the partial message is built from it. Its tool calls are not copied here: they are
+// ToolCall rows written as each call finishes, linked to the job until a message takes them.
 type AgentRunDraft struct {
-	Run       AgentRun           `json:"run"`
-	ToolCalls []AgentRunToolCall `json:"tool_calls,omitempty"`
+	Run AgentRun `json:"run"`
 	// The reply's generation metadata, so a draft finalized without the agent (a server shutdown)
 	// still records which model, personality and mode produced it.
 	GenerationModel       string `json:"generation_model,omitempty"`
 	GenerationPersonality string `json:"generation_personality,omitempty"`
 	GenerationMoodID      string `json:"generation_mood_id,omitempty"`
-}
-
-// AgentRunToolCall is a finished tool call in an AgentRunDraft, saved as a ToolCall row when the
-// draft becomes a message.
-type AgentRunToolCall struct {
-	ToolName   string `json:"tool_name"`
-	ToolInput  string `json:"tool_input,omitempty"`
-	ToolOutput string `json:"tool_output,omitempty"`
-	ToolError  string `json:"tool_error,omitempty"`
-	Step       int    `json:"step,omitempty"`
 }
 
 // PlanItemStatus is the state of one item in an Advanced run's plan.

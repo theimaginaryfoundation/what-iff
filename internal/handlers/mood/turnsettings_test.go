@@ -20,6 +20,7 @@ type fakeStore struct {
 	Store
 	created *models.CreateMoodRequest
 	updated *models.UpdateMoodRequest
+	stored  *models.Mood
 }
 
 func (f *fakeStore) CreateMood(_ context.Context, _ uuid.UUID, req models.CreateMoodRequest) (*models.Mood, error) {
@@ -33,12 +34,18 @@ func (f *fakeStore) UpdateMood(_ context.Context, _ uuid.UUID, id uuid.UUID, req
 }
 
 func (f *fakeStore) GetMood(context.Context, uuid.UUID, uuid.UUID) (*models.Mood, error) {
+	if f.stored != nil {
+		return f.stored, nil
+	}
 	return nil, errors.New("unused")
 }
 
-func moodRequest(t *testing.T, method, body string, handle func(*Handler) http.HandlerFunc) (*fakeStore, *httptest.ResponseRecorder) {
+func moodRequest(t *testing.T, method, body string, handle func(*Handler) http.HandlerFunc, stored ...*models.Mood) (*fakeStore, *httptest.ResponseRecorder) {
 	t.Helper()
 	store := &fakeStore{}
+	if len(stored) > 0 {
+		store.stored = stored[0]
+	}
 	h := NewHandler(store, zap.NewNop(), nil)
 	id := uuid.New()
 	req := httptest.NewRequest(method, "/mood/"+id.String(), strings.NewReader(body))
@@ -75,5 +82,26 @@ func TestMoodHandlers_TurnSettings(t *testing.T) {
 		if w.Code != http.StatusBadRequest || store.created != nil || store.updated != nil {
 			t.Fatalf("invalid effort: status %d", w.Code)
 		}
+	}
+}
+
+// PUT keeps a setting the client did not send (an older client must not clear it by saving);
+// "" sent explicitly still clears.
+func TestUpdateMood_KeepsOmittedTurnSettings(t *testing.T) {
+	update := func(h *Handler) http.HandlerFunc { return h.UpdateMood }
+	high, adv := models.ReasoningEffortHigh, models.AgentLoopAdvanced
+	stored := &models.Mood{TurnSettingValues: models.TurnSettingValues{ReasoningEffort: &high, AgentLoop: &adv}}
+
+	store, w := moodRequest(t, http.MethodPut, `{"name":"Research"}`, update, stored)
+	if w.Code >= 300 {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	if store.updated.ReasoningEffort == nil || *store.updated.ReasoningEffort != high || store.updated.AgentLoop == nil || *store.updated.AgentLoop != adv {
+		t.Fatalf("omitted settings were not kept: %+v", store.updated.TurnSettingValues)
+	}
+
+	store, _ = moodRequest(t, http.MethodPut, `{"name":"Research","reasoning_effort":""}`, update, stored)
+	if store.updated.ReasoningEffort != nil || store.updated.AgentLoop == nil {
+		t.Fatalf("an explicit clear must clear, and only that key: %+v", store.updated.TurnSettingValues)
 	}
 }
