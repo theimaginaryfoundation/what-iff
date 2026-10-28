@@ -119,20 +119,31 @@ func NativeReasoningEffort(provider, name string) ReasoningEffort {
 // ReasoningEffortAboveNative returns effective (an effort as sent, from EffectiveReasoningEffort)
 // when it asks the model to reason more than it does unasked (NativeReasoningEffort), else "".
 // A selection at or below the native level costs the model no more than leaving it unset.
+// An effective effort that is not a known level is never reported; a native level that is not
+// one counts as off, the same rule as a default the docs do not state.
 func ReasoningEffortAboveNative(provider, name string, effective ReasoningEffort) ReasoningEffort {
-	if !effective.Valid() || effortRank(effective) <= effortRank(NativeReasoningEffort(provider, name)) {
+	rank, ok := effortRank(effective)
+	if !ok {
+		return ""
+	}
+	native, ok := effortRank(NativeReasoningEffort(provider, name))
+	if !ok {
+		native, _ = effortRank(ReasoningEffortOff)
+	}
+	if rank <= native {
 		return ""
 	}
 	return effective
 }
 
-func effortRank(e ReasoningEffort) int {
+// effortRank is e's position in ReasoningEfforts (lowest first); ok is false for anything else.
+func effortRank(e ReasoningEffort) (rank int, ok bool) {
 	for i, l := range ReasoningEfforts {
 		if l == e {
-			return i
+			return i, true
 		}
 	}
-	return -1
+	return 0, false
 }
 
 // EffectiveReasoningEffort maps a selected effort onto what the model can do. It returns ""

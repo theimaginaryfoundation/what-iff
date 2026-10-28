@@ -150,13 +150,31 @@ func TestNativeReasoningEffort(t *testing.T) {
 		{"openai", "gpt-5.5", ReasoningEffortMedium},
 		{"openai", "o3", ReasoningEffortMedium},
 		{"openai", "gpt-4o", ReasoningEffortOff},
+		{"openai", "gpt-5-chat-latest", ReasoningEffortOff},
+		{"openai", "o3-pro", ReasoningEffortOff},
+		{"openai", "o4-mini", ReasoningEffortMedium},
+		{"openai", "gpt-5.2", ReasoningEffortOff},
+		{"openai", "gpt-5.6", ReasoningEffortMedium},
 		{"google", "gemini-2.5-flash", ReasoningEffortHigh},
 		{"google", "gemini-3.1-pro-preview", ReasoningEffortHigh},
 		{"google", "gemini-3.8-flash", ReasoningEffortMedium},
+		{"google", "gemini-3.6-flash", ReasoningEffortMedium},
+		{"google", "gemini-3-pro-preview", ReasoningEffortHigh},
+		{"google", "gemini-3-flash-preview", ReasoningEffortHigh},
+		{"google", "gemini-2.5-pro", ReasoningEffortHigh},
+		{"google", "gemini-3-pro-image-preview", ReasoningEffortOff},
 		{"qwen", "qwen3-235b-a22b-thinking-2507", ReasoningEffortHigh},
 		{"qwen", "qwen3.7-plus", ReasoningEffortHigh},
 		{"qwen", "qwen-plus", ReasoningEffortOff},
 		{"qwen", "qwen3-32b", ReasoningEffortOff},
+		{"qwen", "qwen3.5-plus", ReasoningEffortHigh},
+		{"qwen", "qwen3.6-flash", ReasoningEffortHigh},
+		{"qwen", "qwen3.8-max", ReasoningEffortHigh},
+		{"qwen", "qwen3.8-2.4t-a95b", ReasoningEffortHigh},
+		{"qwen", "qwen3.7-max-preview", ReasoningEffortHigh},
+		{"qwen", "qwen3.6-coder-plus", ReasoningEffortOff},
+		{"qwen", "qwen3-235b-a22b-instruct-2507", ReasoningEffortOff},
+		{"qwen", "qwen-flash", ReasoningEffortOff},
 		{"deepseek", "deepseek-v4-pro", ReasoningEffortHigh},
 		{"mistral", "mistral-large-4", ReasoningEffortOff},
 		{"zai", "glm-5", ReasoningEffortHigh},
@@ -166,6 +184,20 @@ func TestNativeReasoningEffort(t *testing.T) {
 	for _, c := range cases {
 		assert.Equal(t, c.want, NativeReasoningEffort(c.provider, c.name), "%s/%s", c.provider, c.name)
 	}
+}
+
+// ReasoningEfforts lists exactly the valid levels, lowest first: ReasoningEffortAboveNative ranks by
+// it, so a level added to Valid but not here (or out of order) would misrank.
+func TestReasoningEffortsRankEveryValidLevel(t *testing.T) {
+	assert.Equal(t, []ReasoningEffort{ReasoningEffortOff, ReasoningEffortLow, ReasoningEffortMedium, ReasoningEffortHigh}, ReasoningEfforts)
+	for _, e := range ReasoningEfforts {
+		assert.True(t, e.Valid(), e)
+		_, ok := effortRank(e)
+		assert.True(t, ok, e)
+	}
+	_, ok := effortRank("xhigh")
+	assert.False(t, ok)
+	assert.Empty(t, ReasoningEffortAboveNative("openai", "gpt-5.1", "xhigh"), "an unknown level is never reported")
 }
 
 // Only an effort above the native level is reported: a lower or equal one costs the model no more.
