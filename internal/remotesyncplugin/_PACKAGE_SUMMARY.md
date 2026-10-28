@@ -2,15 +2,15 @@
 
 ## Role
 
-Wires remote sync into the API server through the plugin seam: the `/api/remote-sync` routes and the runner (ADR 0x026).
+Wires remote sync into the API server through the plugin seam: the `/api/remote-sync` routes and the runner (ADR 0x032).
 Linked by a blank import in `cmd/api-server/plugins.go`.
 
 ## Responsibilities
 
 - **`init`:** registers the plugin.
 - **`apply`:** does nothing unless `REMOTE_SYNC_ENABLED` is true (read here rather than at init so a value from `.env` counts).
-  Otherwise it reads `REMOTE_SYNC_INTERVAL`, `REMOTE_SYNC_MAX_THREADS_PER_RUN` and `REMOTE_SYNC_ALLOW_LOCAL_NETWORK`, mounts the routes on the authenticated router, and starts the runner on the server's lifecycle context.
-- **`Handler` (`handlers.go`):** `GET`, `PUT` and `DELETE /remote-sync`, and `POST /remote-sync/run`.
+  Otherwise it reads `REMOTE_SYNC_INTERVAL` (background syncs, default an hour, `off` for none), `REMOTE_SYNC_MAX_THREADS_PER_RUN` and `REMOTE_SYNC_ALLOW_LOCAL_NETWORK`, mounts the routes on the authenticated router, and starts the background runner on the server's lifecycle context unless the interval is off.
+- **`Handler` (`handlers.go`):** `GET`, `PUT` and `DELETE /remote-sync`, `POST /remote-sync/run` ("sync now"), and `POST /remote-sync/wake` (the app is being used: sync if stale; always 200 with `started`).
 
 ## Key types and entry points
 

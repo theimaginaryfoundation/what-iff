@@ -1,10 +1,15 @@
-# ADR 0x026: Remote sync — keep a self-hosted copy of a hosted account, automatically
+# ADR 0x032: Mullet mode — keep a self-hosted copy of a hosted account, automatically
 
-- **Status:** Proposed (experimental)
-- **Date:** 2026-10-13
+- **Status:** Proposed (experimental beta)
+- **Date:** 2026-10-13, revised 2026-10-28 (sync on wake instead of polling; first published as 0x026, renumbered because 0x026 went to another ADR first)
 - **Deciders:** What Iff maintainers
+- **PR:** [#324](https://github.com/theimaginaryfoundation/what-iff/pull/324)
 - **Builds on:** webhook read access and token scopes ([ADR 0x023](0x023-webhook-read-access.md)), the account export and import (ADR 0x018), lazy thread rehydration, the plugin seam (`internal/plugins`), and the Discord relay's shape ([ADR 0x025](0x025-discord-relay.md)).
 - **Related:** "What if…" branching, PR #148 (draft): the fork semantics used here.
+
+**Mullet mode** is the product name: business up front (the hosted app, for talking on the go), party in the back (your own server, with your own models, keys and data).
+The code, routes and settings call it *remote sync*, which says what it does.
+How to set it up and why you would: [the mullet mode guide](../guides/mullet-mode.md).
 
 ## Context
 
@@ -29,12 +34,12 @@ Branching (PR #148) already gives the answer the product wants: when histories d
 
 | # | Requirement | Why it shapes the design |
 |---|---|---|
-| R1 | **Set up once, then hands-off.** One token, one URL, one toggle. No per-thread action, no manual export. | Needs a server-side poller, not a client-side or one-shot import. |
+| R1 | **Set up once, then hands-off.** One token, one URL, one toggle. No per-thread action, no manual export. | The local server syncs on its own, triggered by the local app being used, not by a one-shot import. |
 | R2 | **Works against today's hosted app.** No hosted-side release is needed for v1. | Only the `chat:read` webhook reads may be used, with the shapes they already return. |
 | R3 | **Nothing is lost on either side.** Sync never deletes or edits a local message, and never writes to the hosted account. | v1 is pull-only and append-only; local deletes and edits stay local. |
 | R4 | **Concurrent writes never interleave.** If a mirrored thread got local messages and the hosted thread also moved on, both continuations survive as separate threads. | Divergence is detected per thread and resolved by forking, never by merging. |
 | R5 | **Idempotent and crash-safe.** Re-running a sync, two instances running at once, or a crash halfway through never duplicates a message. | Per-message links with a unique key; each thread's changes commit in one transaction; a lease per account. |
-| R6 | **Gentle on the hosted app.** An idle account costs a couple of requests per interval. | Incremental discovery that stops at the first unchanged page; page limits; per-run caps; no retries on auth errors. |
+| R6 | **Gentle on the hosted app.** A copy nobody is reading costs the hosted app (almost) nothing. | Syncs start when the local app is used (§8), with a slow, optional background sync; incremental discovery that stops at the first unchanged page; page limits; per-run caps; no retries on auth errors. |
 | R7 | **Off unless the operator turns it on, and safe when on.** A multi-tenant server must not become a proxy into other networks. | Opt-in env flag; HTTPS to public addresses only, checked on every connection (local networks only with an explicit flag); the token is encrypted at rest and never returned. |
 | R8 | **Continuing offline works well.** A mirrored 2,000-message thread must not be fed raw to the model on the first local turn. | Mirrored threads are created as imported threads, so the existing rehydration summary (and memory seeding) runs on first use. |
 | R9 | **Optional and removable.** The feature is its own package and tables; the core `chats` and `chat_messages` schemas do not change. | Plugin seam, separate tables keyed by plain UUIDs, like the Discord relay. |
@@ -69,7 +74,10 @@ Branching (PR #148) already gives the answer the product wants: when histories d
 1. On the hosted app: Tools → Webhooks → create a token with **Read threads** (`chat:read`). This page already exists.
 2. On the local app: Tools → **Remote sync** → paste the token (the address defaults to the hosted API, `https://api.whatiff.chat`; the app's own addresses are accepted and mapped to it) → **Save**.
    Saving checks the token against the remote (`GET /webhooks/personality?limit=1`) and reports precisely what is wrong: unreachable, not a token (401), or missing `chat:read` (403).
-3. Sync is on. The first run starts immediately; later runs come every `REMOTE_SYNC_INTERVAL` (default 5 minutes). **Sync now** runs one at once.
+3. Sync is on. The first run starts immediately. After that, the copy is brought up to date whenever the local app is opened or comes back after a while (§8), plus once an hour in the background. **Sync now** runs one at once.
+
+A brand-new local account has no persona yet, and the app normally sends such an account straight to persona setup.
+Tools is exempt from that redirect (like Import & Export), and the first-run welcome offers "Keep a copy of those threads here" when the server runs mullet mode, so someone whose personas live on the hosted app can bring their history over first.
 
 Minting the token stays a deliberate step on the hosted app: a local server asking the hosted app to mint its own credential would be circular, and the token page is where scopes are chosen and revoked.
 
@@ -139,11 +147,19 @@ When #148 lands, the sync fork should set #148's `forked_from_chat_id` and `fork
 - **Context:** the thread has an import `source` and no summary, so the first local turn (or opening it) starts the existing rehydration: a summary of everything but the last few turns, plus memory seeding, on the local server's own model keys.
 - **Renames:** a hosted rename is copied only if the local name is still the last hosted name, so a local rename wins.
 
-### 8. Running (R5, R6)
+### 8. Running: sync on wake, not on a clock (R5, R6)
 
-- The runner ticks every minute, lists enabled accounts whose last run is older than the interval, and for each one **claims a lease** with a conditional update (`lease_until < now`). Only the claimer runs it, so several API instances need no leader lock.
+The copy only matters when someone is about to read it, so that is when the remote is asked.
+
+- **Wake.** The web app calls `POST /api/remote-sync/wake` when a signed-in session starts, and when the tab becomes visible after at least five minutes hidden (`RemoteSyncWakeService`).
+  The server starts a run if the last one finished more than two minutes ago (`Syncer.Wake`), and otherwise does nothing.
+  Sync being off, not set up, waiting on its owner or already running is not an error: a wake is a hint.
+  When the wake started a run, the app follows it and refreshes the thread list if anything came over, so a thread continued on the phone is simply there.
+- **Background.** A slow sync for copies nobody is reading (backups, a server whose app is left open): `REMOTE_SYNC_INTERVAL`, default one hour, or `off` for wakes only.
+  The first version polled every five minutes; for a hosted app serving many home servers that is a steady stream of requests that almost always find nothing.
+- **Leases.** Every run, however started, first **claims a lease** with a conditional update (`lease_until < now`). Only the claimer runs it, so several API instances, several open tabs, or a wake racing the timer need no leader lock.
 - Accounts run one at a time per instance, with a per-request timeout and a cap on response size.
-- **401 or 403** sets `needs_attention` with a message that says which, and the runner skips that account until its settings are saved again: retrying a revoked token every five minutes helps nobody.
+- **401 or 403** sets `needs_attention` with a message that says which, and neither wakes nor the timer run that account until its settings are saved again: retrying a revoked token helps nobody.
 - Network errors, 429 and 5xx record `error` and are retried next interval. A failure on one thread is recorded and the run moves on to the next.
 - Each run logs counts only (threads checked, updated, created, forked; messages added), never content.
 
@@ -155,8 +171,10 @@ When #148 lands, the sync fork should set #148's `forked_from_chat_id` and `fork
 | `PUT /api/remote-sync` | Save URL, token (required the first time; omitted keeps the stored one) and enabled. Validates against the remote before saving; clears `needs_attention`. |
 | `DELETE /api/remote-sync` | Stop syncing and forget the token and links. Local threads stay. |
 | `POST /api/remote-sync/run` | Run now (202). 409 if a run is already in progress. |
+| `POST /api/remote-sync/wake` | The app is being used: run if stale (§8). Always 200 with `{started}`. |
 
-When the plugin is off these routes are not mounted (404), and the UI shows the tab as unavailable with the variable to set.
+When the plugin is off these routes are not mounted (404), and the web app hides the tab and sends no wakes.
+That relies on a cross-origin browser being able to read the 404, so the server's not-found and method-not-allowed responses carry CORS headers like every other response (before this, mux skipped middleware for them, and a switched-off plugin looked switched on).
 
 ### 10. Security (R7)
 
@@ -173,7 +191,15 @@ When the plugin is off these routes are not mounted (404), and the UI shows the 
 - **Two-way sync in v1.** Writing local turns to the hosted thread needs a write that records an existing exchange without running the agent, which the webhook surface does not have (`user` mode runs a turn; `assistant` mode posts only a reply). It also turns every conflict into a two-sided one. Deferred.
 - **Stack on PR #148 now.** It is 346 commits behind `main` with conflicts in ten files. Making the sync wait for it, or rebasing someone's draft as a side effect, is the wrong trade for an experiment. The fork semantics are the same; only the lineage display waits.
 - **A new hosted scope (`sync:read`) first.** It would let the sync also bring persona prompts, memories and attachments, and an ascending "since" read would make polling cheaper. It needs a hosted release and a decision about serving private working state to a static token. Deferred so v1 works today (R2), and listed below.
-- **Outbound webhooks from the hosted app instead of polling.** Lower latency, but a home server is often not reachable from the internet. Polling is the only thing that works behind NAT. Deferred.
+- **Outbound webhooks from the hosted app instead of polling.** Lower latency, but a home server is often not reachable from the internet. Deferred.
+- **Polling every five minutes** (the first version). Simple, but every connected home server costs the hosted app two requests per interval, around the clock, nearly all of which find nothing. Replaced by sync on wake (§8).
+- **Firebase (FCM) push on change, then sync on wake.** The hosted app already sends FCM pushes to the mobile app (`overlay/internal/push`). Considered on 2026-10-28 and not taken for now:
+  - FCM delivers to app instances running a Firebase SDK (Android, iOS, a browser's service worker), not to a server process, so the home server itself cannot receive it. The only receiver at home would be a browser tab of the local app.
+  - A push to that tab only helps while the tab is open but unused. Once someone looks at it, a wake already syncs; the push would save at most the gap between "a message was sent on the phone" and "I came back to the tab".
+  - It would put the hosted Firebase project's web config, a service worker and a third-party push dependency into every self-hosted install, and the hosted side would keep device tokens for browsers on other people's servers, keyed to a webhook token.
+  - What it was meant to fix, no-op load, is fixed by not polling at all.
+
+  Worth revisiting if the local side gains a native client, or if people want the copy current while the tab sits in the background (a long-poll or server-sent-events "something changed" channel from the hosted app would also work behind NAT, without Google in the path).
 
 ## Consequences
 
@@ -182,7 +208,7 @@ When the plugin is off these routes are not mounted (404), and the UI shows the 
 - Local copies of hosted threads take local model calls on first use (rehydration summary and memory seeding), metered against the local keys.
 - Three new tables and one new plugin. Removing the feature is deleting the plugin and dropping the tables; mirrored threads remain ordinary imported threads.
 
-## Follow-ups
+## Not done yet
 
 - **#148 lineage:** set `forked_from_*` on sync forks so the branch banner and markers show them.
 - **`sync:read` scope (hosted):** persona prompts and settings, memories, attachment downloads, chats `updated_since`, an ascending messages-since cursor, and deletion tombstones, behind its own scope and a clear "full copy of your account" warning on the token page.
@@ -190,9 +216,8 @@ When the plugin is off these routes are not mounted (404), and the UI shows the 
 - **Hosted-side helper:** a "Sync to a self-hosted app" preset on the Webhooks tab that creates a correctly scoped token in one click.
 - **Thread list badge** for mirrored and forked threads (the link table already knows which are which).
 - **Archive and favourite state** are copied when a mirror is created, not afterwards.
-- **First-run path:** an account with no persona is sent to persona setup and cannot reach Tools until it has one. A brand-new self-hosted account that only wants to sync should be offered "Keep a copy of your whatiff.chat threads" right there.
 - **Close the apply race:** a local turn that commits between the local-tail check and the append is appended after rather than forked. The window is milliseconds; locking the tracking thread's row for the apply would close it.
-- **The hosted web app asks `GET /api/remote-sync` once per session** to decide whether to show the tab, and gets a 404 (the plugin is off there). A build-time flag could skip the request where the feature can never be on.
+- **The hosted web app asks `GET /api/remote-sync` once per session** to decide whether to show the tab and send wakes, and gets a 404 from the router (no database work). A build-time flag could skip it where the feature can never be on.
 
 ## Test plan
 

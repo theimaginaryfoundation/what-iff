@@ -2,7 +2,7 @@
 
 ## Role
 
-Remote sync's logic: keeps a copy of a user's threads from another What Iff server (usually the hosted app) in this one, pulled through the remote's webhook read routes with a `chat:read` token (ADR 0x026).
+Remote sync's logic: keeps a copy of a user's threads from another What Iff server (usually the hosted app) in this one, pulled through the remote's webhook read routes with a `chat:read` token (ADR 0x032).
 It talks to the remote through a small `Remote` interface and to storage through `Store`, so it is tested without either.
 
 ## Responsibilities
@@ -14,7 +14,8 @@ It talks to the remote through a small `Remote` interface and to storage through
   `discover` walks the remote thread list (newest activity first, active then archived) and stops at the first page with nothing changed, unless the account needs a full walk.
   `pull` reads a thread's messages newest first back to its head less an overlap (the whole history for a new link) and returns them oldest first.
   Each thread is applied through `Store.ApplyRemoteSyncThread`, which creates, adopts, appends or forks.
-- **Runs:** `Start` claims the account's lease and runs in the background ("sync now" and saves); `RunDue` runs every due account; `Runner` calls it on a timer.
+- **Runs:** `Wake` runs the account if its last run is older than `WakeMinAge` (two minutes): the web app sends one when a session starts or comes back, which is how copies stay current without polling.
+  `Start` claims the lease and runs regardless of age ("sync now" and saves); `RunDue` runs every account due on the background interval; `Runner` calls it on a timer.
   A run records its outcome with `FinishRemoteSyncRun`, which also releases the lease.
 
 ## Key types and entry points

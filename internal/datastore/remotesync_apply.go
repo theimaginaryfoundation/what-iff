@@ -19,7 +19,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
-// Applying one remote thread to the local account (ADR 0x026 §6). Everything for one thread
+// Applying one remote thread to the local account (ADR 0x032 §6). Everything for one thread
 // happens in one transaction, together with its link rows, so a failure leaves nothing behind
 // and a re-run picks up exactly where the last committed one stopped.
 //

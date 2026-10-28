@@ -16,7 +16,7 @@ const (
 	ChatSourceOpenAI    = "openai"
 	ChatSourceAnthropic = "anthropic"
 	// ChatSourceRemoteSync marks a thread copied from another What Iff server by remote sync
-	// (ADR 0x026). Like any imported thread, it is summarized lazily on first use.
+	// (ADR 0x032). Like any imported thread, it is summarized lazily on first use.
 	ChatSourceRemoteSync = "remote_sync"
 )
 

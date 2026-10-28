@@ -1,6 +1,6 @@
 // Package remotesync keeps a copy of a user's threads from another What Iff server (usually the
 // hosted app) in this one, pulled through the remote's webhook read routes with a chat:read
-// token. See docs/adr/0x026-remote-sync.md.
+// token. See docs/adr/0x032-mullet-mode-remote-sync.md.
 package remotesync
 
 import (
