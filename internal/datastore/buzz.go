@@ -912,24 +912,25 @@ func (d *Datastore) buzzSpeakerForTurn(ctx context.Context, userID, chatID, chat
 	return names(rows), nil
 }
 
-// RelayPlatformForChat names the platform a relay thread is relayed from ("Discord", "Buzz"),
-// or "" for an ordinary chat. It picks the wording of the memory extraction note.
+// RelayPlatformForChat names the platform a relay thread is relayed from ("Discord", "Buzz",
+// "Slack"), or "" for an ordinary chat. It picks the wording of the memory extraction note.
 func (d *Datastore) RelayPlatformForChat(ctx context.Context, userID, chatID uuid.UUID) (string, error) {
 	if chatID == uuid.Nil {
 		return "", nil
 	}
-	buzz, err := externalBuzzChat(ctx, d.dbClient, userID, chatID)
-	if err != nil {
-		return "", err
+	for _, p := range []struct {
+		name  string
+		bound func(context.Context, *ent.Client, uuid.UUID, uuid.UUID) (bool, error)
+	}{{"Buzz", externalBuzzChat}, {"Slack", externalSlackChat}, {"Discord", externalDiscordChat}} {
+		ok, err := p.bound(ctx, d.dbClient, userID, chatID)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return p.name, nil
+		}
 	}
-	if buzz {
-		return "Buzz", nil
-	}
-	discord, err := externalRelayChat(ctx, d.dbClient, userID, chatID)
-	if err != nil || !discord {
-		return "", err
-	}
-	return "Discord", nil
+	return "", nil
 }
 
 // --- helpers ---

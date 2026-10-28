@@ -678,8 +678,8 @@ func (d *Datastore) ListDiscordPendingPosts(ctx context.Context, userID, chatID 
 }
 
 // IsExternalRelayChat reports whether chatID is one of the user's relay threads: bound to a
-// Discord channel by one of the user's bots, or to a Buzz channel by one of their personas'
-// Buzz identities, sandboxed or not. People outside the account speak there, so memories written from it are stored with external provenance
+// Discord channel by one of the user's bots, to a Buzz channel by one of their personas'
+// Buzz identities, or to a Slack channel by one of their personas' Slack apps, sandboxed or not. People outside the account speak there, so memories written from it are stored with external provenance
 // (models.MemoryProvenanceExternal). The sandbox decides what such a thread may read, not who is
 // talking in it, so an owner who unsandboxed a relay thread still gets its memories marked.
 func (d *Datastore) IsExternalRelayChat(ctx context.Context, userID, chatID uuid.UUID) (bool, error) {
@@ -691,20 +691,29 @@ func externalRelayChat(ctx context.Context, client *ent.Client, userID, chatID u
 	if chatID == uuid.Nil {
 		return false, nil
 	}
-	discord, err := client.DiscordBinding.Query().
+	for _, bound := range []func(context.Context, *ent.Client, uuid.UUID, uuid.UUID) (bool, error){
+		externalDiscordChat, externalBuzzChat, externalSlackChat,
+	} {
+		if ok, err := bound(ctx, client, userID, chatID); err != nil || ok {
+			return ok, err
+		}
+	}
+	return false, nil
+}
+
+// externalDiscordChat reports whether chatID is bound to a Discord channel by one of the user's
+// bots, on any client (a transaction's included).
+func externalDiscordChat(ctx context.Context, client *ent.Client, userID, chatID uuid.UUID) (bool, error) {
+	return client.DiscordBinding.Query().
 		Where(
 			discordbinding.ChatID(chatID),
 			discordbinding.HasBotWith(discordbot.HasOwnerWith(user.ID(userID))),
 		).
 		Exist(ctx)
-	if err != nil || discord {
-		return discord, err
-	}
-	return externalBuzzChat(ctx, client, userID, chatID)
 }
 
 // ExternalSpeakerForMessage returns the display name recorded for one of the user's saved
-// messages, when that message arrived through a relay (Discord or Buzz); "" otherwise.
+// messages, when that message arrived through a relay (Discord, Buzz or Slack); "" otherwise.
 func (d *Datastore) ExternalSpeakerForMessage(ctx context.Context, userID, chatMessageID uuid.UUID) (string, error) {
 	return d.ExternalSpeakerForTurn(ctx, userID, uuid.Nil, chatMessageID)
 }
@@ -719,7 +728,11 @@ func (d *Datastore) ExternalSpeakerForTurn(ctx context.Context, userID, chatID, 
 	if err != nil || name != "" {
 		return name, err
 	}
-	return d.buzzSpeakerForTurn(ctx, userID, chatID, chatMessageID)
+	name, err = d.buzzSpeakerForTurn(ctx, userID, chatID, chatMessageID)
+	if err != nil || name != "" {
+		return name, err
+	}
+	return d.slackSpeakerForTurn(ctx, userID, chatID, chatMessageID)
 }
 
 // maxBatchSpeakers bounds the links read for a turn's speakers (a batched turn answers a

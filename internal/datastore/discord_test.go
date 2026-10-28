@@ -84,8 +84,9 @@ func createDiscordTestTables(t *testing.T, db *sql.DB) {
 		_, err := db.Exec(ddl)
 		require.NoError(t, err)
 	}
-	// The relay provenance lookups (IsExternalRelayChat) read Buzz bindings too.
+	// The relay provenance lookups (IsExternalRelayChat) read Buzz and Slack bindings too.
 	createBuzzTestTables(t, db)
+	createSlackTestTables(t, db)
 }
 
 type discordFixture struct {

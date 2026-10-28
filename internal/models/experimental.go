@@ -10,6 +10,10 @@ package models
 // the server by BUZZ_RELAY_ENABLED.
 const ExperimentalFeatureBuzzRelay = "buzz_relay"
 
+// ExperimentalFeatureSlackRelay is the Slack relay (docs/adr/0x032-slack-relay.md), switched on
+// for the server by SLACK_RELAY_ENABLED.
+const ExperimentalFeatureSlackRelay = "slack_relay"
+
 // ExperimentalFeature describes one experimental feature, for the admin's toggles.
 type ExperimentalFeature struct {
 	Name        string `json:"name"`
@@ -23,6 +27,11 @@ var ExperimentalFeatures = []ExperimentalFeature{
 		Name:        ExperimentalFeatureBuzzRelay,
 		Label:       "Buzz relay",
 		Description: "Connect personas to Buzz communities, where people and agents share channels.",
+	},
+	{
+		Name:        ExperimentalFeatureSlackRelay,
+		Label:       "Slack relay",
+		Description: "Connect personas to Slack workspaces as their own Slack apps.",
 	},
 }
 

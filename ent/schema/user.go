@@ -107,6 +107,10 @@ func (User) Edges() []ent.Edge {
 		// and through them communities, bindings and message links. See ent/schema/buzz.go.
 		edge.To("buzz_agents", BuzzAgent.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),
+		// Slack relay apps. Cascade so deleting a user removes their personas' Slack apps, and
+		// through them bindings and message links. See ent/schema/slack.go.
+		edge.To("slack_apps", SlackApp.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}, userPrivateEdges()...)
 }
 
