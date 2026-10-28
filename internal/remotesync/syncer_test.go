@@ -112,6 +112,9 @@ type fakeStore struct {
 	applyErr map[uuid.UUID]error
 	leased   bool
 	finished []models.RemoteSyncRunResult
+	// rematches counts persona rematch calls; rematchN is what each reports.
+	rematches int
+	rematchN  int
 }
 
 func newFakeStore() *fakeStore {
@@ -188,6 +191,13 @@ func (s *fakeStore) FinishRemoteSyncRun(_ context.Context, _ uuid.UUID, r models
 	s.finished = append(s.finished, r)
 	s.account.FullWalk = r.Status != models.RemoteSyncStatusOK || r.Stats.ThreadsDeferred > 0
 	return nil
+}
+
+func (s *fakeStore) RematchRemoteSyncPersonas(context.Context, uuid.UUID) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rematches++
+	return s.rematchN, nil
 }
 
 func (s *fakeStore) ListDueRemoteSyncs(context.Context, time.Time) ([]uuid.UUID, error) {
@@ -383,7 +393,8 @@ func TestWakeSyncsOnlyStaleAccountsThatCanRun(t *testing.T) {
 	}
 
 	// Never run: a wake starts one.
-	started, err := s.Wake(ctx, user)
+	res, err := s.Wake(ctx, user)
+	started := res.Started
 	require.NoError(t, err)
 	assert.True(t, started)
 	require.Eventually(t, finished(1), time.Second, 10*time.Millisecond)
@@ -391,32 +402,57 @@ func TestWakeSyncsOnlyStaleAccountsThatCanRun(t *testing.T) {
 	// Ran moments ago: left alone.
 	recent := time.Now().Add(-10 * time.Second)
 	store.account.LastRunAt = &recent
-	started, err = s.Wake(ctx, user)
+	res, err = s.Wake(ctx, user)
+	started = res.Started
 	require.NoError(t, err)
 	assert.False(t, started)
 
 	// Stale again: runs.
 	stale := time.Now().Add(-2 * time.Minute)
 	store.account.LastRunAt = &stale
-	started, err = s.Wake(ctx, user)
+	res, err = s.Wake(ctx, user)
+	started = res.Started
 	require.NoError(t, err)
 	assert.True(t, started)
 	require.Eventually(t, finished(2), time.Second, 10*time.Millisecond)
 
 	// Off, or waiting on its owner: left alone, and neither is an error.
 	store.account.Enabled = false
-	started, err = s.Wake(ctx, user)
+	res, err = s.Wake(ctx, user)
+	started = res.Started
 	require.NoError(t, err)
 	assert.False(t, started)
 	store.account.Enabled, store.account.Status = true, models.RemoteSyncStatusNeedsAttention
-	started, err = s.Wake(ctx, user)
+	res, err = s.Wake(ctx, user)
+	started = res.Started
 	require.NoError(t, err)
 	assert.False(t, started)
 
 	// Already running: left alone.
 	store.account.Status = models.RemoteSyncStatusOK
 	store.leased = true
-	started, err = s.Wake(ctx, user)
+	res, err = s.Wake(ctx, user)
+	started = res.Started
 	require.NoError(t, err)
 	assert.False(t, started)
+}
+
+func TestEveryWakeAndRunRematchesPersonas(t *testing.T) {
+	remote, store := newFakeRemote(), newFakeStore()
+	remote.addThread("t", 1, t0)
+	s := newTestSyncer(store, remote, Config{})
+	ctx := context.Background()
+
+	s.RunDue(ctx)
+	assert.Equal(t, 1, store.rematches, "after a run")
+
+	// A fresh account starts no run, but a persona created a moment ago still takes its threads.
+	recent := time.Now()
+	store.account.LastRunAt = &recent
+	store.rematchN = 3
+	res, err := s.Wake(ctx, store.account.UserID)
+	require.NoError(t, err)
+	assert.False(t, res.Started)
+	assert.Equal(t, 3, res.Rematched)
+	assert.Equal(t, 2, store.rematches)
 }

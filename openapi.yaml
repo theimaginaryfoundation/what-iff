@@ -580,8 +580,9 @@ paths:
               schema:
                 type: object
                 properties:
-                  started: {type: boolean}
-                required: [started]
+                  started: {type: boolean, description: A run started; poll GET /remote-sync for its outcome}
+                  rematched: {type: integer, description: Copied threads that just got a local persona whose name matches their remote one}
+                required: [started, rematched]
         '401':
           description: Unauthorized
           content:
@@ -11032,6 +11033,10 @@ components:
         last_run: {$ref: '#/components/schemas/RemoteSyncRunStats'}
         running: {type: boolean}
         totals: {$ref: '#/components/schemas/RemoteSyncTotals'}
+        unmatched_personas:
+          type: array
+          items: {type: string}
+          description: Remote persona names whose copied threads have no persona here yet. Creating or importing a persona with one of these names gives it those threads (on the next wake or run).
         interval_seconds: {type: integer, description: Background sync interval; absent when syncs start only when the app is used}
         default_base_url: {type: string}
         allow_local_network: {type: boolean}

@@ -209,6 +209,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Remote sync (`remotesync.go`, `remotesync_apply.go`, ADR 0x032):** each user's sync settings (token encrypted with the MCP token helper) and lease, and the links from remote threads and messages to local ones.
   `ApplyRemoteSyncThread` brings one remote thread in under one transaction: it creates a mirror (an imported thread with `source` `remote_sync` and the remote id's import hash), adopts a thread an account import already holds (aligning the shared prefix), appends, or forks when the tracking thread has messages after its newest remote one.
   A deleted mirror detaches its link instead of being recreated.
+  `RematchRemoteSyncPersonas` gives copies without a persona the local persona named like their remote one, once it exists; `GetRemoteSyncSettings` lists the names still waiting (`UnmatchedPersonas`).
   Tests auto-migrate the generated schema on SQLite (`createGeneratedTestSchema`), minus the vector tables.
   `CreateChat` honours `Chat.DisabledTools`, so a server-created relay thread never exists with its default-off tools on (the app's create route drops the field).
 - **Failure codes:** a job's `error_code` and a chat message's `last_error_code` carry a stable code beside the failure text.

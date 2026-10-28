@@ -67,17 +67,18 @@ func (s *stubStore) GetRemoteSyncAccount(context.Context, uuid.UUID) (*models.Re
 }
 
 type stubSyncer struct {
-	woke    int
-	wakeErr error
-	wakeOK  bool
-	err     error
-	starts  int
+	woke      int
+	wakeErr   error
+	wakeOK    bool
+	rematched int
+	err       error
+	starts    int
 }
 
 func (s *stubSyncer) Start(context.Context, uuid.UUID) error { s.starts++; return s.err }
-func (s *stubSyncer) Wake(context.Context, uuid.UUID) (bool, error) {
+func (s *stubSyncer) Wake(context.Context, uuid.UUID) (remotesync.WakeResult, error) {
 	s.woke++
-	return s.wakeOK, s.wakeErr
+	return remotesync.WakeResult{Started: s.wakeOK, Rematched: s.rematched}, s.wakeErr
 }
 
 type checkCall struct{ baseURL, token string }
@@ -207,13 +208,13 @@ func TestWakeIsAHintNeverAFailure(t *testing.T) {
 	syncer.wakeOK = true
 	rec := do(t, h, http.MethodPost, "/remote-sync/wake", "")
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"started":true}`, rec.Body.String())
+	assert.JSONEq(t, `{"started":true,"rematched":0}`, rec.Body.String())
 
 	// Nothing set up: not an error, just nothing started.
 	syncer.wakeOK, syncer.wakeErr = false, datastore.ErrRemoteSyncNotFound
 	rec = do(t, h, http.MethodPost, "/remote-sync/wake", "")
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"started":false}`, rec.Body.String())
+	assert.JSONEq(t, `{"started":false,"rematched":0}`, rec.Body.String())
 	assert.Equal(t, 2, syncer.woke)
 }
 

@@ -31,6 +31,7 @@ type Store interface {
 	ExtendRemoteSyncLease(ctx context.Context, userID uuid.UUID, leaseUntil time.Time) error
 	FinishRemoteSyncRun(ctx context.Context, userID uuid.UUID, result models.RemoteSyncRunResult) error
 	ListDueRemoteSyncs(ctx context.Context, lastRunBefore time.Time) ([]uuid.UUID, error)
+	RematchRemoteSyncPersonas(ctx context.Context, userID uuid.UUID) (int, error)
 }
 
 // Remote is the remote server as a syncer reads it; *Client implements it.
@@ -145,28 +146,43 @@ func (s *Syncer) Start(ctx context.Context, userID uuid.UUID) error {
 // DefaultWakeMinAge is how old an account's last run must be before a wake starts another.
 const DefaultWakeMinAge = 2 * time.Minute
 
+// WakeResult is what a wake did.
+type WakeResult struct {
+	// Started is true when the wake started a run.
+	Started bool `json:"started"`
+	// Rematched is how many copies just got a persona that now exists here.
+	Rematched int `json:"rematched"`
+}
+
 // Wake is the local app saying "someone is using me": it starts a run when the account's last
-// one is older than the wake minimum age, and reports whether it did. This is how copies stay
+// one is older than the wake minimum age, and reports whether it did. Every wake also gives
+// copies without a persona one whose name now matches (no remote call), so a persona created
+// or imported a moment ago takes its threads straight away. This is how copies stay
 // current without polling: the remote is asked when the copy is about to be read, not on a
 // clock. An account that is off, needs its owner, was synced moments ago or is already
 // running is left alone; none of those is an error.
-func (s *Syncer) Wake(ctx context.Context, userID uuid.UUID) (bool, error) {
+func (s *Syncer) Wake(ctx context.Context, userID uuid.UUID) (WakeResult, error) {
+	var res WakeResult
 	acct, err := s.store.GetRemoteSyncAccount(ctx, userID)
 	if err != nil {
-		return false, err
+		return res, err
+	}
+	if res.Rematched, err = s.store.RematchRemoteSyncPersonas(ctx, userID); err != nil {
+		s.logger.Warn("remote sync: rematch personas", zap.String("user_id", userID.String()), zap.Error(err))
 	}
 	if !acct.Enabled || acct.Status == models.RemoteSyncStatusNeedsAttention {
-		return false, nil
+		return res, nil
 	}
 	if acct.LastRunAt != nil && time.Since(*acct.LastRunAt) < s.cfg.WakeMinAge {
-		return false, nil
+		return res, nil
 	}
 	ok, err := s.store.ClaimRemoteSync(ctx, userID, time.Now().Add(s.cfg.Lease))
 	if err != nil || !ok {
-		return false, err
+		return res, err
 	}
 	go s.runClaimed(ctx, userID)
-	return true, nil
+	res.Started = true
+	return res, nil
 }
 
 // RunDue runs every account that is due, one after another. The runner calls it on each tick.
@@ -288,6 +304,10 @@ func (s *Syncer) run(ctx context.Context, userID uuid.UUID) models.RemoteSyncRun
 		if err := s.store.ExtendRemoteSyncLease(ctx, userID, time.Now().Add(s.cfg.Lease)); err != nil {
 			s.logger.Warn("remote sync: extend lease", zap.String("user_id", userID.String()), zap.Error(err))
 		}
+	}
+
+	if _, err := s.store.RematchRemoteSyncPersonas(ctx, userID); err != nil {
+		s.logger.Warn("remote sync: rematch personas", zap.String("user_id", userID.String()), zap.Error(err))
 	}
 
 	if stats.ThreadsFailed > 0 {

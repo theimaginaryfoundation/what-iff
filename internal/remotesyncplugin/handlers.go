@@ -29,7 +29,7 @@ type Store interface {
 // Starter starts runs in the background (remotesync.Syncer).
 type Starter interface {
 	Start(ctx context.Context, userID uuid.UUID) error
-	Wake(ctx context.Context, userID uuid.UUID) (bool, error)
+	Wake(ctx context.Context, userID uuid.UUID) (remotesync.WakeResult, error)
 }
 
 // Handler serves /api/remote-sync (behind auth).
@@ -55,26 +55,22 @@ func (h *Handler) Register(r *mux.Router) {
 	r.HandleFunc("/wake", h.wake).Methods(http.MethodPost)
 }
 
-type wakeResponse struct {
-	// Started is true when the wake started a run; poll GET for its outcome.
-	Started bool `json:"started"`
-}
-
 // wake is the web app saying it is being used (opened, or back after a while). It starts a run
 // unless the account is off, needs its owner, ran moments ago or is running, and never fails
 // for those: a wake is a hint, not a command. An account with no sync answers started: false.
+// Started means poll GET for the run's outcome; rematched counts copies that just got a persona.
 func (h *Handler) wake(w http.ResponseWriter, r *http.Request) {
 	userID, ok := h.userID(w, r)
 	if !ok {
 		return
 	}
-	started, err := h.Syncer.Wake(h.Lifecycle, userID)
+	res, err := h.Syncer.Wake(h.Lifecycle, userID)
 	if err != nil && !errors.Is(err, datastore.ErrRemoteSyncNotFound) {
 		h.failed(w, "Could not start a sync.", err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	handlerutils.RespondWithJSON(w, h.Logger, http.StatusOK, wakeResponse{Started: started})
+	handlerutils.RespondWithJSON(w, h.Logger, http.StatusOK, res)
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {

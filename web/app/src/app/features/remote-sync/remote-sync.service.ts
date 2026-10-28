@@ -38,9 +38,17 @@ export interface RemoteSyncSettings {
   last_run?: RemoteSyncRunStats;
   running: boolean;
   totals?: RemoteSyncTotals;
+  /** Remote persona names whose copied threads have no persona here yet. */
+  unmatched_personas?: string[];
   interval_seconds?: number;
   default_base_url?: string;
   allow_local_network?: boolean;
+}
+
+/** What a wake did: started a run (poll for its outcome), and/or gave copies a persona. */
+export interface RemoteSyncWakeResult {
+  started: boolean;
+  rematched: number;
 }
 
 export interface RemoteSyncSaveRequest {
@@ -55,8 +63,9 @@ export function runSummary(r: RemoteSyncRunStats | undefined | null): string {
   if (!r) return '';
   const parts: string[] = [];
   const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
-  const added = r.threads_created + r.threads_adopted;
-  if (added) parts.push(plural(added, 'new thread', 'new threads'));
+  if (r.threads_created) parts.push(plural(r.threads_created, 'new thread', 'new threads'));
+  // Adopted: already here (an account import, or a copy whose sync was removed), now kept up to date.
+  if (r.threads_adopted) parts.push(plural(r.threads_adopted, 'thread reconnected', 'threads reconnected'));
   if (r.threads_updated) parts.push(plural(r.threads_updated, 'updated thread', 'updated threads'));
   if (r.threads_forked) parts.push(plural(r.threads_forked, 'fork', 'forks'));
   if (r.messages_added) parts.push(plural(r.messages_added, 'message', 'messages'));
@@ -107,7 +116,7 @@ export class RemoteSyncService {
    * Tells the server the app is being used, so it syncs if the copy is stale. A hint: it starts
    * nothing when sync is off, not set up, or ran moments ago.
    */
-  wake(): Observable<{ started: boolean }> {
-    return this.http.post<{ started: boolean }>(`${this.base}/wake`, {});
+  wake(): Observable<RemoteSyncWakeResult> {
+    return this.http.post<RemoteSyncWakeResult>(`${this.base}/wake`, {});
   }
 }

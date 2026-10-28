@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/ent"
+	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
 	"github.com/theimaginaryfoundation/what-iff/ent/remotesync"
 	"github.com/theimaginaryfoundation/what-iff/ent/remotesyncchat"
 	"github.com/theimaginaryfoundation/what-iff/ent/remotesyncmessage"
@@ -56,6 +58,18 @@ func (d *Datastore) GetRemoteSyncSettings(ctx context.Context, userID uuid.UUID)
 		return nil, err
 	}
 	out.Totals = totals
+	unmatched, err := d.unmatchedRemoteCopies(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	for _, name := range unmatched {
+		if key := strings.ToLower(strings.TrimSpace(name)); !seen[key] {
+			seen[key] = true
+			out.UnmatchedPersonas = append(out.UnmatchedPersonas, strings.TrimSpace(name))
+		}
+	}
+	slices.Sort(out.UnmatchedPersonas)
 	return out, nil
 }
 
@@ -291,6 +305,7 @@ func remoteSyncChatLinkModel(r *ent.RemoteSyncChat) models.RemoteSyncChatLink {
 		RemoteChatID:          r.RemoteChatID,
 		ChatID:                r.ChatID,
 		RemoteName:            r.RemoteName,
+		RemotePersonalityName: r.RemotePersonalityName,
 		RemoteLastMessageTime: r.RemoteLastMessageTime,
 		RemoteHeadSentAt:      r.RemoteHeadSentAt,
 		Forks:                 r.Forks,
@@ -305,4 +320,72 @@ func tokenHint(token string) string {
 		return ""
 	}
 	return string(r[len(r)-4:])
+}
+
+// unmatchedRemoteCopies maps the user's tracked copies that have no persona to the name of their
+// remote thread's persona.
+func (d *Datastore) unmatchedRemoteCopies(ctx context.Context, userID uuid.UUID) (map[uuid.UUID]string, error) {
+	links, err := d.dbClient.RemoteSyncChat.Query().
+		Where(
+			remotesyncchat.HasSyncWith(remotesync.HasOwnerWith(user.ID(userID))),
+			remotesyncchat.StateEQ(remotesyncchat.StateActive),
+			remotesyncchat.RemotePersonalityNameNEQ(""),
+		).
+		Select(remotesyncchat.FieldChatID, remotesyncchat.FieldRemotePersonalityName).
+		All(ctx)
+	if err != nil || len(links) == 0 {
+		return nil, err
+	}
+	names := make(map[uuid.UUID]string, len(links))
+	ids := make([]uuid.UUID, 0, len(links))
+	for _, l := range links {
+		names[l.ChatID] = l.RemotePersonalityName
+		ids = append(ids, l.ChatID)
+	}
+	bare, err := d.dbClient.Chat.Query().
+		Where(entchat.IDIn(ids...), entchat.HasOwnerWith(user.ID(userID)), entchat.Not(entchat.HasPersonality())).
+		IDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("find copies without a persona: %w", err)
+	}
+	out := make(map[uuid.UUID]string, len(bare))
+	for _, id := range bare {
+		out[id] = names[id]
+	}
+	return out, nil
+}
+
+// RematchRemoteSyncPersonas gives each copy that has no persona the local persona named like its
+// remote one, once such a persona exists (created here, or brought by an account import), and
+// reports how many copies it changed. A copy is matched when it is made; this catches the ones
+// whose persona arrived later. It never replaces a persona someone chose.
+func (d *Datastore) RematchRemoteSyncPersonas(ctx context.Context, userID uuid.UUID) (int, error) {
+	unmatched, err := d.unmatchedRemoteCopies(ctx, userID)
+	if err != nil || len(unmatched) == 0 {
+		return 0, err
+	}
+	byName := map[string][]uuid.UUID{}
+	for chatID, name := range unmatched {
+		key := strings.ToLower(strings.TrimSpace(name))
+		byName[key] = append(byName[key], chatID)
+	}
+	changed := 0
+	for name, chatIDs := range byName {
+		pid, err := matchPersonalityByName(ctx, d.dbClient.Personality, userID, name)
+		if err != nil {
+			return changed, err
+		}
+		if pid == nil {
+			continue
+		}
+		n, err := d.dbClient.Chat.Update().
+			Where(entchat.IDIn(chatIDs...), entchat.HasOwnerWith(user.ID(userID)), entchat.Not(entchat.HasPersonality())).
+			SetPersonalityID(*pid).
+			Save(ctx)
+		if err != nil {
+			return changed, fmt.Errorf("assign persona to copies: %w", err)
+		}
+		changed += n
+	}
+	return changed, nil
 }

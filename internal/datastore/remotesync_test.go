@@ -431,3 +431,47 @@ func TestDeleteRemoteSyncKeepsThreadsAndReadoptsThem(t *testing.T) {
 	assert.Equal(t, res.ChatID, again.ChatID)
 	assert.Equal(t, []string{"A1", "B1", "A2"}, f.texts(t, res.ChatID))
 }
+
+func TestCopiesPickUpAPersonaThatArrivesLater(t *testing.T) {
+	f := newRemoteSyncFixture(t)
+	ctx := context.Background()
+	th := f.thread(uuid.New(), "Trip planning")
+	th.PersonalityName = "Vix"
+	res := f.apply(t, th, f.msgs(0, "A1"))
+
+	s, err := f.ds.GetRemoteSyncSettings(ctx, f.owner)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Vix"}, s.UnmatchedPersonas)
+	n, err := f.ds.RematchRemoteSyncPersonas(ctx, f.owner)
+	require.NoError(t, err)
+	assert.Zero(t, n, "no Vix here yet")
+
+	// A thread whose persona someone chose is never touched.
+	chosen := uuid.New()
+	createTestPersonality(t, f.ds, chosen, f.owner)
+	th2 := f.thread(uuid.New(), "Other")
+	th2.PersonalityName = "Vix"
+	res2 := f.apply(t, th2, f.msgs(0, "B1"))
+	require.NoError(t, f.ds.dbClient.Chat.UpdateOneID(res2.ChatID).SetPersonalityID(chosen).Exec(ctx))
+
+	vix, err := f.ds.dbClient.Personality.Create().SetName("vix").SetSystemPrompt("You are Vix.").SetUserID(f.owner).Save(ctx)
+	require.NoError(t, err)
+	n, err = f.ds.RematchRemoteSyncPersonas(ctx, f.owner)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+
+	got, err := f.ds.dbClient.Chat.Get(ctx, res.ChatID)
+	require.NoError(t, err)
+	pid, err := got.QueryPersonality().OnlyID(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, vix.ID, pid)
+	other, err := f.ds.dbClient.Chat.Get(ctx, res2.ChatID)
+	require.NoError(t, err)
+	pid, err = other.QueryPersonality().OnlyID(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, chosen, pid, "a chosen persona stays")
+
+	s, err = f.ds.GetRemoteSyncSettings(ctx, f.owner)
+	require.NoError(t, err)
+	assert.Empty(t, s.UnmatchedPersonas)
+}

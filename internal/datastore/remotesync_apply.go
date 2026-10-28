@@ -85,6 +85,7 @@ func (d *Datastore) applyRemoteSyncThread(ctx context.Context, tx *ent.Tx, userI
 			SetRemoteChatID(thread.RemoteChatID).
 			SetChatID(existing.ID).
 			SetRemoteName(existing.Name).
+			SetRemotePersonalityName(thread.PersonalityName).
 			Save(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("create remote sync link: %w", err)
@@ -174,7 +175,7 @@ func (d *Datastore) createRemoteMirror(ctx context.Context, tx *ent.Tx, userID, 
 		SetImportHash(models.ConversationImportHash(thread.RemoteChatID.String())).
 		SetArchived(thread.Archived).
 		SetCreatedAt(created)
-	if pid, err := matchPersonalityByName(ctx, tx, userID, thread.PersonalityName); err != nil {
+	if pid, err := matchPersonalityByName(ctx, tx.Personality, userID, thread.PersonalityName); err != nil {
 		return nil, err
 	} else if pid != nil {
 		create.SetPersonalityID(*pid)
@@ -188,6 +189,7 @@ func (d *Datastore) createRemoteMirror(ctx context.Context, tx *ent.Tx, userID, 
 		SetRemoteChatID(thread.RemoteChatID).
 		SetChatID(mirror.ID).
 		SetRemoteName(thread.Name).
+		SetRemotePersonalityName(thread.PersonalityName).
 		Save(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("create remote sync link: %w", err)
@@ -445,12 +447,12 @@ func notAfter(m *ent.ChatMessage) func(*entsql.Selector) {
 // matchPersonalityByName finds the user's persona with this name (trimmed, case-insensitive), as
 // account import does. Remote persona prompts are not served to a chat:read token, so a name is
 // all there is to match on; no match leaves the thread on the local default.
-func matchPersonalityByName(ctx context.Context, tx *ent.Tx, userID uuid.UUID, name string) (*uuid.UUID, error) {
+func matchPersonalityByName(ctx context.Context, personas *ent.PersonalityClient, userID uuid.UUID, name string) (*uuid.UUID, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, nil
 	}
-	id, err := tx.Personality.Query().
+	id, err := personas.Query().
 		Where(personality.HasUserWith(user.ID(userID)), personality.NameEqualFold(name)).
 		Order(ent.Asc(personality.FieldCreatedAt)).
 		FirstID(ctx)
@@ -489,6 +491,9 @@ func bumpLastMessageTime(ctx context.Context, tx *ent.Tx, c *ent.Chat, batch []m
 // last remote one, so a local rename wins.
 func (d *Datastore) touchRemoteLink(ctx context.Context, tx *ent.Tx, link *ent.RemoteSyncChat, thread models.RemoteSyncThread, tracking *ent.Chat) error {
 	upd := tx.RemoteSyncChat.UpdateOneID(link.ID)
+	if thread.PersonalityName != "" && thread.PersonalityName != link.RemotePersonalityName {
+		upd.SetRemotePersonalityName(thread.PersonalityName)
+	}
 	if thread.LastMessageTime != nil {
 		upd.SetRemoteLastMessageTime(*thread.LastMessageTime)
 	}

@@ -3,6 +3,12 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
 import { guideUrl } from '../../../core/constants/guides.constants';
 import { SparkleIconComponent } from '../../../shared/ui/icons/icons';
 
+/** Copied threads waiting for a persona (see PersonalityWelcomeComponent.mulletWaiting). */
+export interface MulletWaiting {
+  threads: number;
+  personas: string[];
+}
+
 /**
  * First-run welcome shown on the personalities page when the user has none yet (where the
  * personality-setup guard sends brand-new accounts). Explains what WhatIff is before asking the
@@ -23,6 +29,11 @@ export class PersonalityWelcomeComponent {
   /** Offers mullet mode (keeping a copy of whatiff.chat threads here) when the server runs it. */
   readonly mulletModeAvailable = input(false);
   readonly openMulletMode = output<void>();
+  /**
+   * Threads mullet mode already copied here, and the remote persona names they were written with:
+   * creating (or importing) a persona with one of those names gives it those threads.
+   */
+  readonly mulletWaiting = input<MulletWaiting | null>(null);
 
   readonly gettingStartedHref = guideUrl('gettingStarted');
 

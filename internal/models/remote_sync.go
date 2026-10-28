@@ -93,6 +93,9 @@ type RemoteSyncSettings struct {
 	// Running is true while a run holds the account's lease.
 	Running bool              `json:"running"`
 	Totals  *RemoteSyncTotals `json:"totals,omitempty"`
+	// UnmatchedPersonas names the remote personas whose copied threads have no persona here yet.
+	// Creating (or importing) a persona with one of these names gives those threads to it.
+	UnmatchedPersonas []string `json:"unmatched_personas,omitempty"`
 	// IntervalSeconds is how often the server syncs an enabled account.
 	IntervalSeconds int `json:"interval_seconds,omitempty"`
 	// DefaultBaseURL is the address the settings page suggests (the hosted app's API).
@@ -149,6 +152,7 @@ type RemoteSyncChatLink struct {
 	// ChatID is the local thread new remote messages go to.
 	ChatID                uuid.UUID
 	RemoteName            string
+	RemotePersonalityName string
 	RemoteLastMessageTime *time.Time
 	RemoteHeadSentAt      *time.Time
 	Forks                 int

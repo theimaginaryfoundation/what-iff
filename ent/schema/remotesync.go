@@ -77,6 +77,9 @@ func (RemoteSyncChat) Fields() []ent.Field {
 		// The remote thread's name as last seen, so a remote rename is copied only while the
 		// local name is still the remote one.
 		field.String("remote_name").Default(""),
+		// The remote thread's persona name. A copy whose local thread has no persona is matched to
+		// a local persona of this name whenever one appears (created here, or by an account import).
+		field.String("remote_personality_name").Default(""),
 		// The remote thread's last_message_time as last seen: a different value means it changed.
 		field.Time("remote_last_message_time").Optional().Nillable(),
 		// The newest remote message copied, where the next pull stops (less an overlap).

@@ -2,8 +2,8 @@
   <p class="welcome__eyebrow">Welcome to WhatIff</p>
   <h2 id="welcome-title" class="welcome__title">What if your AI could grow with you?</h2>
   <p class="welcome__lead">
-    Every chat in WhatIff runs through a personality you create. It keeps its own voice, builds memory with you
-    across conversations, and adapts as you go.
+    Every chat in WhatIff runs through a personality you create. It keeps its own voice, builds memory with you across conversations, and
+    adapts as you go.
   </p>
 
   <ul class="welcome__highlights">
@@ -29,7 +29,19 @@
       Already have a WhatIff export, or chats from ChatGPT or Claude?
       <button type="button" class="welcome__inline-action" (click)="importData.emit()">Import them instead</button>
     </p>
-    @if (mulletModeAvailable()) {
+    @if (mulletWaiting(); as waiting) {
+      <p class="welcome__import" data-testid="welcome-mullet-waiting">
+        {{ waiting.threads === 1 ? "Your thread" : "Your " + waiting.threads + " threads" }} from whatiff.chat
+        {{ waiting.threads === 1 ? "is" : "are" }} here.
+        @if (waiting.personas.length) {
+          {{ waiting.threads === 1 ? "It was" : "They were" }} written with <strong>{{ waiting.personas.join(", ") }}</strong
+          >: create a persona with {{ waiting.personas.length === 1 ? "that name" : "one of those names" }}, or import your whatiff.chat
+          export, and {{ waiting.threads === 1 ? "it" : "they" }} will use it.
+        } @else {
+          Create a persona to start talking.
+        }
+      </p>
+    } @else if (mulletModeAvailable()) {
       <p class="welcome__import" data-testid="welcome-mullet-mode">
         Talk on whatiff.chat too?
         <button type="button" class="welcome__inline-action" (click)="openMulletMode.emit()">Keep a copy of those threads here</button>

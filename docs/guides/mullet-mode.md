@@ -61,14 +61,16 @@ Your server also needs `TOKEN_ENCRYPTION_SECRET` (the compose stack generates on
 ### 3. (Recommended) Bring your personas over once
 
 Mullet mode copies conversations, not the personas behind them: a persona's prompt is private working state that a read token deliberately cannot see.
-Copied threads are matched to your local personas **by name**, so bring them over once:
+Copied threads are matched to your local personas **by name**. Either bring them over once:
 
 1. On whatiff.chat: **Import & Export → Export**. The download link arrives by email.
 2. On your server: **Import & Export → Import** that file.
 
 This also brings your memories.
 Threads that came over in the export are recognised later, so mullet mode continues them instead of copying them twice.
-You can do this before or after step 4.
+
+Or simply create a persona here with the same name (say, `Vix`): every copied thread that was written with Vix picks it up straight away.
+Either way you can do it before or after step 4; after step 4, the welcome screen tells you which names your threads are waiting for.
 
 ### 4. Paste the token at home
 
@@ -144,7 +146,7 @@ Alternatively, keep `LLM_BACKEND` at its default and give the server your own pr
 | "The remote server did not accept the token" | Mistyped, or revoked on whatiff.chat. Paste a fresh one. |
 | **Needs attention** | whatiff.chat refused the token during a sync, so syncing paused. Saving a working token resumes it. |
 | **Will retry** | A sync hit a network or server problem. It tries again by itself. |
-| A copied thread shows **Unassigned** or the wrong persona | No persona here has the same name. Import an export (step 3), or pick a persona for the thread. |
+| A copied thread shows **Unassigned** | No persona here has its name yet. Create one with that name, or import an export (step 3), and it takes those threads. You can also pick a persona for the thread yourself. |
 | Two threads with the same name, one ending "(from api.whatiff.chat)" | You continued it in both places; both continuations are kept. |
 | Syncing from a server on your LAN fails | Set `REMOTE_SYNC_ALLOW_LOCAL_NETWORK=true` on the server doing the copying. |
 

@@ -70,7 +70,7 @@ describe('runSummary', () => {
   it('says what a run did in words', () => {
     expect(
       runSummary({ ...zero, threads_created: 2, threads_adopted: 1, threads_forked: 1, messages_added: 1204, threads_deferred: 5 }),
-    ).toBe('3 new threads, 1 fork, 1,204 messages, 5 more next time');
+    ).toBe('2 new threads, 1 thread reconnected, 1 fork, 1,204 messages, 5 more next time');
     expect(runSummary({ ...zero, threads_updated: 1, messages_added: 1 })).toBe('1 updated thread, 1 message');
   });
 

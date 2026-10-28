@@ -15,6 +15,7 @@ It talks to the remote through a small `Remote` interface and to storage through
   `pull` reads a thread's messages newest first back to its head less an overlap (the whole history for a new link) and returns them oldest first.
   Each thread is applied through `Store.ApplyRemoteSyncThread`, which creates, adopts, appends or forks.
 - **Runs:** `Wake` runs the account if its last run is older than `WakeMinAge` (two minutes): the web app sends one when a session starts or comes back, which is how copies stay current without polling.
+  Every wake and every run also calls `Store.RematchRemoteSyncPersonas`, so copies whose persona arrived later (created here, or imported) take it without a remote call.
   `Start` claims the lease and runs regardless of age ("sync now" and saves); `RunDue` runs every account due on the background interval; `Runner` calls it on a timer.
   A run records its outcome with `FinishRemoteSyncRun`, which also releases the lease.
 

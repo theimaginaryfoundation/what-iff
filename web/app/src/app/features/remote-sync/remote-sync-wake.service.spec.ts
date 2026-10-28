@@ -1,9 +1,10 @@
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { DOCUMENT } from '@angular/common';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 
 import { AuthService } from '../../core/services/auth.service';
+import { PersonalityChange, PersonalityService } from '../../core/services/personality.service';
 import { ThreadListService } from '../../core/services/thread-list.service';
 import { RemoteSyncService, RemoteSyncSettings } from './remote-sync.service';
 import { RemoteSyncWakeService } from './remote-sync-wake.service';
@@ -18,6 +19,7 @@ describe('RemoteSyncWakeService', () => {
   let threadList: { refresh: ReturnType<typeof vi.fn> };
   let service: RemoteSyncWakeService;
   let visibility: DocumentVisibilityState;
+  let personaChanges: Subject<PersonalityChange>;
 
   const done = (messages: number): RemoteSyncSettings => ({
     configured: true,
@@ -37,7 +39,8 @@ describe('RemoteSyncWakeService', () => {
   beforeEach(() => {
     loggedIn.set(false);
     visibility = 'visible';
-    api = { available: vi.fn(() => of(true)), wake: vi.fn(() => of({ started: false })), get: vi.fn() };
+    api = { available: vi.fn(() => of(true)), wake: vi.fn(() => of({ started: false, rematched: 0 })), get: vi.fn() };
+    personaChanges = new Subject<PersonalityChange>();
     threadList = { refresh: vi.fn(() => Promise.resolve()) };
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
     TestBed.configureTestingModule({
@@ -46,6 +49,7 @@ describe('RemoteSyncWakeService', () => {
         { provide: RemoteSyncService, useValue: api },
         { provide: AuthService, useValue: { isLoggedIn: loggedIn } },
         { provide: ThreadListService, useValue: threadList },
+        { provide: PersonalityService, useValue: { changes$: personaChanges.asObservable() } },
       ],
     });
     service = TestBed.inject(RemoteSyncWakeService);
@@ -63,7 +67,7 @@ describe('RemoteSyncWakeService', () => {
   });
 
   it('follows a run it started and refreshes the thread list when something came over', async () => {
-    api.wake.mockReturnValue(of({ started: true }));
+    api.wake.mockReturnValue(of({ started: true, rematched: 0 }));
     api.get.mockReturnValueOnce(of({ configured: true, running: true })).mockReturnValueOnce(of(done(4)));
     await service.wake();
     expect(api.get).toHaveBeenCalledTimes(2);
@@ -71,7 +75,7 @@ describe('RemoteSyncWakeService', () => {
   });
 
   it('leaves the thread list alone when the run brought nothing', async () => {
-    api.wake.mockReturnValue(of({ started: true }));
+    api.wake.mockReturnValue(of({ started: true, rematched: 0 }));
     api.get.mockReturnValue(of(done(0)));
     await service.wake();
     expect(threadList.refresh).not.toHaveBeenCalled();
@@ -112,5 +116,32 @@ describe('RemoteSyncWakeService', () => {
     doc.dispatchEvent(new Event('visibilitychange'));
     await vi.waitFor(() => expect(api.wake).toHaveBeenCalledTimes(2));
     now.mockRestore();
+  });
+});
+
+describe('RemoteSyncWakeService and personas', () => {
+  it('wakes when a persona is created or imported, and refreshes when copies took it', async () => {
+    const personaChanges = new Subject<PersonalityChange>();
+    const api = { available: vi.fn(() => of(true)), wake: vi.fn(() => of({ started: false, rematched: 2 })), get: vi.fn() };
+    const threadList = { refresh: vi.fn(() => Promise.resolve()) };
+    TestBed.configureTestingModule({
+      providers: [
+        provideZonelessChangeDetection(),
+        { provide: RemoteSyncService, useValue: api },
+        { provide: AuthService, useValue: { isLoggedIn: signal(false) } },
+        { provide: ThreadListService, useValue: threadList },
+        { provide: PersonalityService, useValue: { changes$: personaChanges.asObservable() } },
+      ],
+    });
+    const service = TestBed.inject(RemoteSyncWakeService);
+    service.start();
+
+    personaChanges.next({ kind: 'updated', personality: {} as never });
+    await Promise.resolve();
+    expect(api.wake).not.toHaveBeenCalled();
+
+    personaChanges.next({ kind: 'created', personality: {} as never });
+    await vi.waitFor(() => expect(threadList.refresh).toHaveBeenCalledTimes(1));
+    expect(api.wake).toHaveBeenCalledTimes(1);
   });
 });

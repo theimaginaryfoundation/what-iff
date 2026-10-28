@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
+import { catchError, firstValueFrom, of, switchMap } from 'rxjs';
 import { filter, map } from 'rxjs/operators';
 import { FormsModule } from '@angular/forms';
 
@@ -38,7 +38,7 @@ import {
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { SparkleIconComponent } from '../../shared/ui/icons/icons';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
-import { PersonalityWelcomeComponent } from './personality-welcome/personality-welcome.component';
+import { MulletWaiting, PersonalityWelcomeComponent } from './personality-welcome/personality-welcome.component';
 import { RemoteSyncService } from '../remote-sync/remote-sync.service';
 import { PersonalityEditModalComponent } from './detail/personality-edit-modal.component';
 import { PersonalityEditorSessionService } from './services/personality-editor-session.service';
@@ -87,7 +87,18 @@ export class PersonalitiesPageComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
   private readonly editorSession = inject(PersonalityEditorSessionService);
   /** Whether this server runs mullet mode, so the first-run welcome can offer it. */
-  readonly mulletModeAvailable = toSignal(inject(RemoteSyncService).available(), { initialValue: false });
+  private readonly remoteSync = inject(RemoteSyncService);
+  readonly mulletModeAvailable = toSignal(this.remoteSync.available(), { initialValue: false });
+  /** Threads mullet mode already copied here, for the first-run welcome (null when none). */
+  readonly mulletWaiting = toSignal(
+    this.remoteSync.available().pipe(
+      switchMap(on => (on ? this.remoteSync.get().pipe(catchError(() => of(null))) : of(null))),
+      map((s): MulletWaiting | null =>
+        s?.configured && (s.totals?.threads ?? 0) > 0 ? { threads: s.totals!.threads, personas: s.unmatched_personas ?? [] } : null,
+      ),
+    ),
+    { initialValue: null },
+  );
 
   readonly personalities = signal<Personality[]>([]);
   readonly totalCount = signal(0);

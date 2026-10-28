@@ -998,7 +998,10 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
+                            /** @description A run started; poll GET /remote-sync for its outcome */
                             started: boolean;
+                            /** @description Copied threads that just got a local persona whose name matches their remote one */
+                            rematched: number;
                         };
                     };
                 };
@@ -13940,6 +13943,8 @@ export interface components {
             last_run?: components["schemas"]["RemoteSyncRunStats"];
             running: boolean;
             totals?: components["schemas"]["RemoteSyncTotals"];
+            /** @description Remote persona names whose copied threads have no persona here yet. Creating or importing a persona with one of these names gives it those threads (on the next wake or run). */
+            unmatched_personas?: string[];
             /** @description Background sync interval; absent when syncs start only when the app is used */
             interval_seconds?: number;
             default_base_url?: string;

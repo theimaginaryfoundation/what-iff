@@ -92,7 +92,10 @@ type Tone = 'success' | 'warning' | 'danger' | 'neutral' | 'info';
                     >whatiff.chat</a
                   >).
                 </li>
-                <li>Create a token with <strong>Read threads</strong> ticked. Name it after this server.</li>
+                <li>
+                  Create a token with <strong>Read threads</strong> ticked (it does not need <strong>Post messages</strong>). Name it after
+                  this server.
+                </li>
                 <li>Paste it here and save. The first sync starts straight away.</li>
               </ol>
             } @else {

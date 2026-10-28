@@ -3,6 +3,7 @@ import { Injectable, Injector, effect, inject, untracked } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
 import { AuthService } from '../../core/services/auth.service';
+import { PersonalityService } from '../../core/services/personality.service';
 import { ThreadListService } from '../../core/services/thread-list.service';
 import { RemoteSyncService } from './remote-sync.service';
 
@@ -13,6 +14,9 @@ import { RemoteSyncService } from './remote-sync.service';
  * A wake is sent when a signed-in session starts, and when the tab comes back after being hidden
  * for a while. When the wake starts a run, this follows it and refreshes the thread list if
  * anything new came over, so the threads someone left on their phone are just there.
+ *
+ * A persona created or imported here sends a wake too: copied threads written with a persona of
+ * that name on the remote take it straight away.
  *
  * Nothing is sent on a server that does not run remote sync (its route answers 404 once and the
  * answer is cached for the session), and every failure is swallowed: a wake is a hint.
@@ -27,6 +31,7 @@ export class RemoteSyncWakeService {
   private readonly api = inject(RemoteSyncService);
   private readonly auth = inject(AuthService);
   private readonly threadList = inject(ThreadListService);
+  private readonly personalities = inject(PersonalityService);
   private readonly document = inject(DOCUMENT);
   private readonly injector = inject(Injector);
 
@@ -48,6 +53,10 @@ export class RemoteSyncWakeService {
       { injector: this.injector },
     );
     this.document.addEventListener('visibilitychange', this.onVisibilityChange);
+    // Lives as long as the app (root service started once), so it is never unsubscribed.
+    this.personalities.changes$.subscribe(change => {
+      if (change.kind === 'created' || change.kind === 'invalidated') void this.wake();
+    });
   }
 
   private readonly onVisibilityChange = (): void => {
@@ -66,13 +75,16 @@ export class RemoteSyncWakeService {
     this.inFlight = true;
     try {
       if (!(await firstValueFrom(this.api.available()))) return;
-      const { started } = await firstValueFrom(this.api.wake());
-      if (!started) return;
+      const { started, rematched } = await firstValueFrom(this.api.wake());
+      if (!started) {
+        if (rematched > 0) await this.threadList.refresh();
+        return;
+      }
       for (let i = 0; i < RemoteSyncWakeService.MAX_POLLS; i++) {
         await new Promise(resolve => setTimeout(resolve, this.pollMs));
         const s = await firstValueFrom(this.api.get());
         if (s.running) continue;
-        if ((s.last_run?.messages_added ?? 0) > 0) await this.threadList.refresh();
+        if (rematched > 0 || (s.last_run?.messages_added ?? 0) > 0) await this.threadList.refresh();
         return;
       }
     } catch {

@@ -140,8 +140,10 @@ When #148 lands, the sync fork should set #148's `forked_from_chat_id` and `fork
 ### 7. What a mirror thread is (R8)
 
 - `source = remote_sync`, `import_hash = sha256(remote chat id)` (so a later account-export import skips it instead of duplicating it, and so a removed link can be re-adopted), name from the hosted thread, archived if the hosted thread is archived, `last_message_time` from its newest message.
-- **Persona:** the hosted thread's `personality_name` is matched by name (trimmed, case-insensitive) against the local personas, the way account import matches them. With no match the thread uses the local default persona.
-  Persona prompts are private working state that the `chat:read` surface does not serve (ADR 0x023), so they are not synced; importing an account export once brings them over, and later mirrors then match them by name.
+- **Persona:** the hosted thread's `personality_name` is matched by name (trimmed, case-insensitive) against the local personas, the way account import matches them, and kept on the link (`remote_personality_name`).
+  Persona prompts are private working state that the `chat:read` surface does not serve (ADR 0x023), so a copy whose persona is not here yet has none.
+  Every run and every wake re-matches such copies (`RematchRemoteSyncPersonas`, no remote call), and the web app sends a wake when a persona is created or imported, so creating "Vix" (or importing the account export) gives Vix's threads to Vix straight away. A persona someone chose for a copy is never replaced.
+  The first-run welcome names the personas copied threads are waiting for (`unmatched_personas`): with no persona at all, the app sends an account to persona setup, and a sync-only account would otherwise see no sign that its threads are already here.
 - **Model:** left unset, like any imported thread; the local default applies.
 - **Messages:** text, origin, `sent_at` and the generation display fields (model, persona and mood names, expression key). Read status is `read`. Tool calls, reasoning and attachments are not served by `chat:read` and are not copied.
 - **Context:** the thread has an import `source` and no summary, so the first local turn (or opening it) starts the existing rehydration: a summary of everything but the last few turns, plus memory seeding, on the local server's own model keys.
@@ -171,7 +173,7 @@ The copy only matters when someone is about to read it, so that is when the remo
 | `PUT /api/remote-sync` | Save URL, token (required the first time; omitted keeps the stored one) and enabled. Validates against the remote before saving; clears `needs_attention`. |
 | `DELETE /api/remote-sync` | Stop syncing and forget the token and links. Local threads stay. |
 | `POST /api/remote-sync/run` | Run now (202). 409 if a run is already in progress. |
-| `POST /api/remote-sync/wake` | The app is being used: run if stale (§8). Always 200 with `{started}`. |
+| `POST /api/remote-sync/wake` | The app is being used: run if stale, and re-match personas (§7, §8). Always 200 with `{started, rematched}`. |
 
 When the plugin is off these routes are not mounted (404), and the web app hides the tab and sends no wakes.
 That relies on a cross-origin browser being able to read the 404, so the server's not-found and method-not-allowed responses carry CORS headers like every other response (before this, mux skipped middleware for them, and a switched-off plugin looked switched on).
