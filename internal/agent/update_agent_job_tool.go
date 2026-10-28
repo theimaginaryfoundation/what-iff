@@ -28,6 +28,7 @@ type agentJobUpdateStore interface {
 	SetAgentJobChat(ctx context.Context, userID, id uuid.UUID, chatID *uuid.UUID) (*models.AgentJob, error)
 	SetAgentJobOverrides(ctx context.Context, userID, id uuid.UUID, patch models.SetAgentJobOverridesPatch) (*models.AgentJob, error)
 	SetAgentJobFollowUserTimezone(ctx context.Context, userID, id uuid.UUID, follow bool) (*models.AgentJob, error)
+	SetAgentJobNextRunAt(ctx context.Context, userID, id uuid.UUID, nextRunAt *time.Time) (*models.AgentJob, error)
 	UpdateAgentJobSchedule(ctx context.Context, userID, id uuid.UUID, scheduleInput string, scheduleType models.AgentJobScheduleType, schedule *string, runAt *time.Time, timezone string, nextRunAt *time.Time) (*models.AgentJob, error)
 	UpdateAgentJobStatus(ctx context.Context, userID, id uuid.UUID, status models.AgentJobStatus, lastError string) (*models.AgentJob, error)
 	AddAgentJobRitual(ctx context.Context, userID, jobID, ritualID uuid.UUID) error
@@ -245,6 +246,10 @@ func (u *agentJobUpdater) update(ctx context.Context, chat *models.Chat, args []
 	}
 	if a.FollowUserTimezone != nil {
 		if job, err = u.store.SetAgentJobFollowUserTimezone(ctx, userID, jobID, *a.FollowUserTimezone); err != nil {
+			return failWrite("follow_user_timezone", err)
+		}
+		// The job may now run in another timezone; report its next run there.
+		if job, err = schedule.StoreNextRun(ctx, u.store, job, time.Now()); err != nil {
 			return failWrite("follow_user_timezone", err)
 		}
 		done = append(done, "follow_user_timezone")

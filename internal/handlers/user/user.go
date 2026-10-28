@@ -24,7 +24,8 @@ type userStore interface {
 	GetUserByCredentials(ctx context.Context, loginReq models.UserLoginRequest) (*models.UserResponse, *models.TokenPair, error)
 	GetUserByID(ctx context.Context, userID uuid.UUID) (*models.UserResponse, error)
 	UpdateUserProfile(ctx context.Context, userID uuid.UUID, updateReq models.UpdateUserRequest) (*models.UserResponse, error)
-	SetUserCurrentTimezone(ctx context.Context, userID uuid.UUID, tz string) (bool, error)
+	SetUserCurrentTimezone(ctx context.Context, userID uuid.UUID, tz string) (models.CurrentTimezoneReport, error)
+	ResumeTimezoneFollowing(ctx context.Context, userID uuid.UUID) error
 	UpdateUserPassword(ctx context.Context, userID uuid.UUID, passwordReq models.UpdatePasswordRequest) error
 	DeleteUser(ctx context.Context, userID uuid.UUID) error
 	RefreshUserToken(ctx context.Context, refreshToken string) (*models.TokenPair, error)
@@ -79,6 +80,7 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/user/profile", h.GetProfile).Methods("GET")
 	router.HandleFunc("/user/profile", h.UpdateProfile).Methods("PUT")
 	router.HandleFunc("/user/current-timezone", h.SetCurrentTimezone).Methods("PUT")
+	router.HandleFunc("/user/current-timezone/resume", h.ResumeTimezoneFollowing).Methods("POST")
 	router.HandleFunc("/user/password", h.UpdatePassword).Methods("PUT")
 	router.HandleFunc("/user/delete", h.DeleteUser).Methods("DELETE")
 	router.HandleFunc("/user/refresh", h.RefreshToken).Methods("POST")

@@ -25,7 +25,9 @@ HTTP API for **users** — profile, preferences, registration/login-adjacent flo
   With a store from `WithFileStore`, `DeleteUser` removes everything under `users/{id}/` and the account's `exports/{id}/` bundles after the row delete (`storage.PurgeUserObjects`), best effort.
 
 - **Current timezone is separate from the profile timezone.**
-  `PUT /user/current-timezone` (`current_timezone.go`) stores the zone the web app's browser reports (`users.current_timezone`), writing only on a change, and answers 204.
+  `PUT /user/current-timezone` (`current_timezone.go`) stores the zone the web app's browser reports (`users.current_timezone`), writing only on a change, and answers with the resulting `CurrentTimezoneReport`.
+  When the user's devices keep disagreeing, the datastore pauses following instead; the answer then carries `timezone_following_paused_at` (and `paused_now` on the report that paused it).
+  `POST /user/current-timezone/resume` ends the pause.
   Jobs with `follow_user_timezone` run in it; the profile `timezone` is unchanged.
   It is best effort: Discord and webhooks never report one.
 

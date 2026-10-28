@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/reugn/go-quartz/quartz"
+	"github.com/theimaginaryfoundation/what-iff/internal/agentjobs/schedule"
 	"github.com/theimaginaryfoundation/what-iff/internal/apicontext"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
@@ -557,33 +558,14 @@ func buildTrigger(j models.AgentJob, now time.Time) (quartz.Trigger, error) {
 		return quartz.NewRunOnceTrigger(delay), nil
 
 	case models.AgentJobScheduleTypeCron:
-		return cronTrigger(j)
+		return schedule.CronTrigger(j)
 
 	default:
 		return nil, fmt.Errorf("unsupported schedule_type %q", j.ScheduleType)
 	}
 }
 
+// computeNextRunAt is the job's next run after the given time (schedule.NextRunAt).
 func computeNextRunAt(j models.AgentJob, after time.Time) (*time.Time, error) {
-	if j.Status != models.AgentJobStatusActive {
-		return nil, nil
-	}
-
-	switch j.ScheduleType {
-	case models.AgentJobScheduleTypeAt:
-		return nil, nil
-	case models.AgentJobScheduleTypeCron:
-		trigger, err := cronTrigger(j)
-		if err != nil {
-			return nil, err
-		}
-		nextNs, err := trigger.NextFireTime(after.UTC().UnixNano())
-		if err != nil {
-			return nil, err
-		}
-		next := time.Unix(0, nextNs).UTC()
-		return &next, nil
-	default:
-		return nil, fmt.Errorf("unsupported schedule_type %q", j.ScheduleType)
-	}
+	return schedule.NextRunAt(j, after)
 }

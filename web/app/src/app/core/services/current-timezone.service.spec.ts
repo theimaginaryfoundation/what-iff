@@ -87,4 +87,47 @@ describe('CurrentTimezoneService', () => {
     becomeVisible();
     http.expectNone(url);
   });
+  it('takes the pause from the profile and stops reporting while paused', () => {
+    service.start({ ...user('America/New_York'), timezone_following_paused_at: '2026-10-28T12:00:00Z' });
+    expect(service.followingPaused()).toBe(true);
+    http.expectNone(url);
+    becomeVisible();
+    http.expectNone(url);
+  });
+
+  it('pauses when the API says this report paused following', () => {
+    service.start(user('America/New_York'));
+    http.expectOne(url).flush({ timezone_following_paused_at: '2026-10-28T12:00:00Z', paused_now: true });
+    expect(service.followingPausedAt()).toBe('2026-10-28T12:00:00Z');
+
+    browserZone = 'Asia/Tokyo';
+    becomeVisible();
+    http.expectNone(url);
+  });
+
+  it('resumes, then reports the browser zone straight away', () => {
+    service.start({ ...user('America/Los_Angeles'), timezone_following_paused_at: '2026-10-28T12:00:00Z' });
+    service.resume();
+    expect(service.resuming()).toBe(true);
+    http.expectOne(`${url}/resume`).flush(null);
+    expect(service.resuming()).toBe(false);
+    expect(service.followingPaused()).toBe(false);
+    // The API forgot the zone on resume, so even the same zone is sent again.
+    expect(http.expectOne(url).request.body).toEqual({ timezone: 'America/Los_Angeles' });
+  });
+
+  it('removes its listener on sign-out', () => {
+    const remove = vi.spyOn(document, 'removeEventListener');
+    service.start(user('America/Los_Angeles'));
+    service.stop();
+    expect(remove).toHaveBeenCalledWith('visibilitychange', expect.any(Function));
+  });
+  it('keeps the pause and says why when resuming fails', () => {
+    service.start({ ...user('America/Los_Angeles'), timezone_following_paused_at: '2026-10-28T12:00:00Z' });
+    service.resume();
+    http.expectOne(`${url}/resume`).flush('nope', { status: 500, statusText: 'Server Error' });
+    expect(service.followingPaused()).toBe(true);
+    expect(service.resumeError()).toContain("Couldn't resume");
+    http.expectNone(url);
+  });
 });

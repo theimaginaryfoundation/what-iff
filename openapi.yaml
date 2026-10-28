@@ -295,7 +295,11 @@ paths:
       description: |
         Records the IANA timezone the user's browser is in. Jobs with follow_user_timezone run in it,
         so they keep their local time while the user travels. The user's own timezone is unchanged.
-        Writes only when the value differs from the stored one.
+        Writes only when the value differs from the stored one. When the day's changes look like
+        devices disagreeing (four changes, or back and forth between two zones) and the user has a
+        job that follows their timezone, following is paused instead: the current timezone is
+        cleared, following jobs use their own timezone, and reports are ignored until
+        POST /user/current-timezone/resume (ADR 0x027).
       tags: [User Management]
       requestBody:
         required: true
@@ -311,14 +315,44 @@ paths:
               required:
                 - timezone
       responses:
-        '204':
-          description: Current timezone recorded
+        '200':
+          description: Report handled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  current_timezone:
+                    type: string
+                    description: The timezone following jobs run in now (empty while paused)
+                  timezone_following_paused_at:
+                    type: string
+                    format: date-time
+                    description: Set while following is paused; the report was not applied
+                  paused_now:
+                    type: boolean
+                    description: True when this report paused following
         '400':
-          description: Missing or invalid timezone
+          description: Missing or invalid timezone ("Local" is not accepted)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /user/current-timezone/resume:
+    post:
+      summary: Resume following the user's timezone
+      description: Ends a pause of following the user's timezone and forgets recent changes; the browser's next report sets it again.
+      tags: [User Management]
+      responses:
+        '204':
+          description: Following resumed
         '401':
           description: Unauthorized
           content:
@@ -7486,6 +7520,10 @@ components:
           type: string
           maxLength: 64
           description: IANA timezone the user's browser last reported (best effort). Jobs with follow_user_timezone run in it.
+        timezone_following_paused_at:
+          type: string
+          format: date-time
+          description: Set while following the user's timezone is paused because their devices kept reporting different zones.
         role:
           type: string
           enum: [user, admin, super_admin]

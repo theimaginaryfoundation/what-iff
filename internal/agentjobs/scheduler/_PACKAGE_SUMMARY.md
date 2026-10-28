@@ -27,15 +27,15 @@
   A user pause clears `last_error`, so paused + marker is how the web app (`scheduleFailureReason` in `job-status.helpers.ts`) shows "Paused: schedule error" with the reason instead of a plain pause.
 - **Run failure text:** `last_error` and the assistant message posted on a failed run use `providerkeys.FailureText`, so a missing provider key reads "No OpenAI API key is set." rather than the transport error.
   There is no separate status value or column; keep the marker and the helper in sync.
-- **Jobs that follow the user (`timezone.go`, [ADR 0x027](../../../docs/adr/0x027-jobs-follow-user-timezone.md)):** a cron job runs in `AgentJob.ScheduleTimezone()`.
+- **Jobs that follow the user (`internal/agentjobs/schedule/timezone.go`, [ADR 0x027](../../../docs/adr/0x027-jobs-follow-user-timezone.md)):** a cron job runs in `AgentJob.ScheduleTimezone()`.
   For a job with `follow_user_timezone`, that is the owner's browser-reported `current_timezone` (the datastore derives it as `EffectiveTimezone`); otherwise it is the job's own `timezone`.
   The reconcile fingerprint uses the effective timezone, so a change of the owner's timezone reschedules only the jobs that follow them.
-  The manager then stores their new `next_run_at`, except on the first schedule after startup.
+  The manager then stores their new `next_run_at` when it changed, on the first schedule after startup or a leader handover too.
   Each run records the timezone it ran in (`last_run_timezone`).
-  When a job's timezone differs from the one it last ran in, `slotGuardTrigger` skips fire times at or before the last run's wall-clock time in the new zone, so a slot that already ran is not run again.
+  When a following job's timezone differs from the one it last ran in, the slot guard skips fire times at or before the last run's wall-clock time in the new zone, so a slot that already ran is not run again.
   For example, if 8am New York has run and the user moves to Los Angeles, 8am Los Angeles that same day is skipped.
   Moving east can lose a slot instead: it has passed in the new zone but had not come up in the old one (8am LA ran yesterday; signing in from New York at 9am, 8am New York has passed and 8am LA is still to come).
-  Reconcile checks for this (`lostSlotOnMove`) whenever it (re)schedules a following job, startup included, and runs the job once right away (`runCatchUp`, `executionOptions.catchUp`, no lateness metric).
+  Reconcile checks for this (`schedule.LostSlotOnMove`, with the manager's `now` clock) whenever it (re)schedules a following job, startup included, and runs the job once right away (`runCatchUp`, `executionOptions.catchUp`, no lateness metric).
   Several lost slots (an hourly job) still mean one run.
   Signing in late loses nothing, because the old schedule has already run the slot; the catch-up run records the new zone, so it does not repeat.
 - **MVP note:** `Config.EnableAgentJobsScheduler` gates whether the scheduler runs at all.

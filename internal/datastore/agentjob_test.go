@@ -1142,9 +1142,9 @@ func TestAgentJob_FollowUserTimezoneRunsInOwnersCurrentTimezone(t *testing.T) {
 	require.False(t, created.FollowUserTimezone)
 	require.Equal(t, "America/New_York", created.EffectiveTimezone)
 
-	changed, err := ds.SetUserCurrentTimezone(ctx, userID, "America/Los_Angeles")
+	report, err := ds.SetUserCurrentTimezone(ctx, userID, "America/Los_Angeles")
 	require.NoError(t, err)
-	require.True(t, changed)
+	require.Equal(t, "America/Los_Angeles", report.CurrentTimezone)
 
 	// Not following: the owner's current timezone does not move the job.
 	got, err := ds.GetAgentJob(ctx, userID, created.ID)
@@ -1229,22 +1229,92 @@ func TestSetUserCurrentTimezone(t *testing.T) {
 
 	userID := createAgentJobTestUser(t, ds)
 
-	changed, err := ds.SetUserCurrentTimezone(ctx, userID, " America/Los_Angeles ")
+	report, err := ds.SetUserCurrentTimezone(ctx, userID, " America/Los_Angeles ")
 	require.NoError(t, err)
-	require.True(t, changed)
+	require.Equal(t, "America/Los_Angeles", report.CurrentTimezone)
 
-	changed, err = ds.SetUserCurrentTimezone(ctx, userID, "America/Los_Angeles")
-	require.NoError(t, err)
-	require.False(t, changed, "reporting the same timezone again is not a change")
+	report, err = ds.SetUserCurrentTimezone(ctx, userID, "America/Los_Angeles")
+	require.NoError(t, err, "reporting the same timezone again is not a change")
+	require.Equal(t, "America/Los_Angeles", report.CurrentTimezone)
 
 	u, err := ds.dbClient.User.Get(ctx, userID)
 	require.NoError(t, err)
 	require.Equal(t, "America/Los_Angeles", u.CurrentTimezone)
+	require.Empty(t, u.CurrentTimezoneChanges, "a first report is not a change of zone")
 
 	_, err = ds.SetUserCurrentTimezone(ctx, userID, "Mars/Olympus_Mons")
 	require.ErrorIs(t, err, ErrInvalidTimezone)
+	_, err = ds.SetUserCurrentTimezone(ctx, userID, "Local")
+	require.ErrorIs(t, err, ErrInvalidTimezone, "Local is the server's zone, not an IANA name")
 	_, err = ds.SetUserCurrentTimezone(ctx, userID, "")
 	require.ErrorIs(t, err, ErrInvalidTimezone)
 	_, err = ds.SetUserCurrentTimezone(ctx, uuid.New(), "America/Chicago")
 	require.ErrorIs(t, err, ErrUserNotFound)
+}
+
+func TestSetUserCurrentTimezone_FlappingPausesFollowing(t *testing.T) {
+	ds, cleanup := newAgentJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createAgentJobTestUser(t, ds)
+	job := baseAgentJobModel()
+	job.Timezone = "America/New_York"
+	job.FollowUserTimezone = true
+	created, err := ds.CreateAgentJob(ctx, userID, job)
+	require.NoError(t, err)
+
+	// A laptop at home and a phone on a trip take turns: NY, LA, NY, LA.
+	for _, tz := range []string{"America/New_York", "America/Los_Angeles", "America/New_York"} {
+		report, err := ds.SetUserCurrentTimezone(ctx, userID, tz)
+		require.NoError(t, err)
+		require.Nil(t, report.FollowingPausedAt, "not flapping yet at %s", tz)
+	}
+	report, err := ds.SetUserCurrentTimezone(ctx, userID, "America/Los_Angeles")
+	require.NoError(t, err)
+	require.True(t, report.PausedNow)
+	require.NotNil(t, report.FollowingPausedAt)
+	require.Empty(t, report.CurrentTimezone)
+
+	// Paused: the job is back on its own timezone and further reports change nothing.
+	got, err := ds.GetAgentJob(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, "America/New_York", got.EffectiveTimezone)
+	report, err = ds.SetUserCurrentTimezone(ctx, userID, "Asia/Tokyo")
+	require.NoError(t, err)
+	require.False(t, report.PausedNow)
+	require.NotNil(t, report.FollowingPausedAt)
+	got, err = ds.GetAgentJob(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, "America/New_York", got.EffectiveTimezone)
+
+	// Resuming clears the pause and the history; the next report applies again.
+	require.NoError(t, ds.ResumeTimezoneFollowing(ctx, userID))
+	report, err = ds.SetUserCurrentTimezone(ctx, userID, "America/Los_Angeles")
+	require.NoError(t, err)
+	require.Nil(t, report.FollowingPausedAt)
+	require.Equal(t, "America/Los_Angeles", report.CurrentTimezone)
+	u, err := ds.dbClient.User.Get(ctx, userID)
+	require.NoError(t, err)
+	require.Empty(t, u.CurrentTimezoneChanges)
+
+	require.ErrorIs(t, ds.ResumeTimezoneFollowing(ctx, uuid.New()), ErrUserNotFound)
+}
+
+func TestSetUserCurrentTimezone_FlappingWithoutFollowingJobsDoesNotPause(t *testing.T) {
+	ds, cleanup := newAgentJobTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createAgentJobTestUser(t, ds)
+	_, err := ds.CreateAgentJob(ctx, userID, baseAgentJobModel()) // pinned to its own timezone
+	require.NoError(t, err)
+
+	var report models.CurrentTimezoneReport
+	for _, tz := range []string{"America/New_York", "America/Los_Angeles", "America/New_York", "America/Los_Angeles"} {
+		report, err = ds.SetUserCurrentTimezone(ctx, userID, tz)
+		require.NoError(t, err)
+	}
+	require.Nil(t, report.FollowingPausedAt, "nothing follows the user, so there is nothing to protect")
+	require.Equal(t, "America/Los_Angeles", report.CurrentTimezone)
 }

@@ -212,7 +212,8 @@ export class JobDetailPageComponent implements OnInit, OnDestroy {
       schedule_input: scheduleInput,
       timezone: payload.timezone ?? this.job()?.timezone ?? 'UTC',
     };
-    if (payload.follow_user_timezone) request.follow_user_timezone = true;
+    // Sent either way, so the request always says what the form showed.
+    request.follow_user_timezone = !!payload.follow_user_timezone;
     const title = (payload.title ?? '').trim();
     if (title) request.title = title;
     const chatId = (payload.chat_id ?? '').trim();

@@ -10,6 +10,7 @@ import (
 
 	"github.com/reugn/go-quartz/quartz"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent"
+	"github.com/theimaginaryfoundation/what-iff/internal/agentjobs/schedule"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 
@@ -129,6 +130,8 @@ type Manager struct {
 
 	schedulerFactory   func() (quartz.Scheduler, error)
 	lockHealthInterval time.Duration
+	// now is the clock reconcile reads (time.Now; tests fix it).
+	now func() time.Time
 }
 
 func NewManager(ds schedulerStore, a *agent.Agent, logger *zap.Logger, cfg Config) (*Manager, error) {
@@ -151,6 +154,7 @@ func NewManager(ds schedulerStore, a *agent.Agent, logger *zap.Logger, cfg Confi
 		inFlight:           map[uuid.UUID]bool{},
 		rng:                rand.New(rand.NewSource(time.Now().UnixNano())),
 		lockHealthInterval: schedulerLockHealthInterval,
+		now:                time.Now,
 	}
 	m.schedulerFactory = m.newQuartzScheduler
 	return m, nil
@@ -494,21 +498,23 @@ func (m *Manager) reconcileOnce(ctx context.Context) {
 		m.mu.Unlock()
 
 		// A job that follows the user moves when their timezone does, and nothing else updates its
-		// stored next run until it runs. Skipped at startup (no previous fingerprint), where the
-		// stored value is still what the last run or edit wrote.
-		if ok && j.FollowUserTimezone {
+		// stored next run until it runs. Also on the first schedule after startup or a leader
+		// handover, in case the timezone changed in between; it writes only a changed value.
+		if j.FollowUserTimezone {
 			m.storeNextRunAt(ctx, j, next)
 		}
 		// Moving east can skip a run that had passed in the new timezone but not come up in the old
 		// one; run it once now. Checked on every (re)schedule, startup included: the run records the
 		// new timezone, so it does not repeat.
-		if j.FollowUserTimezone && lostSlotOnMove(j, time.Now()) {
+		if j.FollowUserTimezone && schedule.LostSlotOnMove(j, m.now()) {
 			m.runCatchUp(ctx, j)
 		}
 	}
 }
 
-// runCatchUp runs a job once now, in place of a slot its timezone change skipped.
+// runCatchUp runs a job once now, in place of a slot its timezone change skipped. Like a regular
+// firing it runs detached from reconcile (its context is not cancelled with reconcile's), so a slow
+// run does not hold up scheduling; the run's own limits apply as for any scheduled run.
 func (m *Manager) runCatchUp(ctx context.Context, j models.AgentJob) {
 	m.logger.Info("agent job catch-up run after timezone change",
 		zap.String("agent_job_id", j.ID.String()),
@@ -541,7 +547,7 @@ func (m *Manager) scheduleOrReschedule(ctx context.Context, j models.AgentJob) (
 	}
 	_ = s.DeleteJob(jobKey)
 
-	now := time.Now()
+	now := m.now()
 	trigger, err := buildTrigger(j, now)
 	if err != nil {
 		return nil, err

@@ -25,6 +25,7 @@ type fakeAgentJobProvider struct {
 	lastOverridesPatch      models.SetAgentJobOverridesPatch
 	setAgentJobOverridesErr error
 	lastFollow              *bool
+	nextRunWrites           []*time.Time
 }
 
 func (f *fakeAgentJobProvider) CreateAgentJob(ctx context.Context, userID uuid.UUID, jobModel models.AgentJob) (*models.AgentJob, error) {
@@ -60,8 +61,14 @@ func (f *fakeAgentJobProvider) SetAgentJobFollowUserTimezone(ctx context.Context
 	if f.job == nil {
 		return nil, errors.New("job not set")
 	}
+	f.job.FollowUserTimezone = follow
 	updated := *f.job
-	updated.FollowUserTimezone = follow
+	return &updated, nil
+}
+func (f *fakeAgentJobProvider) SetAgentJobNextRunAt(ctx context.Context, userID, id uuid.UUID, nextRunAt *time.Time) (*models.AgentJob, error) {
+	f.nextRunWrites = append(f.nextRunWrites, nextRunAt)
+	updated := *f.job
+	updated.NextRunAt = nextRunAt
 	return &updated, nil
 }
 func (f *fakeAgentJobProvider) SetAgentJobOverrides(ctx context.Context, userID, id uuid.UUID, patch models.SetAgentJobOverridesPatch) (*models.AgentJob, error) {
@@ -199,7 +206,13 @@ func TestUpdateAgentJob_SetsFollowUserTimezone(t *testing.T) {
 
 	userID := uuid.New()
 	jobID := uuid.New()
-	provider := &fakeAgentJobProvider{job: &models.AgentJob{ID: jobID, UserID: userID, Prompt: "p", Timezone: "America/New_York"}}
+	cron := "0 0 8 ? * *"
+	provider := &fakeAgentJobProvider{job: &models.AgentJob{
+		ID: jobID, UserID: userID, Prompt: "p", Timezone: "America/New_York",
+		ScheduleType: models.AgentJobScheduleTypeCron, Schedule: &cron, Status: models.AgentJobStatusActive,
+		// As the store derives it once the job follows a user who is in Los Angeles.
+		EffectiveTimezone: "America/Los_Angeles",
+	}}
 	h := NewHandler(provider, nil, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodPut, "/agent-job/"+jobID.String(), strings.NewReader(`{"follow_user_timezone":true}`))
@@ -220,6 +233,10 @@ func TestUpdateAgentJob_SetsFollowUserTimezone(t *testing.T) {
 	}
 	if !got.FollowUserTimezone {
 		t.Fatal("expected the response to show the job following the user's timezone")
+	}
+	la, _ := time.LoadLocation("America/Los_Angeles")
+	if len(provider.nextRunWrites) != 1 || got.NextRunAt == nil || got.NextRunAt.In(la).Hour() != 8 {
+		t.Fatalf("expected the next run stored and returned at 8:00 Los Angeles, got %v (writes %d)", got.NextRunAt, len(provider.nextRunWrites))
 	}
 
 	// Leaving the field out does not touch it.

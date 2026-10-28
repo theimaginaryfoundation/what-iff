@@ -60,6 +60,7 @@ import {
   UserIconComponent,
   XIconComponent,
 } from '../shared/ui/icons/icons';
+import { TimezonePausedNoticeComponent } from './timezone-paused-notice/timezone-paused-notice.component';
 
 /**
  * Top-level shell. Owns the route outlet, the left sidebar, the right context
@@ -81,6 +82,7 @@ import {
     RightPanelHostComponent,
     RouterOutlet,
     SheetComponent,
+    TimezonePausedNoticeComponent,
     MenuIconComponent,
     XIconComponent,
   ],

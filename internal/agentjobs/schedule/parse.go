@@ -11,6 +11,7 @@ import (
 	"github.com/reugn/go-quartz/quartz"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 
 	"github.com/google/uuid"
@@ -67,7 +68,7 @@ func Parse(ctx context.Context, caller openAICaller, userID uuid.UUID, scheduleI
 		timezone = "UTC"
 	}
 	loc, err := time.LoadLocation(timezone)
-	if err != nil || loc == nil {
+	if err != nil || loc == nil || !modeltypes.ValidTimezoneName(timezone) {
 		return nil, fmt.Errorf("invalid timezone %q", timezone)
 	}
 

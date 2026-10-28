@@ -1,9 +1,10 @@
 
-import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import { AgentJob, AgentJobScheduleParseRequest, AgentJobSchedulePreview, UpdateAgentJobRequest } from '../../../core/models/agent-job.model';
 import { Chat } from '../../../core/models/chat.model';
+import { CurrentTimezoneService } from '../../../core/services/current-timezone.service';
 import { Model } from '../../../core/models/model.model';
 import { Personality } from '../../../core/models/personality.model';
 import {
@@ -62,6 +63,11 @@ export class JobFormComponent {
   readonly scheduleInput = signal('');
   readonly timezone = signal('UTC');
   readonly followUserTimezone = signal(false);
+  private readonly currentTimezone = inject(CurrentTimezoneService);
+  readonly timezoneFollowingPaused = this.currentTimezone.followingPaused;
+  readonly resumeError = this.currentTimezone.resumeError;
+  /** Following only changes recurring schedules (a one-off run is a fixed moment). */
+  readonly isRecurring = computed(() => (this.preview()?.schedule_type ?? this.job().schedule_type) === 'cron');
   readonly chatId = signal('');
   readonly personalityId = signal('');
   readonly modelId = signal('');
@@ -161,6 +167,10 @@ export class JobFormComponent {
       reasoning_effort: this.reasoningEffort(),
       agent_loop: this.agentLoop(),
     });
+  }
+
+  resumeFollowing(): void {
+    this.currentTimezone.resume();
   }
 
   private normalize(value: string | null | undefined): string {

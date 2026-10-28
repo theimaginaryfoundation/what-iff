@@ -505,7 +505,11 @@ export interface paths {
          * Report the user's current timezone
          * @description Records the IANA timezone the user's browser is in. Jobs with follow_user_timezone run in it,
          *     so they keep their local time while the user travels. The user's own timezone is unchanged.
-         *     Writes only when the value differs from the stored one.
+         *     Writes only when the value differs from the stored one. When the day's changes look like
+         *     devices disagreeing (four changes, or back and forth between two zones) and the user has a
+         *     job that follows their timezone, following is paused instead: the current timezone is
+         *     cleared, following jobs use their own timezone, and reports are ignored until
+         *     POST /user/current-timezone/resume (ADR 0x027).
          */
         put: {
             parameters: {
@@ -523,14 +527,26 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Current timezone recorded */
-                204: {
+                /** @description Report handled */
+                200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            /** @description The timezone following jobs run in now (empty while paused) */
+                            current_timezone?: string;
+                            /**
+                             * Format: date-time
+                             * @description Set while following is paused; the report was not applied
+                             */
+                            timezone_following_paused_at?: string;
+                            /** @description True when this report paused following */
+                            paused_now?: boolean;
+                        };
+                    };
                 };
-                /** @description Missing or invalid timezone */
+                /** @description Missing or invalid timezone ("Local" is not accepted) */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -551,6 +567,52 @@ export interface paths {
             };
         };
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/user/current-timezone/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume following the user's timezone
+         * @description Ends a pause of following the user's timezone and forgets recent changes; the browser's next report sets it again.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Following resumed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -10728,6 +10790,11 @@ export interface components {
             timezone?: string;
             /** @description IANA timezone the user's browser last reported (best effort). Jobs with follow_user_timezone run in it. */
             current_timezone?: string;
+            /**
+             * Format: date-time
+             * @description Set while following the user's timezone is paused because their devices kept reporting different zones.
+             */
+            timezone_following_paused_at?: string;
             /**
              * @description User role for authorization
              * @enum {string}

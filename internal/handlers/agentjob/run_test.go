@@ -232,3 +232,7 @@ func TestRunAgentJobNow_NotFoundReturnsNotFound(t *testing.T) {
 func (f *fakeAgentJobRunProvider) SetAgentJobFollowUserTimezone(ctx context.Context, userID, id uuid.UUID, follow bool) (*models.AgentJob, error) {
 	return nil, errors.New("not implemented")
 }
+
+func (f *fakeAgentJobRunProvider) SetAgentJobNextRunAt(ctx context.Context, userID, id uuid.UUID, nextRunAt *time.Time) (*models.AgentJob, error) {
+	return nil, errors.New("not implemented")
+}

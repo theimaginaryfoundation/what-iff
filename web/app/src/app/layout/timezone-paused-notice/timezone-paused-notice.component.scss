@@ -1,0 +1,40 @@
+:host {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 40;
+  max-width: min(24rem, calc(100vw - 2rem));
+}
+
+.timezone-paused-notice {
+  border: 1px solid var(--color-border-base);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface-card));
+  padding: 0.75rem 1rem;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+
+.timezone-paused-notice__title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.timezone-paused-notice__body {
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.timezone-paused-notice__error {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--color-danger);
+}
+
+.timezone-paused-notice__actions {
+  margin-top: 0.75rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}

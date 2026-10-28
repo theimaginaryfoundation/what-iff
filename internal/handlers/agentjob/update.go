@@ -6,10 +6,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/theimaginaryfoundation/what-iff/internal/agentjobs/schedule"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -204,6 +206,10 @@ func (h *Handler) UpdateAgentJob(w http.ResponseWriter, r *http.Request) {
 	// Update whether the schedule follows the user's current timezone (optional).
 	if req.FollowUserTimezone != nil {
 		updated, err = h.provider.SetAgentJobFollowUserTimezone(r.Context(), userID, id, *req.FollowUserTimezone)
+		if err == nil {
+			// The job may now run in another timezone; show its next run there straight away.
+			updated, err = schedule.StoreNextRun(r.Context(), h.provider, updated, time.Now())
+		}
 		if err == datastore.ErrAgentJobNotFound {
 			handlerutils.RespondWithError(w, h.logger, http.StatusNotFound, handlerutils.CodeNotSet, "AgentJob not found", nil)
 			return
@@ -241,8 +247,8 @@ func (h *Handler) UpdateAgentJob(w http.ResponseWriter, r *http.Request) {
 			tz = strings.TrimSpace(*req.Timezone)
 		}
 		if tz != "" {
-			if _, err := time.LoadLocation(tz); err != nil {
-				handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid timezone (expected IANA name like America/New_York)", err)
+			if !modeltypes.ValidTimezoneName(tz) {
+				handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, "Invalid timezone (expected IANA name like America/New_York)", nil)
 				return
 			}
 		}

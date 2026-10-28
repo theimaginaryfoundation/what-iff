@@ -335,3 +335,7 @@ func TestRemoveAgentJobRitual_InternalError(t *testing.T) {
 func (f *fakeRitualOpsProvider) SetAgentJobFollowUserTimezone(ctx context.Context, userID, id uuid.UUID, follow bool) (*models.AgentJob, error) {
 	return nil, errors.New("not implemented")
 }
+
+func (f *fakeRitualOpsProvider) SetAgentJobNextRunAt(ctx context.Context, userID, id uuid.UUID, nextRunAt *time.Time) (*models.AgentJob, error) {
+	return nil, errors.New("not implemented")
+}

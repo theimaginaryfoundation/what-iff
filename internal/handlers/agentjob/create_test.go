@@ -171,3 +171,7 @@ func TestCreateAgentJob_FollowUserTimezoneIsOffUnlessAsked(t *testing.T) {
 		}
 	}
 }
+
+func (f *fakeCreateAgentJobProvider) SetAgentJobNextRunAt(ctx context.Context, userID, id uuid.UUID, nextRunAt *time.Time) (*models.AgentJob, error) {
+	return nil, errors.New("not implemented")
+}

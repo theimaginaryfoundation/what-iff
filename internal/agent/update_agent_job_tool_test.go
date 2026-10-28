@@ -125,6 +125,18 @@ func (f *fakeJobStore) SetAgentJobFollowUserTimezone(_ context.Context, userID, 
 	return j, nil
 }
 
+func (f *fakeJobStore) SetAgentJobNextRunAt(_ context.Context, userID, id uuid.UUID, next *time.Time) (*models.AgentJob, error) {
+	j, err := f.job(userID, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.write("next_run_at"); err != nil {
+		return nil, err
+	}
+	j.NextRunAt = next
+	return j, nil
+}
+
 func (f *fakeJobStore) UpdateAgentJobSchedule(_ context.Context, userID, id uuid.UUID, input string, typ models.AgentJobScheduleType, sched *string, runAt *time.Time, tz string, next *time.Time) (*models.AgentJob, error) {
 	j, err := f.job(userID, id)
 	if err != nil {
@@ -323,9 +335,17 @@ func TestUpdateAgentJobPausesAndResumes(t *testing.T) {
 func TestUpdateAgentJobFollowsTheUsersTimezoneOnlyWhenAsked(t *testing.T) {
 	f := newJobUpdateFixture(t)
 
+	cron := "0 0 8 ? * *"
+	f.job.Schedule = &cron
+	f.job.EffectiveTimezone = "America/Los_Angeles" // as the store derives it once following
+
 	res := f.run(t, fmt.Sprintf(`{"job_id":%q,"follow_user_timezone":true}`, f.job.ID))
 	require.True(t, res.Success, res.Error)
 	assert.Equal(t, []string{"follow_user_timezone"}, res.Updated)
+	assert.Equal(t, []string{"follow_user_timezone", "next_run_at"}, f.store.writes, "the next run moves with the job")
+	require.NotNil(t, res.NextRunAt)
+	la, _ := time.LoadLocation("America/Los_Angeles")
+	assert.Equal(t, 8, res.NextRunAt.In(la).Hour(), "the result shows the next run in the zone the job now runs in")
 	assert.True(t, f.job.FollowUserTimezone)
 	assert.True(t, res.FollowsUserTimezone)
 	assert.Equal(t, "America/New_York", f.job.Timezone, "the job keeps its own timezone to return to")

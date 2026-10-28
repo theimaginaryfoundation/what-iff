@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -164,17 +163,22 @@ func TestReconcile_StoresTheNextRunWhenAFollowingJobMoves(t *testing.T) {
 		t.Fatalf("NewManager: %v", err)
 	}
 	m.sched = &fakeScheduler{}
+	ny := mustLoc(t, "America/New_York")
+	la := mustLoc(t, "America/Los_Angeles")
+	now := time.Date(2026, 10, 22, 6, 0, 0, 0, ny)
+	m.now = func() time.Time { return now }
 
 	following := followJob("0 0 8 ? * *", "America/New_York", nil, nil)
+	following.NextRunAt = ptrTime(time.Date(2026, 10, 22, 8, 0, 0, 0, ny).UTC())
 	pinned := following
 	pinned.ID = uuid.New()
 	pinned.FollowUserTimezone = false
 	ds.jobs = []*models.AgentJob{&following, &pinned}
 
-	// Startup scheduling does not rewrite stored next runs.
+	// The first schedule (startup, or a new leader) leaves a stored next run that is right alone.
 	m.reconcileOnce(context.Background())
 	if len(ds.nextRunWrites) != 0 {
-		t.Fatalf("expected no next-run writes on first schedule, got %d", len(ds.nextRunWrites))
+		t.Fatalf("expected no next-run writes when the stored value is right, got %d", len(ds.nextRunWrites))
 	}
 
 	// The owner's timezone changes: only the following job moves, and its next run is stored.
@@ -184,94 +188,37 @@ func TestReconcile_StoresTheNextRunWhenAFollowingJobMoves(t *testing.T) {
 	ds.jobs = []*models.AgentJob{&movedFollowing, &movedPinned}
 	m.reconcileOnce(context.Background())
 
-	next, ok := ds.nextRunWrites[following.ID]
-	if !ok {
-		t.Fatal("expected the following job's next run to be stored")
-	}
-	la := mustLoc(t, "America/Los_Angeles")
-	if l := next.In(la); l.Hour() != 8 || l.Minute() != 0 {
-		t.Fatalf("stored next run = %s, want 8:00 in Los Angeles", l)
+	if next, ok := ds.nextRunWrites[following.ID]; !ok || !next.Equal(time.Date(2026, 10, 22, 8, 0, 0, 0, la)) {
+		t.Fatalf("stored next run = %v (written %v), want 8:00 today in Los Angeles", next, ok)
 	}
 	if _, ok := ds.nextRunWrites[pinned.ID]; ok {
 		t.Fatal("expected no write for a job that does not follow the user (its editor stores next_run_at)")
 	}
 }
 
-func ptrTime(t time.Time) *time.Time { return &t }
-
-func TestLostSlotOnMove(t *testing.T) {
+func TestReconcile_FirstScheduleCorrectsAStaleNextRun(t *testing.T) {
+	// The owner's timezone changed between the old leader's last reconcile and this one's first.
+	ds := &fakeDatastoreProvider{}
+	m, err := NewManager(ds, nil, zap.NewNop(), Config{})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	m.sched = &fakeScheduler{}
 	ny := mustLoc(t, "America/New_York")
 	la := mustLoc(t, "America/Los_Angeles")
+	m.now = func() time.Time { return time.Date(2026, 10, 22, 6, 0, 0, 0, ny) }
 
-	tests := []struct {
-		name      string
-		cron      string
-		effective string
-		lastRunAt *time.Time
-		lastRunTZ *string
-		now       time.Time
-		want      bool
-	}{
-		{
-			name: "east, signed in before the old zone's slot: 8am New York was lost",
-			// 8am LA ran yesterday; at 9am New York 8am there has passed and 8am LA (11am New York) is to come.
-			cron: "0 0 8 ? * *", effective: "America/New_York",
-			lastRunAt: ptrTime(time.Date(2026, 10, 21, 8, 0, 4, 0, la)), lastRunTZ: strPtr("America/Los_Angeles"),
-			now:  time.Date(2026, 10, 22, 9, 0, 0, 0, ny),
-			want: true,
-		},
-		{
-			name: "east, signed in late: the old schedule already ran today's slot",
-			cron: "0 0 8 ? * *", effective: "America/New_York",
-			lastRunAt: ptrTime(time.Date(2026, 10, 22, 8, 0, 4, 0, la)), lastRunTZ: strPtr("America/Los_Angeles"),
-			now:  time.Date(2026, 10, 22, 14, 0, 0, 0, ny),
-			want: false,
-		},
-		{
-			name: "east, signed in before today's slot in the new zone too: nothing lost",
-			cron: "0 0 8 ? * *", effective: "America/New_York",
-			lastRunAt: ptrTime(time.Date(2026, 10, 21, 8, 0, 4, 0, la)), lastRunTZ: strPtr("America/Los_Angeles"),
-			now:  time.Date(2026, 10, 22, 7, 0, 0, 0, ny),
-			want: false,
-		},
-		{
-			name: "west never loses a slot",
-			cron: "0 0 8 ? * *", effective: "America/Los_Angeles",
-			lastRunAt: ptrTime(time.Date(2026, 10, 22, 8, 0, 4, 0, ny)), lastRunTZ: strPtr("America/New_York"),
-			now:  time.Date(2026, 10, 22, 9, 0, 0, 0, ny),
-			want: false,
-		},
-		{
-			name: "east, hourly: the hours lost to the move count once",
-			// 11am LA ran; at 11:30 LA (2:30pm New York) noon-2pm New York have passed but noon LA is to come.
-			cron: "0 0 9-17 ? * *", effective: "America/New_York",
-			lastRunAt: ptrTime(time.Date(2026, 10, 22, 11, 0, 2, 0, la)), lastRunTZ: strPtr("America/Los_Angeles"),
-			now:  time.Date(2026, 10, 22, 14, 30, 0, 0, ny),
-			want: true,
-		},
-		{
-			name: "same timezone as the last run",
-			cron: "0 0 8 ? * *", effective: "America/New_York",
-			lastRunAt: ptrTime(time.Date(2026, 10, 21, 8, 0, 4, 0, ny)), lastRunTZ: strPtr("America/New_York"),
-			now:  time.Date(2026, 10, 22, 9, 0, 0, 0, ny),
-			want: false,
-		},
-		{
-			name: "a job that has never run",
-			cron: "0 0 8 ? * *", effective: "America/New_York",
-			now:  time.Date(2026, 10, 22, 9, 0, 0, 0, ny),
-			want: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			j := followJob(tt.cron, tt.effective, tt.lastRunAt, tt.lastRunTZ)
-			if got := lostSlotOnMove(j, tt.now); got != tt.want {
-				t.Fatalf("lostSlotOnMove = %v, want %v", got, tt.want)
-			}
-		})
+	job := followJob("0 0 8 ? * 2", "America/Los_Angeles", nil, nil) // weekly, Mondays
+	job.NextRunAt = ptrTime(time.Date(2026, 10, 26, 8, 0, 0, 0, ny).UTC())
+	ds.jobs = []*models.AgentJob{&job}
+
+	m.reconcileOnce(context.Background())
+	if next, ok := ds.nextRunWrites[job.ID]; !ok || !next.Equal(time.Date(2026, 10, 26, 8, 0, 0, 0, la)) {
+		t.Fatalf("stored next run = %v (written %v), want Monday 8:00 in Los Angeles", next, ok)
 	}
 }
+
+func ptrTime(t time.Time) *time.Time { return &t }
 
 func TestReconcile_RunsOnceForASlotLostMovingEast(t *testing.T) {
 	ds := &fakeDatastoreProvider{gets: make(chan uuid.UUID, 4)}
@@ -281,15 +228,12 @@ func TestReconcile_RunsOnceForASlotLostMovingEast(t *testing.T) {
 	}
 	m.sched = &fakeScheduler{}
 
-	// Ran in LA a day ago; now runs in New York. Picking the schedule as "the hour before now"
-	// guarantees a New York slot just passed that LA (3 hours behind) has not reached yet.
+	// 8am LA ran yesterday; at 9am New York, 8am there has passed and 8am LA is still to come.
 	la := mustLoc(t, "America/Los_Angeles")
 	ny := mustLoc(t, "America/New_York")
-	now := time.Now().In(ny)
-	slot := now.Add(-time.Hour)
-	cron := fmt.Sprintf("0 %d %d ? * *", slot.Minute(), slot.Hour())
-	lastRun := time.Date(slot.Year(), slot.Month(), slot.Day()-1, slot.Hour(), slot.Minute(), 0, 0, la)
-	moved := followJob(cron, "America/New_York", &lastRun, strPtr("America/Los_Angeles"))
+	m.now = func() time.Time { return time.Date(2026, 10, 22, 9, 0, 0, 0, ny) }
+	lastRun := time.Date(2026, 10, 21, 8, 0, 4, 0, la)
+	moved := followJob("0 0 8 ? * *", "America/New_York", &lastRun, strPtr("America/Los_Angeles"))
 	pinned := moved
 	pinned.ID = uuid.New()
 	pinned.FollowUserTimezone = false
@@ -311,5 +255,20 @@ func TestReconcile_RunsOnceForASlotLostMovingEast(t *testing.T) {
 	case id := <-ds.gets:
 		t.Fatalf("unexpected second run of %s", id)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestScheduleTimezone_PinnedJobRunsAsEdited(t *testing.T) {
+	// A daily 8am New York job ran at 8am New York. At 5am Los Angeles the user edits it from that
+	// browser to 6am, which saves Los Angeles as the job's timezone. It does not follow the user, so
+	// today's 6am Los Angeles runs as edited.
+	ny := mustLoc(t, "America/New_York")
+	la := mustLoc(t, "America/Los_Angeles")
+	j := followJob("0 0 6 ? * *", "", ptrTime(time.Date(2026, 10, 22, 8, 0, 4, 0, ny)), strPtr("America/New_York"))
+	j.FollowUserTimezone = false
+	j.Timezone = "America/Los_Angeles"
+
+	if got, want := nextFire(t, j, time.Date(2026, 10, 22, 5, 0, 0, 0, la)), time.Date(2026, 10, 22, 6, 0, 0, 0, la); !got.Equal(want) {
+		t.Fatalf("next run = %s, want %s", got.In(la), want)
 	}
 }
