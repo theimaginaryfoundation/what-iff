@@ -9,6 +9,9 @@ import "strings"
 // a table edit here. Each table cites the provider doc it follows; models.reasoning_test.go pins
 // the matrix.
 //
+// Each family also records the effort its models reason at when the request sends no control
+// (NativeReasoningEffort), from the same docs. A default the docs do not state is taken as off.
+//
 // The tables fail closed: a model they do not list gets no reasoning control (nothing is sent,
 // so the request is what it was before ADR 0x026). Sending a control a model rejects fails the
 // turn, while leaving a new model out only hides the setting until it is added.
@@ -63,6 +66,24 @@ func AnthropicSummarizesThinkingByDefault(name string) bool {
 // AnthropicUsesThinkingBudget reports whether a model takes budget_tokens rather than effort.
 func AnthropicUsesThinkingBudget(name string) bool { return hasPrefix(name, anthropicThinkingBudget) }
 
+// anthropicNativeMedium default to medium effort; every other model that thinks without a
+// thinking field (anthropicThinksByDefault, which includes the 5.5 generation) defaults to high.
+// The 4.x models do not think unless asked (/thinking, "No thinking field").
+var (
+	anthropicNativeMedium    = []string{"claude-opus-5-5", "claude-haiku-5-5"}
+	anthropicThinksByDefault = []string{"claude-opus-5", "claude-sonnet-5", "claude-haiku-5", "claude-fable", "claude-mythos"}
+)
+
+func anthropicNativeEffort(n string) ReasoningEffort {
+	switch {
+	case hasPrefix(n, anthropicNativeMedium):
+		return ReasoningEffortMedium
+	case hasPrefix(n, anthropicThinksByDefault):
+		return ReasoningEffortHigh
+	}
+	return ReasoningEffortOff
+}
+
 // --- OpenAI (developers.openai.com/api/docs/guides/reasoning) ---
 
 var (
@@ -109,6 +130,22 @@ func OpenAIRejectsNoneEffort(name string) bool {
 	return false
 }
 
+// openAINoReasoningByDefault are the GPT-5 releases whose default effort is "none" (5.1, 5.2,
+// 5.4). 5.3's default is not documented, so it is treated the same way and its selected effort
+// is metered. The original GPT-5 models, the codex models (Codex docs), 5.5 and later, and the
+// o-series default to medium.
+var openAINoReasoningByDefault = []string{"gpt-5.1", "gpt-5.2", "gpt-5.3", "gpt-5.4"}
+
+func openAINativeEffort(n string) ReasoningEffort {
+	switch {
+	case openAIReasoningSupport(n) == ReasoningSupportNone:
+		return ReasoningEffortOff
+	case hasPrefix(n, openAINoReasoningByDefault) && !strings.Contains(n, "-codex"):
+		return ReasoningEffortOff
+	}
+	return ReasoningEffortMedium
+}
+
 // --- Gemini (ai.google.dev/gemini-api/docs/openai, /thinking) ---
 
 // geminiNoReasoning marks media and non-chat model names; geminiThinkingOptional can disable
@@ -129,6 +166,20 @@ func geminiReasoningSupport(n string) ReasoningSupport {
 		return ReasoningSupportAlways
 	}
 	return ReasoningSupportNone
+}
+
+// geminiNativeMedium are the Gemini 3 releases whose default thinking level is medium; the rest
+// of Gemini 3 defaults to high, and 2.5 thinks dynamically (no budget cap), counted as high.
+var geminiNativeMedium = []string{"gemini-3.6-flash", "gemini-3.8-flash"}
+
+func geminiNativeEffort(n string) ReasoningEffort {
+	switch {
+	case geminiReasoningSupport(n) == ReasoningSupportNone:
+		return ReasoningEffortOff
+	case hasPrefix(n, geminiNativeMedium):
+		return ReasoningEffortMedium
+	}
+	return ReasoningEffortHigh
 }
 
 // --- Qwen (alibabacloud.com/help/en/model-studio/deep-thinking) ---
@@ -163,6 +214,22 @@ func qwenReasoningSupport(n string) ReasoningSupport {
 // thinking budget (DashScope rejects the two together).
 func QwenUsesReasoningEffort(name string) bool { return hasPrefix(name, qwenEffort) }
 
+// qwenThinksByDefault are the hybrid series that think unless told not to (Qwen 3.5 and later).
+// Qwen 3 and the commercial qwen-plus / qwen-flash do not think by default.
+var qwenThinksByDefault = []string{"qwen3.5", "qwen3.6", "qwen3.7", "qwen3.8"}
+
+func qwenNativeEffort(n string) ReasoningEffort {
+	switch qwenReasoningSupport(n) {
+	case ReasoningSupportAlways:
+		return ReasoningEffortHigh
+	case ReasoningSupportOptional:
+		if hasPrefix(n, qwenThinksByDefault) {
+			return ReasoningEffortHigh
+		}
+	}
+	return ReasoningEffortOff
+}
+
 // --- DeepSeek (api-docs.deepseek.com/guides/thinking_mode) ---
 
 // deepSeekHybrid are the hybrid models (reasoning_effort none/low/high/max, thinking on by
@@ -178,6 +245,14 @@ func deepSeekReasoningSupport(n string) ReasoningSupport {
 		return ReasoningSupportOptional
 	}
 	return ReasoningSupportNone
+}
+
+// deepSeekNativeEffort: the hybrid models think by default at high effort.
+func deepSeekNativeEffort(n string) ReasoningEffort {
+	if deepSeekReasoningSupport(n) == ReasoningSupportNone {
+		return ReasoningEffortOff
+	}
+	return ReasoningEffortHigh
 }
 
 // --- Mistral (docs.mistral.ai/studio/conversations/reasoning) ---
@@ -206,6 +281,15 @@ func zaiReasoningSupport(n string) ReasoningSupport {
 	return ReasoningSupportNone
 }
 
+// zaiNativeEffort: GLM thinks by default ("enabled" is the default thinking type), at its
+// deepest level.
+func zaiNativeEffort(n string) ReasoningEffort {
+	if zaiReasoningSupport(n) == ReasoningSupportNone {
+		return ReasoningEffortOff
+	}
+	return ReasoningEffortHigh
+}
+
 // xiaomiHybrid are the MiMo models that think by default and can switch it off (a toggle).
 var xiaomiHybrid = []string{"mimo-v2"}
 
@@ -214,6 +298,15 @@ func xiaomiReasoningSupport(n string) ReasoningSupport {
 		return ReasoningSupportToggle
 	}
 	return ReasoningSupportNone
+}
+
+// xiaomiNativeEffort: MiMo thinks by default, which is "on", reported as medium like any toggle
+// model's on (EffectiveReasoningEffort).
+func xiaomiNativeEffort(n string) ReasoningEffort {
+	if xiaomiReasoningSupport(n) == ReasoningSupportNone {
+		return ReasoningEffortOff
+	}
+	return ReasoningEffortMedium
 }
 
 // --- helpers ---

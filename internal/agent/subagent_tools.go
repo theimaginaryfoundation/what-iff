@@ -61,8 +61,9 @@ type runSubagentToolResult struct {
 type subagentCallResult struct {
 	Output      string
 	InputTokens int64
-	// ReasoningEffort is the effort the sub-agent's model ran at, inherited from the turn
-	// ("" when the turn selected none or the model has no effort control).
+	// ReasoningEffort is the effort the sub-agent's model ran at, inherited from the turn, when it
+	// is above the model's native level (models.ReasoningEffortAboveNative); "" when the turn
+	// selected none, the model has no effort control, or it reasons that much unasked.
 	ReasoningEffort models.ReasoningEffort
 	// Calls is the usage of each model call the sub-agent made, for metering.
 	Calls []provider.CallUsage
@@ -335,11 +336,12 @@ func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelNa
 	caps := a.subagentModelCapabilities(ctx, modelName)
 	// This wrapper exists to derive the effort once: the parent turn's selected effort (carried on
 	// ctx by withSubagentReasoningEffort) mapped onto the sub-agent's own model. The call itself is
-	// callSubagentModelWithEffort; the effort is also reported back for metering.
+	// callSubagentModelWithEffort; the effort is also reported back for metering when it is above the
+	// model's native level.
 	effort := models.EffectiveReasoningEffort(caps.reasoningSupport(modelName), subagentReasoningEffort(ctx))
 	result, err := a.callSubagentModelWithEffort(ctx, userID, caps, modelName, modelContext, ritualIDs, sandboxed, effort)
 	if result != nil {
-		result.ReasoningEffort = effort
+		result.ReasoningEffort = models.ReasoningEffortAboveNative(caps.Provider, modelName, effort)
 	}
 	return result, err
 }
