@@ -31,3 +31,16 @@ type ProviderKeySummary struct {
 	Hint      string    `json:"hint"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// Where provider keys come from, as reported by ProviderAccess.KeysFrom.
+const (
+	KeysFromDeployment = "deployment"
+	KeysFromAccount    = "account"
+)
+
+// ProviderAccess is what the requesting account can reach: where its provider
+// keys come from, and which providers it has a key for right now.
+type ProviderAccess struct {
+	KeysFrom  string          `json:"keys_from"`
+	Providers []ModelProvider `json:"providers"`
+}

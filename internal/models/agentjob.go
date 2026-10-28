@@ -44,7 +44,10 @@ type AgentJob struct {
 	LastError     string               `json:"last_error,omitempty"`
 	RunCount      int                  `json:"run_count"`
 	// Rituals is populated when the job is loaded with ritual edges. May be nil if edges not loaded.
-	Rituals   []*Ritual `json:"rituals,omitempty"`
+	Rituals []*Ritual `json:"rituals,omitempty"`
+	// TurnSettingValues override everything else for this job's runs (ADR 0x026); they are never
+	// written to the thread.
+	TurnSettingValues
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -65,4 +68,8 @@ type SetAgentJobOverridesPatch struct {
 	PersonalityID     *uuid.UUID
 	UpdateModel       bool
 	ModelID           *uuid.UUID
+	// UpdateReasoningEffort / UpdateAgentLoop write the matching TurnSettings field (nil clears).
+	UpdateReasoningEffort bool
+	UpdateAgentLoop       bool
+	TurnSettings          TurnSettingValues
 }

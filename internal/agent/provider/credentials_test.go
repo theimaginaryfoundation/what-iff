@@ -2,12 +2,17 @@ package provider
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 )
 
 type capturingTransport struct{ last *http.Request }
@@ -76,27 +81,42 @@ func TestCredentialHTTPClient_LeavesUnknownHostsAlone(t *testing.T) {
 	require.Equal(t, "Bearer theirs", cap.last.Header.Get("Authorization"))
 }
 
-// With no credential for this caller the request goes out without one, even
+// With no credential for this caller the request is not sent at all, even
 // when the SDK filled the header from the environment: that key is the
-// deployment's, and a caller without a key of its own must not spend it.
-func TestCredentialHTTPClient_NoCredentialSendsNone(t *testing.T) {
+// deployment's, and a caller without a key of its own must not spend it. The
+// error names the provider, so the caller can say which key is missing.
+func TestCredentialHTTPClient_NoCredentialIsNotSent(t *testing.T) {
 	t.Parallel()
 	cap := &capturingTransport{}
 	c := CredentialHTTPClient([]CredentialRule{
-		{BaseURL: "https://api.openai.com/v1", Style: BearerAuthorization, Resolve: static("")},
-		{BaseURL: "https://api.anthropic.com", Style: AnthropicAPIKey, Resolve: static("")},
+		{Provider: models.ModelProviderOpenAI, BaseURL: "https://api.openai.com/v1", Style: BearerAuthorization, Resolve: static("")},
+		{Provider: models.ModelProviderAnthropic, BaseURL: "https://api.anthropic.com", Style: AnthropicAPIKey, Resolve: static("")},
 	}, &http.Client{Transport: cap})
 
-	doWithHeaders(t, c, "https://api.openai.com/v1/responses", map[string]string{"Authorization": "Bearer sk-from-env"})
-	require.Empty(t, cap.last.Header.Get("Authorization"))
+	for url, want := range map[string]models.ModelProvider{
+		"https://api.openai.com/v1/responses":   models.ModelProviderOpenAI,
+		"https://api.anthropic.com/v1/messages": models.ModelProviderAnthropic,
+	} {
+		body := &closeRecorder{Reader: strings.NewReader(`{}`)}
+		req, err := http.NewRequest(http.MethodPost, url, body)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer sk-from-env")
 
-	doWithHeaders(t, c, "https://api.anthropic.com/v1/messages", map[string]string{
-		"x-api-key":     "sk-ant-from-env",
-		"Authorization": "Bearer token-from-env",
-	})
-	require.Empty(t, cap.last.Header.Get("x-api-key"))
-	require.Empty(t, cap.last.Header.Get("Authorization"))
+		_, err = c.Do(req)
+		var notConfigured *providerkeys.NotConfiguredError
+		require.ErrorAs(t, err, &notConfigured)
+		require.Equal(t, want, notConfigured.Provider)
+		require.True(t, body.closed, "the request body is closed even though it was not sent")
+	}
+	require.Nil(t, cap.last, "nothing reached the provider")
 }
+
+type closeRecorder struct {
+	io.Reader
+	closed bool
+}
+
+func (c *closeRecorder) Close() error { c.closed = true; return nil }
 
 // A resolved credential replaces whatever the SDK set, in either header.
 func TestCredentialHTTPClient_ResolvedCredentialReplacesTheSDKs(t *testing.T) {

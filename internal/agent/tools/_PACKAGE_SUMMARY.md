@@ -43,6 +43,8 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
 
 ## Non-obvious decisions
 
+- **Plan tool (ADR 0x026, `update_plan.go`):** `UpdatePlanToolSpec` is deliberately not in the catalog: the agent offers it only on Advanced-loop turns, where the plan's open items are what keep the loop going.
+  `ParseUpdatePlanArgs` validates the whole-list replacement (at most `MaxPlanItems`, known statuses, trimmed content).
 - **Find context:** `RecallTool` implements the agent-facing `find_context` surface, consolidating memory and attachment retrieval.
   `conversation` pages from the start of a thread toward its end with a conversation-scoped `(sent_at, message_id)` keyset cursor; relative time scopes are frozen in that cursor so later pages cannot drift.
 - **`list` conversations:** Empty shells (no messages / nil `last_message_time`) are excluded via `ChatFilters.HasMessages` so they do not crowd out real conversations under Postgres `DESC NULLS FIRST` sort.

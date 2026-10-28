@@ -19,6 +19,10 @@ const (
 	// the call, and every write rewrites the whole payload.
 	toolProgressPreviewRunes   = 1000
 	toolProgressPersistTimeout = 2 * time.Second
+	// advancedProgressMaxEntries caps the live timeline of an Advanced run (ADR 0x026), which can
+	// make hundreds of calls: every write rewrites the whole payload, so only the newest calls
+	// are kept live. Every call is still saved on the reply.
+	advancedProgressMaxEntries = 60
 )
 
 // jobProgressWriter is the slice of the datastore the recorder needs.
@@ -43,6 +47,9 @@ type jobToolProgress struct {
 
 	mu      sync.Mutex
 	entries []models.ChatTurnToolCall
+	// step and plan are the Advanced run's current step and checklist (zero on Standard turns).
+	step int
+	plan []models.PlanItem
 	// pending is the newest snapshot not yet written; the writer goroutine always takes the
 	// latest, so writes can't land out of order and a burst of updates coalesces into one.
 	pending string
@@ -169,8 +176,34 @@ func (p *jobToolProgress) Started(round int, use provider.ToolUse) {
 		Input:     tools.TruncateRunes(string(use.Input), toolProgressPreviewRunes),
 		Status:    models.ChatTurnToolRunning,
 		Round:     round,
+		Step:      p.step,
 		StartedAt: p.now().UTC(),
 	})
+	if p.step > 0 && len(p.entries) > advancedProgressMaxEntries {
+		p.entries = append([]models.ChatTurnToolCall(nil), p.entries[len(p.entries)-advancedProgressMaxEntries:]...)
+	}
+	p.scheduleLocked()
+	p.mu.Unlock()
+}
+
+// SetStep records the Advanced run's current step (1-based); later calls are tagged with it.
+func (p *jobToolProgress) SetStep(step int) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.step = step
+	p.scheduleLocked()
+	p.mu.Unlock()
+}
+
+// SetPlan publishes the Advanced run's current plan.
+func (p *jobToolProgress) SetPlan(plan []models.PlanItem) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.plan = append([]models.PlanItem(nil), plan...)
 	p.scheduleLocked()
 	p.mu.Unlock()
 }
@@ -205,7 +238,7 @@ func (p *jobToolProgress) Finished(result provider.ToolResult) {
 }
 
 func (p *jobToolProgress) snapshotLocked() string {
-	raw, err := json.Marshal(models.ChatTurnProgress{ToolCalls: p.entries})
+	raw, err := json.Marshal(models.ChatTurnProgress{ToolCalls: p.entries, Step: p.step, Plan: p.plan})
 	if err != nil {
 		p.logger.Warn("failed to encode chat turn progress", zap.String("job_id", p.jobID.String()), zap.Error(err))
 		return ""

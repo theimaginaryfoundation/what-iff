@@ -196,6 +196,8 @@ func (d *Datastore) persistImportedConversation(ctx context.Context, tx *ent.Tx,
 		if conv.ContextScope != "" {
 			create.SetContextScope(entchat.ContextScope(conv.ContextScope))
 		}
+		create.SetNillableReasoningEffort(entEffort[entchat.ReasoningEffort](conv.TurnSettings.ReasoningEffort)).
+			SetNillableAgentLoop(entLoop[entchat.AgentLoop](conv.TurnSettings.AgentLoop))
 		if conv.RestoreReady {
 			create.SetRehydrationState(models.RehydrationStateReady)
 			create.SetCheckpointSummary(conv.CheckpointSummary)

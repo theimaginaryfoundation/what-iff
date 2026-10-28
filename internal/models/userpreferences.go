@@ -21,6 +21,10 @@ type UserPreferences struct {
 	// ImageGenerationProviders is read-only: the vendors this deployment can
 	// generate images with, which is what the setting may be set to. Ignored on update.
 	ImageGenerationProviders []string `json:"image_generation_providers,omitempty"`
+	// TurnSettingValues are the account-default reasoning effort and agent loop (ADR 0x026),
+	// which seed a new thread whose personality sets none. On update a nil field is left alone
+	// and "" clears it.
+	TurnSettingValues
 }
 
 // DefaultImageGenerationProvider is the image vendor for a user who never chose one.

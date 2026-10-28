@@ -677,11 +677,12 @@ func (h *Handler) importPersonalities(ctx context.Context, userID uuid.UUID, zr 
 		}
 
 		created, err := h.ds.CreatePersonality(ctx, userID, models.Personality{
-			Name:            name,
-			SystemPrompt:    pf.SystemPrompt,
-			Scratchpad:      pf.Scratchpad,
-			AutoPinMemories: pf.AutoPinMemories,
-			CharacterCard:   restoredCard(pf),
+			Name:              name,
+			SystemPrompt:      pf.SystemPrompt,
+			Scratchpad:        pf.Scratchpad,
+			AutoPinMemories:   pf.AutoPinMemories,
+			CharacterCard:     restoredCard(pf),
+			TurnSettingValues: models.TurnSettingValuesFromStrings(pf.ReasoningEffort, pf.AgentLoop),
 		})
 		if err != nil {
 			h.logger.Warn("account import: create personality failed", zap.String("name", name), zap.Error(err))
@@ -792,6 +793,7 @@ func toImportConversations(parsed []exporter.ParsedConversation, personalityIDs 
 			IsFavorite:                 c.WhatiffIsFavorite,
 			IsAutoMood:                 c.WhatiffIsAutoMood,
 			ContextScope:               models.ContextScope(c.WhatiffContextScope),
+			TurnSettings:               models.TurnSettingValuesFromStrings(c.WhatiffReasoningEffort, c.WhatiffAgentLoop),
 			AccountExport:              true,
 			RestoreReady:               strings.TrimSpace(c.WhatiffCheckpointSummary) != "",
 		})

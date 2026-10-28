@@ -136,6 +136,15 @@ func (a *Agent) turnWebSearchCount(adapter provider.AgentAdapter, toolCalls []*m
 	return n
 }
 
+// sumWebSearches totals provider-native web searches over a turn's adapters.
+func sumWebSearches[A interface{ WebSearchCompletedCount() int }](adapters []A) int {
+	n := 0
+	for _, ad := range adapters {
+		n += ad.WebSearchCompletedCount()
+	}
+	return n
+}
+
 // webSearchBillableTurns lists the turn types whose web searches are billed: user chat turns
 // and scheduled agent job runs. Both run the full agent loop with the web search tools.
 // Turns that skip usage recording altogether (the welcome message) never reach
