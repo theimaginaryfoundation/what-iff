@@ -35,15 +35,15 @@ describe('PersonalityWelcomeComponent', () => {
     expect(emitted).toEqual(['generate', 'create', 'import']);
   });
 
-  it('offers mullet mode only when the server runs it', () => {
-    expect(host.querySelector('[data-testid="welcome-mullet-mode"]')).toBeNull();
+  it('offers remote sync only when the server runs it', () => {
+    expect(host.querySelector('[data-testid="welcome-remote-sync"]')).toBeNull();
 
-    fixture.componentRef.setInput('mulletModeAvailable', true);
+    fixture.componentRef.setInput('remoteSyncAvailable', true);
     fixture.detectChanges();
-    const offer = host.querySelector('[data-testid="welcome-mullet-mode"]') as HTMLElement;
+    const offer = host.querySelector('[data-testid="welcome-remote-sync"]') as HTMLElement;
     expect(offer.textContent).toContain('whatiff.chat');
     let opened = false;
-    fixture.componentInstance.openMulletMode.subscribe(() => (opened = true));
+    fixture.componentInstance.openRemoteSync.subscribe(() => (opened = true));
     (offer.querySelector('button') as HTMLButtonElement).click();
     expect(opened).toBe(true);
   });

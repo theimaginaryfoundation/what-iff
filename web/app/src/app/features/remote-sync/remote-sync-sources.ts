@@ -5,10 +5,10 @@ import { IntegrationTab, IntegrationTabSource } from '../../core/services/integr
 import { RemoteSyncTabComponent } from './remote-sync-tab.component';
 import { RemoteSyncService } from './remote-sync.service';
 
-/** The Integrations "Mullet mode" tab (remote sync). */
+/** The Integrations "Remote sync" tab. */
 export const REMOTE_SYNC_TAB: IntegrationTab = {
   id: 'remote-sync',
-  label: 'Mullet mode',
+  label: 'Remote sync',
   tooltip: 'Keep a copy of your whatiff.chat threads on this server, to continue here',
   component: RemoteSyncTabComponent,
 };

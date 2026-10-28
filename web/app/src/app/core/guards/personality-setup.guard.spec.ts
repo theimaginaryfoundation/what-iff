@@ -53,7 +53,7 @@ describe('personalitySetupGuard', () => {
         expect(personalityService.listPersonalities).not.toHaveBeenCalled();
     });
 
-    it('lets a new account reach Tools, where mullet mode brings its history in', async () => {
+    it('lets a new account reach Tools, where remote sync brings its history in', async () => {
         const value = await runGuard('/integrations?tab=remote-sync');
         expect(value).toBe(true);
         expect(personalityService.listPersonalities).not.toHaveBeenCalled();

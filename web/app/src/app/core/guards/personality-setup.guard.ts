@@ -16,7 +16,7 @@ const EXEMPT_PATH_PREFIXES = [
   // may want to restore an export or import history first). /experimental → /data.
   '/data',
   '/experimental',
-  // Tools holds mullet mode (remote sync), the other way to bring history in: a fresh
+  // Tools holds remote sync, the other way to bring history in: a fresh
   // self-hosted account may want its whatiff.chat threads before making anything.
   '/integrations',
 ];

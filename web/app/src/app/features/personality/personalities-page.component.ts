@@ -38,7 +38,7 @@ import {
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { SparkleIconComponent } from '../../shared/ui/icons/icons';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
-import { MulletWaiting, PersonalityWelcomeComponent } from './personality-welcome/personality-welcome.component';
+import { RemoteSyncWaiting, PersonalityWelcomeComponent } from './personality-welcome/personality-welcome.component';
 import { RemoteSyncService } from '../remote-sync/remote-sync.service';
 import { PersonalityEditModalComponent } from './detail/personality-edit-modal.component';
 import { PersonalityEditorSessionService } from './services/personality-editor-session.service';
@@ -86,14 +86,14 @@ export class PersonalitiesPageComponent implements OnInit {
   private readonly generatePersonalityModal = inject(GeneratePersonalityModalService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly editorSession = inject(PersonalityEditorSessionService);
-  /** Whether this server runs mullet mode, so the first-run welcome can offer it. */
+  /** Whether this server runs remote sync, so the first-run welcome can offer it. */
   private readonly remoteSync = inject(RemoteSyncService);
-  readonly mulletModeAvailable = toSignal(this.remoteSync.available(), { initialValue: false });
-  /** Threads mullet mode already copied here, for the first-run welcome (null when none). */
-  readonly mulletWaiting = toSignal(
+  readonly remoteSyncAvailable = toSignal(this.remoteSync.available(), { initialValue: false });
+  /** Threads remote sync already copied here, for the first-run welcome (null when none). */
+  readonly remoteSyncWaiting = toSignal(
     this.remoteSync.available().pipe(
       switchMap(on => (on ? this.remoteSync.get().pipe(catchError(() => of(null))) : of(null))),
-      map((s): MulletWaiting | null =>
+      map((s): RemoteSyncWaiting | null =>
         s?.configured && (s.totals?.threads ?? 0) > 0 ? { threads: s.totals!.threads, personas: s.unmatched_personas ?? [] } : null,
       ),
     ),
@@ -315,7 +315,7 @@ export class PersonalitiesPageComponent implements OnInit {
     this.router.navigate(['/data']);
   }
 
-  goToMulletMode(): void {
+  goToRemoteSync(): void {
     this.router.navigate(['/integrations'], { queryParams: { tab: 'remote-sync' } });
   }
 

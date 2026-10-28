@@ -63,9 +63,9 @@
       (generate)="navigateGenerate()"
       (createManually)="openCreate()"
       (importData)="goToImport()"
-      [mulletModeAvailable]="mulletModeAvailable()"
-      [mulletWaiting]="mulletWaiting()"
-      (openMulletMode)="goToMulletMode()"
+      [remoteSyncAvailable]="remoteSyncAvailable()"
+      [remoteSyncWaiting]="remoteSyncWaiting()"
+      (openRemoteSync)="goToRemoteSync()"
     />
   } @else {
     <div

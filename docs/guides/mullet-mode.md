@@ -6,7 +6,7 @@ Your own What Iff server at home keeps a copy of every one of those conversation
 
 > **Beta.** Mullet mode is new. It works, it is careful with your data, and it will still have rough edges. Tell us what feels weird: [open an issue](https://github.com/theimaginaryfoundation/what-iff/issues/new/choose).
 
-In the code and settings it is called *remote sync*.
+In the app, the code and the settings it is called **Remote sync**.
 The design and the reasoning behind it are in [ADR 0x033](../adr/0x033-mullet-mode-remote-sync.md).
 
 ## Why you would want it
@@ -75,7 +75,7 @@ Either way you can do it before or after step 4; after step 4, the welcome scree
 ### 4. Paste the token at home
 
 1. Sign in to your server. (A brand-new account is asked to create a persona first; the welcome screen also offers **Keep a copy of those threads here**, which goes straight to the next step.)
-2. Open **Tools → Mullet mode**.
+2. Open **Tools → Remote sync**.
 3. Leave the server address as `https://api.whatiff.chat`, paste the token, and press **Save**.
 
 Saving checks the token with whatiff.chat first and tells you plainly if it is mistyped, revoked, or cannot read threads.
@@ -90,7 +90,7 @@ That is it. From now on, open the app at home and your threads are there.
 |---|---|
 | See what you said on your phone | Open the app at home (or come back to its tab after a few minutes away). New messages arrive a few seconds later. |
 | Continue a conversation at home | Open the copied thread and reply. |
-| Get it now, without waiting | **Tools → Mullet mode → Sync now**. |
+| Get it now, without waiting | **Tools → Remote sync → Sync now**. |
 | Pause it | Untick **Keep this server in sync** and save. |
 | Stop for good | **Stop syncing and forget the token**, then revoke the token on whatiff.chat. Copies already here stay. |
 | Not have a thread at home | Delete the copy. Sync will not bring it back. |
@@ -141,7 +141,7 @@ Alternatively, keep `LLM_BACKEND` at its default and give the server your own pr
 
 | What you see | What it means |
 |---|---|
-| No **Mullet mode** tab under Tools | The server runs without `REMOTE_SYNC_ENABLED=true`. |
+| No **Remote sync** tab under Tools | The server runs without `REMOTE_SYNC_ENABLED=true`. |
 | "The token cannot read threads" | The token was made without **Read threads**. Create a new one with it ticked. |
 | "The remote server did not accept the token" | Mistyped, or revoked on whatiff.chat. Paste a fresh one. |
 | **Needs attention** | whatiff.chat refused the token during a sync, so syncing paused. Saving a working token resumes it. |

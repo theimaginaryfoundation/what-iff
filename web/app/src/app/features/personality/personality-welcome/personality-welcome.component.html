@@ -29,8 +29,8 @@
       Already have a WhatIff export, or chats from ChatGPT or Claude?
       <button type="button" class="welcome__inline-action" (click)="importData.emit()">Import them instead</button>
     </p>
-    @if (mulletWaiting(); as waiting) {
-      <p class="welcome__import" data-testid="welcome-mullet-waiting">
+    @if (remoteSyncWaiting(); as waiting) {
+      <p class="welcome__import" data-testid="welcome-remote-sync-waiting">
         {{ waiting.threads === 1 ? "Your thread" : "Your " + waiting.threads + " threads" }} from whatiff.chat
         {{ waiting.threads === 1 ? "is" : "are" }} here.
         @if (waiting.personas.length) {
@@ -41,10 +41,10 @@
           Create a persona to start talking.
         }
       </p>
-    } @else if (mulletModeAvailable()) {
-      <p class="welcome__import" data-testid="welcome-mullet-mode">
+    } @else if (remoteSyncAvailable()) {
+      <p class="welcome__import" data-testid="welcome-remote-sync">
         Talk on whatiff.chat too?
-        <button type="button" class="welcome__inline-action" (click)="openMulletMode.emit()">Keep a copy of those threads here</button>
+        <button type="button" class="welcome__inline-action" (click)="openRemoteSync.emit()">Keep a copy of those threads here</button>
       </p>
     }
   </div>

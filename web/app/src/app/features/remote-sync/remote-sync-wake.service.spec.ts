@@ -81,7 +81,7 @@ describe('RemoteSyncWakeService', () => {
     expect(threadList.refresh).not.toHaveBeenCalled();
   });
 
-  it('sends nothing on a server without mullet mode, and swallows failures', async () => {
+  it('sends nothing on a server without remote sync, and swallows failures', async () => {
     api.available.mockReturnValue(of(false));
     await service.wake();
     expect(api.wake).not.toHaveBeenCalled();

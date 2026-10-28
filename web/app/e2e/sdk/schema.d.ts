@@ -980,7 +980,7 @@ export interface paths {
         put?: never;
         /**
          * The app is being used
-         * @description The web app calls this when a signed-in session starts and when it comes back after a while (mullet mode, ADR 0x033). The server starts a sync if the last one is more than a couple of minutes old, and otherwise does nothing; sync being off, not set up, waiting on its owner or already running is not an error. This is what keeps copies current without polling.
+         * @description The web app calls this when a signed-in session starts and when it comes back after a while (remote sync, ADR 0x033). The server starts a sync if the last one is more than a couple of minutes old, and otherwise does nothing; sync being off, not set up, waiting on its owner or already running is not an error. This is what keeps copies current without polling.
          */
         post: {
             parameters: {

@@ -8,7 +8,7 @@
 - **Related:** "What if…" branching, PR #148 (draft): the fork semantics used here.
 
 **Mullet mode** is the product name: business up front (the hosted app, for talking on the go), party in the back (your own server, with your own models, keys and data).
-The code, routes and settings call it *remote sync*, which says what it does.
+The app, code, routes and settings call it *Remote sync*, which says what it does.
 How to set it up and why you would: [the mullet mode guide](../guides/mullet-mode.md).
 
 ## Context
