@@ -3,6 +3,7 @@ import { ChangeDetectionStrategy, Component, ElementRef, afterRenderEffect, comp
 import { Router } from '@angular/router';
 
 import { ChatMessage } from '../../../../core/models/message.model';
+import { ToolCall } from '../../../../core/models/toolcall.model';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../../chat.constants';
 import { parseThreadReferenceBlock } from '../../helpers/thread-reference.helpers';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
@@ -32,7 +33,7 @@ import { AgentRunView, agentRunView } from '../../helpers/agent-run.helpers';
             <ui-brain-icon [size]="12" />
             <span>Working notes</span>
           </summary>
-          <app-agent-run-notes class="bubble__reasoning-text" [run]="run" />
+          <app-agent-run-notes class="bubble__reasoning-text" [run]="run" (openToolCall)="openToolCall.emit($event)" />
         </details>
       } @else if (reasoning(); as reasoningText) {
         <!-- Live while the model is still thinking (open, auto-following); settles to a
@@ -504,6 +505,8 @@ export class MessageBubbleComponent {
   readonly copy = output<ChatMessage>();
   readonly toggleBookmark = output<ChatMessage>();
   readonly showContext = output<ChatMessage>();
+  /** A tool call opened from the working notes. */
+  readonly openToolCall = output<ToolCall>();
 
   /** True for assistant replies that captured a Context X-ray snapshot. */
   readonly hasContextBreakdown = computed(() => {

@@ -1,5 +1,5 @@
 import { CHAT_TURN_PLAN_STATUSES, ChatTurnPlanItem, ChatTurnPlanStatus } from '../../../core/models/job.model';
-import { AgentRun, AgentRunEndReason, AgentRunEvent } from '../../../core/models/message.model';
+import { AgentRun, AgentRunEndReason, AgentRunEvent, ChatMessage } from '../../../core/models/message.model';
 import { ToolCall } from '../../../core/models/toolcall.model';
 import { toolCallDisplayName, toolCallFailed } from './tool-call-format.helpers';
 
@@ -106,4 +106,18 @@ export function agentRunView(run: AgentRun | null | undefined, toolCalls: readon
   const stopLabel = agentRunStopLabel(run.end_reason);
   if (steps.length === 0 && plan.length === 0 && !stopLabel) return null;
   return { steps, plan, stopLabel };
+}
+
+/**
+ * The tool calls a saved reply shows outside its working notes: those no shown step refers to.
+ * A call an Advanced step refers to is shown (and opened) from the notes instead, so the
+ * tool-call list does not repeat it. Non-assistant messages keep all their calls.
+ */
+export function toolCallsOutsideAgentRun(message: ChatMessage): readonly ToolCall[] {
+  const toolCalls = message.tool_calls ?? [];
+  if (message.origin !== 'Assistant' || toolCalls.length === 0) return toolCalls;
+  const view = agentRunView(message.agent_run, toolCalls);
+  if (!view) return toolCalls;
+  const noted = new Set(view.steps.flatMap(step => step.events.flatMap(event => (event.kind === 'tool_call' ? [event.toolCall.id] : []))));
+  return noted.size === 0 ? toolCalls : toolCalls.filter(call => !noted.has(call.id));
 }

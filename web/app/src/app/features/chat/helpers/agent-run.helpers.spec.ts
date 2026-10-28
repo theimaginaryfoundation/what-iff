@@ -1,5 +1,6 @@
+import { ChatMessage } from '../../../core/models/message.model';
 import { ToolCall } from '../../../core/models/toolcall.model';
-import { agentRunStopLabel, agentRunView, normalizePlanItems } from './agent-run.helpers';
+import { agentRunStopLabel, agentRunView, normalizePlanItems, toolCallsOutsideAgentRun } from './agent-run.helpers';
 
 describe('agent-run helpers', () => {
   describe('normalizePlanItems', () => {
@@ -155,6 +156,37 @@ describe('agent-run helpers', () => {
         stopLabel: 'Stopped: step limit reached',
       });
       expect(agentRunView({ end_reason: 'failed' })?.stopLabel).toBe('Stopped: failed');
+    });
+  });
+
+  describe('toolCallsOutsideAgentRun', () => {
+    const call = (id: string): ToolCall => ({
+      id,
+      chat_message_id: 'm1',
+      tool_name: 'web_search',
+      tool_input: '{}',
+      tool_output: '{}',
+      tool_error: '',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    });
+    const reply = (extra: Partial<ChatMessage>): ChatMessage =>
+      ({ id: 'm1', chat_id: 'c1', origin: 'Assistant', message: 'Done', sent_at: '2026-01-01T00:00:00Z', ...extra }) as ChatMessage;
+
+    it('leaves out the calls the working notes show', () => {
+      const calls = [call('tc-1'), call('tc-2'), call('tc-3')];
+      const run = { version: 1, steps: [{ step: 1, events: [{ kind: 'tool_call', tool_call_id: 'tc-1' }, { kind: 'tool_call', tool_call_id: 'tc-3' }] }] };
+      expect(toolCallsOutsideAgentRun(reply({ tool_calls: calls, agent_run: run })).map(c => c.id)).toEqual(['tc-2']);
+    });
+
+    it('keeps every call without a run, for a user message, or when no step refers to one', () => {
+      const calls = [call('tc-1')];
+      expect(toolCallsOutsideAgentRun(reply({ tool_calls: calls }))).toBe(calls);
+      const run = { steps: [{ step: 1, events: [{ kind: 'tool_call', tool_call_id: 'tc-1' }] }] };
+      expect(toolCallsOutsideAgentRun(reply({ origin: 'User', tool_calls: calls, agent_run: run }))).toBe(calls);
+      // A call the notes cannot show (no step refers to it) stays in the list.
+      expect(toolCallsOutsideAgentRun(reply({ tool_calls: calls, agent_run: { steps: [], end_reason: 'quota' } }))).toBe(calls);
+      expect(toolCallsOutsideAgentRun(reply({}))).toEqual([]);
     });
   });
 });

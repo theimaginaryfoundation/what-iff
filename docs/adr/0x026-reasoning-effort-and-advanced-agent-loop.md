@@ -119,6 +119,7 @@ The saved message is the final step's reply, with the run as structured data in 
 
 An Advanced message has no `model_reasoning`; Standard messages are unchanged.
 Tool calls are saved with the step they ran in (`ToolCall.step`), and the live timeline (`ChatTurnProgress`) carries the step number and the current plan.
+The message still carries every tool call in `tool_calls`; the web client shows a saved run's step tool calls only in its working notes, each opening the call's details, and lists outside the notes only the calls no step refers to.
 
 **Runs that do not finish.**
 Each tool call is saved as a ToolCall row as soon as it finishes, linked to the run's job (`ToolCall.draft_job`) until a message takes it; the run's steps, plan and generation metadata are saved on the job (`Job.draft_agent_run`) at every step boundary and when the run ends in an error. The draft refers to the tool-call rows rather than copying them, so a long run's draft writes do not grow with every tool output.

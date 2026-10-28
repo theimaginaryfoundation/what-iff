@@ -1,13 +1,14 @@
-import { ChangeDetectionStrategy, Component, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 
+import { ToolCall } from '../../../../core/models/toolcall.model';
 import { AgentRunView } from '../../helpers/agent-run.helpers';
 import { AdvancedRunPlanComponent } from '../advanced-run-progress/advanced-run-plan.component';
 
 /**
  * A saved Advanced run's working notes (ADR 0x026), shown inside the message bubble's collapsed
  * reasoning disclosure: each step's events in order (reasoning muted, text the model wrote in the
- * body colour, tool calls as a compact name with a failure marker; the full calls render in the
- * tool-call group as usual), then the plan as it stood at the end, then why the run stopped if it ended early.
+ * body colour, tool calls as a compact name with a failure marker that opens the call's details; the
+ * message's tool-call list leaves these calls out), then the plan as it stood at the end, then why the run stopped if it ended early.
  */
 @Component({
   selector: 'app-agent-run-notes',
@@ -19,13 +20,19 @@ import { AdvancedRunPlanComponent } from '../advanced-run-progress/advanced-run-
         <p class="agent-run__step-title">Step {{ step.step }}</p>
         @for (event of step.events; track $index) {
           @if (event.kind === 'tool_call') {
-            <p class="agent-run__tool" [class.agent-run__tool--error]="event.failed">
+            <button
+              type="button"
+              class="agent-run__tool"
+              [class.agent-run__tool--error]="event.failed"
+              [attr.aria-label]="'Open tool call ' + event.name + (event.failed ? ' (failed)' : '')"
+              (click)="openToolCall.emit(event.toolCall)"
+            >
               <span class="agent-run__tool-dot" aria-hidden="true"></span>
               <span class="agent-run__tool-name">{{ event.name }}</span>
               @if (event.failed) {
                 <span class="agent-run__tool-error">failed</span>
               }
-            </p>
+            </button>
           } @else {
             <p class="agent-run__note" [class]="'agent-run__note--' + event.kind">{{ event.text }}</p>
           }
@@ -78,11 +85,28 @@ import { AdvancedRunPlanComponent } from '../advanced-run-progress/advanced-run-
 
       .agent-run__tool {
         align-items: center;
+        background: none;
+        border: none;
+        border-radius: 0.25rem;
         color: var(--color-text-muted);
+        cursor: pointer;
         display: flex;
+        font: inherit;
         font-size: 0.6875rem;
         gap: 0.375rem;
-        margin: 0;
+        justify-self: start;
+        margin: 0 0 0 -0.25rem;
+        padding: 0.125rem 0.25rem;
+        text-align: start;
+      }
+
+      .agent-run__tool:hover {
+        background: var(--color-surface-muted);
+      }
+
+      .agent-run__tool:focus-visible {
+        outline: 2px solid var(--focus-ring);
+        outline-offset: 1px;
       }
 
       .agent-run__tool-dot {
@@ -117,4 +141,5 @@ import { AdvancedRunPlanComponent } from '../advanced-run-progress/advanced-run-
 })
 export class AgentRunNotesComponent {
   readonly run = input.required<AgentRunView>();
+  readonly openToolCall = output<ToolCall>();
 }

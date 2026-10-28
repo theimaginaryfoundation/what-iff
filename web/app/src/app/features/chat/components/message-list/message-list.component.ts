@@ -55,6 +55,7 @@ interface AssistantVisual {
                 (showContext)="showContext.emit($event)"
                 (toggleBookmark)="toggleBookmark.emit($event)"
                 (retryUserMessage)="retryUserMessage.emit($event)"
+                (openToolCall)="openToolCallDetail.emit($event)"
               />
             }
             @case ('tool-call-group') {

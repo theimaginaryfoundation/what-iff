@@ -202,6 +202,11 @@ describe('MessageBubbleComponent', () => {
             expect(plan.map(li => li.querySelector('.advanced-run__content')?.textContent)).toEqual(['Search', 'Summarise']);
             expect(plan[1].classList).toContain('advanced-run__item--in_progress');
             expect(box.querySelector('.agent-run__stop')?.textContent).toBe('Stopped: step limit reached');
+
+            const opened: unknown[] = [];
+            fixture.componentInstance.openToolCall.subscribe(call => opened.push(call));
+            (tools[1] as HTMLButtonElement).click();
+            expect(opened).toEqual([expect.objectContaining({ id: 'tc-2' })]);
         });
 
         it('shows a generic stop label for an unknown end reason and none for a finished run', () => {

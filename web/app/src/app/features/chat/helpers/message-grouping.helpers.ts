@@ -3,6 +3,7 @@ import { ChatTurnAdvancedProgress, ChatTurnToolCall } from '../../../core/models
 import { ToolCall, ToolCallView } from '../../../core/models/toolcall.model';
 
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../chat.constants';
+import { toolCallsOutsideAgentRun } from './agent-run.helpers';
 
 export type GroupedItem =
   | MessageGroupItem
@@ -72,10 +73,12 @@ export function groupMessages(messages: readonly ChatMessage[]): GroupedItem[] {
       continue;
     }
 
-    if (message.tool_calls?.length) {
-      groups.push({ kind: 'tool-call-group', message, toolCalls: message.tool_calls });
+    // An Advanced reply's step tool calls show in its working notes, not here (ADR 0x026).
+    const toolCalls = toolCallsOutsideAgentRun(message);
+    if (toolCalls.length) {
+      groups.push({ kind: 'tool-call-group', message, toolCalls });
       currentGroup = null;
-      if (!hasRenderableMessageBody(message)) {
+      if (!hasRenderableMessageBody(message) && toolCalls.length === message.tool_calls?.length) {
         continue;
       }
     }
