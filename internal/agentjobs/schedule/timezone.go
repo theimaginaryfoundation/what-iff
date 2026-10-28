@@ -34,8 +34,10 @@ func loadLocation(tz string) *time.Location {
 
 // CronTrigger builds the quartz trigger for a cron job in the timezone its schedule runs in now.
 // For a job that follows the user and has moved since it last ran, the trigger skips the time
-// slots the job already ran: 8am in New York has run, the user moves to Los Angeles, and 8am there
-// later that same day does not run again.
+// slots the job already ran, but only those that would come before its next regular run in the
+// zone it left: 8am in New York has run, the user moves to Los Angeles, and 8am there later that
+// same day (before 8am New York tomorrow) does not run again. An hourly job that ran at 10:00 New
+// York runs at 8:00 Los Angeles (11:00 New York), so it keeps running hourly.
 func CronTrigger(j models.AgentJob) (quartz.Trigger, error) {
 	if j.Schedule == nil || strings.TrimSpace(*j.Schedule) == "" {
 		return nil, fmt.Errorf("schedule is required for schedule_type=cron")
@@ -47,9 +49,31 @@ func CronTrigger(j models.AgentJob) (quartz.Trigger, error) {
 		return nil, err
 	}
 	if cutoff, ok := ranSlotCutoff(j, tz, loc); ok {
-		return &slotGuardTrigger{inner: trigger, notAfter: cutoff.UnixNano()}, nil
+		notAfter := cutoff.UnixNano()
+		if next, ok := nextRunInOldZone(j); ok && next.UnixNano()-1 < notAfter {
+			notAfter = next.UnixNano() - 1
+		}
+		return &slotGuardTrigger{inner: trigger, notAfter: notAfter}, nil
 	}
 	return trigger, nil
+}
+
+// nextRunInOldZone is when the job would have run next had it stayed in the zone it last ran in.
+// A slot that already ran is skipped only before then, so a move never leaves the job silent for
+// longer than its own interval just because the new zone's times carry labels that ran.
+func nextRunInOldZone(j models.AgentJob) (time.Time, bool) {
+	if j.LastRunAt == nil || j.Schedule == nil {
+		return time.Time{}, false
+	}
+	old, err := quartz.NewCronTriggerWithLoc(strings.TrimSpace(*j.Schedule), loadLocation(lastRunTimezone(j)))
+	if err != nil {
+		return time.Time{}, false
+	}
+	next, err := old.NextFireTime(j.LastRunAt.UnixNano())
+	if err != nil {
+		return time.Time{}, false
+	}
+	return time.Unix(0, next), true
 }
 
 // NextRunAt is a job's next scheduled run after the given time: nil for a job that is not active

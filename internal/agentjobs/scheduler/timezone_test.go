@@ -126,17 +126,34 @@ func TestScheduleTimezone_FollowsTheUser(t *testing.T) {
 	}
 }
 
-func TestScheduleTimezone_SkipsEveryRanSlotOfAnHourlyJob(t *testing.T) {
+func TestScheduleTimezone_FrequentJobsKeepTheirCadenceMovingWest(t *testing.T) {
 	ny := mustLoc(t, "America/New_York")
 	la := mustLoc(t, "America/Los_Angeles")
-	// Hourly 9-17. 10am ran in New York; at 10:30 New York (7:30 LA) the user is in LA. 9am and
-	// 10am LA already ran as New York hours, so 11am LA is next.
-	j := followJob("0 0 9-17 ? * *", "America/Los_Angeles",
-		ptrTime(time.Date(2026, 10, 22, 10, 0, 2, 0, ny)), strPtr("America/New_York"))
-
-	got := nextFire(t, j, time.Date(2026, 10, 22, 10, 30, 0, 0, ny))
-	if want := time.Date(2026, 10, 22, 11, 0, 0, 0, la); !got.Equal(want) {
-		t.Fatalf("next run = %s, want %s", got.In(la), want)
+	// 10am ran in New York (7am LA); at 10:30 New York (7:30 LA) the user is in LA. Slots whose
+	// labels already ran are skipped only before the job's next regular run (11am New York, 8am LA).
+	tests := []struct {
+		name    string
+		cron    string
+		lastRun time.Time
+		want    time.Time
+	}{
+		{"hourly runs at 8am LA, an hour after the last run", "0 0 * ? * *",
+			time.Date(2026, 10, 22, 10, 0, 2, 0, ny), time.Date(2026, 10, 22, 8, 0, 0, 0, la)},
+		{"hourly 9-5 runs at its first hour, 9am LA", "0 0 9-17 ? * *",
+			time.Date(2026, 10, 22, 10, 0, 2, 0, ny), time.Date(2026, 10, 22, 9, 0, 0, 0, la)},
+		// Every 4 hours from midnight, last run 8am New York: 8am LA (11am New York) is sooner than
+		// the next regular run (noon New York), so noon LA is next.
+		{"every 4 hours skips the ran 8am label", "0 0 0/4 ? * *",
+			time.Date(2026, 10, 22, 8, 0, 2, 0, ny), time.Date(2026, 10, 22, 12, 0, 0, 0, la)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lastRun := tt.lastRun
+			j := followJob(tt.cron, "America/Los_Angeles", &lastRun, strPtr("America/New_York"))
+			if got := nextFire(t, j, time.Date(2026, 10, 22, 10, 30, 0, 0, ny)); !got.Equal(tt.want) {
+				t.Fatalf("next run = %s, want %s", got.In(la), tt.want)
+			}
+		})
 	}
 }
 

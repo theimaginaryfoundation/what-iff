@@ -68,7 +68,7 @@ The schedule arithmetic (`CronTrigger`, `NextRunAt`, `LostSlotOnMove`, `StoreNex
 ### 5. The day of the move: no slot runs twice
 
 Each run records the zone it ran in (`agent_jobs.last_run_timezone`).
-When a following job's zone differs from the one it last ran in, `slotGuardTrigger` skips every fire time at or before the last run's wall-clock time placed in the new zone.
+When a following job's zone differs from the one it last ran in, the slot guard skips fire times at or before the last run's wall-clock time placed in the new zone, but only those that come before the job's next regular run in the zone it left.
 If it cannot get past that cutoff (a schedule that stops advancing, or more than 10,000 fire times), it fails rather than return a slot that already ran; the scheduler then reports the schedule error.
 
 Moving west: 8am ran in New York, the user signs in from Los Angeles at 9am New York time, and 8am Los Angeles (11am New York) that same day does not run again.
@@ -77,10 +77,11 @@ Runs recorded before `last_run_timezone` existed count as having run in the job'
 The guard applies only to jobs that follow the user.
 A pinned job's timezone changes only when someone edits it (editing a schedule saves the browser's zone as the job's), and an edited job runs exactly as edited, the way it always has.
 
-For a schedule more frequent than daily, each wall-clock slot runs once, so moving west skips the slots that already ran as the old zone's hours.
-An hourly job that ran at 10:00 New York (7:00 Los Angeles) and moves to Los Angeles at 7:30 there skips 8:00, 9:00 and 10:00 Los Angeles and runs next at 11:00: about four hours of real time without a run, once, on the day of the move.
-Schedules like "every 4 hours" can show a longer gap.
-We accept that for now: it is a quirk on the day of a move, and people are used to some oddity when their devices change timezone.
+The second condition keeps frequent schedules on their cadence.
+An hourly job that ran at 10:00 New York (7:00 Los Angeles) and moves to Los Angeles at 7:30 there runs next at 8:00 Los Angeles (11:00 New York), the time it would have run anyway, even though "8:00" already ran in New York.
+Skipping every label that ran would have left it four hours without a run; the first version did that, and review caught it.
+Coarser schedules can still show a longer gap on the day of a move: "every 4 hours" that ran at 8:00 New York skips 8:00 Los Angeles (11:00 New York, sooner than its next run at noon New York) and runs at noon Los Angeles, seven hours later.
+We accept that: running at a time that is not on the schedule would be more surprising than one long gap.
 
 ### 6. Moving east: a lost slot runs once, right away
 

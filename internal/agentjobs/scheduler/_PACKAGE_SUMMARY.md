@@ -32,7 +32,7 @@
   The reconcile fingerprint uses the effective timezone, so a change of the owner's timezone reschedules only the jobs that follow them.
   The manager then stores their new `next_run_at` when it changed, on the first schedule after startup or a leader handover too.
   Each run records the timezone it ran in (`last_run_timezone`).
-  When a following job's timezone differs from the one it last ran in, the slot guard skips fire times at or before the last run's wall-clock time in the new zone, so a slot that already ran is not run again.
+  When a following job's timezone differs from the one it last ran in, the slot guard skips fire times at or before the last run's wall-clock time in the new zone that come before the job's next regular run in the old zone, so a slot that already ran is not run again and frequent jobs keep their cadence.
   For example, if 8am New York has run and the user moves to Los Angeles, 8am Los Angeles that same day is skipped.
   Moving east can lose a slot instead: it has passed in the new zone but had not come up in the old one (8am LA ran yesterday; signing in from New York at 9am, 8am New York has passed and 8am LA is still to come).
   Reconcile checks for this (`schedule.LostSlotOnMove`, with the manager's `now` clock) whenever it (re)schedules a following job, startup included, and runs the job once right away (`runCatchUp`, `executionOptions.catchUp`, no lateness metric).
