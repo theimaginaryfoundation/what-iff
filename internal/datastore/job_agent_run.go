@@ -179,11 +179,12 @@ func (d *Datastore) consumeDraftAgentRunToMessageTx(
 }
 
 // FinalizeAdvancedDraft ends a turn job that has an Advanced draft with a partial reply built
-// from it, as cancelled or failed (with failureMessage). handled is false, and nothing is written,
+// from it, as cancelled or failed (with failureMessage, and failureCode when the failure has a
+// stable one). handled is false, and nothing is written,
 // when the job has no Advanced draft: the caller then ends the job as it always has, so Standard
 // turns keep their behaviour. chatID is the job's chat; uuid.Nil resolves it from the job's
 // reference (the user message it answers, or the chat itself for a scheduled run's ticket).
-func (d *Datastore) FinalizeAdvancedDraft(ctx context.Context, userID, jobID, chatID uuid.UUID, cancelled bool, failureMessage string) (handled bool, err error) {
+func (d *Datastore) FinalizeAdvancedDraft(ctx context.Context, userID, jobID, chatID uuid.UUID, cancelled bool, failureMessage, failureCode string) (handled bool, err error) {
 	entJob, err := d.dbClient.Job.Query().
 		Where(job.ID(jobID), job.HasOwnerWith(user.ID(userID)), job.DraftAgentRunNotNil()).
 		Select(job.FieldID, job.FieldReference).
@@ -202,7 +203,7 @@ func (d *Datastore) FinalizeAdvancedDraft(ctx context.Context, userID, jobID, ch
 	if cancelled {
 		_, _, err = d.FinalizeCancelledChatJobWithPartial(ctx, userID, jobID, chatID, "", "", nil)
 	} else {
-		_, _, err = d.FinalizeFailedChatJobWithPartial(ctx, userID, jobID, chatID, "", "", failureMessage, nil)
+		_, _, err = d.FinalizeFailedChatJobWithPartial(ctx, userID, jobID, chatID, "", "", failureMessage, failureCode, nil)
 	}
 	if err != nil {
 		return false, err
@@ -259,7 +260,7 @@ func (d *Datastore) FailInterruptedAdvancedJobs(ctx context.Context, jobTypes []
 		if r.Edges.Owner == nil {
 			continue
 		}
-		handled, err := d.FinalizeAdvancedDraft(ctx, r.Edges.Owner.ID, r.ID, uuid.Nil, false, message)
+		handled, err := d.FinalizeAdvancedDraft(ctx, r.Edges.Owner.ID, r.ID, uuid.Nil, false, message, "")
 		if err != nil {
 			d.logger.Warn("reaper: failed to finalize an interrupted Advanced run", zap.String("job_id", r.ID.String()), zap.Error(err))
 			continue

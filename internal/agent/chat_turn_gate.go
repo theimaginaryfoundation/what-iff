@@ -82,7 +82,7 @@ type chatTurnStore interface {
 	ListPendingTurnJobsForChat(ctx context.Context, userID, chatID, excludeJobID uuid.UUID) ([]*models.Job, error)
 	CreateJob(ctx context.Context, userID uuid.UUID, job models.Job) (*models.Job, error)
 	UpdateJobStatus(ctx context.Context, userID, id uuid.UUID, status models.JobStatus, errorMsg string) (*models.Job, error)
-	FinalizeAdvancedDraft(ctx context.Context, userID, jobID, chatID uuid.UUID, cancelled bool, failureMessage string) (bool, error)
+	FinalizeAdvancedDraft(ctx context.Context, userID, jobID, chatID uuid.UUID, cancelled bool, failureMessage, failureCode string) (bool, error)
 	JobStatus(ctx context.Context, userID, jobID uuid.UUID) (models.JobStatus, error)
 	FinishTurnJobIfActive(ctx context.Context, userID, jobID uuid.UUID, replied bool, failMsg string) (models.JobStatus, error)
 	TouchJob(ctx context.Context, userID, id uuid.UUID) error
@@ -358,7 +358,7 @@ func (a *Agent) FailInFlightTurns(ctx context.Context) {
 // turn is ended as before (a Standard turn's failure banner offers a retry).
 func finishInterruptedTurn(ctx context.Context, store chatTurnStore, jobID uuid.UUID, turn inFlightTurn, status models.JobStatus, msg string) error {
 	if status == models.JobStatusFailed && turn.chatID != uuid.Nil {
-		if handled, err := store.FinalizeAdvancedDraft(ctx, turn.userID, jobID, turn.chatID, false, msg); err == nil && handled {
+		if handled, err := store.FinalizeAdvancedDraft(ctx, turn.userID, jobID, turn.chatID, false, msg, ""); err == nil && handled {
 			return nil
 		}
 	}
