@@ -16,6 +16,7 @@ It talks to the remote through a small `Remote` interface and to storage through
   Each thread is applied through `Store.ApplyRemoteSyncThread`, which creates, adopts, appends or forks.
 - **Runs:** `Wake` runs the account if its last run is older than `WakeMinAge` (two minutes): the web app sends one when a session starts or comes back, which is how copies stay current without polling.
   Every wake and every run also calls `Store.RematchRemoteSyncPersonas`, so copies whose persona arrived later (created here, or imported) take it without a remote call.
+  A run that leaves threads over the per-round cap goes straight on with another round (a full walk), so a big first sync finishes in one go.
   `Start` claims the lease and runs regardless of age ("sync now" and saves); `RunDue` runs every account due on the background interval; `Runner` calls it on a timer.
   An account is due a jittered amount after the interval (up to a fifth of it, from `backgroundJitter` over the account and its last run), so servers that started together drift apart instead of calling the remote in step.
   A run records its outcome with `FinishRemoteSyncRun`, which also releases the lease.
@@ -49,4 +50,4 @@ It talks to the remote through a small `Remote` interface and to storage through
 ## Testing
 
 - `client_test.go` — address normalization, request shape, error classification (including a refused redirect) and the public-address default.
-- `syncer_test.go` — against a fake remote and a recording store: first and later runs, the overlap, early stop, the per-run cap and the full walk after it, detached threads, a refused token, per-thread failures, `Start`.
+- `syncer_test.go` — against a fake remote and a recording store: first and later runs, the overlap, early stop, rounds past the per-run cap (and stopping at a failing round), blank replies, background jitter, detached threads, a refused token, per-thread failures, `Start`.

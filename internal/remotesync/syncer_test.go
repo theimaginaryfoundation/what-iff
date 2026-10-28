@@ -3,6 +3,7 @@ package remotesync
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -288,20 +289,51 @@ func TestAnIdleAccountCostsOneListPerArchiveState(t *testing.T) {
 	assert.Zero(t, store.last().Stats.ThreadsChecked)
 }
 
-func TestTheRunCapDefersAndTheNextRunWalksOn(t *testing.T) {
+func TestABigSyncKeepsGoingPastTheRunCap(t *testing.T) {
 	remote, store := newFakeRemote(), newFakeStore()
-	for i := range PageSize + 20 {
+	for i := range 2*PageSize + 20 {
 		remote.addThread("t", 1, t0.Add(time.Duration(i)*time.Minute))
 	}
 	s := newTestSyncer(store, remote, Config{MaxThreadsPerRun: PageSize})
 	s.RunDue(context.Background())
-	assert.Equal(t, 20, store.last().Stats.ThreadsDeferred)
 
-	// The first page is now all unchanged; a full walk still finds the rest.
-	s.RunDue(context.Background())
-	assert.Equal(t, 20, store.last().Stats.ThreadsCreated)
+	// Rounds of PageSize each; after the first the newest page is unchanged, and a full walk
+	// still finds the rest. One run is recorded, with the rounds added up.
+	require.Len(t, store.finished, 1)
+	assert.Equal(t, models.RemoteSyncStatusOK, store.last().Status)
+	assert.Equal(t, 2*PageSize+20, store.last().Stats.ThreadsCreated)
 	assert.Zero(t, store.last().Stats.ThreadsDeferred)
-	assert.Len(t, store.links, PageSize+20)
+	assert.Len(t, store.links, 2*PageSize+20)
+}
+
+func TestABigSyncStopsAtAFailingRound(t *testing.T) {
+	remote, store := newFakeRemote(), newFakeStore()
+	var newest uuid.UUID
+	for i := range PageSize + 20 {
+		newest = remote.addThread("t", 1, t0.Add(time.Duration(i)*time.Minute))
+	}
+	remote.msgErr[newest] = errors.New("boom")
+	s := newTestSyncer(store, remote, Config{MaxThreadsPerRun: PageSize})
+	s.RunDue(context.Background())
+
+	require.Len(t, store.finished, 1)
+	assert.Equal(t, models.RemoteSyncStatusError, store.last().Status)
+	assert.Equal(t, 20, store.last().Stats.ThreadsDeferred, "left for the next run, which walks the whole list")
+}
+
+func TestBlankRepliesAreNotCopied(t *testing.T) {
+	remote, store := newFakeRemote(), newFakeStore()
+	id := remote.addThread("t", 4, t0)
+	// A reply that failed: blank on the remote, and absent from an account export.
+	remote.messages[id][1].Message = "  "
+	newTestSyncer(store, remote, Config{}).RunDue(context.Background())
+
+	require.Len(t, store.applied[id], 1)
+	got := store.applied[id][0]
+	require.Len(t, got, 3)
+	for _, m := range got {
+		assert.NotEmpty(t, strings.TrimSpace(m.Message))
+	}
 }
 
 func TestDetachedThreadsAreSeenButNotRead(t *testing.T) {

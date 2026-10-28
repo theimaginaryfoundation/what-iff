@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -234,13 +235,30 @@ func backgroundJitter(userID uuid.UUID, lastRun time.Time, interval time.Duratio
 }
 
 // runClaimed runs one claimed account and records the outcome, which also releases the lease.
+//
+// A run that leaves changed threads for later (more than MaxThreadsPerRun) goes straight on with
+// another round, so a big first sync finishes in one go rather than one batch per wake or
+// interval. Later rounds walk the whole list, because the newest threads are now unchanged and
+// would stop an incremental walk before it reached the rest. Rounds stop when nothing is left,
+// on any failure, or when a round leaves no fewer threads than the one before.
 func (s *Syncer) runClaimed(ctx context.Context, userID uuid.UUID) {
 	defer func() {
 		if v := recover(); v != nil {
 			s.logger.Error("remote sync: run panicked", zap.String("user_id", userID.String()), zap.Any("panic", v))
 		}
 	}()
-	result := s.run(ctx, userID)
+	result := s.run(ctx, userID, false)
+	for result.Status == models.RemoteSyncStatusOK && result.Stats.ThreadsDeferred > 0 {
+		next := s.run(ctx, userID, true)
+		if next.Status == "" {
+			break
+		}
+		progressed := next.Stats.ThreadsDeferred < result.Stats.ThreadsDeferred
+		result = addRounds(result, next)
+		if !progressed {
+			break
+		}
+	}
 	if result.Status == "" {
 		// Cancelled (shutdown): leave the lease to expire; the next run starts over safely.
 		return
@@ -265,8 +283,26 @@ func (s *Syncer) runClaimed(ctx context.Context, userID uuid.UUID) {
 		zap.Int("messages_added", st.MessagesAdded))
 }
 
-// run does one account's sync. A zero Status means it was cancelled.
-func (s *Syncer) run(ctx context.Context, userID uuid.UUID) models.RemoteSyncRunResult {
+// addRounds folds a follow-up round into a run: counts add up, and the outcome and what is
+// still left over are the latest round's.
+func addRounds(run, next models.RemoteSyncRunResult) models.RemoteSyncRunResult {
+	a, b := run.Stats, next.Stats
+	next.Stats = models.RemoteSyncRunStats{
+		ThreadsChecked:  a.ThreadsChecked + b.ThreadsChecked,
+		ThreadsCreated:  a.ThreadsCreated + b.ThreadsCreated,
+		ThreadsAdopted:  a.ThreadsAdopted + b.ThreadsAdopted,
+		ThreadsUpdated:  a.ThreadsUpdated + b.ThreadsUpdated,
+		ThreadsForked:   a.ThreadsForked + b.ThreadsForked,
+		ThreadsFailed:   a.ThreadsFailed + b.ThreadsFailed,
+		ThreadsDeferred: b.ThreadsDeferred,
+		MessagesAdded:   a.MessagesAdded + b.MessagesAdded,
+	}
+	return next
+}
+
+// run does one round of an account's sync. fullWalk forces a walk of the whole thread list (a
+// follow-up round); the account may also ask for one. A zero Status means it was cancelled.
+func (s *Syncer) run(ctx context.Context, userID uuid.UUID, fullWalk bool) models.RemoteSyncRunResult {
 	fail := func(status models.RemoteSyncStatus, err error, stats models.RemoteSyncRunStats) models.RemoteSyncRunResult {
 		if ctx.Err() != nil {
 			return models.RemoteSyncRunResult{}
@@ -297,7 +333,7 @@ func (s *Syncer) run(ctx context.Context, userID uuid.UUID) models.RemoteSyncRun
 		return fail(models.RemoteSyncStatusError, err, models.RemoteSyncRunStats{})
 	}
 
-	changed, err := s.discover(ctx, remote, links, acct.FullWalk)
+	changed, err := s.discover(ctx, remote, links, fullWalk || acct.FullWalk)
 	if err != nil {
 		return fail(statusFor(err), err, models.RemoteSyncRunStats{})
 	}
@@ -449,6 +485,12 @@ func (s *Syncer) pull(ctx context.Context, remote Remote, chatID uuid.UUID, cuto
 				break
 			}
 			if m.Origin != models.MessageOriginUser && m.Origin != models.MessageOriginAssistant {
+				continue
+			}
+			// A blank reply (a generation that failed or was cut off) has nothing to continue
+			// from, and an account export leaves it out: copying it would stop adoption from
+			// lining an imported thread up with the remote, and fork it for nothing.
+			if strings.TrimSpace(m.Message) == "" {
 				continue
 			}
 			out = append(out, models.RemoteSyncMessage{

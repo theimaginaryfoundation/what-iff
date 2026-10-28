@@ -126,13 +126,13 @@ type Tone = 'success' | 'warning' | 'danger' | 'neutral' | 'info';
 
               <dl class="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
                 <div>
-                  <dt class="text-xs text-gray-500 dark:text-gray-400">Threads</dt>
+                  <dt class="text-xs text-gray-500 dark:text-gray-400">Threads in sync</dt>
                   <dd class="font-medium text-gray-900 dark:text-white" data-testid="remote-sync-threads">
                     {{ settings()!.totals?.threads ?? 0 | number }}
                   </dd>
                 </div>
                 <div>
-                  <dt class="text-xs text-gray-500 dark:text-gray-400">Messages</dt>
+                  <dt class="text-xs text-gray-500 dark:text-gray-400">Messages in sync</dt>
                   <dd class="font-medium text-gray-900 dark:text-white">{{ settings()!.totals?.messages ?? 0 | number }}</dd>
                 </div>
                 <div>

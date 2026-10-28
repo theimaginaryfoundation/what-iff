@@ -96,7 +96,7 @@ The syncer walks it a page (100) at a time, once for active and once for archive
 A thread with no link, or a different value, is **changed**. The walk stops at the first page with no changed thread: everything after it is older still.
 An idle account therefore costs two list requests per interval. Threads with no messages yet are skipped.
 
-At most `REMOTE_SYNC_MAX_THREADS_PER_RUN` (default 50) threads are synced per run. The rest keep their old stored value, so they are still "changed" next run; a first sync of a large account simply takes a few runs.
+At most `REMOTE_SYNC_MAX_THREADS_PER_RUN` (default 50) threads are synced per round. The rest keep their old stored value, so they are still "changed". A round that leaves some goes straight on to another, with a full walk (the newest page is now unchanged and would stop an incremental one), until none are left, a round fails, or a round makes no progress; the rounds are recorded as one run. A first sync of a large account therefore finishes in one go instead of taking one wake or interval per 50 threads.
 
 ### 5. Pulling a thread's new messages
 
@@ -116,7 +116,7 @@ A **local tail** is any message in the tracking thread ordered after the head th
 | Situation | What happens |
 |---|---|
 | No link and no local thread | **Create** a mirror thread and append the whole history. |
-| No link, but a local thread with `import_hash = sha256(remote chat id)` (an earlier account-export import, or a mirror whose link was removed) | **Adopt** it: align its messages with the hosted history, oldest first, by origin and text, and link the matching prefix. Then continue as below. |
+| No link, but a local thread with `import_hash = sha256(remote chat id)` (an earlier account-export import, or a mirror whose link was removed) | **Adopt** it: align its messages with the hosted history, oldest first, by origin and text, and link the matching prefix. Then continue as below. Blank hosted replies (a generation that failed or was cut off) are never copied: an export leaves them out, so copying them would break the alignment and fork every imported thread that has one. |
 | Link, no local tail | **Append** the batch to the tracking thread. |
 | Link, local tail | **Fork**: create a new thread holding a copy of the tracking thread up to and including the head (links copied too), append the batch to it, and point the link at it. The old thread keeps the local continuation and is no longer tracked. |
 | Link, but the local thread was deleted | Mark the link `detached` and stop. Deleting a mirror locally means "I don't want this here"; it is not recreated. |

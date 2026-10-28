@@ -80,7 +80,7 @@ Either way you can do it before or after step 4; after step 4, the welcome scree
 
 Saving checks the token with whatiff.chat first and tells you plainly if it is mistyped, revoked, or cannot read threads.
 The first sync starts straight away; the status shows **Syncing…** and then **In sync**, with how many threads and messages came over.
-A big account can take a few rounds to come over completely; that happens on its own.
+A big account comes over in rounds of 50 threads, one straight after another, until it is all here.
 
 That is it. From now on, open the app at home and your threads are there.
 
@@ -112,7 +112,7 @@ Copies are one-way, from whatiff.chat to your server.
 |---|---|---|
 | `REMOTE_SYNC_ENABLED` | `false` (`true` in Docker Compose) | Turns mullet mode on for this server. When off, the Tools tab does not appear. |
 | `REMOTE_SYNC_INTERVAL` | `1h` | Background sync for copies nobody is looking at, on top of syncing when the app is used. Each run is spread randomly over up to a fifth of the interval later (an hour means every 60 to 72 minutes), so servers do not all call whatiff.chat at once. At least `1m`, or `off` to sync only when the app is used. |
-| `REMOTE_SYNC_MAX_THREADS_PER_RUN` | `50` | Threads per sync; the rest come in the next one. |
+| `REMOTE_SYNC_MAX_THREADS_PER_RUN` | `50` | Threads per round. A sync with more to do carries on with another round straight away. |
 | `REMOTE_SYNC_ALLOW_LOCAL_NETWORK` | `false` | Allows `http://` and private addresses, for syncing from another What Iff server on your own network (or for development). Otherwise sync only connects to public `https` addresses. |
 
 **Running your own models.** To continue copied threads on a local model, point What Iff at an OpenAI-compatible server (Ollama, LM Studio, vLLM):
