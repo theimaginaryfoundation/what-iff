@@ -148,6 +148,9 @@ func (a *Agent) handleEphemeralPromptAsync(ctx context.Context, chatID uuid.UUID
 				return
 			}
 			_, failErr := a.ds.UpdateJobStatus(runCtx, userID, jobID, models.JobStatusFailed, providerkeys.FailureText(runErr))
+			if failErr == nil {
+				a.recordJobFailureCode(runCtx, userID, jobID, runErr)
+			}
 			if failErr != nil {
 				a.logger.Error("failed to mark async webhook background job failed",
 					zap.String("job_id", jobID.String()),

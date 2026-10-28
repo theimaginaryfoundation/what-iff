@@ -204,6 +204,8 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   Methods taking a userID are owner-scoped; the relay's own (`FindDiscordBindingTarget`, `GetDiscordBindingTarget`, `ListActiveDiscordBotCredentials`, link and pending-post bookkeeping) act for the owner recorded on the bot.
   `IsExternalRelayChat` (any chat bound by one of the user's bots) and `ExternalSpeakerForMessage` (the Discord author of a saved message) back memory provenance in the agent.
   `CreateChat` honours `Chat.DisabledTools`, so a server-created relay thread never exists with its default-off tools on (the app's create route drops the field).
+- **Failure codes:** a job's `error_code` and a chat message's `last_error_code` carry a stable code beside the failure text.
+  `SetChatMessageLastError` takes the code and clears it with the message; `FinalizeFailedChatJobWithPartial` and `UpdateJob` record it on the job; `SetJobErrorCode` adds it after `UpdateJobStatus` has marked a job failed.
 - **`EncryptToken` / `DecryptToken`** expose the token helper to packages that keep their own tables but share the one key (`internal/accountkeys`).
 
 ## Testing
