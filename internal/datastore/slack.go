@@ -122,8 +122,9 @@ func (d *Datastore) UpdateSlackApp(ctx context.Context, userID, id uuid.UUID, p 
 }
 
 // SetSlackAppState records how an app's connection stands (the gateway's view). An empty
-// lastError clears it; an active state records the connection time. An app the owner paused
-// is left paused, so a connection closing just after the pause cannot undo it.
+// lastError clears it; an active state without an error records the connection time (active
+// with an error is a connection that is retrying). An app the owner paused is left paused, so
+// a connection closing just after the pause cannot undo it.
 func (d *Datastore) SetSlackAppState(ctx context.Context, id uuid.UUID, status models.SlackAppStatus, lastError string) error {
 	upd := d.dbClient.SlackApp.Update().
 		Where(slackapp.ID(id), slackapp.StatusNEQ(slackapp.StatusDisabled)).
@@ -133,7 +134,7 @@ func (d *Datastore) SetSlackAppState(ctx context.Context, id uuid.UUID, status m
 	} else {
 		upd.SetLastError(lastError)
 	}
-	if status == models.SlackAppActive {
+	if status == models.SlackAppActive && lastError == "" {
 		upd.SetLastConnectedAt(time.Now())
 	}
 	if _, err := upd.Save(ctx); err != nil {

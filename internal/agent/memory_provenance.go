@@ -11,8 +11,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// Memory provenance (models.MemoryProvenance). A relay thread (Discord or Buzz) is a conversation with
-// people outside the account: whoever the binding lets tag the bot. What the agent learns
+// Memory provenance (models.MemoryProvenance). A relay thread (Discord, Buzz or Slack) is a
+// conversation with people outside the account: whoever the binding lets tag the bot. What the agent learns
 // there is stored as external, so it is shown to the model as unverified and attributed to its
 // speaker wherever it is read later (memoryutil.FormatMemoryForContext), and the owner can review
 // it in the memory manager. Scope is chosen exactly as in any chat (a sandboxed relay thread always
@@ -97,7 +97,7 @@ func stampExtractedProvenance(collapsed []memoryutil.CollapsedExtractedMemory, e
 
 // relayMemoryExtractionNote is added to the extraction instructions in a relay thread, where
 // the extraction uses the speaker schema variant (models.ExtractedRelayMemory). platform is the
-// service the thread is relayed from ("Discord", "Buzz").
+// service the thread is relayed from ("Discord", "Buzz", "Slack").
 func relayMemoryExtractionNote(platform string) string {
 	if platform == "" {
 		platform = "Discord"
