@@ -142,6 +142,10 @@ func toChatMessageModel(e *ent.ChatMessage) *models.ChatMessage {
 		msg := strings.TrimSpace(*e.LastErrorMessage)
 		if msg != "" {
 			chatMessage.LastErrorMessage = &msg
+			if e.LastErrorCode != nil && *e.LastErrorCode != "" {
+				code := *e.LastErrorCode
+				chatMessage.LastErrorCode = &code
+			}
 		}
 	}
 
@@ -189,8 +193,10 @@ func trimChatMessageLastError(s string) string {
 	return string(r[:maxRunes])
 }
 
-// SetChatMessageLastError sets or clears the user-visible generation error on a chat message (user-owned).
-func (d *Datastore) SetChatMessageLastError(ctx context.Context, userID, messageID uuid.UUID, msg *string) error {
+// SetChatMessageLastError sets or clears the user-visible generation error on a chat message
+// (user-owned), with code, a stable code for it when it has one. Clearing the message clears
+// the code.
+func (d *Datastore) SetChatMessageLastError(ctx context.Context, userID, messageID uuid.UUID, msg *string, code string) error {
 	upd := d.dbClient.ChatMessage.Update().
 		Where(
 			chatmessage.ID(messageID),
@@ -200,15 +206,20 @@ func (d *Datastore) SetChatMessageLastError(ctx context.Context, userID, message
 				),
 			),
 		)
-	if msg == nil {
+	t := ""
+	if msg != nil {
+		t = trimChatMessageLastError(*msg)
+	}
+	switch {
+	case t == "":
 		upd.ClearLastErrorMessage()
-	} else {
-		t := trimChatMessageLastError(*msg)
-		if t == "" {
-			upd.ClearLastErrorMessage()
-		} else {
-			upd.SetLastErrorMessage(t)
-		}
+		upd.ClearLastErrorCode()
+	case code == "":
+		upd.SetLastErrorMessage(t)
+		upd.ClearLastErrorCode()
+	default:
+		upd.SetLastErrorMessage(t)
+		upd.SetLastErrorCode(code)
 	}
 	affected, err := upd.Save(ctx)
 	if err != nil {

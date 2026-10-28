@@ -98,6 +98,7 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			model_reasoning text,
 			agent_run json,
 			last_error_message text,
+			last_error_code text,
 			checkpoint_completed_at datetime,
 			context_breakdown json,
 			chat_messages uuid NOT NULL,

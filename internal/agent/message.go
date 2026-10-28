@@ -797,7 +797,7 @@ func (a *Agent) RetryUserChatMessage(ctx context.Context, chatID, messageID uuid
 		}, nil
 	}
 
-	if err := a.ds.SetChatMessageLastError(detachedCtx, userID, messageID, nil); err != nil {
+	if err := a.ds.SetChatMessageLastError(detachedCtx, userID, messageID, nil, ""); err != nil {
 		a.logger.Warn("failed to clear last_error_message before retry", zap.Error(err))
 	}
 
@@ -1075,7 +1075,7 @@ func (a *Agent) handleUserMessage(ctx context.Context, chatJob *models.Job, chat
 				return nil, err
 			}
 			a.persistUserTurnAndChatAfterInference(ctx, chatJob.UserID, chatMessage, chatCtx.chat, chatCtx, result, true)
-			if cerr := a.ds.SetChatMessageLastError(ctx, chatJob.UserID, chatMessage.ID, nil); cerr != nil {
+			if cerr := a.ds.SetChatMessageLastError(ctx, chatJob.UserID, chatMessage.ID, nil, ""); cerr != nil {
 				a.logger.Warn("failed to clear user message last_error_message after inference recovery", zap.Error(cerr))
 			}
 			a.runUserChatPostInferencePhases(ctx, chatJob, chatMessage, agentMessage, chatCtx, modelContext, qd)
@@ -3175,6 +3175,7 @@ func (a *Agent) setJobStatusFailedWithPartial(
 		generationModel,
 		generationPersonality,
 		failureMessage,
+		failureCode(cause),
 		moodID,
 	)
 	if err != nil {
@@ -3186,7 +3187,7 @@ func (a *Agent) setJobStatusFailedWithPartial(
 	if failureMessage == "" {
 		return
 	}
-	if err := a.ds.SetChatMessageLastError(ctx, chatJob.UserID, userMessage.ID, &failureMessage); err != nil {
+	if err := a.ds.SetChatMessageLastError(ctx, chatJob.UserID, userMessage.ID, &failureMessage, failureCode(cause)); err != nil {
 		a.logger.Warn("failed to set user message last_error_message for failed job", zap.Error(err))
 	}
 }
@@ -3198,6 +3199,7 @@ func (a *Agent) setJobStatusFailed(ctx context.Context, chatJob *models.Job, cau
 	toSave := *chatJob
 	toSave.Status = models.JobStatusFailed
 	toSave.Error = providerkeys.FailureText(cause)
+	toSave.ErrorCode = failureCode(cause)
 	updated, uerr := a.ds.UpdateJob(ctx, chatJob.UserID, toSave)
 	if uerr != nil {
 		a.logger.Error("failed to update job", zap.Error(uerr))
@@ -3223,7 +3225,7 @@ func (a *Agent) setJobStatusFailed(ctx context.Context, chatJob *models.Job, cau
 	if errText == "" {
 		return
 	}
-	if serr := a.ds.SetChatMessageLastError(ctx, chatJob.UserID, userMsgID, &errText); serr != nil {
+	if serr := a.ds.SetChatMessageLastError(ctx, chatJob.UserID, userMsgID, &errText, failureCode(cause)); serr != nil {
 		a.logger.Warn("failed to set user message last_error_message for failed job", zap.Error(serr))
 	}
 }

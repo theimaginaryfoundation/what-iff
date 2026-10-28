@@ -7960,6 +7960,12 @@ components:
           $ref: '#/components/schemas/JobStatus'
         error:
           type: string
+        error_code:
+          type: string
+          description: >-
+            Stable code for the failure when it has one (a specific ErrorCode such as
+            `provider_not_configured`), so clients can branch on it rather than on
+            `error`. Absent otherwise.
         result_id:
           type: string
           format: uuid
@@ -8733,6 +8739,12 @@ components:
           type: string
           nullable: true
           description: User-visible async generation failure for this user turn; cleared after a successful reply
+        last_error_code:
+          type: string
+          nullable: true
+          description: >-
+            Stable code for last_error_message when it has one (a specific ErrorCode such
+            as `provider_not_configured`); set and cleared with it.
         checkpoint_completed_at:
           type: string
           format: date-time

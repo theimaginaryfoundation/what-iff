@@ -35,6 +35,9 @@ func (Job) Fields() []ent.Field {
 		field.String("error").
 			Optional().
 			Comment("Error message if the job failed"),
+		field.String("error_code").
+			Optional().
+			Comment("Stable code for the failure when it has one (models error codes), so clients can branch on it; empty otherwise"),
 		field.UUID("result_id", uuid.UUID{}).
 			Optional().
 			Nillable().

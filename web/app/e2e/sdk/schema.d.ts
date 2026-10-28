@@ -11063,6 +11063,8 @@ export interface components {
             reference?: string;
             status?: components["schemas"]["JobStatus"];
             error?: string;
+            /** @description Stable code for the failure when it has one (a specific ErrorCode such as `provider_not_configured`), so clients can branch on it rather than on `error`. Absent otherwise. */
+            error_code?: string;
             /** Format: uuid */
             result_id?: string;
             /** @description Incremental assistant text chunks emitted while inference is in progress. */
@@ -11505,6 +11507,8 @@ export interface components {
             agent_run?: components["schemas"]["AgentRun"] | null;
             /** @description User-visible async generation failure for this user turn; cleared after a successful reply */
             last_error_message?: string | null;
+            /** @description Stable code for last_error_message when it has one (a specific ErrorCode such as `provider_not_configured`); set and cleared with it. */
+            last_error_code?: string | null;
             /**
              * Format: date-time
              * @description When scratchpad, memory extraction, and summary checkpoint finished for the assistant turn ending with this message
