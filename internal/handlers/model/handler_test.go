@@ -10,10 +10,12 @@ import (
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
+	"entgo.io/ent/dialect/sql/schema"
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/ent"
+	"github.com/theimaginaryfoundation/what-iff/ent/migrate"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"go.uber.org/zap"
 )
@@ -25,22 +27,13 @@ func listModels(t *testing.T, tiersApply bool) []map[string]any {
 	db, err := sql.Open("sqlite3", "file:"+uuid.NewString()+"?mode=memory&cache=shared&_fk=1")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	// Only the table this handler reads; the full schema needs pgvector.
-	_, err = db.Exec(`CREATE TABLE models (
-		id uuid PRIMARY KEY,
-		name text NOT NULL,
-		display_name text NOT NULL,
-		description text NOT NULL,
-		provider text NOT NULL DEFAULT 'openai',
-		tool_support bool NOT NULL DEFAULT false,
-		vision_support bool NULL,
-		base_credits_per_slab integer NOT NULL DEFAULT 1,
-		subscription_tier text NOT NULL DEFAULT 'high',
-		deleted bool NOT NULL DEFAULT false,
-		is_default bool NOT NULL DEFAULT false
-	)`)
+	drv := entsql.OpenDB(dialect.SQLite, db)
+	// Only the table this handler reads, from the ent schema so it never drifts; the full
+	// schema needs pgvector.
+	m, err := schema.NewMigrate(drv)
 	require.NoError(t, err)
-	client := ent.NewClient(ent.Driver(entsql.OpenDB(dialect.SQLite, db)))
+	require.NoError(t, m.Create(context.Background(), migrate.ModelsTable))
+	client := ent.NewClient(ent.Driver(drv))
 	require.NoError(t, client.Model.Create().
 		SetName("gpt-5.6-luna").
 		SetDisplayName("GPT-5.6 Luna").
