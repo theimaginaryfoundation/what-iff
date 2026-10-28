@@ -35,4 +35,10 @@ regexes = [
   # internal/auth/secret_test.go's synthetic "this is a valid-shaped secret"
   # fixture — asserts ValidateSecret accepts it, not a real credential.
   '''kx8f2m9qz3vw7n4jr6bt1yc5hd0lp8se''',
+  # internal/buzzrelay/nostr/nostr_test.go: the example key pair and public
+  # key published in the Nostr NIP-19 spec, used as test vectors so key
+  # derivation is checked against the spec rather than our own output.
+  # Public by definition; no relay or person uses them.
+  '''67dea2ed018072d675f5415ecfaed7d2597555e202d85b3d65ea4e58d2d92ffa''',
+  '''3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d''',
 ]
