@@ -1,8 +1,11 @@
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable, catchError, map, of, shareReplay } from 'rxjs';
+import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
+import { relayAvailability } from '../relay/relay-availability';
+import { RELAY_EMPTY_ALLOW_NOTE } from '../relay/relay-copy';
+import { RelayIdKind } from '../relay/relay-id-chips.component';
 
 /** Discord relay. Shapes mirror internal/models/discord.go. */
 
@@ -110,7 +113,14 @@ export const UNRESTRICTED_WARNING =
   'Anyone allowed to tag the bot can use what this thread reads: your name, memories, other conversations, files, scratchpad and tools.';
 
 /** The note shown while a binding's allow list is empty. */
-export const EMPTY_ALLOW_NOTE = 'Anyone in this channel can talk to this persona.';
+export const EMPTY_ALLOW_NOTE = RELAY_EMPTY_ALLOW_NOTE;
+
+/** Discord user ids in the allow and deny chips: numbers only (Copy User ID, with Developer Mode on). */
+export const DISCORD_USER_IDS: RelayIdKind = {
+  parse: entry => (/^\d+$/.test(entry) ? entry : null),
+  invalid: 'Discord user ids are numbers only (Copy User ID, with Developer Mode on).',
+  inputMode: 'numeric',
+};
 
 /**
  * Whether a thread needs the owner's acknowledgement to be driven from Discord: anything that is
@@ -141,11 +151,7 @@ export class DiscordService {
    */
   available(): Observable<boolean> {
     if (!this.availability$) {
-      this.availability$ = this.http.get<unknown>(`${this.base}/bindings`).pipe(
-        map(() => true),
-        catchError((e: unknown) => of(!(e instanceof HttpErrorResponse && e.status === 404))),
-        shareReplay({ bufferSize: 1, refCount: false }),
-      );
+      this.availability$ = relayAvailability(this.http, `${this.base}/bindings`);
     }
     return this.availability$;
   }

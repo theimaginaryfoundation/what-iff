@@ -69,7 +69,8 @@ describe('BuzzComposerToggleComponent', () => {
     await settle();
 
     expect(setPostNextReply).toHaveBeenCalledWith('chat-1', 'b1', true);
-    expect(fixture.componentInstance.pending().has('b1')).toBe(true);
+    fixture.detectChanges();
+    expect((fixture.nativeElement.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(true);
   });
 
   it('reflects a pending post from the server, and leaves out broken bindings', async () => {

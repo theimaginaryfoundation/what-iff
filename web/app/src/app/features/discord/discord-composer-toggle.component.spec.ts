@@ -70,7 +70,8 @@ describe('DiscordComposerToggleComponent', () => {
     await settle();
 
     expect(setPostNextReply).toHaveBeenCalledWith('chat-1', 'b1', true);
-    expect(fixture.componentInstance.pending().has('b1')).toBe(true);
+    fixture.detectChanges();
+    expect((fixture.nativeElement.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(true);
   });
 
   it('says tags are paused, with a way to Integrations, once the thread leaves the sandbox unacknowledged', async () => {

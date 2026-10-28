@@ -15,6 +15,7 @@ import {
   DiscordBot,
   DiscordChannel,
   DiscordGuild,
+  DISCORD_USER_IDS,
   DiscordService,
   EMPTY_ALLOW_NOTE,
   UNRESTRICTED_WARNING,
@@ -22,7 +23,7 @@ import {
   needsRelayAcknowledgement,
 } from './discord.service';
 import { DiscordBindingThreadComponent } from './discord-binding-thread.component';
-import { DiscordIdChipsComponent } from './discord-id-chips.component';
+import { RelayIdChipsComponent } from '../relay/relay-id-chips.component';
 
 /** Per-bot "connect a channel" form state. */
 interface ConnectForm {
@@ -55,7 +56,7 @@ interface AccessDraft {
 @Component({
   selector: 'app-discord-tab',
   standalone: true,
-  imports: [DatePipe, FormsModule, RouterLink, DiscordBindingThreadComponent, DiscordIdChipsComponent],
+  imports: [DatePipe, FormsModule, RouterLink, DiscordBindingThreadComponent, RelayIdChipsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-6" data-testid="discord-tab">
@@ -310,7 +311,8 @@ interface AccessDraft {
                   <div class="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
                     <div>
                       <span class="mb-1 block text-gray-600 dark:text-gray-400">Allow</span>
-                      <app-discord-id-chips
+                      <app-relay-id-chips
+                        [kind]="userIds"
                         label="Allowed Discord user ids"
                         placeholder="Anyone, until you add an id…"
                         [ids]="draft(b).allow"
@@ -319,7 +321,8 @@ interface AccessDraft {
                     </div>
                     <div>
                       <span class="mb-1 block text-gray-600 dark:text-gray-400">Deny</span>
-                      <app-discord-id-chips
+                      <app-relay-id-chips
+                        [kind]="userIds"
                         label="Denied Discord user ids"
                         placeholder="Nobody blocked…"
                         [ids]="draft(b).deny"
@@ -391,7 +394,8 @@ interface AccessDraft {
                   </label>
                   <div class="block text-xs text-gray-600 dark:text-gray-400">
                     <span class="mb-1 block">Only these Discord user ids may tag it (optional)</span>
-                    <app-discord-id-chips
+                    <app-relay-id-chips
+                      [kind]="userIds"
                       label="Allowed Discord user ids"
                       placeholder="Anyone, until you add an id…"
                       [ids]="form.allowIds"
@@ -452,6 +456,7 @@ export class DiscordTabComponent implements OnInit {
   private readonly chats = inject(ChatService);
 
   readonly unrestrictedWarning = UNRESTRICTED_WARNING;
+  readonly userIds = DISCORD_USER_IDS;
   readonly emptyAllowNote = EMPTY_ALLOW_NOTE;
 
   readonly loading = signal(true);

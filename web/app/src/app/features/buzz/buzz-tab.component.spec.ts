@@ -424,7 +424,7 @@ describe('BuzzTabComponent', () => {
 
     it('saves who can mention the persona, as hex keys', async () => {
       const { fixture, click, q } = await create();
-      const allow = fixture.nativeElement.querySelector('app-buzz-pubkey-chips input') as HTMLInputElement;
+      const allow = fixture.nativeElement.querySelector('app-relay-id-chips input') as HTMLInputElement;
       allow.value = NPUB;
       allow.dispatchEvent(new Event('blur'));
       fixture.detectChanges();

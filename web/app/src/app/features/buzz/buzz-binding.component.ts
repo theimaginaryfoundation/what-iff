@@ -4,15 +4,16 @@ import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
 import { ConfirmationService } from '../../core/services/confirmation.service';
+import { RelayIdChipsComponent } from '../relay/relay-id-chips.component';
 import {
   BUZZ_EMPTY_ALLOW_NOTE,
+  BUZZ_PUBKEYS,
   BUZZ_UNRESTRICTED_WARNING,
   BuzzBinding,
   BuzzService,
   UpdateBuzzBindingRequest,
   buzzBindingLabel,
 } from './buzz.service';
-import { BuzzPubkeyChipsComponent } from './buzz-pubkey-chips.component';
 import { BuzzTabState } from './buzz-tab.state';
 import { BUZZ_UI, buzzStatusClass } from './buzz-ui';
 
@@ -29,7 +30,7 @@ interface AccessDraft {
 @Component({
   selector: 'app-buzz-binding',
   standalone: true,
-  imports: [DatePipe, RouterLink, BuzzPubkeyChipsComponent],
+  imports: [DatePipe, RouterLink, RelayIdChipsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let b = binding();
@@ -131,20 +132,22 @@ interface AccessDraft {
         <div class="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
           <div>
             <span class="mb-1 block text-gray-600 dark:text-gray-400">Allow</span>
-            <app-buzz-pubkey-chips
+            <app-relay-id-chips
+              [kind]="pubkeys"
               label="Allowed Buzz public keys"
               placeholder="Anyone, until you add a key…"
-              [keys]="draft().allow"
-              (keysChange)="setDraft('allow', $event)"
+              [ids]="draft().allow"
+              (idsChange)="setDraft('allow', $event)"
             />
           </div>
           <div>
             <span class="mb-1 block text-gray-600 dark:text-gray-400">Deny</span>
-            <app-buzz-pubkey-chips
+            <app-relay-id-chips
+              [kind]="pubkeys"
               label="Denied Buzz public keys"
               placeholder="Nobody blocked…"
-              [keys]="draft().deny"
-              (keysChange)="setDraft('deny', $event)"
+              [ids]="draft().deny"
+              (idsChange)="setDraft('deny', $event)"
             />
           </div>
         </div>
@@ -171,6 +174,7 @@ export class BuzzBindingComponent {
   readonly communityName = input<string | undefined>(undefined);
 
   readonly ui = BUZZ_UI;
+  readonly pubkeys = BUZZ_PUBKEYS;
   readonly statusClass = buzzStatusClass;
   readonly unrestrictedWarning = BUZZ_UNRESTRICTED_WARNING;
   readonly emptyAllowNote = BUZZ_EMPTY_ALLOW_NOTE;

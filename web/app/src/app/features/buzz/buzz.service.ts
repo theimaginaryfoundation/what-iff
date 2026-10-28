@@ -1,9 +1,13 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable, catchError, map, of, shareReplay } from 'rxjs';
+import { Observable } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 import { apiErrorEnvelope, hasErrorCode } from '../../core/utils/api-error.helpers';
+import { relayAvailability } from '../relay/relay-availability';
+import { RELAY_EMPTY_ALLOW_NOTE, RELAY_UNRESTRICTED_WARNING } from '../relay/relay-copy';
+import { RelayIdKind } from '../relay/relay-id-chips.component';
+import { fullNpub, normalizePubkey, shortNpub } from './npub';
 
 /** Buzz relay. Shapes mirror internal/models/buzz.go and internal/buzzplugin/handlers.go. */
 
@@ -166,11 +170,22 @@ export interface UpdateBuzzBindingRequest {
 }
 
 /** What anyone allowed to mention the persona gets from a thread that is not sandboxed. */
-export const BUZZ_UNRESTRICTED_WARNING =
-  'Anyone allowed to mention the persona can use what this thread reads: your name, memories, other conversations, files, scratchpad and tools.';
+export const BUZZ_UNRESTRICTED_WARNING = RELAY_UNRESTRICTED_WARNING;
+
+/**
+ * Buzz public keys in the allow and deny chips: typed or pasted as npub or hex, kept as hex (as the
+ * API stores them), shown as a shortened npub with the full one on hover.
+ */
+export const BUZZ_PUBKEYS: RelayIdKind = {
+  parse: normalizePubkey,
+  invalid: 'Buzz public keys are an npub1… or 64 hex characters.',
+  display: shortNpub,
+  title: fullNpub,
+  monospace: true,
+};
 
 /** The note shown while a binding's allow list is empty. */
-export const BUZZ_EMPTY_ALLOW_NOTE = 'Anyone in this channel can talk to this persona.';
+export const BUZZ_EMPTY_ALLOW_NOTE = RELAY_EMPTY_ALLOW_NOTE;
 
 /** "#general · Acme" for a binding (the community name is optional). */
 export function buzzBindingLabel(b: Pick<BuzzBinding, 'channel_name' | 'channel_id' | 'community_name'>, communityName?: string): string {
@@ -210,11 +225,7 @@ export class BuzzService {
    */
   available(): Observable<boolean> {
     if (!this.availability$) {
-      this.availability$ = this.http.get<unknown>(`${this.base}/bindings`).pipe(
-        map(() => true),
-        catchError((e: unknown) => of(!(e instanceof HttpErrorResponse && e.status === 404))),
-        shareReplay({ bufferSize: 1, refCount: false }),
-      );
+      this.availability$ = relayAvailability(this.http, `${this.base}/bindings`);
     }
     return this.availability$;
   }

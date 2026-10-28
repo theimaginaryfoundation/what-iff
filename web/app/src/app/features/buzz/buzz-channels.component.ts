@@ -5,8 +5,8 @@ import { firstValueFrom } from 'rxjs';
 import { Chat, isSandboxed } from '../../core/models/chat.model';
 import { ChatService } from '../../core/services/chat.service';
 import { needsRelayAcknowledgement } from '../discord/discord.service';
-import { BUZZ_EMPTY_ALLOW_NOTE, BUZZ_UNRESTRICTED_WARNING, BuzzChannel, BuzzCommunity, BuzzService } from './buzz.service';
-import { BuzzPubkeyChipsComponent } from './buzz-pubkey-chips.component';
+import { RelayIdChipsComponent } from '../relay/relay-id-chips.component';
+import { BUZZ_EMPTY_ALLOW_NOTE, BUZZ_PUBKEYS, BUZZ_UNRESTRICTED_WARNING, BuzzChannel, BuzzCommunity, BuzzService } from './buzz.service';
 import { BuzzTabState } from './buzz-tab.state';
 import { BUZZ_UI } from './buzz-ui';
 
@@ -18,7 +18,7 @@ import { BUZZ_UI } from './buzz-ui';
 @Component({
   selector: 'app-buzz-channels',
   standalone: true,
-  imports: [FormsModule, BuzzPubkeyChipsComponent],
+  imports: [FormsModule, RelayIdChipsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (!open()) {
@@ -95,11 +95,12 @@ import { BUZZ_UI } from './buzz-ui';
                     </label>
                     <div class="block text-xs text-gray-600 dark:text-gray-400">
                       <span class="mb-1 block">Only these Buzz keys may mention it (optional)</span>
-                      <app-buzz-pubkey-chips
+                      <app-relay-id-chips
+                        [kind]="pubkeys"
                         label="Allowed Buzz public keys"
                         placeholder="Anyone, until you add a key…"
-                        [keys]="allow()"
-                        (keysChange)="allow.set($event)"
+                        [ids]="allow()"
+                        (idsChange)="allow.set($event)"
                       />
                     </div>
                   </div>
@@ -158,6 +159,7 @@ export class BuzzChannelsComponent {
   readonly personalityId = input.required<string>();
 
   readonly ui = BUZZ_UI;
+  readonly pubkeys = BUZZ_PUBKEYS;
   readonly unrestrictedWarning = BUZZ_UNRESTRICTED_WARNING;
   readonly emptyAllowNote = BUZZ_EMPTY_ALLOW_NOTE;
   readonly open = signal(false);
