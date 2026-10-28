@@ -4,7 +4,7 @@ import { Observable, catchError, map, of, shareReplay } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
 
-/** Remote sync (ADR 0x032). Shapes mirror internal/models/remote_sync.go. */
+/** Remote sync (ADR 0x033). Shapes mirror internal/models/remote_sync.go. */
 
 export type RemoteSyncStatus = 'pending' | 'ok' | 'error' | 'needs_attention';
 

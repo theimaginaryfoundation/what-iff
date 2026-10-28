@@ -2,7 +2,7 @@
 
 ## Role
 
-Remote sync's logic: keeps a copy of a user's threads from another What Iff server (usually the hosted app) in this one, pulled through the remote's webhook read routes with a `chat:read` token (ADR 0x032).
+Remote sync's logic: keeps a copy of a user's threads from another What Iff server (usually the hosted app) in this one, pulled through the remote's webhook read routes with a `chat:read` token (ADR 0x033).
 It talks to the remote through a small `Remote` interface and to storage through `Store`, so it is tested without either.
 
 ## Responsibilities

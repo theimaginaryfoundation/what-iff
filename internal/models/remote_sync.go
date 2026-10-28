@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Remote sync keeps a copy of the owner's threads on another What Iff server (ADR 0x032).
+// Remote sync keeps a copy of the owner's threads on another What Iff server (ADR 0x033).
 
 // RemoteSyncStatus is how the last run of an account's sync went.
 type RemoteSyncStatus string

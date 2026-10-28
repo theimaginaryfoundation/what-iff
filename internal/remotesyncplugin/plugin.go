@@ -14,7 +14,7 @@
 // It is off by default because a server with it on makes outbound requests to an address each
 // user chooses; that is what a self-hosted install wants and what a shared one should decide on
 // purpose. Remote tokens are encrypted at rest with the MCP token key (TOKEN_ENCRYPTION_SECRET).
-// See docs/adr/0x032-mullet-mode-remote-sync.md.
+// See docs/adr/0x033-mullet-mode-remote-sync.md.
 package remotesyncplugin
 
 import (

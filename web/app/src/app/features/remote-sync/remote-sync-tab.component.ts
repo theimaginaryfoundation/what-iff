@@ -22,7 +22,7 @@ type Tone = 'success' | 'warning' | 'danger' | 'neutral' | 'info';
 /**
  * Integrations → Remote sync: paste a token from another What Iff server (usually the hosted
  * app) and this server keeps a copy of your threads from it. Talks to /api/remote-sync
- * (internal/remotesyncplugin). See docs/adr/0x032-mullet-mode-remote-sync.md.
+ * (internal/remotesyncplugin). See docs/adr/0x033-mullet-mode-remote-sync.md.
  */
 @Component({
   selector: 'app-remote-sync-tab',

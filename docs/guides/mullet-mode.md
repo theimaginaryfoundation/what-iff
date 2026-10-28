@@ -7,7 +7,7 @@ Your own What Iff server at home keeps a copy of every one of those conversation
 > **Beta.** Mullet mode is new. It works, it is careful with your data, and it will still have rough edges. Tell us what feels weird: [open an issue](https://github.com/theimaginaryfoundation/what-iff/issues/new/choose).
 
 In the code and settings it is called *remote sync*.
-The design and the reasoning behind it are in [ADR 0x032](../adr/0x032-mullet-mode-remote-sync.md).
+The design and the reasoning behind it are in [ADR 0x033](../adr/0x033-mullet-mode-remote-sync.md).
 
 ## Why you would want it
 

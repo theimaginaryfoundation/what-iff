@@ -2,7 +2,7 @@
 
 ## Role
 
-Wires remote sync into the API server through the plugin seam: the `/api/remote-sync` routes and the runner (ADR 0x032).
+Wires remote sync into the API server through the plugin seam: the `/api/remote-sync` routes and the runner (ADR 0x033).
 Linked by a blank import in `cmd/api-server/plugins.go`.
 
 ## Responsibilities

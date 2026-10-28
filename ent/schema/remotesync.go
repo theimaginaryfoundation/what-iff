@@ -11,7 +11,7 @@ import (
 
 // Remote sync: a self-hosted server keeps a copy of its owner's threads on another What Iff
 // server (the hosted app, usually), pulled through that server's webhook read routes with a
-// chat:read token. See docs/adr/0x032-mullet-mode-remote-sync.md and internal/remotesync.
+// chat:read token. See docs/adr/0x033-mullet-mode-remote-sync.md and internal/remotesync.
 //
 // Local threads and messages are plain UUID columns rather than edges, so the Chat and
 // ChatMessage schemas stay unaware of sync; a link whose local thread has been deleted is

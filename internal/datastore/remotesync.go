@@ -18,7 +18,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
-// Remote sync storage (docs/adr/0x032-mullet-mode-remote-sync.md): each user's sync settings and lease, and
+// Remote sync storage (docs/adr/0x033-mullet-mode-remote-sync.md): each user's sync settings and lease, and
 // the links from remote threads and messages to local ones. Every method is owner-scoped by
 // userID. Applying a remote thread is in remotesync_apply.go.
 

@@ -39,7 +39,7 @@ export const appConfig: ApplicationConfig = {
     },
     {
       // Mullet mode: ask this server to sync from the remote when the app is opened or comes
-      // back after a while, instead of polling on a clock (ADR 0x032). No-op where it is off.
+      // back after a while, instead of polling on a clock (ADR 0x033). No-op where it is off.
       provide: APP_INITIALIZER,
       multi: true,
       deps: [RemoteSyncWakeService],

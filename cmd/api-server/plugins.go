@@ -16,6 +16,6 @@ import (
 	// Off unless SLACK_RELAY_ENABLED=true (docs/adr/0x032-slack-relay.md).
 	_ "github.com/theimaginaryfoundation/what-iff/internal/slackplugin"
 	// Remote sync: keep a copy of your threads from another What Iff server (the hosted app).
-	// Off unless REMOTE_SYNC_ENABLED=true (docs/adr/0x032-mullet-mode-remote-sync.md).
+	// Off unless REMOTE_SYNC_ENABLED=true (docs/adr/0x033-mullet-mode-remote-sync.md).
 	_ "github.com/theimaginaryfoundation/what-iff/internal/remotesyncplugin"
 )

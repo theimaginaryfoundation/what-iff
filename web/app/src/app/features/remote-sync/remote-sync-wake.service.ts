@@ -8,7 +8,7 @@ import { ThreadListService } from '../../core/services/thread-list.service';
 import { RemoteSyncService } from './remote-sync.service';
 
 /**
- * Mullet mode's "sync on wake" (ADR 0x032): instead of polling the remote on a clock, the app
+ * Mullet mode's "sync on wake" (ADR 0x033): instead of polling the remote on a clock, the app
  * tells its own server when it is being used, and the server syncs if the copy is stale.
  *
  * A wake is sent when a signed-in session starts, and when the tab comes back after being hidden

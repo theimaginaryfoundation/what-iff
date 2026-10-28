@@ -1,4 +1,4 @@
-# ADR 0x032: Mullet mode — keep a self-hosted copy of a hosted account, automatically
+# ADR 0x033: Mullet mode — keep a self-hosted copy of a hosted account, automatically
 
 - **Status:** Proposed (experimental beta)
 - **Date:** 2026-10-13, revised 2026-10-28 (sync on wake instead of polling; first published as 0x026, renumbered because 0x026 went to another ADR first)

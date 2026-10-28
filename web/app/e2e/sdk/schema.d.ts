@@ -828,7 +828,7 @@ export interface paths {
         };
         /**
          * Get remote sync settings and status
-         * @description The account's remote sync (ADR 0x032): the remote address, the stored token's last four characters, whether sync is on, how the last run went, and totals. The token is never returned. `configured` is false when sync was never set up. Only served when the server runs with REMOTE_SYNC_ENABLED=true; otherwise this route does not exist (404).
+         * @description The account's remote sync (ADR 0x033): the remote address, the stored token's last four characters, whether sync is on, how the last run went, and totals. The token is never returned. `configured` is false when sync was never set up. Only served when the server runs with REMOTE_SYNC_ENABLED=true; otherwise this route does not exist (404).
          */
         get: {
             parameters: {
@@ -980,7 +980,7 @@ export interface paths {
         put?: never;
         /**
          * The app is being used
-         * @description The web app calls this when a signed-in session starts and when it comes back after a while (mullet mode, ADR 0x032). The server starts a sync if the last one is more than a couple of minutes old, and otherwise does nothing; sync being off, not set up, waiting on its owner or already running is not an error. This is what keeps copies current without polling.
+         * @description The web app calls this when a signed-in session starts and when it comes back after a while (mullet mode, ADR 0x033). The server starts a sync if the last one is more than a couple of minutes old, and otherwise does nothing; sync being off, not set up, waiting on its owner or already running is not an error. This is what keeps copies current without polling.
          */
         post: {
             parameters: {
