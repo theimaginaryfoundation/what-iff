@@ -155,7 +155,7 @@ func (f *fakeChatTurnStore) UpdateJobStatus(_ context.Context, _, id uuid.UUID, 
 
 // FinalizeAdvancedDraft records the call and, for a job marked as holding an Advanced draft,
 // fails it as the datastore would (after saving the partial).
-func (f *fakeChatTurnStore) FinalizeAdvancedDraft(ctx context.Context, userID, jobID, _ uuid.UUID, _ bool, failureMessage string) (bool, error) {
+func (f *fakeChatTurnStore) FinalizeAdvancedDraft(ctx context.Context, userID, jobID, _ uuid.UUID, _ bool, failureMessage, _ string) (bool, error) {
 	f.mu.Lock()
 	f.partials = append(f.partials, jobID)
 	advanced := f.advanced[jobID]
