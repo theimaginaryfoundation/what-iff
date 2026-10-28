@@ -1,3 +1,5 @@
+import { AgentLoop, AgentLoopUpdate, ReasoningEffort, ReasoningEffortUpdate } from './turn-settings.model';
+
 export type AgentJobScheduleType = 'cron' | 'at';
 export type AgentJobStatus = 'active' | 'paused' | 'complete' | 'failed';
 
@@ -23,6 +25,10 @@ export interface AgentJob {
   last_run_at?: string | null;
   last_error?: string | null;
   run_count: number;
+  /** Reasoning effort for this job's runs; overrides the thread and mode (ADR 0x026). Null when not set. */
+  reasoning_effort?: ReasoningEffort | null;
+  /** Agent loop for this job's runs; overrides the thread and mode. Null when not set. */
+  agent_loop?: AgentLoop | null;
   rituals?: import('./ritual.model').Ritual[];
   created_at: string;
   updated_at: string;
@@ -43,6 +49,8 @@ export interface CreateAgentJobRequest {
   chat_id?: string | null;
   personality_id?: string | null;
   model_id?: string | null;
+  reasoning_effort?: ReasoningEffort | null;
+  agent_loop?: AgentLoop | null;
 }
 
 export interface UpdateAgentJobRequest {
@@ -54,6 +62,10 @@ export interface UpdateAgentJobRequest {
   schedule_input?: string | null;
   timezone?: string | null;
   follow_user_timezone?: boolean;
+  /** Omit to keep; `''` clears. */
+  reasoning_effort?: ReasoningEffortUpdate;
+  /** Omit to keep; `''` clears. */
+  agent_loop?: AgentLoopUpdate;
 }
 
 export interface UpdateAgentJobStatusRequest {

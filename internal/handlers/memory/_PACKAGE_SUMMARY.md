@@ -12,7 +12,7 @@ HTTP API for **semantic memories** — CRUD, search, plus export/import portabil
   It is best-effort: a provider or store failure is logged, the save still returns success, and the agent's startup `BackfillMemoryEmbeddings` pass picks the row up on the next restart.
 - **Scope moves:** `scope.go` — `POST /memory/{id}/scope` (`datastore.MoveMemoryScope`) moves one memory to global, a personality or a thread, from any level; refused moves (`ErrMemoryScopeMove`) are a 409 with the reason, a missing memory, thread or personality a 404.
   Content is unchanged, so it never re-embeds.
-- **Import/export:** `export.go` streams memory ZIP downloads; `import.go` accepts a ZIP upload and triggers UUID-deduped import with bounded OpenAI embedding batches and bulk persistence.
+- **Import/export:** `export.go` streams memory ZIP downloads; `import.go` accepts a ZIP upload and triggers UUID-deduped import with bounded OpenAI embedding batches and bulk persistence; an import that fails for want of the embedding provider's key answers 409 `provider_not_configured`.
 
 ## Dependencies
 

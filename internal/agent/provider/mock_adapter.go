@@ -27,7 +27,7 @@ const (
 const mockEmptyEchoFallback = "(mock echo: empty user message)"
 
 // MockScriptStep is one Call round in scripted mode: either a tool-use round
-// (ToolUses non-empty, Text ignored) or a final text round.
+// (ToolUses non-empty, with Text streamed first as a preamble when set) or a final text round.
 type MockScriptStep struct {
 	Text     string
 	ToolUses []ToolUse
@@ -61,7 +61,25 @@ type MockAdapter struct {
 
 	// appendedBatches records AppendToolResults input for test inspection.
 	appendedBatches [][]ToolResult
+	// continuations records ContinueWith input for test inspection.
+	continuations []string
+	// grown estimates the tokens the conversation has gained since the first call (replies, tool
+	// results, continuations), so reported input grows as a real model's does.
+	grown int64
+	usageLog
 }
+
+// inputTokens is the estimated input of the next call.
+func (m *MockAdapter) inputTokens() int64 { return estimateMockTokens(m.cfg.EchoText) + m.grown }
+
+// ContinueWith implements Continuer; the mock only records the text.
+func (m *MockAdapter) ContinueWith(text string) {
+	m.continuations = append(m.continuations, text)
+	m.grown += estimateMockTokens(text)
+}
+
+// Continuations exposes the recorded ContinueWith input for tests.
+func (m *MockAdapter) Continuations() []string { return m.continuations }
 
 // NewMockAdapter builds a per-request MockAdapter. An unknown or empty mode
 // falls back to echo.
@@ -87,6 +105,14 @@ func (m *MockAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse, e
 		}
 		scripted := m.cfg.Script[step]
 		if len(scripted.ToolUses) > 0 {
+			// Text alongside tool calls streams first, as a real model's preamble does.
+			if scripted.Text != "" {
+				if _, err := m.streamText(ctx, scripted.Text); err != nil {
+					return nil, nil, err
+				}
+			} else {
+				m.addUsage(genAIUsage{Input: m.inputTokens()})
+			}
 			return nil, scripted.ToolUses, nil
 		}
 		resp, err := m.streamText(ctx, scripted.Text)
@@ -97,10 +123,13 @@ func (m *MockAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse, e
 	return resp, nil, err
 }
 
-// AppendToolResults folds executed tool results back in. The mock has no
-// conversation state to grow, so it only records them for inspection.
+// AppendToolResults folds executed tool results back in. The mock keeps no conversation, so it
+// records them for inspection and counts their size toward later calls' input.
 func (m *MockAdapter) AppendToolResults(results []ToolResult) {
 	m.appendedBatches = append(m.appendedBatches, results)
+	for _, r := range results {
+		m.grown += estimateMockTokens(r.Output)
+	}
 }
 
 // AppendedBatches exposes the recorded AppendToolResults input for tests.
@@ -158,12 +187,15 @@ func (m *MockAdapter) streamText(ctx context.Context, text string) (*GenerateRes
 			m.deltaHandler(delta)
 		}
 	}
+	input, output := m.inputTokens(), estimateMockTokens(text)
+	m.addUsage(genAIUsage{Input: input, Output: output})
+	m.grown += output
 	return &GenerateResponse{
 		ID:           "mock-" + uuid.NewString(),
 		CreatedAt:    time.Now().Unix(),
 		Text:         text,
-		InputTokens:  estimateMockTokens(m.cfg.EchoText),
-		OutputTokens: estimateMockTokens(text),
+		InputTokens:  input,
+		OutputTokens: output,
 	}, nil
 }
 

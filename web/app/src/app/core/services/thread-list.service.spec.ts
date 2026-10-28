@@ -42,7 +42,7 @@ describe('ThreadListService', () => {
             chats: [makeChat({ id: 'a', name: 'Alpha' }), makeChat({ id: 'b', name: 'Bravo' })],
             truncated: false,
         }));
-        chatService.patchChat.mockImplementation((id: string, patch: PatchChatRequest) => of(makeChat({ id, ...patch })));
+        chatService.patchChat.mockImplementation((id: string, patch: PatchChatRequest) => of(makeChat({ id, ...(patch as Partial<Chat>) })));
         chatService.deleteChat.mockReturnValue(of(void 0));
 
         TestBed.configureTestingModule({
@@ -132,7 +132,7 @@ describe('ThreadListService', () => {
         chatService.patchChat.mockImplementation((id: string, patch: PatchChatRequest) => {
             if (id === 'a')
                 return throwError(() => new Error('archive a failed'));
-            return of(makeChat({ id, ...patch }));
+            return of(makeChat({ id, ...(patch as Partial<Chat>) }));
         });
         vi.spyOn(console, 'error').mockReturnValue(undefined);
 
@@ -152,7 +152,7 @@ describe('ThreadListService', () => {
         chatService.patchChat.mockImplementation((id: string, patch: PatchChatRequest) => {
             if (id === 'a')
                 return throwError(() => new Error('personality a failed'));
-            return of(makeChat({ id, ...patch }));
+            return of(makeChat({ id, ...(patch as Partial<Chat>) }));
         });
         vi.spyOn(console, 'error').mockReturnValue(undefined);
 
@@ -178,7 +178,7 @@ describe('ThreadListService', () => {
         expect(service.error()).toContain('tag save failed');
         expect(console.error).toHaveBeenCalled();
 
-        chatService.patchChat.mockImplementation((id: string, patch: PatchChatRequest) => of(makeChat({ id, ...patch })));
+        chatService.patchChat.mockImplementation((id: string, patch: PatchChatRequest) => of(makeChat({ id, ...(patch as Partial<Chat>) })));
     });
 
     it('records opened thread ids when active thread changes', () => {

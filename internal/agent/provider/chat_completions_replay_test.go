@@ -2,12 +2,15 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/openai/openai-go/v3"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -112,4 +115,66 @@ func TestExtractChatCompletionToolUses_EmptyArgumentsBecomeEmptyObject(t *testin
 	require.NoError(t, err)
 	require.Len(t, uses, 1)
 	require.JSONEq(t, `{}`, string(uses[0].Input))
+}
+
+// ContinueWith records the final reply as plain assistant text (with MiMo's reasoning echoed)
+// before the next user turn.
+func TestChatCompletionsFinal_ContinueWithAppendsReplyThenUser(t *testing.T) {
+	var resp openai.ChatCompletion
+	if err := json.Unmarshal([]byte(`{"id":"c1","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"partial answer"}}]}`), &resp); err != nil {
+		t.Fatal(err)
+	}
+	f := chatCompletionsFinal{last: &resp}
+	var msgs []openai.ChatCompletionMessageParamUnion
+	f.continueWith(&msgs, "keep going", "my reasoning")
+
+	raw, err := json.Marshal(msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	for _, want := range []string{`"role":"assistant"`, `"content":"partial answer"`, `"reasoning_content":"my reasoning"`, `"role":"user"`, `"content":"keep going"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %s in %s", want, got)
+		}
+	}
+	if f.last != nil {
+		t.Errorf("the reply is recorded once")
+	}
+}
+
+// DeepSeek (thinking on by default, 400 without it) and Qwen (read with preserve_thinking) get the
+// tool-call turn's reasoning_content echoed back, through the shared reasoningChatAdapter.
+func TestReasoningChatAdapters_ReplayReasoningContentOnToolCall(t *testing.T) {
+	for name, build := range map[string]func(baseURL string) AgentAdapter{
+		"deepseek": func(baseURL string) AgentAdapter {
+			return NewDeepSeekAdapter(NewDeepSeekProvider("k", baseURL, nil, nil), openai.ChatCompletionNewParams{Model: "deepseek-flash"}, nil, nil)
+		},
+		"qwen": func(baseURL string) AgentAdapter {
+			return NewQwenAdapter(NewQwenProvider("k", baseURL, nil, nil), openai.ChatCompletionNewParams{Model: "qwen3.7-plus"}, nil, nil)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv, body := recordingSSEServer(t, []string{
+				streamedToolRoundSSE("checking the weather", `{\"city\":\"Paris\"}`),
+				chatCompletionSSE(nil, []string{"Sunny."}, "stop"),
+			})
+			defer srv.Close()
+			a := build(srv.URL)
+			var live strings.Builder
+			a.(ReasoningStreamer).SetReasoningStream(ReasoningStream{OnDelta: func(d string) { live.WriteString(d) }})
+			a.SetTextDeltaHandler(func(string) {})
+
+			_, uses, err := a.Call(context.Background())
+			require.NoError(t, err)
+			require.Len(t, uses, 1)
+			a.AppendToolResults([]ToolResult{{ID: uses[0].ID, Output: "sunny"}})
+			final, _, err := a.Call(context.Background())
+			require.NoError(t, err)
+
+			require.Equal(t, "checking the weather", gjson.Get(body(1), "messages.#(role==\"assistant\").reasoning_content").String())
+			require.Equal(t, "checking the weather", final.Reasoning)
+			require.Equal(t, "checking the weather", live.String())
+		})
+	}
 }

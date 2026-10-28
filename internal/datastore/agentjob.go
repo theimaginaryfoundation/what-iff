@@ -96,6 +96,7 @@ func toAgentJobModel(e *ent.AgentJob) *models.AgentJob {
 		LastError:          lastError,
 		RunCount:           e.RunCount,
 		Rituals:            rituals,
+		TurnSettingValues:  turnSettingsFromEnt(e.ReasoningEffort, e.AgentLoop),
 		CreatedAt:          e.CreatedAt,
 		UpdatedAt:          e.UpdatedAt,
 	}
@@ -134,7 +135,9 @@ func (d *Datastore) CreateAgentJob(ctx context.Context, userID uuid.UUID, jobMod
 		SetTimezone(jobModel.Timezone).
 		SetFollowUserTimezone(jobModel.FollowUserTimezone).
 		SetStatus(agentjob.Status(jobModel.Status)).
-		SetRunCount(jobModel.RunCount)
+		SetRunCount(jobModel.RunCount).
+		SetNillableReasoningEffort(entEffort[agentjob.ReasoningEffort](jobModel.ReasoningEffort)).
+		SetNillableAgentLoop(entLoop[agentjob.AgentLoop](jobModel.AgentLoop))
 
 	if jobModel.Title != nil {
 		create.SetNillableTitle(jobModel.Title)
@@ -759,7 +762,10 @@ func validateAgentJobOverrideIDs(ctx context.Context, tx *ent.Tx, userID uuid.UU
 }
 
 func (d *Datastore) SetAgentJobOverrides(ctx context.Context, userID, id uuid.UUID, patch models.SetAgentJobOverridesPatch) (*models.AgentJob, error) {
-	if !patch.UpdatePersonality && !patch.UpdateModel {
+	if !patch.UpdatePersonality && !patch.UpdateModel && !patch.UpdateReasoningEffort && !patch.UpdateAgentLoop {
+		return nil, ErrInvalidRequestBody
+	}
+	if err := patch.TurnSettings.Validate(); err != nil {
 		return nil, ErrInvalidRequestBody
 	}
 
@@ -800,6 +806,12 @@ func (d *Datastore) SetAgentJobOverrides(ctx context.Context, userID, id uuid.UU
 		} else {
 			update.ClearModelID()
 		}
+	}
+	if patch.UpdateReasoningEffort {
+		setReasoningEffort[agentjob.ReasoningEffort, agentjob.AgentLoop](update, patch.TurnSettings.ReasoningEffort)
+	}
+	if patch.UpdateAgentLoop {
+		setAgentLoop[agentjob.ReasoningEffort, agentjob.AgentLoop](update, patch.TurnSettings.AgentLoop)
 	}
 
 	affected, err := update.Save(ctx)

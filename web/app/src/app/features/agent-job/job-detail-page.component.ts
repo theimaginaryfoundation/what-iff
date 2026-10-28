@@ -221,6 +221,8 @@ export class JobDetailPageComponent implements OnInit, OnDestroy {
     if (personalityId) request.personality_id = personalityId;
     const modelId = (payload.model_id ?? '').trim();
     if (modelId) request.model_id = modelId;
+    if (payload.reasoning_effort) request.reasoning_effort = payload.reasoning_effort;
+    if (payload.agent_loop) request.agent_loop = payload.agent_loop;
 
     this.saving.set(true);
     this.error.set(null);

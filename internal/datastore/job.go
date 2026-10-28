@@ -12,6 +12,7 @@ import (
 	entchatmessage "github.com/theimaginaryfoundation/what-iff/ent/chatmessage"
 	"github.com/theimaginaryfoundation/what-iff/ent/job"
 	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
+	"github.com/theimaginaryfoundation/what-iff/ent/toolcall"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -236,6 +237,19 @@ func (d *Datastore) ListJobs(ctx context.Context, userID uuid.UUID, pageNum, pag
 }
 
 // GetJob retrieves a single job by ID
+// jobReadColumns are the job columns the API returns: every column except an Advanced run's
+// internal draft (draft_agent_run, ADR 0x026), which can be large and is only read by the
+// finalize paths, inside their own transactions.
+var jobReadColumns = func() []string {
+	cols := make([]string, 0, len(job.Columns))
+	for _, c := range job.Columns {
+		if c != job.FieldDraftAgentRun {
+			cols = append(cols, c)
+		}
+	}
+	return cols
+}()
+
 func (d *Datastore) GetJob(ctx context.Context, userID, id uuid.UUID) (*models.Job, error) {
 	// Start transaction
 	tx, err := d.dbClient.Tx(ctx)
@@ -252,7 +266,8 @@ func (d *Datastore) GetJob(ctx context.Context, userID, id uuid.UUID) (*models.J
 		}
 	}()
 
-	// Query job with authorization check
+	// Query job with authorization check. The client polls this every second while a turn
+	// runs, so it reads only what the API returns (jobReadColumns).
 	entJob, err := tx.Job.Query().
 		Where(
 			job.ID(id),
@@ -261,6 +276,7 @@ func (d *Datastore) GetJob(ctx context.Context, userID, id uuid.UUID) (*models.J
 			),
 		).
 		WithOwner().
+		Select(jobReadColumns...).
 		Only(ctx)
 
 	if err != nil {
@@ -543,13 +559,18 @@ func (d *Datastore) ResetJobDraftReasoning(ctx context.Context, userID, id uuid.
 	return nil
 }
 
-// ClearJobDraftDeltas removes any in-progress draft chunks — text and reasoning — from a job.
+// ClearJobDraftDeltas removes any in-progress draft from a job: text, reasoning, an Advanced
+// run's draft, and draft tool calls no message took (the reply, saved first, has taken its own).
 func (d *Datastore) ClearJobDraftDeltas(ctx context.Context, userID, id uuid.UUID) error {
-	_, err := d.dbClient.Job.Update().
+	n, err := d.dbClient.Job.Update().
 		Where(job.ID(id), job.HasOwnerWith(user.ID(userID))).
 		ClearDraftDeltas().
 		ClearDraftReasoning().
+		ClearDraftAgentRun().
 		Save(ctx)
+	if err == nil && n > 0 {
+		_, err = d.dbClient.ToolCall.Delete().Where(toolcall.HasDraftJobWith(job.ID(id)), toolcall.Not(toolcall.HasChatMessage())).Exec(ctx)
+	}
 	if err != nil {
 		d.logger.Error(i18n.T1("update.failed", "Entity", "job draft_deltas"), zap.Error(err))
 		return err
@@ -617,9 +638,11 @@ func (d *Datastore) finalizeChatJobWithPartial(
 		return nil, nil, err
 	}
 
-	// Phase 1: idempotency fast-path for already-terminal jobs.
+	// Phase 1: idempotency fast-path for already-terminal jobs. An Advanced run's draft that no
+	// message took yet (Stop handled by another instance, MarkChatJobCancelled) still becomes the
+	// partial here.
 	if entJob.Status == terminalStatus {
-		resultID, iErr := d.finalizeTerminalPartialIdempotentTx(ctx, tx, entJob)
+		resultID, iErr := d.finalizeTerminalPartialIdempotentTx(ctx, tx, entJob, chatID, generationModel, generationPersonality, generationMoodID)
 		if iErr != nil {
 			d.rollbackTx(tx)
 			return nil, nil, iErr
@@ -639,9 +662,16 @@ func (d *Datastore) finalizeChatJobWithPartial(
 	// Phase 2: consume current draft deltas into a partial assistant message (if any).
 	partialText := strings.Join(entJob.DraftDeltas, "")
 	partialReasoning := strings.Join(entJob.DraftReasoning, "")
-	resultID, err := d.consumeDraftDeltasToMessageTx(
-		ctx, tx, chatID, partialText, partialReasoning, generationModel, generationPersonality, generationMoodID,
-	)
+	var resultID *uuid.UUID
+	if entJob.DraftAgentRun != nil {
+		// An Advanced run (ADR 0x026) keeps everything it wrote in its structured draft.
+		resultID, err = d.consumeDraftAgentRunToMessageTx(ctx, tx, chatID, jobID, entJob.DraftAgentRun, terminalStatus,
+			generationModel, generationPersonality, generationMoodID)
+	} else {
+		resultID, err = d.consumeDraftDeltasToMessageTx(
+			ctx, tx, chatID, partialText, partialReasoning, generationModel, generationPersonality, generationMoodID,
+		)
+	}
 	if err != nil {
 		d.rollbackTx(tx)
 		return nil, nil, err
@@ -694,16 +724,32 @@ func (d *Datastore) loadOwnedJobTx(ctx context.Context, tx *ent.Tx, userID, jobI
 	return entJob, nil
 }
 
-func (d *Datastore) finalizeTerminalPartialIdempotentTx(ctx context.Context, tx *ent.Tx, entJob *ent.Job) (*uuid.UUID, error) {
-	if len(entJob.DraftDeltas) > 0 || len(entJob.DraftReasoning) > 0 {
-		if _, err := tx.Job.UpdateOneID(entJob.ID).SetDraftDeltas([]string{}).ClearDraftReasoning().Save(ctx); err != nil {
+func (d *Datastore) finalizeTerminalPartialIdempotentTx(ctx context.Context, tx *ent.Tx, entJob *ent.Job, chatID uuid.UUID, generationModel, generationPersonality string, generationMoodID *uuid.UUID) (*uuid.UUID, error) {
+	resultID := entJob.ResultID
+	if resultID == nil && entJob.DraftAgentRun != nil {
+		id, err := d.consumeDraftAgentRunToMessageTx(ctx, tx, chatID, entJob.ID, entJob.DraftAgentRun, entJob.Status,
+			generationModel, generationPersonality, generationMoodID)
+		if err != nil {
+			return nil, err
+		}
+		resultID = id
+	}
+	if len(entJob.DraftDeltas) > 0 || len(entJob.DraftReasoning) > 0 || entJob.DraftAgentRun != nil || resultID != entJob.ResultID {
+		update := tx.Job.UpdateOneID(entJob.ID).SetDraftDeltas([]string{}).ClearDraftReasoning().ClearDraftAgentRun()
+		if resultID != nil && entJob.ResultID == nil {
+			update.SetResultID(*resultID)
+		}
+		if _, err := update.Save(ctx); err != nil {
 			return nil, err
 		}
 	}
-	if entJob.ResultID == nil {
+	if err := dropJobDraftToolCallsTx(ctx, tx, entJob.ID); err != nil {
+		return nil, err
+	}
+	if resultID == nil {
 		return nil, nil
 	}
-	id := *entJob.ResultID
+	id := *resultID
 	return &id, nil
 }
 
@@ -754,11 +800,15 @@ func (d *Datastore) updateJobToTerminalTx(
 	terminalStatus job.Status,
 	failureMessage string,
 ) error {
+	if err := dropJobDraftToolCallsTx(ctx, tx, jobID); err != nil {
+		return err
+	}
 	jobUpdate := tx.Job.Update().
 		Where(job.ID(jobID), job.HasOwnerWith(user.ID(userID))).
 		SetStatus(terminalStatus).
 		SetDraftDeltas([]string{}).
-		ClearDraftReasoning()
+		ClearDraftReasoning().
+		ClearDraftAgentRun()
 	switch terminalStatus {
 	case job.StatusFailed:
 		jobUpdate.SetError(failureMessage)
@@ -1228,6 +1278,8 @@ func (d *Datastore) MarkChatJobCancelled(ctx context.Context, userID, jobID uuid
 		SetStatus(job.StatusCancelled).
 		SetDraftDeltas([]string{}).
 		SetDraftReasoning([]string{}).
+		// draft_agent_run is kept: the worker that is still running the turn (on another
+		// instance) finalizes it into the partial through the idempotent terminal path.
 		Save(ctx)
 	if err != nil {
 		d.logger.Error(i18n.T1("update.failed", "Entity", "job status"), zap.Error(err))

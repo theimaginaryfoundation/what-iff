@@ -279,7 +279,7 @@ func TestSaveAgentResponse_CreateChatMessageErrorIsWrapped(t *testing.T) {
 	a := &Agent{ds: ds, logger: zap.NewNop()}
 	result := &provider.GenerateResponse{ID: "resp_1", Text: "hi"}
 
-	msg, err := a.saveAgentResponse(context.Background(), uuid.New(), uuid.New(), result, nil, nil, "gpt-5.1", "", nil)
+	msg, err := a.saveAgentResponse(context.Background(), uuid.New(), uuid.New(), result, nil, nil, "gpt-5.1", "", nil, nil)
 	require.Nil(t, msg)
 	require.ErrorContains(t, err, "failed to create chat message")
 	require.NoError(t, mock.ExpectationsWereMet())

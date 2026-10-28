@@ -97,6 +97,9 @@ func (h *Handler) ImportMemories(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.ds.ImportMemoriesWithBatchEmbeddings(r.Context(), userID, zr, h.createEmbedding, h.createEmbeddings)
 	if err != nil {
+		if handlerutils.RespondIfProviderNotConfigured(w, h.logger, err) {
+			return
+		}
 		h.logger.Error("failed to import memories",
 			zap.String("user_id", userID.String()),
 			zap.Error(err))

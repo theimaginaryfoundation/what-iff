@@ -92,6 +92,9 @@ type ChatMessage struct {
 	// Display-only: the context builder never replays it to the model. Nil when the
 	// provider reported none.
 	ModelReasoning *string `json:"model_reasoning,omitempty"`
+	// AgentRun is the structured record of an Advanced-loop turn (steps, plan, end reason; ADR
+	// 0x026). Nil on Standard turns, which keep their reasoning in ModelReasoning.
+	AgentRun *modeltypes.AgentRun `json:"agent_run,omitempty"`
 	// LastErrorMessage is set when async generation failed for this user turn; cleared on successful delivery.
 	LastErrorMessage *string `json:"last_error_message,omitempty"`
 	// CheckpointCompletedAt is set on assistant messages after a successful checkpoint (scratchpad, memories, summary).

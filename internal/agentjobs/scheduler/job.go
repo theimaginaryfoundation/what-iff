@@ -13,6 +13,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -99,7 +100,7 @@ const ScheduleErrorMarker = "failed to compute next_run_at:"
 func deriveStatusAndErrorText(job *models.AgentJob, runErr error, scheduleErrText string) (*models.AgentJobStatus, string) {
 	errText := ""
 	if runErr != nil {
-		errText = runErr.Error()
+		errText = providerkeys.FailureText(runErr)
 	}
 
 	var statusUpdate *models.AgentJobStatus
@@ -309,6 +310,8 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 			ritualIDs = append(ritualIDs, r.ID)
 		}
 	}
+	// The job's reasoning effort and agent loop override the thread and mode for this run (ADR 0x026).
+	execCtx = models.WithJobTurnSettings(execCtx, job.TurnSettingValues)
 	runStart := time.Now()
 	_, runErr := m.agent.HandleAgentJobPrompt(execCtx, *chatID, job.Prompt, job.ModelID, job.PersonalityID, ritualIDs, nil)
 	runOutcome := runOutcomeRan
@@ -324,7 +327,7 @@ func (m *Manager) executeAgentJobWithOptions(ctx context.Context, userID, agentJ
 		_, _ = m.ds.CreateChatMessage(execCtx, userID, models.ChatMessage{
 			ChatID:  *chatID,
 			Origin:  models.MessageOriginAssistant,
-			Message: fmt.Sprintf("I tried to run your scheduled job, but it failed:\n\n%s", runErr.Error()),
+			Message: fmt.Sprintf("I tried to run your scheduled job, but it failed:\n\n%s", providerkeys.FailureText(runErr)),
 		})
 	}
 

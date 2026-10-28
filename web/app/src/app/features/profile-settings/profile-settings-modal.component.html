@@ -140,6 +140,33 @@
               }
             </select>
           </label>
+          <label class="profile-settings__field">
+            <span>Reasoning effort</span>
+            <select
+              data-testid="default-reasoning-effort-select"
+              [disabled]="loadingAction()"
+              [uiTooltip]="reasoningEffortDescription"
+              (change)="onDefaultReasoningEffortChange($any($event.target).value)"
+            >
+              <option value="" [selected]="!preferences()?.reasoning_effort">Model default</option>
+              @for (option of reasoningEffortOptions; track option.value) {
+                <option [value]="option.value" [selected]="option.value === preferences()?.reasoning_effort">{{ option.label }}</option>
+              }
+            </select>
+          </label>
+          <label class="profile-settings__field">
+            <span>Agent loop</span>
+            <select
+              data-testid="default-agent-loop-select"
+              [disabled]="loadingAction()"
+              [uiTooltip]="agentLoopDescriptions.advanced"
+              (change)="onDefaultAgentLoopChange($any($event.target).value)"
+            >
+              <option value="" [selected]="!preferences()?.agent_loop">Standard (default)</option>
+              <option value="advanced" [selected]="preferences()?.agent_loop === 'advanced'">{{ agentLoopLabels.advanced }}</option>
+            </select>
+          </label>
+          <small>Reasoning effort and agent loop apply to every thread that doesn't set its own, unless its personality does. Changes reach existing threads too; sandboxed threads don't use them.</small>
         </fieldset>
 
         @if (imageGenerationProviders().length > 1) {

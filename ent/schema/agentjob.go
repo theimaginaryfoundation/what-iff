@@ -16,7 +16,7 @@ type AgentJob struct {
 
 // Fields of the AgentJob.
 func (AgentJob) Fields() []ent.Field {
-	return []ent.Field{
+	return append([]ent.Field{
 		field.UUID("id", uuid.UUID{}).
 			Default(uuid.New).
 			Immutable(),
@@ -80,7 +80,7 @@ func (AgentJob) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			Comment("Optional model override applied for this job run"),
-	}
+	}, turnSettingFields("agent job")...)
 }
 
 // Edges of the AgentJob.

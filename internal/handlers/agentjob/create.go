@@ -28,6 +28,8 @@ type createAgentJobRequest struct {
 	ModelID       *string `json:"model_id,omitempty"`
 	// FollowUserTimezone runs a recurring schedule in the user's current timezone.
 	FollowUserTimezone bool `json:"follow_user_timezone,omitempty"`
+	// TurnSettingValues override everything else for this job's runs (ADR 0x026).
+	models.TurnSettingValues
 }
 
 func (h *Handler) CreateAgentJob(w http.ResponseWriter, r *http.Request) {
@@ -109,6 +111,11 @@ func (h *Handler) CreateAgentJob(w http.ResponseWriter, r *http.Request) {
 		NextRunAt:          nextRunAt,
 		RunCount:           0,
 	}
+	if err := req.TurnSettingValues.Validate(); err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusBadRequest, handlerutils.CodeNotSet, err.Error(), nil)
+		return
+	}
+	newJob.TurnSettingValues = req.TurnSettingValues.Normalized()
 
 	if req.ChatID != nil {
 		chatIDStr := strings.TrimSpace(*req.ChatID)
