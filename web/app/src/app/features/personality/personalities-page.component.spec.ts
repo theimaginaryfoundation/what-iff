@@ -13,7 +13,7 @@ import { ConfirmationService } from '../../core/services/confirmation.service';
 import { UserPreferencesService } from '../../core/services/user-preferences.service';
 import { GeneratePersonalityModalService } from '../../core/services/generate-personality-modal.service';
 import { Personality, PaginatedPersonalityResponse } from '../../core/models/personality.model';
-import { UserPreferences } from '../../core/models/user.model';
+import { UserPreferences, UserPreferencesUpdateRequest } from '../../core/models/user.model';
 import { TEXT_LIMIT_HARD_MAX, TEXT_LIMIT_WARNING_THRESHOLD, } from '../../core/constants/text-limits.constants';
 
 function makePersonality(overrides: Partial<Personality>): Personality {
@@ -184,7 +184,7 @@ describe('PersonalitiesPageComponent', () => {
     it('set-default merges onto freshly read preferences, not the copy loaded with the page', async () => {
         // The profile modal changed the default model after this page loaded its copy.
         userPrefsService.getUserPreferences.mockReturnValue(of({ ...preferences, default_model_id: 'model-new' } as UserPreferences));
-        userPrefsService.updateUserPreferences.mockImplementation((prefs: UserPreferences) => of(prefs));
+        userPrefsService.updateUserPreferences.mockImplementation((prefs: UserPreferencesUpdateRequest) => of(prefs as UserPreferences));
 
         await component.makeDefault(personalities[1]);
 

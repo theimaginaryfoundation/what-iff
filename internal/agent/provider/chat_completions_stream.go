@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
@@ -52,6 +53,11 @@ type chatCompletionStreamHooks struct {
 	// onReasoningDelta receives incremental reasoning_content — the non-standard field
 	// DeepSeek-style reasoning models (Xiaomi MiMo) stream their reasoning in.
 	onReasoningDelta func(delta string)
+	// parseContent, when set, reads a delta's content itself from the raw delta JSON, returning
+	// its reply text and reasoning. For providers whose content is not always a string (Mistral
+	// sends typed chunks while reasoning), which the SDK would decode as raw JSON text. The final
+	// message's content is then rebuilt from the parsed text.
+	parseContent func(rawDelta string) (text, reasoning string)
 	// call, when set, is told about the first streamed output for time to first token.
 	call *genAICall
 }
@@ -86,6 +92,7 @@ func streamChatCompletionCapturing(
 	// that carries it and use that as the authoritative total instead of the sum.
 	var finalUsage openai.CompletionUsage
 	var sawUsage bool
+	var parsedText strings.Builder
 	for stream.Next() {
 		chunk := stream.Current()
 		acc.AddChunk(chunk)
@@ -95,7 +102,19 @@ func streamChatCompletionCapturing(
 		}
 		if len(chunk.Choices) > 0 {
 			delta := chunk.Choices[0].Delta
-			if d := delta.Content; d != "" && hooks.onTextDelta != nil {
+			if hooks.parseContent != nil {
+				text, reasoning := hooks.parseContent(delta.RawJSON())
+				parsedText.WriteString(text)
+				if text != "" && hooks.onTextDelta != nil {
+					hooks.onTextDelta(text)
+				}
+				if reasoning != "" && hooks.onReasoningDelta != nil {
+					hooks.onReasoningDelta(reasoning)
+				}
+				if (text != "" || reasoning != "") && hooks.call != nil && !hooks.call.sawToken {
+					hooks.call.firstToken()
+				}
+			} else if d := delta.Content; d != "" && hooks.onTextDelta != nil {
 				hooks.onTextDelta(d)
 			}
 			if hooks.onToolCallDelta != nil {
@@ -105,7 +124,7 @@ func streamChatCompletionCapturing(
 					}
 				}
 			}
-			if hooks.onReasoningDelta != nil {
+			if hooks.onReasoningDelta != nil && hooks.parseContent == nil {
 				if d := gjson.Get(delta.RawJSON(), "reasoning_content").String(); d != "" {
 					hooks.onReasoningDelta(d)
 				}
@@ -124,6 +143,9 @@ func streamChatCompletionCapturing(
 	}
 	if sawUsage {
 		acc.ChatCompletion.Usage = finalUsage
+	}
+	if hooks.parseContent != nil && len(acc.ChatCompletion.Choices) > 0 {
+		acc.ChatCompletion.Choices[0].Message.Content = parsedText.String()
 	}
 	return &acc.ChatCompletion, nil
 }

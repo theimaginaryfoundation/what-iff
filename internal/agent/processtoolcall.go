@@ -74,6 +74,10 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 			out, err := a.moveFilesTool.Move(ctx, chatCtx.chat, input)
 			return out, nil, err
 		},
+		tools.UpdatePlanToolSpec.Name: func(_ context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := updatePlanTool(chatCtx, input)
+			return out, nil, err
+		},
 		tools.ListMoodsToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
 			out, err := a.listMoodsTool(ctx, chatCtx, input)
 			return out, nil, err

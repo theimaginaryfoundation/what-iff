@@ -23,6 +23,13 @@ type OpenAIAdapter struct {
 	rawResponses       []*responses.Response
 	webSearchCompleted int
 	textDeltaHandler   func(delta string)
+
+	// reasoning collects reasoning summaries from every call this turn (only present when a
+	// reasoning effort asked for them; ADR 0x026).
+	reasoning reasoningLog
+	// liveReasoning streams summary deltas as they arrive (see SetReasoningStream).
+	liveReasoning reasoningRelay
+	usageLog
 }
 
 // NewOpenAIAdapter constructs an OpenAIAdapter from pre-built ResponseNewParams.
@@ -43,30 +50,82 @@ func (a *OpenAIAdapter) Call(ctx context.Context) (*GenerateResponse, []ToolUse,
 	if a.previousResponseID != "" {
 		a.params.PreviousResponseID = openai.String(a.previousResponseID)
 	}
-	var (
-		resp *responses.Response
-		err  error
-	)
-	if a.textDeltaHandler != nil {
-		resp, err = a.provider.CallWithRetryStreaming(ctx, a.params, a.textDeltaHandler)
-	} else {
-		resp, err = a.provider.CallWithRetry(ctx, a.params)
-	}
+	resp, err := a.send(ctx)
 	if err != nil {
 		return nil, nil, WrapSafetyViolationError(models.SafetyViolationProviderOpenAI, fmt.Errorf("OpenAI API call failed: %w", err))
 	}
 
 	a.previousResponseID = resp.ID
-	a.lastResponse = resp
-	a.rawResponses = append(a.rawResponses, resp)
-	a.webSearchCompleted += countCompletedWebSearchesOpenAI(resp)
-
 	toolUses := extractOpenAIToolUses(resp)
 	if len(toolUses) == 0 {
-		return OpenAIToGenerateResponse(resp), nil, nil
+		return a.toGenerateResponse(resp), nil, nil
 	}
 
 	return nil, toolUses, nil
+}
+
+// send issues one Responses request (streaming when a delta handler is set) and records the
+// response: raw copy, web searches, usage and reasoning summaries.
+func (a *OpenAIAdapter) send(ctx context.Context) (*responses.Response, error) {
+	resp, err := a.sendOnce(ctx)
+	if err != nil && a.params.Reasoning.Summary != "" && isOpenAISummaryVerificationError(err) {
+		// Reasoning summaries need a verified OpenAI organization. Without one, drop them (for
+		// this process) and resend, rather than failing every turn that selects an effort.
+		disableOpenAIReasoningSummaries()
+		a.params.Reasoning.Summary = ""
+		resp, err = a.sendOnce(ctx)
+	}
+	return resp, err
+}
+
+// sendOnce issues the request once (CallWithRetry's transport retries aside).
+func (a *OpenAIAdapter) sendOnce(ctx context.Context) (*responses.Response, error) {
+	a.liveReasoning.beginCall()
+	var (
+		resp *responses.Response
+		err  error
+	)
+	switch {
+	case a.textDeltaHandler != nil && a.liveReasoning.enabled():
+		resp, err = a.provider.CallWithRetryStreamingReasoning(ctx, a.params, a.textDeltaHandler,
+			ReasoningStream{OnDelta: a.liveReasoning.delta, OnReset: a.liveReasoning.reset})
+	case a.textDeltaHandler != nil:
+		resp, err = a.provider.CallWithRetryStreaming(ctx, a.params, a.textDeltaHandler)
+	default:
+		resp, err = a.provider.CallWithRetry(ctx, a.params)
+	}
+	if err != nil {
+		return nil, err
+	}
+	a.lastResponse = resp
+	a.rawResponses = append(a.rawResponses, resp)
+	a.webSearchCompleted += countCompletedWebSearchesOpenAI(resp)
+	a.addUsage(responsesUsage(resp.Usage))
+	a.reasoning.add(ExtractOpenAIReasoningSummary(resp))
+	return resp, nil
+}
+
+// toGenerateResponse converts a final response, carrying the whole turn's reasoning.
+func (a *OpenAIAdapter) toGenerateResponse(resp *responses.Response) *GenerateResponse {
+	out := OpenAIToGenerateResponse(resp)
+	out.Reasoning = a.reasoning.String()
+	return out
+}
+
+// SetReasoningStream streams reasoning summaries live on streaming calls. Implements
+// ReasoningStreamer; summaries exist only when a reasoning effort requested them.
+func (a *OpenAIAdapter) SetReasoningStream(stream ReasoningStream) {
+	a.liveReasoning = reasoningRelay{stream: stream, kept: &a.reasoning}
+}
+
+// ContinueWith implements Continuer. The server already holds the last reply (it is the
+// response previous_response_id points at), so only the new user turn is sent.
+func (a *OpenAIAdapter) ContinueWith(text string) {
+	a.params.Input = responses.ResponseNewParamsInputUnion{
+		OfInputItemList: []responses.ResponseInputItemUnionParam{
+			responses.ResponseInputItemParamOfMessage(text, RoleUser),
+		},
+	}
 }
 
 func (a *OpenAIAdapter) SetTextDeltaHandler(handler func(delta string)) {
@@ -147,22 +206,12 @@ func (a *OpenAIAdapter) ForceFinalResponse(ctx context.Context) (*GenerateRespon
 		OfInputItemList: messages,
 	}
 
-	var (
-		resp *responses.Response
-		err  error
-	)
-	if a.textDeltaHandler != nil {
-		resp, err = a.provider.CallWithRetryStreaming(ctx, a.params, a.textDeltaHandler)
-	} else {
-		resp, err = a.provider.CallWithRetry(ctx, a.params)
-	}
+	resp, err := a.send(ctx)
 	if err != nil {
 		return nil, WrapSafetyViolationError(models.SafetyViolationProviderOpenAI, fmt.Errorf("OpenAI final-response call failed: %w", err))
 	}
-	a.lastResponse = resp
-	a.rawResponses = append(a.rawResponses, resp)
-	a.webSearchCompleted += countCompletedWebSearchesOpenAI(resp)
-	return OpenAIToGenerateResponse(resp), nil
+	a.previousResponseID = resp.ID
+	return a.toGenerateResponse(resp), nil
 }
 
 // AllRawResponses returns every Responses API payload observed this turn (each Call

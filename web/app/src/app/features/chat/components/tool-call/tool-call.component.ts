@@ -2,7 +2,7 @@
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 
 import { ToolCall, ToolCallStatus } from '../../../../core/models/toolcall.model';
-import { formatToolPayload, friendlyToolName, summarizeToolCall } from '../../helpers/tool-call-format.helpers';
+import { formatToolPayload, summarizeToolCall, toolCallDisplayName, toolCallFailed } from '../../helpers/tool-call-format.helpers';
 
 
 @Component({
@@ -222,13 +222,13 @@ export class ToolCallComponent {
   readonly openDetail = output<ToolCall>();
   readonly expanded = signal(false);
   readonly resolvedStatus = computed<ToolCallStatus>(
-    () => this.status() ?? (this.toolCall().tool_error?.trim() ? 'error' : 'complete'),
+    () => this.status() ?? (toolCallFailed(this.toolCall()) ? 'error' : 'complete'),
   );
   readonly isRunning = computed(() => this.resolvedStatus() === 'running');
   readonly hasError = computed(() => this.resolvedStatus() === 'error');
   readonly statusLabel = computed(() => STATUS_LABELS[this.resolvedStatus()]);
   readonly panelId = computed(() => `tool-call-${this.toolCall().id}`);
-  readonly displayName = computed(() => friendlyToolName(this.toolCall().tool_name.trim()).toLowerCase());
+  readonly displayName = computed(() => toolCallDisplayName(this.toolCall().tool_name));
   readonly summary = computed(() => summarizeToolCall(this.toolCall(), this.resolvedStatus()));
   readonly formattedInput = computed(() => formatToolPayload(this.toolCall().tool_input));
   readonly formattedResult = computed(() => {

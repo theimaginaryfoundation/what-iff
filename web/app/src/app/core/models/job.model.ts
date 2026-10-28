@@ -44,6 +44,26 @@ export interface ChatTurnProgress {
   tool_calls: ChatTurnToolCall[];
   /** Set while the turn is queued behind an earlier turn in its chat: the phase it waits on. */
   waiting_on?: ChatTurnWaiting;
+  /** Advanced turns only (ADR 0x026): the current step, 1-based. */
+  step?: number;
+  /** Advanced turns only: the model's current plan checklist. */
+  plan?: ChatTurnPlanItem[];
+}
+
+export const CHAT_TURN_PLAN_STATUSES = ['pending', 'in_progress', 'completed', 'cancelled'] as const;
+export type ChatTurnPlanStatus = (typeof CHAT_TURN_PLAN_STATUSES)[number];
+
+/** An Advanced turn's live step and plan, decoded from {@link ChatTurnProgress}. */
+export interface ChatTurnAdvancedProgress {
+  /** Current step, 1-based. */
+  step: number;
+  plan: ChatTurnPlanItem[];
+}
+
+/** One item of an Advanced turn's plan (the `update_plan` tool's checklist). */
+export interface ChatTurnPlanItem {
+  content: string;
+  status: ChatTurnPlanStatus;
 }
 
 /** What a queued turn is waiting on (the server's turn gate): an earlier turn's reply. */
@@ -60,6 +80,8 @@ export interface ChatTurnToolCall {
   /** Result (or error text) preview, set once the call finishes. */
   output?: string;
   round: number;
+  /** Advanced turns only: the step (1-based) the call ran in. */
+  step?: number;
   started_at: string;
   finished_at?: string;
 }

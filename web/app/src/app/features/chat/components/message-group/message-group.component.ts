@@ -4,6 +4,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, output } f
 import { ChatMessage } from '../../../../core/models/message.model';
 import { ProviderKeysService } from '../../../../core/services/provider-keys.service';
 import { ProfileSettingsModalService } from '../../../profile-settings/profile-settings-modal.service';
+import { ToolCall } from '../../../../core/models/toolcall.model';
 import { AuthImagePipe } from '../../../../core/pipes/auth-image.pipe';
 import { MessageBubbleComponent } from '../message-bubble/message-bubble.component';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
@@ -97,6 +98,7 @@ interface AssistantVisual {
             (copy)="copy.emit($event)"
             (showContext)="showContext.emit($event)"
             (toggleBookmark)="toggleBookmark.emit($event)"
+            (openToolCall)="openToolCall.emit($event)"
           />
         }
         @if (userGenerationError(); as errInfo) {
@@ -430,6 +432,7 @@ export class MessageGroupComponent {
   readonly showContext = output<ChatMessage>();
   readonly toggleBookmark = output<ChatMessage>();
   readonly retryUserMessage = output<ChatMessage>();
+  readonly openToolCall = output<ToolCall>();
 
   /** When false, hide the entire assistant image column (expression, portrait, thinking). */
   readonly showAssistantAvatar = computed(() => this.assistantVisual()?.expressionsEnabled !== false);

@@ -2,10 +2,12 @@ package schema
 
 import (
 	"entgo.io/ent"
+	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/index"
 	"github.com/google/uuid"
+	"github.com/theimaginaryfoundation/what-iff/internal/modeltypes"
 )
 
 // Job holds the schema definition for the Job entity.
@@ -33,6 +35,9 @@ func (Job) Fields() []ent.Field {
 		field.String("error").
 			Optional().
 			Comment("Error message if the job failed"),
+		field.String("error_code").
+			Optional().
+			Comment("Stable code for the failure when it has one (models error codes), so clients can branch on it; empty otherwise"),
 		field.UUID("result_id", uuid.UUID{}).
 			Optional().
 			Nillable().
@@ -43,6 +48,9 @@ func (Job) Fields() []ent.Field {
 		field.JSON("draft_reasoning", []string{}).
 			Optional().
 			Comment("Incremental model reasoning chunks persisted while inference is still running (GLM/MiMo); display-only, cleared with draft_deltas and reset when a truncated call is retried"),
+		field.JSON("draft_agent_run", &modeltypes.AgentRunDraft{}).
+			Optional().
+			Comment("An Advanced run in progress (ADR 0x026), written at every step boundary so a failed, stopped or interrupted run still becomes a partial message; cleared with the drafts."),
 		field.Text("progress").
 			Optional().
 			Comment("Optional JSON-encoded progress payload for long-running jobs (e.g. chat import imported/skipped/total counts)"),
@@ -56,6 +64,11 @@ func (Job) Edges() []ent.Edge {
 			Ref("jobs").
 			Unique().
 			Required(),
+		// draft_tool_calls are an in-progress Advanced run's tool calls (ADR 0x026), saved as each
+		// finishes and moved onto the reply (or the partial reply) when the run ends. Rows still
+		// linked here when the job is deleted never reached a message, so they go with it.
+		edge.To("draft_tool_calls", ToolCall.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}
 }
 

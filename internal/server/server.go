@@ -156,6 +156,17 @@ func (s *Server) setupRoutes() {
 	// flight on another instance alone. They are marked failed (not cancelled) so the thread shows
 	// the turn's failure banner instead of silently dropping it. agent_job_run turns (webhook
 	// background, scheduled runs) are reaped the same way so none is left non-terminal forever.
+	// An Advanced run (ADR 0x026) can run for hours, but it writes its job (draft, progress) at
+	// every step and tool call, so a live one stays fresh; one that died keeps its work: its draft
+	// is finalized into a partial reply first.
+	if n, rerr := dataStore.FailInterruptedAdvancedJobs(context.Background(),
+		[]string{agent.JobTypeChatMessage, agent.JobTypeAgentJobRun},
+		time.Now().Add(-30*time.Minute),
+		"Interrupted by a server restart"); rerr != nil {
+		s.logger.Warn("startup: failed to finalize interrupted Advanced runs", zap.Error(rerr))
+	} else if n > 0 {
+		s.logger.Info("startup: saved interrupted Advanced runs as partial replies", zap.Int("count", n))
+	}
 	if n, rerr := dataStore.FailInterruptedJobs(context.Background(),
 		[]string{agent.JobTypeChatMessage, agent.JobTypeAgentJobRun},
 		time.Now().Add(-30*time.Minute),

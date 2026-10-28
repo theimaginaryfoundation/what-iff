@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 
 import { Model } from '../../../core/models/model.model';
+import { AgentLoop, ReasoningEffort } from '../../../core/models/turn-settings.model';
 import { defaultComposerPlaceholder } from '../helpers/chat-send.helpers';
 
 /**
@@ -25,8 +26,21 @@ export abstract class ChatSendGate {
   abstract handleSendError(error: unknown): void;
   /** Notify the gate that the active model changed. */
   abstract setActiveModel(model: Model | null): void;
+  /**
+   * Notify the gate of the settings the next turn will run with (ADR 0x026), e.g. to show a
+   * credit-multiplier hint. Values are effective ones: the active mode's over the thread's, with
+   * the effort already mapped onto the active model's support (null when not set or unsupported;
+   * a null loop runs Standard).
+   */
+  abstract setActiveTurnSettings(settings: ActiveTurnSettings): void;
   /** Reset in-memory state (call on logout). */
   abstract clearCache(): void;
+}
+
+/** The effective turn settings passed to {@link ChatSendGate.setActiveTurnSettings}. */
+export interface ActiveTurnSettings {
+  reasoningEffort: ReasoningEffort | null;
+  agentLoop: AgentLoop | null;
 }
 
 /**
@@ -60,6 +74,10 @@ export class NoopChatSendGate extends ChatSendGate {
 
   setActiveModel(): void {
     // The active model does not affect sending here.
+  }
+
+  setActiveTurnSettings(): void {
+    // Turn settings do not affect sending here.
   }
 
   clearCache(): void {

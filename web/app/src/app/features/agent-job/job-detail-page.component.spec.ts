@@ -215,6 +215,23 @@ describe('JobDetailPageComponent', () => {
         expect(host.querySelector('app-job-run-history')).toBeNull();
     });
 
+    it('sends turn settings on create only when the form sets them', () => {
+        route.snapshot.paramMap.get.mockReturnValue('new');
+        agentJobService.createAgentJob.mockReturnValue(of(job));
+        fixture.detectChanges();
+        const base = { prompt: 'Summarize', schedule_input: 'every day at 9am', timezone: 'UTC' };
+
+        fixture.componentInstance.save({ ...base, reasoning_effort: 'high', agent_loop: 'advanced' });
+        expect(agentJobService.createAgentJob).toHaveBeenLastCalledWith(
+            expect.objectContaining({ reasoning_effort: 'high', agent_loop: 'advanced' }),
+        );
+
+        fixture.componentInstance.save({ ...base, reasoning_effort: '', agent_loop: '' });
+        const request = agentJobService.createAgentJob.mock.lastCall![0];
+        expect(request).not.toHaveProperty('reasoning_effort');
+        expect(request).not.toHaveProperty('agent_loop');
+    });
+
     describe('create-mode timezone default', () => {
         const formTimezone = (): string =>
             (fixture.nativeElement.querySelector('input[name="timezone"]') as HTMLInputElement).value;

@@ -45,14 +45,26 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
   `GenerateResponse.StopReason` carries `finish_reason`.
 - **Model reasoning capture:** `GenerateResponse.Reasoning` carries the turn's reasoning text for display — joined across **every** tool round via the embedded `reasoningLog`, not just the final call.
   Sources: GLM `thinking` blocks (`ExtractClaudeThinking`, non-beta path) and MiMo `reasoning_content` (non-streamed via `ChatCompletionReasoning`; streamed via the `onReasoningDelta` hook on `streamChatCompletionCapturing`, since `ChatCompletionAccumulator` drops non-standard fields).
+  With a selected reasoning effort (ADR 0x026), native Anthropic thinking (the same `ExtractClaudeThinking` path) and OpenAI reasoning summaries (`ExtractOpenAIReasoningSummary`; streamed from `response.reasoning_summary_text.delta` by `CallWithRetryStreamingReasoning`) are captured the same way; without one nothing is requested, so nothing is captured.
   A truncated-and-retried attempt's reasoning is dropped.
   Other providers leave it empty.
   Reasoning is never replayed into model context.
-  **Live streaming:** `ClaudeAdapter` and `XiaomiAdapter` implement the optional `ReasoningStreamer` (`SetReasoningStream(ReasoningStream{OnDelta, OnReset})`) on streaming calls; `reasoningRelay` keeps the live draft identical to the saved text (round separators) and, on reset, clears it and re-sends the kept rounds.
-  Resets fire on the truncation fallback and — Claude path only, via `retryAwareThinking` in `CallWithRetryStreamingReasoning` — on a transport retry after thinking streamed (the retry loop only refuses once *text* has streamed).
+  **Live streaming:** `ClaudeAdapter`, `OpenAIAdapter` and `XiaomiAdapter` implement the optional `ReasoningStreamer` (`SetReasoningStream(ReasoningStream{OnDelta, OnReset})`) on streaming calls; `reasoningRelay` keeps the live draft identical to the saved text (round separators) and, on reset, clears it and re-sends the kept rounds.
+  Resets fire on the truncation fallback and — Claude and OpenAI paths, via `retryAwareThinking` in `CallWithRetryStreamingReasoning` — on a transport retry after thinking streamed (the retry loop only refuses once *text* has streamed).
+  A consumer that keeps its own record of earlier calls (the Advanced loop's transcript) sets `ReasoningStream.OnDiscardCall` instead: the relay then discards only the current call and re-sends nothing.
   Chat Completions streams are never replayed by the SDK, so MiMo needs no transport reset.
   Observed live: z.ai streams thinking incrementally at `max` but at `high` it is short enough to arrive in one burst right before text.
 - **Unified iteration:** `AgentAdapter` + `ToolUse` / `ToolResult` for the multi-round agent loop.
+- **Reasoning effort (ADR 0x026, `reasoning_effort.go`):** maps a selected effort onto each request: `ApplyOpenAIReasoning` (`reasoning.effort`, `none`/`minimal` for off, summaries otherwise), `ApplyClaudeReasoning` (adaptive thinking with summarized display and `output_config.effort`; a thinking budget on Haiku 4.5; disabled for off; it reports whether thinking blocks must be replayed, which `ClaudeAdapter.SetReplayThinking` does) and `ZAIReasoningEffortFor` (low/high/max; no selection keeps `ZAIReasoningEffort`).
+  With an effort on, the output cap is raised to `ReasoningMaxOutputTokens`.
+  Chat Completions providers: `ApplyGeminiReasoning`, `ApplyQwenReasoning`, `ApplyDeepSeekReasoning`, `ApplyMistralReasoning`; provider-specific fields go through `mergeChatExtraFields` so settings never overwrite each other.
+- **`reasoningChatAdapter` (`reasoning_chat_adapter.go`):** the shared adapter core for DeepSeek, Qwen and Mistral.
+  It captures reasoning (`reasoning_content`, streamed through the `onReasoningDelta` hook), streams it live, and replays it on the assistant turn it belongs to through an `assistantReasoningReplay` (`reasoning_content` for DeepSeek/Qwen; DeepSeek returns 400 on a tool round without it).
+  Mistral's reasoning models send content as typed chunks: `mistral_content.go` parses them (`chatCompletionStreamHooks.parseContent`, which rebuilds the final content from parsed text) and replays thinking as a chunk (`mistralChunkReplay`).
+- **OpenAI reasoning summaries** need a verified organization: `OPENAI_REASONING_SUMMARIES=off` stops requesting them, and an OpenAI refusal for that reason turns them off for the process and resends (`OpenAIAdapter.send`).
+- **Context overflow:** `IsContextOverflowError` (`context_overflow.go`) recognises each provider's "input does not fit the window" refusal, which the Advanced loop recovers from by compacting.
+- **Advanced-loop adapter interfaces (ADR 0x026):** every adapter `runGeneration` drives embeds `usageLog` (optional `UsageReporter.CallUsage`, each call's input/cached/cache-write/output/reasoning tokens, including a call discarded by a truncation retry) and implements `Continuer.ContinueWith`, which records the last final reply in the adapter's history (OpenAI: already server-side via `previous_response_id`) and appends a user turn.
+  The local adapter does neither.
 - **`GenerateResponse`:** Normalized completion type from either provider.
   Carries **`StopReason`** — the provider's own verbatim account of why generation ended (`end_turn`, `max_tokens`, `refusal`, `incomplete`, …), sourced from `Message.StopReason` on Anthropic and from `IncompleteDetails.Reason` (falling back to `Status`) on the Responses API, and from `finish_reason` on the Xiaomi Chat Completions adapter (`length` = truncated).
   The agent's empty-turn guard reads it to surface a clearer truncation message.
@@ -163,6 +175,9 @@ Maps **`ModelContext`** (ordered prompt segments) to OpenAI Responses and Anthro
 ## Testing
 
 - `mock_adapter_test.go` — echo/fixed/scripted modes, delta concatenation (unicode, no-space, newline-heavy), mid-stream cancellation.
+- `reasoning_effort_test.go` — the effort mappings per provider, OpenAI summary extraction, and streamed summary deltas.
+- `continuation_test.go`, `chat_completions_replay_test.go` — `ContinueWith` on the Claude (with and without thinking replay), OpenAI and Chat Completions adapters, and DeepSeek/Qwen reasoning replay on tool rounds.
+- `mistral_content_test.go` — Mistral thinking chunks in streamed and non-streamed content, and chunk replay on tool rounds.
   `call_timeouts_test.go` — each limit against `httptest` servers (slow response, stalled and endless streams), a healthy stream outliving `Request`, caller cancel staying a cancel, and a stalled Claude stream timing out after one attempt.
   `deny_transport_test.go` — proves an `httptest` server is never reached, including through a real openai-go client built on the deny client.
 - `model_context_test.go`, `model_context_hydrate_test.go`, `model_context_openai_test.go` — segment assembly, hydration helpers, OpenAI/Claude rendering (including Claude text fallback when image bytes absent).

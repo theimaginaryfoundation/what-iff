@@ -26,11 +26,15 @@ import (
 // Meter gates and records metered turns. Implementations must be safe for
 // concurrent use; both Check and Record are called from per-request goroutines.
 //
-// The two calls form a pair around a single turn: Check runs before inference to
-// decide whether the turn may proceed, returning a Decision. That same Decision
-// is handed back to Record after the turn completes so the implementation can
-// settle it with the context it captured at gate time. The agent treats the
-// Decision as opaque apart from its Allowed flag.
+// Check runs before a turn's inference to decide whether it may proceed, returning a Decision.
+// That Decision (the turn's gate Decision) is handed back to every Record the turn makes so the
+// implementation can settle it with the context it captured at gate time. A Standard turn records
+// once, when it completes. An Advanced turn (ADR 0x026) records once per finished step and once
+// at the end, all with the gate Decision, even an hour later: the implementation must read
+// anything that can change during the run (balances, caps) at Record time, not from the snapshot.
+// The Checks an Advanced run makes before its further calls return Decisions that are only read
+// for Allowed and Err; they are never passed to Record. The agent treats a Decision as opaque
+// apart from Allowed, DontRecordUsage and Err.
 type Meter interface {
 	// Check reports whether userID may start a turn on a model of the given
 	// tier ("low"/"medium"/"high"/"ultra"; "" means unknown, treated
@@ -39,11 +43,17 @@ type Meter interface {
 	// The check is intentionally fuzzy — concurrent requests are not serialised
 	// here; the implementation's atomic accounting at Record time is the precise
 	// enforcer. A returned Decision with Allowed=false must hard-reject the turn.
+	//
+	// A running Advanced turn also calls Check before each model call after its first, with
+	// the usage it has not recorded yet on ctx (WithPendingUsage). Allowed=false then stops the
+	// run before that call. A Check that could not decide (a database error) sets Err as well as
+	// Allowed=false, so the run can tell that from a refusal and does not end as out of quota.
 	Check(ctx context.Context, userID uuid.UUID, tier, actionType string) Decision
 
-	// Record settles the cost of one completed turn (fire-and-forget; it must not
-	// block normal flow and swallows its own errors). d is the Decision returned by
-	// the Check that gated this turn; u describes what actually happened.
+	// Record settles the cost of one completed turn, or of one finished step of an Advanced turn
+	// (fire-and-forget; it must not block normal flow and swallows its own errors). d is the gate
+	// Decision of the turn; u describes what actually happened. The agent calls it with a context
+	// that is not cancelled when the turn is stopped, so a write on it can complete.
 	Record(ctx context.Context, d Decision, u Usage)
 }
 
@@ -60,6 +70,10 @@ type Decision struct {
 	// State is private to the Meter implementation that produced this Decision.
 	// The agent must not inspect or construct it — only pass it back into Record.
 	State any
+	// Err is set, with Allowed=false, when the implementation could not decide (an
+	// infrastructure failure) rather than refusing on quota. A turn's gate treats both alike; a
+	// running Advanced turn ends as failed rather than out of quota.
+	Err error
 }
 
 // Usage describes one completed turn for Meter.Record. It carries only facts the
@@ -70,7 +84,11 @@ type Usage struct {
 	ActionType string // models.ActionType* — already resolved (e.g. image generation)
 	Model      string
 	ChatID     string
-	Tokens     int64
+	// Tokens is the input of the turn's final model call (on every path, Standard and
+	// Advanced): the basis of slab pricing for implementations that price a turn on one call.
+	// When CallsReported is set, Calls is the complete account of what this record covers and
+	// Tokens must not be priced on top of it.
+	Tokens int64
 	// MessageID is the assistant message this turn produced — the same message
 	// that owns the turn's Context X-ray snapshot. Optional (empty when no
 	// assistant message exists, e.g. a failed turn); it carries no metering
@@ -104,6 +122,44 @@ type Usage struct {
 	// models.ActionTypeImageGeneration; empty means OpenAI, the only vendor before
 	// users could choose one.
 	ImageProvider string
+	// ReasoningEffort is the reasoning effort ("off"|"low"|"medium"|"high") the turn was run
+	// at when the user explicitly selected one and the model honours it (ADR 0x026). Empty
+	// when no effort was selected, including models that always reason by default, so an
+	// implementation that prices effort leaves those turns as they were.
+	ReasoningEffort string
+	// AgentLoop is the loop the turn ran ("standard"|"advanced"; ADR 0x026). Empty means
+	// standard.
+	AgentLoop string
+	// Calls are the model calls this record covers, in order, with each call's token usage
+	// (ADR 0x026). A Standard turn's record carries every call of the turn (tool rounds and the
+	// reply). An Advanced turn is recorded step by step as it runs (Step > 0), each record carrying
+	// that step's calls, and the turn's final record carries whatever calls remain.
+	Calls []CallUsage
+	// CallsReported says Calls is complete for this record, including when it is empty (an
+	// Advanced turn's final record after every call was in a step record: nothing left to
+	// charge). False means per-call usage is unknown, and only then is Tokens the whole basis.
+	CallsReported bool
+	// Step is the Advanced step a step record covers (1-based); 0 for a turn's final record and
+	// for Standard turns.
+	Step int
+	// TurnID identifies the turn (its job) across its step records and final record, so an
+	// implementation can total a turn's charges. Empty when the turn has no job.
+	TurnID string
+}
+
+// CallUsage is one model call's token usage as the provider reported it. InputTokens includes
+// CachedInputTokens and CacheWriteTokens; OutputTokens includes ReasoningTokens where the provider
+// reports them separately (Anthropic reports thinking only as output).
+type CallUsage struct {
+	// Model is the model the call ran on; it can differ from Usage.Model (a sub-agent's model).
+	Model             string
+	InputTokens       int64
+	CachedInputTokens int64
+	// CacheWriteTokens are input tokens written to the provider's prompt cache on this call
+	// (Anthropic's cache_creation_input_tokens), which some providers bill above the input rate.
+	CacheWriteTokens int64
+	OutputTokens     int64
+	ReasoningTokens  int64
 }
 
 // New constructs the production Meter. It is nil in builds that do not link a
