@@ -46,6 +46,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   - Models: `model.go`.
     `ListModels` is the deployment's own catalog (models with no `connection_id`); `ListModelsForUser` adds the models the user enabled on their own provider connections (ADR 0x027).
     An account may enable a model with a catalog model's name, so lookups by name that mean the catalog (`GetModelByName`, a new account's default, the admin create and rename checks, and boot's seeding) look only at models with no connection.
+    `GetDisabledConnectionModel` and `ModelRowExists` let a chat or job tell a model turned off, or gone with its connection, from a retired catalog model.
     `assertUserCanUseModelTx` treats a connection's model as nonexistent to anyone but the connection's owner, so it can't be set on another account's chat, job or preference.
   - Safety violations: `safety_violation_event.go`.
   - Tool call persistence: `toolcall.go`.

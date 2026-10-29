@@ -295,18 +295,25 @@ func (a *Agent) handleEphemeralPrompt(
 	// Overrides below apply only to this run; the save after inference writes continuity only, so
 	// they never reach the Chat row.
 	if modelOverrideID != nil {
-		model, err := a.ds.GetModel(ctx, *modelOverrideID)
-		if err == nil && model != nil {
+		model, err := a.jobModel(ctx, *modelOverrideID)
+		if err != nil {
+			return nil, err
+		}
+		if model != nil {
+			// A provider connection's model runs through its connection (ADR 0x027).
+			connection, err := a.connectionFor(ctx, userID, model)
+			if err != nil {
+				return nil, err
+			}
 			chatCtx.chat.ModelID = model.ID
 			chatCtx.chat.ModelName = model.Name
 			chatCtx.chat.ToolsEnabled = model.ToolSupport
 			chatCtx.model = model.Name
 			chatCtx.modelProvider = model.Provider
+			chatCtx.connection = connection
 			chatCtx.modelReasoningSupport = model.ReasoningSupport
 			chatCtx.modelSubscriptionTier = model.SubscriptionTier
 			chatCtx.modelVisionSupport = model.VisionSupport
-		} else if err != nil && !errors.Is(err, datastore.ErrModelNotFound) {
-			return nil, fmt.Errorf("failed to resolve model override: %w", err)
 		}
 	}
 	if personalityOverrideID != nil {
@@ -458,4 +465,33 @@ func (a *Agent) finalizeEphemeralAdvancedDraft(ctx context.Context, userID uuid.
 	if _, err := a.ds.FinalizeAdvancedDraft(persistCtx, userID, draftJob.ID, chatID, cancelled, cause.Error(), failureCode(cause)); err != nil {
 		a.logger.Warn("failed to save the Advanced run's partial reply", zap.String("job_id", draftJob.ID.String()), zap.Error(err))
 	}
+}
+
+// ErrJobModelGone is returned for a job whose model no longer exists: a
+// provider connection's model, deleted with its connection (ADR 0x027).
+var ErrJobModelGone = errors.New("this job's model no longer exists")
+
+// jobModel resolves a job's model override. It returns nil, with no error, for
+// a catalog model that was retired, so the run uses the thread's model as it
+// always has. A connection model the account turned off, or one deleted with
+// its connection, fails the run instead of running it on something else.
+func (a *Agent) jobModel(ctx context.Context, id uuid.UUID) (*models.Model, error) {
+	model, err := a.ds.GetModel(ctx, id)
+	if err == nil {
+		return model, nil
+	}
+	if !errors.Is(err, datastore.ErrModelNotFound) {
+		return nil, fmt.Errorf("failed to resolve model override: %w", err)
+	}
+	if disabled, derr := a.ds.GetDisabledConnectionModel(ctx, id); derr == nil {
+		return disabled, nil
+	}
+	exists, err := a.ds.ModelRowExists(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve model override: %w", err)
+	}
+	if !exists {
+		return nil, ErrJobModelGone
+	}
+	return nil, nil
 }

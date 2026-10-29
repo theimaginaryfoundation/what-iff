@@ -307,12 +307,7 @@ func (h *Handler) connectionFor(w http.ResponseWriter, r *http.Request, userID u
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read the provider connection", err)
 		return nil, Preset{}, false
 	}
-	preset, ok := findPreset(h.presets, row.Preset)
-	if !ok {
-		// A preset this build no longer offers: treat the row as Custom.
-		preset, _ = findPreset(h.presets, PresetCustom)
-	}
-	return row, preset, true
+	return row, presetOf(h.presets, row.Preset), true
 }
 
 // storedAddress is what a connection stores for an address the account gave:

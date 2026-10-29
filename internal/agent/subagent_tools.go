@@ -115,7 +115,7 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 		var overrideModel *models.Model
 		// Try UUID first; fall back to case-insensitive name lookup.
 		if overrideModelID, parseErr := uuid.Parse(modelInput); parseErr == nil {
-			m, err := a.findModelByID(ctx, overrideModelID)
+			m, err := a.findModelByID(ctx, chatCtx.chat.UserID, overrideModelID)
 			if err != nil {
 				return marshalSubagentToolResult(runSubagentToolResult{
 					Success: false,
@@ -124,7 +124,7 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 			}
 			overrideModel = m
 		} else {
-			m, err := a.findModelByName(ctx, modelInput)
+			m, err := a.findModelByName(ctx, chatCtx.chat.UserID, modelInput)
 			if err != nil {
 				return marshalSubagentToolResult(runSubagentToolResult{
 					Success: false,
@@ -135,6 +135,15 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 		}
 		modelID = overrideModel.ID
 		modelName = overrideModel.Name
+	}
+	caps, err := a.subagentCapabilitiesFor(ctx, chatCtx.chat.UserID, modelID, modelName)
+	if err != nil {
+		return marshalSubagentToolResult(runSubagentToolResult{
+			Success: false,
+			Model:   modelName,
+			ModelID: optionalUUIDString(modelID),
+			Error:   err.Error(),
+		})
 	}
 
 	personalityID := chatCtx.chat.PersonalityID
@@ -190,7 +199,7 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 	if chatCtx.reasoningEffort != "" {
 		subagentCtx = withSubagentReasoningEffort(subagentCtx, chatCtx.turnSettings.ReasoningEffort)
 	}
-	callResult, err := a.callSubagentModel(subagentCtx, chatCtx.chat.UserID, modelName, modelContext, ritualUUIDs, chatCtx.chat.IsSandboxed())
+	callResult, err := a.callSubagentModelWithCaps(subagentCtx, chatCtx.chat.UserID, caps, modelName, modelContext, ritualUUIDs, chatCtx.chat.IsSandboxed())
 	if callResult != nil && (err == nil || len(callResult.Calls) > 0) {
 		// The meter computes subagent LLM credits and records nothing when the charge rounds to
 		// zero (subagent job runs are never free chat). A sub-agent that failed after making
@@ -227,18 +236,21 @@ func (a *Agent) runSubagentTool(ctx context.Context, chatCtx *chatContext, args 
 	})
 }
 
-func (a *Agent) findModelByID(ctx context.Context, modelID uuid.UUID) (*models.Model, error) {
+// findModelByID looks up a model the account can use by ID.
+func (a *Agent) findModelByID(ctx context.Context, userID, modelID uuid.UUID) (*models.Model, error) {
 	return a.resolveModelByReference(ctx, modelID.String(), modelResolverOptions{
 		AllowDisplayName: false,
 		AllowPrefixMatch: false,
+		UserID:           userID,
 	})
 }
 
-// findModelByName looks up an active model by case-insensitive name match.
-func (a *Agent) findModelByName(ctx context.Context, name string) (*models.Model, error) {
+// findModelByName looks up a model the account can use by case-insensitive name match.
+func (a *Agent) findModelByName(ctx context.Context, userID uuid.UUID, name string) (*models.Model, error) {
 	return a.resolveModelByReference(ctx, name, modelResolverOptions{
 		AllowDisplayName: true,
 		AllowPrefixMatch: true,
+		UserID:           userID,
 	})
 }
 
@@ -273,6 +285,9 @@ type subagentModelCapabilities struct {
 	VisionSupport bool
 	// ReasoningSupport is the model row's (with any admin override); "" derives it.
 	ReasoningSupport models.ReasoningSupport
+	// connection is the provider connection that serves the model, when it needs
+	// its own client (ADR 0x027); nil for the built-in providers' paths.
+	connection *ConnectionEndpoint
 }
 
 // reasoningSupport is the sub-agent model's reasoning support.
@@ -295,6 +310,30 @@ func (a *Agent) subagentModelCapabilities(ctx context.Context, modelName string)
 		return subagentModelCapabilities{Provider: string(cfg.Provider), ToolSupport: cfg.ToolSupport, VisionSupport: cfg.VisionSupport}
 	}
 	return subagentModelCapabilities{ToolSupport: true}
+}
+
+// subagentCapabilitiesFor is subagentModelCapabilities for the model the
+// sub-agent was given by ID, read from its row, so a model from one of the
+// account's provider connections keeps its connection. A model turned off, or
+// whose connection is gone, fails here rather than at the provider.
+func (a *Agent) subagentCapabilitiesFor(ctx context.Context, userID, modelID uuid.UUID, modelName string) (subagentModelCapabilities, error) {
+	if a.ds == nil || modelID == uuid.Nil {
+		return a.subagentModelCapabilities(ctx, modelName), nil
+	}
+	m, err := a.ds.GetModel(ctx, modelID)
+	if err != nil {
+		if m, err = a.ds.GetDisabledConnectionModel(ctx, modelID); err != nil {
+			return a.subagentModelCapabilities(ctx, modelName), nil
+		}
+	}
+	if m.ConnectionID == nil {
+		return a.subagentModelCapabilities(ctx, modelName), nil
+	}
+	conn, err := a.connectionFor(ctx, userID, m)
+	if err != nil {
+		return subagentModelCapabilities{}, err
+	}
+	return subagentModelCapabilities{Provider: m.Provider, ToolSupport: m.ToolSupport, VisionSupport: m.VisionSupport, ReasoningSupport: m.ReasoningSupport, connection: conn}, nil
 }
 
 // errSubagentToolsUnsupported reports that the selected skills would hand the
@@ -333,7 +372,11 @@ func openAIFunctionToolNames(toolParams []responses.ToolUnionParam) map[string]s
 
 // sandboxed is the parent chat's sandbox: the sub-agent's tool loop inherits it.
 func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelName string, modelContext *provider.ModelContext, ritualIDs []uuid.UUID, sandboxed bool) (*subagentCallResult, error) {
-	caps := a.subagentModelCapabilities(ctx, modelName)
+	return a.callSubagentModelWithCaps(ctx, userID, a.subagentModelCapabilities(ctx, modelName), modelName, modelContext, ritualIDs, sandboxed)
+}
+
+// callSubagentModelWithCaps is callSubagentModel with the model's capabilities already read.
+func (a *Agent) callSubagentModelWithCaps(ctx context.Context, userID uuid.UUID, caps subagentModelCapabilities, modelName string, modelContext *provider.ModelContext, ritualIDs []uuid.UUID, sandboxed bool) (*subagentCallResult, error) {
 	// This wrapper exists to derive the effort once: the parent turn's selected effort (carried on
 	// ctx by withSubagentReasoningEffort) mapped onto the sub-agent's own model. The call itself is
 	// callSubagentModelWithEffort; the effort is also reported back for metering when it is above the
@@ -348,14 +391,21 @@ func (a *Agent) callSubagentModel(ctx context.Context, userID uuid.UUID, modelNa
 
 func (a *Agent) callSubagentModelWithEffort(ctx context.Context, userID uuid.UUID, caps subagentModelCapabilities, modelName string, modelContext *provider.ModelContext, ritualIDs []uuid.UUID, sandboxed bool, effort models.ReasoningEffort) (*subagentCallResult, error) {
 	modelProvider := caps.Provider
-	if models.UsesOpenAIChatCompletionsAPI(modelProvider, modelName) {
+	conn := caps.connection
+	anthropicConnection := conn != nil && conn.Flavor == ConnectionFlavorAnthropic
+	if (conn != nil && !anthropicConnection) || (conn == nil && models.UsesOpenAIChatCompletionsAPI(modelProvider, modelName)) {
 		return a.callSubagentChatCompletions(ctx, userID, caps, modelName, modelContext, ritualIDs, sandboxed)
 	}
 
-	if models.UsesAnthropicMessagesAPI(modelProvider, modelName) {
-		// z.ai GLM shares the Messages API but uses a different client.
+	if anthropicConnection || models.UsesAnthropicMessagesAPI(modelProvider, modelName) {
+		// z.ai GLM shares the Messages API but uses a different client, as does a
+		// provider connection.
 		claudeProvider := a.ClaudeProvider
-		if models.IsZAIModel(modelProvider, modelName) {
+		sv := models.SafetyViolationProviderAnthropic
+		if anthropicConnection {
+			claudeProvider = a.connectionClaudeProvider(conn)
+			_, sv = connectionLabels(conn.Preset)
+		} else if models.IsZAIModel(modelProvider, modelName) {
 			claudeProvider = a.ZAIProvider
 		}
 		if claudeProvider == nil {
@@ -386,7 +436,7 @@ func (a *Agent) callSubagentModelWithEffort(ctx context.Context, userID uuid.UUI
 			toolCtx := subagentToolContext(userID, modelName, sandboxed, mcpServers, offeredToolNames(mcpSpecs, nil))
 			resp, _, _, err := a.handleAgentLoop(ctx, toolCtx, adapter)
 			if err != nil {
-				return &subagentCallResult{Calls: subagentCalls(adapter, nil)}, provider.WrapSafetyViolationError(models.SafetyViolationProviderAnthropic, fmt.Errorf("Claude subagent MCP call failed: %w", err))
+				return &subagentCallResult{Calls: subagentCalls(adapter, nil)}, provider.WrapSafetyViolationError(sv, fmt.Errorf("Claude subagent MCP call failed: %w", err))
 			}
 			if resp != nil {
 				return &subagentCallResult{
@@ -398,7 +448,7 @@ func (a *Agent) callSubagentModelWithEffort(ctx context.Context, userID uuid.UUI
 		}
 		msg, err := claudeProvider.Call(ctx, claudeParams)
 		if err != nil {
-			return nil, provider.WrapSafetyViolationError(models.SafetyViolationProviderAnthropic, fmt.Errorf("Claude subagent call failed: %w", err))
+			return nil, provider.WrapSafetyViolationError(sv, fmt.Errorf("Claude subagent call failed: %w", err))
 		}
 		// ToGenerateResponse folds cached prefix tokens into InputTokens.
 		resp := claudeProvider.ToGenerateResponse(msg)
@@ -460,8 +510,12 @@ func (a *Agent) callSubagentChatCompletions(ctx context.Context, userID uuid.UUI
 // routing testable without a live MCP server.
 func (a *Agent) runSubagentChatCompletions(ctx context.Context, userID uuid.UUID, caps subagentModelCapabilities, modelName string, modelContext *provider.ModelContext, mcpSpecs []agenttools.FunctionToolSpec, mcpServers []*models.MCPServer, sandboxed bool) (*subagentCallResult, error) {
 	providerName := models.ProviderForModel(caps.Provider, modelName)
+	if caps.connection != nil {
+		providerName = models.ModelProvider(caps.Provider)
+	}
 	renderCtx := &chatContext{model: modelName, modelProvider: caps.Provider, modelVisionSupport: caps.VisionSupport,
-		reasoningEffort: models.EffectiveReasoningEffort(caps.reasoningSupport(modelName), subagentReasoningEffort(ctx))}
+		reasoningEffort: models.EffectiveReasoningEffort(caps.reasoningSupport(modelName), subagentReasoningEffort(ctx)),
+		connection:      caps.connection}
 	params := buildOpenAIChatCompletionsParams(renderCtx, modelContext)
 
 	if len(mcpSpecs) > 0 && !caps.ToolSupport {
@@ -474,7 +528,10 @@ func (a *Agent) runSubagentChatCompletions(ctx context.Context, userID uuid.UUID
 		err     error
 		sv      models.SafetyViolationProvider
 	)
-	if models.IsGeminiModel(caps.Provider, modelName) {
+	if caps.connection != nil {
+		adapter, _ = a.openAIChatCompletionsAdapter(renderCtx, params, functionTools, nil)
+		_, sv = connectionLabels(caps.connection.Preset)
+	} else if models.IsGeminiModel(caps.Provider, modelName) {
 		if a.GeminiProvider == nil {
 			return nil, fmt.Errorf("Gemini model %q requested but GEMINI_API_KEY is not configured", modelName)
 		}
