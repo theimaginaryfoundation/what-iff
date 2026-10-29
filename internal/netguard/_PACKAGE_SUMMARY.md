@@ -11,7 +11,7 @@ Keeps server-side requests to user-chosen addresses on the public internet.
 
 ## Dependencies
 
-- **Inbound:** `internal/discordrelay` (the Discord CDN fetcher), `internal/remotesync` (the remote server client).
+- **Inbound:** `internal/relaykit` (`relaykit.PublicOnlyControl` wraps it with the caller's name, for the Discord CDN fetcher and the Buzz and Slack clients), `internal/remotesync` (the remote server client).
 - **Outbound:** Standard library only.
 
 ## Non-obvious decisions

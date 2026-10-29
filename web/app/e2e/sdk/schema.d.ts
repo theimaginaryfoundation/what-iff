@@ -14058,11 +14058,11 @@ export interface components {
         };
         RemoteSyncUpsertRequest: {
             /**
-             * @description The remote server's address. Empty means the hosted app.
+             * @description The remote server's address. Empty means the hosted app, not the saved address, so send it on every save.
              * @example https://api.whatiff.chat
              */
             base_url?: string;
-            /** @description A wht_ webhook token with chat:read, created on the remote. Required the first time. */
+            /** @description A wht_ webhook token with chat:read, created on the remote. Required the first time, and whenever base_url names a different host from the saved one (400 otherwise); a saved token is only sent to the host it came from. */
             token?: string;
             enabled?: boolean;
         };

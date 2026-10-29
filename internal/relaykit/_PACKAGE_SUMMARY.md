@@ -29,6 +29,7 @@ Each relay keeps its own storage, wire format and trigger rules; what is the sam
 - **`LoadReplyFiles`, `SkippedNote`:** the files a reply produced, within a platform's limits, never the context-only ones, and the note naming those left out.
 - **`SplitText`, `TablesToCodeBlocks`, `IsFenceLine`:** a reply split into messages of a platform's length (Discord 2000, Slack 4000) on paragraphs, then lines, with a split code block closed and reopened (with its backticks and a short language tag only, `fenceOpening`, so a very long opening line cannot leave a part no room and stall the split), and Markdown tables turned into code blocks.
 - **`PublicOnlyControl`, `IsPublicIP`:** the `net.Dialer` hook that refuses non-public addresses after DNS on every connection.
+  Both are `internal/netguard`'s, which remote sync uses too; the hook here only names the relay in its error.
 - **`SpeakerLabel`, `MessageBody`, `Allowed`, `SleepCtx`:** speaker names cleaned so they cannot forge the `name (Platform, #channel):` label, and message text whose further lines are marked `│ ` so a line cannot pose as another speaker's turn (`ContinuationNote` tells the persona); allow and deny lists where deny wins.
 
 ## Key types and entry points
@@ -38,7 +39,7 @@ Each relay keeps its own storage, wire format and trigger rules; what is the sam
 ## Dependencies
 
 - **Inbound:** `internal/discordrelay` (and its `gateway`), `internal/buzzrelay`, `internal/buzzplugin`, `internal/slackrelay`, `internal/slackplugin`.
-- **Outbound:** `internal/datastore` (`TryAcquireSchedulerLeaderLock`), `internal/replyhook` (`Event`), `zap`.
+- **Outbound:** `internal/datastore` (`TryAcquireSchedulerLeaderLock`), `internal/netguard`, `internal/replyhook` (`Event`), `zap`.
 
 ## Non-obvious decisions
 
