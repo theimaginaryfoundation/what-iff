@@ -146,7 +146,16 @@ When #148 lands, the sync fork should set #148's `forked_from_chat_id` and `fork
   The first-run welcome names the personas copied threads are waiting for (`unmatched_personas`): with no persona at all, the app sends an account to persona setup, and a sync-only account would otherwise see no sign that its threads are already here.
 - **Model:** left unset, like any imported thread; the local default applies.
 - **Messages:** text, origin, `sent_at` and the generation display fields (model, persona and mood names, expression key). Read status is `read`. Tool calls, reasoning and attachments are not served by `chat:read` and are not copied.
-- **Context:** the thread has an import `source` and no summary, so the first local turn (or opening it) starts the existing rehydration: a summary of everything but the last few turns, plus memory seeding, on the local server's own model keys.
+- **Context (summaries):** a reply reads a thread's running summary plus at most the 50 newest messages after it, so whatever sits between the two is invisible. Sync keeps that gap closed in two ways (`settleRemoteSummary`, run whenever remote messages land in a thread nobody has continued here):
+  - **The hosted summary comes too.** `GET /api/webhooks/chat/{id}/summary` (`chat:read`) returns the hosted thread's summary and `window_start` (its `last_checkpoint_at`).
+    The syncer asks for it with each thread it brings messages into, and the copy takes it when it reaches further than the copy's own.
+    A new copy then needs no summarizing here at all, however long it is.
+    The summary is derived from the thread's messages, which the scope already serves, so it widens nothing.
+    A hosted server from before the route answers 404, which reads as "no summary".
+  - **A local catch-up otherwise.** When more than 50 messages sit past a copy's summary (no hosted summary, one that lags, or an account-export import that sync appended to), the copy is flagged `rehydration_state = stale`.
+    Its next use runs the existing rehydration in catch-up mode: the messages from the old window start up to the last few turns are folded into the existing summary in one pass (chunked when long), and memories are seeded from that stretch.
+  - A copy that has never been summarized is left to its first rehydration, which summarizes everything but the last few turns, plus memory seeding, on the local server's own model keys.
+  A diverged home thread is never given the hosted summary: it is no longer the hosted thread. Its fork, which is, is.
 - **Renames:** a hosted rename is copied only if the local name is still the last hosted name, so a local rename wins.
 
 ### 8. Running: sync on wake, not on a clock (R5, R6)
@@ -207,9 +216,10 @@ That relies on a cross-origin browser being able to read the 404, so the server'
 
 ## Consequences
 
-- A self-hosted install can keep a live copy of a hosted account's conversations with one token. Nothing changes on the hosted side.
+- A self-hosted install can keep a live copy of a hosted account's conversations with one token.
 - A conversation continued in both places becomes two threads. That is the intended result, but it can surprise people until the branch UI from #148 shows the relationship.
-- Local copies of hosted threads take local model calls on first use (rehydration summary and memory seeding), metered against the local keys.
+- Local copies of hosted threads take local model calls on first use (rehydration summary and memory seeding), metered against the local keys, unless the hosted summary came with them.
+- The hosted app serves one new read route (`GET /webhooks/chat/{id}/summary`), so the summary half needs a hosted deploy; everything else works against the hosted app as it is.
 - Three new tables and one new plugin. Removing the feature is deleting the plugin and dropping the tables; mirrored threads remain ordinary imported threads.
 
 ## Not done yet
@@ -221,11 +231,12 @@ That relies on a cross-origin browser being able to read the 404, so the server'
 - **Thread list badge** for mirrored and forked threads (the link table already knows which are which).
 - **Archive and favourite state** are copied when a mirror is created, not afterwards.
 - **Close the apply race:** a local turn that commits between the local-tail check and the append is appended after rather than forked. The window is milliseconds; locking the tracking thread's row for the apply would close it.
+- **A summary written after the last message** (the hosted checkpoint runs after the reply is saved) comes over with the thread's next message, not on its own; until then the local catch-up covers the gap.
 - **The hosted web app asks `GET /api/remote-sync` once per session** to decide whether to show the tab and send wakes, and gets a 404 from the router (no database work). A build-time flag could skip it where the feature can never be on.
 
 ## Test plan
 
 - **Unit (`internal/remotesync`):** the client's error classification and paging; discovery stopping at the first unchanged page; the pull overlap and dedupe; the planner's create / adopt / append / fork / detach decisions, including a second fork; persona matching; caps and the skip for `needs_attention`.
-- **Datastore:** apply in one transaction (a failure leaves nothing), fork copy up to the head with links copied, adoption alignment, the lease claim under contention, ownership on every query, cascade on account deletion.
+- **Datastore:** apply in one transaction (a failure leaves nothing), fork copy up to the head with links copied, adoption alignment, taking the hosted summary only when it reaches further, flagging a backlog stale and claiming it once, the lease claim under contention, ownership on every query, cascade on account deletion.
 - **Handlers:** validation outcomes on save, token never returned, 404 when the plugin is off.
 - **End to end (manual for now):** one local server syncing user B from user A on the same server over `http://localhost` with `REMOTE_SYNC_ALLOW_LOCAL_NETWORK=true`: first sync, incremental append, local reply then remote reply (fork), local delete (detach), run now.

@@ -100,7 +100,7 @@ That is it. From now on, open the app at home and your threads are there.
 | Comes over | Does not (yet) |
 |---|---|
 | Every thread, active and archived, with its name | Persona prompts and settings (bring them with an export, step 3) |
-| Every message: who said it, what was said, and when | Memories (an export brings them; copied threads also build new ones here as you use them) |
+| Every message: who said it, what was said, and when, plus the thread's running summary | Memories (an export brings them; copied threads also build new ones here as you use them) |
 | Which model and persona wrote each reply (as a label) | Attachments and images (their names are known, the files are not copied) |
 | Renames on whatiff.chat, unless you renamed the copy | Tool calls and model reasoning |
 
@@ -135,7 +135,8 @@ Alternatively, keep `LLM_BACKEND` at its default and give the server your own pr
 - **Nothing flows back.** Mullet mode only reads from whatiff.chat. What you write at home stays at home.
 - **Copying is not moving.** Your conversations stay on whatiff.chat too. To remove something from there, delete it there.
 - **Your server only talks to public `https` addresses** for sync, checked on every connection, unless you allow your local network.
-- **Copied threads are summarized with your server's model** the first time you use them, so the persona can pick up a long conversation. That uses your local model or keys, not whatiff.chat.
+- **Copied threads come with whatiff.chat's running summary of them**, so the persona can pick up a long conversation without re-reading it.
+  When there is no summary to bring (or a lot came over since it was written), your server summarizes the thread itself the next time you use it, with your local model or keys, not whatiff.chat.
 
 ## Troubleshooting
 

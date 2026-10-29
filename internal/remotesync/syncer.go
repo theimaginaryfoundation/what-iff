@@ -42,6 +42,9 @@ type Remote interface {
 	Host() string
 	ListChats(ctx context.Context, page int, archived bool) ([]RemoteChat, error)
 	ListMessages(ctx context.Context, chatID uuid.UUID, cursor string) ([]models.WebhookMessage, string, error)
+	// GetSummary returns the thread's running summary, or nil when the remote has none to give
+	// (no summary yet, or a server from before the summary route).
+	GetSummary(ctx context.Context, chatID uuid.UUID) (*models.ChatSummary, error)
 }
 
 // Config tunes a Syncer. Zero values take the defaults below.
@@ -465,7 +468,32 @@ func (s *Syncer) syncThread(ctx context.Context, userID uuid.UUID, remote Remote
 		}
 		return nil, err
 	}
+	if len(batch) > 0 {
+		// Only a thread that is getting messages can need a newer summary.
+		if thread.Summary, err = s.summary(ctx, remote, chat.ID); err != nil {
+			return nil, err
+		}
+	}
 	return s.store.ApplyRemoteSyncThread(ctx, userID, thread, batch)
+}
+
+// summary fetches the remote's running summary of a thread. It is an optimisation: without it a
+// copy is summarized here instead (lazy rehydration, or a catch-up). So any failure but a refused
+// token just means no summary this time.
+func (s *Syncer) summary(ctx context.Context, remote Remote, chatID uuid.UUID) (*models.ChatSummary, error) {
+	sum, err := remote.GetSummary(ctx, chatID)
+	switch {
+	case NeedsOwner(err):
+		return nil, err
+	case err != nil:
+		if ctx.Err() == nil {
+			s.logger.Debug("remote sync: no summary", zap.String("remote_chat_id", chatID.String()), zap.Error(err))
+		}
+		return nil, nil
+	case sum == nil || strings.TrimSpace(sum.Summary) == "" || sum.WindowStart == nil:
+		return nil, nil
+	}
+	return sum, nil
 }
 
 // pull walks a thread's messages newest first until one is older than cutoff (or the history

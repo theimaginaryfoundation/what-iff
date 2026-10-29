@@ -27,6 +27,9 @@ const (
 	RehydrationStateProcessing = "processing"
 	RehydrationStateReady      = "ready"
 	RehydrationStateFailed     = "failed"
+	// RehydrationStateStale: the thread has a summary, but more messages arrived after it (remote
+	// sync) than a reply reads past the summary. The next use folds them into the summary.
+	RehydrationStateStale = "stale"
 )
 
 // ConversationImportHash is the import dedup key for a source conversation id: hex sha256 of the

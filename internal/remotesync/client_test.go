@@ -130,3 +130,27 @@ func TestTheDefaultClientRefusesLocalAddresses(t *testing.T) {
 	require.NoError(t, err)
 	assert.NoError(t, c.Check(context.Background()))
 }
+
+func TestClientReadsTheSummaryAndTreats404AsNone(t *testing.T) {
+	withSummary, oldServer := uuid.New(), uuid.New()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/webhooks/chat/"+withSummary.String()+"/summary" {
+			_, _ = w.Write([]byte(`{"chat_id":"` + withSummary.String() + `","summary":"So far.","window_start":"2026-10-01T12:00:00Z"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	c, err := NewClient(srv.URL, "wht_abc", NewHTTPClient(true))
+	require.NoError(t, err)
+	sum, err := c.GetSummary(context.Background(), withSummary)
+	require.NoError(t, err)
+	require.NotNil(t, sum)
+	assert.Equal(t, "So far.", sum.Summary)
+	require.NotNil(t, sum.WindowStart)
+
+	sum, err = c.GetSummary(context.Background(), oldServer)
+	require.NoError(t, err, "a server from before the summary route")
+	assert.Nil(t, sum)
+}

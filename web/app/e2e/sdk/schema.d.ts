@@ -10090,6 +10090,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/webhooks/chat/{chatId}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a thread's running summary (webhook)
+         * @description Returns the thread's running summary: the text a reply reads in place of every message sent before
+         *     `window_start`. Messages from `window_start` on are read as they are. An empty `summary` (and no
+         *     `window_start`) means the thread has none yet. The summary is derived from the thread's own messages,
+         *     which `chat:read` already serves. Remote sync uses it so a copy need not summarize the history again
+         *     (ADR 0x033). Requires the `chat:read` scope. A thread that does not exist and one that belongs to
+         *     someone else both return 404.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Chat ID */
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Summary retrieved successfully */
+                200: {
+                    headers: {
+                        /** @description Always `no-store`. */
+                        "Cache-Control"?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ChatSummary"];
+                    };
+                };
+                /** @description Invalid chat ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Missing or invalid webhook token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The token does not have the `chat:read` scope */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Chat not found (or not yours) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/webhooks/chat/chat-message/{id}": {
         parameters: {
             query?: never;
@@ -13305,11 +13399,23 @@ export interface components {
         };
         /**
          * @description What a webhook token may do. `messages:write` allows `POST /webhooks/chat/{chatId}/messages`.
-         *     `chat:read` allows the read routes (threads, messages, job status, persona names) and never exposes
+         *     `chat:read` allows the read routes (threads, messages, thread summaries, job status, persona names) and never exposes
          *     system prompts, scratchpads or memories. Tokens created before scopes existed are `messages:write` only.
          * @enum {string}
          */
         WebhookScope: "messages:write" | "chat:read";
+        /** @description A thread's running summary, as `GET /webhooks/chat/{chatId}/summary` returns it. */
+        ChatSummary: {
+            /** Format: uuid */
+            chat_id: string;
+            /** @description The summary text. Empty when the thread has none yet. */
+            summary: string;
+            /**
+             * Format: date-time
+             * @description Messages sent before this are covered by the summary; messages from it on are not.
+             */
+            window_start?: string;
+        };
         /**
          * @description A message as the webhook read routes return it: a stable subset of `ChatMessage` with the same field
          *     names. Tool calls, model reasoning, context breakdowns, portrait thumbnails, rituals, bookmarks and

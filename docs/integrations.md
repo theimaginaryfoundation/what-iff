@@ -52,6 +52,7 @@ By area (`tags` in the spec):
 | `GET /webhooks/chat` | `chat:read` | List threads; `personality_id` filters by persona |
 | `GET /webhooks/personality` | `chat:read` | List personas (id, name, cover) to choose a filter from |
 | `GET /webhooks/chat/{chatId}/messages` | `chat:read` | Read a thread, newest first, paged or by cursor |
+| `GET /webhooks/chat/{chatId}/summary` | `chat:read` | Read a thread's running summary and where it ends |
 | `GET /webhooks/chat/chat-message/{id}` | `chat:read` | Read one message |
 | `GET /webhooks/job/{id}` | `chat:read` | Poll a background job |
 

@@ -479,3 +479,126 @@ func TestCopiesPickUpAPersonaThatArrivesLater(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, s.UnmatchedPersonas)
 }
+
+// turns builds n remote user/assistant pairs from f.t0+offset minutes.
+func (f *remoteSyncFixture) turns(offset, n int) []models.RemoteSyncMessage {
+	texts := make([]string, 2*n)
+	for i := range texts {
+		texts[i] = "m" + string(rune('a'+i%26))
+	}
+	return f.msgs(offset, texts...)
+}
+
+func (f *remoteSyncFixture) chat(t *testing.T, id uuid.UUID) *ent.Chat {
+	t.Helper()
+	c, err := f.ds.dbClient.Chat.Get(context.Background(), id)
+	require.NoError(t, err)
+	return c
+}
+
+func TestCopiesTakeTheRemoteSummaryWhenItIsFurtherAlong(t *testing.T) {
+	f := newRemoteSyncFixture(t)
+	ctx := context.Background()
+	remote := uuid.New()
+	th := f.thread(remote, "Long one")
+	history := f.turns(0, 20)
+	windowStart := history[30].SentAt // the remote summary covers the first 15 turns
+	th.Summary = &models.ChatSummary{Summary: "They planned a trip.", WindowStart: &windowStart}
+
+	res := f.apply(t, th, history)
+	c := f.chat(t, res.ChatID)
+	assert.Equal(t, "They planned a trip.", c.CheckpointSummary)
+	require.NotNil(t, c.LastCheckpointAt)
+	assert.True(t, windowStart.Equal(*c.LastCheckpointAt))
+	assert.Equal(t, 15, c.CheckpointUserMessageCount, "replies before the window, for the checkpoint cadence")
+	assert.Equal(t, models.RehydrationStateReady, c.RehydrationState, "nothing to summarize here")
+
+	got, err := f.ds.GetChatSummary(ctx, f.owner, res.ChatID)
+	require.NoError(t, err)
+	assert.Equal(t, "They planned a trip.", got.Summary)
+	_, err = f.ds.GetChatSummary(ctx, f.other, res.ChatID)
+	assert.ErrorIs(t, err, ErrChatNotFound, "owner-scoped")
+
+	// A summary that reaches no further than the copy's own is not taken.
+	older := history[10].SentAt
+	th.Summary = &models.ChatSummary{Summary: "Older.", WindowStart: &older}
+	f.apply(t, th, f.msgs(40, "late"))
+	assert.Equal(t, "They planned a trip.", f.chat(t, res.ChatID).CheckpointSummary)
+}
+
+func TestACopyWithoutARemoteSummaryIsLeftToItsFirstRehydration(t *testing.T) {
+	f := newRemoteSyncFixture(t)
+	res := f.apply(t, f.thread(uuid.New(), "Long one"), f.turns(0, 60))
+	c := f.chat(t, res.ChatID)
+	assert.Empty(t, c.CheckpointSummary)
+	assert.Equal(t, models.RehydrationStateNone, c.RehydrationState, "rehydration summarizes the whole history on first use")
+}
+
+func TestSyncFlagsASummarizedThreadStaleWhenTooMuchArrivesPastIt(t *testing.T) {
+	f := newRemoteSyncFixture(t)
+	ctx := context.Background()
+	remote := uuid.New()
+	history := f.turns(0, 40)
+
+	// An account-export import with a summary covering its first 10 turns.
+	windowStart := history[20].SentAt
+	imported, err := f.ds.dbClient.Chat.Create().
+		SetName("Trip planning").SetOwnerID(f.owner).SetSource(models.ChatSourceAnthropic).
+		SetImportHash(models.ConversationImportHash(remote.String())).
+		SetCheckpointSummary("Exported summary.").SetLastCheckpointAt(windowStart).
+		SetRehydrationState(models.RehydrationStateReady).
+		Save(ctx)
+	require.NoError(t, err)
+	for _, m := range history[:24] {
+		_, err := f.ds.dbClient.ChatMessage.Create().SetChatID(imported.ID).SetMessage(m.Message).
+			SetOrigin(chatmessage.Origin(m.Origin)).SetSentAt(m.SentAt).Save(ctx)
+		require.NoError(t, err)
+	}
+
+	// Sync adopts it and appends 56 messages: 60 now sit past the summary, more than a reply reads.
+	res := f.apply(t, f.thread(remote, "Trip planning"), history)
+	assert.Equal(t, models.RemoteSyncAdopted, res.Outcome)
+	assert.Equal(t, models.RehydrationStateStale, f.chat(t, imported.ID).RehydrationState)
+
+	info, err := f.ds.GetChatRehydrationInfo(ctx, f.owner, imported.ID)
+	require.NoError(t, err)
+	assert.True(t, info.NeedsRehydration(), "a stale thread is caught up on its next use")
+	claimed, err := f.ds.ClaimChatRehydration(ctx, f.owner, imported.ID, true)
+	require.NoError(t, err)
+	assert.True(t, claimed)
+	claimed, err = f.ds.ClaimChatRehydration(ctx, f.owner, imported.ID, true)
+	require.NoError(t, err)
+	assert.False(t, claimed, "once")
+
+	// While the catch-up runs, sync leaves the thread to it.
+	f.apply(t, f.thread(remote, "Trip planning"), f.turns(200, 40))
+	assert.Equal(t, models.RehydrationStatePending, f.chat(t, imported.ID).RehydrationState)
+}
+
+func TestASmallBacklogPastTheSummaryNeedsNoCatchUp(t *testing.T) {
+	f := newRemoteSyncFixture(t)
+	remote := uuid.New()
+	th := f.thread(remote, "Short gap")
+	history := f.turns(0, 30)
+	windowStart := history[40].SentAt // 20 messages past the summary: a reply reads them all
+	th.Summary = &models.ChatSummary{Summary: "So far.", WindowStart: &windowStart}
+
+	res := f.apply(t, th, history)
+	assert.Equal(t, models.RehydrationStateReady, f.chat(t, res.ChatID).RehydrationState)
+}
+
+func TestAForkTakesTheRemoteSummaryAndTheHomeThreadKeepsItsOwn(t *testing.T) {
+	f := newRemoteSyncFixture(t)
+	remote := uuid.New()
+	th := f.thread(remote, "Trip planning")
+	res := f.apply(t, th, f.turns(0, 3))
+	home := res.ChatID
+	f.writeLocal(t, home, "home turn", f.t0.Add(30*time.Minute))
+
+	windowStart := f.t0.Add(40 * time.Minute)
+	th.Summary = &models.ChatSummary{Summary: "Phone side.", WindowStart: &windowStart}
+	res = f.apply(t, th, f.turns(40, 3))
+	require.Equal(t, models.RemoteSyncForked, res.Outcome)
+	assert.Equal(t, "Phone side.", f.chat(t, res.ChatID).CheckpointSummary)
+	assert.Empty(t, f.chat(t, home).CheckpointSummary, "the home continuation is not the remote's thread any more")
+}

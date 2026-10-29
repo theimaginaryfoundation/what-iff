@@ -27,6 +27,10 @@ type fakeRemote struct {
 
 	listCalls int
 	msgCalls  map[uuid.UUID]int
+
+	summaries   map[uuid.UUID]*models.ChatSummary
+	summaryErr  error
+	summaryHits int
 }
 
 func newFakeRemote() *fakeRemote {
@@ -34,6 +38,16 @@ func newFakeRemote() *fakeRemote {
 }
 
 func (r *fakeRemote) Host() string { return "remote.test" }
+
+func (r *fakeRemote) GetSummary(_ context.Context, chatID uuid.UUID) (*models.ChatSummary, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.summaryHits++
+	if r.summaryErr != nil {
+		return nil, r.summaryErr
+	}
+	return r.summaries[chatID], nil
+}
 
 // addThread adds an active thread with n messages a minute apart from start, and returns its id.
 func (r *fakeRemote) addThread(name string, n int, start time.Time) uuid.UUID {
@@ -106,13 +120,15 @@ func (r *fakeRemote) ListMessages(_ context.Context, chatID uuid.UUID, cursor st
 
 // fakeStore records what the syncer asks to apply and plays back links.
 type fakeStore struct {
-	mu       sync.Mutex
-	account  models.RemoteSyncAccount
-	links    map[uuid.UUID]models.RemoteSyncChatLink
-	applied  map[uuid.UUID][][]models.RemoteSyncMessage
-	applyErr map[uuid.UUID]error
-	leased   bool
-	finished []models.RemoteSyncRunResult
+	mu      sync.Mutex
+	account models.RemoteSyncAccount
+	links   map[uuid.UUID]models.RemoteSyncChatLink
+	applied map[uuid.UUID][][]models.RemoteSyncMessage
+	// summaries is the Summary each apply carried, in order.
+	summaries []*models.ChatSummary
+	applyErr  map[uuid.UUID]error
+	leased    bool
+	finished  []models.RemoteSyncRunResult
 	// rematches counts persona rematch calls; rematchN is what each reports.
 	rematches int
 	rematchN  int
@@ -152,6 +168,7 @@ func (s *fakeStore) ApplyRemoteSyncThread(_ context.Context, _ uuid.UUID, th mod
 		return nil, err
 	}
 	s.applied[th.RemoteChatID] = append(s.applied[th.RemoteChatID], batch)
+	s.summaries = append(s.summaries, th.Summary)
 	link, existed := s.links[th.RemoteChatID]
 	link.RemoteChatID = th.RemoteChatID
 	link.RemoteLastMessageTime = th.LastMessageTime
@@ -527,4 +544,47 @@ func TestRunDueWaitsOutTheAccountsJitter(t *testing.T) {
 	store.account.LastRunAt = &stale
 	s.RunDue(ctx)
 	require.Len(t, store.finished, 1)
+}
+
+func TestTheRemoteSummaryComesWithAThreadsMessages(t *testing.T) {
+	remote, store := newFakeRemote(), newFakeStore()
+	id := remote.addThread("t", 4, t0)
+	start := t0.Add(2 * time.Minute)
+	remote.summaries = map[uuid.UUID]*models.ChatSummary{id: {ChatID: id, Summary: "So far.", WindowStart: &start}}
+	s := newTestSyncer(store, remote, Config{})
+
+	s.RunDue(context.Background())
+	require.Len(t, store.summaries, 1)
+	require.NotNil(t, store.summaries[0])
+	assert.Equal(t, "So far.", store.summaries[0].Summary)
+
+	// An unchanged thread is not read again, summary included.
+	hits := remote.summaryHits
+	s.RunDue(context.Background())
+	assert.Equal(t, hits, remote.summaryHits)
+}
+
+func TestNoRemoteSummaryIsNotAFailure(t *testing.T) {
+	for name, setup := range map[string]func(r *fakeRemote, id uuid.UUID){
+		"none yet":         func(r *fakeRemote, id uuid.UUID) { r.summaries = map[uuid.UUID]*models.ChatSummary{id: {ChatID: id}} },
+		"old server (404)": func(*fakeRemote, uuid.UUID) {},
+		"server error":     func(r *fakeRemote, _ uuid.UUID) { r.summaryErr = &Error{Kind: KindServer, Status: 502} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			remote, store := newFakeRemote(), newFakeStore()
+			setup(remote, remote.addThread("t", 2, t0))
+			newTestSyncer(store, remote, Config{}).RunDue(context.Background())
+			assert.Equal(t, models.RemoteSyncStatusOK, store.last().Status)
+			require.Len(t, store.summaries, 1)
+			assert.Nil(t, store.summaries[0], "the copy is summarized here instead")
+		})
+	}
+}
+
+func TestARefusedTokenOnTheSummaryStopsTheRun(t *testing.T) {
+	remote, store := newFakeRemote(), newFakeStore()
+	remote.addThread("t", 2, t0)
+	remote.summaryErr = &Error{Kind: KindUnauthorized, Status: 401}
+	newTestSyncer(store, remote, Config{}).RunDue(context.Background())
+	assert.Equal(t, models.RemoteSyncStatusNeedsAttention, store.last().Status)
 }

@@ -258,6 +258,19 @@ func (c *Client) ListMessages(ctx context.Context, chatID uuid.UUID, cursor stri
 	return out.Results, out.NextCursor, nil
 }
 
+// GetSummary returns a thread's running summary. A 404 (no such thread, or a server from before
+// the summary route) is nil with no error.
+func (c *Client) GetSummary(ctx context.Context, chatID uuid.UUID) (*models.ChatSummary, error) {
+	var out models.ChatSummary
+	if err := c.get(ctx, "/api/webhooks/chat/"+chatID.String()+"/summary", url.Values{}, &out); err != nil {
+		if KindOf(err) == KindNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *Client) get(ctx context.Context, path string, q url.Values, into any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path+"?"+q.Encode(), nil)
 	if err != nil {

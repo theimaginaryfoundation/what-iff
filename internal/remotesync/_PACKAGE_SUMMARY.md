@@ -14,6 +14,7 @@ It talks to the remote through a small `Remote` interface and to storage through
   `discover` walks the remote thread list (newest activity first, active then archived) and stops at the first page with nothing changed, unless the account needs a full walk.
   `pull` reads a thread's messages newest first back to its head less an overlap (the whole history for a new link) and returns them oldest first.
   Each thread is applied through `Store.ApplyRemoteSyncThread`, which creates, adopts, appends or forks.
+  A thread that pulled messages also carries the remote's running summary (`Remote.GetSummary`, the `/summary` read route); a 404 (an older server) or any failure but a refused token just means none, and the copy is summarized here instead.
 - **Runs:** `Wake` runs the account if its last run is older than `WakeMinAge` (two minutes): the web app sends one when a session starts or comes back, which is how copies stay current without polling.
   Every wake and every run also calls `Store.RematchRemoteSyncPersonas`, so copies whose persona arrived later (created here, or imported) take it without a remote call.
   A run that leaves threads over the per-round cap goes straight on with another round (a full walk), so a big first sync finishes in one go.

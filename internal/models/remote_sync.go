@@ -176,6 +176,9 @@ type RemoteSyncThread struct {
 	LastMessageTime *time.Time
 	// Host labels forks: "<name> (from <host>)".
 	Host string
+	// Summary is the remote's running summary of the thread, when it has one and the syncer
+	// fetched it. A copy nobody has continued here takes it if it is further along than its own.
+	Summary *ChatSummary
 }
 
 // RemoteSyncMessage is a remote message to copy, oldest first within a batch. Moods and

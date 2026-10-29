@@ -48,6 +48,7 @@ func (h *Handler) RegisterWebhookRoutes(router *mux.Router) {
 	route("/chat", read, h.ListChats, http.MethodGet)
 	route("/personality", read, h.ListPersonalities, http.MethodGet)
 	route("/chat/{chatId}/messages", read, h.ListChatMessages, http.MethodGet)
+	route("/chat/{chatId}/summary", read, h.GetChatSummary, http.MethodGet)
 	route("/chat/chat-message/{id}", read, h.GetChatMessage, http.MethodGet)
 	route("/job/{id}", read, h.GetJob, http.MethodGet)
 }

@@ -12,6 +12,7 @@ import (
 	entchat "github.com/theimaginaryfoundation/what-iff/ent/chat"
 	"github.com/theimaginaryfoundation/what-iff/ent/chatmessage"
 	"github.com/theimaginaryfoundation/what-iff/ent/personality"
+	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
 	"github.com/theimaginaryfoundation/what-iff/ent/remotesync"
 	"github.com/theimaginaryfoundation/what-iff/ent/remotesyncchat"
 	"github.com/theimaginaryfoundation/what-iff/ent/remotesyncmessage"
@@ -31,6 +32,12 @@ import (
 
 // remoteSyncInsertChunk bounds one bulk insert, well under SQLite's and Postgres's bind limits.
 const remoteSyncInsertChunk = 400
+
+// remoteSyncCatchUpAfter is how many messages may sit past a thread's summary before sync flags
+// it for a catch-up summary. It matches the agent's history page (defaultHistoryPageSize): a
+// reply reads the summary and at most that many newer messages, so anything older than those and
+// not in the summary would be invisible to it.
+const remoteSyncCatchUpAfter = 50
 
 // ApplyRemoteSyncThread brings one remote thread's new messages into the user's account.
 // batch is oldest first. When the thread has no link yet it must be the whole remote history,
@@ -157,6 +164,9 @@ func (d *Datastore) applyRemoteSyncThread(ctx context.Context, tx *ent.Tx, userI
 	if err := setRemoteHead(ctx, tx, link.ID, batch); err != nil {
 		return nil, err
 	}
+	if err := settleRemoteSummary(ctx, tx, target.ID, thread.Summary); err != nil {
+		return nil, err
+	}
 	return res, nil
 }
 
@@ -207,7 +217,110 @@ func (d *Datastore) createRemoteMirror(ctx context.Context, tx *ent.Tx, userID, 
 	if err := setRemoteHead(ctx, tx, link.ID, batch); err != nil {
 		return nil, err
 	}
+	if err := settleRemoteSummary(ctx, tx, mirror.ID, thread.Summary); err != nil {
+		return nil, err
+	}
 	return &models.RemoteSyncApplyResult{Outcome: models.RemoteSyncCreated, ChatID: mirror.ID, MessagesAdded: added}, nil
+}
+
+// settleRemoteSummary runs once remote messages have landed in a thread nobody has continued here
+// (a new mirror, a tracking thread with no local tail, or a fresh fork), so everything in it came
+// from the remote. It takes the remote's running summary if that reaches further than the
+// thread's own (adoptRemoteSummary), then flags the thread for a catch-up if too much still sits
+// past its summary (flagIfBehind). A thread whose rehydration is in flight is left to it.
+func settleRemoteSummary(ctx context.Context, tx *ent.Tx, chatID uuid.UUID, remote *models.ChatSummary) error {
+	c, err := tx.Chat.Get(ctx, chatID)
+	if err != nil {
+		return fmt.Errorf("load thread for summary: %w", err)
+	}
+	if c.RehydrationState == models.RehydrationStatePending || c.RehydrationState == models.RehydrationStateProcessing {
+		return nil
+	}
+	if c, err = adoptRemoteSummary(ctx, tx, c, remote); err != nil || c == nil {
+		return err
+	}
+	return flagIfBehind(ctx, tx, c)
+}
+
+// adoptRemoteSummary gives the thread the remote's running summary when that reaches further
+// than the thread's own, so the thread needs no summarizing here. It returns the thread as it now
+// stands, or nil when a rehydration claimed it meanwhile.
+func adoptRemoteSummary(ctx context.Context, tx *ent.Tx, c *ent.Chat, remote *models.ChatSummary) (*ent.Chat, error) {
+	if remote == nil || remote.WindowStart == nil || strings.TrimSpace(remote.Summary) == "" ||
+		(c.LastCheckpointAt != nil && !remote.WindowStart.After(*c.LastCheckpointAt)) {
+		return c, nil
+	}
+	// The checkpoint cadence counts assistant messages since the last checkpoint.
+	assistants, err := tx.ChatMessage.Query().
+		Where(chatmessage.HasChatWith(entchat.ID(c.ID)),
+			chatmessage.OriginEQ(chatmessage.OriginAssistant),
+			chatmessage.SentAtLT(*remote.WindowStart)).
+		Count(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("count summarized replies: %w", err)
+	}
+	n, err := tx.Chat.Update().
+		Where(entchat.ID(c.ID), notRehydrating()).
+		SetCheckpointSummary(remote.Summary).
+		SetLastCheckpointAt(*remote.WindowStart).
+		SetCheckpointUserMessageCount(assistants).
+		SetRehydrationState(models.RehydrationStateReady).
+		ClearResponseID().
+		Save(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("adopt remote summary: %w", err)
+	}
+	if n == 0 {
+		return nil, nil
+	}
+	updated, err := tx.Chat.Get(ctx, c.ID)
+	if err != nil {
+		return nil, fmt.Errorf("reload thread after summary: %w", err)
+	}
+	return updated, nil
+}
+
+// flagIfBehind marks a summarized thread stale when more messages sit past its summary than a
+// reply reads (the remote summary was missing or behind, or the thread is an export import that
+// sync appended to): its next use folds them into the summary. A thread never summarized is left
+// to its first rehydration, which summarizes the whole history anyway.
+func flagIfBehind(ctx context.Context, tx *ent.Tx, c *ent.Chat) error {
+	if c.RehydrationState == models.RehydrationStateStale {
+		return nil
+	}
+	if c.CheckpointSummary == "" &&
+		(c.RehydrationState == models.RehydrationStateNone || c.RehydrationState == models.RehydrationStateFailed) {
+		return nil
+	}
+	pending := tx.ChatMessage.Query().Where(chatmessage.HasChatWith(entchat.ID(c.ID)))
+	if c.LastCheckpointAt != nil {
+		pending = pending.Where(chatmessage.SentAtGTE(*c.LastCheckpointAt))
+	}
+	n, err := pending.Count(ctx)
+	if err != nil {
+		return fmt.Errorf("count unsummarized messages: %w", err)
+	}
+	if n <= remoteSyncCatchUpAfter {
+		return nil
+	}
+	err = tx.Chat.Update().
+		Where(entchat.ID(c.ID), notRehydrating()).
+		SetRehydrationState(models.RehydrationStateStale).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("flag thread for catch-up: %w", err)
+	}
+	return nil
+}
+
+// notRehydrating matches a chat no rehydration is running for. adoptRemoteSummary's and flagIfBehind's writes are
+// conditional on it, like ClaimChatRehydration's claim, so a rehydration claimed after the thread
+// was read is never overwritten.
+func notRehydrating() predicate.Chat {
+	return entchat.Or(
+		entchat.RehydrationStateIsNil(),
+		entchat.RehydrationStateNotIn(models.RehydrationStatePending, models.RehydrationStateProcessing),
+	)
 }
 
 // adoptRemoteHistory links the oldest-first prefix of a local thread's messages that matches the

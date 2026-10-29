@@ -22,6 +22,7 @@ type Provider interface {
 	ListChatMessages(ctx context.Context, userID, chatID uuid.UUID, page, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
 	ListChatMessagesBefore(ctx context.Context, userID, chatID uuid.UUID, beforeSentAt time.Time, beforeID uuid.UUID, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
 	GetChatMessage(ctx context.Context, userID, messageID uuid.UUID) (*models.ChatMessage, error)
+	GetChatSummary(ctx context.Context, userID, chatID uuid.UUID) (*models.ChatSummary, error)
 	GetJob(ctx context.Context, userID, jobID uuid.UUID) (*models.Job, error)
 }
 
