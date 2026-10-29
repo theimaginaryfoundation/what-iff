@@ -24,6 +24,27 @@ func (p ModelProvider) Known() bool {
 	return false
 }
 
+// providerNames are the names a person would know a provider by.
+var providerNames = map[ModelProvider]string{
+	ModelProviderOpenAI:    "OpenAI",
+	ModelProviderAnthropic: "Anthropic",
+	ModelProviderZAI:       "z.ai",
+	ModelProviderGoogle:    "Google Gemini",
+	ModelProviderMistral:   "Mistral",
+	ModelProviderDeepSeek:  "DeepSeek",
+	ModelProviderQwen:      "Qwen",
+	ModelProviderXiaomi:    "Xiaomi MiMo",
+}
+
+// DisplayName is the name a person would know p by, or p itself when it is not
+// a known provider.
+func (p ModelProvider) DisplayName() string {
+	if name, ok := providerNames[p]; ok {
+		return name
+	}
+	return string(p)
+}
+
 // ProviderKeySummary describes a stored provider key without revealing it.
 type ProviderKeySummary struct {
 	Provider ModelProvider `json:"provider"`
