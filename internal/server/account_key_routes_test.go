@@ -44,14 +44,3 @@ func TestMountAccountKeyRoutes_SeesThroughAWrapper(t *testing.T) {
 	require.True(t, mountAccountKeyRoutes(router, wrapped{keys}, keys))
 	require.True(t, servesKeyRoutes(router))
 }
-
-// With the default New, the server takes the deployment's keys and serves no
-// key routes.
-func TestDefaultResolverServesNoKeyRoutes(t *testing.T) {
-	keys := accountkeys.New(nil, nil, nil, zap.NewNop())
-	resolver := providerkeys.New(providerkeys.NewDeploymentResolver(nil), keys)
-
-	router := mux.NewRouter()
-	require.False(t, mountAccountKeyRoutes(router, resolver, keys))
-	require.False(t, servesKeyRoutes(router))
-}

@@ -223,6 +223,49 @@ func TestBuzzActiveConnectionsListBoundChannels(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, conns[0].Channels[0].LastEventAt, "cleared when the gateway stops listening")
 
+	// Pausing clears the mark in the same write, whichever process leads the gateway next, and a
+	// late mark write cannot bring it back while paused.
+	mark := func() *time.Time {
+		t.Helper()
+		row, err := f.ds.dbClient.BuzzBinding.Get(ctx, b.ID)
+		require.NoError(t, err)
+		return row.LastEventAt
+	}
+	for name, pause := range map[string]func(){
+		"community paused": func() {
+			s := models.BuzzCommunityDisabled
+			_, err := f.ds.UpdateBuzzCommunity(ctx, f.owner, c.ID, models.BuzzCommunityPatch{Status: &s})
+			require.NoError(t, err)
+		},
+		"persona paused": func() {
+			_, err := f.ds.SetBuzzAgentStatus(ctx, f.owner, a.ID, models.BuzzAgentDisabled)
+			require.NoError(t, err)
+		},
+		"inbound off": func() {
+			_, err := f.ds.UpdateBuzzBinding(ctx, f.owner, b.ID, models.BuzzBindingPatch{InboundEnabled: &off})
+			require.NoError(t, err)
+		},
+		"binding broken": func() {
+			require.NoError(t, f.ds.SetBuzzBindingStatus(ctx, b.ID, models.BuzzBindingBroken, "gone"))
+		},
+	} {
+		require.NoError(t, f.ds.MarkBuzzBindingEvent(ctx, b.ID, at), name)
+		require.NotNil(t, mark(), name)
+		pause()
+		assert.Nil(t, mark(), name+": cleared by the pause")
+		require.NoError(t, f.ds.MarkBuzzBindingEvent(ctx, b.ID, at.Add(time.Minute)))
+		assert.Nil(t, mark(), name+": a late write is refused")
+		// Resume everything for the next case.
+		on, activeC := true, models.BuzzCommunityActive
+		_, err := f.ds.UpdateBuzzCommunity(ctx, f.owner, c.ID, models.BuzzCommunityPatch{Status: &activeC})
+		require.NoError(t, err)
+		_, err = f.ds.SetBuzzAgentStatus(ctx, f.owner, a.ID, models.BuzzAgentActive)
+		require.NoError(t, err)
+		_, err = f.ds.UpdateBuzzBinding(ctx, f.owner, b.ID, models.BuzzBindingPatch{InboundEnabled: &on})
+		require.NoError(t, err)
+		require.NoError(t, f.ds.SetBuzzBindingStatus(ctx, b.ID, models.BuzzBindingActive, ""))
+	}
+
 	disabled := models.BuzzCommunityDisabled
 	_, err = f.ds.UpdateBuzzCommunity(ctx, f.owner, c.ID, models.BuzzCommunityPatch{Status: &disabled})
 	require.NoError(t, err)

@@ -1209,6 +1209,9 @@ func (h *Handler) relayFailed(w http.ResponseWriter, err error) {
 	case errors.Is(err, buzzrelay.ErrNoAccess):
 		handlerutils.RespondWithError(w, h.Logger, http.StatusBadGateway, handlerutils.CodeNotSet,
 			"The community has not let this persona in yet.", nil)
+	case errors.Is(err, buzzrelay.ErrNoRelayIdentity):
+		handlerutils.RespondWithError(w, h.Logger, http.StatusBadGateway, handlerutils.CodeNotSet,
+			"This community does not say which key signs its channels, so they cannot be checked. Check it again once its relay publishes one.", nil)
 	case errors.As(err, &rejected):
 		handlerutils.RespondWithError(w, h.Logger, http.StatusBadGateway, handlerutils.CodeNotSet,
 			"Buzz refused that: "+rejected.Reason, nil)

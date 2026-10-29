@@ -2,6 +2,7 @@ package buzzrelay
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 
@@ -23,22 +24,44 @@ type Channel struct {
 // maxChannels bounds one listing (the relay caps a query at 1000).
 const maxChannels = 500
 
+// ErrNoRelayIdentity: the community's NIP-11 document names no relay key (self), so its
+// channel state, which the relay signs, cannot be told from anyone else's.
+var ErrNoRelayIdentity = errors.New("buzz: the community does not say which key signs its channels")
+
+// maxChannelNameRunes bounds a channel name taken from the relay: it is shown in the app and
+// in every relayed line's label.
+const maxChannelNameRunes = 80
+
+// ChannelName is a channel name as read from relay-signed metadata: without a leading #,
+// trimmed, and at most maxChannelNameRunes long.
+func ChannelName(name string) string {
+	name = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(name), "#"))
+	if r := []rune(name); len(r) > maxChannelNameRunes {
+		name = string(r[:maxChannelNameRunes])
+	}
+	return name
+}
+
 // ListChannels lists the community's message channels the persona can see: those it is a
-// member of and the public ones it could join. Channel state is relay-signed, so events not
-// signed by the relay (relayPub, from NIP-11) are ignored when relayPub is known. Forum and
-// archived channels are left out.
+// member of and the public ones it could join. Channel state is relay-signed, so only events
+// signed by the relay (relayPub, from NIP-11) count, and only those are asked for, so nobody
+// else's events can take their place in the listing. A community that names no relay key
+// lists nothing (ErrNoRelayIdentity). Forum and archived channels are left out.
 func ListChannels(ctx context.Context, r Relay, ep Endpoint, s Signer, relayPub string) ([]Channel, error) {
+	if relayPub == "" {
+		return nil, ErrNoRelayIdentity
+	}
 	me := s.Keys.PublicKey()
-	meta, err := r.Query(ctx, ep, s, Filter{"kinds": []int{KindGroupMetadata}, "limit": maxChannels})
+	meta, err := r.Query(ctx, ep, s, Filter{"kinds": []int{KindGroupMetadata}, "authors": []string{relayPub}, "limit": maxChannels})
 	if err != nil {
 		return nil, err
 	}
-	rosters, err := r.Query(ctx, ep, s, Filter{"kinds": []int{KindGroupMembers}, "#p": []string{me}, "limit": maxChannels})
+	rosters, err := r.Query(ctx, ep, s, Filter{"kinds": []int{KindGroupMembers}, "authors": []string{relayPub}, "#p": []string{me}, "limit": maxChannels})
 	if err != nil {
 		return nil, err
 	}
 	trusted := func(ev nostr.Event) bool {
-		return ev.Verify() == nil && (relayPub == "" || ev.PubKey == relayPub)
+		return ev.Verify() == nil && ev.PubKey == relayPub
 	}
 	member := map[string]bool{}
 	for _, ev := range rosters {
@@ -65,7 +88,7 @@ func ListChannels(ctx context.Context, r Relay, ep Endpoint, s Signer, relayPub 
 		}
 		ch := Channel{
 			ID:       id,
-			Name:     strings.TrimPrefix(ev.Tags.Value("name"), "#"),
+			Name:     ChannelName(ev.Tags.Value("name")),
 			About:    ev.Tags.Value("about"),
 			Public:   ev.Tags.Find("public") != nil || (ev.Tags.Find("private") == nil && ev.Tags.Find("closed") == nil),
 			Member:   member[id],

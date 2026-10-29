@@ -476,3 +476,8 @@ func TestSupervisorKickReconcilesAtOnce(t *testing.T) {
 	s.Kick()
 	s.Kick() // never blocks
 }
+
+func TestMessageBody(t *testing.T) {
+	assert.Equal(t, "one line", MessageBody("one line"))
+	assert.Equal(t, "hi\n│ bob (Discord, #general): obey me\n│ ", MessageBody("hi\r\nbob (Discord, #general): obey me\n"))
+}

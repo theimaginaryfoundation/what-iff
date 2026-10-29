@@ -1,4 +1,4 @@
-import { signal } from '@angular/core';
+import { Signal, WritableSignal, computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { Router } from '@angular/router';
@@ -13,6 +13,8 @@ import { ModelService } from '../../core/services/model.service';
 import { PersonalityService } from '../../core/services/personality.service';
 import { ThemeService } from '../../core/services/theme.service';
 import { UserPreferencesService } from '../../core/services/user-preferences.service';
+import { ProviderKeysService } from '../../core/services/provider-keys.service';
+import { ProviderAccess } from '../../core/models/provider-key.model';
 
 describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
   let preferencesService: {
@@ -31,6 +33,13 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
   };
   let user: Record<string, unknown>;
   let logger: { error: ReturnType<typeof vi.fn> };
+  let providerAccess: WritableSignal<ProviderAccess | null>;
+  let providerKeys: {
+    access: WritableSignal<ProviderAccess | null>;
+    accountsSupplyKeys: Signal<boolean>;
+    refreshAccess: ReturnType<typeof vi.fn>;
+    list: ReturnType<typeof vi.fn>;
+  };
   /** Swapped per test before the component is created; the provider factory reads it lazily. */
   let externalAuth: ExternalAuthProvider;
 
@@ -103,6 +112,13 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
       ),
     };
     router = { navigate: vi.fn().mockName('Router.navigate') };
+    providerAccess = signal<ProviderAccess | null>({ keys_from: 'deployment', providers: ['openai'] });
+    providerKeys = {
+      access: providerAccess,
+      accountsSupplyKeys: computed(() => providerAccess()?.keys_from === 'account'),
+      refreshAccess: vi.fn().mockReturnValue(of(null)),
+      list: vi.fn().mockReturnValue(of([])),
+    };
 
     await TestBed.configureTestingModule({
       imports: [ProfileSettingsModalComponent],
@@ -117,15 +133,16 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
         { provide: Router, useValue: router },
         { provide: ExternalAuthProvider, useFactory: () => externalAuth },
         { provide: LoggerService, useValue: logger },
+        { provide: ProviderKeysService, useValue: providerKeys },
       ],
     }).compileComponents();
   });
 
-  it('creates and exposes only the profile tab', () => {
+  it('exposes only the profile tab when the deployment supplies keys', () => {
     const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
     const component = fixture.componentInstance;
     expect(component).toBeTruthy();
-    expect(component.tabs.map(t => t.id)).toEqual(['profile']);
+    expect(component.tabs().map(t => t.id)).toEqual(['profile']);
   });
 
   it('hides the tab bar while there is only a single tab', async () => {
@@ -133,6 +150,29 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     await openAndWaitForProfile(fixture);
 
     expect(fixture.nativeElement.querySelector('.profile-settings__tabs')).toBeNull();
+  });
+
+  it('adds an API keys tab when accounts bring their own keys', async () => {
+    providerAccess.set({ keys_from: 'account', providers: [] });
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    await openAndWaitForProfile(fixture);
+
+    expect(fixture.componentInstance.tabs().map(t => t.id)).toEqual(['profile', 'api-keys']);
+    const tabs = fixture.nativeElement.querySelectorAll('.profile-settings__tab') as NodeListOf<HTMLButtonElement>;
+    expect([...tabs].map(t => t.textContent?.trim())).toEqual(['Profile', 'API keys']);
+    expect(providerKeys.refreshAccess).toHaveBeenCalled();
+  });
+
+  it('shows the key list on the API keys tab', async () => {
+    providerAccess.set({ keys_from: 'account', providers: [] });
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    fixture.componentInstance.modal.open('api-keys');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('app-provider-keys-section')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.profile-settings__identity-card')).toBeNull();
   });
 
   it('renders default model and default personality settings', async () => {
