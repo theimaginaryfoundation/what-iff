@@ -988,6 +988,9 @@ func (d *Datastore) buzzSpeakerForTurn(ctx context.Context, userID, chatID, chat
 	rows, err := d.dbClient.BuzzMessageLink.Query().
 		Where(
 			buzzmessagelink.ChatMessageIDIsNil(),
+			// Only links of a turn that may still be starting: one that never got its message
+			// (a failed attach, a shutdown before the cleanup) must not be credited forever.
+			buzzmessagelink.CreatedAtGT(time.Now().Add(-pendingSpeakerWindow)),
 			inbound,
 			buzzmessagelink.HasBindingWith(buzzbinding.ChatID(chatID)),
 			owned,

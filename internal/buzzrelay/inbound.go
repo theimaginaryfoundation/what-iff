@@ -95,6 +95,15 @@ func (s *Service) runInbound(ctx context.Context, batch []inboundWork) {
 		return
 	}
 	last := mentions[len(mentions)-1].w
+	// Who is told when the turn fails: the newest person in the batch. Never an agent, which
+	// would answer the notice; and only when there is no person in the batch is nobody told.
+	var asker *nostr.Event
+	for i := len(mentions) - 1; i >= 0; i-- {
+		if !mentions[i].w.agent {
+			asker = &mentions[i].w.ev
+			break
+		}
+	}
 
 	personaName := ""
 	if p, err := s.Store.GetPersonality(ctx, t.Agent.OwnerID, t.Agent.PersonalityID); err == nil && p != nil {
@@ -137,8 +146,8 @@ func (s *Service) runInbound(ctx context.Context, batch []inboundWork) {
 		for _, m := range mentions {
 			_ = s.Store.DeleteBuzzLink(ctx, m.link.ID)
 		}
-		if !last.agent {
-			s.notice(ctx, t, last.ev, NoticeFailed)
+		if asker != nil {
+			s.notice(ctx, t, *asker, NoticeFailed)
 		}
 		return
 	}
@@ -158,7 +167,7 @@ func (s *Service) runInbound(ctx context.Context, batch []inboundWork) {
 	}
 
 	jobID, _ := uuid.Parse(resp.JobID)
-	s.waitForReply(ctx, t, ep, signer, last, jobID, done)
+	s.waitForReply(ctx, t, ep, signer, last, asker, jobID, done)
 }
 
 // lastInbound is the binding's previous message for the loop guard (nil: none within its
@@ -218,7 +227,7 @@ func (s *Service) quoted(ctx context.Context, ep Endpoint, signer Signer, agentP
 	return s.names.name(ctx, s.Relay, ep, signer, parent.PubKey), parent.Content
 }
 
-func (s *Service) waitForReply(ctx context.Context, t models.BuzzBindingTarget, ep Endpoint, signer Signer, w inboundWork, jobID uuid.UUID, done <-chan struct{}) {
+func (s *Service) waitForReply(ctx context.Context, t models.BuzzBindingTarget, ep Endpoint, signer Signer, w inboundWork, asker *nostr.Event, jobID uuid.UUID, done <-chan struct{}) {
 	ev := w.ev
 	reply := ReplyThread(ev)
 	s.typing(ctx, ep, signer, t.Binding.ChannelID, &reply)
@@ -248,8 +257,8 @@ func (s *Service) waitForReply(ctx context.Context, t models.BuzzBindingTarget, 
 				continue
 			}
 			if job.Status == models.JobStatusFailed || job.Status == models.JobStatusCancelled {
-				if !w.agent {
-					s.notice(ctx, t, ev, NoticeFailed)
+				if asker != nil {
+					s.notice(ctx, t, *asker, NoticeFailed)
 				}
 				return
 			}

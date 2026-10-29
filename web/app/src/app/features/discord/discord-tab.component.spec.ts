@@ -226,6 +226,7 @@ describe('DiscordTabComponent', () => {
     it.each([
       ['discord-binding-ack', { chat_sandboxed: false, allow_unrestricted: false }, false],
       ['discord-binding-inbound', { inbound_enabled: true }, true],
+      ['discord-binding-agents', { answer_agents: true }, true],
     ] as const)('puts %s back and says why when the save fails', async (testId, fields, saved) => {
       const fixture = await create([{ ...binding, ...fields }]);
       discord['updateBinding'].mockReturnValue(

@@ -313,6 +313,15 @@ func TestBuzzLinksDedupeAndThreadsContinue(t *testing.T) {
 	name, err := f.ds.ExternalSpeakerForTurn(ctx, f.owner, f.chat, uuid.New())
 	require.NoError(t, err)
 	assert.Equal(t, "Alice", name)
+	// An old link that never got its message is not credited to later turns.
+	stale, _, err := f.ds.RecordInboundBuzzMessage(ctx, models.BuzzInbound{BindingID: b.ID, EventID: "ev0", ThreadRoot: "ev0", AuthorPubKey: "mallory", AuthorName: "Mallory"})
+	require.NoError(t, err)
+	_, err = f.ds.sqlDB.ExecContext(ctx, `UPDATE buzz_message_links SET created_at = ? WHERE id = ?`, time.Now().Add(-time.Hour), stale.ID)
+	require.NoError(t, err)
+	name, err = f.ds.ExternalSpeakerForTurn(ctx, f.owner, f.chat, uuid.New())
+	require.NoError(t, err)
+	assert.Equal(t, "Alice", name, "the stale link is left out")
+	require.NoError(t, f.ds.DeleteBuzzLink(ctx, stale.ID))
 
 	userMsg := uuid.New()
 	require.NoError(t, f.ds.AttachBuzzLinkMessage(ctx, link.ID, userMsg))

@@ -624,6 +624,24 @@ func TestAFailedTurnPostsANeutralNotice(t *testing.T) {
 	assert.Empty(t, h.store.links, "the inbound link is removed so a redelivery may try again")
 }
 
+// When a batch's turn fails, the newest person in it is told, even if the newest message is
+// an agent's; the agent is never sent a notice.
+func TestAFailedBatchTellsItsNewestPerson(t *testing.T) {
+	h := newHarness(t)
+	h.turns.err = errors.New("no credits")
+	bot, _ := nostr.GenerateKeys()
+	h.store.personas = map[string]bool{bot.PublicKey(): true}
+	h.store.target.Binding.AnswerAgents = true
+	person := h.say(t, h.alice, "@vix hi", nil, h.agent.PublicKey())
+	agentEv := h.say(t, bot, "@vix beep", nil, h.agent.PublicKey())
+	h.svc.defaults()
+	h.svc.runInbound(h.ctx, []inboundWork{{target: h.store.target, ev: person}, {target: h.store.target, ev: agentEv, agent: true}})
+	msgs := h.relay.messages()
+	require.Len(t, msgs, 1)
+	assert.Equal(t, NoticeFailed, msgs[0].Content)
+	assert.Equal(t, person.ID, ThreadOf(msgs[0]).Parent, "posted to the person, not the agent")
+}
+
 func TestPublishRefusalsAreRecorded(t *testing.T) {
 	h := newHarness(t)
 	replyID := uuid.New()
@@ -898,6 +916,7 @@ func TestARenamedChannelIsRecordedOnTheBinding(t *testing.T) {
 	}{
 		{name: "relay-signed metadata", signer: relayKeys, relayPub: relayKeys.PublicKey(), want: "lounge"},
 		{name: "metadata someone else signed is ignored", signer: stranger, relayPub: relayKeys.PublicKey(), want: "general"},
+		{name: "a community that names no relay key is not renamed", signer: stranger, relayPub: "", want: "general"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
