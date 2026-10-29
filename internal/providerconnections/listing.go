@@ -1,10 +1,12 @@
 package providerconnections
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -180,6 +182,9 @@ func (l *Lister) List(ctx context.Context, t Target) ([]ListedModel, error) {
 		ce.Err = redactKey(ce.Err, t.Key)
 		return nil, ce
 	}
+	if t.OllamaDetails {
+		l.addOllamaDetails(ctx, t.BaseURL, t.Key, out)
+	}
 	if out == nil {
 		out = []ListedModel{}
 	}
@@ -194,6 +199,55 @@ func redactKey(err error, key string) error {
 		return err
 	}
 	return errors.New(strings.ReplaceAll(err.Error(), key, "[redacted]"))
+}
+
+// maxOllamaDetails bounds the per-model lookups after an Ollama listing; a
+// server on this computer holds a handful of models, not thousands.
+const maxOllamaDetails = 200
+
+// ollamaShow is the part of Ollama's POST /api/show answer read here.
+type ollamaShow struct {
+	Capabilities []string `json:"capabilities"`
+}
+
+// addOllamaDetails asks Ollama's native API what each listed model can do,
+// filling in tool and image support. It sends the connection's key as the
+// listing did, for an Ollama behind a proxy that checks one. It is best effort:
+// a model whose lookup fails keeps its capabilities unknown, and the listing
+// still succeeds.
+func (l *Lister) addOllamaDetails(ctx context.Context, baseURL, key string, models []ListedModel) {
+	root := strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
+	client := l.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	for i := range models {
+		if i >= maxOllamaDetails {
+			return
+		}
+		body, _ := json.Marshal(map[string]string{"model": models[i].ID})
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, root+"/api/show", bytes.NewReader(body))
+		if err != nil {
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if key != "" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return
+		}
+		var show ollamaShow
+		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&show)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || decodeErr != nil || show.Capabilities == nil {
+			continue
+		}
+		tools := slices.Contains(show.Capabilities, "tools")
+		vision := slices.Contains(show.Capabilities, "vision")
+		models[i].ToolSupport, models[i].VisionSupport = &tools, &vision
+	}
 }
 
 // keyCheckError is a key check that was answered with something other than

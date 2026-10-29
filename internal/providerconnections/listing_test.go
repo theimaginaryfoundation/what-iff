@@ -2,6 +2,7 @@ package providerconnections
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -414,4 +415,48 @@ func TestWithKnownCapabilities(t *testing.T) {
 	got = withKnownCapabilities(custom, FlavorOpenAI, []ListedModel{{ID: "x", ToolSupport: &no}})
 	require.False(t, *got[0].ToolSupport, "what the provider reported wins")
 	require.Nil(t, got[0].VisionSupport)
+}
+
+// Ollama's OpenAI-compatible list reports only ids; its native /api/show says
+// what each model can do. A failed lookup leaves that model unknown.
+func TestList_OllamaDetails(t *testing.T) {
+	var s seen
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.record(r)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = fmt.Fprint(w, `{"object":"list","data":[{"id":"qwen3:0.6b","object":"model"},{"id":"llava:7b","object":"model"},{"id":"broken","object":"model"}]}`)
+		case "/api/show":
+			var body struct{ Model string }
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			switch body.Model {
+			case "qwen3:0.6b":
+				_, _ = fmt.Fprint(w, `{"capabilities":["completion","tools","thinking"]}`)
+			case "llava:7b":
+				_, _ = fmt.Fprint(w, `{"capabilities":["completion","vision"]}`)
+			default:
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	got, err := NewLister(nil, false).List(context.Background(), Target{Flavor: FlavorOpenAI, BaseURL: srv.URL + "/v1", OllamaDetails: true})
+	require.NoError(t, err, "a failed lookup does not fail the listing")
+	byID := map[string]ListedModel{}
+	for _, m := range got {
+		byID[m.ID] = m
+	}
+	require.True(t, *byID["qwen3:0.6b"].ToolSupport)
+	require.False(t, *byID["qwen3:0.6b"].VisionSupport)
+	require.False(t, *byID["llava:7b"].ToolSupport)
+	require.True(t, *byID["llava:7b"].VisionSupport)
+	require.Nil(t, byID["broken"].ToolSupport)
+	require.Contains(t, s.paths, "/api/show", "asked at the server's root, not under /v1")
+
+	ollama, _ := findPreset(Presets(nil, "localhost"), PresetOllama)
+	require.True(t, ollama.target(ollama.Flavor, ollama.BaseURL, "").OllamaDetails)
 }
