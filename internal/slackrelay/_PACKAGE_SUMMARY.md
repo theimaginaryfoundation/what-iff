@@ -21,7 +21,8 @@ It talks to Slack through the `Slack` interface (the Web API client `API`) and t
 - **Service (`service.go`; the batch path in `inbound.go`, files in `files_in.go`, the name cache in `names.go`):** `HandleEvent` takes an app's events.
   Messages pass `admits` (something someone wrote in a bound channel, newer than the binding, not the persona's own nor an integration's, allowed by the lists, a mention or a thread continuation, bots only with `answer_agents`) and the fail-closed thread gate, then the turn queue (`relaykit.TurnQueue`: one batch per Slack thread, the channel's top-level messages sharing one).
   `channel_rename`/`group_rename` rename the bindings, `channel_left`/`group_left` break them, and `app_uninstalled`/`tokens_revoked` (for the bot) mark the app `invalid_token`.
-  `runInbound` re-checks the binding, applies the loop guard (`guardBatch`), records each mention once (the dedupe key), builds the turn (`buildTurn`), starts it metered as `slack`, puts the `:eyes:` reaction on the newest mention while it runs, and posts a neutral notice when it fails.
+  `runInbound` re-checks the binding, applies the loop guard (`guardBatch`), records each mention once (the dedupe key), builds the turn (`buildTurn`), starts it metered as `slack`, puts the `:eyes:` reaction on the newest mention while it runs, and posts a neutral notice when it fails (re-reading the binding first, so nothing is posted once it is paused).
+  An agent's mention past the loop guard's cap is dropped before it is queued, a failed read of the previous link counts as the chain at its cap, and a batch's links are attached newest first.
   `OnReply` (the reply hook) posts into the newest asker's thread, and to bindings the composer toggle or `post_to_slack` armed (a new message, with further parts and files in its thread).
 
 ## Key types and entry points
@@ -47,7 +48,7 @@ It talks to Slack through the `Slack` interface (the Web API client `API`) and t
   Slack redelivers an envelope that is not acknowledged within a few seconds, so the socket acknowledges before handing the event on; redeliveries are deduplicated on the message `ts`.
 - **No subscription per channel.**
   Slack sends an app every message of every channel it is in, so the gateway's fingerprint is the tokens alone and the binding is looked up per event: binding a channel needs no reconnect.
-- **Thread continuations** need no mention when the persona already answered the same author in that thread (`Store.SlackThreadContinues`); Slack has no reply to a single message inside a thread.
+- **Thread continuations** need no mention when the persona posted in that thread and answered the same author there (`Store.SlackThreadContinues`); Slack has no reply to a single message inside a thread, and a batched turn replies in one thread only.
 - **`app_mention` is not subscribed**: a mention also arrives as a message event, and both would answer it twice.
 - **Integrations are never answered**: a message with no user behind it (an incoming webhook's `bot_message`) has nobody to answer, and no notice is ever posted to a bot.
 - **Messages older than their binding are never answered.**

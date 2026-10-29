@@ -226,6 +226,12 @@ func (s *Service) handleMessage(ctx context.Context, app models.SlackAppCredenti
 	if !ok || !s.threadOpen(ctx, *target) {
 		return
 	}
+	if agent && s.guard.Closed(target.Binding.ID, s.lastInbound(ctx, target.Binding.ID)) {
+		// Past the loop guard's cap: dropped now, so it takes no place from people in the queue.
+		s.Logger.Info("slack relay: loop guard: too many agent turns in a row; dropping mention",
+			zap.String("binding_id", target.Binding.ID.String()), zap.String("ts", m.TS))
+		return
+	}
 	if s.turns.Enqueue(ctx, target.Binding.ChatID, inboundWork{target: *target, msg: m, agent: agent}) {
 		return
 	}
@@ -471,6 +477,13 @@ func invalidBotToken(err error) string { return fmt.Sprintf(invalidBotTokenMessa
 
 // notice posts a short reply in the thread of the message that asked; failures are ignored.
 func (s *Service) notice(ctx context.Context, t models.SlackBindingTarget, m Message, text string) {
+	// Read again first: a notice can come long after the turn started, and nothing is posted
+	// once the app is paused or its tokens refused, or the binding broken.
+	fresh, err := s.Store.GetSlackBindingTarget(ctx, t.Binding.ID)
+	if err != nil || fresh == nil || !fresh.Live() {
+		return
+	}
+	t = *fresh
 	if _, err := s.Slack.PostMessage(ctx, t.App.BotToken, t.Binding.ChannelID, m.ThreadRoot(), escapeMrkdwn(text)); err != nil {
 		s.Logger.Debug("slack relay: notice failed", zap.Error(err))
 	}

@@ -186,6 +186,13 @@ func TestSlackActiveAppsAndGatewayState(t *testing.T) {
 	apps, err = f.ds.ListActiveSlackAppCredentials(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, apps, "an app with a rejected token is not connected")
+	require.NoError(t, f.ds.SetSlackAppState(ctx, a.ID, models.SlackAppActive, ""))
+	got, err = f.ds.GetSlackApp(ctx, f.owner, a.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.SlackAppInvalidToken, got.Status, "a socket that still connects cannot clear invalid_token")
+	active := models.SlackAppActive
+	_, err = f.ds.UpdateSlackApp(ctx, f.owner, a.ID, models.SlackAppPatch{Status: &active})
+	require.NoError(t, err)
 
 	disabled := models.SlackAppDisabled
 	_, err = f.ds.UpdateSlackApp(ctx, f.owner, a.ID, models.SlackAppPatch{Status: &disabled})
@@ -262,6 +269,16 @@ func TestSlackLinksDedupeAndThreadsContinue(t *testing.T) {
 	links, err = f.ds.ListSlackLinksForChat(ctx, f.other, f.chat, 10)
 	require.NoError(t, err)
 	assert.Empty(t, links)
+
+	// Bob's top-level mention was batched into the same turn, but the reply went to Alice's
+	// thread only: Bob's own thread has no reply from the persona, so he has not started a
+	// conversation there.
+	bobLink, _, err := f.ds.RecordInboundSlackMessage(ctx, models.SlackInbound{BindingID: b.ID, MessageTS: "300.1", ThreadTS: "300.1", AuthorUserID: "UBOB", AuthorName: "Bob"})
+	require.NoError(t, err)
+	require.NoError(t, f.ds.AttachSlackLinkMessage(ctx, bobLink.ID, userMsg))
+	ok, err = f.ds.SlackThreadContinues(ctx, b.ID, "300.1", "UBOB")
+	require.NoError(t, err)
+	assert.False(t, ok, "a batched asker in a thread the persona never posted in")
 }
 
 func TestSlackRelayThreadsAreExternal(t *testing.T) {

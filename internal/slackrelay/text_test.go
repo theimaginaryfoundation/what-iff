@@ -52,6 +52,9 @@ func TestToMrkdwn(t *testing.T) {
 	}{
 		{"bold", "this is **important** and __this__ too", "this is *important* and *this* too"},
 		{"italic", "an *aside* here", "an _aside_ here"},
+		{"emphasis marks inside a URL stay as written", "[x](https://a.test/*foo*/__bar__/~~baz~~)", "<https://a.test/*foo*/__bar__/~~baz~~|x>"},
+		{"emphasis in a link label is converted", "see [**the doc**](https://a.test/d) and *this*", "see <https://a.test/d|*the doc*> and _this_"},
+		{"a stray placeholder byte is dropped", "a\x01 0\x01 b", "a 0 b"},
 		{"bold and italic together", "**bold** then *it*", "*bold* then _it_"},
 		{"strike", "~~gone~~", "~gone~"},
 		{"links", "see [the docs](https://x.test/a?b=1&c=2)", "see <https://x.test/a?b=1&amp;c=2|the docs>"},

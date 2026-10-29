@@ -127,10 +127,17 @@ func (d *Datastore) UpdateSlackApp(ctx context.Context, userID, id uuid.UUID, p 
 // SetSlackAppState records how an app's connection stands (the gateway's view). An empty
 // lastError clears it; an active state without an error records the connection time (active
 // with an error is a connection that is retrying). An app the owner paused is left paused, so
-// a connection closing just after the pause cannot undo it.
+// a connection closing just after the pause cannot undo it. An app marked invalid_token is
+// left so too: a socket that still connects (app-level tokens outlive an uninstall or a revoked
+// bot token) must not make it look healthy again; only new tokens or a refresh clear it
+// (UpdateSlackApp).
 func (d *Datastore) SetSlackAppState(ctx context.Context, id uuid.UUID, status models.SlackAppStatus, lastError string) error {
+	where := []predicate.SlackApp{slackapp.ID(id), slackapp.StatusNEQ(slackapp.StatusDisabled)}
+	if status == models.SlackAppActive {
+		where = append(where, slackapp.StatusNEQ(slackapp.StatusInvalidToken))
+	}
 	upd := d.dbClient.SlackApp.Update().
-		Where(slackapp.ID(id), slackapp.StatusNEQ(slackapp.StatusDisabled)).
+		Where(where...).
 		SetStatus(slackapp.Status(status))
 	if lastError == "" {
 		upd.ClearLastError()
@@ -558,12 +565,25 @@ func (d *Datastore) LastInboundSlackLink(ctx context.Context, bindingID uuid.UUI
 }
 
 // SlackThreadContinues reports whether a message in a Slack thread continues a conversation
-// with the persona there, so it is answered without a mention: the persona already answered
-// the same author in that thread. (Slack has no reply to one message inside a thread, so this
-// stands in for Buzz's direct-reply rule.)
+// with the persona there, so it is answered without a mention: the persona posted in that
+// thread (a sent reply), and answered the same author there. (Slack has no reply to one message
+// inside a thread, so this stands in for Buzz's direct-reply rule.) Both are needed: a batched
+// turn answers several askers in one thread only, so an asker whose own thread got no reply
+// has not started a conversation there.
 func (d *Datastore) SlackThreadContinues(ctx context.Context, bindingID uuid.UUID, threadTS, author string) (bool, error) {
 	if threadTS == "" || author == "" {
 		return false, nil
+	}
+	posted, err := d.dbClient.SlackMessageLink.Query().
+		Where(
+			slackmessagelink.HasBindingWith(slackbinding.ID(bindingID)),
+			slackmessagelink.DirectionEQ(slackmessagelink.DirectionOutbound),
+			slackmessagelink.ThreadTs(threadTS),
+			slackmessagelink.StatusEQ(slackmessagelink.StatusSent),
+		).
+		Exist(ctx)
+	if err != nil || !posted {
+		return false, err
 	}
 	return d.dbClient.SlackMessageLink.Query().
 		Where(

@@ -72,7 +72,7 @@ Bot events: `message.channels`, `message.groups`, `channel_rename`, `group_renam
   On a `disconnect` message (Slack refreshes connections every few hours) or a read error it opens a new URL, with backoff.
 - What a connection listens to does not depend on its bindings: Slack sends an app every message in every channel it is in, and the relay looks the binding up by app and channel per event.
   So binding a channel needs no reconnect; the fingerprint is the tokens alone.
-- An `invalid_auth`, `account_inactive`, `token_revoked`, `app_uninstalled` or `tokens_revoked` marks the app `invalid_token` with the reason; a channel the app was removed from (`channel_left`, `group_left`) marks its bindings broken.
+- An `invalid_auth`, `account_inactive`, `token_revoked`, `app_uninstalled` or `tokens_revoked` marks the app `invalid_token` with the reason, which only new tokens or a refresh clear: a Socket Mode connection that still works (app-level tokens outlive an uninstall) does not; a channel the app was removed from (`channel_left`, `group_left`) marks its bindings broken.
 - Retried deliveries (Slack's `retry_attempt`) and a leader handover are harmless: inbound messages are deduplicated on the channel's message `ts` (§3).
 
 ### 3. Data
@@ -88,7 +88,8 @@ As for Discord and Buzz, persona and thread are plain UUID columns, and the stor
 
 ### 4. Inbound
 
-- A message in a bound channel starts a turn when it **mentions the persona's bot** (`<@U…>`), or when it is **in a thread the persona has replied in, from someone the persona answered in that thread** (`SlackThreadContinues`).
+- A message in a bound channel starts a turn when it **mentions the persona's bot** (`<@U…>`), or when it is **in a thread the persona has replied in, from someone the persona answered in that thread** (`SlackThreadContinues`: a sent reply in the thread, and an inbound message there from the same author).
+  A batched turn replies in one thread only, so someone whose top-level mention was batched into it has not started a conversation in their own thread.
   Anyone else in the thread mentions the persona.
   Slack has no reply to a single message inside a thread, so "someone it answered there" stands in for Buzz's direct-reply rule.
 - Only something someone wrote counts (no subtype, `thread_broadcast`, `file_share`, or an app's `bot_message`); edits, deletes, joins and other subtypes are ignored, and so is anything older than its binding.

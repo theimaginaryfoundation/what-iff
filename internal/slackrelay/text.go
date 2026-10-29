@@ -3,6 +3,7 @@ package slackrelay
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/relaykit"
@@ -169,15 +170,21 @@ func convertInline(s string) string {
 	return strings.Join(parts, "`")
 }
 
+// convertSpan converts links, then emphasis, in text outside code spans. The links it builds are
+// set aside while emphasis is converted, so a * or _ inside a URL is not turned into
+// formatting (which would change where the link goes).
 func convertSpan(s string) string {
+	s = strings.ReplaceAll(s, linkMark, "")
+	var links []string
 	link := func(label, target string) string {
 		// Escaped already: &amp; in a URL is how Slack expects it.
 		raw := strings.ReplaceAll(target, "&amp;", "&")
 		if !linkSafeURL.MatchString(raw) {
 			return label + " (" + target + ")"
 		}
-		label = strings.NewReplacer("|", "¦", "&gt;", "›").Replace(label)
-		return "<" + target + "|" + label + ">"
+		label = strings.NewReplacer("|", "¦", "&gt;", "›").Replace(emphasis(label))
+		links = append(links, "<"+target+"|"+label+">")
+		return linkMark + strconv.Itoa(len(links)-1) + linkMark
 	}
 	s = mdImage.ReplaceAllStringFunc(s, func(m string) string {
 		g := mdImage.FindStringSubmatch(m)
@@ -191,6 +198,23 @@ func convertSpan(s string) string {
 		g := mdLink.FindStringSubmatch(m)
 		return link(g[1], g[2])
 	})
+	s = emphasis(s)
+	return linkSlot.ReplaceAllStringFunc(s, func(m string) string {
+		n, err := strconv.Atoi(strings.Trim(m, linkMark))
+		if err != nil || n >= len(links) {
+			return ""
+		}
+		return links[n]
+	})
+}
+
+// linkMark brackets the slot a built link holds while emphasis is converted (linkSlot).
+const linkMark = "\x01"
+
+var linkSlot = regexp.MustCompile(linkMark + `[0-9]+` + linkMark)
+
+// emphasis converts Markdown bold, italic and strikethrough to mrkdwn.
+func emphasis(s string) string {
 	s = mdBold.ReplaceAllStringFunc(s, func(m string) string {
 		g := mdBold.FindStringSubmatch(m)
 		return boldMark + g[1] + g[2] + boldMark
