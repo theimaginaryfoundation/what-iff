@@ -8,8 +8,9 @@ Linked by a blank import in `cmd/api-server/plugins.go`.
 ## Responsibilities
 
 - **`init`:** registers the reply hook (which does nothing until the plugin is applied) and the plugin.
-- **`apply`:** reads `DISCORD_RELAY_ENABLED` (off for `false`, `0` or `off`; read here rather than at init so a value from `.env` counts), mounts the routes on the authenticated router, builds the `discordrelay.Service`, and starts the gateway supervisor on the server's lifecycle context.
-- **`Handler` (`handlers.go`):** bots (add with token validation, update, pause, remove, sync profile, list servers and channels), bindings (create, update, remove), a thread's Discord state, and the composer toggle (`/chats/{chatId}/pending/{bindingId}`).
+- **`apply`:** reads `DISCORD_RELAY_ENABLED` (off for `false`, `0` or `off`; read here rather than at init so a value from `.env` counts), mounts the routes on the authenticated router, builds the `discordrelay.Service` with the turn policy from the environment (`relaykit.PolicyFromEnv`, ADR 0x031), and starts the gateway supervisor on the server's lifecycle context.
+  The gateway sink forwards messages and channel renames (`ChannelRenamed`, run off the event goroutine) to the service.
+- **`Handler` (`handlers.go`):** bots (add with token validation, update, pause, remove, sync profile, list servers and channels), bindings (create, update with `answer_agents`, remove), a thread's Discord state, and the composer toggle (`/chats/{chatId}/pending/{bindingId}`).
 
 ## Key types and entry points
 

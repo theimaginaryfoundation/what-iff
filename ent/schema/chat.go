@@ -75,7 +75,7 @@ func (Chat) Fields() []ent.Field {
 			Comment("How much of the account the chat may read (models.ContextScope). 'account' (the default) reads everything, as any chat. 'sandbox' reads nothing outside itself: only memories created in it, no other conversations, scratchpad or account-wide files, jobs, skills or personalities, and it writes only Chat-scoped memories. Set at creation; a chat can leave the sandbox but never enter one later."),
 		field.String("rehydration_state").
 			Optional().
-			Comment("Lazy-summarization lifecycle for imported threads: ''/'pending'/'processing'/'ready'/'failed'. Empty means no rehydration needed (e.g. native threads)"),
+			Comment("Lazy-summarization lifecycle for imported threads: ''/'pending'/'processing'/'ready'/'failed', or 'stale' when remote sync appended more past the summary than a reply reads (the next use catches it up). Empty means no rehydration needed (e.g. native threads)"),
 	}, turnSettingFields("thread")...)
 }
 

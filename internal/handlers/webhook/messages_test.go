@@ -29,6 +29,7 @@ type mockProvider struct {
 	listMessagesFn       func(ctx context.Context, userID, chatID uuid.UUID, page, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
 	listMessagesBeforeFn func(ctx context.Context, userID, chatID uuid.UUID, beforeSentAt time.Time, beforeID uuid.UUID, pageSize int, filters models.ChatMessageFilters) (*models.PaginatedResponse, error)
 	getMessageFn         func(ctx context.Context, userID, messageID uuid.UUID) (*models.ChatMessage, error)
+	getSummaryFn         func(ctx context.Context, userID, chatID uuid.UUID) (*models.ChatSummary, error)
 	getJobFn             func(ctx context.Context, userID, jobID uuid.UUID) (*models.Job, error)
 }
 

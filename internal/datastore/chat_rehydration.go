@@ -94,9 +94,16 @@ type ChatRehydrationInfo struct {
 }
 
 // NeedsRehydration reports whether the chat is an imported one that still lacks its one-time
-// summary and is not already being summarized or done ("failed" qualifies, so it is retried).
+// summary and is not already being summarized or done ("failed" qualifies, so it is retried), or
+// one that remote sync flagged stale (messages arrived past its summary; see settleRemoteSummary).
 func (i ChatRehydrationInfo) NeedsRehydration() bool {
-	if !i.Imported || i.Summarized {
+	if !i.Imported {
+		return false
+	}
+	if i.State == models.RehydrationStateStale {
+		return true
+	}
+	if i.Summarized {
 		return false
 	}
 	return i.State == models.RehydrationStateNone || i.State == models.RehydrationStateFailed
@@ -126,8 +133,8 @@ func (d *Datastore) GetChatRehydrationInfo(ctx context.Context, userID, chatID u
 // ClaimChatRehydration atomically moves an imported thread that still needs its one-time summary
 // to "pending" and reports whether this caller won the claim. A thread qualifies when it was
 // imported (source set), has no checkpoint summary and is not already pending, processing or ready
-// ("failed" qualifies, so a later attempt retries); unless includeArchived is set it must also be
-// unarchived. The conditional update makes concurrent attempts (two tabs, a refetch on focus, a
+// ("failed" qualifies, so a later attempt retries), or when remote sync flagged it stale; unless
+// includeArchived is set it must also be unarchived. The conditional update makes concurrent attempts (two tabs, a refetch on focus, a
 // turn racing an open) start the summary job exactly once.
 // Ownership is enforced in the WHERE clause; a chat that does not qualify is not an error.
 func (d *Datastore) ClaimChatRehydration(ctx context.Context, userID, chatID uuid.UUID, includeArchived bool) (bool, error) {
@@ -137,10 +144,15 @@ func (d *Datastore) ClaimChatRehydration(ctx context.Context, userID, chatID uui
 			entchat.HasOwnerWith(user.ID(userID)),
 			entchat.SourceNotNil(),
 			entchat.SourceNEQ(""),
-			entchat.Or(entchat.CheckpointSummaryIsNil(), entchat.CheckpointSummary("")),
 			entchat.Or(
-				entchat.RehydrationStateIsNil(),
-				entchat.RehydrationStateIn(models.RehydrationStateNone, models.RehydrationStateFailed),
+				entchat.And(
+					entchat.Or(entchat.CheckpointSummaryIsNil(), entchat.CheckpointSummary("")),
+					entchat.Or(
+						entchat.RehydrationStateIsNil(),
+						entchat.RehydrationStateIn(models.RehydrationStateNone, models.RehydrationStateFailed),
+					),
+				),
+				entchat.RehydrationState(models.RehydrationStateStale),
 			),
 		)
 	if !includeArchived {
@@ -175,6 +187,22 @@ func (d *Datastore) SetImportedThreadRehydrated(ctx context.Context, userID, cha
 		return ErrChatNotFound
 	}
 	return nil
+}
+
+// GetChatSummary returns a chat's running summary and where its live window starts (cheap; no
+// edges). Returns ErrChatNotFound when the chat does not exist or is not owned by the user.
+func (d *Datastore) GetChatSummary(ctx context.Context, userID, chatID uuid.UUID) (*models.ChatSummary, error) {
+	row, err := d.dbClient.Chat.Query().
+		Where(entchat.ID(chatID), entchat.HasOwnerWith(user.ID(userID))).
+		Select(entchat.FieldCheckpointSummary, entchat.FieldLastCheckpointAt).
+		Only(ctx)
+	if ent.IsNotFound(err) {
+		return nil, ErrChatNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &models.ChatSummary{ChatID: chatID, Summary: row.CheckpointSummary, WindowStart: row.LastCheckpointAt}, nil
 }
 
 // GetChatPersonalityID returns the id of the personality assigned to a chat, or uuid.Nil when none

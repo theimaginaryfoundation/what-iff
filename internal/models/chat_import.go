@@ -1,6 +1,8 @@
 package models
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"time"
 	"unicode"
@@ -13,6 +15,9 @@ import (
 const (
 	ChatSourceOpenAI    = "openai"
 	ChatSourceAnthropic = "anthropic"
+	// ChatSourceRemoteSync marks a thread copied from another What Iff server by remote sync
+	// (ADR 0x033). Like any imported thread, it is summarized lazily on first use.
+	ChatSourceRemoteSync = "remote_sync"
 )
 
 // Rehydration lifecycle states for imported threads (Chat.rehydration_state).
@@ -22,7 +27,19 @@ const (
 	RehydrationStateProcessing = "processing"
 	RehydrationStateReady      = "ready"
 	RehydrationStateFailed     = "failed"
+	// RehydrationStateStale: the thread has a summary, but more messages arrived after it (remote
+	// sync) than a reply reads past the summary. The next use folds them into the summary.
+	RehydrationStateStale = "stale"
 )
+
+// ConversationImportHash is the import dedup key for a source conversation id: hex sha256 of the
+// id as given. Chat imports, account imports and remote sync all use it, so a thread brought in by
+// one is recognised by the others (a remote-sync mirror is skipped by a later account import, and
+// an account-imported thread is adopted by remote sync instead of copied again).
+func ConversationImportHash(conversationID string) string {
+	sum := sha256.Sum256([]byte(conversationID))
+	return hex.EncodeToString(sum[:])
+}
 
 // ImportResult summarizes a chat import run.
 // Errors contains client-visible per-conversation error strings (capped at models.MaxImportErrors).

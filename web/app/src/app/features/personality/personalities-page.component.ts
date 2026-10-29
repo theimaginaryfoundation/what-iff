@@ -7,9 +7,9 @@ import {
   OnInit,
   signal,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
+import { catchError, firstValueFrom, of, switchMap } from 'rxjs';
 import { filter, map } from 'rxjs/operators';
 import { FormsModule } from '@angular/forms';
 
@@ -38,7 +38,8 @@ import {
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { SparkleIconComponent } from '../../shared/ui/icons/icons';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
-import { PersonalityWelcomeComponent } from './personality-welcome/personality-welcome.component';
+import { RemoteSyncWaiting, PersonalityWelcomeComponent } from './personality-welcome/personality-welcome.component';
+import { RemoteSyncService } from '../remote-sync/remote-sync.service';
 import { PersonalityEditModalComponent } from './detail/personality-edit-modal.component';
 import { PersonalityEditorSessionService } from './services/personality-editor-session.service';
 import {
@@ -85,6 +86,19 @@ export class PersonalitiesPageComponent implements OnInit {
   private readonly generatePersonalityModal = inject(GeneratePersonalityModalService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly editorSession = inject(PersonalityEditorSessionService);
+  /** Whether this server runs remote sync, so the first-run welcome can offer it. */
+  private readonly remoteSync = inject(RemoteSyncService);
+  readonly remoteSyncAvailable = toSignal(this.remoteSync.available(), { initialValue: false });
+  /** Threads remote sync already copied here, for the first-run welcome (null when none). */
+  readonly remoteSyncWaiting = toSignal(
+    this.remoteSync.available().pipe(
+      switchMap(on => (on ? this.remoteSync.get().pipe(catchError(() => of(null))) : of(null))),
+      map((s): RemoteSyncWaiting | null =>
+        s?.configured && (s.totals?.threads ?? 0) > 0 ? { threads: s.totals!.threads, personas: s.unmatched_personas ?? [] } : null,
+      ),
+    ),
+    { initialValue: null },
+  );
 
   readonly personalities = signal<Personality[]>([]);
   readonly totalCount = signal(0);
@@ -299,6 +313,10 @@ export class PersonalitiesPageComponent implements OnInit {
   /** Fresh users with an existing export/history can jump straight to Import & Export. */
   goToImport(): void {
     this.router.navigate(['/data']);
+  }
+
+  goToRemoteSync(): void {
+    this.router.navigate(['/integrations'], { queryParams: { tab: 'remote-sync' } });
   }
 
   openCreate(): void {

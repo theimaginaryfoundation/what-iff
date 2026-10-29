@@ -49,7 +49,8 @@ export type SpecificErrorCode =
   | 'provider_incompatible'
   | 'provider_unavailable'
   | 'custom_address_not_allowed'
-  | 'provider_connection_exists';
+  | 'provider_connection_exists'
+  | 'buzz_terms_required';
 
 export interface PaginatedResponse<T> {
   results: T[];

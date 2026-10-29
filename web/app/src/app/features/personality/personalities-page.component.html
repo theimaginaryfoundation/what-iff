@@ -63,6 +63,9 @@
       (generate)="navigateGenerate()"
       (createManually)="openCreate()"
       (importData)="goToImport()"
+      [remoteSyncAvailable]="remoteSyncAvailable()"
+      [remoteSyncWaiting]="remoteSyncWaiting()"
+      (openRemoteSync)="goToRemoteSync()"
     />
   } @else {
     <div

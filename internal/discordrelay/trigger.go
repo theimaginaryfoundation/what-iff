@@ -2,9 +2,11 @@ package discordrelay
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
-	"unicode"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/relaykit"
 )
 
 // InboundMessage is the part of a Discord message the relay needs. The gateway
@@ -20,11 +22,16 @@ type InboundMessage struct {
 	ParentChannelID string
 	AuthorID        string
 	AuthorName      string
-	AuthorIsBot     bool
+	// AuthorIsBot: another bot (another persona's, say) wrote it. Answered only when the
+	// binding answers agents, within the loop guard.
+	AuthorIsBot bool
 	// WebhookID is set for messages posted by a webhook (never answered).
 	WebhookID      string
 	Content        string
 	MentionUserIDs []string
+	// BindingChannelName is the current name of the bound channel (BindingChannelID), from
+	// the gateway's cache; "" when unknown. A differing name is recorded on the binding.
+	BindingChannelName string
 	// Attachments are the files posted with the message.
 	Attachments []Attachment
 	// Referenced* describe the message this one replies to, if any.
@@ -45,10 +52,11 @@ const (
 )
 
 // Triggered reports whether m tags the bot (by @mention, or by replying to one of
-// its messages). Messages from bots and webhooks, including the bot's own, never
-// trigger, so a persona cannot answer itself or another bot in a loop.
+// its messages). The bot's own messages and webhooks never trigger, so a persona cannot
+// answer itself. Other bots may: the binding decides (AnswerAgents), and the relay's loop
+// guard bounds the exchange.
 func Triggered(m InboundMessage, botUserID string) (TriggerReason, bool) {
-	if botUserID == "" || m.AuthorIsBot || m.WebhookID != "" || m.AuthorID == botUserID {
+	if botUserID == "" || m.WebhookID != "" || m.AuthorID == botUserID {
 		return "", false
 	}
 	if slices.Contains(m.MentionUserIDs, botUserID) {
@@ -63,10 +71,7 @@ func Triggered(m InboundMessage, botUserID string) (TriggerReason, bool) {
 // Allowed applies a binding's allow and deny lists to a Discord user id. Deny
 // always wins; an empty allow list means anyone who is not denied.
 func Allowed(authorID string, allow, deny []string) bool {
-	if slices.Contains(deny, authorID) {
-		return false
-	}
-	return len(allow) == 0 || slices.Contains(allow, authorID)
+	return relaykit.Allowed(authorID, allow, deny)
 }
 
 // BindingChannelID is the channel a message is bound through: the thread's
@@ -109,40 +114,20 @@ func PromptText(m InboundMessage, botUserID, channelName string) string {
 		refAuthor := speakerLabel(m.ReferencedAuthorName)
 		fmt.Fprintf(&b, "(replying to %s: %q)\n", refAuthor, quoted)
 	}
-	fmt.Fprintf(&b, "%s (%s): %s", author, where, content)
+	fmt.Fprintf(&b, "%s (%s): %s", author, where, relaykit.MessageBody(content))
 	return b.String()
 }
 
-// speakerLabel is a display name as it may appear at the start of a relayed line.
-// Names are chosen by whoever posts, so the characters that make up the
-// "name (Discord, #channel):" label are removed: a nickname cannot pose as another
-// speaker's label or end its own early. An empty result reads "someone".
-func speakerLabel(name string) string {
-	name = strings.Map(func(r rune) rune {
-		switch r {
-		case '(', ')', ':', '[', ']', '"':
-			return ' '
-		}
-		if unicode.IsControl(r) {
-			return ' '
-		}
-		return r
-	}, name)
-	name = strings.Join(strings.Fields(name), " ")
-	if r := []rune(name); len(r) > 64 {
-		name = string(r[:64])
-	}
-	if name == "" {
-		return "someone"
-	}
-	return name
-}
+// speakerLabel is a display name as it may appear at the start of a relayed line
+// (relaykit.SpeakerLabel): a nickname cannot pose as another speaker's label.
+func speakerLabel(name string) string { return relaykit.SpeakerLabel(name) }
 
-// stripMention removes <@id> and <@!id> mentions of the bot and tidies spaces.
+// stripMention removes <@id> and <@!id> mentions of the bot, with the spaces after them.
+// Everything else is kept as written: line breaks and runs of spaces matter in code blocks and
+// lists, and MessageBody marks the further lines so none can pose as another speaker's.
 func stripMention(content, botUserID string) string {
 	if botUserID != "" {
-		content = strings.ReplaceAll(content, "<@"+botUserID+">", "")
-		content = strings.ReplaceAll(content, "<@!"+botUserID+">", "")
+		content = regexp.MustCompile(`<@!?`+regexp.QuoteMeta(botUserID)+`>[ \t]*`).ReplaceAllString(content, "")
 	}
-	return strings.Join(strings.Fields(content), " ")
+	return strings.TrimSpace(content)
 }

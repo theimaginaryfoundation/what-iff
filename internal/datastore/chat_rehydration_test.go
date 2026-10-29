@@ -14,14 +14,15 @@ func TestClaimChatRehydration_ClaimsOnlyAQualifyingThread(t *testing.T) {
 	ds, mock, cleanup := newMockDatastore(t)
 	defer cleanup()
 
-	// The conditions live in the UPDATE itself, so the claim is atomic: unarchived, imported, no
-	// summary yet, and not pending/processing/ready.
+	// The conditions live in the UPDATE itself, so the claim is atomic: unarchived, imported, and
+	// either no summary yet and not pending/processing/ready, or flagged stale by remote sync.
 	mock.ExpectExec("UPDATE .chats. SET .updated_at. = \\?, .rehydration_state. = \\? WHERE "+
 		".*"+
 		".chats.\\..source. IS NOT NULL.*.chats.\\..source. <> \\?.*"+
 		".chats.\\..checkpoint_summary. IS NULL OR .chats.\\..checkpoint_summary. = \\?.*"+
-		".chats.\\..rehydration_state. IS NULL OR .chats.\\..rehydration_state. IN \\(\\?, \\?\\).*NOT .chats.\\..archived.$").
-		WithArgs(sqlmock.AnyArg(), "pending", sqlmock.AnyArg(), sqlmock.AnyArg(), "", "", "", "failed").
+		".chats.\\..rehydration_state. IS NULL OR .chats.\\..rehydration_state. IN \\(\\?, \\?\\).*"+
+		"OR .chats.\\..rehydration_state. = \\?.*NOT .chats.\\..archived.$").
+		WithArgs(sqlmock.AnyArg(), "pending", sqlmock.AnyArg(), sqlmock.AnyArg(), "", "", "", "failed", "stale").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	claimed, err := ds.ClaimChatRehydration(context.Background(), uuid.New(), uuid.New(), false)
@@ -59,8 +60,8 @@ func TestClaimChatRehydration_IncludeArchivedDropsTheArchivedCondition(t *testin
 	defer cleanup()
 
 	// Without the archived condition the statement ends at the state check.
-	mock.ExpectExec(`UPDATE .*chats.* WHERE .*IN \(\?, \?\)\)$`).
-		WithArgs(sqlmock.AnyArg(), "pending", sqlmock.AnyArg(), sqlmock.AnyArg(), "", "", "", "failed").
+	mock.ExpectExec(`UPDATE .*chats.* WHERE .*IN \(\?, \?\)\)\) OR .chats.\..rehydration_state. = \?\)$`).
+		WithArgs(sqlmock.AnyArg(), "pending", sqlmock.AnyArg(), sqlmock.AnyArg(), "", "", "", "failed", "stale").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	claimed, err := ds.ClaimChatRehydration(context.Background(), uuid.New(), uuid.New(), true)

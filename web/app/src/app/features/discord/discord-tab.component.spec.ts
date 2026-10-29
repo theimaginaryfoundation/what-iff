@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
+import { of, throwError } from 'rxjs';
 
 import { ChatService } from '../../core/services/chat.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
@@ -31,6 +32,7 @@ const binding: DiscordBinding = {
   inbound_enabled: true,
   allow_user_ids: [],
   deny_user_ids: [],
+  answer_agents: false,
   allow_unrestricted: false,
   status: 'active',
   created_at: '',
@@ -221,11 +223,39 @@ describe('DiscordTabComponent', () => {
       expect(discord['updateBinding']).toHaveBeenCalledWith('b1', { allow_unrestricted: true });
     });
 
+    it.each([
+      ['discord-binding-ack', { chat_sandboxed: false, allow_unrestricted: false }, false],
+      ['discord-binding-inbound', { inbound_enabled: true }, true],
+      ['discord-binding-agents', { answer_agents: true }, true],
+    ] as const)('puts %s back and says why when the save fails', async (testId, fields, saved) => {
+      const fixture = await create([{ ...binding, ...fields }]);
+      discord['updateBinding'].mockReturnValue(
+        throwError(() => new HttpErrorResponse({ status: 500, error: { message: 'Relay is down' } })),
+      );
+      const box = q(fixture, testId) as HTMLInputElement;
+      box.checked = !saved;
+      box.dispatchEvent(new Event('change'));
+      await settle();
+      fixture.detectChanges();
+      expect(box.checked).toBe(saved);
+      expect(fixture.nativeElement.textContent).toContain('Relay is down');
+    });
+
     it('marks a sandboxed binding and offers no acknowledgement for it', async () => {
       const fixture = await create([{ ...binding, chat_sandboxed: true }]);
       expect(q(fixture, 'discord-binding-sandboxed')).toBeTruthy();
       expect(q(fixture, 'discord-binding-ack')).toBeNull();
     });
+  });
+
+  it('answers other bots only once the owner turns it on', async () => {
+    const fixture = await create();
+    const box = (fixture.nativeElement as HTMLElement).querySelector('[data-testid=discord-binding-agents]') as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    box.checked = true;
+    box.dispatchEvent(new Event('change'));
+    await settle();
+    expect(discord['updateBinding']).toHaveBeenCalledWith('b1', { answer_agents: true });
   });
 
   describe('empty allow list', () => {

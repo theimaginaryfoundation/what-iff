@@ -17,7 +17,7 @@ const baseIntents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages
 
 // DiscordgoDialer opens real Gateway connections with discordgo.
 func DiscordgoDialer(logger *zap.Logger) Dialer {
-	return func(_ context.Context, bot Bot, onMessage func(discordrelay.InboundMessage)) (Conn, error) {
+	return func(_ context.Context, bot Bot, on Handlers) (Conn, error) {
 		session, err := discordgo.New("Bot " + bot.Token)
 		if err != nil {
 			return nil, fmt.Errorf("discord session: %w", err)
@@ -32,7 +32,18 @@ func DiscordgoDialer(logger *zap.Logger) Dialer {
 			if m == nil || m.Message == nil {
 				return
 			}
-			onMessage(ToInbound(s, m.Message))
+			on.Message(ToInbound(s, m.Message))
+		})
+		// A renamed channel: discordgo's state cache already holds the new name for the next
+		// message (BindingChannelName); this records it on the binding right away.
+		session.AddHandler(func(_ *discordgo.Session, c *discordgo.ChannelUpdate) {
+			if c == nil || c.Channel == nil || on.ChannelRenamed == nil || c.IsThread() {
+				return
+			}
+			if c.BeforeUpdate != nil && c.BeforeUpdate.Name == c.Name {
+				return
+			}
+			on.ChannelRenamed(c.ID, c.Name)
 		})
 		if err := session.Open(); err != nil {
 			return nil, fmt.Errorf("discord gateway open: %w", err)
@@ -79,8 +90,17 @@ func ToInbound(s *discordgo.Session, m *discordgo.Message) discordrelay.InboundM
 		in.ReferencedMessageID = m.MessageReference.MessageID
 	}
 	if s != nil && s.State != nil {
-		if ch, err := s.State.Channel(m.ChannelID); err == nil && ch != nil && ch.IsThread() {
-			in.ParentChannelID = ch.ParentID
+		if ch, err := s.State.Channel(m.ChannelID); err == nil && ch != nil {
+			if ch.IsThread() {
+				in.ParentChannelID = ch.ParentID
+			} else {
+				in.BindingChannelName = ch.Name
+			}
+		}
+		if in.ParentChannelID != "" {
+			if parent, err := s.State.Channel(in.ParentChannelID); err == nil && parent != nil {
+				in.BindingChannelName = parent.Name
+			}
 		}
 	}
 	return in
