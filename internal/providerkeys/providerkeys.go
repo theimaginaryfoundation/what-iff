@@ -105,26 +105,10 @@ func (e *NotConfiguredError) Error() string {
 // retried as if it were a dropped connection.
 func (e *NotConfiguredError) HTTPStatusCode() int { return 401 }
 
-// vendorNames are the names a person would know a provider's key by.
-var vendorNames = map[models.ModelProvider]string{
-	models.ModelProviderOpenAI:    "OpenAI",
-	models.ModelProviderAnthropic: "Anthropic",
-	models.ModelProviderZAI:       "z.ai",
-	models.ModelProviderGoogle:    "Google Gemini",
-	models.ModelProviderMistral:   "Mistral",
-	models.ModelProviderDeepSeek:  "DeepSeek",
-	models.ModelProviderQwen:      "Qwen",
-	models.ModelProviderXiaomi:    "Xiaomi MiMo",
-}
-
 // Message states the missing key in words a person can act on. It states the
 // fact only; what to do about it is for the client to say.
 func (e *NotConfiguredError) Message() string {
-	name, ok := vendorNames[e.Provider]
-	if !ok {
-		name = string(e.Provider)
-	}
-	return "No " + name + " API key is set."
+	return "No " + e.Provider.DisplayName() + " API key is set."
 }
 
 // FailureText is what to record when err ends a job or a chat turn: Message
