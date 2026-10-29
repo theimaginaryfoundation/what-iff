@@ -54,14 +54,18 @@ Allowing Custom addresses on a public deployment needs a real guard against serv
 
 At startup, each `account_provider_keys` row becomes a preset connection for the same account, and the row is removed.
 The ciphertext is copied as-is, with no decryption.
-The step is idempotent, and does nothing on a deployment that supplies its own keys, whose table is empty.
+The step is idempotent and safe on two instances at once: where a connection already exists for that account and provider, it is kept and the old row is still removed.
+It does nothing on a deployment that supplies its own keys, whose table is empty.
 
 Until models point at connections (section 5), an account has at most one connection per built-in preset.
 The account resolver then answers "this account's OpenAI key" from its `openai` connection, and its interface does not change.
+A unique index enforces it per account. Deployment-owned connections have no owner, so the index does not cover them; whatever first creates them has to keep them to one per built-in provider as well.
 `/provider-keys` stays as a thin layer over preset connections, so existing clients keep working.
 
-After the conversion, the Providers screen shows a one-time, dismissible notice that saved keys are now connections.
 The converted connections carry the preset's plain name.
+Once the Providers screen exists (rollout step 3), it shows a one-time, dismissible notice to accounts that had keys converted, saying their saved keys are now connections.
+
+The conversion and the `account_provider_keys` table are removed together, once the rest of this rollout has merged. A deployment that skips from before the conversion to after that removal loses its stored keys and has to re-enter them, so the removal says so in its description.
 
 ### 4. Connecting lists the provider's models
 
@@ -69,7 +73,7 @@ Adding a connection checks it before saving: the request lists the provider's mo
 On failure nothing is saved, and the response carries a stable code for what went wrong: unreachable, key rejected, not a compatible server, or the account password not confirmed.
 The frontend keeps the form filled in and points at the field to fix.
 
-Listing depends on the flavor: `GET {base}/models` for OpenAI-compatible, and `GET /v1/models` for Anthropic-compatible.
+Listing depends on the flavor: `GET {base}/models` for OpenAI-compatible, and `GET {base}/v1/models` for Anthropic-compatible.
 
 A listing call uses a client built for that request, with the connection's key passed directly.
 It does not go through the shared credential transport, which would replace a key being tested with the account's stored one.
@@ -130,10 +134,10 @@ Each step merges before the next begins.
 
 - An account can use OpenRouter, a local model server or any compatible server, not only the built-in providers.
 - After step 5, nothing but embeddings requires an OpenAI key.
-- A new provider no longer needs a migration, a configuration variable or a new client at startup.
+- After step 4, a new provider no longer needs a migration, a configuration variable or a new client at startup.
 - Deployment-owned connections make it possible to add a provider for everyone without a restart. Nothing in this ADR adds a screen for that.
 - Listing a provider's models replaces typing model IDs by hand.
-- The conversion in step 1 is one-way. A build from before it cannot read keys stored after it.
+- The conversion in step 1 is one-way. A build from before it cannot read keys stored after it, so rolling back past it means re-entering keys.
 - Each request to a connection builds its client. That is cheap, and leaves no cache to invalidate when a connection changes.
 
 ## Alternatives considered
