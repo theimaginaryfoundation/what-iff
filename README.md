@@ -166,6 +166,7 @@ what-iff/
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — system design, patterns, and internals
 - **[openapi.yaml](openapi.yaml)** — full REST API specification
+- **[Mullet mode](docs/guides/mullet-mode.md)** — keep a copy of your whatiff.chat threads on your own server and continue them there
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — how to contribute
 - **[SECURITY.md](SECURITY.md)** — reporting vulnerabilities
 

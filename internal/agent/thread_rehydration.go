@@ -196,17 +196,43 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 		return telemetry.JobOutcomeFailed
 	}
 
-	summarizeMsgs, windowStartIdx, needs := splitForRehydration(msgs, rehydrationKeepTurns)
+	// A thread that already has a summary (remote sync flagged it stale: more messages arrived
+	// after the summary than a reply reads) is caught up: only the messages from its window start
+	// on are split, and the older part of them is folded into the existing summary.
+	prior, err := a.ds.GetChatSummary(ctx, userID, chatID)
+	if errors.Is(err, datastore.ErrChatNotFound) {
+		// Deleted since the transcript was read: nothing to persist to, and nothing wrong.
+		a.logger.Info("thread rehydration: chat gone before summarizing", zap.String("chat_id", chatID.String()))
+		if _, err := a.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusComplete, ""); err != nil {
+			a.logger.Warn("thread rehydration: failed to complete job", zap.String("job_id", jobID.String()), zap.Error(err))
+		}
+		return telemetry.JobOutcomeSuccess
+	}
+	if err != nil {
+		a.failRehydration(ctx, userID, chatID, jobID, fmt.Sprintf("load summary: %v", err))
+		return telemetry.JobOutcomeFailed
+	}
+	pending, priorSummary := msgs, ""
+	if prior.Summary != "" && prior.WindowStart != nil {
+		// Empty when nothing came after the summary: the split below then finds no turns to
+		// summarize and the thread is simply marked ready again.
+		pending, priorSummary = messagesFrom(msgs, *prior.WindowStart), prior.Summary
+	}
+
+	summarizeMsgs, windowStartIdx, needs := splitForRehydration(pending, rehydrationKeepTurns)
 	if !needs {
 		// Thread is short enough to load in full; no summary needed. Mark ready without a checkpoint
-		// so the entire (small) history is used as context.
+		// so the entire (small) history is used as context. (A caught-up thread keeps its summary.)
 		if err := a.ds.SetChatRehydrationState(ctx, userID, chatID, models.RehydrationStateReady); err != nil {
 			a.failRehydration(ctx, userID, chatID, jobID, fmt.Sprintf("mark ready: %v", err))
 			return telemetry.JobOutcomeFailed
 		}
 		// Seed long-term memories from the (short) thread too — even a few turns can carry durable
-		// facts. Runs after the gate is released; best-effort so it never fails the job.
-		a.extractAndStoreImportedMemories(ctx, userID, chatID, msgs)
+		// facts. Runs after the gate is released; best-effort so it never fails the job. A caught-up
+		// thread has nothing new outside the live window, which its own checkpoints will cover.
+		if priorSummary == "" {
+			a.extractAndStoreImportedMemories(ctx, userID, chatID, msgs)
+		}
 		if _, err := a.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusComplete, ""); err != nil {
 			a.logger.Warn("thread rehydration: failed to complete short-thread job", zap.String("job_id", jobID.String()), zap.Error(err))
 		}
@@ -221,18 +247,22 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 		// fake so the rehydration state machine still completes and imported
 		// threads remain chattable (WaitForThreadRehydration gates every turn on them).
 		summary = fmt.Sprintf("Mock rehydration summary of %d imported messages.", len(summarizeMsgs))
+		if priorSummary != "" {
+			summary = priorSummary + "\n" + summary
+		}
 		a.logger.Debug("mock/local mode: using deterministic rehydration summary", zap.String("chat_id", chatID.String()))
 	} else {
 		var err error
-		summary, err = a.summarizeImportedThread(ctx, userID, summarizeMsgs)
+		summary, err = a.summarizeImportedThread(ctx, userID, priorSummary, summarizeMsgs)
 		if err != nil {
 			a.failRehydration(ctx, userID, chatID, jobID, fmt.Sprintf("summarize: %v", err))
 			return telemetry.JobOutcomeFailed
 		}
 	}
 
-	windowStart := msgs[windowStartIdx].SentAt
-	assistantCount := countAssistantMessages(summarizeMsgs)
+	windowStart := pending[windowStartIdx].SentAt
+	// The checkpoint cadence counts every reply before the window, summarized now or before.
+	assistantCount := countAssistantMessagesBefore(msgs, windowStart)
 
 	if err := a.ds.SetImportedThreadRehydrated(ctx, userID, chatID, summary, assistantCount, windowStart); err != nil {
 		a.failRehydration(ctx, userID, chatID, jobID, fmt.Sprintf("persist: %v", err))
@@ -249,9 +279,14 @@ func (a *Agent) runThreadRehydration(ctx context.Context, userID, chatID, jobID 
 		}
 	}
 
-	// Seed long-term memories from the full transcript. The state is already ready (gate released),
-	// so this extra LLM work delays only job completion, not the user's next turn. Best-effort.
-	a.extractAndStoreImportedMemories(ctx, userID, chatID, msgs)
+	// Seed long-term memories from the full transcript, or for a caught-up thread from the part
+	// just folded in. The state is already ready (gate released), so this extra LLM work delays
+	// only job completion, not the user's next turn. Best-effort.
+	memorySource := msgs
+	if priorSummary != "" {
+		memorySource = summarizeMsgs
+	}
+	a.extractAndStoreImportedMemories(ctx, userID, chatID, memorySource)
 
 	if _, err := a.ds.UpdateJobStatus(ctx, userID, jobID, models.JobStatusComplete, ""); err != nil {
 		a.logger.Warn("thread rehydration: failed to complete job", zap.String("job_id", jobID.String()), zap.Error(err))
@@ -298,6 +333,20 @@ func splitForRehydration(msgs []models.ChatMessage, keepTurns int) (summarize []
 	return msgs[:windowStartIdx], windowStartIdx, true
 }
 
+// countAssistantMessagesBefore counts the replies in a chronological message list sent before t.
+func countAssistantMessagesBefore(msgs []models.ChatMessage, t time.Time) int {
+	n := 0
+	for _, m := range msgs {
+		if !m.SentAt.Before(t) {
+			break
+		}
+		if m.Origin == models.MessageOriginAssistant {
+			n++
+		}
+	}
+	return n
+}
+
 func countAssistantMessages(msgs []models.ChatMessage) int {
 	n := 0
 	for _, m := range msgs {
@@ -330,14 +379,16 @@ func buildTranscript(msgs []models.ChatMessage) string {
 
 // summarizeImportedThread produces a single compact summary of the pre-window transcript. For long
 // threads it map-reduces: summarize message chunks, then roll the partial summaries up into one.
-func (a *Agent) summarizeImportedThread(ctx context.Context, userID uuid.UUID, msgs []models.ChatMessage) (string, error) {
+// prior, when set, is the thread's existing summary of everything before msgs: the result covers
+// both (a catch-up after remote sync appended messages past the summary).
+func (a *Agent) summarizeImportedThread(ctx context.Context, userID uuid.UUID, prior string, msgs []models.ChatMessage) (string, error) {
 	transcript := buildTranscript(msgs)
 	if strings.TrimSpace(transcript) == "" {
 		return "", fmt.Errorf("empty transcript")
 	}
 
 	if len(transcript) <= rehydrationSinglePassChars {
-		return a.summarizeText(ctx, userID, checkpointConversationSummaryInstructions, transcript, rehydrationSummaryMaxTokens)
+		return a.summarizeText(ctx, userID, checkpointConversationSummaryInstructions, withPriorSummary(prior, transcript), rehydrationSummaryMaxTokens)
 	}
 
 	// Map: chunk by message boundaries within a character budget and summarize each chunk.
@@ -353,7 +404,27 @@ func (a *Agent) summarizeImportedThread(ctx context.Context, userID uuid.UUID, m
 
 	// Reduce: roll the section summaries up into one cohesive summary.
 	rollupInput := fmt.Sprintf("The following are ordered section summaries of one long conversation. Produce a single cohesive summary as instructed.\n\n%s", strings.Join(partials, "\n\n"))
-	return a.summarizeText(ctx, userID, checkpointConversationSummaryInstructions, rollupInput, rehydrationSummaryMaxTokens)
+	return a.summarizeText(ctx, userID, checkpointConversationSummaryInstructions, withPriorSummary(prior, rollupInput), rehydrationSummaryMaxTokens)
+}
+
+// withPriorSummary puts a thread's existing summary ahead of what continues it, so one summary
+// covers both.
+func withPriorSummary(prior, input string) string {
+	if strings.TrimSpace(prior) == "" {
+		return input
+	}
+	return "Summary of the conversation up to this point:\n" + prior + "\n\nThe conversation then continued:\n\n" + input
+}
+
+// messagesFrom returns the suffix of a chronological message list sent at or after from (empty
+// when every message is older).
+func messagesFrom(msgs []models.ChatMessage, from time.Time) []models.ChatMessage {
+	for i, m := range msgs {
+		if !m.SentAt.Before(from) {
+			return msgs[i:]
+		}
+	}
+	return msgs[len(msgs):]
 }
 
 // chunkMessagesByChars groups consecutive messages so each chunk's transcript stays under maxChars.

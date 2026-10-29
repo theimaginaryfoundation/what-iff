@@ -125,6 +125,30 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 	h.respondRead(w, result)
 }
 
+// GetChatSummary returns a thread's running summary: what a reply reads in place of the messages
+// before window_start. It is derived from the thread's own messages, which chat:read already
+// serves, so it is no wider than that scope. Remote sync copies it so a copy need not summarize
+// the history again (ADR 0x033).
+func (h *Handler) GetChatSummary(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.readerID(w, r)
+	if !ok {
+		return
+	}
+	chatID, err := uuid.Parse(mux.Vars(r)["chatId"])
+	if err != nil {
+		h.badRequest(w, errors.New("chat ID must be a UUID"))
+		return
+	}
+
+	summary, err := h.provider.GetChatSummary(r.Context(), userID, chatID)
+	if err != nil {
+		h.readFailed(w, "failed to get chat summary", err)
+		return
+	}
+	h.auditRead(r, "get_chat_summary", zap.String("chat_id", chatID.String()))
+	h.respondRead(w, summary)
+}
+
 // GetChatMessage returns one message by id. It is how a client reads the sent_at of a message it
 // just posted, to match the reply that follows it.
 func (h *Handler) GetChatMessage(w http.ResponseWriter, r *http.Request) {

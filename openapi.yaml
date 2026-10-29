@@ -475,6 +475,164 @@ paths:
                 $ref: '#/components/schemas/Error'
 
   # Discord relay (docs/adr/0x025-discord-relay.md). Absent when DISCORD_RELAY_ENABLED is false.
+  /remote-sync:
+    get:
+      summary: Get remote sync settings and status
+      description: >
+        The account's remote sync (ADR 0x033): the remote address, the stored token's last four
+        characters, whether sync is on, how the last run went, and totals. The token is never
+        returned. `configured` is false when sync was never set up. Only served when the server
+        runs with REMOTE_SYNC_ENABLED=true; otherwise this route does not exist (404).
+      tags: [Remote Sync]
+      responses:
+        '200':
+          description: Settings and status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoteSyncSettings'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Save remote sync settings
+      description: >
+        Saves the remote address, the token (required the first time; omit to keep the stored
+        one) and whether sync is on. Unless the request switches sync off, the token is first
+        checked against the remote (it must hold chat:read), and a refusal is reported as 400 with
+        the reason. A successful save starts a run. The address must be https unless the server
+        allows http (REMOTE_SYNC_ALLOW_LOCAL_NETWORK); the hosted app's web addresses map to its API.
+      tags: [Remote Sync]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemoteSyncUpsertRequest'
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoteSyncSettings'
+        '400':
+          description: Invalid address or token, or the remote refused the token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Remove remote sync
+      description: Stops syncing and forgets the token and the thread links. Local threads stay.
+      tags: [Remote Sync]
+      responses:
+        '204':
+          description: Removed
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /remote-sync/wake:
+    post:
+      summary: The app is being used
+      description: >
+        The web app calls this when a signed-in session starts and when it comes back after a while
+        (remote sync, ADR 0x033). The server starts a sync if the last one is more than a couple of
+        minutes old, and otherwise does nothing; sync being off, not set up, waiting on its owner
+        or already running is not an error. This is what keeps copies current without polling.
+      tags: [Remote Sync]
+      responses:
+        '200':
+          description: Whether a sync was started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  started: {type: boolean, description: A run started; poll GET /remote-sync for its outcome}
+                  rematched: {type: integer, description: Copied threads that just got a local persona whose name matches their remote one}
+                required: [started, rematched]
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /remote-sync/run:
+    post:
+      summary: Sync now
+      description: Starts a run in the background. Poll GET /remote-sync for its outcome.
+      tags: [Remote Sync]
+      responses:
+        '202':
+          description: Run started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoteSyncSettings'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Remote sync is not set up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: A run is already in progress, or sync is switched off
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /discord/bots:
     get:
       summary: List Discord bots
@@ -6471,6 +6629,70 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /webhooks/chat/{chatId}/summary:
+    get:
+      summary: Get a thread's running summary (webhook)
+      description: |
+        Returns the thread's running summary: the text a reply reads in place of every message sent before
+        `window_start`. Messages from `window_start` on are read as they are. An empty `summary` (and no
+        `window_start`) means the thread has none yet. The summary is derived from the thread's own messages,
+        which `chat:read` already serves. Remote sync uses it so a copy need not summarize the history again
+        (ADR 0x033). Requires the `chat:read` scope. A thread that does not exist and one that belongs to
+        someone else both return 404.
+      tags: [Webhooks]
+      security:
+        - webhookAuth: []
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          description: Chat ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Summary retrieved successfully
+          headers:
+            Cache-Control:
+              description: Always `no-store`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSummary'
+        '400':
+          description: Invalid chat ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid webhook token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: The token does not have the `chat:read` scope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Chat not found (or not yours)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /webhooks/chat/chat-message/{id}:
     get:
       summary: Get one message (webhook)
@@ -9860,8 +10082,24 @@ components:
       enum: [messages:write, chat:read]
       description: |
         What a webhook token may do. `messages:write` allows `POST /webhooks/chat/{chatId}/messages`.
-        `chat:read` allows the read routes (threads, messages, job status, persona names) and never exposes
+        `chat:read` allows the read routes (threads, messages, thread summaries, job status, persona names) and never exposes
         system prompts, scratchpads or memories. Tokens created before scopes existed are `messages:write` only.
+
+    ChatSummary:
+      type: object
+      description: A thread's running summary, as `GET /webhooks/chat/{chatId}/summary` returns it.
+      required: [chat_id, summary]
+      properties:
+        chat_id:
+          type: string
+          format: uuid
+        summary:
+          type: string
+          description: The summary text. Empty when the thread has none yet.
+        window_start:
+          type: string
+          format: date-time
+          description: Messages sent before this are covered by the summary; messages from it on are not.
 
     WebhookMessage:
       type: object
@@ -10837,6 +11075,63 @@ components:
           type: string
       required: [id, name]
 
+    RemoteSyncRunStats:
+      type: object
+      description: Counts from one run. Never content.
+      properties:
+        threads_checked: {type: integer}
+        threads_created: {type: integer, description: New local copies}
+        threads_adopted: {type: integer, description: Matched to a thread an account import already brought over}
+        threads_updated: {type: integer, description: Had new messages appended}
+        threads_forked: {type: integer, description: Diverged (written in both places) and continued in a new local thread}
+        threads_failed: {type: integer, description: Retried next run}
+        threads_deferred: {type: integer, description: Left for the next run by the per-run cap}
+        messages_added: {type: integer}
+    RemoteSyncTotals:
+      type: object
+      properties:
+        threads: {type: integer, description: Remote threads being copied}
+        messages: {type: integer, description: Remote messages copied}
+        forks: {type: integer, description: Times a thread forked because both sides wrote}
+      required: [threads, messages, forks]
+    RemoteSyncSettings:
+      type: object
+      properties:
+        configured: {type: boolean}
+        enabled: {type: boolean}
+        base_url: {type: string, example: 'https://api.whatiff.chat'}
+        token_hint: {type: string, description: The stored token's last four characters}
+        status:
+          type: string
+          enum: [pending, ok, error, needs_attention]
+          description: >
+            pending: never run. ok: the last run succeeded. error: it failed and will be retried.
+            needs_attention: the remote refused the token; runs stop until the settings are saved again.
+        last_error: {type: string, nullable: true}
+        last_run_at: {type: string, format: date-time, nullable: true}
+        last_success_at: {type: string, format: date-time, nullable: true}
+        last_run: {$ref: '#/components/schemas/RemoteSyncRunStats'}
+        running: {type: boolean}
+        totals: {$ref: '#/components/schemas/RemoteSyncTotals'}
+        unmatched_personas:
+          type: array
+          items: {type: string}
+          description: Remote persona names whose copied threads have no persona here yet. Creating or importing a persona with one of these names gives it those threads (on the next wake or run).
+        interval_seconds: {type: integer, description: Background sync interval; absent when syncs start only when the app is used}
+        default_base_url: {type: string}
+        allow_local_network: {type: boolean}
+      required: [configured, running]
+    RemoteSyncUpsertRequest:
+      type: object
+      properties:
+        base_url:
+          type: string
+          description: The remote server's address. Empty means the hosted app, not the saved address, so send it on every save.
+          example: 'https://api.whatiff.chat'
+        token:
+          type: string
+          description: A wht_ webhook token with chat:read, created on the remote. Required the first time, and whenever base_url names a different host from the saved one (400 otherwise); a saved token is only sent to the host it came from.
+        enabled: {type: boolean}
     DiscordBot:
       type: object
       description: A user's own Discord bot, speaking as one of their personalities. The token is never returned.
@@ -12514,6 +12809,8 @@ tags:
       paths are lower-case, `/` nests, and `""` is the top level.
   - name: Memory Management
     description: User memory storage and retrieval operations
+  - name: Remote Sync
+    description: Keeping a copy of your threads from another What Iff server (self-hosted installs)
   - name: Discord
     description: The Discord relay - personalities answering in Discord channels as their own bots
   - name: Buzz

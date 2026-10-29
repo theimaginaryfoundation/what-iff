@@ -100,7 +100,16 @@ func TestSignVerify(t *testing.T) {
 		t.Fatal("tampered content verified")
 	}
 	tampered = *ev
-	tampered.ID = tampered.ComputeID()[:62] + "00"
+	// An id that differs from the real one in its last digit. (Overwriting the last two digits
+	// with "00" left the id unchanged whenever it already ended that way, 1 run in 256.)
+	if len(ev.ID) != 64 {
+		t.Fatalf("id %q is not 64 hex digits", ev.ID)
+	}
+	last := "0"
+	if strings.HasSuffix(ev.ID, "0") {
+		last = "1"
+	}
+	tampered.ID = ev.ID[:63] + last
 	if tampered.Verify() == nil {
 		t.Fatal("wrong id verified")
 	}

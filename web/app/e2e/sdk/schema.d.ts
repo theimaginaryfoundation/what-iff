@@ -819,6 +819,293 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/remote-sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get remote sync settings and status
+         * @description The account's remote sync (ADR 0x033): the remote address, the stored token's last four characters, whether sync is on, how the last run went, and totals. The token is never returned. `configured` is false when sync was never set up. Only served when the server runs with REMOTE_SYNC_ENABLED=true; otherwise this route does not exist (404).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Settings and status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RemoteSyncSettings"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        /**
+         * Save remote sync settings
+         * @description Saves the remote address, the token (required the first time; omit to keep the stored one) and whether sync is on. Unless the request switches sync off, the token is first checked against the remote (it must hold chat:read), and a refusal is reported as 400 with the reason. A successful save starts a run. The address must be https unless the server allows http (REMOTE_SYNC_ALLOW_LOCAL_NETWORK); the hosted app's web addresses map to its API.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RemoteSyncUpsertRequest"];
+                };
+            };
+            responses: {
+                /** @description Saved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RemoteSyncSettings"];
+                    };
+                };
+                /** @description Invalid address or token, or the remote refused the token */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Remove remote sync
+         * @description Stops syncing and forgets the token and the thread links. Local threads stay.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Removed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/remote-sync/wake": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The app is being used
+         * @description The web app calls this when a signed-in session starts and when it comes back after a while (remote sync, ADR 0x033). The server starts a sync if the last one is more than a couple of minutes old, and otherwise does nothing; sync being off, not set up, waiting on its owner or already running is not an error. This is what keeps copies current without polling.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Whether a sync was started */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @description A run started; poll GET /remote-sync for its outcome */
+                            started: boolean;
+                            /** @description Copied threads that just got a local persona whose name matches their remote one */
+                            rematched: number;
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/remote-sync/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync now
+         * @description Starts a run in the background. Poll GET /remote-sync for its outcome.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Run started */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RemoteSyncSettings"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Remote sync is not set up */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A run is already in progress, or sync is switched off */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/discord/bots": {
         parameters: {
             query?: never;
@@ -9803,6 +10090,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/webhooks/chat/{chatId}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a thread's running summary (webhook)
+         * @description Returns the thread's running summary: the text a reply reads in place of every message sent before
+         *     `window_start`. Messages from `window_start` on are read as they are. An empty `summary` (and no
+         *     `window_start`) means the thread has none yet. The summary is derived from the thread's own messages,
+         *     which `chat:read` already serves. Remote sync uses it so a copy need not summarize the history again
+         *     (ADR 0x033). Requires the `chat:read` scope. A thread that does not exist and one that belongs to
+         *     someone else both return 404.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Chat ID */
+                    chatId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Summary retrieved successfully */
+                200: {
+                    headers: {
+                        /** @description Always `no-store`. */
+                        "Cache-Control"?: string;
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ChatSummary"];
+                    };
+                };
+                /** @description Invalid chat ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Missing or invalid webhook token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The token does not have the `chat:read` scope */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Chat not found (or not yours) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/webhooks/chat/chat-message/{id}": {
         parameters: {
             query?: never;
@@ -13018,11 +13399,23 @@ export interface components {
         };
         /**
          * @description What a webhook token may do. `messages:write` allows `POST /webhooks/chat/{chatId}/messages`.
-         *     `chat:read` allows the read routes (threads, messages, job status, persona names) and never exposes
+         *     `chat:read` allows the read routes (threads, messages, thread summaries, job status, persona names) and never exposes
          *     system prompts, scratchpads or memories. Tokens created before scopes existed are `messages:write` only.
          * @enum {string}
          */
         WebhookScope: "messages:write" | "chat:read";
+        /** @description A thread's running summary, as `GET /webhooks/chat/{chatId}/summary` returns it. */
+        ChatSummary: {
+            /** Format: uuid */
+            chat_id: string;
+            /** @description The summary text. Empty when the thread has none yet. */
+            summary: string;
+            /**
+             * Format: date-time
+             * @description Messages sent before this are covered by the summary; messages from it on are not.
+             */
+            window_start?: string;
+        };
         /**
          * @description A message as the webhook read routes return it: a stable subset of `ChatMessage` with the same field
          *     names. Tool calls, model reasoning, context breakdowns, portrait thumbnails, rituals, bookmarks and
@@ -13610,6 +14003,68 @@ export interface components {
         DiscordNamedRef: {
             id: string;
             name: string;
+        };
+        /** @description Counts from one run. Never content. */
+        RemoteSyncRunStats: {
+            threads_checked?: number;
+            /** @description New local copies */
+            threads_created?: number;
+            /** @description Matched to a thread an account import already brought over */
+            threads_adopted?: number;
+            /** @description Had new messages appended */
+            threads_updated?: number;
+            /** @description Diverged (written in both places) and continued in a new local thread */
+            threads_forked?: number;
+            /** @description Retried next run */
+            threads_failed?: number;
+            /** @description Left for the next run by the per-run cap */
+            threads_deferred?: number;
+            messages_added?: number;
+        };
+        RemoteSyncTotals: {
+            /** @description Remote threads being copied */
+            threads: number;
+            /** @description Remote messages copied */
+            messages: number;
+            /** @description Times a thread forked because both sides wrote */
+            forks: number;
+        };
+        RemoteSyncSettings: {
+            configured: boolean;
+            enabled?: boolean;
+            /** @example https://api.whatiff.chat */
+            base_url?: string;
+            /** @description The stored token's last four characters */
+            token_hint?: string;
+            /**
+             * @description pending: never run. ok: the last run succeeded. error: it failed and will be retried. needs_attention: the remote refused the token; runs stop until the settings are saved again.
+             * @enum {string}
+             */
+            status?: "pending" | "ok" | "error" | "needs_attention";
+            last_error?: string | null;
+            /** Format: date-time */
+            last_run_at?: string | null;
+            /** Format: date-time */
+            last_success_at?: string | null;
+            last_run?: components["schemas"]["RemoteSyncRunStats"];
+            running: boolean;
+            totals?: components["schemas"]["RemoteSyncTotals"];
+            /** @description Remote persona names whose copied threads have no persona here yet. Creating or importing a persona with one of these names gives it those threads (on the next wake or run). */
+            unmatched_personas?: string[];
+            /** @description Background sync interval; absent when syncs start only when the app is used */
+            interval_seconds?: number;
+            default_base_url?: string;
+            allow_local_network?: boolean;
+        };
+        RemoteSyncUpsertRequest: {
+            /**
+             * @description The remote server's address. Empty means the hosted app, not the saved address, so send it on every save.
+             * @example https://api.whatiff.chat
+             */
+            base_url?: string;
+            /** @description A wht_ webhook token with chat:read, created on the remote. Required the first time, and whenever base_url names a different host from the saved one (400 otherwise); a saved token is only sent to the host it came from. */
+            token?: string;
+            enabled?: boolean;
         };
         /** @description A user's own Discord bot, speaking as one of their personalities. The token is never returned. */
         DiscordBot: {
