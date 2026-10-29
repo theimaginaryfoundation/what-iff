@@ -460,3 +460,88 @@ func TestList_OllamaDetails(t *testing.T) {
 	ollama, _ := findPreset(Presets(nil, "localhost"), PresetOllama)
 	require.True(t, ollama.target(ollama.Flavor, ollama.BaseURL, "").OllamaDetails)
 }
+
+// lmStudioServer answers like LM Studio: an OpenAI-compatible list with ids
+// only, and a native list in version 1 or 0 (or none).
+func lmStudioServer(t *testing.T, native string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/v1/models":
+			_, _ = fmt.Fprint(w, `{"object":"list","data":[{"id":"qwen3-0.6b","object":"model"},{"id":"gemma-3-4b","object":"model"},{"id":"text-embedding-nomic-embed-text-v1.5","object":"model"}]}`)
+		case r.URL.Path == "/api/v1/models" && native == "v1":
+			_, _ = fmt.Fprint(w, `{"models":[
+				{"type":"llm","key":"qwen3-0.6b","display_name":"Qwen3 0.6B","capabilities":{"vision":false,"trained_for_tool_use":true}},
+				{"type":"llm","key":"gemma-3-4b","display_name":"Gemma 3 4B","capabilities":{"vision":true,"trained_for_tool_use":false}},
+				{"type":"embedding","key":"text-embedding-nomic-embed-text-v1.5","display_name":"Nomic Embed Text v1.5"}]}`)
+		case r.URL.Path == "/api/v0/models" && native == "v0":
+			_, _ = fmt.Fprint(w, `{"object":"list","data":[
+				{"id":"qwen3-0.6b","type":"llm","capabilities":["tool_use"]},
+				{"id":"gemma-3-4b","type":"vlm"},
+				{"id":"text-embedding-nomic-embed-text-v1.5","type":"embeddings"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestList_LMStudioDetails(t *testing.T) {
+	for _, version := range []string{"v1", "v0"} {
+		t.Run(version, func(t *testing.T) {
+			srv := lmStudioServer(t, version)
+			got, err := NewLister(nil, false).List(context.Background(), Target{Flavor: FlavorOpenAI, BaseURL: srv.URL + "/v1", LMStudioDetails: true})
+			require.NoError(t, err)
+			require.Len(t, got, 2, "the embedding model can't chat, so it is not offered")
+			byID := map[string]ListedModel{}
+			for _, m := range got {
+				byID[m.ID] = m
+			}
+			require.True(t, *byID["qwen3-0.6b"].ToolSupport)
+			require.False(t, *byID["qwen3-0.6b"].VisionSupport)
+			require.False(t, *byID["gemma-3-4b"].ToolSupport)
+			require.True(t, *byID["gemma-3-4b"].VisionSupport)
+			if version == "v1" {
+				require.Equal(t, "Qwen3 0.6B", byID["qwen3-0.6b"].DisplayName)
+			}
+		})
+	}
+
+	t.Run("no native list", func(t *testing.T) {
+		srv := lmStudioServer(t, "none")
+		got, err := NewLister(nil, false).List(context.Background(), Target{Flavor: FlavorOpenAI, BaseURL: srv.URL + "/v1", LMStudioDetails: true})
+		require.NoError(t, err)
+		require.Len(t, got, 3, "kept as listed")
+		require.Nil(t, got[0].ToolSupport)
+	})
+
+	lmstudio, _ := findPreset(Presets(nil, "localhost"), PresetLMStudio)
+	require.True(t, lmstudio.target(lmstudio.Flavor, lmstudio.BaseURL, "").LMStudioDetails)
+}
+
+// An Ollama embedding model lacks "completion", so it is not offered for chat.
+func TestList_OllamaDropsModelsThatCannotChat(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = fmt.Fprint(w, `{"object":"list","data":[{"id":"qwen3:0.6b","object":"model"},{"id":"nomic-embed-text","object":"model"}]}`)
+		case "/api/show":
+			var body struct{ Model string }
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.Model == "nomic-embed-text" {
+				_, _ = fmt.Fprint(w, `{"capabilities":["embedding"]}`)
+				return
+			}
+			_, _ = fmt.Fprint(w, `{"capabilities":["completion","tools"]}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	got, err := NewLister(nil, false).List(context.Background(), Target{Flavor: FlavorOpenAI, BaseURL: srv.URL + "/v1", OllamaDetails: true})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, "qwen3:0.6b", got[0].ID)
+}
