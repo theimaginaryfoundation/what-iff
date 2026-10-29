@@ -14,6 +14,16 @@ import (
 type fakeDiscordToolStore struct {
 	bindings []models.DiscordBinding
 	pending  []uuid.UUID
+	external bool // the chat is another relay's thread
+}
+
+func (f *fakeDiscordToolStore) IsExternalRelayChat(_ context.Context, _, chatID uuid.UUID) (bool, error) {
+	for _, b := range f.bindings {
+		if b.ChatID == chatID {
+			return true, nil
+		}
+	}
+	return f.external, nil
 }
 
 func (f *fakeDiscordToolStore) ListDiscordBindingsForPersonality(context.Context, uuid.UUID, uuid.UUID) ([]models.DiscordBinding, error) {

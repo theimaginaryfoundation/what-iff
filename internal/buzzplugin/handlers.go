@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -337,6 +338,15 @@ func (h *Handler) addCommunity(w http.ResponseWriter, r *http.Request) {
 	if inv := strings.TrimSpace(req.Invite); inv != "" {
 		code = inviteCode(inv)
 	}
+	// Before anything is sent to the community: re-adding one the persona is already in would
+	// otherwise use up a (possibly single-use) invite and then fail on the unique constraint.
+	if exists, err := h.inCommunity(r.Context(), userID, agentID, ep.WS); err != nil {
+		h.fail(w, err, "Failed to load the persona's communities")
+		return
+	} else if exists {
+		h.fail(w, datastore.ErrBuzzCommunityExists, "")
+		return
+	}
 	info, ok := h.readInfo(w, r, ep)
 	if !ok {
 		return
@@ -379,6 +389,17 @@ func (h *Handler) addCommunity(w http.ResponseWriter, r *http.Request) {
 	h.changed()
 	h.Logger.Info("buzz community added", zap.String("community_id", community.ID.String()), zap.String("status", string(community.Status)))
 	handlerutils.RespondWithJSON(w, h.Logger, http.StatusCreated, community)
+}
+
+// inCommunity reports whether the persona already has the community at relayURL (normalised).
+func (h *Handler) inCommunity(ctx context.Context, userID, agentID uuid.UUID, relayURL string) (bool, error) {
+	communities, err := h.Store.ListBuzzCommunities(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(communities, func(c models.BuzzCommunity) bool {
+		return c.AgentID == agentID && c.RelayURL == relayURL
+	}), nil
 }
 
 // readInfo reads a community's NIP-11 document and checks it is Buzz. When ok is false the
@@ -1174,6 +1195,9 @@ func (h *Handler) fail(w http.ResponseWriter, err error, msg string) {
 	case errors.Is(err, datastore.ErrBuzzBindingExists):
 		handlerutils.RespondWithError(w, h.Logger, http.StatusConflict, handlerutils.CodeNotSet,
 			"That channel is already connected for this persona.", nil)
+	case errors.Is(err, datastore.ErrBuzzBindingPaused):
+		handlerutils.RespondWithError(w, h.Logger, http.StatusConflict, handlerutils.CodeNotSet,
+			"That channel is paused or needs attention, so nothing is posted there. Turn it back on first.", nil)
 	default:
 		handlerutils.RespondWithError(w, h.Logger, http.StatusInternalServerError, handlerutils.CodeNotSet, msg, err)
 	}

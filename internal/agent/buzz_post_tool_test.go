@@ -14,6 +14,16 @@ import (
 type fakeBuzzToolStore struct {
 	bindings []models.BuzzBinding
 	pending  []uuid.UUID
+	external bool // the chat is another relay's thread
+}
+
+func (f *fakeBuzzToolStore) IsExternalRelayChat(_ context.Context, _, chatID uuid.UUID) (bool, error) {
+	for _, b := range f.bindings {
+		if b.ChatID == chatID {
+			return true, nil
+		}
+	}
+	return f.external, nil
 }
 
 func (f *fakeBuzzToolStore) ListBuzzBindingsForPersonality(context.Context, uuid.UUID, uuid.UUID) ([]models.BuzzBinding, error) {
@@ -36,23 +46,29 @@ func withBuzzToolStore(t *testing.T, s buzzToolStore) {
 	allowBuzz(t, true)
 }
 
-// allowBuzz decides whether every owner may use the (experimental) relay for the test.
+// allowBuzz switches the relay on or off for the test.
 func allowBuzz(t *testing.T, ok bool) {
 	t.Helper()
-	orig := buzzMayUse
-	buzzMayUse = func(context.Context, uuid.UUID) bool { return ok }
-	t.Cleanup(func() { buzzMayUse = orig })
+	orig := buzzRelayOn
+	buzzRelayOn = func() bool { return ok }
+	t.Cleanup(func() { buzzRelayOn = orig })
 }
 
 func buzzBinding(community, channel string) models.BuzzBinding {
 	return models.BuzzBinding{ID: uuid.New(), ChatID: uuid.New(), CommunityName: community, ChannelName: channel, ChannelID: "id-" + channel, Status: models.BuzzBindingActive}
 }
 
-func TestBuzzToolIsInTheCatalogAndNeedsChannels(t *testing.T) {
+func catalogNames() map[string]bool {
 	names := map[string]bool{}
 	for _, d := range tools.AdditionalFunctionToolCatalog() {
 		names[d.Spec.Name] = true
 	}
+	return names
+}
+
+func TestBuzzToolIsInTheCatalogAndNeedsChannels(t *testing.T) {
+	allowBuzz(t, true)
+	names := catalogNames()
 	assert.True(t, names[buzzPostToolName])
 	assert.True(t, names[discordPostToolName], "both relays' tools are registered")
 	assert.Contains(t, extraToolHandlersForChat(&Agent{}, testChat()), buzzPostToolName)
@@ -74,7 +90,8 @@ func TestBuzzToolIsOffWhereTheRelayIsOff(t *testing.T) {
 	assert.False(t, additionalDisabledToolsForChat(&Agent{}, chat)[buzzPostToolName])
 
 	allowBuzz(t, false)
-	assert.True(t, additionalDisabledToolsForChat(&Agent{}, chat)[buzzPostToolName], "an owner without the experimental feature gets no Buzz tool")
+	assert.True(t, additionalDisabledToolsForChat(&Agent{}, chat)[buzzPostToolName], "with the relay off there is no Buzz tool")
+	assert.False(t, catalogNames()[buzzPostToolName], "with the relay off the tool is not listed for anyone")
 }
 
 func TestBuzzPostMarksTheChosenChannel(t *testing.T) {
@@ -105,6 +122,25 @@ func TestBuzzSameNamedChannelsAreQualifiedByCommunity(t *testing.T) {
 	_, err = buzzPost(context.Background(), store, chat, []byte(`{"channel":"Globex/#general"}`))
 	require.NoError(t, err)
 	assert.Equal(t, []uuid.UUID{b.ID}, store.pending)
+}
+
+// A Discord relay thread the owner left unsandboxed (acknowledged) is still driven by Discord
+// strangers: it reaches none of the persona's Buzz channels, and post_to_discord likewise none
+// of its Discord channels from a Buzz thread.
+func TestAnotherRelaysThreadReachesNoChannelsOfThisOne(t *testing.T) {
+	allowBuzz(t, true)
+	chat := testChat()
+	chat.ContextScope = models.ContextScopeAccount
+	require.False(t, chat.IsSandboxed())
+
+	buzz := &fakeBuzzToolStore{bindings: []models.BuzzBinding{buzzBinding("Acme", "general")}, external: true}
+	assert.Empty(t, buzzChannelsFor(context.Background(), buzz, chat))
+	discord := &fakeDiscordToolStore{bindings: []models.DiscordBinding{binding("Guild", "general")}, external: true}
+	assert.Empty(t, discordChannelsFor(context.Background(), discord, chat))
+
+	buzz.external, discord.external = false, false
+	assert.Len(t, buzzChannelsFor(context.Background(), buzz, chat), 1, "an ordinary chat reaches them all")
+	assert.Len(t, discordChannelsFor(context.Background(), discord, chat), 1)
 }
 
 func TestBuzzSandboxedOrRelayThreadsReachOnlyTheirOwnChannel(t *testing.T) {

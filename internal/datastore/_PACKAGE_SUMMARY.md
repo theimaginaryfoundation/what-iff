@@ -44,6 +44,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   - Models: `model.go`.
   - Safety violations: `safety_violation_event.go`.
   - Tool call persistence: `toolcall.go`.
+- **`CheckUserPassword`** reports whether a password is the account's current one (false for identity-provider accounts); it backs `reauth`'s default confirmation.
 - **`errors.go`:** Sentinel errors for handlers and agent.
 - **DB metrics** (`dbmetrics.go`): **`InstrumentEntClient`** adds an ent interceptor and hook that record `db.client.operation.duration` for every query and mutation, with `db.collection.name` = snake_case entity (`chat_message`) and `db.operation.name` = `query`/`create`/`update`/`delete`.
   `internal/server` calls it once at startup; calling it twice double-counts.
@@ -176,6 +177,13 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   `MemoryIDsCreatedInChat` re-checks persisted memory ids against the chat's own memories.
   `toChatModel` blanks the personality scratchpad for a sandboxed chat, so neither a turn nor `GetChatContext` (the owner's context panel) sees it, and the chat handler refuses a scratchpad save for a sandbox.
   `CreateChat` and `UpdateChat` write `context_scope` (validated; `ErrInvalidRequestBody` for an unknown scope); `UpdateChat` writes it only when `SetContextScope` is true, so a stale copy saved by a turn cannot un-sandbox a chat.
+- **Turn settings (ADR 0x026, `turnsettings.go`):** user preferences, personalities, moods, chats and agent jobs each carry nullable `reasoning_effort` / `agent_loop` enums (one Ent enum type per entity; the generic helpers convert).
+  A chat stores only its own explicit values (nothing is copied at creation); `InheritedTurnSettings` reads the personality's and account default for a turn, selecting only the two columns.
+  `UpdateChat` writes the chat's values only when `SetReasoningEffort` / `SetAgentLoop` is true, like the scope.
+  `UpdateUserPreferences` leaves an omitted value alone and clears on `""`; personality and mood updates replace both (their handlers fill an omitted value from the stored one).
+  `ChatMessage.agent_run` holds a saved Advanced run; an Advanced run in progress keeps its steps on `Job.draft_agent_run` (`UpdateJobDraftAgentRun`, `job_agent_run.go`) and its finished tool calls as ToolCall rows linked to the job (`CreateJobDraftToolCall`, `ToolCall.draft_job`).
+  Saving the reply moves those rows onto it (`createToolCallsBulk`, `models.ToolCall.JobDraft`); the partial-finalize paths turn the draft into the partial message with them (`consumeDraftAgentRunToMessageTx`), including the idempotent path after another instance cancelled the job (`MarkChatJobCancelled` keeps the draft), `FinalizeAdvancedDraft` (shutdown, agent-job runs) and the startup reaper's `FailInterruptedAdvancedJobs`; rows no message took are dropped with the draft.
+  `GetJob` reads every column except `draft_agent_run` (`jobReadColumns`): the client polls it.
   `CreateChat` honours `Chat.DisabledTools`, and gives a chat created sandboxed with no list of its own the registered sandbox defaults (`models.SandboxDefaultDisabledTools`), so every creation path starts a sandbox the same way.
   `memoryOfChat` (`memory_chat_scope.go`) is the one predicate for "the chat's own memories": created in it AND Chat- or Summary-scoped; `MemoryIDsCreatedInChat`, `ensureMemoriesCreatedInChatTx` and the `OnlyChatID` merge-event filter all use it, so a User-scoped memory that merely came from the chat is outside the sandbox.
   `ListFileAttachmentsInChatScope` returns a conversation's uploads (plus a personality's documents when a personality id is given); a sandboxed chat passes none, so it sees only its own uploads.
@@ -188,19 +196,23 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   `UpsertChatSummaryMemory` marks a relay thread's summary (Discord, Buzz or Slack) external, and it stays so.
   `ListMemories` filters by `MemoryFilters.Provenance`, `UpdateMemory` accepts a provenance patch (the owner confirming a memory), and memory export/import carry both fields (the `user` default is not written).
 - **Discord relay (`discord.go`):** bots (token encrypted with the MCP token helper), bindings, message links and pending posts.
-- **`EncryptToken` / `DecryptToken`** expose the token helper to packages that keep their own tables but share the one key (`internal/accountkeys`).
   Methods taking a userID are owner-scoped; the relay's own (`FindDiscordBindingTarget`, `GetDiscordBindingTarget`, `ListActiveDiscordBotCredentials`, link and pending-post bookkeeping) act for the owner recorded on the bot.
   `IsExternalRelayChat` (any chat bound by one of the user's Discord bots, Buzz identities or Slack apps) and `ExternalSpeakerForMessage` (the Discord, Buzz or Slack authors of a saved message, "alice, bob" for a batched turn) back memory provenance in the agent; `RelayPlatformForChat` names the platform for the extraction note.
   For every relay (ADR 0x031): inbound links record an `agent_depth`, `LastInbound…Link` returns a binding's newest one within the loop guard's window, `FindInbound…Link` returns the newest link of a batched turn's message, and `RenameDiscordChannel` / `RenameBuzzChannel` / `RenameSlackChannel` record a channel's new name when it changed.
 - **Buzz relay (`buzz.go`, ADR 0x028):** personas' Buzz identities (secret key encrypted with the token helper), communities (attestation encrypted too), bindings, message links and pending posts, mirroring `discord.go`.
-  `ListActiveBuzzConnections` is the gateway's work list; `SetBuzzCommunityState` never resumes a community the owner paused; `BuzzThreadContinues` decides thread continuations from the links.
+  `ListActiveBuzzConnections` is the gateway's work list; `SetBuzzCommunityState` never resumes a community the owner paused; `MarkBuzzCommunityEvent` moves a community's resume point forward only; `BuzzThreadContinues` decides thread continuations from the links.
+  `IsBuzzAgentPubKey` (any owner's persona) backs the relay's loop guard, and `SetBuzzPendingPost` refuses a binding that is broken or whose persona or community is paused (`ErrBuzzBindingPaused`).
 - **Slack relay (`slack.go`, ADR 0x032):** personas' Slack apps (bot and app-level tokens encrypted with the token helper; one per `app_id`, one per persona per workspace), bindings, message links and pending posts, mirroring `buzz.go`.
   `ListActiveSlackAppCredentials` is the gateway's work list; `SetSlackAppState` never resumes an app the owner paused, and records a connection time only for a clean connect; `SlackThreadContinues` is true when the persona already answered the same author in that Slack thread; `BreakSlackChannel` marks an app's bindings of a channel it was removed from.
   `CreateChat` honours `Chat.DisabledTools`, so a server-created relay thread never exists with its default-off tools on (the app's create route drops the field).
+- **Failure codes:** a job's `error_code` and a chat message's `last_error_code` carry a stable code beside the failure text.
+  `SetChatMessageLastError` takes the code and clears it with the message; `FinalizeFailedChatJobWithPartial` and `UpdateJob` record it on the job; `SetJobErrorCode` adds it after `UpdateJobStatus` has marked a job failed.
+- **`EncryptToken` / `DecryptToken`** expose the token helper to packages that keep their own tables but share the one key (`internal/accountkeys`).
 
 ## Testing
 
 - `chat_checkpoint_test.go`, `chatmessage_test.go`, `chatmessage_mark_read_test.go` — message and checkpoint behavior.
+- `turnsettings_test.go` — threads store only explicit values, `InheritedTurnSettings` reads the personality and account default, explicit-only chat writes, and preference update semantics for the turn settings.
 - `memory_test.go`, `memory2_test.go`, `filechunk_test.go` — retrieval (including **`ListMemories`** excluding Summary unless `level=summary`), ZIP export/import helpers, full import count/persist coverage, and chunks.
 - `memory_embedding_test.go` — stale-embedding drop on content edits (not for Summary), missing-embedding queries, the `SetMemoryEmbedding` content guard and replace, non-content patches on untrimmed legacy rows, the dialect-gated row lock, and backfill batching, per-item retry, skipping a page of bad input, and early stop.
 - `memory_import_metrics_test.go` — memory import stage timings and item counts, including a failed embed stage.

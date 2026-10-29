@@ -106,7 +106,7 @@ func (s *Service) runInbound(ctx context.Context, batch []inboundWork) {
 		attachments []*models.FileAttachment
 	)
 	for _, m := range mentions {
-		quoteAuthor, quote := s.quoted(ctx, ep, signer, t.Agent.PubKey, m.w.ev, ThreadOf(m.w.ev))
+		quoteAuthor, quote := s.quoted(ctx, ep, signer, t.Agent.PubKey, b.ChannelID, m.w.ev, ThreadOf(m.w.ev))
 		atts, notes := s.ingestInbound(ctx, ep, signer, t.Agent.OwnerID, b.ChatID, m.w.ev, MaxInboundAttachments-len(attachments))
 		attachments = append(attachments, atts...)
 		line := PromptText(m.w.ev.Content, m.author, b.ChannelName, personaName, npub, quoteAuthor, quote)
@@ -188,7 +188,7 @@ func (s *Service) guardBatch(ctx context.Context, bindingID uuid.UUID, batch []i
 // quoted is the message ev replies to, when that is someone else's (the persona's own is
 // already the previous reply in the thread): its author's name and text. Lookup failures
 // quote nothing.
-func (s *Service) quoted(ctx context.Context, ep Endpoint, signer Signer, agentPub string, ev nostr.Event, thread ThreadRef) (string, string) {
+func (s *Service) quoted(ctx context.Context, ep Endpoint, signer Signer, agentPub, channelID string, ev nostr.Event, thread ThreadRef) (string, string) {
 	if thread.Parent == "" || thread.Parent == ev.ID {
 		return "", ""
 	}
@@ -197,7 +197,10 @@ func (s *Service) quoted(ctx context.Context, ep Endpoint, signer Signer, agentP
 		return "", ""
 	}
 	parent := events[0]
-	if parent.Verify() != nil || parent.PubKey == agentPub || parent.Kind != KindStreamMessage {
+	// The parent's id comes from the sender: quote it only when it is a message in this
+	// binding's channel, so a reply cannot pull in a message from a channel its sender cannot
+	// read.
+	if parent.Verify() != nil || parent.ID != thread.Parent || parent.PubKey == agentPub || !IsChannelMessage(parent, channelID) {
 		return "", ""
 	}
 	return s.names.name(ctx, s.Relay, ep, signer, parent.PubKey), parent.Content

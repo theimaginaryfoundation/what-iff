@@ -11,6 +11,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 
@@ -146,7 +147,10 @@ func (a *Agent) handleEphemeralPromptAsync(ctx context.Context, chatID uuid.UUID
 				)
 				return
 			}
-			_, failErr := a.ds.UpdateJobStatus(runCtx, userID, jobID, models.JobStatusFailed, runErr.Error())
+			_, failErr := a.ds.UpdateJobStatus(runCtx, userID, jobID, models.JobStatusFailed, providerkeys.FailureText(runErr))
+			if failErr == nil {
+				a.recordJobFailureCode(runCtx, userID, jobID, runErr)
+			}
 			if failErr != nil {
 				a.logger.Error("failed to mark async webhook background job failed",
 					zap.String("job_id", jobID.String()),
@@ -203,7 +207,8 @@ func detachedUserContext(ctx context.Context) (context.Context, error) {
 	if !ok {
 		return nil, errors.New("user ID not found in context")
 	}
-	return detached, nil
+	// An agent job's reasoning effort / agent loop ride on the context (ADR 0x026).
+	return models.CopyJobTurnSettings(ctx, detached), nil
 }
 
 // handleEphemeralPrompt runs the turn on ctx as given, which must carry the user ID: callers
@@ -264,11 +269,17 @@ func (a *Agent) handleEphemeralPrompt(
 	}
 
 	// Turn gate: queue behind earlier turns in this chat (#254); see beginEphemeralChatTurn.
-	endTurn, err := a.beginEphemeralChatTurn(ctx, userID, chatID, trackingJob)
+	endTurn, ticket, err := a.beginEphemeralChatTurn(ctx, userID, chatID, trackingJob)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { endTurn(retErr) }()
+	// The job an Advanced run keeps its draft on (ADR 0x026): the tracking job, or a scheduled
+	// run's queue ticket.
+	draftJob := trackingJob
+	if draftJob == nil {
+		draftJob = ticket
+	}
 
 	// Rehydration gate: stall if this thread's import summary is still in flight (no-op otherwise).
 	a.WaitForThreadRehydration(ctx, userID, chatID)
@@ -291,6 +302,7 @@ func (a *Agent) handleEphemeralPrompt(
 			chatCtx.chat.ToolsEnabled = model.ToolSupport
 			chatCtx.model = model.Name
 			chatCtx.modelProvider = model.Provider
+			chatCtx.modelReasoningSupport = model.ReasoningSupport
 			chatCtx.modelSubscriptionTier = model.SubscriptionTier
 			chatCtx.modelVisionSupport = model.VisionSupport
 		} else if err != nil && !errors.Is(err, datastore.ErrModelNotFound) {
@@ -308,6 +320,17 @@ func (a *Agent) handleEphemeralPrompt(
 		}
 	}
 
+	// Reasoning effort and agent loop: the job's (on ctx), then the thread's active mode, then
+	// the thread (ADR 0x026). This path does not select a mode, so the current one is read.
+	a.resolveTurnSettings(ctx, chatCtx, a.threadActiveMood(ctx, chatCtx))
+	if opts.skipUsageRecording {
+		// An unmetered turn (the welcome message) never runs Advanced or a selected effort: it
+		// would be work nobody pays for.
+		chatCtx.turnSettings = models.TurnSettings{}
+		chatCtx.reasoningEffort = ""
+	}
+	ctx = withTurnAgentLoop(ctx, chatCtx)
+
 	// Quota gate — checked after overrides are resolved so we use the effective model tier.
 	// actionType controls whether free-tier chat eligibility can apply.
 	qd := metering.Decision{Allowed: true}
@@ -317,6 +340,13 @@ func (a *Agent) handleEphemeralPrompt(
 			a.recordQuotaRejection(ctx)
 			return nil, fmt.Errorf("%w for user %s", ErrQuotaExceeded, userID)
 		}
+	}
+	chatCtx.meterDecision = qd
+	chatCtx.actionType = actionType
+	chatCtx.skipUsageRecording = opts.skipUsageRecording
+	chatCtx.draftJob = draftJob
+	if draftJob != nil {
+		chatCtx.turnID = draftJob.ID.String()
 	}
 
 	doneBuildContext := a.timeTurnStage(ctx, turnStageBuildContext)
@@ -328,6 +358,7 @@ func (a *Agent) handleEphemeralPrompt(
 
 	agentMessage, resp, err := a.generateAssistantForMessage(ctx, userID, trackingJob, ephemeralUserMessage, chatCtx, modelContext)
 	if err != nil {
+		a.finalizeEphemeralAdvancedDraft(ctx, userID, draftJob, chatID, err)
 		return nil, err
 	}
 	if resp == nil {
@@ -351,6 +382,12 @@ func (a *Agent) handleEphemeralPrompt(
 	// own status (advanceJobInferenceComplete). A scheduled run has no job row, so its queue ticket
 	// is ended here.
 	if trackingJob == nil {
+		if ticket != nil && a.ds != nil {
+			// The reply took the run's draft tool calls; drop the rest of the draft from the ticket.
+			if err := a.ds.ClearJobDraftDeltas(ctx, userID, ticket.ID); err != nil {
+				a.logger.Warn("failed to clear the turn ticket's draft", zap.Error(err))
+			}
+		}
 		endTurn(nil)
 	}
 	if err := a.advanceJobInferenceComplete(ctx, trackingJob, agentMessage.ID); err != nil {
@@ -406,4 +443,19 @@ func (a *Agent) handleEphemeralPrompt(
 	}
 
 	return agentMessage, nil
+}
+
+// finalizeEphemeralAdvancedDraft saves a failed or stopped agent-job Advanced run (ADR 0x026) as a
+// partial reply from its draft, as a chat turn's failure path does. A turn without an Advanced
+// draft is left to its caller's status handling.
+func (a *Agent) finalizeEphemeralAdvancedDraft(ctx context.Context, userID uuid.UUID, draftJob *models.Job, chatID uuid.UUID, cause error) {
+	if draftJob == nil || a.ds == nil {
+		return
+	}
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), jobTerminalPersistTimeout)
+	defer cancel()
+	cancelled := errors.Is(cause, context.Canceled) || ctx.Err() != nil
+	if _, err := a.ds.FinalizeAdvancedDraft(persistCtx, userID, draftJob.ID, chatID, cancelled, cause.Error(), failureCode(cause)); err != nil {
+		a.logger.Warn("failed to save the Advanced run's partial reply", zap.String("job_id", draftJob.ID.String()), zap.Error(err))
+	}
 }

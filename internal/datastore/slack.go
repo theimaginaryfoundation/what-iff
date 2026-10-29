@@ -32,6 +32,9 @@ var (
 	ErrSlackAppExists = errors.New("slack app already connected")
 	// ErrSlackBindingExists: the app already has a binding for the channel.
 	ErrSlackBindingExists = errors.New("slack channel already bound for this app")
+	// ErrSlackBindingPaused: the binding is broken, or its app is paused or its tokens refused,
+	// so nothing may be posted through it.
+	ErrSlackBindingPaused = errors.New("slack binding is paused or broken")
 )
 
 func slackAppOwnedBy(userID uuid.UUID) predicate.SlackApp {
@@ -650,6 +653,19 @@ func (d *Datastore) SetSlackPendingPost(ctx context.Context, userID, bindingID, 
 	if _, err := d.GetSlackBinding(ctx, userID, bindingID); err != nil {
 		return err
 	}
+	live, err := d.dbClient.SlackBinding.Query().
+		Where(
+			slackbinding.ID(bindingID),
+			slackbinding.StatusEQ(slackbinding.StatusActive),
+			slackbinding.HasAppWith(slackapp.StatusEQ(slackapp.StatusActive)),
+		).
+		Exist(ctx)
+	if err != nil {
+		return fmt.Errorf("check slack binding: %w", err)
+	}
+	if !live {
+		return ErrSlackBindingPaused
+	}
 	if err := d.ClearSlackPendingPost(ctx, userID, bindingID, chatID); err != nil {
 		return err
 	}
@@ -815,6 +831,7 @@ func (d *Datastore) slackCredentials(row *ent.SlackApp, ownerID uuid.UUID) (*mod
 		BotID:         row.BotID,
 		BotToken:      bot,
 		AppToken:      app,
+		Status:        models.SlackAppStatus(row.Status),
 	}, nil
 }
 

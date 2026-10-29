@@ -74,6 +74,7 @@ type SlackAppCredentials struct {
 	BotID         string
 	BotToken      string `json:"-"`
 	AppToken      string `json:"-"`
+	Status        SlackAppStatus
 }
 
 // SlackBindingStatus is the health of a binding.
@@ -143,6 +144,13 @@ type SlackBindingPatch struct {
 type SlackBindingTarget struct {
 	Binding SlackBinding
 	App     SlackAppCredentials
+}
+
+// Live reports whether the relay may act through t now: the persona's app is active (not
+// paused by its owner, its tokens not refused) and the binding is not broken. Checked before
+// every post, so a pause also stops replies already queued or armed.
+func (t SlackBindingTarget) Live() bool {
+	return t.App.Status == SlackAppActive && t.Binding.Status == SlackBindingActive
 }
 
 // SlackLinkStatus is where a crossing message is.

@@ -7,9 +7,8 @@ It talks to Slack through the `Slack` interface (the Web API client `API`) and t
 
 ## Responsibilities
 
-- **Access (`access.go`):** the relay is an experimental feature.
-  `Enabled` is the operator switch (`SLACK_RELAY_ENABLED=true`, default off); `UserMayUse` adds the per-user policy a build may link (`featuregate.ExperimentalEnabled`).
-  The routes, the gateway and `post_to_slack` all ask `UserMayUse`.
+- **Access (`access.go`):** `Enabled` is the operator switch (`SLACK_RELAY_ENABLED=true`, default off), on for every user when set.
+  The routes, the gateway and `post_to_slack` all ask it.
 - **Web API (`api.go`):** form POSTs with the token in the header: `auth.test`, `bots.info`, `apps.connections.open`, `chat.postMessage` (with `link_names` off), reactions, `users.info`, `conversations.list`/`info`/`join`/`replies`, and files (`Download` from Slack's file host only; `UploadFile` in Slack's three steps).
   `Error` carries Slack's error code (and `Retry-After` on a 429); `IsAuthError`, `IsChannelError` and `IsTransient` classify it.
   Every connection goes through the public-address dial guard, and the bot token is sent to `files.slack.com` and nowhere else.
@@ -27,7 +26,7 @@ It talks to Slack through the `Slack` interface (the Web API client `API`) and t
 
 ## Key types and entry points
 
-- `Enabled`, `UserMayUse`.
+- `Enabled`.
 - `API`, `NewAPI`, `Error`, `IsAuthError`, `IsChannelError`, `IsTransient`, `Identity`, `BotInfo`, `User`, `Channel`.
 - `Socket`, `OpenSocket`, `SocketConfig`, `SocketState`, `Opener`, `NewDialer`, `SocketAppID`.
 - `EventCallback`, `Message`, `File`, `PlainText`, `PromptText`, `ToMrkdwn`, `MaxMessageRunes`.
@@ -36,7 +35,7 @@ It talks to Slack through the `Slack` interface (the Web API client `API`) and t
 
 ## Dependencies
 
-- **Inbound:** `internal/slackplugin` (routes, gateway, reply hook), `internal/agent` (`UserMayUse` for `post_to_slack`).
+- **Inbound:** `internal/slackplugin` (routes, gateway, reply hook), `internal/agent` (`Enabled` for `post_to_slack`).
 - **Outbound:** `internal/relaykit` (turn queue, loop guard, reply bookkeeping, thread gate, reply files, splitter, dial guard), `internal/plugins`, `internal/replyhook`, `internal/featuregate`, `internal/models`, `github.com/gorilla/websocket`, `zap`.
 
 ## Non-obvious decisions

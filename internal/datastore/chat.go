@@ -105,6 +105,7 @@ func toChatModel(e *ent.Chat) *models.Chat {
 		id := e.Edges.ActiveMood.ID
 		chatModel.ActiveMoodID = &id
 	}
+	chatModel.TurnSettingValues = turnSettingsFromEnt(e.ReasoningEffort, e.AgentLoop)
 
 	return &chatModel
 }
@@ -212,6 +213,10 @@ func (d *Datastore) CreateChat(ctx context.Context, userID uuid.UUID, chat model
 		}
 	}
 
+	// Only explicit turn settings are stored on the thread (ADR 0x026); inherited ones are
+	// resolved at each turn (InheritedTurnSettings).
+	chat.TurnSettingValues = chat.TurnSettingValues.Normalized()
+
 	normalizedTags, err := modeltypes.NormalizeAndValidateChatTags(chat.Tags)
 	if err != nil {
 		if rerr := tx.Rollback(); rerr != nil {
@@ -278,7 +283,9 @@ func (d *Datastore) CreateChat(ctx context.Context, userID uuid.UUID, chat model
 		SetTags(normalizedTags).
 		SetNillableIsFavorite(chat.IsFavorite).
 		SetIsAutoMood(true).
-		SetContextScope(entchat.ContextScope(scope))
+		SetContextScope(entchat.ContextScope(scope)).
+		SetNillableReasoningEffort(entEffort[entchat.ReasoningEffort](chat.ReasoningEffort)).
+		SetNillableAgentLoop(entLoop[entchat.AgentLoop](chat.AgentLoop))
 	if len(disabledTools) > 0 {
 		// Server-created threads (a Discord relay thread, say) start with tools switched off in the
 		// same transaction, so the thread never exists with them on.
@@ -1025,6 +1032,13 @@ func (d *Datastore) UpdateChat(ctx context.Context, userID uuid.UUID, chat model
 			return nil, fmt.Errorf("%w: invalid context_scope: %s", ErrInvalidRequestBody, scope)
 		}
 		update.SetContextScope(entchat.ContextScope(scope))
+	}
+	// Turn settings follow the same explicit-change rule as the scope.
+	if chat.SetReasoningEffort {
+		setReasoningEffort[entchat.ReasoningEffort, entchat.AgentLoop](update, chat.ReasoningEffort)
+	}
+	if chat.SetAgentLoop {
+		setAgentLoop[entchat.ReasoningEffort, entchat.AgentLoop](update, chat.AgentLoop)
 	}
 
 	entChat, err := update.Save(ctx)

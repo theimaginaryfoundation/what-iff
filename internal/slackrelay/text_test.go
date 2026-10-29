@@ -27,7 +27,7 @@ func TestPlainText(t *testing.T) {
 		{"bare links", "<https://x.test>", "https://x.test"},
 		{"mail links", "<mailto:a@b.test|a@b.test>", "a@b.test"},
 		{"escapes", "1 &lt; 2 &amp;&amp; 3 &gt; 2", "1 < 2 && 3 > 2"},
-		{"line breaks are kept", "<@UBOT> one\n  two   three\n", "one\ntwo three"},
+		{"line breaks and spacing are kept", "<@UBOT> one\n  two   three  \n", "one\n  two   three"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, PlainText(tc.in, "UBOT", names))

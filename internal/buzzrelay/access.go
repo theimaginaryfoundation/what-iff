@@ -1,19 +1,13 @@
 package buzzrelay
 
 import (
-	"context"
 	"os"
 	"strings"
-
-	"github.com/google/uuid"
-	"github.com/theimaginaryfoundation/what-iff/internal/featuregate"
-	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
-// The Buzz relay is an experimental feature (models.ExperimentalFeatureBuzzRelay). It is off
-// unless the operator switches it on with BUZZ_RELAY_ENABLED=true; a build with a per-user
-// experimental gate (featuregate.NewExperimental) further limits it to the users it is turned on
-// for. The routes, the gateway and the post_to_buzz tool all ask UserMayUse.
+// The Buzz relay is off unless the operator switches it on with BUZZ_RELAY_ENABLED=true; when it
+// is on, it is on for every user of the server. The routes, the gateway and the post_to_buzz
+// tool all ask Enabled.
 
 // Enabled reports whether the operator switched the relay on: BUZZ_RELAY_ENABLED is true, 1 or
 // on. It is read on every call, so a value from the server's .env file counts.
@@ -23,10 +17,4 @@ func Enabled() bool {
 		return true
 	}
 	return false
-}
-
-// UserMayUse reports whether userID may use the relay: it is switched on, and the per-user
-// experimental policy (when a build links one) has it on for them.
-func UserMayUse(ctx context.Context, userID uuid.UUID) bool {
-	return Enabled() && featuregate.ExperimentalEnabled(ctx, userID, models.ExperimentalFeatureBuzzRelay)
 }

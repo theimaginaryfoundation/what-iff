@@ -253,7 +253,7 @@ func (s *Service) admits(ctx context.Context, t models.SlackBindingTarget, m Mes
 	if m.User == "" {
 		return false, false // an incoming webhook or another integration: nobody to answer
 	}
-	if !b.InboundEnabled || b.Status != models.SlackBindingActive {
+	if !b.InboundEnabled || !t.Live() {
 		return false, false
 	}
 	if m.Time().Before(b.CreatedAt.Add(-bindingSkew)) {
@@ -364,6 +364,12 @@ func (s *Service) post(ctx context.Context, t models.SlackBindingTarget, message
 	s.defaults()
 	b, app := t.Binding, t.App
 	log := s.Logger.With(zap.String("binding_id", b.ID.String()), zap.String("message_id", messageID.String()))
+	if !t.Live() {
+		// Paused or broken since the post was asked for: a pause also stops replies already
+		// armed or in flight.
+		log.Info("slack relay: binding not live; not posting")
+		return
+	}
 	link, created, err := s.Store.StartOutboundSlackLink(ctx, b.ID, messageID, threadTS, replyToLink)
 	if err != nil {
 		log.Error("slack relay: start outbound", zap.Error(err))

@@ -22,6 +22,16 @@ func FromAgent(ev nostr.Event) bool {
 	return len(tag) == 4
 }
 
+// MayConcern is the cheap check on a delivered event, before anything is looked up: a
+// channel message by someone other than the persona that mentions it or replies in a thread
+// (which may continue a conversation with it). Everything else is dropped on arrival.
+func MayConcern(ev nostr.Event, personaPub string) bool {
+	if ev.Kind != KindStreamMessage || ev.PubKey == personaPub {
+		return false
+	}
+	return Mentions(ev, personaPub) || ThreadOf(ev).Root != ""
+}
+
 // IsChannelMessage reports whether ev is a message in channel (kind 9 with that h tag).
 func IsChannelMessage(ev nostr.Event, channelID string) bool {
 	return ev.Kind == KindStreamMessage && ev.Tags.Value("h") == channelID
@@ -59,16 +69,18 @@ func PromptText(content, author, channelName, personaName, personaNPub, quoteAut
 }
 
 // stripPersonaMention removes "@<persona name>" (at a word start, any case) and nostr:npub
-// references to the persona, and tidies spaces. Other people's mentions are left as written.
+// references to the persona, with the spaces after them. Everything else is left as written:
+// line breaks and runs of spaces matter in code blocks, lists and tables, and other people's
+// mentions are the sender's.
 func stripPersonaMention(content, name, npub string) string {
 	if npub != "" {
-		content = strings.ReplaceAll(content, "nostr:"+npub, "")
+		content = regexp.MustCompile(`nostr:`+regexp.QuoteMeta(npub)+`[ \t]*`).ReplaceAllString(content, "")
 	}
 	if name = strings.TrimSpace(name); name != "" {
-		pattern := regexp.MustCompile(`(?i)(^|\s)@` + regexp.QuoteMeta(name) + `\b`)
+		pattern := regexp.MustCompile(`(?i)(^|\s)@` + regexp.QuoteMeta(name) + `\b[ \t]*`)
 		content = pattern.ReplaceAllString(content, "$1")
 	}
-	return strings.Join(strings.Fields(content), " ")
+	return strings.TrimSpace(content)
 }
 
 // ShortNPub is an npub cut for display ("npub1abcd…wxyz"), the name used for an author who

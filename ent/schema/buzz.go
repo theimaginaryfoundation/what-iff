@@ -79,6 +79,9 @@ func (BuzzCommunity) Fields() []ent.Field {
 		field.Enum("status").Values("active", "needs_access", "error", "disabled").Default("needs_access"),
 		field.String("last_error").Optional().Nillable(),
 		field.Time("last_connected_at").Optional().Nillable(),
+		// The newest event the gateway has seen from the community, so a fresh connection (a
+		// deploy, a new gateway leader, a changed binding) resumes from there rather than now.
+		field.Time("last_event_at").Optional().Nillable(),
 	}
 }
 

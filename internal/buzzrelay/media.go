@@ -97,9 +97,7 @@ func (c *Client) Upload(ctx context.Context, ep Endpoint, s Signer, name, conten
 		req.Header.Set("Content-Type", contentType)
 	}
 	req.Header.Set("X-SHA-256", digest)
-	if s.Attestation != nil {
-		req.Header.Set("x-auth-tag", s.Attestation.JSON())
-	}
+	s.setAuthTag(req, KindBlossomAuth)
 	var blob Blob
 	if err := c.do(req, &blob); err != nil {
 		return nil, err
@@ -157,9 +155,7 @@ func (c *Client) FetchMedia(ctx context.Context, ep Endpoint, s Signer, rawURL s
 		return nil, err
 	}
 	req.Header.Set("Authorization", auth)
-	if s.Attestation != nil {
-		req.Header.Set("x-auth-tag", s.Attestation.JSON())
-	}
+	s.setAuthTag(req, KindBlossomAuth)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, err
@@ -233,11 +229,16 @@ func (s *Service) ingestInbound(ctx context.Context, ep Endpoint, signer Signer,
 	skip := func(m MediaRef, why string) {
 		notes = append(notes, fmt.Sprintf("[File %q was not added: %s]", m.Filename, why))
 	}
+	// The cap is on attempts, not successes: a message can carry any number of imeta tags, and
+	// each failed fetch would otherwise hold the thread's turn queue and add a note. room is
+	// what the batch has left of MaxInboundAttachments.
+	room = max(0, min(room, MaxInboundAttachments))
+	extra := len(media) - room
+	if extra > 0 {
+		media = media[:room]
+	}
 	for i, m := range media {
 		switch {
-		case len(atts) >= room:
-			skip(m, fmt.Sprintf("at most %d files are added at a time", MaxInboundAttachments))
-			continue
 		case m.Size > MaxInboundFileBytes:
 			skip(m, "too large")
 			continue
@@ -264,6 +265,9 @@ func (s *Service) ingestInbound(ctx context.Context, ep Endpoint, signer Signer,
 			s.Logger.Warn("buzz relay: ingest attachment", zap.Int("index", i), zap.Error(err))
 			skip(m, "it could not be saved")
 		}
+	}
+	if extra > 0 {
+		notes = append(notes, fmt.Sprintf("[%d more file(s) were not added: at most %d files are read at a time]", extra, MaxInboundAttachments))
 	}
 	return atts, notes
 }

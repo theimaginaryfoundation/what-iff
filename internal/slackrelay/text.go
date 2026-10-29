@@ -55,9 +55,11 @@ func PlainText(text, botUserID string, names func(userID string) string) string 
 		}
 	})
 	text = strings.NewReplacer("&lt;", "<", "&gt;", ">", "&amp;", "&").Replace(text)
+	// Line ends are trimmed, nothing else: runs of spaces and indentation matter in code blocks
+	// and nested lists.
 	lines := strings.Split(text, "\n")
 	for i, l := range lines {
-		lines[i] = strings.Join(strings.Fields(l), " ")
+		lines[i] = strings.TrimRight(l, " \t\r")
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }

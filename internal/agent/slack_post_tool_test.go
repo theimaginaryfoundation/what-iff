@@ -14,6 +14,16 @@ import (
 type fakeSlackToolStore struct {
 	bindings []models.SlackBinding
 	pending  []uuid.UUID
+	external bool // the chat is another relay's thread
+}
+
+func (f *fakeSlackToolStore) IsExternalRelayChat(_ context.Context, _, chatID uuid.UUID) (bool, error) {
+	for _, b := range f.bindings {
+		if b.ChatID == chatID {
+			return true, nil
+		}
+	}
+	return f.external, nil
 }
 
 func (f *fakeSlackToolStore) ListSlackBindingsForPersonality(context.Context, uuid.UUID, uuid.UUID) ([]models.SlackBinding, error) {
@@ -36,12 +46,12 @@ func withSlackToolStore(t *testing.T, s slackToolStore) {
 	allowSlack(t, true)
 }
 
-// allowSlack decides whether every owner may use the (experimental) relay for the test.
+// allowSlack switches the relay on or off for the test.
 func allowSlack(t *testing.T, ok bool) {
 	t.Helper()
-	orig := slackMayUse
-	slackMayUse = func(context.Context, uuid.UUID) bool { return ok }
-	t.Cleanup(func() { slackMayUse = orig })
+	orig := slackRelayOn
+	slackRelayOn = func() bool { return ok }
+	t.Cleanup(func() { slackRelayOn = orig })
 }
 
 func slackBinding(team, channel string) models.SlackBinding {
@@ -49,6 +59,7 @@ func slackBinding(team, channel string) models.SlackBinding {
 }
 
 func TestSlackToolIsInTheCatalogAndNeedsChannels(t *testing.T) {
+	allowSlack(t, true)
 	names := map[string]bool{}
 	for _, d := range tools.AdditionalFunctionToolCatalog() {
 		names[d.Spec.Name] = true
@@ -74,7 +85,22 @@ func TestSlackToolIsOffWhereTheRelayIsOff(t *testing.T) {
 	assert.False(t, additionalDisabledToolsForChat(&Agent{}, chat)[slackPostToolName])
 
 	allowSlack(t, false)
-	assert.True(t, additionalDisabledToolsForChat(&Agent{}, chat)[slackPostToolName], "an owner without the experimental feature gets no Slack tool")
+	assert.True(t, additionalDisabledToolsForChat(&Agent{}, chat)[slackPostToolName], "with the relay off there is no Slack tool")
+	for _, d := range tools.AdditionalFunctionToolCatalog() {
+		assert.NotEqual(t, slackPostToolName, d.Spec.Name, "with the relay off the tool is not listed for anyone")
+	}
+}
+
+// A Buzz or Discord relay thread the owner left unsandboxed still reaches none of the
+// persona's Slack channels.
+func TestAnotherRelaysThreadReachesNoSlackChannels(t *testing.T) {
+	allowSlack(t, true)
+	chat := testChat()
+	chat.ContextScope = models.ContextScopeAccount
+	store := &fakeSlackToolStore{bindings: []models.SlackBinding{slackBinding("Acme", "general")}, external: true}
+	assert.Empty(t, slackChannelsFor(context.Background(), store, chat))
+	store.external = false
+	assert.Len(t, slackChannelsFor(context.Background(), store, chat), 1, "an ordinary chat reaches them all")
 }
 
 func TestSlackPostMarksTheChosenChannel(t *testing.T) {

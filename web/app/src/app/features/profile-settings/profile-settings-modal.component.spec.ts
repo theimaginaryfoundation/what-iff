@@ -242,6 +242,26 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     );
   });
 
+  it('saves the default reasoning effort and agent loop, sending an empty string to clear', async () => {
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    const component = fixture.componentInstance;
+    await openAndWaitForProfile(fixture);
+
+    await component.onDefaultReasoningEffortChange('high');
+    expect(preferencesService.updateUserPreferences).toHaveBeenLastCalledWith(
+      expect.objectContaining({ reasoning_effort: 'high', default_model_id: 'model-1' }),
+    );
+
+    await component.onDefaultAgentLoopChange('advanced');
+    expect(preferencesService.updateUserPreferences).toHaveBeenLastCalledWith(expect.objectContaining({ agent_loop: 'advanced' }));
+
+    await component.onDefaultReasoningEffortChange('');
+    expect(preferencesService.updateUserPreferences).toHaveBeenLastCalledWith(expect.objectContaining({ reasoning_effort: '' }));
+
+    await component.onDefaultAgentLoopChange('bogus');
+    expect(preferencesService.updateUserPreferences).toHaveBeenLastCalledWith(expect.objectContaining({ agent_loop: '' }));
+  });
+
   it('clears the default personality by omitting it from the serialized update', async () => {
     const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
     const component = fixture.componentInstance;

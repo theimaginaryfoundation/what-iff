@@ -71,6 +71,10 @@ var (
 	minBackoff      = time.Second
 	maxBackoff      = time.Minute
 	noAccessBackoff = 2 * time.Minute
+	// stableAfter is how long a connection must stay up for its end to reset the backoff. A
+	// relay that accepts the subscriptions and then drops the connection would otherwise be
+	// redialled every second.
+	stableAfter = time.Minute
 )
 
 // Open starts a session; it connects in the background and keeps reconnecting until Close
@@ -102,6 +106,7 @@ func (s *Session) run(ctx context.Context) {
 	defer close(s.done)
 	backoff := minBackoff
 	for ctx.Err() == nil {
+		began := time.Now()
 		connected, err := s.connectOnce(ctx)
 		if ctx.Err() != nil {
 			return
@@ -114,7 +119,7 @@ func (s *Session) run(ctx context.Context) {
 		case err != nil:
 			s.setState(SessionError, err.Error())
 		}
-		if connected {
+		if connected && time.Since(began) >= stableAfter {
 			backoff = minBackoff // it worked for a while; start over
 			wait = minBackoff
 		} else if backoff *= 2; backoff > maxBackoff {
@@ -257,7 +262,7 @@ func (s *Session) authenticate(ws *websocket.Conn, send func(any) error) error {
 			if json.Unmarshal(msg[1], &challenge) != nil || challenge == "" {
 				continue
 			}
-			ev, err := nostr.AuthEvent(s.cfg.Signer.Keys, s.cfg.Endpoint.WS, challenge, s.cfg.Signer.Attestation)
+			ev, err := nostr.AuthEvent(s.cfg.Signer.Keys, s.cfg.Endpoint.WS, challenge, s.cfg.Signer.attestationFor(nostr.KindClientAuth))
 			if err != nil {
 				return err
 			}

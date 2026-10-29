@@ -2,6 +2,7 @@ package buzzrelay
 
 import (
 	"encoding/json"
+	"time"
 	"unicode/utf8"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/buzzrelay/nostr"
@@ -48,10 +49,13 @@ func ParseProfile(ev nostr.Event) Profile {
 	return p
 }
 
-// sign signs an event as the persona, with its owner attestation (when it has one) on every
-// event, as Buzz's own agents do.
+// sign signs an event as the persona, with its owner attestation (when it has one and its
+// conditions allow this event) on every event, as Buzz's own agents do.
 func sign(s Signer, ev *nostr.Event) error {
-	if s.Attestation != nil {
+	if ev.CreatedAt == 0 {
+		ev.CreatedAt = time.Now().Unix()
+	}
+	if s.Attestation != nil && s.Attestation.Allows(ev.Kind, time.Unix(ev.CreatedAt, 0)) {
 		ev.Tags = append(ev.Tags, s.Attestation.Tag())
 	}
 	return ev.Sign(s.Keys)

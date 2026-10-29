@@ -186,10 +186,10 @@ export class SlackService {
   private availability$: Observable<boolean> | null = null;
 
   /**
-   * Whether the relay is on for this user. It is experimental: off unless the operator switches it
-   * on (SLACK_RELAY_ENABLED=true), and a build may turn it on per user. Where it is off, every
-   * /api/slack route answers 404; an answer that cannot be read (status 0) counts as off too, so an
-   * experimental feature stays hidden when we cannot tell. Asked once per session.
+   * Whether the relay is on. It is off unless the operator switches it on
+   * (SLACK_RELAY_ENABLED=true). Where it is off, every /api/slack route answers 404; an answer that
+   * cannot be read (status 0) counts as off too, so a feature the server may not have stays hidden
+   * when we cannot tell. Asked once per session.
    */
   available(): Observable<boolean> {
     this.availability$ ??= relayAvailability(this.http, `${this.base}/bindings`, { failClosed: true });

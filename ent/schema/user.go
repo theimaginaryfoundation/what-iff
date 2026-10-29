@@ -46,9 +46,6 @@ func (User) Fields() []ent.Field {
 		field.Bool("enable_experimental_models").
 			Default(false).
 			Comment("When true, user can see and use google/zai (Gemini/GLM) models"),
-		field.Strings("experimental_features").
-			Optional().
-			Comment("Experimental features an admin turned on for this user (models.ExperimentalFeatures, e.g. buzz_relay). Read only by a build that links a per-user experimental gate (featuregate.NewExperimental); without one, a feature's own switch decides for everyone."),
 		field.Time("last_login").
 			Optional().
 			Nillable(),

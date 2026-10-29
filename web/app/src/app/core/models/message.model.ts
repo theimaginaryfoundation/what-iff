@@ -35,6 +35,45 @@ export interface ContextBreakdown {
   captured_at: string;
 }
 
+/**
+ * One thing that happened within a step of a saved Advanced run: `reasoning` (native reasoning) or
+ * `text` (text the model wrote) carry `text`; `tool_call` carries the id of one of the message's
+ * tool_calls. Open-ended: readers skip kinds they do not know.
+ */
+export interface AgentRunEvent {
+  kind: 'reasoning' | 'text' | 'tool_call' | (string & {});
+  text?: string;
+  tool_call_id?: string;
+}
+
+/** What happened in one step of a saved Advanced run, in order, before its final reply. */
+export interface AgentRunStep {
+  /** The step, 1-based; the message's tool_calls carry the same number. */
+  step: number;
+  events?: AgentRunEvent[];
+}
+
+/** One item of a saved Advanced run's plan. The status is open-ended: render unknown values generically. */
+export interface AgentRunPlanItem {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled' | (string & {});
+}
+
+/** Why a saved Advanced run ended. Open-ended: render unknown values generically. */
+export type AgentRunEndReason = 'done' | 'stalled' | 'duration_limit' | 'step_limit' | 'quota' | 'cancelled' | 'failed' | (string & {});
+
+/**
+ * A saved Advanced run (ADR 0x026) on the assistant message it produced: what happened per step
+ * (notes and tool calls), the plan as it stood at the end, and why the run ended. The message text is the final reply.
+ */
+export interface AgentRun {
+  /** The record's format (1). Readers render what they know of a newer version rather than reject it. */
+  version?: number;
+  steps?: AgentRunStep[];
+  plan?: AgentRunPlanItem[];
+  end_reason?: AgentRunEndReason;
+}
+
 export interface ChatMessage {
   id: string;
   chat_id: string;
@@ -57,6 +96,8 @@ export interface ChatMessage {
   pending_status?: string;
   /** Reasoning/thinking the model reported for this assistant turn (GLM, MiMo). Display-only. */
   model_reasoning?: string | null;
+  /** Advanced turns only (ADR 0x026): the run's notes, plan and end reason. Replaces model_reasoning there. */
+  agent_run?: AgentRun | null;
   sent_at: string;
   attachments?: FileAttachment[];
   rituals?: Ritual[];

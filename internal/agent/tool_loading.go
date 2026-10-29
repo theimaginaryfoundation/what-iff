@@ -24,6 +24,7 @@ import (
 // not loaded.
 func (a *Agent) turnFunctionToolSpecs(ctx context.Context, chatCtx *chatContext, userID, chatID uuid.UUID, policy turnToolPolicy) []agenttools.FunctionToolSpec {
 	specs := agenttools.AgentFunctionToolSpecs(policy.showMoodTools)
+	specs = append(specs, turnOnlyToolSpecs(chatCtx)...)
 	if policy.toolsEnabled {
 		specs = append(specs, a.prepareTurnMCPToolSpecs(ctx, chatCtx, userID, chatID, policy.ritualIDs)...)
 	}

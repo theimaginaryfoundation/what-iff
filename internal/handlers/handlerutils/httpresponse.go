@@ -101,9 +101,9 @@ func RespondWithError(w http.ResponseWriter, logger *zap.Logger, statusCode int,
 	RespondWithErrorDetails(w, logger, statusCode, code, message, nil, err)
 }
 
-// RespondWithErrorDetails is RespondWithError with structured metadata in the envelope's
-// details, for an error the client acts on (the join terms to accept, say). details is
-// omitted when nil.
+// RespondWithErrorDetails is RespondWithError with structured details for the
+// client (models.ErrorResponse.Details), for a specific code whose contract
+// includes them. nil details are omitted.
 func RespondWithErrorDetails(w http.ResponseWriter, logger *zap.Logger, statusCode int, code, message string, details any, err error) {
 	// Trimmed rather than compared to CodeNotSet directly: a caller passing " "
 	// or a stray tab means the same thing as passing nothing, and Code has no

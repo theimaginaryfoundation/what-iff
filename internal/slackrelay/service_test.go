@@ -403,7 +403,7 @@ func newHarness(t *testing.T) *harness {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	app := models.SlackAppCredentials{ID: uuid.New(), OwnerID: uuid.New(), PersonalityID: uuid.New(), TeamID: team,
-		AppID: "AVIX", BotUserID: botUser, BotID: botID, BotToken: "xoxb-test", AppToken: "xapp-test"}
+		AppID: "AVIX", BotUserID: botUser, BotID: botID, BotToken: "xoxb-test", AppToken: "xapp-test", Status: models.SlackAppActive}
 	target := models.SlackBindingTarget{
 		Binding: models.SlackBinding{ID: uuid.New(), AppID: app.ID, ChatID: uuid.New(), ChannelID: "C1", ChannelName: "general",
 			InboundEnabled: true, Status: models.SlackBindingActive, CreatedAt: time.Now().Add(-time.Hour)},
@@ -669,6 +669,30 @@ func TestAComposerRequestPostsTheNextReply(t *testing.T) {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 	assert.Equal(t, sent[0].TS, h.store.links[0].ThreadTS, "the link records the thread it started")
+}
+
+// Pausing the persona's app (or Slack refusing its tokens), or a broken binding, stops posts
+// already armed and mentions alike.
+func TestNothingIsPostedThroughAPausedBinding(t *testing.T) {
+	for name, pause := range map[string]func(*models.SlackBindingTarget){
+		"app paused":     func(t *models.SlackBindingTarget) { t.App.Status = models.SlackAppDisabled },
+		"tokens refused": func(t *models.SlackBindingTarget) { t.App.Status = models.SlackAppInvalidToken },
+		"binding broken": func(t *models.SlackBindingTarget) { t.Binding.Status = models.SlackBindingBroken },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			replyID := uuid.New()
+			h.store.messages[replyID] = &models.ChatMessage{ID: replyID, Message: "armed before the pause"}
+			h.store.pending = []uuid.UUID{h.target.Binding.ID}
+			pause(&h.store.target)
+			h.svc.OnReply(h.ctx, replyhook.Event{UserID: h.app.OwnerID, ChatID: h.target.Binding.ChatID, MessageID: replyID})
+			assert.Empty(t, h.slack.sent())
+
+			h.deliver(t, h.msg("UALICE", "<@UVIX> hi"))
+			time.Sleep(20 * time.Millisecond)
+			assert.Equal(t, 0, h.turns.count(), "mentions are not answered either")
+		})
+	}
 }
 
 func TestMentionsThatWaitAreAnsweredInOneBatch(t *testing.T) {

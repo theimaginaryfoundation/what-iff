@@ -31,6 +31,9 @@ func (s *Service) ingestInbound(ctx context.Context, app models.SlackAppCredenti
 	if s.Ingest == nil {
 		return nil, []string{fmt.Sprintf("[%d file(s) posted with this message could not be added here]", len(m.Files))}
 	}
+	// The cap is on downloads tried, not files added, so failures cannot hold the thread's
+	// queue one download after another.
+	tried := 0
 	for i, f := range m.Files {
 		name := f.Name
 		if name == "" {
@@ -53,13 +56,14 @@ func (s *Service) ingestInbound(ctx context.Context, app models.SlackAppCredenti
 		case f.FileAccess == "check_file_info" || src == "":
 			skip("Slack did not share its contents with the app")
 			continue
-		case len(atts) >= room:
+		case tried >= room:
 			skip(fmt.Sprintf("at most %d files are added at a time", MaxInboundAttachments))
 			continue
 		case f.Size > MaxInboundFileBytes:
 			skip("too large")
 			continue
 		}
+		tried++
 		data, err := s.Slack.Download(ctx, app.BotToken, src, MaxInboundFileBytes)
 		if err != nil {
 			if errors.Is(err, errFileTooLarge) {

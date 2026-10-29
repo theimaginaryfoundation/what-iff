@@ -5,7 +5,7 @@
 //
 // Configuration (environment):
 //
-//	SLACK_RELAY_ENABLED=true             turn the experimental feature on (default off)
+//	SLACK_RELAY_ENABLED=true             turn the relay on (default off)
 //	SLACK_GATEWAY_LOCK_KEY=<int64>       advisory-lock key for gateway leadership (default 80920035)
 //	SLACK_GATEWAY_SINGLE_INSTANCE=true   lead without a lock (one process only)
 //
@@ -17,16 +17,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
 
 	"github.com/google/uuid"
-	"github.com/gorilla/mux"
-	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
-	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
 	"github.com/theimaginaryfoundation/what-iff/internal/relaykit"
@@ -69,7 +65,7 @@ func apply(d plugins.Deps) {
 			unregisterHook()
 		}
 		if d.Logger != nil {
-			d.Logger.Info("slack relay: off (experimental; set SLACK_RELAY_ENABLED=true to turn it on)")
+			d.Logger.Info("slack relay: off (set SLACK_RELAY_ENABLED=true to turn it on)")
 		}
 		return
 	}
@@ -85,7 +81,6 @@ func apply(d plugins.Deps) {
 			return slackrelay.SocketAppID(ctx, api, dialer, appToken)
 		}}
 	routes := d.AuthRouter.PathPrefix("/slack").Subrouter()
-	routes.Use(experimentalOnly(logger))
 	h.Register(routes)
 
 	if d.Turns == nil || d.Lifecycle == nil {
@@ -105,7 +100,7 @@ func apply(d plugins.Deps) {
 	sup := &relaykit.Supervisor[models.SlackAppCredentials]{
 		Name:        "slack gateway",
 		Locker:      locker(d, logger),
-		List:        mayUse(d.DataStore.ListActiveSlackAppCredentials),
+		List:        d.DataStore.ListActiveSlackAppCredentials,
 		Key:         func(c models.SlackAppCredentials) uuid.UUID { return c.ID },
 		Fingerprint: fingerprint,
 		Dial:        gw.dial,
@@ -139,44 +134,4 @@ func locker(d plugins.Deps, logger *zap.Logger) relaykit.Locker {
 func fingerprint(c models.SlackAppCredentials) string {
 	sum := sha256.Sum256([]byte(c.AppToken + "\x00" + c.BotToken + "\x00" + c.BotUserID))
 	return hex.EncodeToString(sum[:])
-}
-
-// experimentalOnly answers 404 on every /api/slack route for a user the per-user experimental
-// policy has the relay off for, exactly as when the relay is switched off, so the web app hides
-// its Slack surfaces for them.
-func experimentalOnly(logger *zap.Logger) mux.MiddlewareFunc {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			userID, ok := middleware.GetUserIDFromContext(r.Context())
-			if !ok || !slackrelay.UserMayUse(r.Context(), userID) {
-				handlerutils.RespondWithError(w, logger, http.StatusNotFound, handlerutils.CodeNotSet, "Not found", nil)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// mayUse keeps the gateway to the apps of owners the relay is on for, so turning the feature
-// off for a user closes their apps' connections at the next reconcile.
-func mayUse(list func(context.Context) ([]models.SlackAppCredentials, error)) func(context.Context) ([]models.SlackAppCredentials, error) {
-	return func(ctx context.Context) ([]models.SlackAppCredentials, error) {
-		all, err := list(ctx)
-		if err != nil {
-			return nil, err
-		}
-		allowed := map[uuid.UUID]bool{}
-		out := all[:0]
-		for _, c := range all {
-			ok, seen := allowed[c.OwnerID]
-			if !seen {
-				ok = slackrelay.UserMayUse(ctx, c.OwnerID)
-				allowed[c.OwnerID] = ok
-			}
-			if ok {
-				out = append(out, c)
-			}
-		}
-		return out, nil
-	}
 }

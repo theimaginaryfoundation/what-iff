@@ -42,11 +42,12 @@ var buzzPostToolSpec = tools.FunctionToolSpec{
 type buzzToolStore interface {
 	ListBuzzBindingsForPersonality(ctx context.Context, userID, personalityID uuid.UUID) ([]models.BuzzBinding, error)
 	SetBuzzPendingPost(ctx context.Context, userID, bindingID, chatID uuid.UUID, source models.BuzzPendingPostSource) error
+	IsExternalRelayChat(ctx context.Context, userID, chatID uuid.UUID) (bool, error)
 }
 
-// buzzMayUse is whether the owner may use the (experimental) relay at all
-// (buzzrelay.UserMayUse); tests replace it.
-var buzzMayUse = buzzrelay.UserMayUse
+// buzzRelayOn is whether the operator switched the relay on (buzzrelay.Enabled); tests
+// replace it.
+var buzzRelayOn = buzzrelay.Enabled
 
 // buzzToolStoreFor is how the tool reaches storage; tests replace it.
 var buzzToolStoreFor = func(a *Agent) buzzToolStore {
@@ -62,6 +63,11 @@ func init() {
 		var defs []tools.FunctionToolDefinition
 		if prevCatalog != nil {
 			defs = prevCatalog()
+		}
+		// With the relay off the tool is not listed at all (the tool picker, the onboarding
+		// prompt), so a server that never turned Buzz on never mentions it.
+		if !buzzRelayOn() {
+			return defs
 		}
 		return append(defs, tools.FunctionToolDefinition{
 			Spec:             buzzPostToolSpec,
@@ -120,22 +126,17 @@ func init() {
 }
 
 // buzzChannelsFor lists the Buzz channels the chat can post to. As for Discord, an ordinary
-// chat may reach every channel its persona is bound to; a sandboxed chat, or a relay thread,
-// only the channel(s) bound to this very thread.
+// chat may reach every channel its persona is bound to; a sandboxed chat, or a relay thread of
+// either relay, only the channel(s) bound to this very thread.
 func buzzChannelsFor(ctx context.Context, store buzzToolStore, chat *models.Chat) []models.BuzzBinding {
-	if store == nil || chat == nil || chat.PersonalityID == uuid.Nil || !buzzMayUse(ctx, chat.UserID) {
+	if store == nil || chat == nil || chat.PersonalityID == uuid.Nil || !buzzRelayOn() {
 		return nil
 	}
 	bindings, err := store.ListBuzzBindingsForPersonality(ctx, chat.UserID, chat.PersonalityID)
 	if err != nil {
 		return nil
 	}
-	ownOnly := chat.IsSandboxed()
-	for _, b := range bindings {
-		if b.ChatID == chat.ID {
-			ownOnly = true
-		}
-	}
+	ownOnly := relayScoped(ctx, store, chat)
 	var usable []models.BuzzBinding
 	for _, b := range bindings {
 		if b.Status != models.BuzzBindingActive || (ownOnly && b.ChatID != chat.ID) {

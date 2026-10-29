@@ -42,11 +42,12 @@ var slackPostToolSpec = tools.FunctionToolSpec{
 type slackToolStore interface {
 	ListSlackBindingsForPersonality(ctx context.Context, userID, personalityID uuid.UUID) ([]models.SlackBinding, error)
 	SetSlackPendingPost(ctx context.Context, userID, bindingID, chatID uuid.UUID, source models.SlackPendingPostSource) error
+	IsExternalRelayChat(ctx context.Context, userID, chatID uuid.UUID) (bool, error)
 }
 
-// slackMayUse is whether the owner may use the (experimental) relay at all
-// (slackrelay.UserMayUse); tests replace it.
-var slackMayUse = slackrelay.UserMayUse
+// slackRelayOn is whether the operator switched the relay on (slackrelay.Enabled); tests
+// replace it.
+var slackRelayOn = slackrelay.Enabled
 
 // slackToolStoreFor is how the tool reaches storage; tests replace it.
 var slackToolStoreFor = func(a *Agent) slackToolStore {
@@ -62,6 +63,11 @@ func init() {
 		var defs []tools.FunctionToolDefinition
 		if prevCatalog != nil {
 			defs = prevCatalog()
+		}
+		// With the relay off the tool is not listed at all (the tool picker, the onboarding
+		// prompt), so a server that never turned Slack on never mentions it.
+		if !slackRelayOn() {
+			return defs
 		}
 		return append(defs, tools.FunctionToolDefinition{
 			Spec:             slackPostToolSpec,
@@ -123,19 +129,14 @@ func init() {
 // chat may reach every channel its persona is bound to; a sandboxed chat, or a relay thread,
 // only the channel(s) bound to this very thread.
 func slackChannelsFor(ctx context.Context, store slackToolStore, chat *models.Chat) []models.SlackBinding {
-	if store == nil || chat == nil || chat.PersonalityID == uuid.Nil || !slackMayUse(ctx, chat.UserID) {
+	if store == nil || chat == nil || chat.PersonalityID == uuid.Nil || !slackRelayOn() {
 		return nil
 	}
 	bindings, err := store.ListSlackBindingsForPersonality(ctx, chat.UserID, chat.PersonalityID)
 	if err != nil {
 		return nil
 	}
-	ownOnly := chat.IsSandboxed()
-	for _, b := range bindings {
-		if b.ChatID == chat.ID {
-			ownOnly = true
-		}
-	}
+	ownOnly := relayScoped(ctx, store, chat)
 	var usable []models.SlackBinding
 	for _, b := range bindings {
 		if b.Status != models.SlackBindingActive || (ownOnly && b.ChatID != chat.ID) {

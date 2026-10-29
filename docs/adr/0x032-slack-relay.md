@@ -1,6 +1,6 @@
 # ADR 0x032: Slack relay — your persona as its own Slack app
 
-- **Status:** Proposed (experimental; expected to change once it is in use)
+- **Status:** Proposed (expected to change once it is in use)
 - **Branch:** `feat/slack-relay` (stacked on `feat/relay-queue-batch`)
 - **Date:** 2026-10-28
 - **Deciders:** What Iff maintainers
@@ -131,14 +131,16 @@ Unchanged from ADR 0x025 §6 and §7, applied to Slack bindings:
 
 - A relay thread the server creates is sandboxed and quiet; binding a thread that is not sandboxed needs `allow_unrestricted`, re-checked on every mention (`relaykit.ThreadOpen`).
 - Allow and deny lists are Slack user ids; deny always wins and an empty allow list means anyone in the channel.
-- `post_to_slack` in a relay thread or any sandboxed chat reaches only that thread's own channels.
+- `post_to_slack` in a relay thread of any relay, sandboxed or not, or in any sandboxed chat, reaches only that thread's own channels.
 - A thread bound to a Slack channel is an external relay chat: its memories are `external`, the speaker is the Slack display name (the link keeps the user id), and the extraction note names Slack (`RelayPlatformForChat`).
 
 ### 7. Configuration and surfaces
 
-- The relay is an **experimental feature** (`models.ExperimentalFeatureSlackRelay`, `slack_relay`), off by default.
-  `SLACK_RELAY_ENABLED=true` (or `1`, `on`) switches it on for the server; otherwise `/api/slack` is not routed, the gateway does not start and `post_to_slack` is never offered.
-  A build that links a per-user experimental gate (ADR 0x028 §9) further limits it to the users it is turned on for: the routes answer 404, the gateway drops their apps' connections at its next reconcile, and the tool is not offered (`slackrelay.UserMayUse`).
+- The relay is off by default.
+  `SLACK_RELAY_ENABLED=true` (or `1`, `on`) switches it on for every user of the server; otherwise `/api/slack` is not routed (the web app reads the 404 as off and hides its Slack surfaces), the gateway does not start, and `post_to_slack` is neither listed nor offered.
+  As for Buzz (ADR 0x028 §9) there is no per-user gate: each persona's app is one its owner created in a workspace they choose.
+- Nothing is answered or posted while the persona's app is paused or its tokens are refused, or the binding is broken.
+  This is checked again just before each post, so a pause also stops a reply already armed (composer, `post_to_slack`) or a turn already running; arming a post on such a binding is refused (409).
 - `SLACK_GATEWAY_LOCK_KEY`, `SLACK_GATEWAY_SINGLE_INSTANCE` as in §2.
 - Routes (authenticated, owner-scoped, another account's rows are a 404): `/api/slack/manifest?personality_id=`, `/apps`, `/apps/{id}` (update tokens, refresh, pause, remove), `/apps/{id}/channels`, `/apps/{id}/channels/{channelId}/join`, `/bindings`, `/bindings/{id}`, `/chats/{chatId}`, `/chats/{chatId}/pending/{bindingId}`.
 - Web app: an Integrations → Slack tab; Slack relay threads in the Thread Manager's Jobs tab; the composer toggle in a relay thread.

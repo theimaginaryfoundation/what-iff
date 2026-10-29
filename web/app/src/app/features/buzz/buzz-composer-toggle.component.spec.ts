@@ -1,7 +1,7 @@
 import { signal } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 
 import { ContextPanelService } from '../chat/services/context-panel.service';
 import { BuzzComposerToggleComponent } from './buzz-composer-toggle.component';
@@ -96,6 +96,31 @@ describe('BuzzComposerToggleComponent', () => {
     state = { bindings: [{ ...binding, allow_unrestricted: true }], pending_binding_ids: [], links: [] };
     const acknowledged = await create();
     expect(acknowledged.nativeElement.querySelector('[data-testid=buzz-paused-note]')).toBeNull();
+  });
+
+  it('puts the box back and says so when the server does not save it', async () => {
+    state.pending_binding_ids = ['b1'];
+    const fixture = await create();
+    setPostNextReply.mockReturnValueOnce(throwError(() => new Error('offline')));
+    const box = fixture.nativeElement.querySelector('input[type=checkbox]') as HTMLInputElement;
+
+    box.checked = false;
+    box.dispatchEvent(new Event('change'));
+    await settle();
+    fixture.detectChanges();
+
+    expect(setPostNextReply).toHaveBeenCalledWith('chat-1', 'b1', false);
+    // Still armed on the server, so the box shows it, and the owner is told the untick failed.
+    expect(box.checked).toBe(true);
+    expect(fixture.nativeElement.querySelector('.toggle__option--on')).toBeTruthy();
+    expect(fixture.nativeElement.querySelector('[data-testid=buzz-composer-toggle-error]')?.textContent).toContain('offline');
+
+    box.checked = false;
+    box.dispatchEvent(new Event('change'));
+    await settle();
+    fixture.detectChanges();
+    expect(box.checked).toBe(false);
+    expect(fixture.nativeElement.querySelector('[data-testid=buzz-composer-toggle-error]')).toBeNull();
   });
 
   it('renders nothing outside a relay thread or when the server does not run the relay', async () => {

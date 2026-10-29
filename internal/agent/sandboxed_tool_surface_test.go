@@ -61,6 +61,8 @@ func sortedNames(set map[string]struct{}) []string {
 }
 
 func TestSandboxedChatToolSurface_EveryCatalogToolIsClassified(t *testing.T) {
+	allowBuzz(t, true) // post_to_buzz and post_to_slack are only in the catalog with their relay on
+	allowSlack(t, true)
 	catalog := map[string]struct{}{}
 	for _, spec := range agenttools.ExecutableFunctionToolSpecs() {
 		catalog[spec.Name] = struct{}{}

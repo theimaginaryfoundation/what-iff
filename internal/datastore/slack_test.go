@@ -302,6 +302,17 @@ func TestSlackBindingsPendingPostsRenamesAndCascade(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "lounge", got.ChannelName)
 
+	// Nothing can be armed through a paused app or a broken binding.
+	paused, active := models.SlackAppDisabled, models.SlackAppActive
+	_, err = f.ds.UpdateSlackApp(ctx, f.owner, a.ID, models.SlackAppPatch{Status: &paused})
+	require.NoError(t, err)
+	assert.ErrorIs(t, f.ds.SetSlackPendingPost(ctx, f.owner, b.ID, f.chat, models.SlackPostFromComposer), ErrSlackBindingPaused)
+	_, err = f.ds.UpdateSlackApp(ctx, f.owner, a.ID, models.SlackAppPatch{Status: &active})
+	require.NoError(t, err)
+	require.NoError(t, f.ds.SetSlackBindingStatus(ctx, b.ID, models.SlackBindingBroken, "gone"))
+	assert.ErrorIs(t, f.ds.SetSlackPendingPost(ctx, f.owner, b.ID, f.chat, models.SlackPostFromComposer), ErrSlackBindingPaused)
+	require.NoError(t, f.ds.SetSlackBindingStatus(ctx, b.ID, models.SlackBindingActive, ""))
+
 	require.NoError(t, f.ds.SetSlackPendingPost(ctx, f.owner, b.ID, f.chat, models.SlackPostFromComposer))
 	pending, err := f.ds.ListSlackPendingPosts(ctx, f.owner, f.chat)
 	require.NoError(t, err)

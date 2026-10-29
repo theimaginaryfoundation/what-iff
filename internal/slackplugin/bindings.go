@@ -407,6 +407,9 @@ func (h *Handler) fail(w http.ResponseWriter, err error, msg string) {
 	case errors.Is(err, datastore.ErrSlackBindingExists):
 		handlerutils.RespondWithError(w, h.Logger, http.StatusConflict, handlerutils.CodeNotSet,
 			"That channel is already connected for this app.", nil)
+	case errors.Is(err, datastore.ErrSlackBindingPaused):
+		handlerutils.RespondWithError(w, h.Logger, http.StatusConflict, handlerutils.CodeNotSet,
+			"That channel is paused or needs attention, so nothing is posted there. Turn it back on first.", nil)
 	default:
 		handlerutils.RespondWithError(w, h.Logger, http.StatusInternalServerError, handlerutils.CodeNotSet, msg, err)
 	}

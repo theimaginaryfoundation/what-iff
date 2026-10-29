@@ -144,6 +144,10 @@ func (r *reasoningRelay) reset() {
 		return
 	}
 	r.emittedThisCall = false
+	if r.stream.OnDiscardCall != nil {
+		r.stream.OnDiscardCall()
+		return
+	}
 	if r.stream.OnReset != nil {
 		r.stream.OnReset()
 	}

@@ -38,6 +38,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/model"
 	moodhandler "github.com/theimaginaryfoundation/what-iff/internal/handlers/mood"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/personality"
+	"github.com/theimaginaryfoundation/what-iff/internal/handlers/provideraccess"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/ritual"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/role"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/search"
@@ -52,6 +53,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
 	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
+	"github.com/theimaginaryfoundation/what-iff/internal/reauth"
 	"github.com/theimaginaryfoundation/what-iff/internal/storage"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"github.com/theimaginaryfoundation/what-iff/internal/userhooks"
@@ -162,6 +164,17 @@ func (s *Server) setupRoutes() {
 	// flight on another instance alone. They are marked failed (not cancelled) so the thread shows
 	// the turn's failure banner instead of silently dropping it. agent_job_run turns (webhook
 	// background, scheduled runs) are reaped the same way so none is left non-terminal forever.
+	// An Advanced run (ADR 0x026) can run for hours, but it writes its job (draft, progress) at
+	// every step and tool call, so a live one stays fresh; one that died keeps its work: its draft
+	// is finalized into a partial reply first.
+	if n, rerr := dataStore.FailInterruptedAdvancedJobs(context.Background(),
+		[]string{agent.JobTypeChatMessage, agent.JobTypeAgentJobRun},
+		time.Now().Add(-30*time.Minute),
+		"Interrupted by a server restart"); rerr != nil {
+		s.logger.Warn("startup: failed to finalize interrupted Advanced runs", zap.Error(rerr))
+	} else if n > 0 {
+		s.logger.Info("startup: saved interrupted Advanced runs as partial replies", zap.Int("count", n))
+	}
 	if n, rerr := dataStore.FailInterruptedJobs(context.Background(),
 		[]string{agent.JobTypeChatMessage, agent.JobTypeAgentJobRun},
 		time.Now().Add(-30*time.Minute),
@@ -204,7 +217,7 @@ func (s *Server) setupRoutes() {
 	// applied at the transport they all still share. It sits directly on the
 	// base transport, so the timeouts and instrumentation below wrap the
 	// credentialed request exactly as they wrap any other.
-	accountKeys := accountkeys.New(s.db, dataStore, s.logger)
+	accountKeys := accountkeys.New(s.db, dataStore, reauth.New(dataStore), s.logger)
 	keyResolver := providerkeys.New(
 		providerkeys.NewDeploymentResolver(s.config.configuredProviderKeys()),
 		accountKeys,
@@ -274,11 +287,6 @@ func (s *Server) setupRoutes() {
 	// cmd/api-server, same as the meter.
 	if featuregate.New != nil {
 		featuregate.Active = featuregate.New(dataStore)
-	}
-	// A build that links a per-user experimental policy (featuregate.NewExperimental) gates
-	// experimental features per user; without one, each feature's operator switch decides.
-	if featuregate.NewExperimental != nil {
-		featuregate.ActiveExperimental = featuregate.NewExperimental(dataStore)
 	}
 	// Optional post-registration hook (linked privately; nil in the open-source
 	// build, where registration has no extra side effects). Registered via a blank
@@ -428,6 +436,7 @@ func (s *Server) setupRoutes() {
 	imageGalleryHandler.RegisterRoutes(authRouter)
 	moodHandler.RegisterRoutes(authRouter)
 	mountAccountKeyRoutes(authRouter, keyResolver, accountKeys)
+	provideraccess.NewHandler(keyResolver, s.logger).RegisterRoutes(authRouter)
 	toolsHandler.RegisterRoutes(authRouter)
 	searchHandler.RegisterRoutes(authRouter)
 
