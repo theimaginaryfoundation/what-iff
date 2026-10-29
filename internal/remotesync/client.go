@@ -163,8 +163,12 @@ type Client struct {
 }
 
 // NewHTTPClient is the HTTP client sync uses. Unless allowLocal, it connects to public addresses
-// only (checked after DNS, on every connection), so a user-chosen address cannot reach the
-// server's own network or the cloud metadata service.
+// only, so a user-chosen address cannot reach the server's own network or the cloud metadata
+// service. Hostnames are resolved by the standard resolver as usual; the dialer's Control hook
+// (netguard.PublicOnlyControl) then vets each resolved IP just before connecting to it, which is
+// also what defeats a name rebound to an internal address after a first lookup. The transport
+// has no proxy (Proxy is nil, so HTTPS_PROXY is ignored): a proxy would make the checked address
+// the proxy's rather than the remote's.
 func NewHTTPClient(allowLocal bool) *http.Client {
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	if !allowLocal {

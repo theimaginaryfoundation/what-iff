@@ -18,7 +18,8 @@ Keeps server-side requests to user-chosen addresses on the public internet.
 
 - **Checked at connect time, not at URL-parse time.**
   The hook sees the resolved address of every connection, so a name that resolves to an internal address, or is rebound to one after a first check, is still refused.
+  It never sees a hostname: a dialer resolves first and calls the hook once per IP it tries, so public names work and need no lookup of their own here.
 
 ## Testing
 
-- `netguard_test.go` — public and non-public addresses, IPv4 and IPv6.
+- `netguard_test.go` — public and non-public addresses, IPv4 and IPv6, and a hostname dial showing the hook sees resolved IP literals (a hostname that reaches the hook directly is refused).

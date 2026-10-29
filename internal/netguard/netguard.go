@@ -21,6 +21,11 @@ func IsPublicIP(ip net.IP) bool {
 }
 
 // PublicOnlyControl is a net.Dialer Control hook that refuses any address IsPublicIP rejects.
+//
+// A Control hook runs after DNS resolution, once per address the dialer tries, so address is
+// always an IP literal and port, never the hostname that was dialed: a name is checked by what it
+// resolved to. Something that is not an IP literal therefore never reaches here from a dialer,
+// and is refused rather than trusted if it does (TestHostnamesAreCheckedByWhatTheyResolveTo).
 func PublicOnlyControl(_, address string, _ syscall.RawConn) error {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
