@@ -45,6 +45,11 @@ type Config struct {
 	// LocalLLMModel is the model name requested from the local server
 	// (LOCAL_LLM_MODEL). Required when LLMBackend == "local".
 	LocalLLMModel string
+	// LocalServerHost is the name a model server on this computer is reached
+	// by (LOCAL_SERVER_HOST): "localhost" by default, and
+	// "host.docker.internal" in the container image, where localhost is the
+	// container itself. It fills in the Ollama and LM Studio presets' addresses.
+	LocalServerHost string
 	// LLMRequestTimeout, LLMStreamTimeout and LLMStreamIdleTimeout bound each HTTP attempt
 	// of a provider SDK call (LLM_REQUEST_TIMEOUT, LLM_STREAM_TIMEOUT,
 	// LLM_STREAM_IDLE_TIMEOUT; Go durations, 0 disables). Defaults and their rationale are
@@ -194,6 +199,10 @@ func NewConfig() *Config {
 	llmBackend, mockLLMMode, mockLLMFixedResponses, mockLLMStreamDelay := parseMockLLMConfig()
 	localLLMBaseURL := strings.TrimSpace(os.Getenv("LOCAL_LLM_BASE_URL"))
 	localLLMModel := strings.TrimSpace(os.Getenv("LOCAL_LLM_MODEL"))
+	localServerHost := strings.TrimSpace(os.Getenv("LOCAL_SERVER_HOST"))
+	if localServerHost == "" {
+		localServerHost = "localhost"
+	}
 
 	openAIKey := os.Getenv("OPENAI_API_KEY")
 	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
@@ -353,6 +362,7 @@ func NewConfig() *Config {
 		MockLLMStreamDelay:                  mockLLMStreamDelay,
 		LocalLLMBaseURL:                     localLLMBaseURL,
 		LocalLLMModel:                       localLLMModel,
+		LocalServerHost:                     localServerHost,
 		LLMRequestTimeout:                   durationEnv("LLM_REQUEST_TIMEOUT", callTimeouts.Request),
 		LLMStreamTimeout:                    durationEnv("LLM_STREAM_TIMEOUT", callTimeouts.Stream),
 		LLMStreamIdleTimeout:                durationEnv("LLM_STREAM_IDLE_TIMEOUT", callTimeouts.StreamIdle),

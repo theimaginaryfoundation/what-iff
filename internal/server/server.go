@@ -51,6 +51,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerconnections"
 	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 	"github.com/theimaginaryfoundation/what-iff/internal/pushnotify"
 	"github.com/theimaginaryfoundation/what-iff/internal/reauth"
@@ -222,6 +223,11 @@ func (s *Server) setupRoutes() {
 	// inside the instrumentation so a timed-out attempt is recorded with error.type=timeout.
 	callTimeouts := s.llmCallTimeouts()
 	providerHTTPClient = provider.WithCallTimeouts(providerHTTPClient, callTimeouts)
+	// Listing a provider connection's models sends the key being tested, so it
+	// stays off the credential transport, which would replace that key with the
+	// account's stored one. It keeps the network block, timeouts and
+	// instrumentation (ADR 0x027).
+	listingHTTPClient := telemetry.InstrumentHTTPClient(provider.WithCallTimeouts(baseHTTPClient, callTimeouts), s.dependencyHosts()...)
 	providerHTTPClient = telemetry.InstrumentHTTPClient(providerHTTPClient, s.dependencyHosts()...)
 
 	agentCfg := agent.AgentConfig{
@@ -427,7 +433,14 @@ func (s *Server) setupRoutes() {
 	fileAttachmentHandler.RegisterRoutes(authRouter)
 	imageGalleryHandler.RegisterRoutes(authRouter)
 	moodHandler.RegisterRoutes(authRouter)
-	mountAccountKeyRoutes(authRouter, keyResolver, accountKeys)
+	connectionsHandler := providerconnections.NewHandler(
+		providerconnections.NewStore(s.db, dataStore),
+		providerconnections.NewLister(listingHTTPClient, s.config.LLMBackend == "mock"),
+		providerconnections.Presets(s.config.builtinProviderURLs(), s.config.LocalServerHost),
+		reauth.New(dataStore),
+		s.logger,
+	)
+	mountAccountKeyRoutes(authRouter, keyResolver, accountKeys, connectionsHandler)
 	provideraccess.NewHandler(keyResolver, s.logger).RegisterRoutes(authRouter)
 	toolsHandler.RegisterRoutes(authRouter)
 	searchHandler.RegisterRoutes(authRouter)
@@ -492,14 +505,20 @@ func (s *Server) dependencyHosts() []telemetry.HTTPTransportOption {
 	}
 }
 
-// mountAccountKeyRoutes serves the routes an account manages its own keys
-// through, but only when the resolver takes keys from accounts. A deployment
-// that supplies its own keys has nothing for an account to manage.
-func mountAccountKeyRoutes(router *mux.Router, resolver providerkeys.Resolver, keys *accountkeys.Keys) bool {
+// routeRegistrar mounts a package's routes.
+type routeRegistrar interface{ RegisterRoutes(*mux.Router) }
+
+// mountAccountKeyRoutes serves the routes an account manages its own keys and
+// provider connections through, but only when the resolver takes keys from
+// accounts. A deployment that supplies its own keys has nothing for an account
+// to manage.
+func mountAccountKeyRoutes(router *mux.Router, resolver providerkeys.Resolver, routes ...routeRegistrar) bool {
 	if !resolver.AccountsSupplyKeys() {
 		return false
 	}
-	keys.RegisterRoutes(router)
+	for _, r := range routes {
+		r.RegisterRoutes(router)
+	}
 	return true
 }
 

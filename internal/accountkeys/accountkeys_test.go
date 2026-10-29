@@ -337,9 +337,10 @@ func TestKey_UnreadableKeyIsNoKey(t *testing.T) {
 	f := newFixture(t, prefixSealer{})
 	_, err := f.keys.Set(context.Background(), f.alice, models.ModelProviderOpenAI, "sk-alice-key-1111")
 	require.NoError(t, err)
-	f.keys.sealer = prefixSealer{err: errors.New("token key changed")}
+	// The same rows, read with a token key that no longer opens them.
+	changed := New(f.client, prefixSealer{err: errors.New("token key changed")}, ownerPassword{}, zap.NewNop())
 
-	require.Empty(t, f.keys.Key(asUser(f.alice), models.ModelProviderOpenAI))
+	require.Empty(t, changed.Key(asUser(f.alice), models.ModelProviderOpenAI))
 }
 
 // Which accounts have keys is only known per request, so every client is built.

@@ -64,4 +64,7 @@ const (
 type ProviderAccess struct {
 	KeysFrom  string          `json:"keys_from"`
 	Providers []ModelProvider `json:"providers"`
+	// CustomAddresses reports whether an account may choose a provider's
+	// address (Custom, or a server on this computer) when adding a connection.
+	CustomAddresses bool `json:"custom_addresses"`
 }

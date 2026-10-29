@@ -12,6 +12,7 @@ import (
 
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerconnections"
 	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 )
 
@@ -36,8 +37,9 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 // answer matches what a request would carry.
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	access := models.ProviderAccess{
-		KeysFrom:  models.KeysFromDeployment,
-		Providers: []models.ModelProvider{},
+		KeysFrom:        models.KeysFromDeployment,
+		Providers:       []models.ModelProvider{},
+		CustomAddresses: providerconnections.CustomAddressesAllowed(),
 	}
 	if h.resolver.AccountsSupplyKeys() {
 		access.KeysFrom = models.KeysFromAccount

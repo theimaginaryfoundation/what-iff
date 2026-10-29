@@ -6,7 +6,7 @@ Reports which model providers the requesting account can reach, and whether its 
 
 ## Responsibilities
 
-- `GET /provider-access` returns `models.ProviderAccess`: `keys_from` (`deployment` or `account`, from the resolver's `AccountsSupplyKeys()`) and `providers`, those the account has a key for right now, in `models.ModelProviders` order.
+- `GET /provider-access` returns `models.ProviderAccess`: `keys_from` (`deployment` or `account`, from the resolver's `AccountsSupplyKeys()`) `providers`, those the account has a key for right now, in `models.ModelProviders` order, and `custom_addresses`, whether an account may choose a provider's address (`providerconnections.CustomAddressesAllowed`).
 
 ## Dependencies
 
