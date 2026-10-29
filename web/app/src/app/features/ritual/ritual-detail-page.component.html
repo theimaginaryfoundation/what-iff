@@ -57,6 +57,7 @@
           [chatId]="selectedChatId()" />
 
         @if (ritual() && !creating()) {
+          <app-entity-marketplace-outlet kind="skill" [entityId]="ritual()!.id" [entityName]="ritual()!.name" layout="card" />
           <section class="rounded-2xl border border-border-base bg-surface-card p-4 text-sm">
             <h2 class="font-semibold text-text-primary">Metadata</h2>
             <dl class="mt-2 space-y-1 text-text-secondary">
