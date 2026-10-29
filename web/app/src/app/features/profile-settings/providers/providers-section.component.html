@@ -1,0 +1,101 @@
+<section class="providers" data-testid="providers">
+  <p class="providers__intro">
+    The providers WhatIff sends your requests to, billed to your own accounts with them. Keys are stored encrypted
+    and never shown again; only their last four characters are.
+  </p>
+
+  @if (showConvertedNotice()) {
+    <div class="providers__message providers__message--info providers__notice" role="status" data-testid="providers-converted">
+      <span>Your saved API keys are now connections.</span>
+      <button class="providers__link-button" type="button" aria-label="Dismiss" (click)="dismissConvertedNotice()">✕</button>
+    </div>
+  }
+
+  @if (notice()) {
+    <div class="providers__message providers__message--success" role="status">{{ notice() }}</div>
+  }
+
+  @if (!needsOpenAI() && !loading() && onboarding()) {
+    <div class="providers__callout" data-testid="providers-next">
+      <div>
+        <strong>You're set up</strong>
+        <small>Add other providers any time. Next, create the personality you'll chat with.</small>
+      </div>
+      <button class="providers__button providers__button--primary" type="button" (click)="goToPersonalities()">
+        Next: create a personality
+      </button>
+    </div>
+  }
+
+  @if (needsOpenAI() && !loadError()) {
+    <div class="providers__callout" data-testid="providers-needs-openai">
+      <div>
+        <strong>Connect OpenAI to get started</strong>
+        <small>WhatIff uses OpenAI for memory, summaries and images, whichever model you chat with.</small>
+      </div>
+      <button class="providers__button providers__button--primary" type="button" (click)="add('openai')">
+        Add OpenAI key
+      </button>
+    </div>
+  }
+
+  @if (loading()) {
+    <div class="providers__empty">Loading your providers...</div>
+  } @else if (loadError()) {
+    <div class="providers__message providers__message--error" role="alert">
+      {{ loadError() }}
+      <button class="providers__link-button" type="button" (click)="load()">Retry</button>
+    </div>
+  } @else {
+    @if (rows().length > 0) {
+      <ul class="providers__list">
+        @for (row of rows(); track row.connection.id) {
+          <li class="providers__row" [attr.data-preset]="row.connection.preset">
+            <div class="providers__summary">
+              <div class="providers__name">
+                <strong>{{ row.connection.name }}</strong>
+                @if (row.required) {
+                  <span class="providers__badge">Required</span>
+                }
+                @if (row.local) {
+                  <span class="providers__badge providers__badge--local">This computer</span>
+                }
+              </div>
+              <small>{{ row.detail }}</small>
+            </div>
+
+            <div class="providers__status">
+              @if (row.connection.has_key) {
+                <span class="providers__hint">••••{{ row.connection.hint }}</span>
+              } @else {
+                <small>No key</small>
+              }
+            </div>
+
+            <div class="providers__actions">
+              <button class="providers__button" type="button" (click)="edit(row.connection)">Edit</button>
+              <button class="providers__link-button providers__link-button--danger" type="button" (click)="remove(row)">
+                Remove
+              </button>
+            </div>
+          </li>
+        }
+      </ul>
+    }
+
+    <div>
+      <button class="providers__button providers__button--primary" type="button" data-testid="providers-add" (click)="add()">
+        + Add provider
+      </button>
+    </div>
+  }
+
+  <app-provider-form
+    [open]="formOpen()"
+    [presets]="presets()"
+    [connection]="formConnection()"
+    [initialPreset]="formPreset()"
+    (saved)="onSaved($event)"
+    (closed)="closeForm()"
+  />
+</section>

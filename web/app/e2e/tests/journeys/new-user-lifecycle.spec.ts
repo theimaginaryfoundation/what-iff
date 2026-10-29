@@ -1,6 +1,9 @@
 import { test, expect, uniqueId } from '../../fixtures';
-import { ProviderKeyPrompt, ProviderKeysTab } from '../../poms';
+import { ProviderKeyPrompt, ProvidersTab } from '../../poms';
 import { AUTH_REDIRECT_TIMEOUT, LLM_REPLY_TIMEOUT } from '../../timeouts';
+
+/** A made-up OpenAI key; the mock backend never sends it anywhere. */
+const JOURNEY_OPENAI = 'sk-e2e-journey-not-a-real-key';
 
 /**
  * Journey: a brand-new account from the registration form through to a
@@ -43,12 +46,15 @@ test(
     // asked for its OpenAI key before anything else works.
     await test.step('add an OpenAI key', async () => {
       const prompt = new ProviderKeyPrompt(page);
-      const keys = new ProviderKeysTab(page);
+      const providers = new ProvidersTab(page);
       await expect(prompt.root).toBeVisible();
       await prompt.addKeyButton.click();
-      await keys.addKey('openai', 'sk-e2e-journey-not-a-real-key', password);
-      await expect(keys.row('openai')).toContainText('••••');
-      await keys.nextStepButton.click();
+      await providers.connectOpenAIButton.click();
+      await providers.fill({ key: JOURNEY_OPENAI, password });
+      await providers.submit();
+      await providers.done();
+      await expect(providers.row('openai')).toContainText('••••');
+      await providers.nextStepButton.click();
       await expect(prompt.root).toBeHidden();
     });
 

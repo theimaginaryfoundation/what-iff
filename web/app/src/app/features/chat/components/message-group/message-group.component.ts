@@ -453,9 +453,9 @@ export class MessageGroupComponent {
     return { text: target.last_error_message.trim(), message: target, needsKey };
   });
 
-  /** Opens Profile & Settings on the API keys tab. */
+  /** Opens Profile & Settings on the Providers tab. */
   openProviderKeys(): void {
-    this.settings.open('api-keys');
+    this.settings.open('providers');
   }
 
   /** Shown after assistant bubbles when a post-turn checkpoint (scratchpad + summary) completed. */

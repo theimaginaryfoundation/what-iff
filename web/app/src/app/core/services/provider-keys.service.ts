@@ -3,15 +3,13 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { Observable, catchError, of, tap } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
-import { ModelProvider, ProviderAccess, ProviderKeySummary } from '../models/provider-key.model';
+import { ProviderAccess } from '../models/provider-key.model';
 
 /**
- * The account's provider keys, and the server's answer to where keys come
- * from. `access` is shared: the settings tab, the first-run prompt and error
- * links all read it, and it is refreshed whenever a key changes.
- *
- * Errors from set() and remove() are passed through as HttpErrorResponse so
- * callers can branch on the error code (reauthentication_required).
+ * The server's answer to where the account's provider keys come from, and
+ * which providers it can reach. `access` is shared: the Providers tab, the
+ * first-run prompt and error links all read it, and it is refreshed whenever a
+ * connection changes. Connections themselves are ProviderConnectionsService.
  */
 @Injectable({ providedIn: 'root' })
 export class ProviderKeysService {
@@ -39,21 +37,5 @@ export class ProviderKeysService {
       tap(access => this.access.set(access)),
       catchError(() => of(this.access())),
     );
-  }
-
-  list(): Observable<ProviderKeySummary[]> {
-    return this.http.get<ProviderKeySummary[]>(`${this.baseUrl}/provider-keys`);
-  }
-
-  /** Stores a key. currentPassword confirms it is the account's owner. */
-  set(provider: ModelProvider, key: string, currentPassword: string): Observable<ProviderKeySummary> {
-    return this.http.put<ProviderKeySummary>(`${this.baseUrl}/provider-keys/${provider}`, {
-      key,
-      current_password: currentPassword,
-    });
-  }
-
-  remove(provider: ModelProvider): Observable<void> {
-    return this.http.delete<void>(`${this.baseUrl}/provider-keys/${provider}`);
   }
 }

@@ -26,6 +26,7 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
   };
   let router: { navigate: ReturnType<typeof vi.fn> };
   let authService: {
+    currentUser: ReturnType<typeof signal<Record<string, unknown>>>;
     getUserProfile: ReturnType<typeof vi.fn>;
     updateProfile: ReturnType<typeof vi.fn>;
     updatePassword: ReturnType<typeof vi.fn>;
@@ -74,6 +75,7 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     externalAuth = new NoopExternalAuthProvider();
     logger = { error: vi.fn() };
     authService = {
+      currentUser: signal(user),
       getUserProfile: vi.fn().mockReturnValue(of(user)),
       updateProfile: vi.fn().mockReturnValue(of(user)),
       updatePassword: vi.fn().mockReturnValue(of({ message: 'ok' }) as any),
@@ -112,7 +114,7 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
       ),
     };
     router = { navigate: vi.fn().mockName('Router.navigate') };
-    providerAccess = signal<ProviderAccess | null>({ keys_from: 'deployment', providers: ['openai'] });
+    providerAccess = signal<ProviderAccess | null>({ keys_from: 'deployment', providers: ['openai'], custom_addresses: true });
     providerKeys = {
       access: providerAccess,
       accountsSupplyKeys: computed(() => providerAccess()?.keys_from === 'account'),
@@ -152,26 +154,26 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     expect(fixture.nativeElement.querySelector('.profile-settings__tabs')).toBeNull();
   });
 
-  it('adds an API keys tab when accounts bring their own keys', async () => {
-    providerAccess.set({ keys_from: 'account', providers: [] });
+  it('adds a Providers tab when accounts bring their own keys', async () => {
+    providerAccess.set({ keys_from: 'account', providers: [], custom_addresses: true });
     const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
     await openAndWaitForProfile(fixture);
 
-    expect(fixture.componentInstance.tabs().map(t => t.id)).toEqual(['profile', 'api-keys']);
+    expect(fixture.componentInstance.tabs().map(t => t.id)).toEqual(['profile', 'providers']);
     const tabs = fixture.nativeElement.querySelectorAll('.profile-settings__tab') as NodeListOf<HTMLButtonElement>;
-    expect([...tabs].map(t => t.textContent?.trim())).toEqual(['Profile', 'API keys']);
+    expect([...tabs].map(t => t.textContent?.trim())).toEqual(['Profile', 'Providers']);
     expect(providerKeys.refreshAccess).toHaveBeenCalled();
   });
 
-  it('shows the key list on the API keys tab', async () => {
-    providerAccess.set({ keys_from: 'account', providers: [] });
+  it('shows the providers on the Providers tab', async () => {
+    providerAccess.set({ keys_from: 'account', providers: [], custom_addresses: true });
     const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
-    fixture.componentInstance.modal.open('api-keys');
+    fixture.componentInstance.modal.open('providers');
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.querySelector('app-provider-keys-section')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('app-providers-section')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('.profile-settings__identity-card')).toBeNull();
   });
 

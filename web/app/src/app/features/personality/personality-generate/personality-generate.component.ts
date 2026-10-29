@@ -106,11 +106,11 @@ export class PersonalityGenerateComponent implements OnInit {
   private readonly providerKeys = inject(ProviderKeysService);
   private readonly settings = inject(ProfileSettingsModalService);
 
-  /** Leaves the wizard (its answers are saved as a draft) for the API keys tab. */
+  /** Leaves the wizard (its answers are saved as a draft) for the Providers tab. */
   addProviderKey(): void {
     this.errorNeedsKey.set(false);
     this.generateModal.hide();
-    this.settings.open('api-keys');
+    this.settings.open('providers');
   }
 
   readonly pages = WIZARD_PAGES;

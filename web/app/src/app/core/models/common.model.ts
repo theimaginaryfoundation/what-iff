@@ -44,6 +44,12 @@ export type SpecificErrorCode =
   | 'system_prompt_too_long'
   | 'provider_not_configured'
   | 'reauthentication_required'
+  | 'provider_unreachable'
+  | 'provider_key_rejected'
+  | 'provider_incompatible'
+  | 'provider_unavailable'
+  | 'custom_address_not_allowed'
+  | 'provider_connection_exists'
   | 'buzz_terms_required';
 
 export interface PaginatedResponse<T> {

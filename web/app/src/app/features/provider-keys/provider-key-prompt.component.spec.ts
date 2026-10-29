@@ -37,26 +37,26 @@ describe('ProviderKeyPromptComponent', () => {
   });
 
   it('asks for a key when the account needs its first one', () => {
-    access.set({ keys_from: 'account', providers: [] });
+    access.set({ keys_from: 'account', providers: [], custom_addresses: true });
     expect(render().componentInstance.open()).toBe(true);
   });
 
   it('stays away once the account has a key, or where the deployment supplies them', () => {
     const fixture = render();
-    access.set({ keys_from: 'account', providers: ['openai'] });
+    access.set({ keys_from: 'account', providers: ['openai'], custom_addresses: true });
     expect(fixture.componentInstance.open()).toBe(false);
-    access.set({ keys_from: 'deployment', providers: [] });
+    access.set({ keys_from: 'deployment', providers: [], custom_addresses: true });
     expect(fixture.componentInstance.open()).toBe(false);
   });
 
   // It steps aside while settings are open, and returns if they close without a key.
   it('opens settings on the API keys tab and steps aside while they are open', () => {
-    access.set({ keys_from: 'account', providers: [] });
+    access.set({ keys_from: 'account', providers: [], custom_addresses: true });
     const fixture = render();
 
     fixture.componentInstance.addKey();
     expect(settings.openState()).toBe(true);
-    expect(settings.activeTab()).toBe('api-keys');
+    expect(settings.activeTab()).toBe('providers');
     expect(fixture.componentInstance.open()).toBe(false);
 
     settings.close();

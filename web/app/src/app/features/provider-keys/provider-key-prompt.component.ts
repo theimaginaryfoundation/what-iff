@@ -7,7 +7,7 @@ import { ProfileSettingsModalService } from '../profile-settings/profile-setting
 /**
  * The first-run prompt: an account that brings its own provider keys and has
  * none yet cannot use anything, so this asks for one and opens Profile &
- * Settings on the API keys tab. It returns whenever settings close without a
+ * Settings on the Providers tab. It returns whenever settings close without a
  * key, the same way the personality welcome holds until one exists.
  */
 @Component({
@@ -35,6 +35,6 @@ export class ProviderKeyPromptComponent implements OnInit {
   }
 
   addKey(): void {
-    this.settings.open('api-keys');
+    this.settings.open('providers');
   }
 }
