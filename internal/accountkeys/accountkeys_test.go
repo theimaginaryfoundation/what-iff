@@ -43,6 +43,7 @@ func (s prefixSealer) DecryptToken(c string) (string, error) {
 
 type fixture struct {
 	keys       *Keys
+	client     *ent.Client
 	db         *sql.DB
 	alice, bob uuid.UUID
 }
@@ -64,17 +65,35 @@ func newFixture(t *testing.T, sealer Sealer) fixture {
 			UNIQUE (user_id, provider),
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE provider_connections (
+			id uuid PRIMARY KEY,
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL,
+			user_id uuid NULL,
+			preset text NOT NULL,
+			flavor text NOT NULL DEFAULT '',
+			name text NOT NULL,
+			base_url text NOT NULL DEFAULT '',
+			key text NOT NULL DEFAULT '',
+			hint text NOT NULL DEFAULT '',
+			source text NOT NULL DEFAULT '',
+			builtin text NULL,
+			UNIQUE (user_id, builtin),
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		)`,
 	} {
 		_, err := db.Exec(stmt)
 		require.NoError(t, err)
 	}
+	drv := entsql.OpenDB(dialect.SQLite, db)
 	f := fixture{db: db, alice: uuid.New(), bob: uuid.New()}
 	for _, id := range []uuid.UUID{f.alice, f.bob} {
 		_, err := db.Exec(`INSERT INTO users (id) VALUES (?)`, id)
 		require.NoError(t, err)
 	}
-	client := ent.NewClient(ent.Driver(entsql.OpenDB(dialect.SQLite, db)))
+	client := ent.NewClient(ent.Driver(drv))
 	t.Cleanup(func() { _ = client.Close() })
+	f.client = client
 	f.keys = New(client, sealer, ownerPassword{}, zap.NewNop())
 	return f
 }
@@ -94,7 +113,7 @@ func TestSet_StoresSealedAndAnswersWithTheKey(t *testing.T) {
 	require.Equal(t, "1234", summary.Hint)
 
 	var stored string
-	require.NoError(t, f.db.QueryRow(`SELECT key FROM account_provider_keys`).Scan(&stored))
+	require.NoError(t, f.db.QueryRow(`SELECT key FROM provider_connections`).Scan(&stored))
 	require.Equal(t, "sealed:sk-test-abcd1234", stored, "stored trimmed and sealed")
 	require.Equal(t, "sk-test-abcd1234", f.keys.Key(asUser(f.alice), models.ModelProviderOpenAI))
 }
@@ -144,7 +163,7 @@ func TestSet_SealerFailureStoresNothing(t *testing.T) {
 	_, err := f.keys.Set(context.Background(), f.alice, models.ModelProviderOpenAI, "sk-test-abcd1234")
 	require.Error(t, err)
 	var n int
-	require.NoError(t, f.db.QueryRow(`SELECT count(*) FROM account_provider_keys`).Scan(&n))
+	require.NoError(t, f.db.QueryRow(`SELECT count(*) FROM provider_connections`).Scan(&n))
 	require.Zero(t, n)
 }
 
@@ -186,7 +205,7 @@ func TestDelete(t *testing.T) {
 // Deleting an account deletes its keys. The cascade is on this table's own
 // foreign key, so it comes from the generated migration, not the User schema.
 func TestKeysAreDeletedWithTheAccount(t *testing.T) {
-	fks := migrate.AccountProviderKeysTable.ForeignKeys
+	fks := migrate.ProviderConnectionsTable.ForeignKeys
 	require.Len(t, fks, 1)
 	require.Equal(t, migrate.UsersTable, fks[0].RefTable)
 	require.Equal(t, entschema.Cascade, fks[0].OnDelete)
@@ -198,8 +217,49 @@ func TestKeysAreDeletedWithTheAccount(t *testing.T) {
 	require.NoError(t, err)
 
 	var n int
-	require.NoError(t, f.db.QueryRow(`SELECT count(*) FROM account_provider_keys`).Scan(&n))
+	require.NoError(t, f.db.QueryRow(`SELECT count(*) FROM provider_connections`).Scan(&n))
 	require.Zero(t, n)
+}
+
+// The fixture writes its tables by hand. These are the schema facts it and the
+// one-built-in-per-provider rule rely on.
+func TestProviderConnectionsSchema(t *testing.T) {
+	fks := migrate.ProviderConnectionsTable.ForeignKeys
+	require.Len(t, fks, 1)
+	require.Equal(t, migrate.UsersTable, fks[0].RefTable)
+
+	var unique []string
+	for _, idx := range migrate.ProviderConnectionsTable.Indexes {
+		if idx.Unique {
+			for _, c := range idx.Columns {
+				unique = append(unique, c.Name)
+			}
+		}
+	}
+	require.Equal(t, []string{"user_id", "builtin"}, unique)
+}
+
+// Connections that are not a built-in provider's sit beside the built-in ones
+// and stay out of the key routes and the resolver.
+func TestOtherConnectionsAreNotKeys(t *testing.T) {
+	f := newFixture(t, prefixSealer{})
+	_, err := f.keys.Set(context.Background(), f.alice, models.ModelProviderOpenAI, "sk-test-abcd1234")
+	require.NoError(t, err)
+	for _, name := range []string{"Home GPU box", "Lab server"} {
+		_, err := f.client.ProviderConnection.Create().
+			SetUserID(f.alice).
+			SetPreset("custom").
+			SetFlavor("openai").
+			SetName(name).
+			SetBaseURL("http://localhost:8000/v1").
+			Save(context.Background())
+		require.NoError(t, err, "any number of connections that are not built-in")
+	}
+
+	keys, err := f.keys.List(context.Background(), f.alice)
+	require.NoError(t, err)
+	require.Len(t, keys, 1)
+	require.Equal(t, models.ModelProviderOpenAI, keys[0].Provider)
 }
 
 // --- Resolver
@@ -342,7 +402,7 @@ func TestRoutes_RequireAnAccount(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, rec.Code, r.method)
 	}
 	var n int
-	require.NoError(t, f.db.QueryRow(`SELECT count(*) FROM account_provider_keys`).Scan(&n))
+	require.NoError(t, f.db.QueryRow(`SELECT count(*) FROM provider_connections`).Scan(&n))
 	require.Zero(t, n)
 }
 

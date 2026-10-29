@@ -20,7 +20,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
-	"github.com/theimaginaryfoundation/what-iff/ent/accountproviderkey"
+	"github.com/theimaginaryfoundation/what-iff/ent/predicate"
+	"github.com/theimaginaryfoundation/what-iff/ent/providerconnection"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -63,13 +64,24 @@ func New(client *ent.Client, sealer Sealer, confirm reauth.Confirmer, logger *za
 }
 
 // --- Storage
+//
+// An account's key for a built-in provider is that provider's built-in
+// connection (ADR 0x027): one per provider per account, named after it.
 
-func toSummary(row *ent.AccountProviderKey) models.ProviderKeySummary {
+func toSummary(row *ent.ProviderConnection) models.ProviderKeySummary {
 	return models.ProviderKeySummary{
-		Provider:  models.ModelProvider(row.Provider),
+		Provider:  models.ModelProvider(row.Preset),
 		Hint:      row.Hint,
 		UpdatedAt: row.UpdatedAt,
 	}
+}
+
+// builtinConnection selects the account's connection for a built-in provider.
+func builtinConnection(userID uuid.UUID, provider models.ModelProvider) predicate.ProviderConnection {
+	return providerconnection.And(
+		providerconnection.UserID(userID),
+		providerconnection.Builtin(string(provider)),
+	)
 }
 
 // Set stores the account's key for provider, replacing any key already stored
@@ -87,12 +99,14 @@ func (k *Keys) Set(ctx context.Context, userID uuid.UUID, provider models.ModelP
 		return models.ProviderKeySummary{}, fmt.Errorf("encrypt provider key: %w", err)
 	}
 
-	id, err := k.client.AccountProviderKey.Create().
+	id, err := k.client.ProviderConnection.Create().
 		SetUserID(userID).
-		SetProvider(string(provider)).
+		SetPreset(string(provider)).
+		SetBuiltin(string(provider)).
+		SetName(provider.DisplayName()).
 		SetKey(enc).
 		SetHint(key[len(key)-4:]).
-		OnConflictColumns(accountproviderkey.FieldUserID, accountproviderkey.FieldProvider).
+		OnConflictColumns(providerconnection.FieldUserID, providerconnection.FieldBuiltin).
 		UpdateKey().
 		UpdateHint().
 		UpdateUpdatedAt().
@@ -100,7 +114,7 @@ func (k *Keys) Set(ctx context.Context, userID uuid.UUID, provider models.ModelP
 	if err != nil {
 		return models.ProviderKeySummary{}, fmt.Errorf("store provider key: %w", err)
 	}
-	row, err := k.client.AccountProviderKey.Get(ctx, id)
+	row, err := k.client.ProviderConnection.Get(ctx, id)
 	if err != nil {
 		return models.ProviderKeySummary{}, fmt.Errorf("read stored provider key: %w", err)
 	}
@@ -109,9 +123,9 @@ func (k *Keys) Set(ctx context.Context, userID uuid.UUID, provider models.ModelP
 
 // List describes the account's stored keys, in provider order.
 func (k *Keys) List(ctx context.Context, userID uuid.UUID) ([]models.ProviderKeySummary, error) {
-	rows, err := k.client.AccountProviderKey.Query().
-		Where(accountproviderkey.UserID(userID)).
-		Order(ent.Asc(accountproviderkey.FieldProvider)).
+	rows, err := k.client.ProviderConnection.Query().
+		Where(providerconnection.UserID(userID), providerconnection.BuiltinNotNil()).
+		Order(ent.Asc(providerconnection.FieldBuiltin)).
 		All(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list provider keys: %w", err)
@@ -125,8 +139,8 @@ func (k *Keys) List(ctx context.Context, userID uuid.UUID) ([]models.ProviderKey
 
 // Delete removes the account's key for provider.
 func (k *Keys) Delete(ctx context.Context, userID uuid.UUID, provider models.ModelProvider) error {
-	n, err := k.client.AccountProviderKey.Delete().
-		Where(accountproviderkey.UserID(userID), accountproviderkey.Provider(string(provider))).
+	n, err := k.client.ProviderConnection.Delete().
+		Where(builtinConnection(userID, provider)).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("delete provider key: %w", err)
@@ -140,14 +154,17 @@ func (k *Keys) Delete(ctx context.Context, userID uuid.UUID, provider models.Mod
 // stored returns the account's decrypted key for provider, or "" when it has
 // none.
 func (k *Keys) stored(ctx context.Context, userID uuid.UUID, provider models.ModelProvider) (string, error) {
-	row, err := k.client.AccountProviderKey.Query().
-		Where(accountproviderkey.UserID(userID), accountproviderkey.Provider(string(provider))).
+	row, err := k.client.ProviderConnection.Query().
+		Where(builtinConnection(userID, provider)).
 		Only(ctx)
 	if ent.IsNotFound(err) {
 		return "", nil
 	}
 	if err != nil {
 		return "", fmt.Errorf("read provider key: %w", err)
+	}
+	if row.Key == "" {
+		return "", nil
 	}
 	key, err := k.sealer.DecryptToken(row.Key)
 	if err != nil {

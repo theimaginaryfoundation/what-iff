@@ -10,9 +10,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// AccountProviderKey is a model-provider API key an account stored itself:
-// requests made for that account are sent with it. A deployment that supplies
-// its own keys leaves the table empty (see internal/accountkeys).
+// AccountProviderKey is where accounts stored model-provider API keys before
+// provider connections existed (ADR 0x027). Nothing writes it any more: at
+// startup accountkeys.ConvertStoredKeys turns each row into a connection and
+// removes it. It is removed together with that conversion (ADR 0x027).
 //
 // The edge to User is one-way. The foreign key and its cascade live on this
 // table, so deleting an account deletes its keys, and the User schema does not
@@ -57,7 +58,7 @@ func (AccountProviderKey) Indexes() []ent.Index {
 func (AccountProviderKey) Annotations() []schema.Annotation {
 	return []schema.Annotation{
 		// Written to the database, for anyone reading it there.
-		schema.Comment("Model-provider API keys accounts stored themselves. Used only when the server takes keys from accounts; a deployment that supplies its own keys leaves this table empty."),
+		schema.Comment("Superseded by provider_connections: rows here are converted into connections at startup and removed."),
 		entsql.WithComments(true),
 	}
 }
