@@ -203,16 +203,18 @@ export class BuzzService {
   private availability$: Observable<boolean> | null = null;
 
   /**
-   * Whether the relay is on for this user. It is experimental: off unless the operator switches it
-   * on (BUZZ_RELAY_ENABLED=true), and a build may turn it on per user. Where it is off, /api/buzz
-   * answers 404: a 404 here means off. Any other outcome means on (an error
-   * then shows where the user can see it). Asked once per session.
+   * Whether the relay is on. It is off unless the operator switches it on
+   * (BUZZ_RELAY_ENABLED=true). Where it is off, /api/buzz answers 404: a 404 here means off. So
+   * does a request that never got an answer (status 0: the network, or a response the browser
+   * would not let us read), because a feature the server may not have should stay hidden when we
+   * cannot tell. Any other error means on, so it shows where the user
+   * can see it. Asked once per session.
    */
   available(): Observable<boolean> {
     if (!this.availability$) {
       this.availability$ = this.http.get<unknown>(`${this.base}/bindings`).pipe(
         map(() => true),
-        catchError((e: unknown) => of(!(e instanceof HttpErrorResponse && e.status === 404))),
+        catchError((e: unknown) => of(!(e instanceof HttpErrorResponse && (e.status === 404 || e.status === 0)))),
         shareReplay({ bufferSize: 1, refCount: false }),
       );
     }

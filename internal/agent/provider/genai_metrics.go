@@ -55,7 +55,10 @@ type genAIUsage struct {
 	Input       int64
 	Output      int64
 	CachedInput int64
-	Reasoning   int64
+	// CacheWrite is input written to the prompt cache (Anthropic), also a subset of Input. Not a
+	// telemetry token type; it is reported for metering (CallUsage.CacheWriteTokens).
+	CacheWrite int64
+	Reasoning  int64
 }
 
 // genAICall records the metrics of one logical LLM call: its duration (all app-level retries
@@ -216,6 +219,7 @@ func anthropicUsage(u anthropic.Usage) genAIUsage {
 		Input:       anthropicUsageInputTokens(u),
 		Output:      anthropicUsageOutputTokens(u),
 		CachedInput: u.CacheReadInputTokens,
+		CacheWrite:  u.CacheCreationInputTokens,
 	}
 }
 
@@ -225,6 +229,7 @@ func anthropicBetaUsage(u anthropic.BetaUsage) genAIUsage {
 		Input:       anthropicBetaUsageInputTokens(u),
 		Output:      anthropicBetaUsageOutputTokens(u),
 		CachedInput: u.CacheReadInputTokens,
+		CacheWrite:  u.CacheCreationInputTokens,
 	}
 }
 

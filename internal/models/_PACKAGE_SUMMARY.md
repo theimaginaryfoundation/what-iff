@@ -8,7 +8,7 @@
 
 - Request/response structs for chats, messages, memories, personalities, rituals, models, jobs, agent jobs (including schedule types), billing-related payloads, file attachments, MCP servers, users, quotas, etc.
 - **Defaults and validation helpers** where present (e.g. `model_defaults.go` for model configuration).
-- **Provider keys** (`provider_key.go`): `ModelProviders` lists every provider, `ModelProvider.Known` checks one, and `ProviderKeySummary` describes a stored key without it.
+- **Provider keys** (`provider_key.go`): `ModelProviders` lists every provider, `ModelProvider.Known` checks one, `ProviderKeySummary` describes a stored key without it, and `ProviderAccess` reports where an account's keys come from (`KeysFromDeployment`/`KeysFromAccount`) and which providers it has a key for.
 - **Gallery folder paths (`folder.go`):** `NormalizeFolder` is the one definition of a valid folder path, used by the gallery API and the agent tools (trimmed, lower-cased, `/` or `\` separate, no `.` or `..`, at most 8 levels and 255 characters), plus `FolderIsWithin` and `FolderCount`.
   `GalleryKind` (`images`, `files`, `all`) narrows the gallery and its folder counts; `ParseGalleryKind` reads an empty value as `images`, so clients that do not ask keep the image-only list.
   `ExpressionFolder` gives the folder a personality's generated expression images are filed under (`expressions/<name>`, always one level, always valid), so they do not crowd the top level of the gallery.
@@ -53,11 +53,25 @@
   `MergeOrigins` combines folded members: external when any member is, a speaker only when every member names the same one.
   `CleanSpeakerName` makes an untrusted display name safe to store and render inside a memory's metadata block.
   `ExtractedRelayMemory` is the relay-thread extraction schema variant with a `speaker` per memory; `ExtractedMemory.Speaker` carries it without being part of the default schema.
+- **Turn settings (ADR 0x026, `reasoning.go`):** `ReasoningEffort` (`off`/`low`/`medium`/`high`) and `AgentLoop` (`standard`/`advanced`), where the zero value means "not set" (the model's default; Standard).
+  `TurnSettingValues` is the nullable pair embedded in the preference, personality, mood, chat and agent-job DTOs; on update routes `""` clears (`Normalized`, `Validate`, `ParseReasoningEffortUpdate`).
+  `ResolveTurnSettings(TurnSettingLevels)` applies job → mode → thread → personality → account per setting and reports each value's source; a `Sandboxed` turn uses only job and thread.
+  `TurnSettingKeys` / `KeepOmittedTurnSettings` let a PUT route keep a setting its body omitted.
+  The per-provider model-family tables (which models always think, take a budget, reject `none`, take Qwen's `reasoning_effort`, and so on) live in `reasoning_models.go`, read by both `ReasoningSupportFor` and the provider mappings.
+  `ReasoningSupportFor(provider, name)` derives a model's effort support from code (none/optional/toggle/always), so admin-added models are covered; an admin's `Model.ReasoningSupportOverride` wins over it (`ReasoningSupportWithOverride`); `EffectiveReasoningEffort` maps a selection onto it.
+  `NativeReasoningEffort` is the level a model reasons at when nothing is sent (from the same tables; off where the docs state none), and `ReasoningEffortAboveNative` keeps an effort only above it, for metering.
+  `WithJobTurnSettings` / `CopyJobTurnSettings` carry an agent job's values on the run's context.
+  `Chat.SetReasoningEffort` / `SetAgentLoop` mark explicit changes on `UpdateChat`, like `SetContextScope`.
+  `ChatTurnProgress` carries an Advanced run's `Step` and `Plan` (`PlanItem`).
+  `agent_run.go` aliases the saved run types from `modeltypes` (`AgentRun`, versioned, with per-step ordered `AgentRunEvent`s; `AgentRunEnd`; `AgentRunDraft`), which `ChatMessage.AgentRun` and the job's draft use.
+  The model tables fail closed: a model they do not list gets no reasoning control.
+  `ContextWindowFor` (`context_window.go`) gives a model's context window by name prefix (`DefaultContextWindow` when unknown; a family's smallest member), for Advanced compaction.
 - **Discord relay:** `discord.go` holds the relay's models (`DiscordBot`, `DiscordBinding`, `DiscordMessageLink`, and the server-only `DiscordBotCredentials`, which carries the decrypted token and never leaves the server).
 
 ## Testing
 
 - `model_defaults_test.go` — default model configuration.
+- `reasoning_test.go` — turn-setting precedence, reasoning support per model, effective effort, JSON/validation, and the job-settings context.
 - `provider_key_test.go` — `ModelProviders` matches the `ModelProvider` enum in `openapi.yaml`, and `Known`.
 - `error_test.go` — status-to-code mapping, class fallbacks, and generic-code uniqueness.
 - `mcpserver_test.go` — MCP server model validation or serialization.

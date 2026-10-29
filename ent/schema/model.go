@@ -31,6 +31,11 @@ func (Model) Fields() []ent.Field {
 		field.Bool("tool_support").
 			Default(false).
 			Comment("Whether the model supports tool calling"),
+		field.Enum("reasoning_support_override").
+			Values("none", "optional", "toggle", "always").
+			Optional().
+			Nillable().
+			Comment("Admin override of how the model takes a reasoning effort (ADR 0x026). NULL derives it from the provider and name (models.ReasoningSupportFor), so a misclassified model is fixed without a deploy."),
 		field.Bool("vision_support").
 			Optional().
 			Nillable().
@@ -41,7 +46,7 @@ func (Model) Fields() []ent.Field {
 		field.Enum("subscription_tier").
 			Values("low", "medium", "high", "ultra").
 			Default("high").
-			Comment("Minimum tier required for free-chat access on this model"),
+			Comment("Billing grade a linked meter may use; it has no effect without one"),
 		field.Bool("deleted").
 			Default(false).
 			Comment("Whether the model is soft deleted"),

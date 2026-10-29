@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
 import { ConfirmationService } from '../../core/services/confirmation.service';
+import { saveCheckbox } from '../../core/utils/checkbox.helpers';
 import {
   BUZZ_EMPTY_ALLOW_NOTE,
   BUZZ_UNRESTRICTED_WARNING,
@@ -15,6 +16,9 @@ import {
 import { BuzzPubkeyChipsComponent } from './buzz-pubkey-chips.component';
 import { BuzzTabState } from './buzz-tab.state';
 import { BUZZ_UI, buzzStatusClass } from './buzz-ui';
+
+/** The binding settings shown as checkboxes. */
+type BindingFlag = 'allow_unrestricted' | 'inbound_enabled' | 'answer_agents';
 
 /** Editable access lists (hex pubkeys) for one binding, until saved. */
 interface AccessDraft {
@@ -66,7 +70,7 @@ interface AccessDraft {
                 class="mt-0.5"
                 [checked]="b.allow_unrestricted"
                 [disabled]="state.busy()"
-                (change)="update({ allow_unrestricted: $any($event.target).checked })"
+                (change)="setFlag('allow_unrestricted', $any($event.target))"
                 data-testid="buzz-binding-ack"
               />
               <span>This thread is not sandboxed. {{ unrestrictedWarning }} Until this is ticked, mentions here are not answered.</span>
@@ -79,7 +83,7 @@ interface AccessDraft {
               type="checkbox"
               [checked]="b.inbound_enabled"
               [disabled]="state.busy()"
-              (change)="update({ inbound_enabled: $any($event.target).checked })"
+              (change)="setFlag('inbound_enabled', $any($event.target))"
               data-testid="buzz-binding-inbound"
             />
             Answer when mentioned
@@ -106,7 +110,7 @@ interface AccessDraft {
           class="mt-0.5"
           [checked]="b.answer_agents"
           [disabled]="state.busy()"
-          (change)="update({ answer_agents: $any($event.target).checked })"
+          (change)="setFlag('answer_agents', $any($event.target))"
           data-testid="buzz-binding-agents"
         />
         <span>
@@ -188,8 +192,16 @@ export class BuzzBindingComponent {
     this.edited.set({ ...this.draft(), [key]: keys });
   }
 
-  async update(body: UpdateBuzzBindingRequest): Promise<void> {
-    await this.state.run(
+  /**
+   * Saves one of the binding's checkboxes. A failure is shown at the top of the tab and the box
+   * goes back to the saved value (the binding did not change, so Angular would not redraw it).
+   */
+  async setFlag(key: BindingFlag, box: HTMLInputElement): Promise<void> {
+    await saveCheckbox(box, on => this.update({ [key]: on }));
+  }
+
+  async update(body: UpdateBuzzBindingRequest): Promise<boolean> {
+    return this.state.run(
       async () => this.state.putBinding(await firstValueFrom(this.buzz.updateBinding(this.binding().id, body))),
       'Could not update the channel.',
     );

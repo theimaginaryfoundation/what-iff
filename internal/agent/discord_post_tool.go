@@ -46,6 +46,25 @@ var discordPostToolSpec = tools.FunctionToolSpec{
 type discordToolStore interface {
 	ListDiscordBindingsForPersonality(ctx context.Context, userID, personalityID uuid.UUID) ([]models.DiscordBinding, error)
 	SetDiscordPendingPost(ctx context.Context, userID, bindingID, chatID uuid.UUID, source models.DiscordPendingPostSource) error
+	IsExternalRelayChat(ctx context.Context, userID, chatID uuid.UUID) (bool, error)
+}
+
+// relayChecker tells whether a chat is a relay thread of either relay
+// (datastore.IsExternalRelayChat).
+type relayChecker interface {
+	IsExternalRelayChat(ctx context.Context, userID, chatID uuid.UUID) (bool, error)
+}
+
+// relayScoped reports whether a chat may post only to the channels bound to it: a sandboxed
+// chat, or a relay thread of either relay, sandboxed or not. People outside the account speak
+// in a relay thread, so a Discord stranger must not reach the persona's Buzz channels, nor a
+// Buzz member its Discord ones. A failed lookup scopes the chat (fail closed).
+func relayScoped(ctx context.Context, store relayChecker, chat *models.Chat) bool {
+	if chat.IsSandboxed() {
+		return true
+	}
+	external, err := store.IsExternalRelayChat(ctx, chat.UserID, chat.ID)
+	return external || err != nil
 }
 
 // discordToolStoreFor is how the tool reaches storage; tests replace it.
@@ -137,14 +156,7 @@ func discordChannelsFor(ctx context.Context, store discordToolStore, chat *model
 	if err != nil {
 		return nil
 	}
-	// A relay thread (any chat a binding points at) is driven by people outside the account
-	// too, so, like a sandboxed chat, it reaches only its own channel(s).
-	ownOnly := chat.IsSandboxed()
-	for _, b := range bindings {
-		if b.ChatID == chat.ID {
-			ownOnly = true
-		}
-	}
+	ownOnly := relayScoped(ctx, store, chat)
 	var usable []models.DiscordBinding
 	for _, b := range bindings {
 		if b.Status != models.DiscordBindingActive {

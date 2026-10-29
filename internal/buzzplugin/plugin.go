@@ -5,7 +5,7 @@
 //
 // Configuration (environment):
 //
-//	BUZZ_RELAY_ENABLED=true             turn the experimental feature on (default off)
+//	BUZZ_RELAY_ENABLED=true             turn the relay on (default off)
 //	BUZZ_GATEWAY_LOCK_KEY=<int64>       advisory-lock key for gateway leadership (default 80920034)
 //	BUZZ_GATEWAY_SINGLE_INSTANCE=true   lead without a lock (one process only)
 //	BUZZ_ALLOW_PRIVATE_RELAYS=true      allow relays on loopback/private addresses and plain ws/http
@@ -18,20 +18,17 @@ package buzzplugin
 
 import (
 	"context"
-	"net/http"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/gorilla/mux"
 	"github.com/theimaginaryfoundation/what-iff/internal/buzzrelay"
 	"github.com/theimaginaryfoundation/what-iff/internal/buzzrelay/nostr"
-	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
-	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
 	"github.com/theimaginaryfoundation/what-iff/internal/relaykit"
@@ -73,7 +70,7 @@ func apply(d plugins.Deps) {
 			unregisterHook()
 		}
 		if d.Logger != nil {
-			d.Logger.Info("buzz relay: off (experimental; set BUZZ_RELAY_ENABLED=true to turn it on)")
+			d.Logger.Info("buzz relay: off (set BUZZ_RELAY_ENABLED=true to turn it on)")
 		}
 		return
 	}
@@ -89,7 +86,6 @@ func apply(d plugins.Deps) {
 
 	h := &Handler{Store: d.DataStore, Relay: client, Files: d.FileStore, Logger: logger, AllowPrivate: allowPrivate}
 	routes := d.AuthRouter.PathPrefix("/buzz").Subrouter()
-	routes.Use(experimentalOnly(logger))
 	h.Register(routes)
 
 	if d.Turns == nil || d.Lifecycle == nil {
@@ -109,7 +105,7 @@ func apply(d plugins.Deps) {
 	sup := &relaykit.Supervisor[models.BuzzConnection]{
 		Name:        "buzz gateway",
 		Locker:      locker(d, logger),
-		List:        mayUse(d.DataStore.ListActiveBuzzConnections),
+		List:        d.DataStore.ListActiveBuzzConnections,
 		Key:         func(c models.BuzzConnection) uuid.UUID { return c.Community.ID },
 		Fingerprint: fingerprint,
 		Dial:        gw.dial,
@@ -139,7 +135,8 @@ func locker(d plugins.Deps, logger *zap.Logger) relaykit.Locker {
 
 // fingerprint changes when a connection must be reopened: a new key or attestation, or a
 // different set of bound channels (the subscriptions are set when connecting; a reopened
-// session resumes from a minute back, and redeliveries are deduplicated on the event id).
+// session resumes from the newest event seen before, and redeliveries are deduplicated on the
+// event id).
 func fingerprint(c models.BuzzConnection) string {
 	ids := make([]string, 0, len(c.Channels))
 	for _, ch := range c.Channels {
@@ -147,47 +144,6 @@ func fingerprint(c models.BuzzConnection) string {
 	}
 	sort.Strings(ids)
 	return c.Agent.PubKey + "|" + c.Community.RelayURL + "|" + c.AuthTag + "|" + strings.Join(ids, ",")
-}
-
-// experimentalOnly answers 404 on every /api/buzz route for a user the per-user experimental
-// policy has the relay off for, exactly as when the relay is switched off, so the web app hides
-// its Buzz surfaces for them.
-func experimentalOnly(logger *zap.Logger) mux.MiddlewareFunc {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			userID, ok := middleware.GetUserIDFromContext(r.Context())
-			if !ok || !buzzrelay.UserMayUse(r.Context(), userID) {
-				handlerutils.RespondWithError(w, logger, http.StatusNotFound, handlerutils.CodeNotSet, "Not found", nil)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// mayUse keeps the gateway to the connections of owners the relay is on for, so turning the
-// feature off for a user closes their personas' connections at the next reconcile.
-func mayUse(list func(context.Context) ([]models.BuzzConnection, error)) func(context.Context) ([]models.BuzzConnection, error) {
-	return func(ctx context.Context) ([]models.BuzzConnection, error) {
-		all, err := list(ctx)
-		if err != nil {
-			return nil, err
-		}
-		allowed := map[uuid.UUID]bool{}
-		out := all[:0]
-		for _, c := range all {
-			owner := c.Agent.OwnerID
-			ok, seen := allowed[owner]
-			if !seen {
-				ok = buzzrelay.UserMayUse(ctx, owner)
-				allowed[owner] = ok
-			}
-			if ok {
-				out = append(out, c)
-			}
-		}
-		return out, nil
-	}
 }
 
 // subPrefix names a binding's subscription: "b:<binding id>".
@@ -199,12 +155,80 @@ type gateway struct {
 	store  stateStore
 	svc    *buzzrelay.Service
 	logger *zap.Logger
+	marks  resumeMarks
 }
 
-// stateStore is where the gateway records connection and subscription health.
+// stateStore is where the gateway records connection and subscription health, and where it
+// resumes from.
 type stateStore interface {
 	SetBuzzCommunityState(ctx context.Context, id uuid.UUID, status models.BuzzCommunityStatus, lastError string) error
 	SetBuzzBindingStatus(ctx context.Context, id uuid.UUID, status models.BuzzBindingStatus, lastError string) error
+	MarkBuzzCommunityEvent(ctx context.Context, id uuid.UUID, at time.Time) error
+}
+
+// maxResume bounds how far back a fresh connection reaches. A community quiet for days
+// resumes from an hour back, and mentions older than that are left rather than answered late.
+const maxResume = time.Hour
+
+// markEvery bounds how often a community's resume point is written. It is shorter than the
+// session's skew (a minute), so the events after the last write are still asked for again.
+const markEvery = 30 * time.Second
+
+// resumeMarks is where each community's connection resumes: the newest event seen, kept in
+// memory across re-dials (a changed binding reopens the connection) and written to the
+// community row across restarts and leader changes.
+type resumeMarks struct {
+	mu    sync.Mutex
+	seen  map[uuid.UUID]int64
+	saved map[uuid.UUID]time.Time
+}
+
+// start is where a new connection to community id begins: the newer of the stored and the
+// in-memory mark, no earlier than maxResume ago; now when there is neither.
+func (m *resumeMarks) start(id uuid.UUID, stored *time.Time, now time.Time) time.Time {
+	var at int64
+	if stored != nil {
+		at = stored.Unix()
+	}
+	m.mu.Lock()
+	if v := m.seen[id]; v > at {
+		at = v
+	}
+	m.mu.Unlock()
+	if at == 0 {
+		return now
+	}
+	t := time.Unix(at, 0)
+	if floor := now.Add(-maxResume); t.Before(floor) {
+		return floor
+	}
+	if t.After(now) {
+		return now
+	}
+	return t
+}
+
+// note records a delivered event's time and reports whether the mark is due to be written.
+// Times more than a minute ahead are ignored, as the session does, so a skewed clock cannot
+// push the mark past events not yet seen.
+func (m *resumeMarks) note(id uuid.UUID, createdAt int64, now time.Time) bool {
+	if createdAt > now.Add(time.Minute).Unix() {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.seen == nil {
+		m.seen, m.saved = map[uuid.UUID]int64{}, map[uuid.UUID]time.Time{}
+	}
+	if createdAt <= m.seen[id] {
+		return false
+	}
+	m.seen[id] = createdAt
+	if now.Sub(m.saved[id]) < markEvery {
+		return false
+	}
+	m.saved[id] = now
+	return true
 }
 
 func (g *gateway) dial(ctx context.Context, c models.BuzzConnection) (relaykit.Conn, error) {
@@ -213,7 +237,7 @@ func (g *gateway) dial(ctx context.Context, c models.BuzzConnection) (relaykit.C
 		return nil, err
 	}
 	subs := map[string]buzzrelay.Filter{}
-	start := time.Now()
+	start := g.marks.start(c.Community.ID, c.Community.LastEventAt, time.Now())
 	for _, ch := range c.Channels {
 		subs[subPrefix+ch.BindingID.String()] = buzzrelay.Filter{
 			"kinds": []int{buzzrelay.KindStreamMessage},
@@ -222,6 +246,7 @@ func (g *gateway) dial(ctx context.Context, c models.BuzzConnection) (relaykit.C
 	}
 	log := g.logger.With(zap.String("community_id", c.Community.ID.String()), zap.String("relay", c.Community.RelayURL))
 	communityID := c.Community.ID
+	personaPub := c.Agent.PubKey
 	session := g.client.Open(ctx, buzzrelay.SessionConfig{
 		Endpoint: ep,
 		Signer:   signer,
@@ -229,6 +254,19 @@ func (g *gateway) dial(ctx context.Context, c models.BuzzConnection) (relaykit.C
 		Start:    start,
 		Logger:   log,
 		OnEvent: func(subID string, ev nostr.Event) {
+			if g.marks.note(communityID, ev.CreatedAt, time.Now()) {
+				at := time.Unix(ev.CreatedAt, 0)
+				go func() {
+					if err := g.store.MarkBuzzCommunityEvent(context.WithoutCancel(ctx), communityID, at); err != nil {
+						log.Warn("buzz gateway: record resume point", zap.Error(err))
+					}
+				}()
+			}
+			// Most of a channel's traffic is not for the persona: drop it here, before a
+			// goroutine and a binding lookup (with key decryption) are spent on it.
+			if !buzzrelay.MayConcern(ev, personaPub) {
+				return
+			}
 			id, err := uuid.Parse(strings.TrimPrefix(subID, subPrefix))
 			if err != nil {
 				return

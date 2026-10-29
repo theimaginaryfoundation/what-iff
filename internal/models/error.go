@@ -55,6 +55,14 @@ const (
 	// ErrCodeBuzzTermsRequired: a Buzz community has join terms the owner has not yet
 	// accepted for the persona; details.policy carries them (ADR 0x028).
 	ErrCodeBuzzTermsRequired = "buzz_terms_required"
+
+	// ErrCodeProviderNotConfigured: the request needed a model provider the
+	// account has no key for. Details is {"provider": "<name>"}.
+	ErrCodeProviderNotConfigured = "provider_not_configured"
+	// ErrCodeReauthenticationRequired: the action needs the account owner to
+	// confirm it (for example with the current password), and that confirmation
+	// was missing or wrong. Answered with 403, not 401: the session is valid.
+	ErrCodeReauthenticationRequired = "reauthentication_required"
 )
 
 // AllErrorCodes is every code this API can emit. It is the source the
@@ -84,6 +92,8 @@ var AllErrorCodes = []string{
 	ErrCodeQuotaExceeded,
 	ErrCodeSystemPromptTooLong,
 	ErrCodeBuzzTermsRequired,
+	ErrCodeProviderNotConfigured,
+	ErrCodeReauthenticationRequired,
 }
 
 // genericErrorCodes maps HTTP statuses to their generic code.

@@ -59,6 +59,7 @@ func sortedNames(set map[string]struct{}) []string {
 }
 
 func TestSandboxedChatToolSurface_EveryCatalogToolIsClassified(t *testing.T) {
+	allowBuzz(t, true) // post_to_buzz is only in the catalog with the relay on
 	catalog := map[string]struct{}{}
 	for _, spec := range agenttools.ExecutableFunctionToolSpecs() {
 		catalog[spec.Name] = struct{}{}

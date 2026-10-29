@@ -165,6 +165,7 @@ func (d *Datastore) exportConversationInput(ctx context.Context, c *ent.Chat) (e
 		}
 	}
 
+	effort, loop := turnSettingsFromEnt(c.ReasoningEffort, c.AgentLoop).Strings()
 	return exporter.ConversationInput{
 		ID:                         c.ID,
 		Title:                      c.Name,
@@ -179,6 +180,8 @@ func (d *Datastore) exportConversationInput(ctx context.Context, c *ent.Chat) (e
 		IsFavorite:                 c.IsFavorite,
 		IsAutoMood:                 c.IsAutoMood,
 		ContextScope:               string(models.ContextScope(c.ContextScope).OrDefault()),
+		ReasoningEffort:            effort,
+		AgentLoop:                  loop,
 	}, nil
 }
 
@@ -229,6 +232,7 @@ func (d *Datastore) ExportPersonalityInputs(ctx context.Context, userID uuid.UUI
 			CreatedAt:       p.CreatedAt,
 			UpdatedAt:       p.UpdatedAt,
 		}
+		in.ReasoningEffort, in.AgentLoop = turnSettingsFromEnt(p.ReasoningEffort, p.AgentLoop).Strings()
 		if p.Edges.Card != nil {
 			in.CharacterCard = p.Edges.Card.Data
 			in.OmittedCardFields = p.Edges.Card.OmittedFields

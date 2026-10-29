@@ -36,6 +36,8 @@ import { PersonalitySystemPromptEditorComponent, SystemPromptValue } from './per
 import { PersonalityAttachmentsListComponent } from './personality-attachments-list.component';
 import { PersonalityExpressionsManagerComponent } from './personality-expressions-manager.component';
 import { PersonalityMediaJobBannerComponent } from '../components/personality-media-job-banner.component';
+import { PersonalityTurnSettingsFieldsComponent } from '../components/personality-turn-settings-fields.component';
+import { TurnSettingValues, TurnSettingsPatch } from '../../../core/models/turn-settings.model';
 import {
   BellIconComponent,
   ContractIconComponent,
@@ -57,6 +59,7 @@ import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
     PersonalityAttachmentsListComponent,
     PersonalityExpressionsManagerComponent,
     PersonalityMediaJobBannerComponent,
+    PersonalityTurnSettingsFieldsComponent,
     BellIconComponent,
     ContractIconComponent,
     HelpHintComponent,
@@ -114,6 +117,14 @@ export class PersonalityDetailPageComponent implements OnInit {
   });
 
   readonly autoPinUpdating = signal(false);
+  readonly turnSettingsUpdating = signal(false);
+  /** The turn settings as shown: the draft's when one is tracked (it may hold an unsaved modal edit), else the saved ones. */
+  readonly turnSettings = computed<TurnSettingValues>(() => {
+    const personality = this.personality();
+    const draft = this.editorSession.personalityId() === personality?.id ? this.editorSession.draft() : null;
+    const source = draft ?? personality;
+    return { reasoning_effort: source?.reasoning_effort ?? null, agent_loop: source?.agent_loop ?? null };
+  });
   readonly expressionsEnabledUpdating = signal(false);
   readonly editorSaving = signal(false);
   readonly scratchpadAdvancedOpen = signal(false);
@@ -244,6 +255,33 @@ export class PersonalityDetailPageComponent implements OnInit {
         this.autoPinUpdating.set(false);
         await this.confirmation.alert({
           message: 'Failed to update auto-pin setting. Please try again.',
+          type: 'danger',
+        });
+      },
+    });
+  }
+
+  /** Saves one turn setting immediately, like the auto-pin switch (other draft edits stay unsaved). */
+  onTurnSettingChange(change: TurnSettingsPatch): void {
+    const personality = this.personality();
+    if (!personality) return;
+    const previous = this.turnSettings();
+    if ('reasoning_effort' in change) this.editorSession.update('reasoning_effort', change.reasoning_effort ?? null);
+    if ('agent_loop' in change) this.editorSession.update('agent_loop', change.agent_loop ?? null);
+    this.turnSettingsUpdating.set(true);
+    const request = this.buildUpdateRequest(personality, change);
+    this.personalityService.updatePersonality(personality.id, request).subscribe({
+      next: updated => {
+        this.view.setPersonality(updated);
+        this.turnSettingsUpdating.set(false);
+      },
+      error: async err => {
+        console.error('Failed to update thread settings', err);
+        this.editorSession.update('reasoning_effort', previous.reasoning_effort ?? null);
+        this.editorSession.update('agent_loop', previous.agent_loop ?? null);
+        this.turnSettingsUpdating.set(false);
+        await this.confirmation.alert({
+          message: 'Failed to update thread settings. Please try again.',
           type: 'danger',
         });
       },

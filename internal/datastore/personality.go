@@ -96,6 +96,7 @@ func toPersonalityModel(e *ent.Personality) *models.Personality {
 		AccentColor:            e.AccentColor,
 		ExpressionsEnabled:     e.ExpressionsEnabled,
 		ImageStyle:             e.ImageStyle,
+		TurnSettingValues:      turnSettingsFromEnt(e.ReasoningEffort, e.AgentLoop),
 		CreatedAt:              e.CreatedAt,
 		UpdatedAt:              e.UpdatedAt,
 	}
@@ -177,7 +178,9 @@ func (d *Datastore) CreatePersonality(ctx context.Context, userID uuid.UUID, per
 		SetScratchpad(personalityModel.Scratchpad).
 		SetUserID(userID).
 		SetExpressionsEnabled(personalityModel.ExpressionsEnabled).
-		SetImageStyle(personalityModel.ImageStyle)
+		SetImageStyle(personalityModel.ImageStyle).
+		SetNillableReasoningEffort(entEffort[personality.ReasoningEffort](personalityModel.ReasoningEffort)).
+		SetNillableAgentLoop(entLoop[personality.AgentLoop](personalityModel.AgentLoop))
 	if personalityModel.CoverImageID != nil {
 		create = create.SetCoverImageID(*personalityModel.CoverImageID)
 	}
@@ -564,6 +567,8 @@ func (d *Datastore) UpdatePersonality(ctx context.Context, userID uuid.UUID, per
 		SetScratchpadHistory(history).
 		SetExpressionsEnabled(personalityModel.ExpressionsEnabled).
 		SetImageStyle(personalityModel.ImageStyle)
+	// PUT semantics: the turn settings are replaced (nil clears).
+	applyTurnSettings[personality.ReasoningEffort, personality.AgentLoop](update, personalityModel.TurnSettingValues)
 	if personalityModel.AccentColor != nil {
 		update = update.SetAccentColor(*personalityModel.AccentColor)
 	} else {

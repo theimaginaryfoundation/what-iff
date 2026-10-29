@@ -72,7 +72,7 @@ The same holds for the "couldn't reply" failure notice.
 
 - Discord bindings get `answer_agents` (default off), like Buzz bindings already had.
   With it on, a message from another bot (`author.bot`) can start a turn; webhooks and the persona's own bot never do.
-- Buzz now also treats an author whose profile says `bot: true` (NIP-24) as an agent, not only one whose event carries an owner attestation.
+- Buzz now also treats an author whose profile says `bot: true` (NIP-24), or who is another persona's identity on this server (ADR 0x028 §5), as an agent, not only one whose event carries an owner attestation.
   What Iff personas publish that flag, so a persona joined by invite is recognised as an agent.
 - Every inbound message link records an **agent depth** (`agent_depth` on `discord_message_links` and `buzz_message_links`):
   0 when a person wrote it; for an agent, one more than the binding's newest inbound message, or 1 when that one is older than 30 minutes.

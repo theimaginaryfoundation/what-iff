@@ -143,3 +143,35 @@ func wholeArrayConversationsJSON(t *testing.T, convs []ConversationInput) string
 	}
 	return buf.String()
 }
+
+// A thread's turn settings (ADR 0x026) round-trip; a thread without them writes nothing new.
+func TestConversationsRoundTripTurnSettings(t *testing.T) {
+	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	msg := []MessageInput{{Origin: models.MessageOriginUser, Text: "hi", SentAt: now}}
+	data, err := BuildConversationsJSON([]ConversationInput{
+		{ID: uuid.New(), Title: "set", CreatedAt: now, Messages: msg, ReasoningEffort: "high", AgentLoop: "advanced"},
+		{ID: uuid.New(), Title: "unset", CreatedAt: now.Add(time.Second), Messages: msg},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseConversations(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range parsed {
+		switch c.Name {
+		case "set":
+			if c.WhatiffReasoningEffort != "high" || c.WhatiffAgentLoop != "advanced" {
+				t.Errorf("set: got %q/%q", c.WhatiffReasoningEffort, c.WhatiffAgentLoop)
+			}
+		case "unset":
+			if c.WhatiffReasoningEffort != "" || c.WhatiffAgentLoop != "" {
+				t.Errorf("unset: got %q/%q", c.WhatiffReasoningEffort, c.WhatiffAgentLoop)
+			}
+		}
+	}
+	if strings.Count(string(data), "whatiff_reasoning_effort") != 1 {
+		t.Errorf("only the thread with a setting should carry it")
+	}
+}

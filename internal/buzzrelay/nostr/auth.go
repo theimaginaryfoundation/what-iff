@@ -176,6 +176,26 @@ func (a *Attestation) ValidAt(t time.Time) bool {
 	return true
 }
 
+// Allows reports whether the attestation's conditions allow an event of kind created at t:
+// every clause must hold, kind ones included. An event that carries an attestation its
+// conditions do not allow is invalid, so callers leave the tag off instead.
+func (a *Attestation) Allows(kind int, t time.Time) bool {
+	if !a.ValidAt(t) {
+		return false
+	}
+	if a.Conditions == "" {
+		return true
+	}
+	for _, c := range strings.Split(a.Conditions, "&") {
+		if raw, ok := strings.CutPrefix(c, "kind="); ok {
+			if n, err := strconv.Atoi(raw); err != nil || n != kind {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // Attest signs an attestation with owner's key for agentPubKey. What Iff never holds
 // an owner's key; this exists for tests and local rigs.
 func Attest(owner *Keys, agentPubKey, conditions string) (*Attestation, error) {

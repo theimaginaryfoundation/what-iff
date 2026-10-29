@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 )
 
 // ToolUse is a normalized tool invocation from either provider.
@@ -90,6 +92,10 @@ type AgentAdapter interface {
 type ReasoningStream struct {
 	OnDelta func(delta string)
 	OnReset func()
+	// OnDiscardCall, when set, replaces OnReset and the re-send: it means "discard what the
+	// current call streamed" and nothing is re-sent. For consumers that keep their own record of
+	// earlier calls (the Advanced loop's transcript, which interleaves them with reply text).
+	OnDiscardCall func()
 }
 
 // ReasoningStreamer is implemented by adapters that can stream reasoning live
@@ -98,4 +104,36 @@ type ReasoningStream struct {
 // Live reasoning is only produced on streaming calls (a text-delta handler is set).
 type ReasoningStreamer interface {
 	SetReasoningStream(stream ReasoningStream)
+}
+
+// CallUsage is one provider call's token usage, as the provider reported it (metering.CallUsage).
+type CallUsage = metering.CallUsage
+
+// UsageReporter is implemented by adapters that record every call's usage (ADR 0x026: an
+// Advanced run is metered on every call it made, not only the final one). Adapters embed
+// usageLog to implement it.
+type UsageReporter interface {
+	CallUsage() []CallUsage
+}
+
+// usageLog accumulates per-call usage across an adapter's calls.
+type usageLog struct {
+	calls []CallUsage
+}
+
+func (u *usageLog) addUsage(g genAIUsage) {
+	u.calls = append(u.calls, CallUsage{InputTokens: g.Input, CachedInputTokens: g.CachedInput, CacheWriteTokens: g.CacheWrite, OutputTokens: g.Output, ReasoningTokens: g.Reasoning})
+}
+
+// CallUsage returns a copy of every call's usage so far, in call order.
+func (u *usageLog) CallUsage() []CallUsage {
+	return append([]CallUsage(nil), u.calls...)
+}
+
+// Continuer is implemented by adapters the Advanced loop can drive past a final answer
+// (ADR 0x026): ContinueWith records the model's last reply in the adapter's own history and
+// appends text as a user turn, so the next Call continues the conversation instead of
+// repeating it. It must only be called after a Call that returned a final response.
+type Continuer interface {
+	ContinueWith(text string)
 }

@@ -33,12 +33,9 @@ type UserResponse struct {
 	Role                     string    `json:"role"`
 	Status                   string    `json:"status"`
 	EnableExperimentalModels bool      `json:"enable_experimental_models"`
-	// ExperimentalFeatures are the experimental features an admin turned on for the user
-	// (ExperimentalFeatures). Only builds with a per-user experimental gate read them.
-	ExperimentalFeatures []string  `json:"experimental_features,omitempty"`
-	Theme                string    `json:"theme,omitempty"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	Theme                    string    `json:"theme,omitempty"`
+	CreatedAt                time.Time `json:"created_at"`
+	UpdatedAt                time.Time `json:"updated_at"`
 }
 
 // TokenPair represents a pair of access and refresh tokens

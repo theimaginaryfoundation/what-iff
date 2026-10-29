@@ -3,16 +3,19 @@ import { ChangeDetectionStrategy, Component, ElementRef, afterRenderEffect, comp
 import { Router } from '@angular/router';
 
 import { ChatMessage } from '../../../../core/models/message.model';
+import { ToolCall } from '../../../../core/models/toolcall.model';
 import { CHAT_PENDING_ASSISTANT_MESSAGE_ID } from '../../chat.constants';
 import { parseThreadReferenceBlock } from '../../helpers/thread-reference.helpers';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
 import { BrainIconComponent, ChevRightIconComponent, StarIconComponent } from '../../../../shared/ui/icons/icons';
 import { MessageContentComponent } from '../message-content/message-content.component';
+import { AgentRunNotesComponent } from '../agent-run-notes/agent-run-notes.component';
+import { AgentRunView, agentRunView } from '../../helpers/agent-run.helpers';
 
 @Component({
   selector: 'app-message-bubble',
   standalone: true,
-  imports: [MessageContentComponent, TooltipDirective, StarIconComponent, BrainIconComponent, ChevRightIconComponent],
+  imports: [AgentRunNotesComponent, MessageContentComponent, TooltipDirective, StarIconComponent, BrainIconComponent, ChevRightIconComponent],
   template: `
     <article
       class="bubble"
@@ -21,7 +24,18 @@ import { MessageContentComponent } from '../message-content/message-content.comp
       [class.bubble--bookmarked]="message().bookmarked && !isPendingPlaceholder()"
       [attr.aria-label]="ariaLabel()"
     >
-      @if (reasoning(); as reasoningText) {
+      @if (agentRun(); as run) {
+        <!-- A saved Advanced reply (ADR 0x026): its per-step working notes, plan and stop reason,
+             collapsed like the reasoning below. It carries no model_reasoning. -->
+        <details class="bubble__reasoning">
+          <summary class="bubble__reasoning-summary" uiTooltip="Show or hide the model's working notes for this reply">
+            <ui-chev-right-icon class="bubble__reasoning-chevron" [size]="12" />
+            <ui-brain-icon [size]="12" />
+            <span>Working notes</span>
+          </summary>
+          <app-agent-run-notes class="bubble__reasoning-text" [run]="run" (openToolCall)="openToolCall.emit($event)" />
+        </details>
+      } @else if (reasoning(); as reasoningText) {
         <!-- Live while the model is still thinking (open, auto-following); settles to a
              collapsed "Thought process" once reply text starts or the saved message lands.
              [open] only flips on that transition, so a manual toggle otherwise sticks. -->
@@ -491,6 +505,8 @@ export class MessageBubbleComponent {
   readonly copy = output<ChatMessage>();
   readonly toggleBookmark = output<ChatMessage>();
   readonly showContext = output<ChatMessage>();
+  /** A tool call opened from the working notes. */
+  readonly openToolCall = output<ToolCall>();
 
   /** True for assistant replies that captured a Context X-ray snapshot. */
   readonly hasContextBreakdown = computed(() => {
@@ -505,6 +521,12 @@ export class MessageBubbleComponent {
       return null;
     }
     return m.model_reasoning?.trim() || null;
+  });
+
+  /** A saved Advanced reply's run (ADR 0x026), reduced to what is shown; null hides it. */
+  readonly agentRun = computed((): AgentRunView | null => {
+    const m = this.message();
+    return m.origin === 'Assistant' ? agentRunView(m.agent_run, m.tool_calls) : null;
   });
 
   /** Reasoning is still streaming: pending placeholder with no reply text yet. */

@@ -18,7 +18,7 @@ type Chat struct {
 
 // Fields of the Chat.
 func (Chat) Fields() []ent.Field {
-	return []ent.Field{
+	return append([]ent.Field{
 		field.UUID("id", uuid.UUID{}).
 			Default(uuid.New).
 			Immutable(),
@@ -76,7 +76,7 @@ func (Chat) Fields() []ent.Field {
 		field.String("rehydration_state").
 			Optional().
 			Comment("Lazy-summarization lifecycle for imported threads: ''/'pending'/'processing'/'ready'/'failed'. Empty means no rehydration needed (e.g. native threads)"),
-	}
+	}, turnSettingFields("thread")...)
 }
 
 // Edges of the Chat.

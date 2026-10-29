@@ -23,8 +23,11 @@ type AccountBackupPersonality struct {
 	MemorySearchPrompt     string    `json:"memory_search_prompt"`
 	MemoryWritePrompt      string    `json:"memory_write_prompt"`
 	AutoPinMemories        bool      `json:"auto_pin_memories"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
+	// TurnSettingValues are the personality's reasoning effort and agent loop (ADR 0x026);
+	// absent in older backups (= not set).
+	TurnSettingValues
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type AccountBackupMood struct {
@@ -33,8 +36,9 @@ type AccountBackupMood struct {
 	Description      string    `json:"description"`
 	PromptSnippet    string    `json:"prompt_snippet"`
 	RecommendedModel string    `json:"recommended_model,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	TurnSettingValues
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type AccountBackupPersonalityMood struct {
@@ -56,8 +60,10 @@ type AccountBackupChat struct {
 	IsAutoMood                 bool       `json:"is_auto_mood"`
 	// ContextScope round-trips the chat's context scope; absent in older backups (= account).
 	ContextScope ContextScope `json:"context_scope,omitempty"`
-	CreatedAt    time.Time    `json:"created_at"`
-	UpdatedAt    time.Time    `json:"updated_at"`
+	// TurnSettingValues are the thread's own reasoning effort and agent loop (ADR 0x026).
+	TurnSettingValues
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type AccountBackupChatMessage struct {
@@ -71,6 +77,8 @@ type AccountBackupChatMessage struct {
 	GenerationMoodID      *uuid.UUID    `json:"generation_mood_id,omitempty"`
 	SentAt                time.Time     `json:"sent_at"`
 	Tokens                int64         `json:"tokens,omitempty"`
+	// AgentRun is an Advanced reply's run record (ADR 0x026).
+	AgentRun *AgentRun `json:"agent_run,omitempty"`
 }
 
 type AccountBackupChatMessageContextItem struct {
@@ -87,8 +95,10 @@ type AccountBackupToolCall struct {
 	ToolInput     string    `json:"tool_input,omitempty"`
 	ToolOutput    string    `json:"tool_output,omitempty"`
 	ToolError     string    `json:"tool_error,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	// Step is the Advanced step the call ran in (ADR 0x026); 0 for Standard turns.
+	Step      int       `json:"step,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type AccountBackupAgentJob struct {
@@ -108,8 +118,10 @@ type AccountBackupAgentJob struct {
 	LastRunAt     *time.Time           `json:"last_run_at,omitempty"`
 	LastError     string               `json:"last_error,omitempty"`
 	RunCount      int                  `json:"run_count"`
-	CreatedAt     time.Time            `json:"created_at"`
-	UpdatedAt     time.Time            `json:"updated_at"`
+	// TurnSettingValues are the job's reasoning effort and agent loop (ADR 0x026).
+	TurnSettingValues
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // AccountBackupRitual is a user-owned ritual (skill). Chat-message and MCP

@@ -51,7 +51,7 @@ func (a *Agent) handleSafetyViolation(ctx context.Context, userID uuid.UUID, cha
 	}
 
 	personalityName := a.resolvePersonalityName(ctx, userID, chatCtx.chat.PersonalityID)
-	agentMessage, err := a.saveAgentResponse(ctx, userID, chatMessage.ChatID, result, nil, nil, chatCtx.model, personalityName, activeMoodID(chatCtx.activeMood))
+	agentMessage, err := a.saveAgentResponse(ctx, userID, chatMessage.ChatID, result, nil, nil, chatCtx.model, personalityName, activeMoodID(chatCtx.activeMood), nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to save safety violation assistant response: %w", err)
 	}

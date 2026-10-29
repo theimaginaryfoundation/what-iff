@@ -380,7 +380,7 @@ func TestSetChatMessageLastError_SetAndClear(t *testing.T) {
 	require.NoError(t, err)
 
 	msg := "  provider timed out  "
-	err = ds.SetChatMessageLastError(ctx, userID, created.ID, &msg)
+	err = ds.SetChatMessageLastError(ctx, userID, created.ID, &msg, "")
 	require.NoError(t, err)
 
 	got, err := ds.GetChatMessage(ctx, userID, created.ID)
@@ -389,7 +389,7 @@ func TestSetChatMessageLastError_SetAndClear(t *testing.T) {
 	require.Equal(t, "provider timed out", *got.LastErrorMessage)
 
 	// Passing nil clears it.
-	err = ds.SetChatMessageLastError(ctx, userID, created.ID, nil)
+	err = ds.SetChatMessageLastError(ctx, userID, created.ID, nil, "")
 	require.NoError(t, err)
 
 	got, err = ds.GetChatMessage(ctx, userID, created.ID)
@@ -414,7 +414,7 @@ func TestSetChatMessageLastError_BlankMessageClears(t *testing.T) {
 	require.NoError(t, err)
 
 	blank := "   "
-	err = ds.SetChatMessageLastError(ctx, userID, created.ID, &blank)
+	err = ds.SetChatMessageLastError(ctx, userID, created.ID, &blank, "")
 	require.NoError(t, err)
 
 	got, err := ds.GetChatMessage(ctx, userID, created.ID)
@@ -430,7 +430,7 @@ func TestSetChatMessageLastError_NotFound(t *testing.T) {
 	userID := createCMTestUser(t, ds)
 	msg := "boom"
 
-	err := ds.SetChatMessageLastError(ctx, userID, uuid.New(), &msg)
+	err := ds.SetChatMessageLastError(ctx, userID, uuid.New(), &msg, "")
 	require.ErrorIs(t, err, ErrChatMessageNotFound)
 }
 
@@ -452,7 +452,7 @@ func TestSetChatMessageLastError_WrongOwner(t *testing.T) {
 	require.NoError(t, err)
 
 	msg := "nope"
-	err = ds.SetChatMessageLastError(ctx, otherID, created.ID, &msg)
+	err = ds.SetChatMessageLastError(ctx, otherID, created.ID, &msg, "")
 	require.ErrorIs(t, err, ErrChatMessageNotFound)
 }
 
@@ -1201,4 +1201,40 @@ func TestTrimChatMessageLastError(t *testing.T) {
 			require.LessOrEqual(t, len([]rune(got)), 4096)
 		})
 	}
+}
+
+// The code is set with the message and cleared with it, so a stale code never
+// outlives the text it describes.
+func TestSetChatMessageLastError_CodeTravelsWithTheMessage(t *testing.T) {
+	ds, cleanup := newChatMessageTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	userID := createCMTestUser(t, ds)
+	chatID := createCMTestChat(t, ds, userID, createCMTestModel(t, ds))
+	created, err := ds.CreateChatMessage(ctx, userID, models.ChatMessage{ChatID: chatID, Message: "hi", Origin: models.MessageOriginUser})
+	require.NoError(t, err)
+
+	msg := "No OpenAI API key is set."
+	require.NoError(t, ds.SetChatMessageLastError(ctx, userID, created.ID, &msg, models.ErrCodeProviderNotConfigured))
+	got, err := ds.GetChatMessage(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, msg, *got.LastErrorMessage)
+	require.Equal(t, models.ErrCodeProviderNotConfigured, *got.LastErrorCode)
+
+	// A later failure without a code replaces the code too.
+	other := "provider timed out"
+	require.NoError(t, ds.SetChatMessageLastError(ctx, userID, created.ID, &other, ""))
+	got, err = ds.GetChatMessage(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, other, *got.LastErrorMessage)
+	require.Nil(t, got.LastErrorCode)
+
+	// Clearing the message clears the code.
+	require.NoError(t, ds.SetChatMessageLastError(ctx, userID, created.ID, &msg, models.ErrCodeProviderNotConfigured))
+	require.NoError(t, ds.SetChatMessageLastError(ctx, userID, created.ID, nil, ""))
+	got, err = ds.GetChatMessage(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Nil(t, got.LastErrorMessage)
+	require.Nil(t, got.LastErrorCode)
 }

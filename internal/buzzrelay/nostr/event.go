@@ -183,11 +183,30 @@ func signDigest(k *Keys, digestHex string) (string, error) {
 var ErrBadEvent = errors.New("nostr: event id or signature is invalid")
 
 // Verify checks the event's id against its content and its signature against its pubkey.
+// NIP-01 fixes all three as lowercase hex, and only that is accepted: callers compare pubkeys
+// as strings (allow and deny lists, "is this the persona"), so an uppercased pubkey that
+// still verified would slip past them.
 func (e *Event) Verify() error {
-	if e.ID == "" || e.ComputeID() != e.ID {
+	if !isLowerHex(e.ID, 64) || !isLowerHex(e.PubKey, 64) || !isLowerHex(e.Sig, 128) {
+		return ErrBadEvent
+	}
+	if e.ComputeID() != e.ID {
 		return ErrBadEvent
 	}
 	return verifySig(e.PubKey, e.ID, e.Sig)
+}
+
+// isLowerHex reports whether s is exactly n lowercase hex characters.
+func isLowerHex(s string, n int) bool {
+	if len(s) != n {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // verifySig checks a hex BIP-340 signature over a hex 32-byte message.

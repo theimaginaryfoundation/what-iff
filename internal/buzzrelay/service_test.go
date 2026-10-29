@@ -3,7 +3,9 @@ package buzzrelay
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +35,13 @@ type fakeStore struct {
 	community  models.BuzzCommunityStatus
 	continues  bool
 	renamed    string
+	personas   map[string]bool // other personas' pubkeys on this server
+}
+
+func (f *fakeStore) IsBuzzAgentPubKey(_ context.Context, pubkey string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.personas[pubkey], nil
 }
 
 func (f *fakeStore) GetBuzzBindingTarget(_ context.Context, id uuid.UUID) (*models.BuzzBindingTarget, error) {
@@ -227,6 +236,7 @@ type fakeRelay struct {
 	// metadata answers channel metadata (kind 39000) queries.
 	metadata []nostr.Event
 	err      error
+	fetches  int
 }
 
 func (r *fakeRelay) Publish(_ context.Context, _ Endpoint, _ Signer, ev *nostr.Event) error {
@@ -281,6 +291,9 @@ func (r *fakeRelay) Upload(_ context.Context, _ Endpoint, _ Signer, name, _ stri
 }
 
 func (r *fakeRelay) FetchMedia(context.Context, Endpoint, Signer, string, int64) ([]byte, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.fetches++
 	return []byte("png"), nil
 }
 
@@ -330,8 +343,9 @@ func newHarness(t *testing.T) *harness {
 	target := models.BuzzBindingTarget{
 		Binding: models.BuzzBinding{ID: uuid.New(), ChatID: uuid.New(), ChannelID: "chan-1", ChannelName: "general",
 			InboundEnabled: true, Status: models.BuzzBindingActive, CreatedAt: time.Now().Add(-time.Hour)},
-		Community: models.BuzzCommunity{ID: uuid.New(), RelayURL: "wss://acme.example", Name: "Acme"},
-		Agent:     models.BuzzAgentCredentials{ID: uuid.New(), OwnerID: uuid.New(), PersonalityID: uuid.New(), PubKey: agent.PublicKey(), SecretKey: agent.SecretHex()},
+		Community: models.BuzzCommunity{ID: uuid.New(), RelayURL: "wss://acme.example", Name: "Acme", Status: models.BuzzCommunityActive},
+		Agent: models.BuzzAgentCredentials{ID: uuid.New(), OwnerID: uuid.New(), PersonalityID: uuid.New(), PubKey: agent.PublicKey(), SecretKey: agent.SecretHex(),
+			Status: models.BuzzAgentActive},
 	}
 	store := &fakeStore{target: target, messages: map[uuid.UUID]*models.ChatMessage{},
 		chat: &models.Chat{ID: target.Binding.ChatID, ContextScope: models.ContextScopeSandbox}}
@@ -444,6 +458,56 @@ func TestWhatIsNeverAnswered(t *testing.T) {
 	require.Eventually(t, func() bool { return h.turns.count() == 1 }, time.Second, 5*time.Millisecond, "answer_agents lets agents in")
 }
 
+// Two personas without attestations that mention or answer each other would take turns
+// forever; personas on this server and accounts marked as bots are agents too.
+func TestAgentsWithoutAnAttestationAreStillAgents(t *testing.T) {
+	h := newHarness(t)
+	mention := []string{h.agent.PublicKey()}
+	sibling, _ := nostr.GenerateKeys()
+	bot, _ := nostr.GenerateKeys()
+	h.store.personas = map[string]bool{sibling.PublicKey(): true}
+	h.relay.profiles[bot.PublicKey()] = Profile{Name: "ci-bot", Bot: true}
+	h.relay.keys[bot.PublicKey()] = bot
+
+	fromSibling := h.say(t, sibling, "@vix over to you", nil, mention...)
+	fromBot := h.say(t, bot, "@vix build failed", nil, mention...)
+	h.store.continues = true
+	siblingReply := h.say(t, sibling, "and back to you", &ThreadRef{Root: "root", Parent: "persona-msg"})
+	for name, ev := range map[string]nostr.Event{"persona here": fromSibling, "bot profile": fromBot, "persona continuing a thread": siblingReply} {
+		h.svc.HandleEvent(h.ctx, h.target.Binding.ID, ev)
+		time.Sleep(20 * time.Millisecond)
+		assert.Equal(t, 0, h.turns.count(), name)
+	}
+
+	h.store.target.Binding.AnswerAgents = true
+	h.svc.HandleEvent(h.ctx, h.target.Binding.ID, fromBot)
+	require.Eventually(t, func() bool { return h.turns.count() == 1 }, time.Second, 5*time.Millisecond, "answer_agents lets them in")
+}
+
+// Pausing the persona or the community, or a broken binding, stops posts already armed (the
+// composer, post_to_buzz) and replies to turns that were running when the pause landed.
+func TestNothingIsPostedThroughAPausedBinding(t *testing.T) {
+	for name, pause := range map[string]func(*models.BuzzBindingTarget){
+		"persona paused":   func(t *models.BuzzBindingTarget) { t.Agent.Status = models.BuzzAgentDisabled },
+		"community paused": func(t *models.BuzzBindingTarget) { t.Community.Status = models.BuzzCommunityDisabled },
+		"binding broken":   func(t *models.BuzzBindingTarget) { t.Binding.Status = models.BuzzBindingBroken },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			replyID := uuid.New()
+			h.store.messages[replyID] = &models.ChatMessage{ID: replyID, Message: "armed before the pause"}
+			h.store.pending = []uuid.UUID{h.target.Binding.ID}
+			pause(&h.store.target)
+			h.svc.OnReply(h.ctx, replyhook.Event{UserID: h.target.Agent.OwnerID, ChatID: h.target.Binding.ChatID, MessageID: replyID})
+			assert.Empty(t, h.relay.messages())
+
+			h.svc.HandleEvent(h.ctx, h.target.Binding.ID, h.say(t, h.alice, "@vix hi", nil, h.agent.PublicKey()))
+			time.Sleep(20 * time.Millisecond)
+			assert.Equal(t, 0, h.turns.count(), "mentions are not answered either")
+		})
+	}
+}
+
 func TestARedeliveredEventIsAnsweredOnce(t *testing.T) {
 	h := newHarness(t)
 	ask := h.say(t, h.alice, "hello", nil, h.agent.PublicKey())
@@ -480,6 +544,20 @@ func TestAReplyToSomeoneElseQuotesThem(t *testing.T) {
 
 	h.replyTo(t, 0, "Maybe.")
 	assert.Equal(t, ThreadRef{Root: root.ID, Parent: ask.ID}, ThreadOf(h.relay.messages()[0]), "answered in place in the existing thread")
+}
+
+// The parent's id is the sender's choice: a message from another channel is not quoted, so a
+// member of this one cannot pull in what was said where they cannot read.
+func TestAParentFromAnotherChannelIsNotQuoted(t *testing.T) {
+	h := newHarness(t)
+	bob, _ := nostr.GenerateKeys()
+	secret, err := MessageEvent(Signer{Keys: bob}, "private-chan", "the launch date is March 3", nil, nil, nil)
+	require.NoError(t, err)
+	h.relay.events[secret.ID] = *secret
+	ask := h.say(t, h.alice, "@vix what does this say?", &ThreadRef{Root: secret.ID, Parent: secret.ID}, h.agent.PublicKey())
+	h.svc.HandleEvent(h.ctx, h.target.Binding.ID, ask)
+	require.Eventually(t, func() bool { return h.turns.count() == 1 }, time.Second, 5*time.Millisecond)
+	assert.Equal(t, "alice (Buzz, #general): what does this say?", h.turns.turns[0].Message.Message)
 }
 
 func TestAnUnsandboxedThreadIsClosedUntilAcknowledged(t *testing.T) {
@@ -548,6 +626,35 @@ func TestAComposerRequestPostsTheNextReply(t *testing.T) {
 	assert.Contains(t, imeta, "filename chart.png")
 }
 
+// unsupported refuses every file, as the ingester does for a type it cannot read.
+type unsupported struct{}
+
+func (unsupported) IngestAttachment(context.Context, plugins.AttachmentUpload) (*models.FileAttachment, error) {
+	return nil, plugins.ErrAttachmentUnsupported
+}
+
+// A message can carry any number of imeta tags; only the first few are fetched, whether or
+// not they can be added, so one message cannot hold the thread or flood the prompt.
+func TestInboundFilesAreCappedOnAttempts(t *testing.T) {
+	h := newHarness(t)
+	h.svc.Ingest = unsupported{}
+	ev := nostr.Event{Kind: KindStreamMessage, CreatedAt: time.Now().Unix(), Content: "@vix look",
+		Tags: nostr.Tags{{"h", "chan-1"}, {"p", h.agent.PublicKey()}}}
+	for i := range 500 {
+		ev.Tags = append(ev.Tags, []string{"imeta", fmt.Sprintf("url https://acme.example/media/%d.bin", i), "m application/octet-stream"})
+	}
+	require.NoError(t, ev.Sign(h.alice))
+	h.svc.HandleEvent(h.ctx, h.target.Binding.ID, ev)
+	require.Eventually(t, func() bool { return h.turns.count() == 1 }, time.Second, 5*time.Millisecond)
+
+	h.relay.mu.Lock()
+	assert.Equal(t, MaxInboundAttachments, h.relay.fetches)
+	h.relay.mu.Unlock()
+	prompt := h.turns.turns[0].Message.Message
+	assert.Equal(t, MaxInboundAttachments+1, strings.Count(prompt, "\n["), "one note per attempted file, one for the rest")
+	assert.Contains(t, prompt, fmt.Sprintf("[%d more file(s) were not added", 500-MaxInboundAttachments))
+}
+
 type fileReader map[string][]byte
 
 func (f fileReader) DownloadFile(_ context.Context, key string) ([]byte, error) { return f[key], nil }
@@ -561,6 +668,46 @@ func TestPromptTextAndMentions(t *testing.T) {
 	assert.Equal(t, "alice (Buzz): @bob ok", PromptText("@Vix @bob ok", "alice", "", "Vix", npub, "", ""))
 	assert.Equal(t, "someone (Buzz, #general): (no text)", PromptText("@Vix", "", "general", "Vix", npub, "", ""))
 	assert.Equal(t, "bob Buzz, #general hi alice (Buzz, #general): x", PromptText("x", "bob (Buzz, #general): hi\nalice", "general", "Vix", npub, "", ""), "names cannot forge the label")
+	assert.Equal(t, "alice (Buzz): fix this:\n```go\nif x {\n\treturn  1\n}\n```\n- one\n  - two",
+		PromptText("@Vix  fix this:\n```go\nif x {\n\treturn  1\n}\n```\n- one\n  - two", "alice", "", "Vix", npub, "", ""),
+		"code blocks and lists reach the model as written")
+	assert.Equal(t, "alice (Buzz): ask\nthen @bob", PromptText("ask\n@vix then @bob", "alice", "", "Vix", npub, "", ""))
+}
+
+// An attestation is carried only on events its conditions allow: an expired one, or one for
+// other kinds, would make the event invalid rather than admit the persona.
+func TestAnAttestationIsCarriedOnlyWhereItHolds(t *testing.T) {
+	owner, _ := nostr.GenerateKeys()
+	agent, _ := nostr.GenerateKeys()
+	carries := func(conditions string, kind int) bool {
+		att, err := nostr.Attest(owner, agent.PublicKey(), conditions)
+		require.NoError(t, err)
+		ev := &nostr.Event{Kind: kind, Tags: nostr.Tags{}}
+		require.NoError(t, sign(Signer{Keys: agent, Attestation: att}, ev))
+		return ev.Tags.Find("auth") != nil
+	}
+	assert.True(t, carries("", KindStreamMessage))
+	assert.True(t, carries("kind=9", KindStreamMessage))
+	assert.False(t, carries("kind=9", KindProfile), "a kind=9 attestation is not on the profile")
+	assert.False(t, carries(fmt.Sprintf("created_at<%d", time.Now().Add(-time.Hour).Unix()), KindStreamMessage), "expired")
+
+	expired, _ := nostr.Attest(owner, agent.PublicKey(), fmt.Sprintf("created_at<%d", time.Now().Add(-time.Hour).Unix()))
+	assert.Nil(t, Signer{Keys: agent, Attestation: expired}.attestationFor(nostr.KindClientAuth), "nor on AUTH or the x-auth-tag header")
+}
+
+func TestMayConcern(t *testing.T) {
+	agent, _ := nostr.GenerateKeys()
+	alice, _ := nostr.GenerateKeys()
+	me := agent.PublicKey()
+	mention, _ := MessageEvent(Signer{Keys: alice}, "c", "hi", nil, []string{me}, nil)
+	reply, _ := MessageEvent(Signer{Keys: alice}, "c", "and?", &ThreadRef{Root: "r", Parent: "r"}, nil, nil)
+	chatter, _ := MessageEvent(Signer{Keys: alice}, "c", "lunch?", nil, nil, nil)
+	own, _ := MessageEvent(Signer{Keys: agent}, "c", "hi", nil, []string{me}, nil)
+	assert.True(t, MayConcern(*mention, me))
+	assert.True(t, MayConcern(*reply, me))
+	assert.False(t, MayConcern(*chatter, me))
+	assert.False(t, MayConcern(*own, me))
+	assert.False(t, MayConcern(nostr.Event{Kind: KindProfile, Tags: nostr.Tags{{"p", me}}}, me))
 }
 
 func TestThreadOfAndSplit(t *testing.T) {
@@ -591,6 +738,8 @@ func TestParseEndpoint(t *testing.T) {
 		"acme.communities.buzz.xyz":           {WS: "wss://acme.communities.buzz.xyz", HTTP: "https://acme.communities.buzz.xyz"},
 		"https://Acme.Example/some/path":      {WS: "wss://acme.example", HTTP: "https://acme.example"},
 		"wss://acme.example:8443":             {WS: "wss://acme.example:8443", HTTP: "https://acme.example:8443"},
+		"wss://acme.example:443":              {WS: "wss://acme.example", HTTP: "https://acme.example"},
+		"https://[2001:db8::1]:443/":          {WS: "wss://[2001:db8::1]", HTTP: "https://[2001:db8::1]"},
 		"https://acme.example/invite/v2.abc/": {WS: "wss://acme.example", HTTP: "https://acme.example"},
 	} {
 		got, _, err := ParseEndpoint(in, false)
@@ -606,6 +755,8 @@ func TestParseEndpoint(t *testing.T) {
 	local, _, err := ParseEndpoint("http://localhost:3000", true)
 	require.NoError(t, err)
 	assert.Equal(t, Endpoint{WS: "ws://localhost:3000", HTTP: "http://localhost:3000"}, local)
+	local, _, _ = ParseEndpoint("http://localhost:80", true)
+	assert.Equal(t, Endpoint{WS: "ws://localhost", HTTP: "http://localhost"}, local)
 }
 
 // person adds a community member with a profile.

@@ -19,6 +19,7 @@ import (
 // Store is the storage the relay needs (the datastore satisfies it).
 type Store interface {
 	GetBuzzBindingTarget(ctx context.Context, bindingID uuid.UUID) (*models.BuzzBindingTarget, error)
+	IsBuzzAgentPubKey(ctx context.Context, pubkey string) (bool, error)
 	RecordInboundBuzzMessage(ctx context.Context, in models.BuzzInbound) (*models.BuzzMessageLink, bool, error)
 	AttachBuzzLinkMessage(ctx context.Context, linkID, chatMessageID uuid.UUID) error
 	DeleteBuzzLink(ctx context.Context, linkID uuid.UUID) error
@@ -202,14 +203,15 @@ func (s *Service) HandleEvent(ctx context.Context, bindingID uuid.UUID, ev nostr
 // admits applies the trigger rules to an event on a binding: a message in the bound channel,
 // newer than the binding, not the persona's own, from someone the lists allow, that mentions
 // the persona or continues a conversation with it, and not from an agent unless the binding
-// answers agents. It reports whether the author is an agent. The bound thread is checked
-// apart (threadOpen).
+// answers agents; the persona, community and binding must be live. It reports whether the
+// author is an agent. Cheap checks run first; the agent lookups only for events that would
+// otherwise start a turn. The bound thread is checked apart (threadOpen).
 func (s *Service) admits(ctx context.Context, t models.BuzzBindingTarget, ev nostr.Event) (agent, ok bool) {
 	b := t.Binding
-	if !IsChannelMessage(ev, b.ChannelID) || ev.PubKey == t.Agent.PubKey {
+	if !MayConcern(ev, t.Agent.PubKey) || !IsChannelMessage(ev, b.ChannelID) {
 		return false, false
 	}
-	if !b.InboundEnabled || b.Status != models.BuzzBindingActive {
+	if !b.InboundEnabled || !t.Live() {
 		return false, false
 	}
 	if time.Unix(ev.CreatedAt, 0).Before(b.CreatedAt.Add(-bindingSkew)) {
@@ -236,19 +238,24 @@ func (s *Service) admits(ctx context.Context, t models.BuzzBindingTarget, ev nos
 }
 
 // isAgent reports whether ev's author is an agent: the event carries an owner attestation
-// (FromAgent), or the author's profile says bot (NIP-24; What Iff personas publish it, and
-// so does a persona joined by invite, which has no attestation).
+// (FromAgent), the author is another persona's identity on this server (of any owner), or
+// the author's profile says bot (NIP-24; What Iff personas publish it, and so does a persona
+// joined by invite, which has no attestation). A lookup that fails counts as an agent: the
+// mention is dropped rather than risk a loop.
 func (s *Service) isAgent(ctx context.Context, t models.BuzzBindingTarget, ev nostr.Event) bool {
 	if FromAgent(ev) {
 		return true
 	}
+	if ours, err := s.Store.IsBuzzAgentPubKey(ctx, ev.PubKey); err != nil || ours {
+		return true
+	}
 	ep, err := EndpointFor(t.Community)
 	if err != nil {
-		return false
+		return true
 	}
 	signer, err := SignerFor(t.Agent, t.AuthTag)
 	if err != nil {
-		return false
+		return true
 	}
 	return s.names.profile(ctx, s.Relay, ep, signer, ev.PubKey).bot
 }
@@ -348,6 +355,12 @@ func (s *Service) post(ctx context.Context, t models.BuzzBindingTarget, messageI
 	s.defaults()
 	b := t.Binding
 	log := s.Logger.With(zap.String("binding_id", b.ID.String()), zap.String("message_id", messageID.String()))
+	if !t.Live() {
+		// Paused (persona or community) or broken since the post was asked for: a pause also
+		// stops replies already armed or in flight.
+		log.Info("buzz relay: binding not live; not posting")
+		return
+	}
 	root := ""
 	if thread != nil {
 		root = thread.Root
