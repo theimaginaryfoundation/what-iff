@@ -156,3 +156,10 @@ Alternatively, keep `LLM_BACKEND` at its default and give the server your own pr
 - Personas, memories and attachments need an export (above); a fuller read scope is planned.
 - It is one-way. Sending what you write at home back to whatiff.chat is not supported.
 - Copies are not marked as copies in the thread list yet, and a thread that split in two does not show the link between them yet.
+- Nothing on screen says a sync is running when you come back; new messages just appear a few seconds later ([#390](https://github.com/theimaginaryfoundation/what-iff/issues/390)).
+
+---
+
+<p align="center">
+  <img src="../assets/mullet-mode.webp" alt="Mullet mode: a fox in a business suit at a SaaS dashboard on the left, and the same fox's mullet flowing into a neon server-rack party on the right. Business up front, party in the back." width="720">
+</p>
