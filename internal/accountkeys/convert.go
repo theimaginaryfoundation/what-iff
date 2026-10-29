@@ -21,9 +21,13 @@ const SourceConverted = "converted"
 // table into that account's built-in connection for the provider, and removes
 // the old row (ADR 0x027). The ciphertext is copied as it is, never decrypted.
 //
-// It runs at startup and is safe to run again, or on two instances at once: a
-// connection that already exists for the account and provider is kept, and the
-// old row is removed either way. A deployment that supplies its own keys has no
+// It runs at startup and is safe to run again, or on two instances at once.
+// Where a connection already exists for the account and provider, the newer of
+// the two keys wins: an old row changed after the connection was made (by an
+// instance still running the previous build, mid-upgrade) replaces its key, and
+// an older row is dropped. A key removed on such an instance leaves no row to
+// see, so instances of the previous build should be stopped before this one
+// starts. The old row is removed either way. A deployment that supplies its own keys has no
 // rows, so it does nothing there. It reports how many old rows it handled,
 // including any whose connection already existed.
 //
@@ -53,12 +57,26 @@ func ConvertStoredKeys(ctx context.Context, client *ent.Client, logger *zap.Logg
 			SetCreatedAt(row.CreatedAt).
 			SetUpdatedAt(row.UpdatedAt).
 			SetSource(SourceConverted).
-			// A connection that already exists is kept as it is.
 			OnConflictColumns(providerconnection.FieldUserID, providerconnection.FieldBuiltin).
 			Ignore().
 			Exec(ctx)
 		if err != nil {
 			return 0, fmt.Errorf("convert stored %s key for user %s: %w", row.Provider, row.UserID, err)
+		}
+		// An existing connection older than the row takes the row's key. One just
+		// made from this row has the same time, so this leaves it alone.
+		_, err = tx.ProviderConnection.Update().
+			Where(
+				providerconnection.UserID(row.UserID),
+				providerconnection.Builtin(row.Provider),
+				providerconnection.UpdatedAtLT(row.UpdatedAt),
+			).
+			SetKey(row.Key).
+			SetHint(row.Hint).
+			SetUpdatedAt(row.UpdatedAt).
+			Save(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("update %s connection for user %s from a newer stored key: %w", row.Provider, row.UserID, err)
 		}
 	}
 	if _, err := tx.AccountProviderKey.Delete().

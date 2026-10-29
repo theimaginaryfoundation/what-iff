@@ -54,12 +54,13 @@ Allowing Custom addresses on a public deployment needs a real guard against serv
 
 At startup, each `account_provider_keys` row becomes a preset connection for the same account, and the row is removed.
 The ciphertext is copied as-is, with no decryption.
-The step is idempotent and safe on two instances at once: where a connection already exists for that account and provider, it is kept and the old row is still removed.
+The step is idempotent and safe on two instances at once. Where a connection already exists for that account and provider, the newer of the two keys wins, and the old row is removed either way.
+That covers a key replaced on an instance still running the previous build during an upgrade. A key *removed* there leaves no row to see, so instances of the previous build are stopped before this one starts.
 It does nothing on a deployment that supplies its own keys, whose table is empty.
 
 Until models point at connections (section 5), an account has at most one connection per built-in preset.
 The account resolver then answers "this account's OpenAI key" from its `openai` connection, and its interface does not change.
-A unique index enforces it per account. Deployment-owned connections have no owner, so the index does not cover them; whatever first creates them has to keep them to one per built-in provider as well.
+A unique index on account and provider enforces it. Deployment-owned connections have no account, and a unique index treats each empty value as different, so a second, partial unique index (provider, where there is no account) keeps the deployment to one per built-in provider too.
 `/provider-keys` stays as a thin layer over preset connections, so existing clients keep working.
 
 The converted connections carry the preset's plain name.

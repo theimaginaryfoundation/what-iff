@@ -69,13 +69,13 @@ func TestConvertStoredKeys_RunsAgainHarmlessly(t *testing.T) {
 	require.Equal(t, 1, f.client.ProviderConnection.Query().CountX(context.Background()))
 }
 
-// A connection that already exists wins over an old row for the same provider,
-// as it does when another instance converted first.
-func TestConvertStoredKeys_KeepsAnExistingConnection(t *testing.T) {
+// A connection that already exists keeps its key over an older row for the
+// same provider, as when another instance converted first.
+func TestConvertStoredKeys_KeepsANewerConnection(t *testing.T) {
 	f := newFixture(t, prefixSealer{})
+	storeOldKey(t, f, f.alice, models.ModelProviderOpenAI, "sealed:sk-older-key-1111", "1111", time.Now().Add(-time.Hour))
 	_, err := f.keys.Set(context.Background(), f.alice, models.ModelProviderOpenAI, "sk-newer-key-9999")
 	require.NoError(t, err)
-	storeOldKey(t, f, f.alice, models.ModelProviderOpenAI, "sealed:sk-older-key-1111", "1111", time.Now())
 
 	n, err := ConvertStoredKeys(context.Background(), f.client, zap.NewNop())
 	require.NoError(t, err)
@@ -85,6 +85,30 @@ func TestConvertStoredKeys_KeepsAnExistingConnection(t *testing.T) {
 	row, err := f.client.ProviderConnection.Query().Only(context.Background())
 	require.NoError(t, err)
 	require.Empty(t, row.Source, "the existing connection is untouched")
+}
+
+// A row changed after the connection was made, as by an instance still running
+// the previous build mid-upgrade, gives the connection its key.
+func TestConvertStoredKeys_TakesANewerRow(t *testing.T) {
+	f := newFixture(t, prefixSealer{})
+	_, err := f.keys.Set(context.Background(), f.alice, models.ModelProviderOpenAI, "sk-connection-key-1111")
+	require.NoError(t, err)
+	later := time.Now().Add(time.Hour)
+	storeOldKey(t, f, f.alice, models.ModelProviderOpenAI, "sealed:sk-replaced-key-9999", "9999", later)
+
+	_, err = ConvertStoredKeys(context.Background(), f.client, zap.NewNop())
+	require.NoError(t, err)
+	require.Zero(t, countOldKeys(t, f))
+	require.Equal(t, "sk-replaced-key-9999", f.keys.Key(asUser(f.alice), models.ModelProviderOpenAI))
+	row, err := f.client.ProviderConnection.Query().Only(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "9999", row.Hint)
+	require.True(t, row.UpdatedAt.Equal(later))
+
+	// Running again changes nothing: the connection is now as new as the row was.
+	_, err = ConvertStoredKeys(context.Background(), f.client, zap.NewNop())
+	require.NoError(t, err)
+	require.Equal(t, "sk-replaced-key-9999", f.keys.Key(asUser(f.alice), models.ModelProviderOpenAI))
 }
 
 func TestConvertStoredKeys_NothingToConvert(t *testing.T) {

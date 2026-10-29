@@ -81,6 +81,7 @@ func newFixture(t *testing.T, sealer Sealer) fixture {
 			UNIQUE (user_id, builtin),
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		)`,
+		`CREATE UNIQUE INDEX providerconnection_builtin ON provider_connections (builtin) WHERE user_id IS NULL`,
 	} {
 		_, err := db.Exec(stmt)
 		require.NoError(t, err)
@@ -228,15 +229,50 @@ func TestProviderConnectionsSchema(t *testing.T) {
 	require.Len(t, fks, 1)
 	require.Equal(t, migrate.UsersTable, fks[0].RefTable)
 
-	var unique []string
-	for _, idx := range migrate.ProviderConnectionsTable.Indexes {
-		if idx.Unique {
-			for _, c := range idx.Columns {
-				unique = append(unique, c.Name)
-			}
-		}
+	type unique struct {
+		columns []string
+		where   string
 	}
-	require.Equal(t, []string{"user_id", "builtin"}, unique)
+	var got []unique
+	for _, idx := range migrate.ProviderConnectionsTable.Indexes {
+		if !idx.Unique {
+			continue
+		}
+		u := unique{}
+		for _, c := range idx.Columns {
+			u.columns = append(u.columns, c.Name)
+		}
+		if idx.Annotation != nil {
+			u.where = idx.Annotation.Where
+		}
+		got = append(got, u)
+	}
+	require.Equal(t, []unique{
+		{columns: []string{"user_id", "builtin"}},
+		{columns: []string{"builtin"}, where: "user_id IS NULL"},
+	}, got)
+}
+
+// The deployment's own connections, with no account, are one per built-in
+// provider too; a NULL user_id alone would let them repeat.
+func TestDeploymentConnectionsAreOnePerBuiltin(t *testing.T) {
+	f := newFixture(t, prefixSealer{})
+	add := func(name string) error {
+		_, err := f.client.ProviderConnection.Create().
+			SetPreset("openai").
+			SetBuiltin("openai").
+			SetName(name).
+			Save(context.Background())
+		return err
+	}
+	require.NoError(t, add("Deployment OpenAI"))
+	require.Error(t, add("Second deployment OpenAI"))
+
+	// Accounts are unaffected: each still has its own.
+	_, err := f.keys.Set(context.Background(), f.alice, models.ModelProviderOpenAI, "sk-alice-key-1111")
+	require.NoError(t, err)
+	_, err = f.keys.Set(context.Background(), f.bob, models.ModelProviderOpenAI, "sk-bob-key-2222")
+	require.NoError(t, err)
 }
 
 // Connections that are not a built-in provider's sit beside the built-in ones

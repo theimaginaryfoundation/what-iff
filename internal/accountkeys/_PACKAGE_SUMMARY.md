@@ -15,7 +15,8 @@ An account's key for a built-in provider is its built-in provider connection (AD
   `Configured` is always true, because which accounts have keys is only known per request, and `AccountsSupplyKeys` is true.
 - **Conversion:** `ConvertStoredKeys` runs at startup (`cmd/api-server`).
   It turns each row of the old `account_provider_keys` table into a built-in connection, copying the ciphertext without decrypting it, and removes the row.
-  It is idempotent and safe on two instances at once: a connection that already exists is kept untouched (an upsert that ignores the conflict).
+  It is idempotent and safe on two instances at once: an existing connection keeps its key over an older row, and takes the row's key when the row is newer (changed by an instance still on the previous build, mid-upgrade).
+  A key removed on such an instance leaves no row, so the previous build's instances are stopped before this one starts.
   Converted connections are marked `source: converted`, so the Providers screen can tell those accounts once.
   The conversion and the old table are removed together once the ADR 0x027 rollout has merged.
 - **Routes:** `GET /provider-keys`, `PUT /provider-keys/{provider}` (`{"key": "...", "current_password": "..."}`) and `DELETE /provider-keys/{provider}`, on the authenticated router.
@@ -32,6 +33,7 @@ An account's key for a built-in provider is its built-in provider connection (AD
   The table carries a database comment saying so, for anyone reading the schema there.
 - The only code that touches the `AccountProviderKey` schema, and the only code that writes built-in connections.
 - One built-in connection per provider per account is enforced by a unique index on `user_id` and `builtin`, a column set only for built-in providers.
+  The deployment's own connections (no `user_id`) get a partial unique index on `builtin` where `user_id IS NULL`, since a unique index treats each NULL as distinct.
   A request to a built-in provider asks for "the account's key", which needs one answer until models point at connections.
 - A key is write-only: no response, error or log line contains it.
   Storage errors are logged by `RespondWithError`, which never puts the error in the response.
@@ -40,7 +42,7 @@ An account's key for a built-in provider is its built-in provider connection (AD
 
 ## Testing
 
-- `convert_test.go` — the conversion: ciphertext, hint and timestamps carried over, the `converted` source, old rows removed, running twice, and an existing connection winning.
+- `convert_test.go` — the conversion: ciphertext, hint and timestamps carried over, the `converted` source, old rows removed, running twice, an existing connection keeping its key over an older row and taking a newer row's (mutation-checked), and one deployment connection per built-in provider.
 - `accountkeys_test.go` — over in-memory SQLite (tables written by hand; `TestProviderConnectionsSchema` checks the schema facts they rely on): sealed storage, replace, validation, per-account isolation, delete, that other connections are not keys, and the cascade (also checked against the generated migration); the resolver's per-account answers, an account recorded with `apicontext` alone, and no key for no account or an unreadable key; each route, that every route requires an account, that setting a key needs the owner's confirmation (missing or wrong: 403 and nothing stored; a failed check: 500), and that deleting one does not.
 
 ## Related documentation

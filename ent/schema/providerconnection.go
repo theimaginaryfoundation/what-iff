@@ -64,6 +64,12 @@ func (ProviderConnection) Edges() []ent.Edge {
 func (ProviderConnection) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("user_id", "builtin").Unique(),
+		// The deployment's own connections have no user_id, and a unique index
+		// treats each NULL as distinct, so they get their own: one per built-in
+		// provider for the deployment too.
+		index.Fields("builtin").
+			Unique().
+			Annotations(entsql.IndexWhere("user_id IS NULL")),
 	}
 }
 
