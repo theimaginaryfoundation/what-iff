@@ -13,7 +13,7 @@ import (
 // on. It is read on every call, so a value from the server's .env file counts.
 func Enabled() bool {
 	switch strings.TrimSpace(strings.ToLower(os.Getenv("BUZZ_RELAY_ENABLED"))) {
-	case "true", "1", "on", "yes":
+	case "true", "1", "on": // the same values as the plugin's other switches (envFlag)
 		return true
 	}
 	return false

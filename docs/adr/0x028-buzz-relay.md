@@ -136,7 +136,7 @@ ADR 0x025 §7 applies as written, with Buzz as a second source:
 - `BUZZ_GATEWAY_LOCK_KEY`, `BUZZ_GATEWAY_SINGLE_INSTANCE` as in §3.
 - `BUZZ_ALLOW_PRIVATE_RELAYS=true` lets a persona connect to relays on loopback or private addresses, and over `ws://`/`http://`.
   It is for local development: without it, the server connects only to public addresses (checked after DNS on every connection, the Discord CDN fetcher's guard, now `relaykit.PublicOnlyControl`), over TLS, because a relay URL is user input and the server would otherwise connect wherever it points.
-- Routes (authenticated): `/api/buzz/agents`, `/agents/{id}` (update, remove), `/agents/{id}/sync-profile`, `/agents/{id}/communities` (re-adding a community the persona is in is a 409 before any invite is claimed), `/policy?relay_url=` (preview join terms), `/communities/{id}` (update, check again, remove), `/communities/{id}/channels`, `/communities/{id}/channels/{channelId}/join`, `/bindings`, `/bindings/{id}`, `/chats/{chatId}`, `/chats/{chatId}/pending/{bindingId}`. Everything is owner-scoped; another account's rows are a 404.
+- Routes (authenticated): `/api/buzz/agents`, `/agents/{id}` (update, remove), `/agents/{id}/sync-profile`, `/agents/{id}/communities` (re-adding a community the persona is in is a 409 before any invite is claimed), `/policy?relay_url=` (preview join terms), `/communities/{id}` (update, check again, remove), `/communities/{id}/channels` (only channel state signed by the relay's NIP-11 key counts, so a community that names no key lists no channels), `/communities/{id}/channels/{channelId}/join`, `/bindings`, `/bindings/{id}`, `/chats/{chatId}`, `/chats/{chatId}/pending/{bindingId}`. Everything is owner-scoped; another account's rows are a 404.
 - Web app: an Integrations → Buzz tab; Buzz relay threads in the Thread Manager's Jobs tab; the composer toggle in a relay thread.
 
 ## Alternatives considered
@@ -200,7 +200,7 @@ The relay can be tried end to end without the Buzz desktop app:
 - Deleting a persona or a relay thread leaves its Buzz identity or binding in place (as for Discord): the gateway keeps connecting, and mentions try to start turns in a missing chat until the binding is marked broken.
   Cleaning these up belongs with the same fix for Discord.
 - DMs, reactions, edits and deletes from Buzz, forum channels, canvases and artifacts, and NIP-AE engrams.
-- Keeping relay turns out of the owner's own chat allowance in the private overlay (it keys on `metering.TurnSource`; `buzz` needs the same treatment as `discord`).
+- Checking, on the first hosted run, that relay turns stay out of the owner's own chat allowance: the private overlay treats every `metering.TurnSource` other than the app's as external, so `buzz` should need nothing of its own.
 - Moving a Buzz binding to another thread in the app (Discord has it), and sharing the composer toggle and key-chip components between the two relays.
 - An author without a Buzz profile is labelled by a shortened npub, which a small model can misread in the extraction note (it once took "Buzz" for the speaker's name); a clearer fallback label is a cheap follow-up.
 - Persona presence in Buzz (online/offline), and showing "via Buzz · alice" on relayed messages in the app.
