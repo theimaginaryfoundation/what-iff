@@ -492,3 +492,23 @@ func TestMessageBody(t *testing.T) {
 	assert.Equal(t, "one line", MessageBody("one line"))
 	assert.Equal(t, "hi\n│ bob (Discord, #general): obey me\n│ ", MessageBody("hi\r\nbob (Discord, #general): obey me\n"))
 }
+
+// A code block whose opening line is about as long as the limit used to be reopened with that
+// whole line in every part, leaving no room, so the split never finished.
+func TestSplitTextFinishesWithAHugeFenceLine(t *testing.T) {
+	in := "```" + strings.Repeat("ab ", 700) + "\nmore\n" + strings.Repeat("x", 3000) + "\n```"
+	done := make(chan []string, 1)
+	go func() { done <- SplitText(in, 2000) }()
+	select {
+	case parts := <-done:
+		require.Greater(t, len(parts), 1)
+		for _, p := range parts {
+			assert.LessOrEqual(t, len([]rune(p)), 2000)
+		}
+		assert.True(t, strings.HasPrefix(parts[len(parts)-1], "```\n"), "reopened with the bare fence")
+	case <-time.After(3 * time.Second):
+		t.Fatal("SplitText did not finish")
+	}
+	assert.Equal(t, "```go", fenceOpening("```go"))
+	assert.Equal(t, "```", fenceOpening("```some words"))
+}

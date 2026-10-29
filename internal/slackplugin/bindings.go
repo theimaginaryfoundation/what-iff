@@ -453,14 +453,25 @@ func validChannelID(s string) bool {
 	return len(s) >= 2 && (s[0] == 'C' || s[0] == 'G') && strings.Trim(s, "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") == ""
 }
 
-// cleanIDs trims, upper-cases, drops empties and anything that is not a Slack user id (U… or
-// W…), and de-duplicates.
+// isSlackUserID reports whether id looks like a Slack member id: U or W, then at least six
+// letters and digits with a digit among them. Ordinary names ("will", "walter") are not ids;
+// taken as one, an allow list would match nobody and the persona would quietly stop answering.
+// The web app's chips apply the same rule (SLACK_USER_IDS).
+func isSlackUserID(id string) bool {
+	if len(id) < 7 || (id[0] != 'U' && id[0] != 'W') || strings.Trim(id, "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") != "" {
+		return false
+	}
+	return strings.ContainsAny(id[1:], "0123456789")
+}
+
+// cleanIDs trims, upper-cases, drops empties and anything that is not a Slack user id, and
+// de-duplicates.
 func cleanIDs(ids []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
 	for _, id := range ids {
 		id = strings.ToUpper(strings.TrimSpace(id))
-		if len(id) < 2 || (id[0] != 'U' && id[0] != 'W') || seen[id] || strings.Trim(id, "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") != "" {
+		if !isSlackUserID(id) || seen[id] {
 			continue
 		}
 		seen[id] = true

@@ -725,17 +725,22 @@ func (d *Datastore) ConsumeSlackPendingPosts(ctx context.Context, userID, chatID
 	}
 	now := time.Now()
 	seen := map[uuid.UUID]bool{}
-	var ids, rowIDs []uuid.UUID
+	var ids []uuid.UUID
 	for _, r := range rows {
-		rowIDs = append(rowIDs, r.ID)
-		if r.ExpiresAt.Before(now) || r.Edges.Binding == nil || seen[r.Edges.Binding.ID] {
+		// Each request is claimed by deleting it: only the caller whose delete removed the row
+		// (n == 1) posts, so each request is posted exactly once. A caller whose delete removed
+		// nothing (n == 0) lost the race to another and must not post: two reply hooks for one
+		// reply (the orphan path) can read the same rows, and before this both posted. A single
+		// DELETE of one row by id is atomic on its own, so no transaction is needed.
+		n, err := d.dbClient.SlackPendingPost.Delete().Where(slackpendingpost.ID(r.ID)).Exec(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("consume slack pending posts: %w", err)
+		}
+		if n == 0 || r.ExpiresAt.Before(now) || r.Edges.Binding == nil || seen[r.Edges.Binding.ID] {
 			continue
 		}
 		seen[r.Edges.Binding.ID] = true
 		ids = append(ids, r.Edges.Binding.ID)
-	}
-	if _, err := d.dbClient.SlackPendingPost.Delete().Where(slackpendingpost.IDIn(rowIDs...)).Exec(ctx); err != nil {
-		return nil, fmt.Errorf("consume slack pending posts: %w", err)
 	}
 	return ids, nil
 }

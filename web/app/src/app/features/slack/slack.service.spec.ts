@@ -121,6 +121,11 @@ describe('SLACK_USER_IDS', () => {
     expect(SLACK_USER_IDS.parse('C0123ABC')).toBeNull();
     expect(SLACK_USER_IDS.parse('B0123ABC')).toBeNull();
     expect(SLACK_USER_IDS.parse('U-12')).toBeNull();
+    // Names that start with U or W are not ids: taken as one, an allow list would match nobody.
+    expect(SLACK_USER_IDS.parse('will')).toBeNull();
+    expect(SLACK_USER_IDS.parse('@walter')).toBeNull();
+    expect(SLACK_USER_IDS.parse('Uma')).toBeNull();
+    expect(SLACK_USER_IDS.parse('WENDYWEN')).toBeNull();
   });
 });
 

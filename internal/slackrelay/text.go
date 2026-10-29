@@ -120,7 +120,10 @@ const boldMark = "\x00"
 // function builds from Markdown links with http(s) or mailto URLs. Tables become code blocks;
 // headings become bold lines; lists get bullets.
 func ToMrkdwn(md string) string {
-	md = relaykit.TablesToCodeBlocks(strings.ReplaceAll(md, "\r\n", "\n"))
+	// The converter's own placeholder bytes (boldMark, linkMark) never come from a reply; a
+	// reply that contained them could hide a fence line from the converter.
+	md = strings.NewReplacer("\r\n", "\n", boldMark, "", linkMark, "").Replace(md)
+	md = relaykit.TablesToCodeBlocks(md)
 	lines := strings.Split(md, "\n")
 	inCode := false
 	for i, line := range lines {

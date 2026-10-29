@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
 import { ConfirmationService } from '../../core/services/confirmation.service';
+import { saveCheckbox } from '../../core/utils/checkbox.helpers';
 import { RELAY_EMPTY_ALLOW_NOTE, RELAY_UNRESTRICTED_WARNING } from '../relay/relay-copy';
 import { RelayIdChipsComponent } from '../relay/relay-id-chips.component';
 import { RELAY_TONE_CLASS, RELAY_UI } from '../relay/relay-ui';
@@ -21,6 +22,8 @@ interface AccessDraft {
  * One connected channel: its status, whether the relay thread is sandboxed, whether mentions are
  * answered (and from other apps' bots), who may mention the persona, and disconnect.
  */
+type BindingFlag = 'allow_unrestricted' | 'inbound_enabled' | 'answer_agents';
+
 @Component({
   selector: 'app-slack-binding',
   standalone: true,
@@ -66,7 +69,7 @@ interface AccessDraft {
                 class="mt-0.5"
                 [checked]="b.allow_unrestricted"
                 [disabled]="state.busy()"
-                (change)="update({ allow_unrestricted: $any($event.target).checked })"
+                (change)="setFlag('allow_unrestricted', $any($event.target))"
                 data-testid="slack-binding-ack"
               />
               <span>This thread is not sandboxed. {{ unrestrictedWarning }} Until this is ticked, mentions here are not answered.</span>
@@ -79,7 +82,7 @@ interface AccessDraft {
               type="checkbox"
               [checked]="b.inbound_enabled"
               [disabled]="state.busy()"
-              (change)="update({ inbound_enabled: $any($event.target).checked })"
+              (change)="setFlag('inbound_enabled', $any($event.target))"
               data-testid="slack-binding-inbound"
             />
             Answer when mentioned
@@ -106,7 +109,7 @@ interface AccessDraft {
           class="mt-0.5"
           [checked]="b.answer_agents"
           [disabled]="state.busy()"
-          (change)="update({ answer_agents: $any($event.target).checked })"
+          (change)="setFlag('answer_agents', $any($event.target))"
           data-testid="slack-binding-agents"
         />
         <span>
@@ -195,8 +198,13 @@ export class SlackBindingComponent {
     this.edited.set({ ...this.draft(), [key]: ids });
   }
 
-  async update(body: UpdateSlackBindingRequest): Promise<void> {
-    await this.state.run(
+  /** Saves one of the binding's switches, putting the box back when the save fails (saveCheckbox). */
+  async setFlag(key: BindingFlag, box: HTMLInputElement): Promise<void> {
+    await saveCheckbox(box, on => this.update({ [key]: on }));
+  }
+
+  async update(body: UpdateSlackBindingRequest): Promise<boolean> {
+    return this.state.run(
       async () => this.state.putBinding(await firstValueFrom(this.slack.updateBinding(this.binding().id, body))),
       'Could not update the channel.',
     );

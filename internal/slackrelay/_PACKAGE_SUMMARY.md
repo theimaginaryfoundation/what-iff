@@ -16,7 +16,7 @@ It talks to Slack through the `Slack` interface (the Web API client `API`) and t
   A refused app-level token stops the session (`SocketInvalidToken`).
   `SocketAppID` reads the app id from a `hello`, which is how the routes check two pasted tokens are one app's.
 - **Events (`events.go`):** `EventCallback`, `Message` (thread root, whether it is in a thread, its time from `ts`, mentions, plain subtypes, from a bot), `File`, `ChannelRef`.
-- **Text (`text.go`):** `PlainText` turns Slack markup into plain text for the model (the persona's mention removed, other mentions by name, channels, links, entities); `PromptText` is the relayed line (`alice (Slack, #general): text`, with a thread's first message quoted); `ToMrkdwn` converts a reply's Markdown into escaped Slack mrkdwn.
+- **Text (`text.go`):** `PlainText` turns Slack markup into plain text for the model (the persona's mention removed, other mentions by name, channels, links, entities); `PromptText` is the relayed line (`alice (Slack, #general): text`, further lines marked by `relaykit.MessageBody`, with a thread's first message quoted); `ToMrkdwn` converts a reply's Markdown into escaped Slack mrkdwn (its placeholder bytes stripped from the reply first, and built links kept out of emphasis conversion).
 - **Manifest (`manifest.go`):** `Manifest` (the persona's app: its name, Socket Mode on, token rotation off, `BotScopes`, `BotEvents`), `CreateAppURL`, `AppSettingsURL`.
 - **Service (`service.go`; the batch path in `inbound.go`, files in `files_in.go`, the name cache in `names.go`):** `HandleEvent` takes an app's events.
   Messages pass `admits` (something someone wrote in a bound channel, newer than the binding, not the persona's own nor an integration's, allowed by the lists, a mention or a thread continuation, bots only with `answer_agents`) and the fail-closed thread gate, then the turn queue (`relaykit.TurnQueue`: one batch per Slack thread, the channel's top-level messages sharing one).
@@ -37,7 +37,7 @@ It talks to Slack through the `Slack` interface (the Web API client `API`) and t
 ## Dependencies
 
 - **Inbound:** `internal/slackplugin` (routes, gateway, reply hook), `internal/agent` (`Enabled` for `post_to_slack`).
-- **Outbound:** `internal/relaykit` (turn queue, loop guard, reply bookkeeping, thread gate, reply files, splitter, dial guard), `internal/plugins`, `internal/replyhook`, `internal/featuregate`, `internal/models`, `github.com/gorilla/websocket`, `zap`.
+- **Outbound:** `internal/relaykit` (turn queue, loop guard, reply bookkeeping, thread gate, reply files, splitter, dial guard), `internal/plugins`, `internal/replyhook`, `internal/models`, `github.com/gorilla/websocket`, `zap`.
 
 ## Non-obvious decisions
 

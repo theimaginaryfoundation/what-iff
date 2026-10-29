@@ -206,7 +206,7 @@ There is no local Slack to run against, so trying the relay needs a real workspa
 - A shared quick-start app (Alternatives), and creating the app from the manifest API.
 - Showing "via Slack · alice" on relayed messages in the app.
 - Offering the persona's portrait as a download next to the app's settings link (the portrait URL needs the owner's session, so a plain link does not work).
-- Keeping relay turns out of the owner's own chat allowance in the private overlay (it keys on `metering.TurnSource`; `slack` needs the same treatment as `discord` and `buzz`).
+- Checking, on the first hosted run, that relay turns stay out of the owner's own chat allowance: the private overlay treats every `metering.TurnSource` other than the app's as external, so `slack` should need nothing of its own.
 - The note an external memory carries in model context still says `said by <name> on Discord` whatever the relay (`memoryutil.ExternalProvenanceNote`); the memory stores the speaker but not the platform.
   That predates this ADR (Buzz memories read the same) and needs the platform recorded on the memory, or a platform-neutral wording.
 - Slack Connect channels shared with other organisations: their members are answered like anyone else in the channel, and their files may need `files.info` before they can be fetched.

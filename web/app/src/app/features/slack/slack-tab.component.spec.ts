@@ -178,7 +178,8 @@ describe('SlackTabComponent', () => {
     expect(all('slack-app-status').map(s => s.textContent?.trim())).toEqual(['Invalid token', 'Paused']);
     expect(q('slack-app-error')!.textContent).toContain('invalid_auth');
     expect(q('slack-channels-open')).toBeNull();
-    expect(all('slack-app-pause').map(b => b.textContent?.trim())).toEqual(['Pause', 'Resume']);
+    // An app whose tokens Slack refuses has no Pause or Resume: replacing the tokens is the way out.
+    expect(all('slack-app-pause').map(b => b.textContent?.trim())).toEqual(['Resume']);
   });
 
   describe('connecting a persona', () => {
@@ -376,6 +377,21 @@ describe('SlackTabComponent', () => {
       expect(slack['updateBinding']).toHaveBeenLastCalledWith('b1', { inbound_enabled: false });
     });
 
+    it.each([
+      ['slack-binding-ack', false],
+      ['slack-binding-inbound', true],
+      ['slack-binding-agents', false],
+    ])('puts %s back and says why when the save fails', async (id, saved) => {
+      const { tick, q } = await create({ bindings: [{ ...binding, chat_sandboxed: false }] });
+      slack['updateBinding'].mockReturnValueOnce(
+        throwError(() => new HttpErrorResponse({ status: 500, error: { message: 'Slack is down.' } })),
+      );
+      expect(q<HTMLInputElement>(id)!.checked).toBe(saved);
+      await tick(id, !saved);
+      expect(q<HTMLInputElement>(id)!.checked).toBe(saved);
+      expect(q('slack-error')!.textContent).toContain('Slack is down.');
+    });
+
     it('links to the relay thread and says when anyone may mention the persona', async () => {
       const { q } = await create();
       expect(q<HTMLAnchorElement>('slack-binding-open-thread')!.getAttribute('href')).toBe('/chat/chat-1');
@@ -393,11 +409,11 @@ describe('SlackTabComponent', () => {
       expect(q('slack-empty-allow-note')).toBeNull();
       expect(allow.value).toBe('nobody');
       const deny = inputs[1] as HTMLInputElement;
-      deny.value = 'W999';
+      deny.value = 'W0999XYZ';
       deny.dispatchEvent(new Event('blur'));
       fixture.detectChanges();
       await click('slack-binding-save-access');
-      expect(slack['updateBinding']).toHaveBeenCalledWith('b1', { allow_user_ids: ['U0123ABC'], deny_user_ids: ['W999'] });
+      expect(slack['updateBinding']).toHaveBeenCalledWith('b1', { allow_user_ids: ['U0123ABC'], deny_user_ids: ['W0999XYZ'] });
     });
 
     it('reactivates when broken, takes the acknowledgement when not sandboxed, and disconnects', async () => {

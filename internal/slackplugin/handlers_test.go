@@ -266,6 +266,15 @@ func TestUpdateAppTokens(t *testing.T) {
 	code, out = r.do(http.MethodPatch, "/slack/apps/"+id, map[string]any{"enabled": false})
 	require.Equal(t, http.StatusOK, code)
 	assert.Equal(t, "disabled", out["status"])
+	code, out = r.do(http.MethodPatch, "/slack/apps/"+id, map[string]any{"enabled": true})
+	require.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "active", out["status"], "resuming undoes a pause")
+
+	// Resuming cannot clear invalid_token: only new tokens or a refresh do.
+	r.store.status[appID] = models.SlackAppInvalidToken
+	code, out = r.do(http.MethodPatch, "/slack/apps/"+id, map[string]any{"enabled": true})
+	require.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "invalid_token", out["status"])
 }
 
 func TestBindingCreatesASandboxedThreadAndRefusesAnOpenOne(t *testing.T) {
@@ -273,13 +282,13 @@ func TestBindingCreatesASandboxedThreadAndRefusesAnOpenOne(t *testing.T) {
 	appID := r.createApp()
 
 	code, out := r.do(http.MethodPost, "/slack/bindings", map[string]any{"app_id": appID, "channel_id": "C1", "channel_name": "#general",
-		"allow_user_ids": []string{" ualice ", "UALICE", "not an id", "C123"}})
+		"allow_user_ids": []string{" u012alice ", "U012ALICE", "not an id", "C123", "walter", "will", "U12"}})
 	require.Equal(t, http.StatusCreated, code, out)
 	require.Len(t, r.store.createdCh, 1)
 	assert.Equal(t, models.ContextScopeSandbox, r.store.createdCh[0].ContextScope)
 	assert.Equal(t, "Slack · #general", r.store.createdCh[0].Name)
 	assert.Equal(t, r.store.persona.ID, r.store.createdCh[0].PersonalityID)
-	assert.Equal(t, []any{"UALICE"}, out["allow_user_ids"], "ids are cleaned and de-duplicated")
+	assert.Equal(t, []any{"U012ALICE"}, out["allow_user_ids"], "ids are cleaned and de-duplicated; names are not ids")
 	assert.Equal(t, true, out["chat_sandboxed"])
 
 	open := uuid.New()

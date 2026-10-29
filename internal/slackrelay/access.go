@@ -13,7 +13,9 @@ import (
 // on. It is read on every call, so a value from the server's .env file counts.
 func Enabled() bool {
 	switch strings.TrimSpace(strings.ToLower(os.Getenv("SLACK_RELAY_ENABLED"))) {
-	case "true", "1", "on", "yes":
+	// The same values as the plugin's other switches and the ADR. The relay has not shipped,
+	// so no deployment relies on the "yes" an earlier draft also took.
+	case "true", "1", "on":
 		return true
 	}
 	return false

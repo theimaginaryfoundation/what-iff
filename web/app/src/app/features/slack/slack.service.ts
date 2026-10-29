@@ -160,11 +160,13 @@ export function tokenLooksWrong(token: string, prefix: string): boolean {
 
 /**
  * Slack member ids in the allow and deny chips: U… or W… (a profile's ⋮ menu, Copy member ID).
- * A pasted mention (`<@U0123ABC>`) works too. Kept upper-case, as Slack writes them.
+ * A pasted mention (`<@U0123ABC>`) works too. Kept upper-case, as Slack writes them. At least
+ * six letters and digits with a digit among them, so a name ("will", "walter") is flagged rather
+ * than taken as an id that matches nobody (the server's cleanIDs applies the same rule).
  */
 export const SLACK_USER_IDS: RelayIdKind = {
   parse: entry => {
-    const m = /^<?@?([UW][A-Z0-9]{2,})(?:\|[^>]*)?>?$/i.exec(entry);
+    const m = /^<?@?([UW](?=[A-Z0-9]*\d)[A-Z0-9]{6,})(?:\|[^>]*)?>?$/i.exec(entry);
     return m ? m[1].toUpperCase() : null;
   },
   invalid: 'Slack member ids start with U or W (open a profile, ⋮, Copy member ID).',

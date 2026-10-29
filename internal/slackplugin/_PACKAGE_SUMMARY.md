@@ -33,4 +33,4 @@ Linked by a blank import in `cmd/api-server/plugins.go`.
 
 ## Testing
 
-- `handlers_test.go` uses a fake store and Slack: the manifest, token checks (wrong kinds, revoked, two apps), replacing tokens, sandboxed relay threads and the unrestricted acknowledgement, id cleaning, joining channels, ownership, the per-user gate, the gateway's owner filter and its fingerprint.
+- `handlers_test.go` uses a fake store and Slack: the manifest, token checks (wrong kinds, revoked, two apps), replacing tokens, sandboxed relay threads and the unrestricted acknowledgement, id cleaning, joining channels, ownership, resuming only undoing a pause, member-id cleaning, and the gateway's fingerprint.

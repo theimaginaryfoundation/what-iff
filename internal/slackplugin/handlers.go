@@ -315,7 +315,12 @@ func (h *Handler) updateApp(w http.ResponseWriter, r *http.Request) {
 		if *req.Enabled {
 			st = models.SlackAppActive
 		}
-		patch.Status = &st
+		// Resuming only undoes a pause: an app whose tokens Slack refused stays invalid_token
+		// until new tokens or a refresh (above) clear it, so the card does not show "Active"
+		// over tokens that still do not work.
+		if !*req.Enabled || current.Status == models.SlackAppDisabled {
+			patch.Status = &st
+		}
 	}
 	app, err := h.Store.UpdateSlackApp(r.Context(), userID, id, patch)
 	if err != nil {

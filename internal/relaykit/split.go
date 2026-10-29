@@ -113,7 +113,9 @@ func splitLongBlock(block string, limit int) []string {
 		if !fits(piece) {
 			flush()
 		}
-		for !fits(piece) {
+		// piece != "": a reopened fence and the closing reserve always leave room now (fenceOpening
+		// keeps the reopened line short), but never spin on an empty piece if they did not.
+		for piece != "" && !fits(piece) {
 			room := limit - runeLen(cur.String()) - reserve()
 			head, tail := cutRunes(piece, room)
 			cur.WriteString(head)
@@ -123,7 +125,7 @@ func splitLongBlock(block string, limit int) []string {
 		cur.WriteString(piece)
 		if IsFenceLine(line) {
 			if fence == "" {
-				fence = strings.TrimSpace(line)
+				fence = fenceOpening(line)
 			} else {
 				fence = ""
 			}
@@ -140,6 +142,23 @@ func splitLongBlock(block string, limit int) []string {
 
 // IsFenceLine reports whether line opens or closes a code block.
 func IsFenceLine(line string) bool { return strings.HasPrefix(strings.TrimSpace(line), "```") }
+
+// maxFenceInfoRunes bounds the language tag a split code block is reopened with.
+const maxFenceInfoRunes = 32
+
+// fenceOpening is what a code block split across parts is reopened with: its backticks and,
+// when it is a plain language tag, the tag. Not the whole opening line: a line about as long
+// as the limit, repeated at the start of every part, would leave no room for the content, and
+// the split would never finish.
+func fenceOpening(line string) string {
+	line = strings.TrimSpace(line)
+	ticks := len(line) - len(strings.TrimLeft(line, "`"))
+	info := strings.TrimSpace(line[ticks:])
+	if info == "" || strings.ContainsAny(info, " \t`") || runeLen(info) > maxFenceInfoRunes {
+		return line[:ticks]
+	}
+	return line[:ticks] + info
+}
 
 func runeLen(s string) int { return utf8.RuneCountInString(s) }
 

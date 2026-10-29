@@ -77,15 +77,19 @@ import { slackStatusClass, slackStatusLabel } from './slack-ui';
           >
             Refresh
           </button>
-          <button
-            type="button"
-            [class]="ui.secondary"
-            [disabled]="state.busy()"
-            (click)="update({ enabled: a.status === 'disabled' }, 'Could not update the Slack app.')"
-            data-testid="slack-app-pause"
-          >
-            {{ a.status === 'disabled' ? 'Resume' : 'Pause' }}
-          </button>
+          <!-- Not while Slack refuses the tokens: replacing them is the way out, and resuming would
+               only show "Active" over tokens that still do not work. -->
+          @if (a.status !== 'invalid_token') {
+            <button
+              type="button"
+              [class]="ui.secondary"
+              [disabled]="state.busy()"
+              (click)="update({ enabled: a.status === 'disabled' }, 'Could not update the Slack app.')"
+              data-testid="slack-app-pause"
+            >
+              {{ a.status === 'disabled' ? 'Resume' : 'Pause' }}
+            </button>
+          }
           <button type="button" [class]="ui.danger" [disabled]="state.busy()" (click)="remove()" data-testid="slack-app-remove">
             Remove
           </button>
