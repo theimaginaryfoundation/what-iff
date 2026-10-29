@@ -1,0 +1,117 @@
+<section class="provider-keys" data-testid="provider-keys">
+  <p class="provider-keys__intro">
+    WhatIff sends your requests with your own provider keys, billed to your provider accounts. Keys are stored
+    encrypted and never shown again; only their last four characters are.
+  </p>
+
+  @if (notice()) {
+    <div class="provider-keys__message provider-keys__message--success" role="status">{{ notice() }}</div>
+  }
+
+  @if (hasRequiredKey() && onboarding()) {
+    <div class="provider-keys__next" data-testid="provider-keys-next">
+      <div>
+        <strong>You're set up</strong>
+        <small>Add other providers' keys any time. Next, create the personality you'll chat with.</small>
+      </div>
+      <button class="provider-keys__button provider-keys__button--primary" type="button" (click)="goToPersonalities()">
+        Next: create a personality
+      </button>
+    </div>
+  }
+
+  @if (loading()) {
+    <div class="provider-keys__empty">Loading your keys...</div>
+  } @else if (loadError()) {
+    <div class="provider-keys__message provider-keys__message--error" role="alert">
+      {{ loadError() }}
+      <button class="provider-keys__link-button" type="button" (click)="load()">Retry</button>
+    </div>
+  } @else {
+    <ul class="provider-keys__list">
+      @for (row of rows(); track row.info.id) {
+        <li class="provider-keys__row" [attr.data-provider]="row.info.id">
+          <div class="provider-keys__summary">
+            <div class="provider-keys__name">
+              <strong>{{ row.info.name }}</strong>
+              @if (row.info.required) {
+                <span class="provider-keys__badge">Required</span>
+              }
+            </div>
+            <small>{{ row.info.usedFor }}</small>
+          </div>
+
+          <div class="provider-keys__status">
+            @if (row.key) {
+              <span class="provider-keys__hint">••••{{ row.key.hint }}</span>
+              <small>Added {{ formatDate(row.key.updated_at) }}</small>
+            } @else {
+              <small>Not set</small>
+            }
+          </div>
+
+          @if (editing() !== row.info.id) {
+            <div class="provider-keys__actions">
+              <button
+                class="provider-keys__button"
+                [class.provider-keys__button--primary]="row.info.required && !row.key"
+                type="button"
+                (click)="open(row.info.id)"
+              >
+                {{ row.key ? 'Replace' : 'Add key' }}
+              </button>
+              @if (row.key) {
+                <button class="provider-keys__link-button provider-keys__link-button--danger" type="button" (click)="remove(row.info)">
+                  Remove
+                </button>
+              }
+            </div>
+          } @else {
+            <form class="provider-keys__form" (ngSubmit)="save(row.info)">
+              <label class="provider-keys__field">
+                <span>{{ row.info.name }} API key</span>
+                <input
+                  type="password"
+                  name="key"
+                  [attr.aria-label]="row.info.name + ' API key'"
+                  autocomplete="off"
+                  spellcheck="false"
+                  [ngModel]="keyInput()"
+                  (ngModelChange)="keyInput.set($event)"
+                  [disabled]="saving()"
+                />
+                @if (row.info.keysUrl) {
+                  <small>
+                    Create one in your <a [href]="row.info.keysUrl" target="_blank" rel="noopener noreferrer">{{ row.info.name }} dashboard</a>.
+                  </small>
+                }
+              </label>
+              <label class="provider-keys__field">
+                <span>Your WhatIff password</span>
+                <input
+                  type="password"
+                  name="current_password"
+                  aria-label="Your WhatIff password"
+                  autocomplete="current-password"
+                  [ngModel]="passwordInput()"
+                  (ngModelChange)="passwordInput.set($event)"
+                  [disabled]="saving()"
+                />
+                <small>Confirms it's you before your conversations go to a new key.</small>
+              </label>
+              @if (formError()) {
+                <div class="provider-keys__message provider-keys__message--error" role="alert">{{ formError() }}</div>
+              }
+              <div class="provider-keys__form-actions">
+                <button class="provider-keys__button provider-keys__button--primary" type="submit" [disabled]="saving()">
+                  {{ saving() ? 'Saving...' : 'Save key' }}
+                </button>
+                <button class="provider-keys__button" type="button" (click)="cancel()" [disabled]="saving()">Cancel</button>
+              </div>
+            </form>
+          }
+        </li>
+      }
+    </ul>
+  }
+</section>

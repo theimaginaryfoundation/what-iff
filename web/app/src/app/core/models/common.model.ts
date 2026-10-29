@@ -38,7 +38,12 @@ export interface ApiErrorEnvelope {
  * a generic one. That restriction is the point: it makes the ADR's rule a
  * compile error rather than a comment asking politely.
  */
-export type SpecificErrorCode = 'message_too_long' | 'quota_exceeded' | 'system_prompt_too_long';
+export type SpecificErrorCode =
+  | 'message_too_long'
+  | 'quota_exceeded'
+  | 'system_prompt_too_long'
+  | 'provider_not_configured'
+  | 'reauthentication_required';
 
 export interface PaginatedResponse<T> {
   results: T[];

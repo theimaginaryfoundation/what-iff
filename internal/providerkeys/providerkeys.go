@@ -77,11 +77,15 @@ func (r DeploymentResolver) Configured(provider models.ModelProvider) bool {
 func (DeploymentResolver) AccountsSupplyKeys() bool { return false }
 
 // New chooses the resolver the server uses, given the deployment's configured
-// keys and the keys accounts store themselves. Keys come from the deployment's
-// configuration until accounts can add their own in the app. A build that
-// always supplies keys itself replaces New in an init().
-var New = func(deployment DeploymentResolver, _ Resolver) Resolver {
-	return deployment
+// keys and the keys accounts store themselves. By default it is AccountKeys:
+// each account brings its own keys, added in the app. A build that always
+// supplies keys itself sets New in an init().
+var New = AccountKeys
+
+// AccountKeys is New's default: requests carry the requesting account's own
+// key, and the deployment's configured keys are not used.
+func AccountKeys(_ DeploymentResolver, accounts Resolver) Resolver {
+	return accounts
 }
 
 // NotConfiguredError reports that a request to a provider was not sent because
