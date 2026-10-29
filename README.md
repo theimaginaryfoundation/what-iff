@@ -86,9 +86,9 @@ docker compose up --build
 ```
 
 Then open http://localhost:8081, create an account, and add your OpenAI key when the
-app asks (it lives in **Profile & Settings → API keys**, where you can add other
-providers' keys too). Keys belong to your account and are stored encrypted; there is
-nothing to put in `.env`.
+app asks (it lives in **Profile & Settings → Providers**, where you can add other
+providers too: OpenRouter, a model server on this computer, or any compatible server).
+Keys belong to your account and are stored encrypted; there is nothing to put in `.env`.
 
 The JWT and token-encryption secrets are generated once per install and kept in a
 Docker volume; nothing is shipped in the repository. Values you set in your shell or

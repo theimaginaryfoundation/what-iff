@@ -18,7 +18,7 @@
           (click)="setTab(tab.id)"
         >
           @switch (tab.icon) {
-            @case ('api-keys') {
+            @case ('providers') {
               <ui-shield-icon [size]="13" />
             }
             @default {
@@ -38,8 +38,8 @@
   }
 
   <div class="profile-settings__body">
-    @if (modal.activeTab() === 'api-keys' && tabs().length > 1) {
-      <app-provider-keys-section />
+    @if (modal.activeTab() === 'providers' && tabs().length > 1) {
+      <app-providers-section />
     } @else {
     <section class="profile-settings__section">
       @if (loadingProfile()) {

@@ -37,13 +37,13 @@ import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { ShieldIconComponent, UserIconComponent } from '../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { ProfileSettingsModalService, ProfileSettingsTab } from './profile-settings-modal.service';
-import { ProviderKeysSectionComponent } from './provider-keys/provider-keys-section.component';
+import { ProvidersSectionComponent } from './providers/providers-section.component';
 
 /** Profile & Settings modal: account identity, appearance, defaults, and password. */
 @Component({
   selector: 'app-profile-settings-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ReactiveFormsModule, UserIconComponent, ShieldIconComponent, TooltipDirective, ProviderKeysSectionComponent],
+  imports: [CommonModule, ModalComponent, ReactiveFormsModule, UserIconComponent, ShieldIconComponent, TooltipDirective, ProvidersSectionComponent],
   templateUrl: './profile-settings-modal.component.html',
   styleUrl: './profile-settings-modal.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -61,10 +61,10 @@ export class ProfileSettingsModalComponent {
   private readonly router = inject(Router);
   private readonly logger = inject(LoggerService);
 
-  /** The API keys tab appears only where accounts bring their own provider keys. */
-  readonly tabs = computed<Array<{ id: ProfileSettingsTab; label: string; icon: 'profile' | 'api-keys' }>>(() => [
+  /** The Providers tab appears only where accounts bring their own provider keys. */
+  readonly tabs = computed<Array<{ id: ProfileSettingsTab; label: string; icon: 'profile' | 'providers' }>>(() => [
     { id: 'profile', label: 'Profile', icon: 'profile' },
-    ...(this.providerKeys.accountsSupplyKeys() ? [{ id: 'api-keys' as const, label: 'API keys', icon: 'api-keys' as const }] : []),
+    ...(this.providerKeys.accountsSupplyKeys() ? [{ id: 'providers' as const, label: 'Providers', icon: 'providers' as const }] : []),
   ]);
 
   readonly profileForm = this.fb.group({

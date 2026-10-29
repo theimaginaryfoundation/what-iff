@@ -1,0 +1,163 @@
+<ui-modal [open]="open()" size="md" labelledBy="provider-form-title" (dismiss)="close()">
+  <div modal-header>
+    <h2 id="provider-form-title" class="provider-form__title">{{ title() }}</h2>
+    @if (!editing() && !result()) {
+      <p class="provider-form__subtitle">Pick a provider to fill in its details, or choose Custom for any compatible server.</p>
+    }
+  </div>
+
+  @if (result(); as done) {
+    <div class="provider-form__body" data-testid="provider-form-result">
+      <div class="provider-form__message provider-form__message--success" role="status">
+        <strong>✓ Connected to {{ done.connection.name }}</strong>
+        @if (done.models.length > 0) {
+          <span>Found {{ done.models.length }} {{ done.models.length === 1 ? 'model' : 'models' }}.</span>
+        } @else if (!editing()) {
+          <span>It doesn't list any models yet.</span>
+        }
+      </div>
+    </div>
+  } @else {
+    <form class="provider-form__body" id="provider-form" (ngSubmit)="submit()">
+      @if (!editing()) {
+        <label class="provider-form__field">
+          <span>Provider</span>
+          <select
+            name="preset"
+            aria-label="Provider"
+            [ngModel]="presetId()"
+            (ngModelChange)="pickPreset($event)"
+            [attr.aria-invalid]="fieldInvalid('preset')"
+            [disabled]="saving()"
+          >
+            <option value="" disabled>Choose a provider</option>
+            @for (group of groups(); track group.label) {
+              <optgroup [label]="group.label">
+                @for (p of group.presets; track p.id) {
+                  <option [value]="p.id">{{ p.name }}</option>
+                }
+              </optgroup>
+            }
+          </select>
+        </label>
+      }
+
+      @if (preset(); as p) {
+        @if (isCustom() || editing()) {
+          <label class="provider-form__field">
+            <span>Name</span>
+            <input
+              type="text"
+              name="name"
+              aria-label="Name"
+              maxlength="100"
+              [placeholder]="isCustom() ? 'Home GPU box' : p.name"
+              [ngModel]="name()"
+              (ngModelChange)="name.set($event)"
+              [attr.aria-invalid]="fieldInvalid('name')"
+              [disabled]="saving()"
+            />
+          </label>
+        }
+
+        @if (isCustom() && !editing()) {
+          <label class="provider-form__field">
+            <span>Speaks</span>
+            <select
+              name="flavor"
+              aria-label="Speaks"
+              [ngModel]="flavor()"
+              (ngModelChange)="flavor.set($event)"
+              [attr.aria-invalid]="fieldInvalid('flavor')"
+              [disabled]="saving()"
+            >
+              <option value="" disabled>Choose an API</option>
+              <option value="openai">OpenAI-compatible</option>
+              <option value="anthropic">Anthropic-compatible</option>
+            </select>
+          </label>
+        }
+
+        <label class="provider-form__field">
+          <span>Address</span>
+          @if (p.address_editable) {
+            <input
+              type="url"
+              name="address"
+              aria-label="Address"
+              autocomplete="off"
+              spellcheck="false"
+              [placeholder]="isCustom() ? 'http://localhost:8000/v1' : ''"
+              [ngModel]="address()"
+              (ngModelChange)="address.set($event)"
+              [attr.aria-invalid]="fieldInvalid('address')"
+              [disabled]="saving()"
+            />
+            @if (p.local) {
+              <small>{{ p.name }}'s usual address. Change it if yours runs elsewhere.</small>
+            }
+          } @else {
+            <input type="text" name="address" aria-label="Address" [value]="p.base_url" readonly />
+            <small>Set by {{ p.name }}.</small>
+          }
+        </label>
+
+        <label class="provider-form__field">
+          <span>{{ p.key_required ? 'API key' : 'API key (optional)' }}</span>
+          <input
+            type="password"
+            name="key"
+            aria-label="API key"
+            autocomplete="off"
+            spellcheck="false"
+            [placeholder]="editing() && connection()?.has_key ? 'Leave empty to keep ••••' + connection()?.hint : p.key_required ? '' : 'Leave empty if the server has none'"
+            [ngModel]="key()"
+            (ngModelChange)="key.set($event)"
+            [attr.aria-invalid]="fieldInvalid('key')"
+            [disabled]="saving()"
+          />
+          @if (keyUrl(); as url) {
+            <small>Create one in your <a [href]="url" target="_blank" rel="noopener noreferrer">{{ p.name }} dashboard</a>.</small>
+          }
+        </label>
+
+        @if (needsPassword()) {
+          <label class="provider-form__field">
+            <span>Your WhatIff password</span>
+            <input
+              type="password"
+              name="current_password"
+              aria-label="Your WhatIff password"
+              autocomplete="current-password"
+              [ngModel]="password()"
+              (ngModelChange)="password.set($event)"
+              [attr.aria-invalid]="fieldInvalid('password')"
+              [disabled]="saving()"
+            />
+            <small>Confirms it's you before your conversations go somewhere new.</small>
+          </label>
+        }
+      }
+
+      @if (error(); as e) {
+        <div class="provider-form__message provider-form__message--error" role="alert">{{ e.message }}</div>
+      }
+    </form>
+  }
+
+  <!-- One footer element, so it is projected into the modal's footer slot; its buttons follow the form's state. -->
+  <div modal-footer class="provider-form__actions">
+    @if (result()) {
+      <button class="provider-form__button provider-form__button--primary" type="button" (click)="closed.emit()">Done</button>
+    } @else {
+      <button class="provider-form__button" type="button" (click)="close()" [disabled]="saving()">Cancel</button>
+      <button class="provider-form__button provider-form__button--primary" type="submit" form="provider-form" [disabled]="saving() || !preset()">
+        @if (saving()) {
+          Connecting...
+        } @else {
+          {{ editing() && !needsPassword() ? 'Save' : 'Connect and list models' }}
+        }
+      </button>
+    }
+  </div>
+</ui-modal>

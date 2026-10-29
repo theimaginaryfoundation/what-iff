@@ -43,7 +43,13 @@ export type SpecificErrorCode =
   | 'quota_exceeded'
   | 'system_prompt_too_long'
   | 'provider_not_configured'
-  | 'reauthentication_required';
+  | 'reauthentication_required'
+  | 'provider_unreachable'
+  | 'provider_key_rejected'
+  | 'provider_incompatible'
+  | 'provider_unavailable'
+  | 'custom_address_not_allowed'
+  | 'provider_connection_exists';
 
 export interface PaginatedResponse<T> {
   results: T[];
