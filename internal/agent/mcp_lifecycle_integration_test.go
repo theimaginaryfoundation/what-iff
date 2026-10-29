@@ -293,7 +293,6 @@ func newMCPLifecycleAgentFixture(t *testing.T, serverURL string) (*Agent, *chatC
 			timezone text NOT NULL DEFAULT 'America/New_York',
 			status text NOT NULL DEFAULT 'active',
 			enable_experimental_models bool NOT NULL DEFAULT false,
-			experimental_features json,
 			last_login datetime,
 			last_seen datetime,
 			terms_accepted_at datetime,

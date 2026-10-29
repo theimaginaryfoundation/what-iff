@@ -7,9 +7,8 @@ It talks to a community through `Relay` (the HTTP bridge) and the reconnecting W
 
 ## Responsibilities
 
-- **Access (`access.go`):** the relay is an experimental feature.
-  `Enabled` is the operator switch (`BUZZ_RELAY_ENABLED=true`, default off); `UserMayUse` adds the per-user policy a build may link (`featuregate.ExperimentalEnabled`).
-  The routes, the gateway and `post_to_buzz` all ask `UserMayUse`.
+- **Access (`access.go`):** `Enabled` is the operator switch (`BUZZ_RELAY_ENABLED=true`, default off), on for every user when set.
+  The routes, the gateway and `post_to_buzz` all ask it.
 - **Client (`client.go`):** `ParseEndpoint` (address, wss URL or invite link; ws/http only when insecure), NIP-11 `Info`, NIP-98 signed `Query` and `Publish`, `JoinPolicy`, `ClaimInvite` (with the join-terms receipt), and `MintInvite` for rigs and tests.
   Every connection goes through the public-address dial guard unless `AllowPrivate` (local development).
 - **Session (`session.go`):** one WebSocket per persona per community; it answers the NIP-42 challenge (with the owner attestation when there is one), holds the per-binding subscriptions resumed from the newest event seen minus a skew, verifies every event, pings, and reconnects with backoff.
@@ -22,7 +21,7 @@ It talks to a community through `Relay` (the HTTP bridge) and the reconnecting W
 
 ## Key types and entry points
 
-- `Enabled`, `UserMayUse`.
+- `Enabled`.
 - `Client`, `NewClient`, `Endpoint`, `ParseEndpoint`, `Signer`, `SignerFor`, `EndpointFor`, `Session`, `SessionConfig`.
 - `Service`, `Store`, `Relay`, `TurnSource`, `NoticeFailed`, `NoticeBusy`, `UnrestrictedWarning`, `ThreadDeletedError`.
 - `MessageEvent`, `ProfileEvent`, `TypingEvent`, `JoinEvent`, `ThreadOf`, `ReplyThread`, `ListChannels`, `PromptText`, `MediaOf`, `PrepareMedia`.

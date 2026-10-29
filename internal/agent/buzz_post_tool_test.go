@@ -36,23 +36,29 @@ func withBuzzToolStore(t *testing.T, s buzzToolStore) {
 	allowBuzz(t, true)
 }
 
-// allowBuzz decides whether every owner may use the (experimental) relay for the test.
+// allowBuzz switches the relay on or off for the test.
 func allowBuzz(t *testing.T, ok bool) {
 	t.Helper()
-	orig := buzzMayUse
-	buzzMayUse = func(context.Context, uuid.UUID) bool { return ok }
-	t.Cleanup(func() { buzzMayUse = orig })
+	orig := buzzRelayOn
+	buzzRelayOn = func() bool { return ok }
+	t.Cleanup(func() { buzzRelayOn = orig })
 }
 
 func buzzBinding(community, channel string) models.BuzzBinding {
 	return models.BuzzBinding{ID: uuid.New(), ChatID: uuid.New(), CommunityName: community, ChannelName: channel, ChannelID: "id-" + channel, Status: models.BuzzBindingActive}
 }
 
-func TestBuzzToolIsInTheCatalogAndNeedsChannels(t *testing.T) {
+func catalogNames() map[string]bool {
 	names := map[string]bool{}
 	for _, d := range tools.AdditionalFunctionToolCatalog() {
 		names[d.Spec.Name] = true
 	}
+	return names
+}
+
+func TestBuzzToolIsInTheCatalogAndNeedsChannels(t *testing.T) {
+	allowBuzz(t, true)
+	names := catalogNames()
 	assert.True(t, names[buzzPostToolName])
 	assert.True(t, names[discordPostToolName], "both relays' tools are registered")
 	assert.Contains(t, extraToolHandlersForChat(&Agent{}, testChat()), buzzPostToolName)
@@ -74,7 +80,8 @@ func TestBuzzToolIsOffWhereTheRelayIsOff(t *testing.T) {
 	assert.False(t, additionalDisabledToolsForChat(&Agent{}, chat)[buzzPostToolName])
 
 	allowBuzz(t, false)
-	assert.True(t, additionalDisabledToolsForChat(&Agent{}, chat)[buzzPostToolName], "an owner without the experimental feature gets no Buzz tool")
+	assert.True(t, additionalDisabledToolsForChat(&Agent{}, chat)[buzzPostToolName], "with the relay off there is no Buzz tool")
+	assert.False(t, catalogNames()[buzzPostToolName], "with the relay off the tool is not listed for anyone")
 }
 
 func TestBuzzPostMarksTheChosenChannel(t *testing.T) {

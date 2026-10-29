@@ -752,9 +752,8 @@ paths:
         '404': { $ref: '#/components/responses/DiscordNotFound' }
         '500': { $ref: '#/components/responses/DiscordServerError' }
 
-  # Buzz relay (docs/adr/0x028-buzz-relay.md), experimental. Every route is a 404 unless
-  # BUZZ_RELAY_ENABLED=true, and, in a build with a per-user experimental gate, for a user the
-  # feature is not turned on for.
+  # Buzz relay (docs/adr/0x028-buzz-relay.md). Every route is a 404 unless
+  # BUZZ_RELAY_ENABLED=true.
   /buzz/agents:
     get:
       summary: List Buzz identities

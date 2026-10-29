@@ -288,11 +288,6 @@ func (s *Server) setupRoutes() {
 	if featuregate.New != nil {
 		featuregate.Active = featuregate.New(dataStore)
 	}
-	// A build that links a per-user experimental policy (featuregate.NewExperimental) gates
-	// experimental features per user; without one, each feature's operator switch decides.
-	if featuregate.NewExperimental != nil {
-		featuregate.ActiveExperimental = featuregate.NewExperimental(dataStore)
-	}
 	// Optional post-registration hook (linked privately; nil in the open-source
 	// build, where registration has no extra side effects). Registered via a blank
 	// import in cmd/api-server, same as the meter and the entitlement gate.
