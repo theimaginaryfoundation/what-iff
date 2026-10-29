@@ -2,6 +2,7 @@ package discordrelay
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -107,7 +108,7 @@ func PromptText(m InboundMessage, botUserID, channelName string) string {
 		refAuthor := speakerLabel(m.ReferencedAuthorName)
 		fmt.Fprintf(&b, "(replying to %s: %q)\n", refAuthor, quoted)
 	}
-	fmt.Fprintf(&b, "%s (%s): %s", author, where, content)
+	fmt.Fprintf(&b, "%s (%s): %s", author, where, relaykit.MessageBody(content))
 	return b.String()
 }
 
@@ -115,11 +116,12 @@ func PromptText(m InboundMessage, botUserID, channelName string) string {
 // (relaykit.SpeakerLabel): a nickname cannot pose as another speaker's label.
 func speakerLabel(name string) string { return relaykit.SpeakerLabel(name) }
 
-// stripMention removes <@id> and <@!id> mentions of the bot and tidies spaces.
+// stripMention removes <@id> and <@!id> mentions of the bot, with the spaces after them.
+// Everything else is kept as written: line breaks and runs of spaces matter in code blocks and
+// lists, and MessageBody marks the further lines so none can pose as another speaker's.
 func stripMention(content, botUserID string) string {
 	if botUserID != "" {
-		content = strings.ReplaceAll(content, "<@"+botUserID+">", "")
-		content = strings.ReplaceAll(content, "<@!"+botUserID+">", "")
+		content = regexp.MustCompile(`<@!?`+regexp.QuoteMeta(botUserID)+`>[ \t]*`).ReplaceAllString(content, "")
 	}
-	return strings.Join(strings.Fields(content), " ")
+	return strings.TrimSpace(content)
 }

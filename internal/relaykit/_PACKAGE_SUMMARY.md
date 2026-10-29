@@ -18,11 +18,11 @@ Each relay keeps its own storage, wire format and trigger rules; what is the sam
 - **`ThreadOpen`, `Gate`:** the fail-closed check that a bound thread may be driven from outside (sandboxed, or acknowledged by the owner), keeping the binding's record honest (deleted thread, stale acknowledgement, paused warning).
 - **`LoadReplyFiles`:** the files a reply produced, within a platform's limits, never the context-only ones.
 - **`PublicOnlyControl`, `IsPublicIP`:** the `net.Dialer` hook that refuses non-public addresses after DNS on every connection.
-- **`SpeakerLabel`, `Allowed`, `SleepCtx`:** speaker names cleaned so they cannot forge the `name (Platform, #channel):` label; allow and deny lists where deny wins.
+- **`SpeakerLabel`, `MessageBody`, `Allowed`, `SleepCtx`:** speaker names cleaned so they cannot forge the `name (Platform, #channel):` label, and message text whose further lines are marked `│ ` so a line cannot pose as another speaker's turn (`ContinuationNote` tells the persona); allow and deny lists where deny wins.
 
 ## Key types and entry points
 
-- `TurnQueue`, `Replies`, `Throttle`, `Supervisor`, `Lock`, `Locker`, `Conn`, `AdvisoryLocker`, `SingleInstanceLocker`, `PublicOnlyControl`, `IsPublicIP`, `SpeakerLabel`, `Allowed`, `SleepCtx`.
+- `TurnQueue`, `Replies`, `Throttle`, `Supervisor`, `Lock`, `Locker`, `Conn`, `AdvisoryLocker`, `SingleInstanceLocker`, `PublicOnlyControl`, `IsPublicIP`, `SpeakerLabel`, `MessageBody`, `ContinuationNote`, `Allowed`, `SleepCtx`.
 
 ## Dependencies
 

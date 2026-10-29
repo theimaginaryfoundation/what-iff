@@ -12,7 +12,7 @@ Linked by a blank import in `cmd/api-server/plugins.go`.
 - **Gateway (`plugin.go`):** one `buzzrelay.Session` per community row, a subscription per bound channel (`b:<binding id>`); connection states are recorded on the community, and a subscription the relay closes for access marks its binding broken.
   Events that cannot concern the persona (`buzzrelay.MayConcern`) are dropped on the read loop, before a goroutine or a binding lookup.
   Each channel's subscription starts from its binding's resume point (`resumeMarks`: the newest event seen in it, in memory across re-dials and on the binding row as `last_event_at` across restarts, at most `maxResume` back), so a re-dial after another binding changes, or a deploy, does not lose mentions.
-  The work list is wrapped (`gateway.list`) so a binding that drops out of it (a pause, inbound off, broken) loses its mark here and on its row, and listening again starts from now.
+  The datastore clears a binding's mark in the write that pauses or breaks it; the work list is also wrapped (`gateway.list`) so a binding that drops out of it loses its mark in memory (and on its row, retried until it succeeds), and `note` ignores bindings not being listened to, so a closing session cannot bring a mark back.
 - **`Handler` (`handlers.go`):** identities (generate the persona's key, pause, remove, publish the profile), communities (join by open relay, invite with join terms, or an admin adding the npub; optional owner attestation; check again; pause), channels (list, join a public one), bindings (create with a sandboxed relay thread or an acknowledged existing one), a thread's Buzz state and the composer toggle.
   After a change it kicks the supervisor so the gateway reconciles at once.
 

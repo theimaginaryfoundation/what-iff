@@ -8,7 +8,7 @@ It talks to Discord through a small `Discord` interface (REST via discordgo), an
 ## Responsibilities
 
 - **Inbound (`Service.HandleInbound`):** decides whether a message tags the bot (`Triggered`: an @mention, or a reply to one of its messages; bots and webhooks never), applies the binding's allow and deny lists (`Allowed`), and re-checks the bound thread before every tag (`threadOpen`).
-  Accepted tags queue per relay thread (one turn at a time, 5 waiting), are recorded once (`RecordInboundDiscordMessage`, the dedupe key), and start a turn through `plugins.TurnStarter` with the text `name (Discord, #channel): text` (`PromptText`).
+  Accepted tags queue per relay thread (one turn at a time, 5 waiting), are recorded once (`RecordInboundDiscordMessage`, the dedupe key), and start a turn through `plugins.TurnStarter` with the text `name (Discord, #channel): text` (`PromptText`: the bot's mention removed, line breaks kept, further lines marked by `relaykit.MessageBody`).
 - **Attachments in (`attachments_in.go`):** fetches files posted with a tag from Discord's CDN only (`CDNFetcher`: HTTPS, an allow-listed host, public addresses checked after DNS on every connection) and saves them through `plugins.AttachmentIngester`.
 - **Outbound (`Service.OnReply`, the reply hook):** posts a reply back to where the tag came from, and to any binding a composer toggle or `post_to_discord` armed (`ConsumeDiscordPendingPosts`); at most once per message and binding, with retries for transient errors.
 - **Formatting (`SplitForDiscord`):** 2000-character parts on paragraph and line boundaries, never splitting a code block without closing and reopening it; Markdown tables become code blocks.

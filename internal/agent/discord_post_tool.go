@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/relaykit"
 )
 
 const discordPostToolName = "post_to_discord"
@@ -223,7 +224,7 @@ func discordDeveloperContext(bindings []models.DiscordBinding, chat *models.Chat
 	}
 	for _, bd := range bindings {
 		if chat != nil && bd.ChatID == chat.ID {
-			b.WriteString(" This thread is the relay for " + channelLabel(bd, false) + ": messages from Discord appear here as \"name (Discord, #channel): text\", and your replies to them are posted back to Discord automatically, where other people can read them.")
+			b.WriteString(" This thread is the relay for " + channelLabel(bd, false) + ": messages from Discord appear here as \"name (Discord, #channel): text\", and your replies to them are posted back to Discord automatically, where other people can read them." + relaykit.ContinuationNote)
 			break
 		}
 	}

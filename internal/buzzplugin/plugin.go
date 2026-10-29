@@ -225,6 +225,11 @@ func (m *resumeMarks) note(id uuid.UUID, createdAt int64, now time.Time) bool {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// An event from a session still closing after its binding left the listing must not bring
+	// the mark back.
+	if !m.listening[id] {
+		return false
+	}
 	if m.seen == nil {
 		m.seen, m.saved = map[uuid.UUID]int64{}, map[uuid.UUID]time.Time{}
 	}
