@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -134,7 +135,8 @@ func locker(d plugins.Deps, logger *zap.Logger) relaykit.Locker {
 
 // fingerprint changes when a connection must be reopened: a new key or attestation, or a
 // different set of bound channels (the subscriptions are set when connecting; a reopened
-// session resumes from a minute back, and redeliveries are deduplicated on the event id).
+// session resumes from the newest event seen before, and redeliveries are deduplicated on the
+// event id).
 func fingerprint(c models.BuzzConnection) string {
 	ids := make([]string, 0, len(c.Channels))
 	for _, ch := range c.Channels {
@@ -153,12 +155,80 @@ type gateway struct {
 	store  stateStore
 	svc    *buzzrelay.Service
 	logger *zap.Logger
+	marks  resumeMarks
 }
 
-// stateStore is where the gateway records connection and subscription health.
+// stateStore is where the gateway records connection and subscription health, and where it
+// resumes from.
 type stateStore interface {
 	SetBuzzCommunityState(ctx context.Context, id uuid.UUID, status models.BuzzCommunityStatus, lastError string) error
 	SetBuzzBindingStatus(ctx context.Context, id uuid.UUID, status models.BuzzBindingStatus, lastError string) error
+	MarkBuzzCommunityEvent(ctx context.Context, id uuid.UUID, at time.Time) error
+}
+
+// maxResume bounds how far back a fresh connection reaches. A community quiet for days
+// resumes from an hour back, and mentions older than that are left rather than answered late.
+const maxResume = time.Hour
+
+// markEvery bounds how often a community's resume point is written. It is shorter than the
+// session's skew (a minute), so the events after the last write are still asked for again.
+const markEvery = 30 * time.Second
+
+// resumeMarks is where each community's connection resumes: the newest event seen, kept in
+// memory across re-dials (a changed binding reopens the connection) and written to the
+// community row across restarts and leader changes.
+type resumeMarks struct {
+	mu    sync.Mutex
+	seen  map[uuid.UUID]int64
+	saved map[uuid.UUID]time.Time
+}
+
+// start is where a new connection to community id begins: the newer of the stored and the
+// in-memory mark, no earlier than maxResume ago; now when there is neither.
+func (m *resumeMarks) start(id uuid.UUID, stored *time.Time, now time.Time) time.Time {
+	var at int64
+	if stored != nil {
+		at = stored.Unix()
+	}
+	m.mu.Lock()
+	if v := m.seen[id]; v > at {
+		at = v
+	}
+	m.mu.Unlock()
+	if at == 0 {
+		return now
+	}
+	t := time.Unix(at, 0)
+	if floor := now.Add(-maxResume); t.Before(floor) {
+		return floor
+	}
+	if t.After(now) {
+		return now
+	}
+	return t
+}
+
+// note records a delivered event's time and reports whether the mark is due to be written.
+// Times more than a minute ahead are ignored, as the session does, so a skewed clock cannot
+// push the mark past events not yet seen.
+func (m *resumeMarks) note(id uuid.UUID, createdAt int64, now time.Time) bool {
+	if createdAt > now.Add(time.Minute).Unix() {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.seen == nil {
+		m.seen, m.saved = map[uuid.UUID]int64{}, map[uuid.UUID]time.Time{}
+	}
+	if createdAt <= m.seen[id] {
+		return false
+	}
+	m.seen[id] = createdAt
+	if now.Sub(m.saved[id]) < markEvery {
+		return false
+	}
+	m.saved[id] = now
+	return true
 }
 
 func (g *gateway) dial(ctx context.Context, c models.BuzzConnection) (relaykit.Conn, error) {
@@ -167,7 +237,7 @@ func (g *gateway) dial(ctx context.Context, c models.BuzzConnection) (relaykit.C
 		return nil, err
 	}
 	subs := map[string]buzzrelay.Filter{}
-	start := time.Now()
+	start := g.marks.start(c.Community.ID, c.Community.LastEventAt, time.Now())
 	for _, ch := range c.Channels {
 		subs[subPrefix+ch.BindingID.String()] = buzzrelay.Filter{
 			"kinds": []int{buzzrelay.KindStreamMessage},
@@ -176,6 +246,7 @@ func (g *gateway) dial(ctx context.Context, c models.BuzzConnection) (relaykit.C
 	}
 	log := g.logger.With(zap.String("community_id", c.Community.ID.String()), zap.String("relay", c.Community.RelayURL))
 	communityID := c.Community.ID
+	personaPub := c.Agent.PubKey
 	session := g.client.Open(ctx, buzzrelay.SessionConfig{
 		Endpoint: ep,
 		Signer:   signer,
@@ -183,6 +254,19 @@ func (g *gateway) dial(ctx context.Context, c models.BuzzConnection) (relaykit.C
 		Start:    start,
 		Logger:   log,
 		OnEvent: func(subID string, ev nostr.Event) {
+			if g.marks.note(communityID, ev.CreatedAt, time.Now()) {
+				at := time.Unix(ev.CreatedAt, 0)
+				go func() {
+					if err := g.store.MarkBuzzCommunityEvent(context.WithoutCancel(ctx), communityID, at); err != nil {
+						log.Warn("buzz gateway: record resume point", zap.Error(err))
+					}
+				}()
+			}
+			// Most of a channel's traffic is not for the persona: drop it here, before a
+			// goroutine and a binding lookup (with key decryption) are spent on it.
+			if !buzzrelay.MayConcern(ev, personaPub) {
+				return
+			}
 			id, err := uuid.Parse(strings.TrimPrefix(subID, subPrefix))
 			if err != nil {
 				return

@@ -43,6 +43,7 @@ func createBuzzTestTables(t *testing.T, db *sql.DB) {
 			status text NOT NULL DEFAULT 'needs_access',
 			last_error text,
 			last_connected_at datetime,
+			last_event_at datetime,
 			buzz_agent_communities uuid NOT NULL REFERENCES buzz_agents(id) ON DELETE CASCADE,
 			UNIQUE (relay_url, buzz_agent_communities)
 		)`,
@@ -206,6 +207,16 @@ func TestBuzzActiveConnectionsListBoundChannels(t *testing.T) {
 	assert.Equal(t, f.owner, conns[0].Agent.OwnerID)
 	require.Len(t, conns[0].Channels, 1, "only bindings with inbound on are listened to")
 	assert.Equal(t, b.ID, conns[0].Channels[0].BindingID)
+	assert.Nil(t, conns[0].Community.LastEventAt, "no resume point yet")
+	assert.Equal(t, models.BuzzAgentActive, conns[0].Agent.Status)
+
+	at := time.Now().Add(-5 * time.Minute).Truncate(time.Second)
+	require.NoError(t, f.ds.MarkBuzzCommunityEvent(ctx, c.ID, at))
+	require.NoError(t, f.ds.MarkBuzzCommunityEvent(ctx, c.ID, at.Add(-time.Hour)))
+	conns, err = f.ds.ListActiveBuzzConnections(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, conns[0].Community.LastEventAt)
+	assert.True(t, at.Equal(*conns[0].Community.LastEventAt), "the resume point only moves forward")
 
 	disabled := models.BuzzCommunityDisabled
 	_, err = f.ds.UpdateBuzzCommunity(ctx, f.owner, c.ID, models.BuzzCommunityPatch{Status: &disabled})
@@ -328,6 +339,29 @@ func TestBuzzPendingPostsAndCascade(t *testing.T) {
 
 	require.NoError(t, f.ds.SetBuzzPendingPost(ctx, f.owner, b.ID, f.chat, models.BuzzPostFromComposer))
 	assert.ErrorIs(t, f.ds.SetBuzzPendingPost(ctx, f.other, b.ID, f.chat, models.BuzzPostFromComposer), ErrBuzzBindingNotFound)
+
+	// Nothing can be armed through a paused persona or community, or a broken binding.
+	disabled, active := models.BuzzCommunityDisabled, models.BuzzCommunityActive
+	_, err := f.ds.UpdateBuzzCommunity(ctx, f.owner, c.ID, models.BuzzCommunityPatch{Status: &disabled})
+	require.NoError(t, err)
+	assert.ErrorIs(t, f.ds.SetBuzzPendingPost(ctx, f.owner, b.ID, f.chat, models.BuzzPostFromComposer), ErrBuzzBindingPaused)
+	_, err = f.ds.UpdateBuzzCommunity(ctx, f.owner, c.ID, models.BuzzCommunityPatch{Status: &active})
+	require.NoError(t, err)
+	_, err = f.ds.SetBuzzAgentStatus(ctx, f.owner, a.ID, models.BuzzAgentDisabled)
+	require.NoError(t, err)
+	assert.ErrorIs(t, f.ds.SetBuzzPendingPost(ctx, f.owner, b.ID, f.chat, models.BuzzPostFromComposer), ErrBuzzBindingPaused)
+	_, err = f.ds.SetBuzzAgentStatus(ctx, f.owner, a.ID, models.BuzzAgentActive)
+	require.NoError(t, err)
+	require.NoError(t, f.ds.SetBuzzBindingStatus(ctx, b.ID, models.BuzzBindingBroken, "gone"))
+	assert.ErrorIs(t, f.ds.SetBuzzPendingPost(ctx, f.owner, b.ID, f.chat, models.BuzzPostFromComposer), ErrBuzzBindingPaused)
+	require.NoError(t, f.ds.SetBuzzBindingStatus(ctx, b.ID, models.BuzzBindingActive, ""))
+
+	ours, err := f.ds.IsBuzzAgentPubKey(ctx, a.PubKey)
+	require.NoError(t, err)
+	assert.True(t, ours)
+	ours, err = f.ds.IsBuzzAgentPubKey(ctx, "not-a-persona")
+	require.NoError(t, err)
+	assert.False(t, ours)
 	pending, err := f.ds.ListBuzzPendingPosts(ctx, f.owner, f.chat)
 	require.NoError(t, err)
 	assert.Equal(t, []uuid.UUID{b.ID}, pending)

@@ -44,6 +44,7 @@ type BuzzAgentCredentials struct {
 	PersonalityID uuid.UUID
 	PubKey        string
 	SecretKey     string `json:"-"`
+	Status        BuzzAgentStatus
 }
 
 // BuzzCommunityStatus is how a persona's membership of a community stands.
@@ -71,8 +72,10 @@ type BuzzCommunity struct {
 	Status          BuzzCommunityStatus `json:"status"`
 	LastError       *string             `json:"last_error,omitempty"`
 	LastConnectedAt *time.Time          `json:"last_connected_at,omitempty"`
-	CreatedAt       time.Time           `json:"created_at"`
-	UpdatedAt       time.Time           `json:"updated_at"`
+	// LastEventAt is the newest event seen from the community (the gateway's resume point).
+	LastEventAt *time.Time `json:"-"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // BuzzCommunityCreate is a new community for an agent.
@@ -187,6 +190,15 @@ type BuzzBindingTarget struct {
 	Community BuzzCommunity
 	Agent     BuzzAgentCredentials
 	AuthTag   string `json:"-"`
+}
+
+// Live reports whether the relay may act through t now: the persona's identity is on, its
+// owner has not paused the community, and the binding is not broken. Checked before every
+// post, so a pause also stops replies already queued or armed.
+func (t BuzzBindingTarget) Live() bool {
+	return t.Agent.Status == BuzzAgentActive &&
+		t.Community.Status != BuzzCommunityDisabled &&
+		t.Binding.Status == BuzzBindingActive
 }
 
 // BuzzLinkStatus is where a crossing message is.

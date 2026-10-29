@@ -36,6 +36,9 @@ var (
 	ErrBuzzCommunityExists = errors.New("buzz community already added for this persona")
 	// ErrBuzzBindingExists: the channel is already bound for that community.
 	ErrBuzzBindingExists = errors.New("buzz channel already bound for this persona")
+	// ErrBuzzBindingPaused: the binding is broken, or its persona or community is paused, so
+	// nothing may be posted through it.
+	ErrBuzzBindingPaused = errors.New("buzz binding is paused or broken")
 )
 
 func buzzAgentOwnedBy(userID uuid.UUID) predicate.BuzzAgent {
@@ -242,6 +245,18 @@ func (d *Datastore) SetBuzzCommunityState(ctx context.Context, id uuid.UUID, sta
 	return nil
 }
 
+// MarkBuzzCommunityEvent moves a community's resume point forward to at (never back).
+func (d *Datastore) MarkBuzzCommunityEvent(ctx context.Context, id uuid.UUID, at time.Time) error {
+	_, err := d.dbClient.BuzzCommunity.Update().
+		Where(buzzcommunity.ID(id), buzzcommunity.Or(buzzcommunity.LastEventAtIsNil(), buzzcommunity.LastEventAtLT(at))).
+		SetLastEventAt(at).
+		Save(ctx)
+	if err != nil {
+		return fmt.Errorf("mark buzz community event: %w", err)
+	}
+	return nil
+}
+
 func (d *Datastore) patchBuzzCommunity(ctx context.Context, id uuid.UUID, p models.BuzzCommunityPatch) (*models.BuzzCommunity, error) {
 	upd := d.dbClient.BuzzCommunity.UpdateOneID(id)
 	if p.Name != nil {
@@ -308,6 +323,16 @@ func (d *Datastore) DeleteBuzzCommunity(ctx context.Context, userID, id uuid.UUI
 		return ErrBuzzCommunityNotFound
 	}
 	return nil
+}
+
+// IsBuzzAgentPubKey reports whether pubkey is any persona's Buzz identity on this server, of
+// any owner (the relay's loop guard: personas do not answer each other unless asked to).
+func (d *Datastore) IsBuzzAgentPubKey(ctx context.Context, pubkey string) (bool, error) {
+	ok, err := d.dbClient.BuzzAgent.Query().Where(buzzagent.Pubkey(pubkey)).Exist(ctx)
+	if err != nil {
+		return false, fmt.Errorf("find buzz agent by pubkey: %w", err)
+	}
+	return ok, nil
 }
 
 // ListActiveBuzzConnections returns every community the gateway should hold a connection for:
@@ -736,6 +761,22 @@ func (d *Datastore) SetBuzzPendingPost(ctx context.Context, userID, bindingID, c
 	if _, err := d.GetBuzzBinding(ctx, userID, bindingID); err != nil {
 		return err
 	}
+	live, err := d.dbClient.BuzzBinding.Query().
+		Where(
+			buzzbinding.ID(bindingID),
+			buzzbinding.StatusEQ(buzzbinding.StatusActive),
+			buzzbinding.HasCommunityWith(
+				buzzcommunity.StatusNEQ(buzzcommunity.StatusDisabled),
+				buzzcommunity.HasAgentWith(buzzagent.StatusEQ(buzzagent.StatusActive)),
+			),
+		).
+		Exist(ctx)
+	if err != nil {
+		return fmt.Errorf("check buzz binding: %w", err)
+	}
+	if !live {
+		return ErrBuzzBindingPaused
+	}
 	if err := d.ClearBuzzPendingPost(ctx, userID, bindingID, chatID); err != nil {
 		return err
 	}
@@ -919,6 +960,7 @@ func (d *Datastore) buzzCredentials(row *ent.BuzzAgent, ownerID uuid.UUID) (*mod
 		PersonalityID: row.PersonalityID,
 		PubKey:        row.Pubkey,
 		SecretKey:     secret,
+		Status:        models.BuzzAgentStatus(row.Status),
 	}, nil
 }
 
@@ -961,6 +1003,7 @@ func buzzCommunityModel(r *ent.BuzzCommunity, agentID uuid.UUID) *models.BuzzCom
 		Status:          models.BuzzCommunityStatus(r.Status),
 		LastError:       r.LastError,
 		LastConnectedAt: r.LastConnectedAt,
+		LastEventAt:     r.LastEventAt,
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.UpdatedAt,
 	}

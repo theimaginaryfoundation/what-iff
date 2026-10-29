@@ -68,6 +68,14 @@ func ParseEndpoint(raw string, insecure bool) (Endpoint, string, error) {
 		return Endpoint{}, "", ErrBadRelayURL
 	}
 	host := strings.ToLower(u.Host)
+	// The scheme's own port is dropped, so wss://host and wss://host:443 are one community
+	// (the stored URL is how a persona's communities are told apart).
+	if port := u.Port(); (secure && port == "443") || (!secure && port == "80") {
+		host = strings.ToLower(u.Hostname())
+		if strings.Contains(host, ":") {
+			host = "[" + host + "]" // IPv6
+		}
+	}
 	code := ""
 	if rest, ok := strings.CutPrefix(u.Path, "/invite/"); ok {
 		code = strings.Trim(rest, "/")
@@ -178,6 +186,24 @@ func (c *Client) Info(ctx context.Context, ep Endpoint) (*RelayInfo, error) {
 type Signer struct {
 	Keys        *nostr.Keys
 	Attestation *nostr.Attestation
+}
+
+// attestationFor is the attestation to carry on an event of kind signed now, or nil when it
+// has none or its conditions do not allow that event (it has expired, or is for other
+// kinds). The relay then judges the persona on its own membership instead of rejecting an
+// invalid tag.
+func (s Signer) attestationFor(kind int) *nostr.Attestation {
+	if s.Attestation == nil || !s.Attestation.Allows(kind, time.Now()) {
+		return nil
+	}
+	return s.Attestation
+}
+
+// setAuthTag adds the x-auth-tag header for a request authorized by an event of kind.
+func (s Signer) setAuthTag(req *http.Request, kind int) {
+	if att := s.attestationFor(kind); att != nil {
+		req.Header.Set("x-auth-tag", att.JSON())
+	}
 }
 
 // Filter is a NIP-01 filter.
@@ -327,9 +353,7 @@ func (c *Client) signedPost(ctx context.Context, ep Endpoint, s Signer, path str
 	}
 	req.Header.Set("Authorization", auth)
 	req.Header.Set("Content-Type", "application/json")
-	if s.Attestation != nil {
-		req.Header.Set("x-auth-tag", s.Attestation.JSON())
-	}
+	s.setAuthTag(req, nostr.KindHTTPAuth)
 	return req, nil
 }
 

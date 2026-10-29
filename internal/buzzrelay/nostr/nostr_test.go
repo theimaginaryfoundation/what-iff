@@ -111,6 +111,25 @@ func TestSignVerify(t *testing.T) {
 	if tampered.Verify() == nil {
 		t.Fatal("another key's claim verified")
 	}
+
+	// Signed correctly over an uppercased pubkey: a valid signature, but not the pubkey
+	// string the allow and deny lists compare against, so it must not verify.
+	upper := *ev
+	upper.PubKey = strings.ToUpper(ev.PubKey)
+	upper.ID = upper.ComputeID()
+	sig, err := signDigest(k, upper.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upper.Sig = sig
+	if upper.Verify() == nil {
+		t.Fatal("uppercase pubkey verified")
+	}
+	upper = *ev
+	upper.Sig = strings.ToUpper(ev.Sig)
+	if upper.Verify() == nil {
+		t.Fatal("uppercase signature verified")
+	}
 }
 
 func TestTags(t *testing.T) {
@@ -176,6 +195,10 @@ func TestAttestation(t *testing.T) {
 	}
 	if !parsed.ValidAt(time.Unix(3999999999, 0)) || parsed.ValidAt(time.Unix(4000000000, 0)) {
 		t.Fatal("ValidAt")
+	}
+	kinds := &Attestation{Conditions: "kind=9&created_at<4000000000"}
+	if !kinds.Allows(9, time.Unix(1, 0)) || kinds.Allows(22242, time.Unix(1, 0)) || kinds.Allows(9, time.Unix(4000000000, 0)) {
+		t.Fatal("Allows")
 	}
 	malformed := &Attestation{Conditions: "created_at<x"}
 	if malformed.ValidAt(time.Unix(0, 0)) {

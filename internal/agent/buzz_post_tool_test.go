@@ -14,6 +14,16 @@ import (
 type fakeBuzzToolStore struct {
 	bindings []models.BuzzBinding
 	pending  []uuid.UUID
+	external bool // the chat is another relay's thread
+}
+
+func (f *fakeBuzzToolStore) IsExternalRelayChat(_ context.Context, _, chatID uuid.UUID) (bool, error) {
+	for _, b := range f.bindings {
+		if b.ChatID == chatID {
+			return true, nil
+		}
+	}
+	return f.external, nil
 }
 
 func (f *fakeBuzzToolStore) ListBuzzBindingsForPersonality(context.Context, uuid.UUID, uuid.UUID) ([]models.BuzzBinding, error) {
@@ -112,6 +122,25 @@ func TestBuzzSameNamedChannelsAreQualifiedByCommunity(t *testing.T) {
 	_, err = buzzPost(context.Background(), store, chat, []byte(`{"channel":"Globex/#general"}`))
 	require.NoError(t, err)
 	assert.Equal(t, []uuid.UUID{b.ID}, store.pending)
+}
+
+// A Discord relay thread the owner left unsandboxed (acknowledged) is still driven by Discord
+// strangers: it reaches none of the persona's Buzz channels, and post_to_discord likewise none
+// of its Discord channels from a Buzz thread.
+func TestAnotherRelaysThreadReachesNoChannelsOfThisOne(t *testing.T) {
+	allowBuzz(t, true)
+	chat := testChat()
+	chat.ContextScope = models.ContextScopeAccount
+	require.False(t, chat.IsSandboxed())
+
+	buzz := &fakeBuzzToolStore{bindings: []models.BuzzBinding{buzzBinding("Acme", "general")}, external: true}
+	assert.Empty(t, buzzChannelsFor(context.Background(), buzz, chat))
+	discord := &fakeDiscordToolStore{bindings: []models.DiscordBinding{binding("Guild", "general")}, external: true}
+	assert.Empty(t, discordChannelsFor(context.Background(), discord, chat))
+
+	buzz.external, discord.external = false, false
+	assert.Len(t, buzzChannelsFor(context.Background(), buzz, chat), 1, "an ordinary chat reaches them all")
+	assert.Len(t, discordChannelsFor(context.Background(), discord, chat), 1)
 }
 
 func TestBuzzSandboxedOrRelayThreadsReachOnlyTheirOwnChannel(t *testing.T) {

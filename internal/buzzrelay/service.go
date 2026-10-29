@@ -19,6 +19,7 @@ import (
 // Store is the storage the relay needs (the datastore satisfies it).
 type Store interface {
 	GetBuzzBindingTarget(ctx context.Context, bindingID uuid.UUID) (*models.BuzzBindingTarget, error)
+	IsBuzzAgentPubKey(ctx context.Context, pubkey string) (bool, error)
 	RecordInboundBuzzMessage(ctx context.Context, in models.BuzzInbound) (*models.BuzzMessageLink, bool, error)
 	AttachBuzzLinkMessage(ctx context.Context, linkID, chatMessageID uuid.UUID) error
 	DeleteBuzzLink(ctx context.Context, linkID uuid.UUID) error
@@ -96,11 +97,11 @@ type Service struct {
 	// RetryBackoff is the wait before the first retry; it doubles each time.
 	RetryBackoff time.Duration
 
-	once    sync.Once
-	turns   relaykit.TurnQueue[inboundWork]
-	replies relaykit.Replies
-	busy    relaykit.Throttle
-	names   nameCache
+	once     sync.Once
+	turns    relaykit.TurnQueue[inboundWork]
+	replies  relaykit.Replies
+	busy     relaykit.Throttle
+	profiles profileCache
 }
 
 type inboundWork struct {
@@ -138,7 +139,7 @@ func (s *Service) setDefaults() {
 	s.turns.Run = s.runInbound
 	s.replies.TTL = s.TurnTimeout
 	s.busy.Every = busyNoticeEvery
-	s.names.ttl = 10 * time.Minute
+	s.profiles.ttl = 10 * time.Minute
 }
 
 // SignerFor is who the relay acts as for a persona: its key, with its owner's attestation when
@@ -188,35 +189,56 @@ func (s *Service) HandleEvent(ctx context.Context, bindingID uuid.UUID, ev nostr
 // accepts applies the trigger rules to an event on a binding: a message in the bound channel,
 // newer than the binding, not the persona's own, from someone the lists allow (and not an
 // agent unless the binding answers agents), that mentions the persona or continues a
-// conversation with it; and the bound thread must be open.
+// conversation with it; the persona, community and binding must be live and the bound thread
+// open. Cheap checks run first; the lookups only for events that would otherwise start a turn.
 func (s *Service) accepts(ctx context.Context, t models.BuzzBindingTarget, ev nostr.Event) bool {
 	b := t.Binding
-	if !IsChannelMessage(ev, b.ChannelID) || ev.PubKey == t.Agent.PubKey {
+	if !MayConcern(ev, t.Agent.PubKey) || !IsChannelMessage(ev, b.ChannelID) {
 		return false
 	}
-	if !b.InboundEnabled || b.Status != models.BuzzBindingActive {
+	if !b.InboundEnabled || !t.Live() {
 		return false
 	}
 	if time.Unix(ev.CreatedAt, 0).Before(b.CreatedAt.Add(-bindingSkew)) {
 		return false // said before the channel was bound
 	}
-	if FromAgent(ev) && !b.AnswerAgents {
+	if !relaykit.Allowed(ev.PubKey, b.AllowPubKeys, b.DenyPubKeys) {
 		return false
 	}
-	if !relaykit.Allowed(ev.PubKey, b.AllowPubKeys, b.DenyPubKeys) {
+	if !b.AnswerAgents && FromAgent(ev) {
 		return false
 	}
 	if !Mentions(ev, t.Agent.PubKey) {
 		thread := ThreadOf(ev)
-		if thread.Root == "" {
-			return false
-		}
 		ok, err := s.Store.BuzzThreadContinues(ctx, b.ID, thread.Root, thread.Parent, ev.PubKey)
 		if err != nil || !ok {
 			return false
 		}
 	}
+	if !b.AnswerAgents && s.isAgent(ctx, t, ev.PubKey) {
+		return false
+	}
 	return s.threadOpen(ctx, t)
+}
+
+// isAgent reports whether pubkey is an agent that did not say so with an attestation: another
+// persona on this server, or an account whose profile is marked as a bot (NIP-24; ours are).
+// Without this, two personas that mention each other, or answer each other's replies, would
+// take turns without end. A lookup that fails counts as an agent: the mention is dropped
+// rather than risk a loop.
+func (s *Service) isAgent(ctx context.Context, t models.BuzzBindingTarget, pubkey string) bool {
+	if ours, err := s.Store.IsBuzzAgentPubKey(ctx, pubkey); err != nil || ours {
+		return true
+	}
+	ep, err := EndpointFor(t.Community)
+	if err != nil {
+		return true
+	}
+	signer, err := SignerFor(t.Agent, t.AuthTag)
+	if err != nil {
+		return true
+	}
+	return s.profiles.bot(ctx, s.Relay, ep, signer, pubkey)
 }
 
 // threadOpen is the fail-closed check on the bound thread (relaykit.ThreadOpen).
@@ -276,7 +298,7 @@ func (s *Service) runInbound(ctx context.Context, w inboundWork) {
 	if root == "" {
 		root = ev.ID
 	}
-	author := s.names.name(ctx, s.Relay, ep, signer, ev.PubKey)
+	author := s.profiles.name(ctx, s.Relay, ep, signer, ev.PubKey)
 	link, created, err := s.Store.RecordInboundBuzzMessage(ctx, models.BuzzInbound{
 		BindingID: b.ID, EventID: ev.ID, ThreadRoot: root, AuthorPubKey: ev.PubKey, AuthorName: author,
 	})
@@ -293,7 +315,7 @@ func (s *Service) runInbound(ctx context.Context, w inboundWork) {
 		personaName = p.Name
 	}
 	npub, _ := nostr.EncodeNPub(t.Agent.PubKey)
-	quoteAuthor, quote := s.quoted(ctx, ep, signer, t.Agent.PubKey, ev, thread)
+	quoteAuthor, quote := s.quoted(ctx, ep, signer, t.Agent.PubKey, b.ChannelID, ev, thread)
 	attachments, notes := s.ingestInbound(ctx, ep, signer, t.Agent.OwnerID, b.ChatID, ev)
 	prompt := PromptText(ev.Content, author, b.ChannelName, personaName, npub, quoteAuthor, quote)
 	if len(notes) > 0 {
@@ -336,7 +358,7 @@ func (s *Service) runInbound(ctx context.Context, w inboundWork) {
 // quoted is the message ev replies to, when that is someone else's (the persona's own is
 // already the previous reply in the thread): its author's name and text. Lookup failures
 // quote nothing.
-func (s *Service) quoted(ctx context.Context, ep Endpoint, signer Signer, agentPub string, ev nostr.Event, thread ThreadRef) (string, string) {
+func (s *Service) quoted(ctx context.Context, ep Endpoint, signer Signer, agentPub, channelID string, ev nostr.Event, thread ThreadRef) (string, string) {
 	if thread.Parent == "" || thread.Parent == ev.ID {
 		return "", ""
 	}
@@ -345,10 +367,13 @@ func (s *Service) quoted(ctx context.Context, ep Endpoint, signer Signer, agentP
 		return "", ""
 	}
 	parent := events[0]
-	if parent.Verify() != nil || parent.PubKey == agentPub || parent.Kind != KindStreamMessage {
+	// The parent's id comes from the sender: quote it only when it is a message in this
+	// binding's channel, so a reply cannot pull in a message from a channel its sender cannot
+	// read.
+	if parent.Verify() != nil || parent.ID != thread.Parent || parent.PubKey == agentPub || !IsChannelMessage(parent, channelID) {
 		return "", ""
 	}
-	return s.names.name(ctx, s.Relay, ep, signer, parent.PubKey), parent.Content
+	return s.profiles.name(ctx, s.Relay, ep, signer, parent.PubKey), parent.Content
 }
 
 func (s *Service) waitForReply(ctx context.Context, t models.BuzzBindingTarget, ep Endpoint, signer Signer, ev nostr.Event, jobID uuid.UUID, done <-chan struct{}) {
@@ -469,6 +494,12 @@ func (s *Service) post(ctx context.Context, t models.BuzzBindingTarget, messageI
 	s.defaults()
 	b := t.Binding
 	log := s.Logger.With(zap.String("binding_id", b.ID.String()), zap.String("message_id", messageID.String()))
+	if !t.Live() {
+		// Paused (persona or community) or broken since the post was asked for: a pause also
+		// stops replies already armed or in flight.
+		log.Info("buzz relay: binding not live; not posting")
+		return
+	}
 	root := ""
 	if thread != nil {
 		root = thread.Root
@@ -604,46 +635,55 @@ func (s *Service) notice(ctx context.Context, t models.BuzzBindingTarget, ev nos
 	}
 }
 
-// nameCache remembers authors' display names (kind 0) for a while, so a busy channel does not
+// profileCache remembers authors' display names (kind 0) for a while, so a busy channel does not
 // look every author up on every mention.
-type nameCache struct {
+type profileCache struct {
 	ttl time.Duration
 
-	mu    sync.Mutex
-	names map[string]cachedName
+	mu       sync.Mutex
+	profiles map[string]cachedProfile
 }
 
-type cachedName struct {
+type cachedProfile struct {
 	name string
+	bot  bool
 	at   time.Time
 }
 
 // name is pubkey's display name in the community, or a short npub when it has no profile.
-func (c *nameCache) name(ctx context.Context, relay Relay, ep Endpoint, signer Signer, pubkey string) string {
+func (c *profileCache) name(ctx context.Context, relay Relay, ep Endpoint, signer Signer, pubkey string) string {
+	return c.lookup(ctx, relay, ep, signer, pubkey).name
+}
+
+// bot reports whether pubkey's profile marks it as an automated account.
+func (c *profileCache) bot(ctx context.Context, relay Relay, ep Endpoint, signer Signer, pubkey string) bool {
+	return c.lookup(ctx, relay, ep, signer, pubkey).bot
+}
+
+func (c *profileCache) lookup(ctx context.Context, relay Relay, ep Endpoint, signer Signer, pubkey string) cachedProfile {
 	key := ep.Host() + "|" + pubkey
 	c.mu.Lock()
-	if n, ok := c.names[key]; ok && time.Since(n.at) < c.ttl {
+	if p, ok := c.profiles[key]; ok && time.Since(p.at) < c.ttl {
 		c.mu.Unlock()
-		return n.name
+		return p
 	}
 	c.mu.Unlock()
 
-	name := ""
+	var p cachedProfile
 	events, err := relay.Query(ctx, ep, signer, Filter{"kinds": []int{KindProfile}, "authors": []string{pubkey}, "limit": 1})
 	if err == nil && len(events) > 0 && events[0].Verify() == nil && events[0].PubKey == pubkey {
-		name = ParseProfile(events[0]).Label()
+		profile := ParseProfile(events[0])
+		p.name, p.bot = profile.Label(), profile.Bot
 	}
-	if strings.TrimSpace(name) == "" {
-		name = ShortNPub(pubkey)
+	if strings.TrimSpace(p.name) == "" {
+		p.name = ShortNPub(pubkey)
 	}
+	p.at = time.Now()
 	c.mu.Lock()
-	if c.names == nil {
-		c.names = map[string]cachedName{}
+	if c.profiles == nil || len(c.profiles) > 5000 {
+		c.profiles = map[string]cachedProfile{}
 	}
-	if len(c.names) > 5000 {
-		c.names = map[string]cachedName{}
-	}
-	c.names[key] = cachedName{name: name, at: time.Now()}
+	c.profiles[key] = p
 	c.mu.Unlock()
-	return name
+	return p
 }

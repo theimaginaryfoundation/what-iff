@@ -1579,7 +1579,7 @@ export interface paths {
         put?: never;
         /**
          * Join a persona to a community
-         * @description Reads the community, verifies an owner attestation when one is given, claims an invite when one is given (after the owner accepted the community's join terms for the persona), records the community, publishes the persona's profile and checks whether it is let in. A 409 with code terms_required carries the terms to show and accept.
+         * @description Reads the community, verifies an owner attestation when one is given, claims an invite when one is given (after the owner accepted the community's join terms for the persona), records the community, publishes the persona's profile and checks whether it is let in. A 409 with code terms_required carries the terms to show and accept. Re-adding a community the persona is already in is a 409 before anything is sent to it, so no invite is used up.
          */
         post: {
             parameters: {
@@ -2051,7 +2051,7 @@ export interface paths {
         get?: never;
         /**
          * Post the next reply to a Buzz channel
-         * @description Arms the composer toggle. The next reply in the thread is posted to the binding's channel; the request expires after 30 minutes.
+         * @description Arms the composer toggle. The next reply in the thread is posted to the binding's channel; the request expires after 30 minutes. A binding that is broken, or whose persona or community is paused, cannot be armed (409); a pause also stops a post already armed.
          */
         put: {
             parameters: {
@@ -2074,6 +2074,7 @@ export interface paths {
                 };
                 401: components["responses"]["BuzzUnauthorized"];
                 404: components["responses"]["BuzzNotFound"];
+                409: components["responses"]["BuzzConflict"];
                 500: components["responses"]["BuzzServerError"];
             };
         };

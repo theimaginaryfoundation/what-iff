@@ -10,6 +10,8 @@ Linked by a blank import in `cmd/api-server/plugins.go`.
 - **`init`:** registers the reply hook (which does nothing until the plugin is applied) and the plugin.
 - **`apply`:** returns at once unless `buzzrelay.Enabled()` (`BUZZ_RELAY_ENABLED=true`), reads `BUZZ_ALLOW_PRIVATE_RELAYS`, mounts the routes, builds the `buzzrelay.Service`, and starts a `relaykit.Supervisor` over `ListActiveBuzzConnections` (lock key `DefaultLockKey` = 80920034, `BUZZ_GATEWAY_LOCK_KEY`, `BUZZ_GATEWAY_SINGLE_INSTANCE`).
 - **Gateway (`plugin.go`):** one `buzzrelay.Session` per community row, a subscription per bound channel (`b:<binding id>`); connection states are recorded on the community, and a subscription the relay closes for access marks its binding broken.
+  Events that cannot concern the persona (`buzzrelay.MayConcern`) are dropped on the read loop, before a goroutine or a binding lookup.
+  Each connection starts from the community's resume point (`resumeMarks`: the newest event seen, in memory across re-dials and on the row as `last_event_at` across restarts, at most `maxResume` back), so a re-dial after a binding change or a deploy does not lose mentions.
 - **`Handler` (`handlers.go`):** identities (generate the persona's key, pause, remove, publish the profile), communities (join by open relay, invite with join terms, or an admin adding the npub; optional owner attestation; check again; pause), channels (list, join a public one), bindings (create with a sandboxed relay thread or an acknowledged existing one), a thread's Buzz state and the composer toggle.
   After a change it kicks the supervisor so the gateway reconciles at once.
 
@@ -36,4 +38,5 @@ Linked by a blank import in `cmd/api-server/plugins.go`.
 
 ## Testing
 
-- `handlers_test.go` uses a fake store and relay: terms and age flow, attestation checks, access states, sandboxed relay threads and the unrestricted acknowledgement, key normalisation, ownership, and the gateway kick.
+- `plugin_test.go` covers the resume marks.
+- `handlers_test.go` uses a fake store and relay: terms and age flow, re-adding a community without spending the invite, attestation checks, access states, sandboxed relay threads and the unrestricted acknowledgement, key normalisation, ownership, and the gateway kick.

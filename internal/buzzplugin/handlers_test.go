@@ -71,6 +71,16 @@ func (f *fakeStore) CreateBuzzCommunity(_ context.Context, user, agentID uuid.UU
 	return &c, nil
 }
 
+func (f *fakeStore) ListBuzzCommunities(_ context.Context, user uuid.UUID) ([]models.BuzzCommunity, error) {
+	var out []models.BuzzCommunity
+	if f.mine(user) {
+		for _, c := range f.comms {
+			out = append(out, c.Community)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeStore) GetBuzzConnection(_ context.Context, user, id uuid.UUID) (*models.BuzzConnection, error) {
 	c, ok := f.comms[id]
 	if !ok || !f.mine(user) {
@@ -244,6 +254,21 @@ func TestAddCommunityNeedsTermsBeforeClaimingAnInvite(t *testing.T) {
 	profile := buzzrelay.ParseProfile(r.relay.published[0])
 	assert.Equal(t, "Vix", profile.Name)
 	assert.True(t, profile.Bot)
+}
+
+// Re-adding a community the persona is in is refused before the invite is sent, so a
+// single-use invite is not spent on a request that then fails; :443 is the same community.
+func TestReAddingACommunityDoesNotSpendTheInvite(t *testing.T) {
+	r := newRig(t)
+	r.createAgent()
+	path := "/buzz/agents/" + r.agentID.String() + "/communities"
+	code, out := r.do(http.MethodPost, path, map[string]any{"relay_url": "https://acme.example/invite/one"})
+	require.Equal(t, http.StatusCreated, code, out)
+
+	code, out = r.do(http.MethodPost, path, map[string]any{"relay_url": "wss://acme.example:443/invite/two"})
+	assert.Equal(t, http.StatusConflict, code, out)
+	assert.Equal(t, "That persona is already in that community.", out["error"])
+	assert.Equal(t, []string{"one@"}, r.relay.claimed, "the second invite is untouched")
 }
 
 func TestAddCommunityWithoutAccessNeedsAccess(t *testing.T) {
