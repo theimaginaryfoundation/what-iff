@@ -230,13 +230,13 @@ func (a *Agent) executeToolUseWithRecovery(ctx context.Context, chatCtx *chatCon
 		}()
 
 		output, generatedAttachments, err := a.dispatchToolUse(ctx, chatCtx, use)
+		attachments = generatedAttachments
 		toolErr = err
 		if err != nil {
 			result.IsErr = true
 			result.Output = err.Error()
 		} else {
 			result.Output = output
-			attachments = generatedAttachments
 		}
 	}()
 

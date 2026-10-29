@@ -176,7 +176,7 @@ func (a *Agent) dispatchMCPToolUse(ctx context.Context, chatCtx *chatContext, us
 	if err != nil {
 		return "", nil, err
 	}
-	return out.Output, out.GeneratedAttachments, nil
+	return out.Output, out.GeneratedAttachments, out.Err()
 }
 
 // mcpToolLoadedOutOfScope reports whether the tool is recorded as loaded for a connector that

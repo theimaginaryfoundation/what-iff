@@ -44,11 +44,6 @@ type DiscoveryResult struct {
 	Errors map[uuid.UUID]string
 }
 
-type CallToolResult struct {
-	Output               string
-	GeneratedAttachments []*models.FileAttachment
-}
-
 type Client struct {
 	httpClient *http.Client
 	logger     *zap.Logger
@@ -197,20 +192,28 @@ func (c *Client) discoverConnectorTools(ctx context.Context, userID uuid.UUID, s
 	return out, nil
 }
 
+// CallToolByFullName invokes a tool and returns its model-visible output.
+// A tool-level failure can return non-empty output together with a non-nil error;
+// callers must check the error even when output is present. Transport or protocol
+// failures return empty output. Use CallToolByFullNameDetailed to inspect status,
+// structured content and attachments separately.
 func (c *Client) CallToolByFullName(ctx context.Context, servers []*models.MCPServer, fullName string, rawArgs json.RawMessage) (string, error) {
 	result, err := c.CallToolByFullNameDetailed(ctx, servers, fullName, rawArgs)
 	if err != nil {
 		return "", err
 	}
-	return result.Output, nil
+	return result.Output, result.Err()
 }
 
+// CallToolByFullNameWithSessionState invokes a tool using the supplied session map.
+// Like CallToolByFullName, non-empty output can accompany a non-nil tool error;
+// callers must check the error. Transport or protocol failures return empty output.
 func (c *Client) CallToolByFullNameWithSessionState(ctx context.Context, servers []*models.MCPServer, fullName string, rawArgs json.RawMessage, sessions SessionState) (string, error) {
 	result, err := c.CallToolByFullNameWithSessionStateDetailed(ctx, servers, fullName, rawArgs, sessions)
 	if err != nil {
 		return "", err
 	}
-	return result.Output, nil
+	return result.Output, result.Err()
 }
 
 func (c *Client) CallToolByFullNameDetailed(ctx context.Context, servers []*models.MCPServer, fullName string, rawArgs json.RawMessage) (CallToolResult, error) {
@@ -406,38 +409,6 @@ func (c *Client) callToolRPC(ctx context.Context, server *models.MCPServer, tool
 		return parsed, nil
 	}
 	return CallToolResult{Output: string(result)}, nil
-}
-
-func (c *Client) parseToolCallResult(result json.RawMessage) (CallToolResult, bool) {
-	var parsed struct {
-		Content []map[string]any `json:"content"`
-	}
-	if err := json.Unmarshal(result, &parsed); err != nil || len(parsed.Content) == 0 {
-		return CallToolResult{}, false
-	}
-
-	callResult := CallToolResult{
-		GeneratedAttachments: make([]*models.FileAttachment, 0),
-	}
-	var textParts []string
-	for _, block := range parsed.Content {
-		blockType := strings.ToLower(strings.TrimSpace(anyString(block["type"])))
-		switch blockType {
-		case "text":
-			if text := strings.TrimSpace(anyString(block["text"])); text != "" {
-				textParts = append(textParts, text)
-			}
-		case "image", "audio", "blob":
-			if att := c.attachmentFromContentBlock(blockType, block); att != nil {
-				callResult.GeneratedAttachments = append(callResult.GeneratedAttachments, att)
-			}
-		}
-	}
-	callResult.Output = strings.Join(textParts, "\n")
-	if callResult.Output != "" || len(callResult.GeneratedAttachments) > 0 {
-		return callResult, true
-	}
-	return CallToolResult{}, false
 }
 
 func (c *Client) attachmentFromContentBlock(blockType string, block map[string]any) *models.FileAttachment {

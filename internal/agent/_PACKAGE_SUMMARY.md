@@ -39,6 +39,8 @@ Orchestrates assistant behavior: user turns, OpenAI/Anthropic calls, tool execut
 - **MCP connector scope:** one in-scope list per turn — thread-attached connectors plus those linked to the active skills (the Mode's skill, a `/skill` call, or an agent job's skills) — built by `resolveChatMCPServers`, cached on `chatContext` by `prepareTurnMCPToolSpecs` (with the skill IDs, `mcpRitualIDs`), and read through `mcpServersInScope`.
   Tool registration, `list(kind="mcp_servers")`, `load_tools`, and `dispatchMCPToolUse` all use it, so a skill-only connector is listed, loadable and callable.
   Loaded state (`ChatMCPToolState`) is per chat and survives Mode changes; a tool loaded for a connector that has fallen out of scope is neither sent nor callable until its skill is active again.
+- **MCP tool results:** `structuredContent` is included with text in model-visible output, and `isError` sets the provider result's error flag and the persisted tool call's `ToolError`.
+  Generated attachments and in-turn vision payloads remain available when a tool reports an error.
   `unload_tools` is not scope-gated so stale state can still be cleared.
 - **Loadable tools (`tool_loading.go`, #305):** MCP tools and the built-in tools the catalog marks `Loadable` (web search and `fetch_page`, image generation, sub-agents, agent jobs, and any a build adds such as `shell_exec`) are only sent to the model once loaded in the chat.
   A chat turn registers them all with its adapter (`turnFunctionToolSpecs`), and before every round `handleAgentLoop` calls the adapter's `provider.ToolScoper.ScopeTools` with `chatContext.loadedToolFilter`, so a tool loaded by `load_tools` is sent from the next round of the same turn and an unloaded one costs no tokens.
@@ -262,6 +264,8 @@ Subpackages: `provider/` (model context & SDK mapping), `tools/` (per-tool imple
 - `checkpoint_window_test.go` — the post-checkpoint history window start (#268): after the reply, before the user message when another message arrived mid-turn, and the fallbacks.
 - `message_test.go`, `message_timezone_test.go` — attachment labels, memories, tool-call context, human-readable `[sys:…]` timezone stamps (weekday + local offset).
 - `mcp_tools_test.go` — MCP tool wiring (OpenAI + Claude MCP config mapping).
+- `mcp_dispatch_coverage_test.go` and `mcp_error_integration_test.go` — MCP status, structured data and images through dispatch, plus complete loop continuation after MCP and registered local tool failures.
+  They verify the tool-call error records used for persistence and error text serialized for OpenAI and Claude, including Claude's `is_error` flag.
 - `processtoolcall_test.go` — catalog-derived tool list and dispatch handler registration (including `list_models`, `list_personalities`, `run_subagent`).
 - `subagent_tools_test.go` — minimal subagent context composition and argument validation behavior.
 - `subagent_providers_test.go` — subagent routing to Chat Completions providers (Qwen et al.) and z.ai against fake endpoints: tool-support gate, text-only rendering, missing-key and provider-error diagnostics.
