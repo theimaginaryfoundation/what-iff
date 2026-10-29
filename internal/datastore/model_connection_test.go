@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
 // createConnectionModelsTestSchema creates the tables a connection's models
@@ -107,4 +109,41 @@ func TestAssertUserCanUseModelTx_ConnectionModelsOnlyForTheirOwner(t *testing.T)
 	require.NoError(t, assertUserCanUseModelTx(ctx, tx, f.alice, f.aliceOwn))
 	err = assertUserCanUseModelTx(ctx, tx, f.bob, f.aliceOwn)
 	require.True(t, errors.Is(err, ErrModelNotFound), "got %v", err)
+}
+
+// An account may enable a model with a catalog model's name on its own
+// connection. Lookups by name that mean the catalog must find the catalog's
+// one, and the catalog's own name checks must not see the account's.
+func TestCatalogNameLookups_IgnoreConnectionModels(t *testing.T) {
+	f := newConnectionModelsFixture(t)
+	ctx := context.Background()
+	conn, err := f.ds.dbClient.ProviderConnection.Create().
+		SetUserID(f.alice).SetPreset("openai").SetBuiltin("openai").SetName("OpenAI").
+		Save(ctx)
+	require.NoError(t, err)
+	_, err = f.ds.dbClient.Model.Create().
+		SetName("gpt-5.6-luna").SetDisplayName("mine").SetDescription("").
+		SetProvider("openai").SetConnectionID(conn.ID).
+		Save(ctx)
+	require.NoError(t, err)
+
+	got, err := f.ds.GetModelByName(ctx, "gpt-5.6-luna")
+	require.NoError(t, err, "not ambiguous with the account's model")
+	require.Equal(t, f.catalog, got.ID)
+
+	t.Setenv("DEFAULT_MODEL_NAME", "gpt-5.6-luna")
+	tx, err := f.ds.dbClient.Tx(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	def, err := resolveDefaultModelTx(ctx, tx)
+	require.NoError(t, err, "a new account's default is found, so signup works")
+	require.Equal(t, f.catalog, def.ID)
+	require.NoError(t, tx.Rollback())
+
+	created, err := f.ds.AdminCreateModel(ctx, models.CreateModelRequest{Name: "qwen3:4b", DisplayName: "Qwen", Provider: "qwen"})
+	require.NoError(t, err, "an account's model of that name is not the catalog's")
+	require.Nil(t, created.ConnectionID)
+	newName := "gpt-5.6-luna"
+	_, err = f.ds.AdminUpdateModel(ctx, created.ID, models.UpdateModelRequest{Name: newName})
+	require.Error(t, err, "renaming onto a catalog model's name is still refused")
 }

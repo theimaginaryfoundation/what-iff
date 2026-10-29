@@ -392,7 +392,7 @@ func (d *Datastore) GetModelByName(ctx context.Context, name string) (*models.Mo
 		return nil, ErrModelNotFound
 	}
 	dbModel, err := d.dbClient.Model.Query().
-		Where(entmodel.Name(name), entmodel.Deleted(false)).
+		Where(entmodel.Name(name), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
 	if err != nil {
 		if ent.IsNotFound(err) {
@@ -520,7 +520,7 @@ func (d *Datastore) AdminCreateModel(ctx context.Context, req models.CreateModel
 	}
 
 	existing, err := tx.Model.Query().
-		Where(entmodel.Name(name)).
+		Where(entmodel.Name(name), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
 	if err == nil {
 		if existing.Deleted {
@@ -652,7 +652,7 @@ func (d *Datastore) AdminUpdateModel(ctx context.Context, id uuid.UUID, req mode
 		}
 		if name != current.Name {
 			exists, qerr := tx.Model.Query().
-				Where(entmodel.Name(name), entmodel.Deleted(false)).
+				Where(entmodel.Name(name), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 				Exist(ctx)
 			if qerr != nil {
 				d.logger.Error(i18n.T1("query.failed", "Entity", "model"), zap.Error(qerr))
@@ -897,7 +897,7 @@ func resolveDefaultModelTx(ctx context.Context, tx *ent.Tx) (*ent.Model, error) 
 	}
 	name := getDefaultModelName()
 	m, err := tx.Model.Query().
-		Where(entmodel.Name(name), entmodel.Deleted(false)).
+		Where(entmodel.Name(name), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
 	if ent.IsNotFound(err) {
 		return tx.Model.Query().
