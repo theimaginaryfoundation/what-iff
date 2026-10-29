@@ -19,6 +19,11 @@ services:
   api:
     build:
       context: .
+    # Docker Desktop resolves host.docker.internal by itself; Linux needs this
+    # line, so the Ollama and LM Studio presets can reach a server on this
+    # computer.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # Optional so db-only bring-up (make db-up, scripts/mock-e2e.sh, CI) works
     # on a fresh clone before `cp .env.example .env`.
     env_file:

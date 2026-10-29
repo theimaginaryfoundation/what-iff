@@ -1817,6 +1817,279 @@ paths:
                 $ref: '#/components/schemas/Error'
 
   # Role Management Endpoints
+  /provider-connections:
+    get:
+      summary: List the account's provider connections
+      description: >-
+        How this account reaches model providers (ADR 0x027): its connections to
+        built-in providers first, in provider order, then the rest by name. Keys are
+        write-only; only whether there is one and its last four characters are
+        returned. Served only when the server takes keys from accounts.
+      tags: [Provider Connections]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The account's connections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProviderConnection'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      summary: Add a provider connection
+      description: >-
+        Lists the provider's models with the details given, and stores the
+        connection only if that works, answering with the connection and the models
+        found. Requires the account's current password. An account has at most one
+        connection to each built-in provider.
+      tags: [Provider Connections]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProviderConnectionRequest'
+      responses:
+        '201':
+          description: Connection added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderConnected'
+        '400':
+          description: >-
+            Invalid request: an unknown preset, a missing or malformed key, name,
+            flavor or address, or an address for a preset that sets its own
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: >-
+            `reauthentication_required` when the current password was missing or
+            wrong; `custom_address_not_allowed` when the preset lets the account
+            choose an address and this server does not allow that.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: The account already has a connection to that built-in provider; `code` is `provider_connection_exists`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: >-
+            Listing the provider's models failed, and nothing was stored. `code` is
+            `provider_unreachable`, `provider_key_rejected`, `provider_incompatible`
+            or `provider_unavailable`; `details.preset` names the preset.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /provider-connections/presets:
+    get:
+      summary: List the presets a connection can be made from
+      description: >-
+        What the "Add provider" form offers, with each preset's default address
+        filled in for this deployment. Presets whose address the account chooses
+        are left out when this server does not allow that.
+      tags: [Provider Connections]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Presets, in the order to offer them
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProviderPreset'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /provider-connections/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The connection
+        schema:
+          type: string
+          format: uuid
+    patch:
+      summary: Edit a provider connection
+      description: >-
+        Renames a connection, or changes its key or address. A rename needs nothing
+        more. A new key or address needs the account's current password, and is
+        checked by listing the provider's models before it is saved; on failure the
+        connection is left as it was. An empty `key` removes the key, where the
+        preset allows none.
+      tags: [Provider Connections]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProviderConnectionRequest'
+      responses:
+        '200':
+          description: >-
+            Connection updated. `models` holds the models found when the key or
+            address changed, and is empty otherwise.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderConnected'
+        '400':
+          description: Invalid request, or an address for a preset that sets its own
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: '`reauthentication_required` or `custom_address_not_allowed`, as for adding one'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such connection on this account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Listing with the new key or address failed, as for adding one
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Remove a provider connection
+      tags: [Provider Connections]
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Connection removed
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such connection on this account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /provider-connections/{id}/models:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The connection
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: List the models a connection's provider offers
+      description: Asks the provider now, with the connection's stored key; nothing is cached.
+      tags: [Provider Connections]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Models, sorted by id
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ListedModel'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No such connection on this account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Listing failed; `code` as for adding a connection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /v1/roles:
     get:
       summary: List all roles (Admin)
@@ -9967,7 +10240,7 @@ components:
       enum: [openai, anthropic, zai, google, mistral, deepseek, qwen, xiaomi]
     ProviderAccess:
       type: object
-      required: [keys_from, providers]
+      required: [keys_from, providers, custom_addresses]
       properties:
         keys_from:
           type: string
@@ -9978,6 +10251,143 @@ components:
           description: Providers the account has a key for right now, in provider order. Empty when none.
           items:
             $ref: '#/components/schemas/ModelProvider'
+        custom_addresses:
+          type: boolean
+          description: >-
+            Whether an account may choose a provider's address (Custom, or a server
+            on the same computer) when adding a connection.
+    ProviderConnection:
+      type: object
+      description: One way the account reaches one model provider, without its key.
+      required: [id, preset, name, has_key, builtin, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        preset:
+          type: string
+          description: The preset it was made from; see GET /provider-connections/presets.
+        name:
+          type: string
+        flavor:
+          type: string
+          enum: [openai, anthropic]
+          description: The API a custom connection speaks. Absent for a preset, which implies it.
+        base_url:
+          type: string
+          description: >-
+            The address the account chose. Absent means the preset's own, including
+            when the account gave exactly that, so the connection follows the preset.
+        hint:
+          type: string
+          description: The key's last four characters. Absent when there is no key.
+        has_key:
+          type: boolean
+        builtin:
+          type: boolean
+          description: A connection to a built-in provider; the account has at most one of each.
+        source:
+          type: string
+          description: >-
+            `converted` for a key stored before connections existed. Absent for a
+            connection added in the app.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProviderPreset:
+      type: object
+      description: Details that fill in a new connection.
+      required: [id, name, address_editable, key_required, builtin, local]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        flavor:
+          type: string
+          enum: [openai, anthropic]
+          description: Absent for Custom, where the account chooses it.
+        base_url:
+          type: string
+          description: The address a new connection gets. Absent for Custom.
+        address_editable:
+          type: boolean
+          description: Whether the account may change the address.
+        key_required:
+          type: boolean
+        builtin:
+          type: boolean
+        local:
+          type: boolean
+          description: A server expected on the same computer.
+        keys_url:
+          type: string
+          description: Where to create a key, when known.
+    ListedModel:
+      type: object
+      description: A model a provider offers.
+      required: [id]
+      properties:
+        id:
+          type: string
+        display_name:
+          type: string
+          description: The provider's own name for it, when it gives one.
+    ProviderConnected:
+      type: object
+      required: [connection, models]
+      properties:
+        connection:
+          $ref: '#/components/schemas/ProviderConnection'
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListedModel'
+    CreateProviderConnectionRequest:
+      type: object
+      required: [preset, current_password]
+      properties:
+        preset:
+          type: string
+        name:
+          type: string
+          maxLength: 100
+          description: Defaults to the preset's name. Required for Custom.
+        flavor:
+          type: string
+          enum: [openai, anthropic]
+          description: Required for Custom; ignored otherwise.
+        base_url:
+          type: string
+          description: >-
+            For presets whose address the account chooses; defaults to the preset's.
+            Required for Custom. Rejected for the others.
+        key:
+          type: string
+          minLength: 8
+          maxLength: 512
+          description: Required where the preset says so.
+        current_password:
+          type: string
+          format: password
+    UpdateProviderConnectionRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        base_url:
+          type: string
+        key:
+          type: string
+          description: A new key, or empty to remove it where the preset allows none.
+        current_password:
+          type: string
+          format: password
+          description: Required when changing the key or address.
     ProviderKeySummary:
       type: object
       description: A stored provider key, without the key.
@@ -12711,6 +13121,12 @@ components:
         - buzz_terms_required
         - provider_not_configured
         - reauthentication_required
+        - provider_unreachable
+        - provider_key_rejected
+        - provider_incompatible
+        - provider_unavailable
+        - custom_address_not_allowed
+        - provider_connection_exists
 
     # Cross-resource search schemas (GET /search)
     SearchResult:
@@ -12783,6 +13199,8 @@ tags:
     description: System health and status endpoints
   - name: Provider Keys
     description: An account's own model-provider API keys. Served only when the server takes keys from accounts.
+  - name: Provider Connections
+    description: How an account reaches model providers, built-in or not (ADR 0x027). Served only when the server takes keys from accounts.
   - name: Authentication
     description: User authentication and token management
   - name: User Management

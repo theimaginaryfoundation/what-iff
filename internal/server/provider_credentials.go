@@ -50,6 +50,18 @@ func (c *Config) providerEndpoints() []providerEndpoint {
 	}
 }
 
+// builtinProviderURLs is the address each built-in provider is reached at,
+// from the same endpoint list its client and credential rule use.
+func (c *Config) builtinProviderURLs() map[appmodels.ModelProvider]string {
+	out := make(map[appmodels.ModelProvider]string)
+	for _, e := range c.providerEndpoints() {
+		if !e.pathScoped {
+			out[e.provider] = e.baseURL
+		}
+	}
+	return out
+}
+
 // configuredProviderKeys is the credentials this deployment was started with.
 func (c *Config) configuredProviderKeys() map[appmodels.ModelProvider]string {
 	return map[appmodels.ModelProvider]string{

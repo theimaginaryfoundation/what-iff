@@ -3397,6 +3397,424 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/provider-connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the account's provider connections
+         * @description How this account reaches model providers (ADR 0x027): its connections to built-in providers first, in provider order, then the rest by name. Keys are write-only; only whether there is one and its last four characters are returned. Served only when the server takes keys from accounts.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The account's connections */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderConnection"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Add a provider connection
+         * @description Lists the provider's models with the details given, and stores the connection only if that works, answering with the connection and the models found. Requires the account's current password. An account has at most one connection to each built-in provider.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateProviderConnectionRequest"];
+                };
+            };
+            responses: {
+                /** @description Connection added */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderConnected"];
+                    };
+                };
+                /** @description Invalid request: an unknown preset, a missing or malformed key, name, flavor or address, or an address for a preset that sets its own */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description `reauthentication_required` when the current password was missing or wrong; `custom_address_not_allowed` when the preset lets the account choose an address and this server does not allow that. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The account already has a connection to that built-in provider; `code` is `provider_connection_exists` */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Listing the provider's models failed, and nothing was stored. `code` is `provider_unreachable`, `provider_key_rejected`, `provider_incompatible` or `provider_unavailable`; `details.preset` names the preset. */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/provider-connections/presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the presets a connection can be made from
+         * @description What the "Add provider" form offers, with each preset's default address filled in for this deployment. Presets whose address the account chooses are left out when this server does not allow that.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Presets, in the order to offer them */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderPreset"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/provider-connections/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The connection */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a provider connection */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The connection */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Connection removed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such connection on this account */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Edit a provider connection
+         * @description Renames a connection, or changes its key or address. A rename needs nothing more. A new key or address needs the account's current password, and is checked by listing the provider's models before it is saved; on failure the connection is left as it was. An empty `key` removes the key, where the preset allows none.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The connection */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateProviderConnectionRequest"];
+                };
+            };
+            responses: {
+                /** @description Connection updated. `models` holds the models found when the key or address changed, and is empty otherwise. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProviderConnected"];
+                    };
+                };
+                /** @description Invalid request, or an address for a preset that sets its own */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description `reauthentication_required` or `custom_address_not_allowed`, as for adding one */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such connection on this account */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Listing with the new key or address failed, as for adding one */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/provider-connections/{id}/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The connection */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List the models a connection's provider offers
+         * @description Asks the provider now, with the connection's stored key; nothing is cached.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The connection */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Models, sorted by id */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ListedModel"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such connection on this account */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Listing failed; `code` as for adding a connection */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/roles": {
         parameters: {
             query?: never;
@@ -13347,6 +13765,91 @@ export interface components {
             keys_from: "deployment" | "account";
             /** @description Providers the account has a key for right now, in provider order. Empty when none. */
             providers: components["schemas"]["ModelProvider"][];
+            /** @description Whether an account may choose a provider's address (Custom, or a server on the same computer) when adding a connection. */
+            custom_addresses: boolean;
+        };
+        /** @description One way the account reaches one model provider, without its key. */
+        ProviderConnection: {
+            /** Format: uuid */
+            id: string;
+            /** @description The preset it was made from; see GET /provider-connections/presets. */
+            preset: string;
+            name: string;
+            /**
+             * @description The API a custom connection speaks. Absent for a preset, which implies it.
+             * @enum {string}
+             */
+            flavor?: "openai" | "anthropic";
+            /** @description The address the account chose. Absent means the preset's own, including when the account gave exactly that, so the connection follows the preset. */
+            base_url?: string;
+            /** @description The key's last four characters. Absent when there is no key. */
+            hint?: string;
+            has_key: boolean;
+            /** @description A connection to a built-in provider; the account has at most one of each. */
+            builtin: boolean;
+            /** @description `converted` for a key stored before connections existed. Absent for a connection added in the app. */
+            source?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description Details that fill in a new connection. */
+        ProviderPreset: {
+            id: string;
+            name: string;
+            /**
+             * @description Absent for Custom, where the account chooses it.
+             * @enum {string}
+             */
+            flavor?: "openai" | "anthropic";
+            /** @description The address a new connection gets. Absent for Custom. */
+            base_url?: string;
+            /** @description Whether the account may change the address. */
+            address_editable: boolean;
+            key_required: boolean;
+            builtin: boolean;
+            /** @description A server expected on the same computer. */
+            local: boolean;
+            /** @description Where to create a key, when known. */
+            keys_url?: string;
+        };
+        /** @description A model a provider offers. */
+        ListedModel: {
+            id: string;
+            /** @description The provider's own name for it, when it gives one. */
+            display_name?: string;
+        };
+        ProviderConnected: {
+            connection: components["schemas"]["ProviderConnection"];
+            models: components["schemas"]["ListedModel"][];
+        };
+        CreateProviderConnectionRequest: {
+            preset: string;
+            /** @description Defaults to the preset's name. Required for Custom. */
+            name?: string;
+            /**
+             * @description Required for Custom; ignored otherwise.
+             * @enum {string}
+             */
+            flavor?: "openai" | "anthropic";
+            /** @description For presets whose address the account chooses; defaults to the preset's. Required for Custom. Rejected for the others. */
+            base_url?: string;
+            /** @description Required where the preset says so. */
+            key?: string;
+            /** Format: password */
+            current_password: string;
+        };
+        UpdateProviderConnectionRequest: {
+            name?: string;
+            base_url?: string;
+            /** @description A new key, or empty to remove it where the preset allows none. */
+            key?: string;
+            /**
+             * Format: password
+             * @description Required when changing the key or address.
+             */
+            current_password?: string;
         };
         /** @description A stored provider key, without the key. */
         ProviderKeySummary: {
@@ -14933,7 +15436,7 @@ export interface components {
          *       on a generic code — use the HTTP status instead.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists";
         /** @description A single hit inside a search section. */
         SearchResult: {
             /**

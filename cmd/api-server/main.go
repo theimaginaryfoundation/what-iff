@@ -206,7 +206,10 @@ func init() {
 
 	// Keys stored before provider connections existed become connections (ADR 0x027).
 	if _, err := accountkeys.ConvertStoredKeys(context.Background(), client, logger); err != nil {
-		logger.Fatal("Failed to convert stored provider keys", zap.Error(err))
+		// Usually the provider_connections table is missing: this build's schema
+		// has not been applied.
+		logger.Fatal("Failed to convert stored provider keys; if the provider_connections table does not exist, run the migrations (AUTO_MIGRATE=true)",
+			zap.Error(err))
 	}
 
 	// Create and configure server

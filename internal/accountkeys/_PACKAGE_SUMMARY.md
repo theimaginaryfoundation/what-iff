@@ -8,6 +8,7 @@ An account's key for a built-in provider is its built-in provider connection (AD
 ## Responsibilities
 
 - **Storage:** `Set` validates the provider and the key (8 to 512 characters, no whitespace), encrypts it with the deployment's token key (`Sealer`, implemented by `datastore.Datastore`) and stores it on the account's built-in connection for that provider, creating the connection (named after the provider) or replacing its key.
+  The connection storage itself is `internal/providerconnections`' `Store`; this package keeps the per-provider view of it.
   `List` returns only provider, last-four hint and update time, for built-in connections only; `Delete` removes one.
   Other connections (custom, local servers) sit in the same table and are not keys here.
 - **Resolver:** `Key(ctx, provider)` implements `providerkeys.Resolver` with the key of the account on the context (`middleware.GetUserIDFromContext`).
@@ -25,13 +26,13 @@ An account's key for a built-in provider is its built-in provider connection (AD
 ## Dependencies
 
 - **Inbound:** `internal/server` only: it builds `Keys`, hands it to `providerkeys.New`, and mounts the routes only when the chosen resolver says accounts supply keys (`mountAccountKeyRoutes`).
-- **Outbound:** `ent` (the `ProviderConnection` schema, table `provider_connections`; and `AccountProviderKey`, table `account_provider_keys`, read only to convert it), `internal/reauth`, `internal/middleware`, `internal/handlers/handlerutils`, `internal/models`.
+- **Outbound:** `internal/providerconnections` (built-in connections), `ent` (`ProviderConnection` and `AccountProviderKey`, the latter read only to convert it), `internal/reauth`, `internal/middleware`, `internal/handlers/handlerutils`, `internal/models`.
 
 ## Non-obvious decisions
 
 - It is used only when `providerkeys.New` picks it; a deployment that supplies its own keys leaves the table empty and serves no key routes.
   The table carries a database comment saying so, for anyone reading the schema there.
-- The only code that touches the `AccountProviderKey` schema, and the only code that writes built-in connections.
+- The only code that touches the `AccountProviderKey` schema.
 - One built-in connection per provider per account is enforced by a unique index on `user_id` and `builtin`, a column set only for built-in providers.
   The deployment's own connections (no `user_id`) get a partial unique index on `builtin` where `user_id IS NULL`, since a unique index treats each NULL as distinct.
   A request to a built-in provider asks for "the account's key", which needs one answer until models point at connections.

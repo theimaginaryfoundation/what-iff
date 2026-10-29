@@ -63,6 +63,27 @@ const (
 	// confirm it (for example with the current password), and that confirmation
 	// was missing or wrong. Answered with 403, not 401: the session is valid.
 	ErrCodeReauthenticationRequired = "reauthentication_required"
+
+	// Why a provider connection could not be made: listing the provider's
+	// models failed (ADR 0x027). Details is {"preset": "<id>"}.
+	//
+	// ErrCodeProviderUnreachable: nothing answered at the address, or it took
+	// too long.
+	ErrCodeProviderUnreachable = "provider_unreachable"
+	// ErrCodeProviderKeyRejected: the provider answered and refused the key.
+	ErrCodeProviderKeyRejected = "provider_key_rejected"
+	// ErrCodeProviderIncompatible: something answered, but not as a server of
+	// the connection's flavor would.
+	ErrCodeProviderIncompatible = "provider_incompatible"
+	// ErrCodeProviderUnavailable: the provider answered with a server error or a
+	// rate limit; trying again later may work.
+	ErrCodeProviderUnavailable = "provider_unavailable"
+	// ErrCodeCustomAddressNotAllowed: this deployment does not let accounts
+	// choose a provider's address.
+	ErrCodeCustomAddressNotAllowed = "custom_address_not_allowed"
+	// ErrCodeProviderConnectionExists: the account already has a connection to
+	// that built-in provider, and has at most one; it edits that one instead.
+	ErrCodeProviderConnectionExists = "provider_connection_exists"
 )
 
 // AllErrorCodes is every code this API can emit. It is the source the
@@ -94,6 +115,12 @@ var AllErrorCodes = []string{
 	ErrCodeBuzzTermsRequired,
 	ErrCodeProviderNotConfigured,
 	ErrCodeReauthenticationRequired,
+	ErrCodeProviderUnreachable,
+	ErrCodeProviderKeyRejected,
+	ErrCodeProviderIncompatible,
+	ErrCodeProviderUnavailable,
+	ErrCodeCustomAddressNotAllowed,
+	ErrCodeProviderConnectionExists,
 }
 
 // genericErrorCodes maps HTTP statuses to their generic code.

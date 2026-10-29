@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/providerconnections"
 	"github.com/theimaginaryfoundation/what-iff/internal/providerkeys"
 )
 
@@ -42,8 +43,9 @@ func TestDeploymentKeys(t *testing.T) {
 	}))
 
 	require.Equal(t, models.ProviderAccess{
-		KeysFrom:  models.KeysFromDeployment,
-		Providers: []models.ModelProvider{models.ModelProviderOpenAI, models.ModelProviderMistral},
+		KeysFrom:        models.KeysFromDeployment,
+		Providers:       []models.ModelProvider{models.ModelProviderOpenAI, models.ModelProviderMistral},
+		CustomAddresses: true,
 	}, got)
 	require.NotContains(t, body, "sk-deployment", "the response names providers, never keys")
 }
@@ -52,8 +54,9 @@ func TestAccountKeys(t *testing.T) {
 	got, body := get(t, accountResolver{models.ModelProviderAnthropic: "sk-account-anthropic"})
 
 	require.Equal(t, models.ProviderAccess{
-		KeysFrom:  models.KeysFromAccount,
-		Providers: []models.ModelProvider{models.ModelProviderAnthropic},
+		KeysFrom:        models.KeysFromAccount,
+		Providers:       []models.ModelProvider{models.ModelProviderAnthropic},
+		CustomAddresses: true,
 	}, got)
 	require.NotContains(t, body, "sk-account")
 }
@@ -62,5 +65,16 @@ func TestAccountKeys(t *testing.T) {
 // can treat it as "nothing set up" without a special case.
 func TestNoKeysIsAnEmptyList(t *testing.T) {
 	_, body := get(t, accountResolver{})
-	require.JSONEq(t, `{"keys_from":"account","providers":[]}`, body)
+	require.JSONEq(t, `{"keys_from":"account","providers":[],"custom_addresses":true}`, body)
+}
+
+// Whether accounts may choose a provider's address is the deployment's to
+// say, through providerconnections.CustomAddressesAllowed.
+func TestCustomAddressesFollowTheDeployment(t *testing.T) {
+	saved := providerconnections.CustomAddressesAllowed
+	t.Cleanup(func() { providerconnections.CustomAddressesAllowed = saved })
+	providerconnections.CustomAddressesAllowed = func() bool { return false }
+
+	got, _ := get(t, accountResolver{})
+	require.False(t, got.CustomAddresses)
 }

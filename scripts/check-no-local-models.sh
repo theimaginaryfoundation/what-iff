@@ -13,12 +13,13 @@
 #   2. resolved import graph (go list -deps) — nothing pulled in transitively
 #   3. source/config scan — no invocation or configuration of an embedded
 #      local runtime (documentation and this script itself are excluded;
-#      ADRs legitimately discuss these tools by name). "ollama" is
-#      deliberately NOT in this pattern list: it's the sanctioned external
-#      LLM_BACKEND=local server, so legitimate references to it (adapter
-#      code, env var defaults, docs) must not fail this audit. Every other
-#      token here still implies embedding or downloading a runtime/weights,
-#      which stays forbidden.
+#      ADRs legitimately discuss these tools by name). "ollama" and LM
+#      Studio are deliberately NOT in this pattern list: both are sanctioned
+#      external servers reached over HTTP (LLM_BACKEND=local, and the provider
+#      connection presets of ADR 0x027), so legitimate references to them
+#      (adapter code, preset ids, env var defaults, docs) must not fail this
+#      audit. Every other token here still implies embedding or downloading a
+#      runtime/weights, which stays forbidden.
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
@@ -28,7 +29,7 @@ cd "$(dirname "$0")/.."
 # false negative would silently let an embedded local-model runtime back in.
 # If a specific token starts producing recurring false positives, narrow that
 # token with word boundaries rather than loosening the whole set.
-PATTERNS='llama[._-]cpp|llamafile|ggml|gguf|gpt4all|lm[-_]?studio|koboldcpp|exllama|localai|text-generation-inference|ctransformers'
+PATTERNS='llama[._-]cpp|llamafile|ggml|gguf|gpt4all|koboldcpp|exllama|localai|text-generation-inference|ctransformers'
 SELF="$(basename "$0")"
 fail=0
 
