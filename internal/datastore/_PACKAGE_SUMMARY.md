@@ -201,6 +201,8 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - **Buzz relay (`buzz.go`, ADR 0x028):** personas' Buzz identities (secret key encrypted with the token helper), communities (attestation encrypted too), bindings, message links and pending posts, mirroring `discord.go`.
   `ListActiveBuzzConnections` is the gateway's work list; `SetBuzzCommunityState` never resumes a community the owner paused; `BuzzThreadContinues` decides thread continuations from the links.
   `CreateChat` honours `Chat.DisabledTools`, so a server-created relay thread never exists with its default-off tools on (the app's create route drops the field).
+- **Failure codes:** a job's `error_code` and a chat message's `last_error_code` carry a stable code beside the failure text.
+  `SetChatMessageLastError` takes the code and clears it with the message; `FinalizeFailedChatJobWithPartial` and `UpdateJob` record it on the job; `SetJobErrorCode` adds it after `UpdateJobStatus` has marked a job failed.
 - **`EncryptToken` / `DecryptToken`** expose the token helper to packages that keep their own tables but share the one key (`internal/accountkeys`).
 
 ## Testing

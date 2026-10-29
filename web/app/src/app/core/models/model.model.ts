@@ -20,8 +20,8 @@ export interface Model {
    */
   base_credits_per_slab?: number;
   /**
-   * Subscription tier this model is accessible from (e.g. 'casual', 'regular').
-   * Optional for the same rollout-safety reason.
+   * Billing grade: 'low', 'medium', 'high' or 'ultra'. The API sends it only
+   * where the deployment bills by tier, so it is absent otherwise.
    */
   subscription_tier?: string;
   /**

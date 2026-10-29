@@ -123,9 +123,11 @@ type Usage struct {
 	// users could choose one.
 	ImageProvider string
 	// ReasoningEffort is the reasoning effort ("off"|"low"|"medium"|"high") the turn was run
-	// at when the user explicitly selected one and the model honours it (ADR 0x026). Empty
-	// when no effort was selected, including models that always reason by default, so an
-	// implementation that prices effort leaves those turns as they were.
+	// at when the user explicitly selected one, the model honours it, and it is above the
+	// model's native level (models.ReasoningEffortAboveNative; ADR 0x026). Empty when no effort
+	// was selected, and when the selection asks for no more than the model reasons at unasked
+	// (low on a model that defaults to medium), so an implementation that prices effort leaves
+	// those turns as they were and never charges more for a lower effort.
 	ReasoningEffort string
 	// AgentLoop is the loop the turn ran ("standard"|"advanced"; ADR 0x026). Empty means
 	// standard.
@@ -170,3 +172,8 @@ type CallUsage struct {
 // environment it needs at construction time. The core passes only the datastore
 // and logger, so no implementation settings cross this boundary.
 var New func(ds *datastore.Datastore, logger *zap.Logger) Meter
+
+// Linked reports whether this build links a metering implementation. Model
+// subscription tiers mean something only to a linked meter: NoopMeter ignores
+// them, so a build without one has no use for showing them.
+func Linked() bool { return New != nil }

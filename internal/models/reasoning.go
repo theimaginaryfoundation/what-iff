@@ -90,6 +90,62 @@ func ReasoningSupportFor(provider, name string) ReasoningSupport {
 	return ReasoningSupportNone
 }
 
+// NativeReasoningEffort is the effort the model reasons at when the request sends no reasoning
+// control: its provider's documented default on this package's scale (xhigh and max count as
+// high, and a toggle model that thinks by default is medium, the level EffectiveReasoningEffort
+// reports for "on"). Off for a model that does not reason unless asked, and for one whose default
+// is not documented. Mistral's hybrid models are off: their docs state no default.
+func NativeReasoningEffort(provider, name string) ReasoningEffort {
+	n := normalizeModelName(name)
+	switch providerForModel(provider, name) {
+	case ModelProviderOpenAI:
+		return openAINativeEffort(n)
+	case ModelProviderAnthropic:
+		return anthropicNativeEffort(n)
+	case ModelProviderZAI:
+		return zaiNativeEffort(n)
+	case ModelProviderXiaomi:
+		return xiaomiNativeEffort(n)
+	case ModelProviderGoogle:
+		return geminiNativeEffort(n)
+	case ModelProviderQwen:
+		return qwenNativeEffort(n)
+	case ModelProviderDeepSeek:
+		return deepSeekNativeEffort(n)
+	}
+	return ReasoningEffortOff
+}
+
+// ReasoningEffortAboveNative returns effective (an effort as sent, from EffectiveReasoningEffort)
+// when it asks the model to reason more than it does unasked (NativeReasoningEffort), else "".
+// A selection at or below the native level costs the model no more than leaving it unset.
+// An effective effort that is not a known level is never reported; a native level that is not
+// one counts as off, the same rule as a default the docs do not state.
+func ReasoningEffortAboveNative(provider, name string, effective ReasoningEffort) ReasoningEffort {
+	rank, ok := effortRank(effective)
+	if !ok {
+		return ""
+	}
+	native, ok := effortRank(NativeReasoningEffort(provider, name))
+	if !ok {
+		native, _ = effortRank(ReasoningEffortOff)
+	}
+	if rank <= native {
+		return ""
+	}
+	return effective
+}
+
+// effortRank is e's position in ReasoningEfforts (lowest first); ok is false for anything else.
+func effortRank(e ReasoningEffort) (rank int, ok bool) {
+	for i, l := range ReasoningEfforts {
+		if l == e {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
 // EffectiveReasoningEffort maps a selected effort onto what the model can do. It returns ""
 // when nothing should be sent: the effort is not set, or the model has no effort control.
 //   - toggle models (on/off only): every level is "on", reported as medium.

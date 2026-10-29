@@ -148,6 +148,9 @@ func (a *Agent) handleEphemeralPromptAsync(ctx context.Context, chatID uuid.UUID
 				return
 			}
 			_, failErr := a.ds.UpdateJobStatus(runCtx, userID, jobID, models.JobStatusFailed, providerkeys.FailureText(runErr))
+			if failErr == nil {
+				a.recordJobFailureCode(runCtx, userID, jobID, runErr)
+			}
 			if failErr != nil {
 				a.logger.Error("failed to mark async webhook background job failed",
 					zap.String("job_id", jobID.String()),
@@ -452,7 +455,7 @@ func (a *Agent) finalizeEphemeralAdvancedDraft(ctx context.Context, userID uuid.
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), jobTerminalPersistTimeout)
 	defer cancel()
 	cancelled := errors.Is(cause, context.Canceled) || ctx.Err() != nil
-	if _, err := a.ds.FinalizeAdvancedDraft(persistCtx, userID, draftJob.ID, chatID, cancelled, cause.Error()); err != nil {
+	if _, err := a.ds.FinalizeAdvancedDraft(persistCtx, userID, draftJob.ID, chatID, cancelled, cause.Error(), failureCode(cause)); err != nil {
 		a.logger.Warn("failed to save the Advanced run's partial reply", zap.String("job_id", draftJob.ID.String()), zap.Error(err))
 	}
 }

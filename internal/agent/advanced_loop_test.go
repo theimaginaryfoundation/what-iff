@@ -312,6 +312,18 @@ func TestWithTurnSettingsUsage(t *testing.T) {
 	assert.Equal(t, []provider.CallUsage{{InputTokens: 20, CachedInputTokens: 5, OutputTokens: 7}}, u.Calls, "only calls no step record has taken")
 	assert.Equal(t, "turn-1", u.TurnID)
 
+	// A selection at or below the model's native level reports no effort: Opus 5.5 reasons at
+	// medium unasked, so low costs no more than leaving it unset; high is above it.
+	opus := func(effort models.ReasoningEffort) string {
+		return withTurnSettingsUsage(&chatContext{
+			model: "claude-opus-5-5", modelProvider: "anthropic", reasoningEffort: effort,
+			turnSettings: models.TurnSettings{ReasoningEffort: effort, ReasoningEffortSource: models.SettingSourceAccount},
+		}, metering.Usage{}).ReasoningEffort
+	}
+	assert.Empty(t, opus(models.ReasoningEffortLow))
+	assert.Empty(t, opus(models.ReasoningEffortMedium))
+	assert.Equal(t, "high", opus(models.ReasoningEffortHigh))
+
 	// No selection: GLM's always-on default reports no effort, so it is priced as before.
 	plain := withTurnSettingsUsage(&chatContext{reasoningEffort: ""}, metering.Usage{})
 	assert.Empty(t, plain.ReasoningEffort)

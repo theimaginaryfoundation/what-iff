@@ -39,7 +39,8 @@ func bodyRecorder(t *testing.T, respond string) (*httptest.Server, func() []map[
 }
 
 // A sub-agent inherits the turn's selected effort, mapped onto its own model, and reports it for
-// metering (ADR 0x026).
+// metering (ADR 0x026) only when it is above the model's native level: Qwen 3.7 and GLM reason at
+// high unasked, Opus 5.5 at medium.
 func TestCallSubagentModel_InheritsReasoningEffort(t *testing.T) {
 	t.Parallel()
 	ctx := withSubagentReasoningEffort(context.Background(), models.ReasoningEffortHigh)
@@ -55,7 +56,7 @@ func TestCallSubagentModel_InheritsReasoningEffort(t *testing.T) {
 
 		out, err := a.callSubagentModel(ctx, uuid.New(), "qwen3.7-plus", buildSubagentModelContext("", "", "hi"), nil, false)
 		require.NoError(t, err)
-		assert.Equal(t, models.ReasoningEffortHigh, out.ReasoningEffort)
+		assert.Equal(t, models.ReasoningEffort(""), out.ReasoningEffort, "high is qwen3.7's native level")
 		assert.Equal(t, true, rec.bodies[0]["enable_thinking"])
 		assert.Equal(t, float64(12288), rec.bodies[0]["thinking_budget"])
 	})
@@ -64,12 +65,12 @@ func TestCallSubagentModel_InheritsReasoningEffort(t *testing.T) {
 		t.Parallel()
 		ds, mock, cleanup := newTestDatastore(t)
 		defer cleanup()
-		expectModelRow(mock, "claude-opus-5", "anthropic", true)
+		expectModelRow(mock, "claude-opus-5-5", "anthropic", true)
 		srv, bodies := bodyRecorder(t, claudeMessageTextJSONBody("msg_a", "claude thought"))
 		a := newTestAgent(ds)
 		a.ClaudeProvider = newHTTPTestClaudeProvider(srv.URL)
 
-		out, err := a.callSubagentModel(ctx, uuid.New(), "claude-opus-5", buildSubagentModelContext("", "", "hi"), nil, false)
+		out, err := a.callSubagentModel(ctx, uuid.New(), "claude-opus-5-5", buildSubagentModelContext("", "", "hi"), nil, false)
 		require.NoError(t, err)
 		assert.Equal(t, models.ReasoningEffortHigh, out.ReasoningEffort)
 		assert.Equal(t, "adaptive", bodies()[0]["thinking"].(map[string]any)["type"])
@@ -87,7 +88,7 @@ func TestCallSubagentModel_InheritsReasoningEffort(t *testing.T) {
 
 		out, err := a.callSubagentModel(ctx, uuid.New(), "glm-5.2", buildSubagentModelContext("", "", "hi"), nil, false)
 		require.NoError(t, err)
-		assert.Equal(t, models.ReasoningEffortHigh, out.ReasoningEffort)
+		assert.Equal(t, models.ReasoningEffort(""), out.ReasoningEffort, "GLM reasons at its deepest level unasked")
 		assert.Equal(t, "max", bodies()[0]["output_config"].(map[string]any)["effort"])
 	})
 
