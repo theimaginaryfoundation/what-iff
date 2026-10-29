@@ -118,8 +118,9 @@ const DefaultBaseURL = "https://api.whatiff.chat"
 var hostedAppHosts = map[string]bool{"whatiff.chat": true, "www.whatiff.chat": true, "app.whatiff.chat": true}
 
 // NormalizeBaseURL checks and tidies a remote server address: https only (http when
-// allowLocal), a host, no credentials, query or fragment, and no trailing slash or /api
-// suffix (the client adds /api itself).
+// allowLocal), a host, no credentials, query or fragment, no default port (so the same server
+// always compares as the same host), and no trailing slash or /api suffix (the client adds /api
+// itself).
 func NormalizeBaseURL(raw string, allowLocal bool) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -146,6 +147,9 @@ func NormalizeBaseURL(raw string, allowLocal bool) (string, error) {
 	}
 	if hostedAppHosts[strings.ToLower(u.Hostname())] && u.Scheme == "https" {
 		return DefaultBaseURL, nil
+	}
+	if (u.Scheme == "https" && u.Port() == "443") || (u.Scheme == "http" && u.Port() == "80") {
+		u.Host = strings.TrimSuffix(u.Host, ":"+u.Port())
 	}
 	p := strings.TrimRight(u.Path, "/")
 	p = strings.TrimSuffix(p, "/api")

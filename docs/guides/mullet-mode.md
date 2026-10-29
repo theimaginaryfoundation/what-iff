@@ -100,7 +100,7 @@ That is it. From now on, open the app at home and your threads are there.
 | Comes over | Does not (yet) |
 |---|---|
 | Every thread, active and archived, with its name | Persona prompts and settings (bring them with an export, step 3) |
-| Every message: who said it, what was said, and when, plus the thread's running summary | Memories (an export brings them; copied threads also build new ones here as you use them) |
+| Every message: who said it, what was said, and when, plus the thread's running summary | Memories (an export brings them; copied threads build new ones from what you say here) |
 | Which model and persona wrote each reply (as a label) | Attachments and images (their names are known, the files are not copied) |
 | Renames on whatiff.chat, unless you renamed the copy | Tool calls and model reasoning |
 

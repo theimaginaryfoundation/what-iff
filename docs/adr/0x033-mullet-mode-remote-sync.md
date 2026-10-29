@@ -41,7 +41,7 @@ Branching (PR #148) already gives the answer the product wants: when histories d
 | R5 | **Idempotent and crash-safe.** Re-running a sync, two instances running at once, or a crash halfway through never duplicates a message. | Per-message links with a unique key; each thread's changes commit in one transaction; a lease per account. |
 | R6 | **Gentle on the hosted app.** A copy nobody is reading costs the hosted app (almost) nothing. | Syncs start when the local app is used (§8), with a slow, optional background sync; incremental discovery that stops at the first unchanged page; page limits; per-run caps; no retries on auth errors. |
 | R7 | **Off unless the operator turns it on, and safe when on.** A multi-tenant server must not become a proxy into other networks. | Opt-in env flag; HTTPS to public addresses only, checked on every connection (local networks only with an explicit flag); the token is encrypted at rest and never returned. |
-| R8 | **Continuing offline works well.** A mirrored 2,000-message thread must not be fed raw to the model on the first local turn. | Mirrored threads are created as imported threads, so the existing rehydration summary (and memory seeding) runs on first use. |
+| R8 | **Continuing offline works well.** A mirrored 2,000-message thread must not be fed raw to the model on the first local turn. | Mirrored threads are created as imported threads, so the existing rehydration summary runs on first use, or the hosted summary comes with them (§7). Memories from synced history are not a goal: the hosted memories come with an account export, and local seeding is only a backstop for a copy summarized here. |
 | R9 | **Optional and removable.** The feature is its own package and tables; the core `chats` and `chat_messages` schemas do not change. | Plugin seam, separate tables keyed by plain UUIDs, like the Discord relay. |
 
 ## Decision
@@ -155,6 +155,8 @@ When #148 lands, the sync fork should set #148's `forked_from_chat_id` and `fork
     A new copy then needs no summarizing here at all, however long it is.
     The summary is derived from the thread's messages, which the scope already serves, so it widens nothing.
     A hosted server from before the route answers 404, which reads as "no summary".
+    A copy that takes the hosted summary is marked `ready`, so first-use rehydration, and with it local memory seeding, does not run for the history that summary covers.
+    That is deliberate: the account's memories already exist on the hosted side and come over with an account export, and memories mined locally from a transcript are a weaker backstop that would cost local model calls per thread.
   - **A local catch-up otherwise.** When more than 50 messages sit past a copy's summary (no hosted summary, one that lags, or an account-export import that sync appended to), the copy is flagged `rehydration_state = stale`.
     Its next use runs the existing rehydration in catch-up mode: the messages from the old window start up to the last few turns are folded into the existing summary in one pass (chunked when long), and memories are seeded from that stretch.
   - A copy that has never been summarized is left to its first rehydration, which summarizes everything but the last few turns, plus memory seeding, on the local server's own model keys.
@@ -224,6 +226,7 @@ That relies on a cross-origin browser being able to read the 404, so the server'
 - A self-hosted install can keep a live copy of a hosted account's conversations with one token.
 - A conversation continued in both places becomes two threads. That is the intended result, but it can surprise people until the branch UI from #148 shows the relationship.
 - Local copies of hosted threads take local model calls on first use (rehydration summary and memory seeding), metered against the local keys, unless the hosted summary came with them.
+  A copy that came with the hosted summary seeds no memories from that history; an account export is how memories come over.
 - The hosted app serves one new read route (`GET /webhooks/chat/{id}/summary`), so the summary half needs a hosted deploy; everything else works against the hosted app as it is.
 - Three new tables and one new plugin. Removing the feature is deleting the plugin and dropping the tables; mirrored threads remain ordinary imported threads.
 
