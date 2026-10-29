@@ -29,9 +29,11 @@ Linked by a blank import in `cmd/api-server/plugins.go`.
   When it is off the routes do not exist, which is how the UI knows.
 - **A save proves the token first** (`Check`: the remote's persona list, one row), so a typo, a revoked token or a token without `chat:read` is reported on the form with the reason, not by a failed run later.
   Switching sync off skips the check.
+- **A stored token only goes back to its own host.**
+  A save that changes the address to another host must carry a new token, even when switching off, so the stored one is never sent somewhere new (the client already refuses redirects for the same reason).
 - **Runs outlive requests.** Saves and "sync now" start the run on the server's lifecycle context, not the request's.
 - **Tokens never leave the server.** Responses carry the last four characters only, and a pasted `Bearer ` prefix is stripped.
 
 ## Testing
 
-- `handlers_test.go` uses a stub store, syncer and check: the token check and its error messages, input validation, switching off, run now and delete, and authentication.
+- `handlers_test.go` uses a stub store, syncer and check: the token check and its error messages, input validation, a new host needing a new token, switching off, run now and delete, and authentication.

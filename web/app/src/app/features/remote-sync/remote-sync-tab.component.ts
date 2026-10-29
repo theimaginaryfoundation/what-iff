@@ -17,6 +17,21 @@ export const REMOTE_SYNC_GUIDE_URL = 'https://github.com/theimaginaryfoundation/
 /** How often the tab re-reads the status while a run is going. */
 const POLL_MS = 2000;
 
+/**
+ * The host (and port) of a server address as typed, scheme optional; '' when it doesn't parse.
+ * Mirrors the server's sameHost (remotesyncplugin), which is what actually refuses to send a
+ * saved token to a new host; this only words the token field to match.
+ */
+export function hostOf(address: string): string {
+  const a = address.trim();
+  if (!a) return '';
+  try {
+    return new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(a) ? a : `https://${a}`).host.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
 type Tone = 'success' | 'warning' | 'danger' | 'neutral' | 'info';
 
 /**
@@ -249,7 +264,9 @@ export class RemoteSyncTabComponent implements OnInit {
   readonly defaultBaseUrl = computed(() => this.settings()?.default_base_url || 'https://api.whatiff.chat');
   readonly tokenPlaceholder = computed(() => {
     const hint = this.settings()?.token_hint;
-    return hint ? `Saved (…${hint}); paste to replace` : 'wht_…';
+    // The server only sends a saved token back to the host it came from.
+    if (!hint || hostOf(this.baseUrl()) !== hostOf(this.settings()?.base_url ?? '')) return 'wht_…';
+    return `Saved (…${hint}); paste to replace`;
   });
   readonly canSave = computed(() => !this.busy() && (!!this.settings()?.configured || this.token().trim() !== ''));
   readonly lastRunSummary = computed(() => runSummary(this.settings()?.last_run));

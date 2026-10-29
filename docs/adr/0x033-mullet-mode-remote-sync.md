@@ -111,18 +111,21 @@ Hosted messages are never edited or deleted one by one (ADR 0x023), and replies 
 Everything below happens in one transaction per thread, together with the link updates.
 
 The **head** of a tracking thread is its newest linked message (the newest message that came from the hosted app).
-A **local tail** is any message in the tracking thread ordered after the head that has no link: something written here.
+A **local tail** is any message in the tracking thread that has no link: something written here.
+Every hosted message in a tracking thread is linked (mirror, adopted prefix and fork alike), so this needs no comparison of `sent_at` values from two clocks; a home server whose clock runs behind would otherwise file a quick reply before the head and miss it.
 
 | Situation | What happens |
 |---|---|
 | No link and no local thread | **Create** a mirror thread and append the whole history. |
 | No link, but a local thread with `import_hash = sha256(remote chat id)` (an earlier account-export import, or a mirror whose link was removed) | **Adopt** it: align its messages with the hosted history, oldest first, by origin and text, and link the matching prefix. Then continue as below. Blank hosted replies (a generation that failed or was cut off) are never copied: an export leaves them out, so copying them would break the alignment and fork every imported thread that has one. |
 | Link, no local tail | **Append** the batch to the tracking thread. |
-| Link, local tail | **Fork**: create a new thread holding a copy of the tracking thread up to and including the head (links copied too), append the batch to it, and point the link at it. The old thread keeps the local continuation and is no longer tracked. |
+| Link, local tail | **Fork**: create a new thread holding a copy of the tracking thread's linked messages (links copied too), append the batch to it, and point the link at it. The old thread keeps the local continuation and is no longer tracked. The import hash moves to the fork with the link. |
 | Link, but the local thread was deleted | Mark the link `detached` and stop. Deleting a mirror locally means "I don't want this here"; it is not recreated. |
 
 A fork is named `<thread name> (from <host>)` and is created exactly like a mirror, so it too is summarized lazily when first used.
 Forking again later works the same way: whichever thread is tracking is the one that gets checked for a local tail.
+Because the import hash follows the tracking thread, **Stop syncing** and a new save re-adopt the fork as it is; left on the old thread, adoption would find that one, see its local tail and fork it a second time.
+A copy deleted here is the exception: its `detached` state lives on the link, which **Stop syncing** removes, so a new save brings it back.
 
 ```
  hosted:  A1 B1 A2 B2 ─────────────► A3 B3            (you kept talking on your phone)
@@ -171,6 +174,7 @@ The copy only matters when someone is about to read it, so that is when the remo
   Each background run is due up to a fifth of the interval late (60 to 72 minutes by default), by an amount derived from the account and its last run (`backgroundJitter`).
   Without it, home servers that start together (after a release, or a power cut) would stay in step and reach the hosted app in the same minute every hour; with it they drift apart within a few cycles.
 - **Leases.** Every run, however started, first **claims a lease** with a conditional update (`lease_until < now`). Only the claimer runs it, so several API instances, several open tabs, or a wake racing the timer need no leader lock.
+  A run cancelled by shutdown records nothing but releases its lease, so the first wake after a restart (a `docker compose` upgrade, say) runs instead of answering "already running" until the lease expires. A run that panics is recorded as `error`.
 - Accounts run one at a time per instance, with a per-request timeout and a cap on response size.
 - **401 or 403** sets `needs_attention` with a message that says which, and neither wakes nor the timer run that account until its settings are saved again: retrying a revoked token helps nobody.
 - Network errors, 429 and 5xx record `error` and are retried next interval. A failure on one thread is recorded and the run moves on to the next.
@@ -181,7 +185,7 @@ The copy only matters when someone is about to read it, so that is when the remo
 | Route | Purpose |
 |---|---|
 | `GET /api/remote-sync` | The account's sync settings and status: URL, token hint, enabled, status, last error, last run and its counts, totals (threads mirrored, messages, forks). `configured: false` when there is none. |
-| `PUT /api/remote-sync` | Save URL, token (required the first time; omitted keeps the stored one) and enabled. Validates against the remote before saving; clears `needs_attention`. |
+| `PUT /api/remote-sync` | Save URL, token (required the first time and whenever the host changes; otherwise omitted keeps the stored one) and enabled. Validates against the remote before saving; clears `needs_attention`. |
 | `DELETE /api/remote-sync` | Stop syncing and forget the token and links. Local threads stay. |
 | `POST /api/remote-sync/run` | Run now (202). 409 if a run is already in progress. |
 | `POST /api/remote-sync/wake` | The app is being used: run if stale, and re-match personas (§7, §8). Always 200 with `{started, rematched}`. |
@@ -192,7 +196,7 @@ That relies on a cross-origin browser being able to read the 404, so the server'
 ### 10. Security (R7)
 
 - **Opt-in per deployment:** `REMOTE_SYNC_ENABLED=true`. The hosted deployment does not set it, so the hosted app never makes outbound sync requests on a user's behalf. The open-source `docker-compose.yml` turns it on, because a self-hosted server is the thing this is for.
-- **HTTPS to public addresses only.** Every connection is checked after DNS resolution (`internal/netguard`, shared with the Discord relay's CDN fetcher), so a user-chosen address cannot reach the server's own network or the cloud metadata service. `REMOTE_SYNC_ALLOW_LOCAL_NETWORK=true` permits `http://` and private or loopback addresses, for syncing from a server on your own network or for development. Redirects are not followed, so the token is never replayed to another host.
+- **HTTPS to public addresses only.** Every connection is checked after DNS resolution (`internal/netguard`, shared with the Discord relay's CDN fetcher), so a user-chosen address cannot reach the server's own network or the cloud metadata service. `REMOTE_SYNC_ALLOW_LOCAL_NETWORK=true` permits `http://` and private or loopback addresses, for syncing from a server on your own network or for development. Redirects are not followed, and changing the address to another host needs the token pasted again, so a stored token is never replayed to another host.
 - **The token is a read credential for the whole hosted account's conversations.** It is encrypted at rest, never returned by the API (only its last four characters), and never logged. The hosted side can revoke it at any time.
 - Error messages shown to the user name the class of failure (unreachable, unauthorized, missing scope, unexpected response), not raw upstream bodies.
 

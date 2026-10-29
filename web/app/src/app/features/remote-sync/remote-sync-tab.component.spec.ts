@@ -6,7 +6,7 @@ import { of, throwError } from 'rxjs';
 
 import { ConfirmationService } from '../../core/services/confirmation.service';
 import { RemoteSyncService, RemoteSyncSettings } from './remote-sync.service';
-import { RemoteSyncTabComponent } from './remote-sync-tab.component';
+import { RemoteSyncTabComponent, hostOf } from './remote-sync-tab.component';
 
 const NOT_SET_UP: RemoteSyncSettings = {
   configured: false,
@@ -142,6 +142,16 @@ describe('RemoteSyncTabComponent', () => {
     expect(api.save).toHaveBeenCalledWith({ base_url: 'https://api.whatiff.chat', enabled: true });
   });
 
+  it('stops offering the saved token once the address names another server', async () => {
+    await render(IN_SYNC);
+
+    type('remote-sync-url', 'https://api.whatiff.chat/api/');
+    expect((el('remote-sync-token') as HTMLInputElement).placeholder).toContain('wxyz');
+
+    type('remote-sync-url', 'home.example:8443');
+    expect((el('remote-sync-token') as HTMLInputElement).placeholder).toBe('wht_…');
+  });
+
   it('flags a refused token as needing attention', async () => {
     await render({ ...IN_SYNC, status: 'needs_attention', last_error: 'The remote server did not accept the token.' });
     expect(text('remote-sync-status-badge')).toBe('Needs attention');
@@ -198,5 +208,14 @@ describe('RemoteSyncTabComponent cadence', () => {
     const cadence = fixture.nativeElement.querySelector('[data-testid="remote-sync-cadence"]') as HTMLElement;
     expect(cadence.textContent?.trim()).toBe('Syncs when you open this app or come back to it.');
     fixture.destroy();
+  });
+});
+
+describe('hostOf', () => {
+  it('reads the host and port, with or without a scheme', () => {
+    expect(hostOf('https://API.whatiff.chat/api')).toBe('api.whatiff.chat');
+    expect(hostOf('localhost:8090')).toBe('localhost:8090');
+    expect(hostOf('http://localhost:8090/')).toBe('localhost:8090');
+    expect(hostOf('  ')).toBe('');
   });
 });

@@ -131,6 +131,28 @@ func TestSaveChecksTheTokenAndNeverReturnsIt(t *testing.T) {
 	assert.Nil(t, store.saved[1].Token)
 }
 
+func TestSaveNeedsANewTokenForANewHost(t *testing.T) {
+	h, store, _, calls, _ := newTestHandler()
+	h.AllowLocalNetwork = true
+	require.Equal(t, http.StatusOK, do(t, h, http.MethodPut, "/remote-sync", `{"token":"wht_secret"}`).Code)
+
+	// Another host without a token: the saved one must not be sent there, even when switching off.
+	for _, body := range []string{`{"base_url":"https://evil.example"}`, `{"base_url":"https://evil.example","enabled":false}`} {
+		rec := do(t, h, http.MethodPut, "/remote-sync", body)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
+		assert.Contains(t, rec.Body.String(), "new address")
+	}
+	assert.Len(t, *calls, 1, "the stored token went nowhere new")
+	assert.Equal(t, remotesync.DefaultBaseURL, store.acct.BaseURL)
+
+	// The same host with another path keeps the token; a new host with a new token is fine.
+	rec := do(t, h, http.MethodPut, "/remote-sync", `{"base_url":"https://api.whatiff.chat/api/"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	rec = do(t, h, http.MethodPut, "/remote-sync", `{"base_url":"http://localhost:8090","token":"wht_other"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, checkCall{"http://localhost:8090", "wht_other"}, (*calls)[len(*calls)-1])
+}
+
 func TestSaveReportsWhyTheRemoteRefused(t *testing.T) {
 	h, store, syncer, _, checkErr := newTestHandler()
 	*checkErr = &remotesync.Error{Kind: remotesync.KindForbidden, Status: 403}

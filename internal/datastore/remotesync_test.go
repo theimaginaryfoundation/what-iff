@@ -281,7 +281,10 @@ func TestApplyForksWhenBothSidesWrote(t *testing.T) {
 	forkRow, err := f.ds.dbClient.Chat.Get(ctx, fork)
 	require.NoError(t, err)
 	assert.Equal(t, "Trip planning (from whatiff.chat)", forkRow.Name)
-	assert.Empty(t, forkRow.ImportHash, "only the first mirror carries the import hash")
+	assert.Equal(t, models.ConversationImportHash(remote.String()), forkRow.ImportHash, "the import hash follows the tracking thread")
+	origRow, err := f.ds.dbClient.Chat.Get(ctx, original)
+	require.NoError(t, err)
+	assert.Empty(t, origRow.ImportHash)
 	assert.Equal(t, models.ChatSourceRemoteSync, forkRow.Source)
 
 	links, err := f.ds.ListRemoteSyncChatLinks(ctx, f.owner)
@@ -304,6 +307,49 @@ func TestApplyForksWhenBothSidesWrote(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, s.Totals.Forks)
 	assert.Equal(t, 6, s.Totals.Messages, "distinct remote messages, not copies")
+}
+
+func TestApplyForksALocalReplyFiledBeforeTheRemoteHead(t *testing.T) {
+	f := newRemoteSyncFixture(t)
+	remote := uuid.New()
+	th := f.thread(remote, "Trip")
+	original := f.apply(t, th, f.msgs(0, "A1", "B1")).ChatID
+
+	// The home server's clock runs behind: its reply sorts before the remote head.
+	f.writeLocal(t, original, "a2 (home, slow clock)", f.t0.Add(30*time.Second))
+	res := f.apply(t, th, f.msgs(2, "A2 (phone)"))
+	assert.Equal(t, models.RemoteSyncForked, res.Outcome)
+	assert.Equal(t, []string{"A1", "a2 (home, slow clock)", "B1"}, f.texts(t, original))
+	assert.Equal(t, []string{"A1", "B1", "A2 (phone)"}, f.texts(t, res.ChatID), "the fork holds only remote messages")
+
+	// The fork has no local tail, so the next remote message appends instead of forking again.
+	again := f.apply(t, th, f.msgs(3, "B2"))
+	assert.Equal(t, models.RemoteSyncAppended, again.Outcome)
+	assert.Equal(t, res.ChatID, again.ChatID)
+}
+
+func TestStopAndResaveReadoptsTheForkInsteadOfForkingAgain(t *testing.T) {
+	f := newRemoteSyncFixture(t)
+	ctx := context.Background()
+	remote := uuid.New()
+	th := f.thread(remote, "Trip")
+	history := f.msgs(0, "A1", "B1")
+	original := f.apply(t, th, history).ChatID
+	f.writeLocal(t, original, "a2 (home)", f.t0.Add(10*time.Minute))
+	history = append(history, f.msgs(2, "A2 (phone)")...)
+	fork := f.apply(t, th, history).ChatID
+
+	require.NoError(t, f.ds.DeleteRemoteSync(ctx, f.owner))
+	token := "wht_new-token-wxyz"
+	require.NoError(t, f.ds.UpsertRemoteSync(ctx, f.owner, models.RemoteSyncUpsert{BaseURL: "https://whatiff.chat", Token: &token}))
+
+	res := f.apply(t, th, append(history, f.msgs(3, "B2")...))
+	assert.Equal(t, models.RemoteSyncAdopted, res.Outcome)
+	assert.Equal(t, fork, res.ChatID)
+	assert.Equal(t, []string{"A1", "B1", "A2 (phone)", "B2"}, f.texts(t, fork))
+	n, err := f.ds.dbClient.Chat.Query().Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 2, n, "the home thread and one fork, no second fork")
 }
 
 func TestApplyAdoptsAnAccountImportedThread(t *testing.T) {

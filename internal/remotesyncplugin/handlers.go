@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -121,6 +122,11 @@ func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
 	if req.Token != nil {
 		token = *req.Token
 	} else if acct, err := h.Store.GetRemoteSyncAccount(r.Context(), userID); err == nil {
+		// A saved token only ever goes back to the server it came from, as with redirects.
+		if !sameHost(acct.BaseURL, baseURL) {
+			h.badRequest(w, "Paste a webhook token from the new address. A saved token is only sent to the server it came from.")
+			return
+		}
 		token = acct.Token
 	} else if !errors.Is(err, datastore.ErrRemoteSyncNotFound) {
 		h.failed(w, "Could not read the sync settings.", err)
@@ -224,6 +230,15 @@ func cleanToken(t string) string {
 		t = strings.TrimSpace(t[7:])
 	}
 	return t
+}
+
+// sameHost reports whether two base URLs, both already normalized (NormalizeBaseURL), name the
+// same server (host and port). The tab's hostOf mirrors this to word the token field; this is
+// the check that counts.
+func sameHost(a, b string) bool {
+	ua, errA := url.Parse(a)
+	ub, errB := url.Parse(b)
+	return errA == nil && errB == nil && strings.EqualFold(ua.Host, ub.Host)
 }
 
 func upperFirst(s string) string {

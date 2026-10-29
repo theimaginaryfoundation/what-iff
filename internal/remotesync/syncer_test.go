@@ -23,7 +23,9 @@ type fakeRemote struct {
 	archived []RemoteChat
 	messages map[uuid.UUID][]models.WebhookMessage // oldest first
 	listErr  error
-	msgErr   map[uuid.UUID]error
+	// listPanic, when set, makes ListChats panic with it.
+	listPanic any
+	msgErr    map[uuid.UUID]error
 
 	listCalls int
 	msgCalls  map[uuid.UUID]int
@@ -71,6 +73,9 @@ func (r *fakeRemote) ListChats(_ context.Context, page int, archived bool) ([]Re
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.listCalls++
+	if r.listPanic != nil {
+		panic(r.listPanic)
+	}
 	if r.listErr != nil {
 		return nil, r.listErr
 	}
@@ -208,6 +213,13 @@ func (s *fakeStore) FinishRemoteSyncRun(_ context.Context, _ uuid.UUID, r models
 	s.leased = false
 	s.finished = append(s.finished, r)
 	s.account.FullWalk = r.Status != models.RemoteSyncStatusOK || r.Stats.ThreadsDeferred > 0
+	return nil
+}
+
+func (s *fakeStore) ReleaseRemoteSync(context.Context, uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.leased = false
 	return nil
 }
 
@@ -427,6 +439,33 @@ func TestCancelledRunsLeaveNoRecord(t *testing.T) {
 	newTestSyncer(store, remote, Config{}).RunDue(ctx)
 	assert.Empty(t, store.finished)
 	assert.True(t, errors.Is(remote.listErr, context.Canceled))
+}
+
+func TestARunCancelledAtShutdownReleasesItsLease(t *testing.T) {
+	remote, store := newFakeRemote(), newFakeStore()
+	remote.addThread("t", 1, t0)
+	remote.listErr = context.Canceled
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s := newTestSyncer(store, remote, Config{})
+	store.leased = true
+
+	s.runClaimed(ctx, store.account.UserID)
+	assert.Empty(t, store.finished, "nothing recorded")
+	assert.False(t, store.leased, "the first wake after a restart can run")
+}
+
+func TestARunThatPanicsIsRecordedAsFailed(t *testing.T) {
+	remote, store := newFakeRemote(), newFakeStore()
+	remote.listPanic = "boom"
+	s := newTestSyncer(store, remote, Config{})
+	store.leased = true
+
+	s.runClaimed(context.Background(), store.account.UserID)
+	require.Len(t, store.finished, 1)
+	assert.Equal(t, models.RemoteSyncStatusError, store.last().Status)
+	assert.Contains(t, *store.last().Error, "stopped unexpectedly")
+	assert.False(t, store.leased)
 }
 
 func TestWakeSyncsOnlyStaleAccountsThatCanRun(t *testing.T) {

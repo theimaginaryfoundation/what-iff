@@ -271,6 +271,19 @@ func (d *Datastore) FinishRemoteSyncRun(ctx context.Context, userID uuid.UUID, r
 	return nil
 }
 
+// ReleaseRemoteSync gives up the user's sync lease without recording a run (a run cancelled at
+// shutdown), so the next wake or tick can claim it straight away.
+func (d *Datastore) ReleaseRemoteSync(ctx context.Context, userID uuid.UUID) error {
+	_, err := d.dbClient.RemoteSync.Update().
+		Where(remotesync.HasOwnerWith(user.ID(userID))).
+		ClearLeaseUntil().
+		Save(ctx)
+	if err != nil {
+		return fmt.Errorf("release remote sync: %w", err)
+	}
+	return nil
+}
+
 // ListRemoteSyncChatLinks returns the user's thread links keyed by remote thread id.
 func (d *Datastore) ListRemoteSyncChatLinks(ctx context.Context, userID uuid.UUID) (map[uuid.UUID]models.RemoteSyncChatLink, error) {
 	rows, err := d.dbClient.RemoteSyncChat.Query().

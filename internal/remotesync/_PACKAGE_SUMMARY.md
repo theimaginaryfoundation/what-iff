@@ -21,6 +21,7 @@ It talks to the remote through a small `Remote` interface and to storage through
   `Start` claims the lease and runs regardless of age ("sync now" and saves); `RunDue` runs every account due on the background interval; `Runner` calls it on a timer.
   An account is due a jittered amount after the interval (up to a fifth of it, from `backgroundJitter` over the account and its last run), so servers that started together drift apart instead of calling the remote in step.
   A run records its outcome with `FinishRemoteSyncRun`, which also releases the lease.
+  A run cancelled at shutdown records nothing but releases the lease (`ReleaseRemoteSync`), so the first wake after a restart can run; a run that panics is recorded as `error`.
 
 ## Key types and entry points
 
@@ -46,9 +47,10 @@ It talks to the remote through a small `Remote` interface and to storage through
 - **401 and 403 stop the account** (`needs_attention`) until its settings are saved again; network errors, 429 and 5xx are retried next run, and one failing thread does not stop the others.
   A thread deleted remotely between the list and the read is skipped, not failed.
 - **Detached threads are seen, not read:** a link whose local thread was deleted records the remote's `last_message_time` without fetching messages, so it stops counting as changed.
-- **Leases, not leader locks.** Any instance may run any account it claims; the lease is renewed after each thread and a cancelled run lets it expire.
+- **Leases, not leader locks.**
+  Any instance may run any account it claims; the lease is renewed after each thread and released when a run ends, however it ends.
 
 ## Testing
 
 - `client_test.go` — address normalization, request shape, error classification (including a refused redirect) and the public-address default.
-- `syncer_test.go` — against a fake remote and a recording store: first and later runs, the overlap, early stop, rounds past the per-run cap (and stopping at a failing round), blank replies, background jitter, detached threads, a refused token, per-thread failures, `Start`.
+- `syncer_test.go` — against a fake remote and a recording store: first and later runs, the overlap, early stop, rounds past the per-run cap (and stopping at a failing round), blank replies, background jitter, detached threads, a refused token, per-thread failures, `Start`, the lease released on cancel, a panicking run.

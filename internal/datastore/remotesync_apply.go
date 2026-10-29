@@ -132,18 +132,14 @@ func (d *Datastore) applyRemoteSyncThread(ctx context.Context, tx *ent.Tx, userI
 		return res, d.touchRemoteLink(ctx, tx, link, thread, tracking)
 	}
 
-	head, err := remoteSyncHead(ctx, tx, tracking.ID)
-	if err != nil {
-		return nil, err
-	}
-	diverged, err := hasLocalTail(ctx, tx, tracking.ID, head)
+	diverged, err := hasLocalTail(ctx, tx, tracking.ID)
 	if err != nil {
 		return nil, err
 	}
 
 	target := tracking
 	if diverged {
-		if target, err = d.forkRemoteMirror(ctx, tx, userID, link, tracking, head, thread); err != nil {
+		if target, err = d.forkRemoteMirror(ctx, tx, userID, link, tracking, thread); err != nil {
 			return nil, err
 		}
 		res.Outcome = models.RemoteSyncForked
@@ -361,11 +357,15 @@ func (d *Datastore) adoptRemoteHistory(ctx context.Context, tx *ent.Tx, link *en
 	return history[n:], nil
 }
 
-// forkRemoteMirror copies a diverged tracking thread up to and including its head into a new
-// thread, links the copies, and points the link at the new thread. The old thread keeps its
-// local continuation and is no longer tracked. This is "What if…" branching (PR #148) done by the
+// forkRemoteMirror copies the remote messages of a diverged tracking thread into a new thread,
+// links the copies, and points the link at the new thread. The old thread keeps its local
+// continuation and is no longer tracked. This is "What if…" branching (PR #148) done by the
 // syncer; when that lands, set its forked_from_* columns here so the branch UI shows it.
-func (d *Datastore) forkRemoteMirror(ctx context.Context, tx *ent.Tx, userID uuid.UUID, link *ent.RemoteSyncChat, from *ent.Chat, head *ent.ChatMessage, thread models.RemoteSyncThread) (*ent.Chat, error) {
+//
+// The remote thread's import hash moves to the fork too, so the thread that tracks the remote is
+// always the one adoption finds: after Stop syncing and a new save it is re-adopted as it is,
+// rather than the old thread being adopted and forked a second time.
+func (d *Datastore) forkRemoteMirror(ctx context.Context, tx *ent.Tx, userID uuid.UUID, link *ent.RemoteSyncChat, from *ent.Chat, thread models.RemoteSyncThread) (*ent.Chat, error) {
 	label := thread.Name
 	if label == "" {
 		label = from.Name
@@ -373,9 +373,19 @@ func (d *Datastore) forkRemoteMirror(ctx context.Context, tx *ent.Tx, userID uui
 	if thread.Host != "" {
 		label += " (from " + thread.Host + ")"
 	}
+	hash := models.ConversationImportHash(thread.RemoteChatID.String())
+	// (owner, import_hash) is unique: take the hash off whichever thread holds it first.
+	err := tx.Chat.Update().
+		Where(entchat.HasOwnerWith(user.ID(userID)), entchat.ImportHash(hash)).
+		ClearImportHash().
+		Exec(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("move import hash: %w", err)
+	}
 	create := tx.Chat.Create().
 		SetName(models.NormalizeImportedTitle(label, "Synced thread")).
 		SetOwnerID(userID).
+		SetImportHash(hash).
 		SetSource(models.ChatSourceRemoteSync).
 		SetArchived(from.Archived).
 		SetTags(from.Tags)
@@ -389,25 +399,23 @@ func (d *Datastore) forkRemoteMirror(ctx context.Context, tx *ent.Tx, userID uui
 		return nil, fmt.Errorf("create fork thread: %w", err)
 	}
 
-	if head != nil {
-		prefix, err := tx.ChatMessage.Query().
-			Where(chatmessage.HasChatWith(entchat.ID(from.ID)), notAfter(head)).
-			Order(ent.Asc(chatmessage.FieldSentAt), ent.Asc(chatmessage.FieldID)).
-			All(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("load fork prefix: %w", err)
-		}
-		links, err := tx.RemoteSyncMessage.Query().Where(remotesyncmessage.ChatID(from.ID)).All(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("load fork prefix links: %w", err)
-		}
-		byLocal := make(map[uuid.UUID]*ent.RemoteSyncMessage, len(links))
-		for _, l := range links {
-			byLocal[l.ChatMessageID] = l
-		}
-		if err := copyMessagesInto(ctx, tx, link.ID, fork.ID, prefix, byLocal); err != nil {
-			return nil, err
-		}
+	prefix, err := tx.ChatMessage.Query().
+		Where(chatmessage.HasChatWith(entchat.ID(from.ID)), fromRemote(from.ID)).
+		Order(ent.Asc(chatmessage.FieldSentAt), ent.Asc(chatmessage.FieldID)).
+		All(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load fork prefix: %w", err)
+	}
+	links, err := tx.RemoteSyncMessage.Query().Where(remotesyncmessage.ChatID(from.ID)).All(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load fork prefix links: %w", err)
+	}
+	byLocal := make(map[uuid.UUID]*ent.RemoteSyncMessage, len(links))
+	for _, l := range links {
+		byLocal[l.ChatMessageID] = l
+	}
+	if err := copyMessagesInto(ctx, tx, link.ID, fork.ID, prefix, byLocal); err != nil {
+		return nil, err
 	}
 
 	err = tx.RemoteSyncChat.UpdateOne(link).
@@ -513,47 +521,30 @@ func dropLinkedRemoteMessages(ctx context.Context, tx *ent.Tx, chatID uuid.UUID,
 	return out, nil
 }
 
-// remoteSyncHead returns the newest message in chatID that came from the remote, or nil.
-func remoteSyncHead(ctx context.Context, tx *ent.Tx, chatID uuid.UUID) (*ent.ChatMessage, error) {
-	head, err := tx.ChatMessage.Query().
-		Where(chatmessage.HasChatWith(entchat.ID(chatID)), func(s *entsql.Selector) {
-			t := entsql.Table(remotesyncmessage.Table)
-			s.Where(entsql.In(s.C(chatmessage.FieldID),
-				entsql.Select(t.C(remotesyncmessage.FieldChatMessageID)).From(t).
-					Where(entsql.EQ(t.C(remotesyncmessage.FieldChatID), chatID))))
-		}).
-		Order(ent.Desc(chatmessage.FieldSentAt), ent.Desc(chatmessage.FieldID)).
-		First(ctx)
-	if ent.IsNotFound(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("find remote head: %w", err)
-	}
-	return head, nil
-}
-
-// hasLocalTail reports whether chatID holds a message ordered after head (any message at all
-// when there is no head). Everything after the head was written here, by definition.
-func hasLocalTail(ctx context.Context, tx *ent.Tx, chatID uuid.UUID, head *ent.ChatMessage) (bool, error) {
-	q := tx.ChatMessage.Query().Where(chatmessage.HasChatWith(entchat.ID(chatID)))
-	if head != nil {
-		q = q.Where(chatmessage.Not(notAfter(head)))
-	}
-	ok, err := q.Exist(ctx)
+// hasLocalTail reports whether chatID holds a message that did not come from the remote, which
+// can only have been written here. Every remote message in a tracking thread is linked (mirror,
+// adopted prefix and fork prefix alike), so this needs no comparison of sent_at values written
+// by two different clocks: a home server running behind could otherwise file a reply before the
+// remote head and miss it.
+func hasLocalTail(ctx context.Context, tx *ent.Tx, chatID uuid.UUID) (bool, error) {
+	ok, err := tx.ChatMessage.Query().
+		Where(chatmessage.HasChatWith(entchat.ID(chatID)), chatmessage.Not(fromRemote(chatID))).
+		Exist(ctx)
 	if err != nil {
 		return false, fmt.Errorf("check local tail: %w", err)
 	}
 	return ok, nil
 }
 
-// notAfter matches messages at or before m in (sent_at, id) order, the order threads are read in.
-func notAfter(m *ent.ChatMessage) func(*entsql.Selector) {
+// fromRemote matches the messages of chatID that are linked to a remote message. The subquery
+// seeks the (chat_id, remote_message_id) unique index on remote_sync_messages by its leading
+// column, so it reads only this thread's links.
+func fromRemote(chatID uuid.UUID) func(*entsql.Selector) {
 	return func(s *entsql.Selector) {
-		s.Where(entsql.Or(
-			entsql.LT(s.C(chatmessage.FieldSentAt), m.SentAt),
-			entsql.And(entsql.EQ(s.C(chatmessage.FieldSentAt), m.SentAt), entsql.LTE(s.C(chatmessage.FieldID), m.ID)),
-		))
+		t := entsql.Table(remotesyncmessage.Table)
+		s.Where(entsql.In(s.C(chatmessage.FieldID),
+			entsql.Select(t.C(remotesyncmessage.FieldChatMessageID)).From(t).
+				Where(entsql.EQ(t.C(remotesyncmessage.FieldChatID), chatID))))
 	}
 }
 

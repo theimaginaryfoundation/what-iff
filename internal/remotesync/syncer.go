@@ -33,6 +33,7 @@ type Store interface {
 	ClaimRemoteSync(ctx context.Context, userID uuid.UUID, leaseUntil time.Time) (bool, error)
 	ExtendRemoteSyncLease(ctx context.Context, userID uuid.UUID, leaseUntil time.Time) error
 	FinishRemoteSyncRun(ctx context.Context, userID uuid.UUID, result models.RemoteSyncRunResult) error
+	ReleaseRemoteSync(ctx context.Context, userID uuid.UUID) error
 	ListDueRemoteSyncs(ctx context.Context, lastRunBefore time.Time) ([]models.RemoteSyncDue, error)
 	RematchRemoteSyncPersonas(ctx context.Context, userID uuid.UUID) (int, error)
 }
@@ -238,6 +239,10 @@ func backgroundJitter(userID uuid.UUID, lastRun time.Time, interval time.Duratio
 }
 
 // runClaimed runs one claimed account and records the outcome, which also releases the lease.
+// A run cancelled by shutdown records nothing but still releases its lease, so the first wake
+// after a restart can run instead of waiting out the lease; the next run starts over safely. A
+// run that panics is recorded as failed, so the settings page says so and the account waits its
+// usual interval (or wake minimum age) before the next try.
 //
 // A run that leaves changed threads for later (more than MaxThreadsPerRun) goes straight on with
 // another round, so a big first sync finishes in one go rather than one batch per wake or
@@ -248,6 +253,8 @@ func (s *Syncer) runClaimed(ctx context.Context, userID uuid.UUID) {
 	defer func() {
 		if v := recover(); v != nil {
 			s.logger.Error("remote sync: run panicked", zap.String("user_id", userID.String()), zap.Any("panic", v))
+			msg := "Sync stopped unexpectedly. It will try again."
+			s.finish(ctx, userID, models.RemoteSyncRunResult{Status: models.RemoteSyncStatusError, Error: &msg})
 		}
 	}()
 	result := s.run(ctx, userID, false)
@@ -262,15 +269,9 @@ func (s *Syncer) runClaimed(ctx context.Context, userID uuid.UUID) {
 			break
 		}
 	}
+	s.finish(ctx, userID, result)
 	if result.Status == "" {
-		// Cancelled (shutdown): leave the lease to expire; the next run starts over safely.
 		return
-	}
-	// Record with a fresh context: a run that ends at shutdown still releases its lease.
-	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	defer cancel()
-	if err := s.store.FinishRemoteSyncRun(finishCtx, userID, result); err != nil {
-		s.logger.Warn("remote sync: record run", zap.String("user_id", userID.String()), zap.Error(err))
 	}
 	st := result.Stats
 	s.logger.Info("remote sync: run finished",
@@ -284,6 +285,22 @@ func (s *Syncer) runClaimed(ctx context.Context, userID uuid.UUID) {
 		zap.Int("threads_failed", st.ThreadsFailed),
 		zap.Int("threads_deferred", st.ThreadsDeferred),
 		zap.Int("messages_added", st.MessagesAdded))
+}
+
+// finish records a run's result and releases the lease; a result with no status (a cancelled run)
+// only releases it. It uses a fresh context, so a run that ends at shutdown still lets go.
+func (s *Syncer) finish(ctx context.Context, userID uuid.UUID, result models.RemoteSyncRunResult) {
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	var err error
+	if result.Status == "" {
+		err = s.store.ReleaseRemoteSync(finishCtx, userID)
+	} else {
+		err = s.store.FinishRemoteSyncRun(finishCtx, userID, result)
+	}
+	if err != nil {
+		s.logger.Warn("remote sync: record run", zap.String("user_id", userID.String()), zap.Error(err))
+	}
 }
 
 // addRounds folds a follow-up round into a run: counts add up, and the outcome and what is

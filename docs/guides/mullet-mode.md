@@ -29,7 +29,7 @@ The design and the reasoning behind it are in [ADR 0x033](../adr/0x033-mullet-mo
 - **Continue anywhere.** Reply to a copied thread at home and it just works; the first reply catches the persona up on the earlier conversation.
 - **Both sides is fine.** If you continue the same thread at home *and* on whatiff.chat, nothing is merged or lost: your home thread stays exactly as you left it, and the whatiff.chat continuation arrives as a second thread named like `Trip planning (from api.whatiff.chat)`.
   From then on, that second thread is the one that keeps up with whatiff.chat.
-- **Nothing is ever deleted or changed by sync.** Delete a copy at home and it stays deleted (sync will not bring it back).
+- **Nothing is ever deleted or changed by sync.** Delete a copy at home and it stays deleted (sync will not bring it back, unless you stop syncing and set it up again).
   Deleting or editing something on whatiff.chat does not touch your copy.
 
 ## What you need
