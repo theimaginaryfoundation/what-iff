@@ -1,6 +1,6 @@
 # ADR 0x027: Provider connections, the models they serve, and utility models
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-29
 - **Deciders:** What Iff maintainers
 
