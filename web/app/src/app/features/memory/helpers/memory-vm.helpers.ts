@@ -16,7 +16,7 @@ export interface MemoryCardVm {
   level: Memory['level'];
   levelLabel: string;
   status: Memory['status'];
-  /** `external`: learned from other people in a Discord relay thread (unverified). */
+  /** `external`: learned from other people in a relay thread (Discord, Buzz or Slack; unverified). */
   provenance: MemoryProvenance;
   /** Who an external memory came from, when known. */
   sourceSpeaker: string | null;

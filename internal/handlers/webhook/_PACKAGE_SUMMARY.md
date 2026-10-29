@@ -9,7 +9,8 @@ HTTP handlers for the **webhook surface**: static-token management for the signe
 - **Token management** (`tokens.go`): create, list and revoke webhook tokens under `/api/webhook-tokens`, authenticated as the account (session JWT).
   Creation takes the token's scopes and stores exactly those; omitting them gives `messages:write` only.
 - **Send** (`messages.go`): `POST /api/webhooks/chat/{chatId}/messages` in `user`, `assistant` or `background` mode.
-- **Read** (`reads.go`, `read_params.go`): `GET /api/webhooks/chat`, `/personality`, `/chat/{chatId}/messages`, `/chat/chat-message/{id}` and `/job/{id}`.
+- **Read** (`reads.go`, `read_params.go`): `GET /api/webhooks/chat`, `/personality`, `/chat/{chatId}/messages`, `/chat/{chatId}/summary`, `/chat/chat-message/{id}` and `/job/{id}`.
+  `/summary` serves a thread's running summary and `window_start`, derived from the messages the scope already serves; remote sync copies it (ADR 0x033).
   Each mirrors a session-API read and calls the same datastore method, but returns an allow-listed shape.
 - Does **not** authenticate requests or check scopes itself: `middleware.WebhookAuthMiddleware` and `middleware.RequireWebhookScope` do, wired in `RegisterWebhookRoutes`.
 
@@ -18,7 +19,7 @@ HTTP handlers for the **webhook surface**: static-token management for the signe
 | Symbol | Notes |
 |--------|--------|
 | `Handler`, `NewHandler` | Takes a `Provider` (datastore reads and token storage), a `MessageAgent` (runs sends), and a logger. |
-| `RegisterWebhookRoutes` | Mounts the webhook routes and attaches the scope each requires: `messages:write` for the POST, `chat:read` for the five GETs. |
+| `RegisterWebhookRoutes` | Mounts the webhook routes and attaches the scope each requires: `messages:write` for the POST, `chat:read` for the six GETs. |
 | `RegisterTokenRoutes` | Mounts the session-authenticated token management routes. |
 | `pagingFrom`, `*FiltersFrom` | Strict query parsing shared by the list routes. |
 

@@ -64,10 +64,10 @@ Nothing writes a separate "Discord version" of a reply.
 
 ### 5. Inbound
 
-- In a bound channel with `inbound_enabled`, the persona answers an @mention of the bot, or a Discord reply to one of its messages. Bots and webhooks are always ignored, including the bot itself.
+- In a bound channel with `inbound_enabled`, the persona answers an @mention of the bot, or a Discord reply to one of its messages. Bots and webhooks are always ignored, including the bot itself (since [ADR 0x031](0x031-relay-turn-batching-and-loop-guard.md), other bots are answered when the binding has `answer_agents`, behind a loop guard).
 - The message is saved as a user message in the relay thread as `alice (Discord, #general): text`. A reply to someone other than the bot quotes the replied-to message first. Files posted with it are fetched from Discord's CDN only (HTTPS, public addresses only, at most 4 files of 20 MB) and attached through the app's own upload path.
 - The turn runs through the plugin turn starter (`plugins.Deps.Turns`, the same path as the app and the webhook user mode), metered against the bot's owner with source `discord` (`metering.TurnSource`), so a metering implementation can keep relay turns out of the owner's own chat allowance.
-- One turn at a time per relay thread; up to 5 tags queue behind it, and an overflow is told so in the channel (at most once a minute per binding). While a turn runs the bot shows "typing…". A failed turn posts a neutral notice that reveals nothing about the owner's account.
+- One turn at a time per relay thread; up to 5 tags queue behind it (since [ADR 0x031](0x031-relay-turn-batching-and-loop-guard.md): tags that wait are answered together in one turn, up to 8), and an overflow is told so in the channel (at most once a minute per binding). While a turn runs the bot shows "typing…". A failed turn posts a neutral notice that reveals nothing about the owner's account.
 - Relay turns run without the owner's time zone, so their timestamps do not reveal it. Display names are cleaned of the characters that make up the `name (Discord, #channel):` label, so a nickname cannot pose as another speaker.
 
 ### 6. Who may tag, and what a relay thread can reach

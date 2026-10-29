@@ -4,6 +4,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { provideHttpClient, withXhr } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ActivatedRoute, Router } from '@angular/router';
+import { By } from '@angular/platform-browser';
 import { BehaviorSubject, NEVER, of, throwError } from 'rxjs';
 
 import { ChatService } from '../../../core/services/chat.service';
@@ -16,6 +17,7 @@ import { Chat } from '../../../core/models/chat.model';
 import { Personality } from '../../../core/models/personality.model';
 import { UserPreferences } from '../../../core/models/user.model';
 import { PersonalityDetailPageComponent } from './personality-detail-page.component';
+import { EntityMarketplaceOutletComponent } from '../../../extensions/entity-marketplace-outlet.component';
 
 function makePersonality(overrides: Partial<Personality> = {}): Personality {
     return {
@@ -128,6 +130,18 @@ describe('PersonalityDetailPageComponent', () => {
         fixture.detectChanges();
         const nameInput = fixture.nativeElement.querySelector('input[aria-label="Personality name"]') as HTMLInputElement;
         expect(nameInput.value).toBe('Vera Calder');
+    });
+
+    it('mounts the marketplace outlet in the header actions with the personality identity', () => {
+        fixture.detectChanges();
+        const outlet = fixture.debugElement.query(By.directive(EntityMarketplaceOutletComponent));
+        expect(outlet).toBeTruthy();
+        const instance = outlet.componentInstance as EntityMarketplaceOutletComponent;
+        expect(instance.kind()).toBe('personality');
+        expect(instance.entityId()).toBe('p-1');
+        expect(instance.entityName()).toBe('Vera Calder');
+        expect(instance.layout()).toBe('actions');
+        expect((outlet.nativeElement as HTMLElement).closest('header')).toBeTruthy();
     });
 
     it('explains each section with a help hint next to its heading', () => {

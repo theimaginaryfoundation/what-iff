@@ -44,6 +44,7 @@ func createDiscordTestTables(t *testing.T, db *sql.DB) {
 			inbound_enabled bool NOT NULL DEFAULT true,
 			allow_user_ids json NOT NULL,
 			deny_user_ids json NOT NULL,
+			answer_agents bool NOT NULL DEFAULT false,
 			allow_unrestricted bool NOT NULL DEFAULT false,
 			status text NOT NULL DEFAULT 'active',
 			last_error text,
@@ -66,6 +67,7 @@ func createDiscordTestTables(t *testing.T, db *sql.DB) {
 			status text NOT NULL DEFAULT 'received',
 			error text,
 			attempts integer NOT NULL DEFAULT 0,
+			agent_depth integer NOT NULL DEFAULT 0,
 			discord_binding_links uuid NOT NULL REFERENCES discord_bindings(id) ON DELETE CASCADE,
 			UNIQUE (discord_message_id, discord_binding_links)
 		)`,
@@ -82,6 +84,9 @@ func createDiscordTestTables(t *testing.T, db *sql.DB) {
 		_, err := db.Exec(ddl)
 		require.NoError(t, err)
 	}
+	// The relay provenance lookups (IsExternalRelayChat) read Buzz and Slack bindings too.
+	createBuzzTestTables(t, db)
+	createSlackTestTables(t, db)
 }
 
 type discordFixture struct {
@@ -385,4 +390,57 @@ func TestCreateChat_StoresDisabledTools(t *testing.T) {
 	plain, err := ds.CreateChat(ctx, userID, models.Chat{Name: "plain"})
 	require.NoError(t, err)
 	assert.Empty(t, plain.DisabledTools)
+}
+
+func TestDiscordBatchLinksLoopDepthAndRenames(t *testing.T) {
+	f := newDiscordFixture(t)
+	ctx := context.Background()
+	bot := f.bot(t)
+	b := f.binding(t, bot.ID, "c1")
+	start := time.Now().Add(-time.Minute)
+
+	none, err := f.ds.LastInboundDiscordLink(ctx, b.ID, start)
+	require.NoError(t, err)
+	assert.Nil(t, none, "a fresh binding has no previous message")
+
+	// One batched turn answers two messages: both links point at its saved message.
+	msgID := uuid.New()
+	for i, in := range []models.DiscordInbound{
+		{BindingID: b.ID, DiscordMessageID: "m1", DiscordChannelID: "c1", AuthorID: "222", AuthorName: "alice"},
+		{BindingID: b.ID, DiscordMessageID: "m2", DiscordChannelID: "c1", AuthorID: "333", AuthorName: "botty", AgentDepth: 2},
+	} {
+		link, created, err := f.ds.RecordInboundDiscordMessage(ctx, in)
+		require.NoError(t, err, i)
+		require.True(t, created)
+		require.NoError(t, f.ds.AttachDiscordLinkMessage(ctx, link.ID, msgID))
+		time.Sleep(2 * time.Millisecond) // distinct created_at
+	}
+	found, err := f.ds.FindInboundDiscordLink(ctx, msgID)
+	require.NoError(t, err)
+	require.NotNil(t, found)
+	assert.Equal(t, "m2", *found.DiscordMessageID, "the reply answers the newest message")
+	speaker, err := f.ds.ExternalSpeakerForMessage(ctx, f.owner, msgID)
+	require.NoError(t, err)
+	assert.Equal(t, "alice, botty", speaker)
+
+	last, err := f.ds.LastInboundDiscordLink(ctx, b.ID, start)
+	require.NoError(t, err)
+	require.NotNil(t, last)
+	assert.Equal(t, 2, last.AgentDepth, "the depth is persisted")
+	last, err = f.ds.LastInboundDiscordLink(ctx, b.ID, time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	assert.Nil(t, last, "older than the chain gap")
+
+	require.NoError(t, f.ds.RenameDiscordChannel(ctx, bot.ID, "c1", "#lounge"))
+	require.NoError(t, f.ds.RenameDiscordChannel(ctx, bot.ID, "c1", " "), "an empty name is ignored")
+	require.NoError(t, f.ds.RenameDiscordChannel(ctx, uuid.New(), "c1", "elsewhere"), "another bot's binding is untouched")
+	got, err := f.ds.GetDiscordBinding(ctx, f.owner, b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "lounge", got.ChannelName)
+
+	assert.False(t, got.AnswerAgents, "bots are not answered by default")
+	yes := true
+	got, err = f.ds.UpdateDiscordBinding(ctx, f.owner, b.ID, models.DiscordBindingPatch{AnswerAgents: &yes})
+	require.NoError(t, err)
+	assert.True(t, got.AnswerAgents)
 }

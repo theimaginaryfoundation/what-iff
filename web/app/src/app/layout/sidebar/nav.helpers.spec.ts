@@ -21,9 +21,15 @@ describe('nav.helpers', () => {
     });
 
     describe('configNavItems', () => {
+        // The build may contribute entries through extensions/nav-items.ts, so
+        // the base set is asserted as a prefix and the extras as the suffix.
+        const BASE_IDS = ['memories', 'modes', 'skills', 'tools', 'jobs'];
+        const extraIds = () => extraConfigItems.map(i => i.id);
+
         it('lists base items in canonical order including jobs', () => {
             const ids = configNavItems().map(i => i.id);
-            expect(ids).toEqual(['memories', 'modes', 'skills', 'tools', 'jobs']);
+            expect(ids.slice(0, BASE_IDS.length)).toEqual(BASE_IDS);
+            expect(ids.slice(BASE_IDS.length)).toEqual(extraIds());
         });
 
         it('appends extraConfigItems after the base set', () => {
@@ -37,7 +43,20 @@ describe('nav.helpers', () => {
             (extraConfigItems as NavItem[]).push(fake);
             try {
                 const ids = configNavItems().map(i => i.id);
-                expect(ids).toEqual(['memories', 'modes', 'skills', 'tools', 'jobs', 'features']);
+                expect(ids).toEqual([...BASE_IDS, ...extraIds()]);
+                expect(ids[ids.length - 1]).toBe('features');
+            }
+            finally {
+                (extraConfigItems as NavItem[]).pop();
+            }
+        });
+
+        it('treats an extra config item\'s route as a config path', () => {
+            const fake: NavItem = { id: 'features', label: 'Features', hint: 'Feature toggles', route: '/features-x', icon: appNavItems()[0].icon };
+            expect(isConfigPath('/features-x/123')).toBe(false);
+            (extraConfigItems as NavItem[]).push(fake);
+            try {
+                expect(isConfigPath('/features-x/123')).toBe(true);
             }
             finally {
                 (extraConfigItems as NavItem[]).pop();
@@ -46,7 +65,10 @@ describe('nav.helpers', () => {
 
         it('uses config routes that match registered Angular paths', () => {
             const routes = configNavItems().map(i => i.route);
-            expect(routes).toEqual(['/memories', '/mode', '/skills', '/integrations', '/agent-jobs']);
+            expect(routes.slice(0, BASE_IDS.length)).toEqual(['/memories', '/mode', '/skills', '/integrations', '/agent-jobs']);
+            for (const item of extraConfigItems) {
+                expect(item.route.startsWith('/'), `${item.id} route`).toBe(true);
+            }
         });
     });
 

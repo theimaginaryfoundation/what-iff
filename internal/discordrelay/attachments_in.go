@@ -9,12 +9,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/plugins"
+	"github.com/theimaginaryfoundation/what-iff/internal/relaykit"
 	"go.uber.org/zap"
 )
 
@@ -87,27 +87,10 @@ func NewCDNFetcher() *CDNFetcher {
 	}}
 }
 
-// cgnat is the shared address space (100.64.0.0/10), which net.IP.IsPrivate does not cover.
-var cgnat = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+// isPublicIP and publicOnlyControl are relaykit's public-address guard, named for this package.
+func isPublicIP(ip net.IP) bool { return relaykit.IsPublicIP(ip) }
 
-// isPublicIP reports whether ip is an address on the public internet: not loopback,
-// private, link-local (including the cloud metadata address), shared, multicast or unspecified.
-func isPublicIP(ip net.IP) bool {
-	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !cgnat.Contains(ip)
-}
-
-// publicOnlyControl is a net.Dialer Control hook: it runs with the resolved address just
-// before each connection is made.
-func publicOnlyControl(_, address string, _ syscall.RawConn) error {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return err
-	}
-	if ip := net.ParseIP(host); ip == nil || !isPublicIP(ip) {
-		return fmt.Errorf("discord attachment: refusing to connect to non-public address %s", host)
-	}
-	return nil
-}
+var publicOnlyControl = relaykit.PublicOnlyControl("discord attachment")
 
 func (f *CDNFetcher) Fetch(ctx context.Context, rawURL string, max int64) ([]byte, error) {
 	u, err := url.Parse(rawURL)
@@ -139,8 +122,9 @@ func (f *CDNFetcher) Fetch(ctx context.Context, rawURL string, max int64) ([]byt
 // ingestInbound saves the files posted with a tag to the relay thread, so the persona
 // sees them with the message. Files that cannot be added (a type the app does not take,
 // too large, too many, a failed download) are named in notes for the persona to pass on,
-// rather than dropped silently.
-func (s *Service) ingestInbound(ctx context.Context, ownerID, chatID uuid.UUID, msg InboundMessage) (atts []*models.FileAttachment, notes []string) {
+// rather than dropped silently. room is how many more files the turn takes (a batched turn
+// shares MaxInboundAttachments across its tags).
+func (s *Service) ingestInbound(ctx context.Context, ownerID, chatID uuid.UUID, msg InboundMessage, room int) (atts []*models.FileAttachment, notes []string) {
 	if len(msg.Attachments) == 0 {
 		return nil, nil
 	}
@@ -152,8 +136,8 @@ func (s *Service) ingestInbound(ctx context.Context, ownerID, chatID uuid.UUID, 
 	}
 	for i, a := range msg.Attachments {
 		switch {
-		case len(atts) >= MaxInboundAttachments:
-			skip(a, fmt.Sprintf("at most %d files are added per message", MaxInboundAttachments))
+		case len(atts) >= room:
+			skip(a, fmt.Sprintf("at most %d files are added at a time", MaxInboundAttachments))
 			continue
 		case a.Size > MaxInboundFileBytes:
 			skip(a, "too large")

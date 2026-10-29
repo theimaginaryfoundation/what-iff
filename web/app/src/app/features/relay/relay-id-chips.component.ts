@@ -1,20 +1,42 @@
 import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
 
+/** What one relay's people ids look like: Discord user ids, Buzz public keys, Slack user ids. */
+export interface RelayIdKind {
+  /** The id to keep for one typed or pasted entry, or null when the entry is not an id. */
+  parse(entry: string): string | null;
+  /** The note under the field while something typed is not an id. */
+  invalid: string;
+  /** How a kept id reads on its chip (as kept, by default). */
+  display?(id: string): string;
+  /** The chip's hover text (none, by default). */
+  title?(id: string): string;
+  /** The field's `inputmode` ('numeric' for numbers-only ids). */
+  inputMode?: string;
+  /** Chips in a monospace font (keys, rather than names or numbers). */
+  monospace?: boolean;
+}
+
 /**
- * A list of Discord user ids shown as removable chips, like the Edit tags field in
- * the thread manager. Ids are added with Enter, a comma or a space, or by pasting
- * a list; whatever is typed when the field loses focus is added too.
+ * A list of people ids shown as removable chips, like the Edit tags field in the thread manager;
+ * the relay tabs' allow and deny lists. What counts as an id comes from `kind`. Ids are added
+ * with Enter, a comma or a space, or by pasting a list; whatever is typed when the field loses
+ * focus is added too.
  */
 @Component({
-  selector: 'app-discord-id-chips',
+  selector: 'app-relay-id-chips',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="chips__field" [class.chips__field--error]="error()" (click)="entry.focus()">
       @for (id of ids(); track id) {
-        <span class="chips__chip">
-          {{ id }}
-          <button type="button" class="chips__remove" [attr.aria-label]="'Remove ' + id" (click)="remove(id); $event.stopPropagation()">
+        <span class="chips__chip" [class.chips__chip--mono]="kind().monospace" [attr.title]="title(id)">
+          {{ display(id) }}
+          <button
+            type="button"
+            class="chips__remove"
+            [attr.aria-label]="'Remove ' + display(id)"
+            (click)="remove(id); $event.stopPropagation()"
+          >
             ×
           </button>
         </span>
@@ -22,9 +44,10 @@ import { ChangeDetectionStrategy, Component, input, output, signal } from '@angu
       <input
         #entry
         type="text"
-        inputmode="numeric"
         autocomplete="off"
+        spellcheck="false"
         class="chips__input"
+        [attr.inputmode]="kind().inputMode ?? null"
         [attr.placeholder]="ids().length === 0 ? placeholder() : 'Add another…'"
         [attr.aria-label]="label()"
         (input)="onInput(entry)"
@@ -79,6 +102,10 @@ import { ChangeDetectionStrategy, Component, input, output, signal } from '@angu
         padding: 0.125rem 0.25rem 0.125rem 0.5rem;
       }
 
+      .chips__chip--mono {
+        font-family: ui-monospace, monospace;
+      }
+
       .chips__remove {
         background: transparent;
         border: 0;
@@ -113,13 +140,23 @@ import { ChangeDetectionStrategy, Component, input, output, signal } from '@angu
     `,
   ],
 })
-export class DiscordIdChipsComponent {
+export class RelayIdChipsComponent {
+  readonly kind = input.required<RelayIdKind>();
+  /** The ids as kept (what the API stores). */
   readonly ids = input<readonly string[]>([]);
-  readonly label = input('Discord user ids');
-  readonly placeholder = input('Paste or type a user id…');
+  readonly label = input('User ids');
+  readonly placeholder = input('Paste or type an id…');
   readonly idsChange = output<string[]>();
 
   readonly error = signal<string | null>(null);
+
+  display(id: string): string {
+    return this.kind().display?.(id) ?? id;
+  }
+
+  title(id: string): string | null {
+    return this.kind().title?.(id) ?? null;
+  }
 
   onInput(entry: HTMLInputElement): void {
     // A separator in the text (typed, or inside a pasted list) ends an id.
@@ -128,8 +165,8 @@ export class DiscordIdChipsComponent {
   }
 
   /**
-   * Browsers flatten new lines when pasting into a single-line field, which would
-   * glue a one-id-per-line list together, so read the clipboard text ourselves.
+   * Browsers flatten new lines when pasting into a single-line field, which would glue a
+   * one-id-per-line list together, so read the clipboard text ourselves.
    */
   onPaste(event: ClipboardEvent, entry: HTMLInputElement): void {
     const text = event.clipboardData?.getData('text');
@@ -154,20 +191,16 @@ export class DiscordIdChipsComponent {
 
   private commitText(text: string, entry: HTMLInputElement): void {
     const parts = text.split(/[\s,]+/).filter(Boolean);
-    if (parts.length === 0) {
-      entry.value = '';
-      this.error.set(null);
-      return;
-    }
     const next = [...this.ids()];
     const rejected: string[] = [];
     for (const part of parts) {
-      if (!/^\d+$/.test(part)) rejected.push(part);
-      else if (!next.includes(part)) next.push(part);
+      const id = this.kind().parse(part);
+      if (!id) rejected.push(part);
+      else if (!next.includes(id)) next.push(id);
     }
     if (next.length !== this.ids().length) this.idsChange.emit(next);
     entry.value = rejected.join(' ');
-    this.error.set(rejected.length ? 'Discord user ids are numbers only (Copy User ID, with Developer Mode on).' : null);
+    this.error.set(rejected.length ? this.kind().invalid : null);
   }
 
   remove(id: string): void {

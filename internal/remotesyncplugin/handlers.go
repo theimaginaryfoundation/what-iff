@@ -1,0 +1,249 @@
+package remotesyncplugin
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/gorilla/mux"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
+	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/remotesync"
+	"go.uber.org/zap"
+)
+
+// Store is the storage the routes need; *datastore.Datastore implements it. Owner-scoped.
+type Store interface {
+	GetRemoteSyncSettings(ctx context.Context, userID uuid.UUID) (*models.RemoteSyncSettings, error)
+	UpsertRemoteSync(ctx context.Context, userID uuid.UUID, in models.RemoteSyncUpsert) error
+	DeleteRemoteSync(ctx context.Context, userID uuid.UUID) error
+	GetRemoteSyncAccount(ctx context.Context, userID uuid.UUID) (*models.RemoteSyncAccount, error)
+}
+
+// Starter starts runs in the background (remotesync.Syncer).
+type Starter interface {
+	Start(ctx context.Context, userID uuid.UUID) error
+	Wake(ctx context.Context, userID uuid.UUID) (remotesync.WakeResult, error)
+}
+
+// Handler serves /api/remote-sync (behind auth).
+type Handler struct {
+	Store  Store
+	Syncer Starter
+	// Interval is the background sync interval, or 0 when only wakes start runs.
+	Interval time.Duration
+	// Check proves a token can read from a remote before it is saved.
+	Check func(ctx context.Context, baseURL, token string) error
+	// Lifecycle is the server's context: runs started from a request outlive the request.
+	Lifecycle         context.Context
+	AllowLocalNetwork bool
+	Logger            *zap.Logger
+}
+
+// Register mounts the routes on r (the authenticated router, prefixed /remote-sync).
+func (h *Handler) Register(r *mux.Router) {
+	r.HandleFunc("", h.get).Methods(http.MethodGet)
+	r.HandleFunc("", h.put).Methods(http.MethodPut)
+	r.HandleFunc("", h.delete).Methods(http.MethodDelete)
+	r.HandleFunc("/run", h.run).Methods(http.MethodPost)
+	r.HandleFunc("/wake", h.wake).Methods(http.MethodPost)
+}
+
+// wake is the web app saying it is being used (opened, or back after a while). It starts a run
+// unless the account is off, needs its owner, ran moments ago or is running, and never fails
+// for those: a wake is a hint, not a command. An account with no sync answers started: false.
+// Started means poll GET for the run's outcome; rematched counts copies that just got a persona.
+func (h *Handler) wake(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.userID(w, r)
+	if !ok {
+		return
+	}
+	res, err := h.Syncer.Wake(h.Lifecycle, userID)
+	if err != nil && !errors.Is(err, datastore.ErrRemoteSyncNotFound) {
+		h.failed(w, "Could not start a sync.", err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	handlerutils.RespondWithJSON(w, h.Logger, http.StatusOK, res)
+}
+
+func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.userID(w, r)
+	if !ok {
+		return
+	}
+	h.respondSettings(w, r, userID, http.StatusOK)
+}
+
+type putRequest struct {
+	BaseURL string  `json:"base_url"`
+	Token   *string `json:"token,omitempty"`
+	Enabled *bool   `json:"enabled,omitempty"`
+}
+
+// put saves the settings. Unless it switches sync off, it first proves the token can read from
+// the remote, so a typo or a token without chat:read is reported here, not by a failed run later.
+func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.userID(w, r)
+	if !ok {
+		return
+	}
+	var req putRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req); err != nil {
+		h.badRequest(w, "The request body is not valid JSON.")
+		return
+	}
+	raw := req.BaseURL
+	if strings.TrimSpace(raw) == "" {
+		raw = remotesync.DefaultBaseURL
+	}
+	baseURL, err := remotesync.NormalizeBaseURL(raw, h.AllowLocalNetwork)
+	if err != nil {
+		h.badRequest(w, upperFirst(err.Error())+".")
+		return
+	}
+	if req.Token != nil {
+		t := cleanToken(*req.Token)
+		if t == "" {
+			req.Token = nil
+		} else {
+			req.Token = &t
+		}
+	}
+
+	token := ""
+	if req.Token != nil {
+		token = *req.Token
+	} else if acct, err := h.Store.GetRemoteSyncAccount(r.Context(), userID); err == nil {
+		// A saved token only ever goes back to the server it came from, as with redirects.
+		if !sameHost(acct.BaseURL, baseURL) {
+			h.badRequest(w, "Paste a webhook token from the new address. A saved token is only sent to the server it came from.")
+			return
+		}
+		token = acct.Token
+	} else if !errors.Is(err, datastore.ErrRemoteSyncNotFound) {
+		h.failed(w, "Could not read the sync settings.", err)
+		return
+	}
+	if token == "" {
+		h.badRequest(w, "Paste a webhook token from the remote server.")
+		return
+	}
+
+	switchingOff := req.Enabled != nil && !*req.Enabled
+	if !switchingOff {
+		if err := h.Check(r.Context(), baseURL, token); err != nil {
+			handlerutils.RespondWithError(w, h.Logger, http.StatusBadRequest, handlerutils.CodeNotSet, remotesync.UserMessage(err), nil)
+			return
+		}
+	}
+
+	if err := h.Store.UpsertRemoteSync(r.Context(), userID, models.RemoteSyncUpsert{BaseURL: baseURL, Token: req.Token, Enabled: req.Enabled}); err != nil {
+		if errors.Is(err, datastore.ErrRemoteSyncTokenRequired) {
+			h.badRequest(w, "Paste a webhook token from the remote server.")
+			return
+		}
+		h.failed(w, "Could not save the sync settings.", err)
+		return
+	}
+	if !switchingOff {
+		if err := h.Syncer.Start(h.Lifecycle, userID); err != nil && !errors.Is(err, remotesync.ErrBusy) && !errors.Is(err, remotesync.ErrDisabled) {
+			h.Logger.Warn("remote sync: start after save", zap.Error(err))
+		}
+	}
+	h.respondSettings(w, r, userID, http.StatusOK)
+}
+
+func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.userID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.Store.DeleteRemoteSync(r.Context(), userID); err != nil && !errors.Is(err, datastore.ErrRemoteSyncNotFound) {
+		h.failed(w, "Could not remove the sync settings.", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// run starts a sync now. The run continues after the response; poll GET for its outcome.
+func (h *Handler) run(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.userID(w, r)
+	if !ok {
+		return
+	}
+	err := h.Syncer.Start(h.Lifecycle, userID)
+	switch {
+	case err == nil:
+		h.respondSettings(w, r, userID, http.StatusAccepted)
+	case errors.Is(err, datastore.ErrRemoteSyncNotFound):
+		handlerutils.RespondWithError(w, h.Logger, http.StatusNotFound, handlerutils.CodeNotSet, "Remote sync is not set up.", nil)
+	case errors.Is(err, remotesync.ErrBusy):
+		handlerutils.RespondWithError(w, h.Logger, http.StatusConflict, handlerutils.CodeNotSet, "A sync is already running.", nil)
+	case errors.Is(err, remotesync.ErrDisabled):
+		handlerutils.RespondWithError(w, h.Logger, http.StatusConflict, handlerutils.CodeNotSet, "Sync is switched off. Switch it on first.", nil)
+	default:
+		h.failed(w, "Could not start a sync.", err)
+	}
+}
+
+func (h *Handler) respondSettings(w http.ResponseWriter, r *http.Request, userID uuid.UUID, status int) {
+	s, err := h.Store.GetRemoteSyncSettings(r.Context(), userID)
+	if err != nil {
+		h.failed(w, "Could not read the sync settings.", err)
+		return
+	}
+	s.IntervalSeconds = int(h.Interval / time.Second)
+	s.DefaultBaseURL = remotesync.DefaultBaseURL
+	s.AllowLocalNetwork = h.AllowLocalNetwork
+	w.Header().Set("Cache-Control", "no-store")
+	handlerutils.RespondWithJSON(w, h.Logger, status, s)
+}
+
+func (h *Handler) userID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	id, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		handlerutils.RespondWithError(w, h.Logger, http.StatusUnauthorized, handlerutils.CodeNotSet, "Unauthorized", nil)
+	}
+	return id, ok
+}
+
+func (h *Handler) badRequest(w http.ResponseWriter, msg string) {
+	handlerutils.RespondWithError(w, h.Logger, http.StatusBadRequest, handlerutils.CodeNotSet, msg, nil)
+}
+
+func (h *Handler) failed(w http.ResponseWriter, msg string, err error) {
+	handlerutils.RespondWithError(w, h.Logger, http.StatusInternalServerError, handlerutils.CodeNotSet, msg, err)
+}
+
+// cleanToken trims a pasted token, including a pasted "Bearer " prefix.
+func cleanToken(t string) string {
+	t = strings.TrimSpace(t)
+	if len(t) > 7 && strings.EqualFold(t[:7], "bearer ") {
+		t = strings.TrimSpace(t[7:])
+	}
+	return t
+}
+
+// sameHost reports whether two base URLs, both already normalized (NormalizeBaseURL), name the
+// same server (host and port). The tab's hostOf mirrors this to word the token field; this is
+// the check that counts.
+func sameHost(a, b string) bool {
+	ua, errA := url.Parse(a)
+	ub, errB := url.Parse(b)
+	return errA == nil && errB == nil && strings.EqualFold(ua.Host, ub.Host)
+}
+
+func upperFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}

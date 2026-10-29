@@ -2,7 +2,7 @@
 
 ## Role
 
-HTTP **API server**: Gorilla mux router, OpenTelemetry/metrics middleware, CORS, dependency construction (datastore, S3, agent, scheduler), and registration of all `internal/handlers/*` routes under `/api`.
+HTTP **API server**: Gorilla mux router, OpenTelemetry/metrics middleware, CORS (also on 404 and 405, which mux serves without middleware, so a browser can read that an optional plugin's route is absent), dependency construction (datastore, S3, agent, scheduler), and registration of all `internal/handlers/*` routes under `/api`.
 
 ## Responsibilities
 

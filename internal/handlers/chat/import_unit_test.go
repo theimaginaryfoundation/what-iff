@@ -13,22 +13,6 @@ import (
 
 var fixedNow = time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
 
-// --- conversationHash ---
-
-func TestConversationHash_Stable(t *testing.T) {
-	h1 := conversationHash("conv-abc")
-	h2 := conversationHash("conv-abc")
-	require.Equal(t, h1, h2)
-}
-
-func TestConversationHash_DifferentIDs(t *testing.T) {
-	require.NotEqual(t, conversationHash("conv-a"), conversationHash("conv-b"))
-}
-
-func TestConversationHash_NonEmpty(t *testing.T) {
-	require.NotEmpty(t, conversationHash("x"))
-}
-
 // --- floatToTime ---
 
 func TestFloatToTime_WholeSeconds(t *testing.T) {
@@ -109,7 +93,7 @@ func TestPrepareConversations_HappyPath(t *testing.T) {
 	require.Empty(t, errs)
 	require.Len(t, convs, 1)
 	require.Equal(t, "Chat A", convs[0].Title)
-	require.Equal(t, conversationHash("id-1"), convs[0].ImportHash)
+	require.Equal(t, models.ConversationImportHash("id-1"), convs[0].ImportHash)
 	require.Len(t, convs[0].Messages, 2)
 }
 

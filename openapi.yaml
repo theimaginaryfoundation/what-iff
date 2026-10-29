@@ -475,6 +475,164 @@ paths:
                 $ref: '#/components/schemas/Error'
 
   # Discord relay (docs/adr/0x025-discord-relay.md). Absent when DISCORD_RELAY_ENABLED is false.
+  /remote-sync:
+    get:
+      summary: Get remote sync settings and status
+      description: >
+        The account's remote sync (ADR 0x033): the remote address, the stored token's last four
+        characters, whether sync is on, how the last run went, and totals. The token is never
+        returned. `configured` is false when sync was never set up. Only served when the server
+        runs with REMOTE_SYNC_ENABLED=true; otherwise this route does not exist (404).
+      tags: [Remote Sync]
+      responses:
+        '200':
+          description: Settings and status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoteSyncSettings'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Save remote sync settings
+      description: >
+        Saves the remote address, the token (required the first time; omit to keep the stored
+        one) and whether sync is on. Unless the request switches sync off, the token is first
+        checked against the remote (it must hold chat:read), and a refusal is reported as 400 with
+        the reason. A successful save starts a run. The address must be https unless the server
+        allows http (REMOTE_SYNC_ALLOW_LOCAL_NETWORK); the hosted app's web addresses map to its API.
+      tags: [Remote Sync]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemoteSyncUpsertRequest'
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoteSyncSettings'
+        '400':
+          description: Invalid address or token, or the remote refused the token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Remove remote sync
+      description: Stops syncing and forgets the token and the thread links. Local threads stay.
+      tags: [Remote Sync]
+      responses:
+        '204':
+          description: Removed
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /remote-sync/wake:
+    post:
+      summary: The app is being used
+      description: >
+        The web app calls this when a signed-in session starts and when it comes back after a while
+        (remote sync, ADR 0x033). The server starts a sync if the last one is more than a couple of
+        minutes old, and otherwise does nothing; sync being off, not set up, waiting on its owner
+        or already running is not an error. This is what keeps copies current without polling.
+      tags: [Remote Sync]
+      responses:
+        '200':
+          description: Whether a sync was started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  started: {type: boolean, description: A run started; poll GET /remote-sync for its outcome}
+                  rematched: {type: integer, description: Copied threads that just got a local persona whose name matches their remote one}
+                required: [started, rematched]
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /remote-sync/run:
+    post:
+      summary: Sync now
+      description: Starts a run in the background. Poll GET /remote-sync for its outcome.
+      tags: [Remote Sync]
+      responses:
+        '202':
+          description: Run started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoteSyncSettings'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Remote sync is not set up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: A run is already in progress, or sync is switched off
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /discord/bots:
     get:
       summary: List Discord bots
@@ -751,6 +909,662 @@ paths:
         '401': { $ref: '#/components/responses/DiscordUnauthorized' }
         '404': { $ref: '#/components/responses/DiscordNotFound' }
         '500': { $ref: '#/components/responses/DiscordServerError' }
+
+  # Buzz relay (docs/adr/0x028-buzz-relay.md). Every route is a 404 unless
+  # BUZZ_RELAY_ENABLED=true.
+  /buzz/agents:
+    get:
+      summary: List Buzz identities
+      description: Returns the user's personas that have a Buzz identity, each with the communities it is in. A secret key is never returned.
+      tags: [Buzz]
+      responses:
+        '200':
+          description: Buzz identities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BuzzAgent'
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+    post:
+      summary: Give a persona a Buzz identity
+      description: Generates a keypair for the persona. The secret key stays on the server, encrypted; the public key is shown as an npub so people can add the persona in Buzz.
+      tags: [Buzz]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuzzAgentCreateRequest'
+      responses:
+        '201':
+          description: Identity created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzAgent'
+        '400': { $ref: '#/components/responses/BuzzBadRequest' }
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '409': { $ref: '#/components/responses/BuzzConflict' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  /buzz/agents/{id}:
+    parameters:
+      - $ref: '#/components/parameters/BuzzID'
+    patch:
+      summary: Pause or resume a Buzz identity
+      tags: [Buzz]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+              required: [enabled]
+      responses:
+        '200':
+          description: Updated identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzAgent'
+        '400': { $ref: '#/components/responses/BuzzBadRequest' }
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+    delete:
+      summary: Remove a Buzz identity
+      description: Removes the identity and its communities and bindings. The key is gone for good, so Buzz will see a new member if the persona is connected again.
+      tags: [Buzz]
+      responses:
+        '204':
+          description: Identity removed
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  /buzz/agents/{id}/sync-profile:
+    parameters:
+      - $ref: '#/components/parameters/BuzzID'
+    post:
+      summary: Publish the persona's name and portrait
+      description: Republishes the persona's Buzz profile (name, portrait, bot flag) to every community it is in.
+      tags: [Buzz]
+      responses:
+        '200':
+          description: Where the profile was published
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  published:
+                    type: integer
+                  failed:
+                    type: array
+                    items:
+                      type: string
+                required: [published, failed]
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  /buzz/agents/{id}/communities:
+    parameters:
+      - $ref: '#/components/parameters/BuzzID'
+    post:
+      summary: Join a persona to a community
+      description: >-
+        Reads the community, verifies an owner attestation when one is given, claims an invite
+        when one is given (after the owner accepted the community's join terms for the persona),
+        records the community, publishes the persona's profile and checks whether it is let in.
+        A 409 with code terms_required carries the terms to show and accept. Re-adding a community
+        the persona is already in is a 409 before anything is sent to it, so no invite is used up.
+      tags: [Buzz]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuzzCommunityCreateRequest'
+      responses:
+        '201':
+          description: Community added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzCommunity'
+        '400': { $ref: '#/components/responses/BuzzBadRequest' }
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '409':
+          description: The community has join terms to accept first, or the persona is already in it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzTermsRequired'
+        '502': { $ref: '#/components/responses/BuzzUpstreamError' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  /buzz/policy:
+    get:
+      summary: Preview a community's join terms
+      tags: [Buzz]
+      parameters:
+        - name: relay_url
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The community and its join terms (policy is null when it has none)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  relay_url:
+                    type: string
+                  policy:
+                    $ref: '#/components/schemas/BuzzJoinPolicy'
+                required: [name, relay_url]
+        '400': { $ref: '#/components/responses/BuzzBadRequest' }
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '502': { $ref: '#/components/responses/BuzzUpstreamError' }
+
+  /buzz/communities/{id}:
+    parameters:
+      - $ref: '#/components/parameters/BuzzID'
+    patch:
+      summary: Update a community
+      description: Pauses or resumes the persona there, replaces or removes the attestation, claims an invite, or checks access again.
+      tags: [Buzz]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuzzCommunityUpdateRequest'
+      responses:
+        '200':
+          description: Updated community
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzCommunity'
+        '400': { $ref: '#/components/responses/BuzzBadRequest' }
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '409':
+          description: The community has join terms to accept first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzTermsRequired'
+        '502': { $ref: '#/components/responses/BuzzUpstreamError' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+    delete:
+      summary: Leave a community
+      description: Removes the community and its bindings from What Iff. Nothing is deleted in Buzz.
+      tags: [Buzz]
+      responses:
+        '204':
+          description: Community removed
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  /buzz/communities/{id}/channels:
+    parameters:
+      - $ref: '#/components/parameters/BuzzID'
+    get:
+      summary: List a community's channels
+      description: The message channels the persona is in, and the public ones it could join.
+      tags: [Buzz]
+      responses:
+        '200':
+          description: Channels, the persona's own first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BuzzChannel'
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '502': { $ref: '#/components/responses/BuzzUpstreamError' }
+
+  /buzz/communities/{id}/channels/{channelId}/join:
+    parameters:
+      - $ref: '#/components/parameters/BuzzID'
+      - name: channelId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      summary: Join a public channel
+      description: Sends a join request for the persona (NIP-29).
+      tags: [Buzz]
+      responses:
+        '204':
+          description: Join requested
+        '400': { $ref: '#/components/responses/BuzzBadRequest' }
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '502': { $ref: '#/components/responses/BuzzUpstreamError' }
+
+  /buzz/bindings:
+    get:
+      summary: List Buzz channel bindings
+      tags: [Buzz]
+      responses:
+        '200':
+          description: Bindings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BuzzBinding'
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+    post:
+      summary: Connect a channel to a thread
+      description: >-
+        Binds a community channel to a relay thread. Without chat_id a new sandboxed relay thread
+        is created. Binding an existing thread that is not sandboxed needs allow_unrestricted.
+      tags: [Buzz]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuzzBindingCreateRequest'
+      responses:
+        '201':
+          description: Channel connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzBinding'
+        '400': { $ref: '#/components/responses/BuzzBadRequest' }
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '409': { $ref: '#/components/responses/BuzzConflict' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  /buzz/bindings/{id}:
+    parameters:
+      - $ref: '#/components/parameters/BuzzID'
+    patch:
+      summary: Update a binding
+      tags: [Buzz]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuzzBindingUpdateRequest'
+      responses:
+        '200':
+          description: Updated binding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzBinding'
+        '400': { $ref: '#/components/responses/BuzzBadRequest' }
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+    delete:
+      summary: Disconnect a channel
+      tags: [Buzz]
+      responses:
+        '204':
+          description: Channel disconnected
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  /buzz/chats/{chatId}:
+    parameters:
+      - $ref: '#/components/parameters/BuzzChatID'
+    get:
+      summary: A thread's Buzz state
+      description: The thread's bindings, which of them will post the next reply, and the recent messages that crossed between the thread and Buzz.
+      tags: [Buzz]
+      responses:
+        '200':
+          description: Buzz state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuzzChatState'
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  /buzz/chats/{chatId}/pending/{bindingId}:
+    parameters:
+      - $ref: '#/components/parameters/BuzzChatID'
+      - name: bindingId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      summary: Post the next reply to a Buzz channel
+      description: >-
+        Arms the composer toggle. The next reply in the thread is posted to the binding's channel;
+        the request expires after 30 minutes. A binding that is broken, or whose persona or
+        community is paused, cannot be armed (409); a pause also stops a post already armed.
+      tags: [Buzz]
+      responses:
+        '204':
+          description: Armed
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '409': { $ref: '#/components/responses/BuzzConflict' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+    delete:
+      summary: Do not post the next reply to Buzz
+      tags: [Buzz]
+      responses:
+        '204':
+          description: Disarmed
+        '401': { $ref: '#/components/responses/BuzzUnauthorized' }
+        '404': { $ref: '#/components/responses/BuzzNotFound' }
+        '500': { $ref: '#/components/responses/BuzzServerError' }
+
+  # Slack relay (docs/adr/0x032-slack-relay.md). Every route is a 404 unless
+  # SLACK_RELAY_ENABLED=true.
+  /slack/manifest:
+    get:
+      summary: The Slack app manifest for a personality
+      description: >
+        The manifest of a Slack app that speaks as the personality (its name, Socket Mode on,
+        token rotation off, and the scopes and events the relay uses), and the link that opens
+        Slack's "create an app" flow with it filled in.
+      tags: [Slack]
+      parameters:
+        - name: personality_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Manifest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlackManifest'
+        '400': { $ref: '#/components/responses/SlackBadRequest' }
+        '401': { $ref: '#/components/responses/SlackUnauthorized' }
+        '404': { $ref: '#/components/responses/SlackNotFound' }
+
+  /slack/apps:
+    get:
+      summary: List Slack apps
+      description: Returns the user's personalities' Slack apps. Tokens are never returned.
+      tags: [Slack]
+      responses:
+        '200':
+          description: Apps retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SlackApp'
+        '401': { $ref: '#/components/responses/SlackUnauthorized' }
+        '500': { $ref: '#/components/responses/SlackServerError' }
+    post:
+      summary: Connect a Slack app
+      description: >
+        Checks the bot token with Slack (its workspace, bot user and app) and that the app-level
+        token belongs to the same app (by opening a Socket Mode connection), then stores both,
+        encrypted, for one of the user's personalities. One app per personality per workspace,
+        and an app can be connected once. Needs TOKEN_ENCRYPTION_SECRET on the server.
+      tags: [Slack]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SlackAppCreateRequest'
+      responses:
+        '201':
+          description: App connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlackApp'
+        '400': { $ref: '#/components/responses/SlackBadRequest' }
+        '401': { $ref: '#/components/responses/SlackUnauthorized' }
+        '404': { $ref: '#/components/responses/SlackNotFound' }
+        '409': { $ref: '#/components/responses/SlackConflict' }
+        '502': { $ref: '#/components/responses/SlackUpstreamError' }
+        '500': { $ref: '#/components/responses/SlackServerError' }
+
+  /slack/apps/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SlackID'
+    patch:
+      summary: Update a Slack app
+      description: Replaces either token (they must stay the same app's), re-reads the workspace's and bot's names from Slack, or pauses and resumes the app.
+      tags: [Slack]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SlackAppUpdateRequest'
+      responses:
+        '200':
+          description: App updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlackApp'
+        '400': { $ref: '#/components/responses/SlackBadRequest' }
+        '401': { $ref: '#/components/responses/SlackUnauthorized' }
+        '404': { $ref: '#/components/responses/SlackNotFound' }
+        '502': { $ref: '#/components/responses/SlackUpstreamError' }
+        '500': { $ref: '#/components/responses/SlackServerError' }
+    delete:
+      summary: Disconnect a Slack app
+      description: Removes the app's tokens and, with them, its channel bindings. The relay threads stay, and nothing changes in Slack.
+      tags: [Slack]
+      responses:
+        '204':
+          description: App disconnected
+        '401': { $ref: '#/components/responses/SlackUnauthorized' }
+        '404': { $ref: '#/components/responses/SlackNotFound' }
+        '500': { $ref: '#/components/responses/SlackServerError' }
+
+  /slack/apps/{id}/channels:
+    parameters:
+      - $ref: '#/components/parameters/SlackID'
+    get:
+      summary: List the workspace's channels
+      description: The workspace's public channels and the private channels the app is in, without archived ones; `is_member` says whether the app is in each.
+      tags: [Slack]
+      responses:
+        '200':
+          description: Channels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SlackChannel'
+        '400': { $ref: '#/components/responses/SlackBadRequest' }
+        '401': { $ref: '#/components/responses/SlackUnauthorized' }
+        '404': { $ref: '#/components/responses/SlackNotFound' }
+        '502': { $ref: '#/components/responses/SlackUpstreamError' }
+
+  /slack/apps/{id}/channels/{channelId}/join:
+    parameters:
+      - $ref: '#/components/parameters/SlackID'
+      - name: channelId
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Add the app to a public channel
+      description: Private channels cannot be joined this way; invite the persona in Slack (`/invite`) instead (400).
+      tags: [Slack]
+      responses:
+        '200':
+          description: Joined
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlackChannel'
+        '400': { $ref: '#/components/responses/SlackBadRequest' }
+        '401': { $ref: '#/components/responses/SlackUnauthorized' }
+        '404': { $ref: '#/components/responses/SlackNotFound' }
+        '502': { $ref: '#/components/responses/SlackUpstreamError' }
+
+  /slack/bindings:
+    get:
+      summary: List Slack channel bindings
+      tags: [Slack]
+      responses:
+        '200':
+          description: Bindings retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SlackBinding'
+        '401': { $ref: '#/components/responses/SlackUnauthorized' }
+        '500': { $ref: '#/components/responses/SlackServerError' }
+    post:
+      summary: Connect a Slack channel to a relay thread
+      description: >
+        Binds a channel of the app's workspace to a thread. Without `chat_id` a new relay thread
+        is created for the app's personality, sandboxed, with no MCP connectors and the
+        sandbox's default-off tools. Binding an existing thread leaves its settings alone; a
+        thread that is not sandboxed is refused unless `allow_unrestricted` is true.
+      tags: [Slack]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SlackBindingCreateRequest'
+      responses:
+        '201':
+          description: Channel connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlackBinding'
+        '400': { $ref: '#/components/responses/SlackBadRequest' }
+        '401': { $ref: '#/components/responses/SlackUnauthorized' }
+        '404': { $ref: '#/components/responses/SlackNotFound' }
+        '409': { $ref: '#/components/responses/SlackConflict' }
+        '500': { $ref: '#/components/responses/SlackServerError' }
+
+  /slack/bindings/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SlackID'
+    patch:
+      summary: Update a Slack channel binding
+      description: Repointing to a thread that is not sandboxed needs `allow_unrestricted`; the acknowledgement is only recorded while the thread is not sandboxed.
+      tags: [Slack]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SlackBindingUpdateRequest'
+      responses:
+        '200':
+          description: Binding updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlackBinding'
+        '400': { $ref: '#/components/responses/SlackBadRequest' }
+        '401': { $ref: '#/components/responses/SlackUnauthorized' }
+        '404': { $ref: '#/components/responses/SlackNotFound' }
+        '500': { $ref: '#/components/responses/SlackServerError' }
+    delete:
+      summary: Disconnect a Slack channel
+      tags: [Slack]
+      responses:
+        '204':
+          description: Channel disconnected
+        '401': { $ref: '#/components/responses/SlackUnauthorized' }
+        '404': { $ref: '#/components/responses/SlackNotFound' }
+        '500': { $ref: '#/components/responses/SlackServerError' }
+
+  /slack/chats/{chatId}:
+    parameters:
+      - $ref: '#/components/parameters/SlackChatID'
+    get:
+      summary: A thread's Slack state
+      description: The thread's Slack bindings, which of them will post the next reply, and the recent messages that crossed between the thread and Slack.
+      tags: [Slack]
+      responses:
+        '200':
+          description: Slack state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlackChatState'
+        '401': { $ref: '#/components/responses/SlackUnauthorized' }
+        '500': { $ref: '#/components/responses/SlackServerError' }
+
+  /slack/chats/{chatId}/pending/{bindingId}:
+    parameters:
+      - $ref: '#/components/parameters/SlackChatID'
+      - name: bindingId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    put:
+      summary: Post the next reply to a Slack channel
+      description: >-
+        Arms the composer toggle. The next reply in the thread is posted to the binding's channel;
+        the request expires after 30 minutes. A binding that is broken, or whose app is paused or
+        has its tokens refused, cannot be armed (409); a pause also stops a post already armed.
+      tags: [Slack]
+      responses:
+        '204':
+          description: Armed
+        '401': { $ref: '#/components/responses/SlackUnauthorized' }
+        '404': { $ref: '#/components/responses/SlackNotFound' }
+        '409': { $ref: '#/components/responses/SlackConflict' }
+        '500': { $ref: '#/components/responses/SlackServerError' }
+    delete:
+      summary: Do not post the next reply to a Slack channel
+      tags: [Slack]
+      responses:
+        '204':
+          description: Disarmed
+        '401': { $ref: '#/components/responses/SlackUnauthorized' }
+        '404': { $ref: '#/components/responses/SlackNotFound' }
+        '500': { $ref: '#/components/responses/SlackServerError' }
 
   /webhook-tokens:
     get:
@@ -6088,6 +6902,70 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /webhooks/chat/{chatId}/summary:
+    get:
+      summary: Get a thread's running summary (webhook)
+      description: |
+        Returns the thread's running summary: the text a reply reads in place of every message sent before
+        `window_start`. Messages from `window_start` on are read as they are. An empty `summary` (and no
+        `window_start`) means the thread has none yet. The summary is derived from the thread's own messages,
+        which `chat:read` already serves. Remote sync uses it so a copy need not summarize the history again
+        (ADR 0x033). Requires the `chat:read` scope. A thread that does not exist and one that belongs to
+        someone else both return 404.
+      tags: [Webhooks]
+      security:
+        - webhookAuth: []
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          description: Chat ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Summary retrieved successfully
+          headers:
+            Cache-Control:
+              description: Always `no-store`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSummary'
+        '400':
+          description: Invalid chat ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid webhook token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: The token does not have the `chat:read` scope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Chat not found (or not yours)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /webhooks/chat/chat-message/{id}:
     get:
       summary: Get one message (webhook)
@@ -7575,6 +8453,36 @@ components:
       schema:
         type: string
         format: uuid
+    BuzzID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BuzzChatID:
+      name: chatId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SlackID:
+      name: id
+      in: path
+      required: true
+      description: What Iff's id for the Slack app or binding row (a UUID), not one of Slack's own ids (A…, C…, U…)
+      schema:
+        type: string
+        format: uuid
+    SlackChatID:
+      name: chatId
+      in: path
+      required: true
+      description: The What Iff thread (chat) id
+      schema:
+        type: string
+        format: uuid
 
   responses:
     DiscordBadRequest:
@@ -7609,6 +8517,78 @@ components:
             $ref: '#/components/schemas/Error'
     DiscordServerError:
       description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BuzzBadRequest:
+      description: "Invalid request (an address that is not a Buzz community, a refused invite, an attestation not signed for this key, a bad pubkey)"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BuzzUnauthorized:
+      description: "Unauthorized"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BuzzNotFound:
+      description: "Not found (including another account's identity, community, binding, thread or personality)"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BuzzConflict:
+      description: "The personality already has a Buzz identity, is already in that community, or the channel is already bound"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BuzzUpstreamError:
+      description: "The community refused the request or could not be reached"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BuzzServerError:
+      description: "Internal server error"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    SlackBadRequest:
+      description: "Invalid request, or Slack rejected a token (a token of the wrong kind, a revoked one, two tokens of different apps)"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    SlackUnauthorized:
+      description: "Unauthorized"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    SlackNotFound:
+      description: "Not found (including another account's app, binding, thread or personality)"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    SlackConflict:
+      description: "The app is already connected, the personality already has an app in that workspace, or the channel is already bound"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    SlackUpstreamError:
+      description: "Slack refused the request or could not be reached"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    SlackServerError:
+      description: "Internal server error"
       content:
         application/json:
           schema:
@@ -9512,8 +10492,24 @@ components:
       enum: [messages:write, chat:read]
       description: |
         What a webhook token may do. `messages:write` allows `POST /webhooks/chat/{chatId}/messages`.
-        `chat:read` allows the read routes (threads, messages, job status, persona names) and never exposes
+        `chat:read` allows the read routes (threads, messages, thread summaries, job status, persona names) and never exposes
         system prompts, scratchpads or memories. Tokens created before scopes existed are `messages:write` only.
+
+    ChatSummary:
+      type: object
+      description: A thread's running summary, as `GET /webhooks/chat/{chatId}/summary` returns it.
+      required: [chat_id, summary]
+      properties:
+        chat_id:
+          type: string
+          format: uuid
+        summary:
+          type: string
+          description: The summary text. Empty when the thread has none yet.
+        window_start:
+          type: string
+          format: date-time
+          description: Messages sent before this are covered by the summary; messages from it on are not.
 
     WebhookMessage:
       type: object
@@ -10489,6 +11485,63 @@ components:
           type: string
       required: [id, name]
 
+    RemoteSyncRunStats:
+      type: object
+      description: Counts from one run. Never content.
+      properties:
+        threads_checked: {type: integer}
+        threads_created: {type: integer, description: New local copies}
+        threads_adopted: {type: integer, description: Matched to a thread an account import already brought over}
+        threads_updated: {type: integer, description: Had new messages appended}
+        threads_forked: {type: integer, description: Diverged (written in both places) and continued in a new local thread}
+        threads_failed: {type: integer, description: Retried next run}
+        threads_deferred: {type: integer, description: Left for the next run by the per-run cap}
+        messages_added: {type: integer}
+    RemoteSyncTotals:
+      type: object
+      properties:
+        threads: {type: integer, description: Remote threads being copied}
+        messages: {type: integer, description: Remote messages copied}
+        forks: {type: integer, description: Times a thread forked because both sides wrote}
+      required: [threads, messages, forks]
+    RemoteSyncSettings:
+      type: object
+      properties:
+        configured: {type: boolean}
+        enabled: {type: boolean}
+        base_url: {type: string, example: 'https://api.whatiff.chat'}
+        token_hint: {type: string, description: The stored token's last four characters}
+        status:
+          type: string
+          enum: [pending, ok, error, needs_attention]
+          description: >
+            pending: never run. ok: the last run succeeded. error: it failed and will be retried.
+            needs_attention: the remote refused the token; runs stop until the settings are saved again.
+        last_error: {type: string, nullable: true}
+        last_run_at: {type: string, format: date-time, nullable: true}
+        last_success_at: {type: string, format: date-time, nullable: true}
+        last_run: {$ref: '#/components/schemas/RemoteSyncRunStats'}
+        running: {type: boolean}
+        totals: {$ref: '#/components/schemas/RemoteSyncTotals'}
+        unmatched_personas:
+          type: array
+          items: {type: string}
+          description: Remote persona names whose copied threads have no persona here yet. Creating or importing a persona with one of these names gives it those threads (on the next wake or run).
+        interval_seconds: {type: integer, description: Background sync interval; absent when syncs start only when the app is used}
+        default_base_url: {type: string}
+        allow_local_network: {type: boolean}
+      required: [configured, running]
+    RemoteSyncUpsertRequest:
+      type: object
+      properties:
+        base_url:
+          type: string
+          description: The remote server's address. Empty means the hosted app, not the saved address, so send it on every save.
+          example: 'https://api.whatiff.chat'
+        token:
+          type: string
+          description: A wht_ webhook token with chat:read, created on the remote. Required the first time, and whenever base_url names a different host from the saved one (400 otherwise); a saved token is only sent to the host it came from.
+        enabled: {type: boolean}
     DiscordBot:
       type: object
       description: A user's own Discord bot, speaking as one of their personalities. The token is never returned.
@@ -10582,6 +11635,9 @@ components:
           items:
             type: string
           description: Discord user ids that may never tag the bot; deny always wins
+        answer_agents:
+          type: boolean
+          description: Let other bots (other personas' among them) start turns. Off by default; the relay's loop guard caps consecutive bot-started turns and asks the persona to wrap up near the cap (ADR 0x031).
         allow_unrestricted:
           type: boolean
           description: The owner's acknowledgement that the bound thread is not sandboxed, so it can read the account. Without it the relay answers only sandboxed threads.
@@ -10602,7 +11658,7 @@ components:
         updated_at:
           type: string
           format: date-time
-      required: [id, bot_id, chat_id, guild_id, channel_id, guild_name, channel_name, inbound_enabled, allow_user_ids, deny_user_ids, allow_unrestricted, status, created_at, updated_at]
+      required: [id, bot_id, chat_id, guild_id, channel_id, guild_name, channel_name, inbound_enabled, allow_user_ids, deny_user_ids, answer_agents, allow_unrestricted, status, created_at, updated_at]
 
     DiscordBindingCreateRequest:
       type: object
@@ -10633,6 +11689,9 @@ components:
           type: array
           items:
             type: string
+        answer_agents:
+          type: boolean
+          default: false
         allow_unrestricted:
           type: boolean
           description: Acknowledge binding an existing thread that is not sandboxed
@@ -10658,6 +11717,8 @@ components:
           type: string
         guild_name:
           type: string
+        answer_agents:
+          type: boolean
         allow_unrestricted:
           type: boolean
         reactivate:
@@ -10702,6 +11763,9 @@ components:
           type: string
         attempts:
           type: integer
+        agent_depth:
+          type: integer
+          description: Inbound only. Consecutive bot-started turns on the binding, this message included; 0 when a person wrote it (the loop guard, ADR 0x031)
         created_at:
           type: string
           format: date-time
@@ -10723,6 +11787,653 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DiscordMessageLink'
+      required: [bindings, pending_binding_ids, links]
+
+    BuzzAgent:
+      type: object
+      description: A personality's Buzz identity, with the communities it is in.
+      properties:
+        id:
+          type: string
+          format: uuid
+        personality_id:
+          type: string
+          format: uuid
+        persona_name:
+          type: string
+        pubkey:
+          type: string
+          description: The public key, lowercase hex
+        npub:
+          type: string
+          description: The public key as a NIP-19 npub, for people to find and add the persona in Buzz
+        status:
+          type: string
+          enum: [active, disabled]
+        last_error:
+          type: string
+        communities:
+          type: array
+          items:
+            $ref: '#/components/schemas/BuzzCommunity'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, personality_id, pubkey, npub, status, created_at, updated_at]
+
+    BuzzAgentCreateRequest:
+      type: object
+      properties:
+        personality_id:
+          type: string
+          format: uuid
+      required: [personality_id]
+
+    BuzzCommunity:
+      type: object
+      description: One community a persona is in, or is trying to get into.
+      properties:
+        id:
+          type: string
+          format: uuid
+        agent_id:
+          type: string
+          format: uuid
+        relay_url:
+          type: string
+          description: The community's WebSocket address (wss://host)
+        name:
+          type: string
+        relay_pubkey:
+          type: string
+        attested:
+          type: boolean
+          description: Whether the owner gave an attestation for the persona's key
+        owner_pubkey:
+          type: string
+        policy_version:
+          type: string
+          description: The join terms version the owner accepted for the persona
+        status:
+          type: string
+          enum: [active, needs_access, error, disabled]
+        last_error:
+          type: string
+        last_connected_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, agent_id, relay_url, name, relay_pubkey, attested, status, created_at, updated_at]
+
+    BuzzCommunityCreateRequest:
+      type: object
+      properties:
+        relay_url:
+          type: string
+          description: The community's address, or an invite link to it
+        invite:
+          type: string
+          description: An invite link or code, when relay_url is not already one
+        attestation:
+          type: string
+          description: The owner's NIP-OA attestation for the persona's key, as its JSON auth tag
+        accept_terms_version:
+          type: string
+          description: The join terms version the owner read and accepted for the persona
+        confirm_age:
+          type: boolean
+          description: The owner's confirmation of the community's age requirement, when it has one
+      required: [relay_url]
+
+    BuzzCommunityUpdateRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        attestation:
+          type: string
+          description: Replaces the attestation; an empty string removes it
+        invite:
+          type: string
+        accept_terms_version:
+          type: string
+        confirm_age:
+          type: boolean
+        recheck:
+          type: boolean
+          description: Check access again (after an admin added the persona, say)
+
+    BuzzJoinPolicy:
+      type: object
+      nullable: true
+      properties:
+        terms_markdown:
+          type: string
+        privacy_markdown:
+          type: string
+        age_attestation_required:
+          type: boolean
+        version:
+          type: string
+
+    BuzzTermsRequired:
+      description: The error envelope (code buzz_terms_required) with the community's join terms in details.policy
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            details:
+              type: object
+              properties:
+                policy:
+                  $ref: '#/components/schemas/BuzzJoinPolicy'
+
+    BuzzChannel:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        about:
+          type: string
+        public:
+          type: boolean
+        member:
+          type: boolean
+          description: Whether the persona is in the channel
+        archived:
+          type: boolean
+      required: [id, name, public, member]
+
+    BuzzBinding:
+      type: object
+      description: One community channel bound to a relay thread.
+      properties:
+        id:
+          type: string
+          format: uuid
+        community_id:
+          type: string
+          format: uuid
+        community_name:
+          type: string
+        chat_id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+        channel_name:
+          type: string
+        inbound_enabled:
+          type: boolean
+          description: Whether mentioning the persona in the channel starts a turn
+        allow_pubkeys:
+          type: array
+          items:
+            type: string
+          description: Pubkeys (hex) that may mention the persona; empty means anyone not denied
+        deny_pubkeys:
+          type: array
+          items:
+            type: string
+          description: Pubkeys (hex) that may never mention the persona; deny always wins
+        answer_agents:
+          type: boolean
+          description: Whether other agents (events carrying an owner attestation) may start turns
+        allow_unrestricted:
+          type: boolean
+          description: The owner's acknowledgement that the bound thread is not sandboxed
+        chat_sandboxed:
+          type: boolean
+          description: Whether the bound thread is sandboxed right now (computed)
+        status:
+          type: string
+          enum: [active, broken]
+        last_error:
+          type: string
+        last_activity_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, community_id, chat_id, channel_id, channel_name, inbound_enabled, allow_pubkeys, deny_pubkeys, answer_agents, allow_unrestricted, status, created_at, updated_at]
+
+    BuzzBindingCreateRequest:
+      type: object
+      properties:
+        community_id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+        channel_name:
+          type: string
+        chat_id:
+          type: string
+          format: uuid
+          description: Binds an existing thread; omitted creates a new sandboxed relay thread
+        inbound_enabled:
+          type: boolean
+        allow_pubkeys:
+          type: array
+          items:
+            type: string
+          description: Pubkeys as npub or hex
+        deny_pubkeys:
+          type: array
+          items:
+            type: string
+        answer_agents:
+          type: boolean
+        allow_unrestricted:
+          type: boolean
+      required: [community_id, channel_id]
+
+    BuzzBindingUpdateRequest:
+      type: object
+      properties:
+        chat_id:
+          type: string
+          format: uuid
+        inbound_enabled:
+          type: boolean
+        allow_pubkeys:
+          type: array
+          items:
+            type: string
+        deny_pubkeys:
+          type: array
+          items:
+            type: string
+        answer_agents:
+          type: boolean
+        channel_name:
+          type: string
+        allow_unrestricted:
+          type: boolean
+        reactivate:
+          type: boolean
+          description: Clears a broken status
+
+    BuzzMessageLink:
+      type: object
+      description: One message that crossed between a relay thread and its Buzz channel.
+      properties:
+        id:
+          type: string
+          format: uuid
+        binding_id:
+          type: string
+          format: uuid
+        direction:
+          type: string
+          enum: [inbound, outbound]
+        chat_message_id:
+          type: string
+          format: uuid
+        event_id:
+          type: string
+        thread_root:
+          type: string
+        posted_event_ids:
+          type: array
+          items:
+            type: string
+        author_pubkey:
+          type: string
+        author_name:
+          type: string
+        reply_to_link_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [received, pending, sent, failed]
+        error:
+          type: string
+        attempts:
+          type: integer
+        agent_depth:
+          type: integer
+          description: Inbound only. Consecutive bot-started turns on the binding, this message included; 0 when a person wrote it (the loop guard, ADR 0x031)
+        created_at:
+          type: string
+          format: date-time
+      required: [id, binding_id, direction, thread_root, posted_event_ids, status, attempts, created_at]
+
+    BuzzChatState:
+      type: object
+      properties:
+        bindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/BuzzBinding'
+        pending_binding_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/BuzzMessageLink'
+      required: [bindings, pending_binding_ids, links]
+
+    SlackManifest:
+      type: object
+      properties:
+        manifest:
+          type: object
+          additionalProperties: true
+          description: The Slack app manifest (JSON), for pasting into "Create an app → From a manifest"
+        create_url:
+          type: string
+          description: Opens Slack's "create an app" flow with the manifest filled in
+        scopes:
+          type: array
+          items:
+            type: string
+          description: The bot token scopes the app asks for
+        events:
+          type: array
+          items:
+            type: string
+          description: The events the app subscribes to
+      required: [manifest, create_url, scopes, events]
+
+    SlackApp:
+      type: object
+      description: A personality's own Slack app in one workspace. Its bot and app-level tokens are never returned.
+      properties:
+        id:
+          type: string
+          format: uuid
+        personality_id:
+          type: string
+          format: uuid
+        team_id:
+          type: string
+        team_name:
+          type: string
+        team_url:
+          type: string
+        app_id:
+          type: string
+        bot_user_id:
+          type: string
+          description: The app's bot user, what people mention
+        bot_id:
+          type: string
+        bot_name:
+          type: string
+        status:
+          type: string
+          enum: [active, invalid_token, disabled]
+        last_error:
+          type: string
+          description: Why Slack refused the app, or why its connection is retrying
+        last_connected_at:
+          type: string
+          format: date-time
+        settings_url:
+          type: string
+          description: The app's settings page in Slack, where its icon is uploaded
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, personality_id, team_id, team_name, team_url, app_id, bot_user_id, bot_id, bot_name, status, settings_url, created_at, updated_at]
+
+    SlackAppCreateRequest:
+      type: object
+      properties:
+        personality_id:
+          type: string
+          format: uuid
+        bot_token:
+          type: string
+          description: The Bot User OAuth Token (xoxb-) from OAuth & Permissions, after installing the app
+        app_token:
+          type: string
+          description: An app-level token (xapp-) with the connections:write scope, from Basic Information
+      required: [personality_id, bot_token, app_token]
+
+    SlackAppUpdateRequest:
+      type: object
+      properties:
+        bot_token:
+          type: string
+          description: Replaces the bot token; it must belong to the same app and workspace
+        app_token:
+          type: string
+          description: Replaces the app-level token; it must belong to the same app
+        refresh:
+          type: boolean
+          description: Re-read the workspace's and the bot's names from Slack
+        enabled:
+          type: boolean
+          description: Pause (false) or resume (true) the app
+
+    SlackChannel:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        is_private:
+          type: boolean
+        is_member:
+          type: boolean
+          description: Whether the app is in the channel (it only hears channels it is in)
+        is_archived:
+          type: boolean
+        num_members:
+          type: integer
+      required: [id, name, is_private, is_member, is_archived]
+
+    SlackBinding:
+      type: object
+      description: One Slack channel of an app's workspace, bound to a relay thread.
+      properties:
+        id:
+          type: string
+          format: uuid
+        app_id:
+          type: string
+          format: uuid
+          description: The Slack app row (not Slack's own app id)
+        team_name:
+          type: string
+        chat_id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+        channel_name:
+          type: string
+        is_private:
+          type: boolean
+        inbound_enabled:
+          type: boolean
+          description: Whether mentioning the persona in the channel starts a turn
+        allow_user_ids:
+          type: array
+          items:
+            type: string
+          description: Slack user ids (U…) that may mention the persona; empty means anyone not denied
+        deny_user_ids:
+          type: array
+          items:
+            type: string
+          description: Slack user ids that may never mention the persona; deny always wins
+        answer_agents:
+          type: boolean
+          description: Let other apps' bots start turns, behind the relay's loop guard (ADR 0x031)
+        allow_unrestricted:
+          type: boolean
+          description: The owner's acknowledgement that the bound thread is not sandboxed. Without it the relay answers only sandboxed threads.
+        chat_sandboxed:
+          type: boolean
+          description: Whether the bound thread is sandboxed right now (computed; absent when the thread could not be read)
+        status:
+          type: string
+          enum: [active, broken]
+        last_error:
+          type: string
+        last_activity_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, app_id, chat_id, channel_id, channel_name, is_private, inbound_enabled, allow_user_ids, deny_user_ids, answer_agents, allow_unrestricted, status, created_at, updated_at]
+
+    SlackBindingCreateRequest:
+      type: object
+      properties:
+        app_id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+          description: The Slack channel id (C… or G…)
+        channel_name:
+          type: string
+        is_private:
+          type: boolean
+        chat_id:
+          type: string
+          format: uuid
+          description: Bind an existing thread; omit to create a new relay thread
+        inbound_enabled:
+          type: boolean
+          default: true
+        allow_user_ids:
+          type: array
+          items:
+            type: string
+        deny_user_ids:
+          type: array
+          items:
+            type: string
+        answer_agents:
+          type: boolean
+          default: false
+        allow_unrestricted:
+          type: boolean
+          description: Acknowledge binding an existing thread that is not sandboxed
+      required: [app_id, channel_id]
+
+    SlackBindingUpdateRequest:
+      type: object
+      properties:
+        chat_id:
+          type: string
+          format: uuid
+        inbound_enabled:
+          type: boolean
+        allow_user_ids:
+          type: array
+          items:
+            type: string
+        deny_user_ids:
+          type: array
+          items:
+            type: string
+        channel_name:
+          type: string
+        answer_agents:
+          type: boolean
+        allow_unrestricted:
+          type: boolean
+        reactivate:
+          type: boolean
+          description: Clear a broken status after fixing the app's access to the channel
+
+    SlackMessageLink:
+      type: object
+      description: One message that crossed between a relay thread and its Slack channel.
+      properties:
+        id:
+          type: string
+          format: uuid
+        binding_id:
+          type: string
+          format: uuid
+        direction:
+          type: string
+          enum: [inbound, outbound]
+        chat_message_id:
+          type: string
+          format: uuid
+        message_ts:
+          type: string
+          description: Inbound only. The Slack message's ts
+        thread_ts:
+          type: string
+          description: The Slack thread the message is in
+        posted_ts:
+          type: array
+          items:
+            type: string
+          description: Outbound only. The ts of each message the reply was posted as
+        author_user_id:
+          type: string
+        author_name:
+          type: string
+        reply_to_link_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [received, pending, sent, failed]
+        error:
+          type: string
+        attempts:
+          type: integer
+        agent_depth:
+          type: integer
+          description: Inbound only. Consecutive bot-started turns on the binding, this message included; 0 when a person wrote it (ADR 0x031)
+        created_at:
+          type: string
+          format: date-time
+      required: [id, binding_id, direction, thread_ts, posted_ts, status, attempts, agent_depth, created_at]
+
+    SlackChatState:
+      type: object
+      properties:
+        bindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/SlackBinding'
+        pending_binding_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/SlackMessageLink'
       required: [bindings, pending_binding_ids, links]
     MemoryCreateRequest:
       type: object
@@ -11407,6 +13118,7 @@ components:
         - message_too_long
         - quota_exceeded
         - system_prompt_too_long
+        - buzz_terms_required
         - provider_not_configured
         - reauthentication_required
         - provider_unreachable
@@ -11515,8 +13227,14 @@ tags:
       paths are lower-case, `/` nests, and `""` is the top level.
   - name: Memory Management
     description: User memory storage and retrieval operations
+  - name: Remote Sync
+    description: Keeping a copy of your threads from another What Iff server (self-hosted installs)
   - name: Discord
     description: The Discord relay - personalities answering in Discord channels as their own bots
+  - name: Buzz
+    description: The Buzz relay - personalities as members of Buzz communities under their own keys
+  - name: Slack
+    description: The Slack relay - personalities as members of Slack workspaces as their own Slack apps
   - name: Personality Management
     description: Custom AI personality creation and management
   - name: Ritual Management

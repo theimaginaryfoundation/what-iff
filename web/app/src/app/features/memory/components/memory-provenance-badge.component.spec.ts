@@ -19,6 +19,16 @@ describe('MemoryProvenanceBadgeComponent', () => {
     expect(render('external').textContent?.trim()).toBe('External');
   });
 
+  it('says the memory came from a relay thread: Discord, Buzz or Slack', () => {
+    const fixture = TestBed.createComponent(MemoryProvenanceBadgeComponent);
+    fixture.componentRef.setInput('provenance', 'external');
+    fixture.componentRef.setInput('speaker', 'alice');
+    fixture.detectChanges();
+    expect(fixture.componentInstance.hint()).toBe(
+      'Learned from alice, in a Discord, Buzz or Slack thread, not from you. Unverified: the persona treats it that way too.',
+    );
+  });
+
   it('renders nothing for your own memories', () => {
     expect(render('user', 'alice').querySelector('.provenance-badge')).toBeNull();
     expect(render(null).querySelector('.provenance-badge')).toBeNull();

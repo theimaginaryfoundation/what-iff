@@ -121,6 +121,14 @@ func (s *Server) setupMiddleware() {
 	s.router.Use(s.metricsMiddleware)
 	s.router.PathPrefix("/").Methods(http.MethodOptions).HandlerFunc(s.handlePreflight)
 	s.router.Use(s.corsMiddleware)
+	// mux runs router middleware only on a matched route, so an unmatched path (a route a plugin
+	// switched off never registered, e.g. /api/buzz with the relay off) would answer without CORS
+	// headers, and a cross-origin browser would see a network error instead of the 404 the web
+	// app reads as "off".
+	s.router.NotFoundHandler = s.corsMiddleware(http.NotFoundHandler())
+	s.router.MethodNotAllowedHandler = s.corsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}))
 }
 
 func (s *Server) setupRoutes() {

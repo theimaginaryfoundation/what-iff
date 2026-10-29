@@ -2,8 +2,6 @@ package chat
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -451,21 +449,12 @@ func prepareConversations(raw []migration.SimplifiedConversation, now time.Time)
 			Title:      title,
 			CreatedAt:  createdAt,
 			Source:     models.ChatSourceOpenAI,
-			ImportHash: conversationHash(r.ConversationID),
+			ImportHash: models.ConversationImportHash(r.ConversationID),
 			Messages:   msgs,
 		})
 	}
 
 	return convs, errs
-}
-
-// conversationHash returns sha256(conversationID) as a stable hex dedup key.
-// Using the export's own conversation ID (not timestamps or message counts) ensures
-// the same conversation always hashes identically regardless of when it is imported.
-func conversationHash(conversationID string) string {
-	h := sha256.New()
-	h.Write([]byte(conversationID)) // hash.Hash.Write never returns a non-nil error
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 // floatToTime converts a Unix float64 timestamp (as used in ChatGPT exports) to a UTC time,

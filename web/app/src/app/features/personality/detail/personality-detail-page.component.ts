@@ -48,6 +48,7 @@ import {
 } from '../services/personality-editor-session.service';
 import { HelpHintComponent } from '../../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
+import { EntityMarketplaceOutletComponent } from '../../../extensions/entity-marketplace-outlet.component';
 
 @Component({
   selector: 'app-personality-detail-page',
@@ -64,6 +65,7 @@ import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
     ContractIconComponent,
     HelpHintComponent,
     TooltipDirective,
+    EntityMarketplaceOutletComponent,
   ],
   providers: [PersonalityViewService],
   templateUrl: './personality-detail-page.component.html',

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -271,6 +273,18 @@ func expectGetChatMessagesForSummarySuccess(mock sqlmock.Sqlmock, msgs []models.
 	mock.ExpectQuery("SELECT .*").WillReturnRows(rows)
 }
 
+// expectChatSummary mocks GetChatSummary: the thread's existing summary and window start (an
+// empty summary and nil start for a thread that has never been summarized).
+func expectChatSummary(mock sqlmock.Sqlmock, summary string, windowStart *time.Time) {
+	row := sqlmock.NewRows([]string{"id", "checkpoint_summary", "last_checkpoint_at"})
+	if windowStart != nil {
+		row.AddRow(uuid.New(), summary, *windowStart)
+	} else {
+		row.AddRow(uuid.New(), summary, nil)
+	}
+	mock.ExpectQuery("SELECT .*").WillReturnRows(row)
+}
+
 func TestRunThreadRehydration_LoadMessagesFailureCallsFailRehydration(t *testing.T) {
 	t.Parallel()
 	ds, mock, cleanup := newTestDatastore(t)
@@ -303,6 +317,7 @@ func TestRunThreadRehydration_ShortThreadMarksReadyWithoutSummarizing(t *testing
 	expectJobStatusUpdateNotFound(mock)                                           // mark processing
 	mock.ExpectExec("UPDATE .*chats.*").WillReturnResult(sqlmock.NewResult(0, 1)) // mark processing state
 	expectGetChatMessagesForSummarySuccess(mock, msgs)
+	expectChatSummary(mock, "", nil)
 	mock.ExpectExec("UPDATE .*chats.*").WillReturnResult(sqlmock.NewResult(0, 1)) // mark ready (short thread)
 	expectJobStatusUpdateNotFound(mock)                                           // complete job
 
@@ -323,6 +338,7 @@ func TestRunThreadRehydration_LongThreadMockLLMUsesDeterministicSummary(t *testi
 	expectJobStatusUpdateNotFound(mock)                                           // mark processing
 	mock.ExpectExec("UPDATE .*chats.*").WillReturnResult(sqlmock.NewResult(0, 1)) // mark processing state
 	expectGetChatMessagesForSummarySuccess(mock, msgs)
+	expectChatSummary(mock, "", nil)
 	mock.ExpectExec("UPDATE .*chats.*").WillReturnResult(sqlmock.NewResult(0, 1)) // SetImportedThreadRehydrated
 	expectJobStatusUpdateNotFound(mock)                                           // complete job
 
@@ -331,6 +347,97 @@ func TestRunThreadRehydration_LongThreadMockLLMUsesDeterministicSummary(t *testi
 	require.NotPanics(t, func() {
 		a.runThreadRehydration(context.Background(), uuid.New(), uuid.New(), uuid.New())
 	})
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// A stale thread (remote sync appended past its summary) is caught up: only the messages from its
+// window start on are split, so a backlog of a few turns needs no summary call at all.
+func TestRunThreadRehydration_CaughtUpThreadWithAShortBacklogKeepsItsSummary(t *testing.T) {
+	t.Parallel()
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	msgs := turnMsgs(10)
+	windowStart := msgs[12].SentAt // 4 user turns after the summary: within the live window
+
+	expectJobStatusUpdateNotFound(mock)
+	mock.ExpectExec("UPDATE .*chats.*").WillReturnResult(sqlmock.NewResult(0, 1)) // mark processing state
+	expectGetChatMessagesForSummarySuccess(mock, msgs)
+	expectChatSummary(mock, "earlier", &windowStart)
+	mock.ExpectExec("UPDATE .*chats.*").WillReturnResult(sqlmock.NewResult(0, 1)) // mark ready, summary kept
+	expectJobStatusUpdateNotFound(mock)                                           // complete job
+
+	a := newTestAgent(ds)
+	a.mockLLM = true
+	a.runThreadRehydration(context.Background(), uuid.New(), uuid.New(), uuid.New())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRunThreadRehydration_CaughtUpThreadWithNothingPastItsSummaryIsReadyAgain(t *testing.T) {
+	t.Parallel()
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	msgs := turnMsgs(10)
+	windowStart := msgs[19].SentAt.Add(time.Minute) // after every message
+
+	expectJobStatusUpdateNotFound(mock)
+	mock.ExpectExec("UPDATE .*chats.*").WillReturnResult(sqlmock.NewResult(0, 1)) // mark processing state
+	expectGetChatMessagesForSummarySuccess(mock, msgs)
+	expectChatSummary(mock, "earlier", &windowStart)
+	mock.ExpectExec("UPDATE .*chats.*").WillReturnResult(sqlmock.NewResult(0, 1)) // mark ready, summary kept
+	expectJobStatusUpdateNotFound(mock)
+
+	a := newTestAgent(ds)
+	a.mockLLM = true
+	a.runThreadRehydration(context.Background(), uuid.New(), uuid.New(), uuid.New())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRunThreadRehydration_AChatDeletedMidRunIsNotAFailure(t *testing.T) {
+	t.Parallel()
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	expectJobStatusUpdateNotFound(mock)
+	mock.ExpectExec("UPDATE .*chats.*").WillReturnResult(sqlmock.NewResult(0, 1)) // mark processing state
+	expectGetChatMessagesForSummarySuccess(mock, turnMsgs(10))
+	mock.ExpectQuery("SELECT .*").WillReturnRows(sqlmock.NewRows([]string{"id"})) // GetChatSummary: gone
+	expectJobStatusUpdateNotFound(mock)                                           // complete job, no "failed" state
+
+	a := newTestAgent(ds)
+	a.mockLLM = true
+	require.Equal(t, telemetry.JobOutcomeSuccess, a.runThreadRehydration(context.Background(), uuid.New(), uuid.New(), uuid.New()))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRunThreadRehydration_CaughtUpThreadFoldsTheBacklogIntoItsSummary(t *testing.T) {
+	t.Parallel()
+	ds, mock, cleanup := newTestDatastore(t)
+	defer cleanup()
+
+	msgs := turnMsgs(20)
+	windowStart := msgs[10].SentAt // 15 user turns after the summary: 10 to fold in, 5 to keep
+
+	expectJobStatusUpdateNotFound(mock)
+	mock.ExpectExec("UPDATE .*chats.*").WillReturnResult(sqlmock.NewResult(0, 1)) // mark processing state
+	expectGetChatMessagesForSummarySuccess(mock, msgs)
+	expectChatSummary(mock, "earlier", &windowStart)
+	mock.ExpectExec("UPDATE .*chats.*").
+		WithArgs(
+			sqlmock.AnyArg(), // updated_at
+			"earlier\nMock rehydration summary of 20 imported messages.",
+			15,              // every reply before the new window: 5 summarized before, 10 now
+			msgs[30].SentAt, // the new window: the last 5 user turns
+			"ready",
+			sqlmock.AnyArg(), sqlmock.AnyArg(), // chat and owner
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1)) // SetImportedThreadRehydrated
+	expectJobStatusUpdateNotFound(mock)
+
+	a := newTestAgent(ds)
+	a.mockLLM = true
+	a.runThreadRehydration(context.Background(), uuid.New(), uuid.New(), uuid.New())
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -381,7 +488,7 @@ func TestSummarizeText_ProviderErrorIsWrapped(t *testing.T) {
 func TestSummarizeImportedThread_EmptyTranscriptReturnsError(t *testing.T) {
 	t.Parallel()
 	a := &Agent{logger: zap.NewNop()}
-	_, err := a.summarizeImportedThread(context.Background(), uuid.New(), []models.ChatMessage{{Message: "   "}})
+	_, err := a.summarizeImportedThread(context.Background(), uuid.New(), "", []models.ChatMessage{{Message: "   "}})
 	require.ErrorContains(t, err, "empty transcript")
 }
 
@@ -392,7 +499,7 @@ func TestSummarizeImportedThread_SinglePassUnderCharBudget(t *testing.T) {
 
 	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
 	msgs := turnMsgs(2)
-	got, err := a.summarizeImportedThread(context.Background(), uuid.New(), msgs)
+	got, err := a.summarizeImportedThread(context.Background(), uuid.New(), "", msgs)
 	require.NoError(t, err)
 	require.Equal(t, "short thread summary", got)
 }
@@ -408,9 +515,41 @@ func TestSummarizeImportedThread_MapReduceForLongTranscript(t *testing.T) {
 	msgs := []models.ChatMessage{
 		{Message: strings.Repeat("x", rehydrationSinglePassChars+1), Origin: models.MessageOriginUser},
 	}
-	got, err := a.summarizeImportedThread(context.Background(), uuid.New(), msgs)
+	got, err := a.summarizeImportedThread(context.Background(), uuid.New(), "", msgs)
 	require.NoError(t, err)
 	require.Equal(t, "rolled-up summary", got)
+}
+
+func TestSummarizeImportedThread_ACatchUpCarriesTheEarlierSummary(t *testing.T) {
+	t.Parallel()
+	var body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		body = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(responseTextJSONBody("resp_5", "caught up")))
+	}))
+	defer srv.Close()
+
+	a := &Agent{logger: zap.NewNop(), OpenAIProvider: newHTTPTestOpenAIProvider(srv.URL)}
+	got, err := a.summarizeImportedThread(context.Background(), uuid.New(), "They planned a trip to Lisbon.", turnMsgs(2))
+	require.NoError(t, err)
+	require.Equal(t, "caught up", got)
+	require.Contains(t, body, "They planned a trip to Lisbon.", "one summary covers the earlier one and what followed")
+}
+
+func TestMessagesFromReturnsTheSuffixFromAMoment(t *testing.T) {
+	t.Parallel()
+	msgs := turnMsgs(3) // six messages, a minute apart
+	require.Equal(t, msgs[2:], messagesFrom(msgs, msgs[2].SentAt), "inclusive of the moment")
+	require.Equal(t, msgs[2:], messagesFrom(msgs, msgs[2].SentAt.Add(-time.Second)))
+	require.Empty(t, messagesFrom(msgs, msgs[5].SentAt.Add(time.Second)), "nothing that late")
+}
+
+func TestWithPriorSummaryLeavesAFirstSummaryAlone(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "plain", withPriorSummary("  ", "plain"))
+	require.Contains(t, withPriorSummary("before", "after"), "before")
 }
 
 // --- extractMemoriesFromTranscript ---

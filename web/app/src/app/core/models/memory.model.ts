@@ -1,6 +1,6 @@
 /**
  * Where a memory came from: `user` (yours: your own threads or the memory manager) or `external`
- * (learned from other people in a Discord relay thread, and unverified).
+ * (learned from other people in a relay thread (Discord, Buzz or Slack), and unverified).
  */
 export type MemoryProvenance = 'user' | 'external';
 
@@ -14,7 +14,7 @@ export interface Memory {
   status: 'active' | 'inactive';
   /** The backend always sends it (default `user`); optional so older payloads and fixtures still type-check. */
   provenance?: MemoryProvenance;
-  /** For an external memory, the Discord display name it came from, when known (unverified). */
+  /** For an external memory, the relay display name it came from, when known (unverified). */
   source_speaker?: string | null;
   // Stored confidence is a float in [0,1] (LLM buckets map to anchors 0.3/0.6/0.9; other signals
   // can refine it). Create/patch still accept the coarse buckets below.

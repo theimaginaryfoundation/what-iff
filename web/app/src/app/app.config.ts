@@ -13,6 +13,7 @@ import { chatSendGateProviders } from './extensions/chat-send-gate.providers';
 import { accessGateProviders } from './extensions/access-gate.providers';
 import { integrationTabProviders } from './extensions/integration-tabs.providers';
 import { threadAutomationProviders } from './extensions/thread-automations.providers';
+import { RemoteSyncWakeService } from './features/remote-sync/remote-sync-wake.service';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -35,6 +36,14 @@ export const appConfig: ApplicationConfig = {
       multi: true,
       deps: [ExternalAuthProvider],
       useFactory: (auth: ExternalAuthProvider) => () => auth.configure(),
+    },
+    {
+      // Remote sync: ask this server to sync from the remote when the app is opened or comes
+      // back after a while, instead of polling on a clock (ADR 0x033). No-op where it is off.
+      provide: APP_INITIALIZER,
+      multi: true,
+      deps: [RemoteSyncWakeService],
+      useFactory: (wake: RemoteSyncWakeService) => () => wake.start(),
     },
   ]
 };

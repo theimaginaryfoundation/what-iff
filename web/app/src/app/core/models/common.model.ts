@@ -43,7 +43,8 @@ export type SpecificErrorCode =
   | 'quota_exceeded'
   | 'system_prompt_too_long'
   | 'provider_not_configured'
-  | 'reauthentication_required';
+  | 'reauthentication_required'
+  | 'buzz_terms_required';
 
 export interface PaginatedResponse<T> {
   results: T[];

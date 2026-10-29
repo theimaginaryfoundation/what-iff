@@ -52,6 +52,9 @@ const (
 	ErrCodeMessageTooLong      = "message_too_long"
 	ErrCodeQuotaExceeded       = "quota_exceeded"
 	ErrCodeSystemPromptTooLong = "system_prompt_too_long"
+	// ErrCodeBuzzTermsRequired: a Buzz community has join terms the owner has not yet
+	// accepted for the persona; details.policy carries them (ADR 0x028).
+	ErrCodeBuzzTermsRequired = "buzz_terms_required"
 
 	// ErrCodeProviderNotConfigured: the request needed a model provider the
 	// account has no key for. Details is {"provider": "<name>"}.
@@ -109,6 +112,7 @@ var AllErrorCodes = []string{
 	ErrCodeMessageTooLong,
 	ErrCodeQuotaExceeded,
 	ErrCodeSystemPromptTooLong,
+	ErrCodeBuzzTermsRequired,
 	ErrCodeProviderNotConfigured,
 	ErrCodeReauthenticationRequired,
 	ErrCodeProviderUnreachable,

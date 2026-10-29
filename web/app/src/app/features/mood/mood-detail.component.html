@@ -38,13 +38,14 @@
               </svg>
             }
           </div>
-          <div>
+          <div class="min-w-0 flex-1">
             <h1 class="text-xl font-bold text-white">{{ mood()!.name }}</h1>
             <p class="text-xs text-gray-500 mt-0.5">
               {{ mood()!.image_ids.length }} image{{ mood()!.image_ids.length !== 1 ? 's' : '' }} ·
               {{ mood()!.ritual_ids.length }} skill{{ mood()!.ritual_ids.length !== 1 ? 's' : '' }}
             </p>
           </div>
+          <app-entity-marketplace-outlet kind="mode" [entityId]="mood()!.id" [entityName]="mood()!.name" layout="actions" />
         </div>
 
         <!-- Status messages -->
