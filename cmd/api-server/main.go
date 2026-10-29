@@ -15,6 +15,7 @@ import (
 
 	"entgo.io/ent/dialect/sql/schema"
 	"github.com/theimaginaryfoundation/what-iff/ent"
+	"github.com/theimaginaryfoundation/what-iff/internal/accountkeys"
 	"github.com/theimaginaryfoundation/what-iff/internal/auth"
 
 	// No billing meter is linked in the open-source build: metering.New stays nil
@@ -201,6 +202,11 @@ func init() {
 	// Ensure seed data exists before serving requests
 	if err := database.EnsureSeedData(context.Background(), client, logger); err != nil {
 		logger.Fatal("Failed to seed database", zap.Error(err))
+	}
+
+	// Keys stored before provider connections existed become connections (ADR 0x027).
+	if _, err := accountkeys.ConvertStoredKeys(context.Background(), client, logger); err != nil {
+		logger.Fatal("Failed to convert stored provider keys", zap.Error(err))
 	}
 
 	// Create and configure server
