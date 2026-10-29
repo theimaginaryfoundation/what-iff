@@ -615,8 +615,15 @@ func (s *Service) recordPublishError(ctx context.Context, t models.BuzzBindingTa
 	}
 }
 
-// notice publishes a short reply to the triggering message; failures are ignored.
+// notice publishes a short reply to the triggering message; failures are ignored. The binding
+// is read again first: a notice can come long after the turn started, and nothing is posted
+// once the persona or community is paused or the binding broken.
 func (s *Service) notice(ctx context.Context, t models.BuzzBindingTarget, ev nostr.Event, text string) {
+	fresh, err := s.Store.GetBuzzBindingTarget(ctx, t.Binding.ID)
+	if err != nil || fresh == nil || !fresh.Live() {
+		return
+	}
+	t = *fresh
 	ep, err := EndpointFor(t.Community)
 	if err != nil {
 		return
@@ -647,7 +654,9 @@ type profileCache struct {
 type cachedProfile struct {
 	name string
 	bot  bool
-	at   time.Time
+	// unknown: the relay could not be asked. Not cached, so the next lookup asks again.
+	unknown bool
+	at      time.Time
 }
 
 // name is pubkey's display name in the community, or a short npub when it has no profile.
@@ -655,9 +664,11 @@ func (c *profileCache) name(ctx context.Context, relay Relay, ep Endpoint, signe
 	return c.lookup(ctx, relay, ep, signer, pubkey).name
 }
 
-// bot reports whether pubkey's profile marks it as an automated account.
+// bot reports whether pubkey's profile marks it as an automated account. A profile that could
+// not be read counts as a bot: the loop guard fails closed.
 func (c *profileCache) bot(ctx context.Context, relay Relay, ep Endpoint, signer Signer, pubkey string) bool {
-	return c.lookup(ctx, relay, ep, signer, pubkey).bot
+	p := c.lookup(ctx, relay, ep, signer, pubkey)
+	return p.bot || p.unknown
 }
 
 func (c *profileCache) lookup(ctx context.Context, relay Relay, ep Endpoint, signer Signer, pubkey string) cachedProfile {
@@ -669,9 +680,12 @@ func (c *profileCache) lookup(ctx context.Context, relay Relay, ep Endpoint, sig
 	}
 	c.mu.Unlock()
 
-	var p cachedProfile
 	events, err := relay.Query(ctx, ep, signer, Filter{"kinds": []int{KindProfile}, "authors": []string{pubkey}, "limit": 1})
-	if err == nil && len(events) > 0 && events[0].Verify() == nil && events[0].PubKey == pubkey {
+	if err != nil {
+		return cachedProfile{name: ShortNPub(pubkey), unknown: true}
+	}
+	var p cachedProfile
+	if len(events) > 0 && events[0].Verify() == nil && events[0].PubKey == pubkey {
 		profile := ParseProfile(events[0])
 		p.name, p.bot = profile.Label(), profile.Bot
 	}

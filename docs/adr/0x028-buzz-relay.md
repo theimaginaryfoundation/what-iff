@@ -56,11 +56,13 @@ A persona joins a community (`buzz_community`: the agent plus a relay URL) in on
 
 - The supervisor (`relaykit.Supervisor`, shared with the Discord gateway) leads through a Postgres advisory lock on its own key, `80920034` (the agent-job scheduler uses `80920031`, Discord `80920032`, the memory embedding backfill `80920033`; the registry is in `.env.example`), overridable with `BUZZ_GATEWAY_LOCK_KEY`.
   `BUZZ_GATEWAY_SINGLE_INSTANCE=true` skips the lock for one-process local runs.
-- The leader keeps one connection per active community row, answers the relay's `AUTH` challenge with a kind 22242 event signed by the persona (plus its attestation, when there is one and its conditions allow that event), and subscribes to each bound channel: `{"kinds":[9], "#h":[channel], "since": …}`.
+- The leader keeps one connection per active community row, answers the relay's `AUTH` challenge with a kind 22242 event signed by the persona (plus its attestation, when there is one and it has not expired: NIP-AA evaluates only its `created_at` clauses at admission, not `kind=` ones, and the same goes for the `x-auth-tag` header), and subscribes to each bound channel: `{"kinds":[9], "#h":[channel], "since": …}`.
   It re-reads the rows and bindings about every 30 s and resubscribes when a binding is added or removed.
-- Every connection resumes from the newest event seen from that community, minus a minute's skew, so a short outage loses nothing; redelivered events are deduplicated on the event id (§4).
-  The mark survives a re-dial (a changed binding reopens the connection) in memory, and a restart or leader change on the community row (`last_event_at`, written at most every 30 s).
-  It reaches back at most an hour: a community quiet for longer resumes from an hour ago, and mentions older than that are left unanswered rather than answered late.
+- Each bound channel's subscription resumes from the newest event seen in it, minus a minute's skew, so a short outage loses no mention that had already been recorded or had not yet arrived; redelivered events are deduplicated on the event id (§4).
+  The mark survives a re-dial (another binding changing reopens the connection) in memory, and a restart or leader change on the binding row (`last_event_at`, written at most every 30 s).
+  It reaches back at most an hour: a channel quiet for longer resumes from an hour ago, and mentions older than that are left unanswered rather than answered late.
+  A binding the gateway stops listening to (its community or persona paused, inbound off, broken) loses its mark, so turning it back on does not answer what was said meanwhile.
+  The mark moves when an event arrives, not when it is answered: mentions still waiting behind a running turn when the process stops can be lost.
 - A connection that drops soon after subscribing does not reset the reconnect backoff; only one that stayed up for a minute does.
 - Events are verified (id and Schnorr signature) before anything else; an event whose signature does not check out, or whose id, pubkey or signature is not lowercase hex as NIP-01 requires, is dropped.
   Events that neither mention the persona nor reply in a thread are dropped on arrival, before any lookup.
@@ -68,8 +70,8 @@ A persona joins a community (`buzz_community`: the agent plus a relay URL) in on
 ### 4. Data
 
 - **`buzz_agent`**: owner, persona (`personality_id`, unique), `pubkey` (hex, unique), encrypted `secret_key`, `status` (active, disabled), `last_error`.
-- **`buzz_community`**: agent, `relay_url` (normalised, without the scheme's default port; unique per agent), cached `name` and `relay_pubkey`, optional `auth_tag` (verified attestation) and `owner_pubkey`, `policy_version` accepted for the persona, `status`, `last_error`, `last_connected_at`, `last_event_at` (the gateway's resume point, §3).
-- **`buzz_binding`**: a channel bound to a relay thread: community, `chat_id`, `channel_id` (the NIP-29 group id, Buzz's `h` tag), cached `channel_name`, `inbound_enabled`, `allow_pubkeys`, `deny_pubkeys`, `answer_agents`, `allow_unrestricted`, `status` (active, broken), `last_error`, `last_activity_at`. Unique on (community, channel).
+- **`buzz_community`**: agent, `relay_url` (normalised, without the scheme's default port; unique per agent), cached `name` and `relay_pubkey`, optional `auth_tag` (verified attestation) and `owner_pubkey`, `policy_version` accepted for the persona, `status`, `last_error`, `last_connected_at`.
+- **`buzz_binding`**: a channel bound to a relay thread: community, `chat_id`, `channel_id` (the NIP-29 group id, Buzz's `h` tag), cached `channel_name`, `inbound_enabled`, `allow_pubkeys`, `deny_pubkeys`, `answer_agents`, `allow_unrestricted`, `status` (active, broken), `last_error`, `last_activity_at`, `last_event_at` (the gateway's resume point, §3). Unique on (community, channel).
 - **`buzz_message_link`**: one row per message that crossed the boundary: the What Iff message, the binding, `direction`, the Buzz event id (inbound: unique per binding, the dedupe key) and its thread root, the event ids posted (outbound), and for inbound messages the author's pubkey and display name.
 - **`buzz_pending_post`**: "post the next reply in this thread to this binding", set by the composer toggle or the `post_to_buzz` tool and consumed by the reply hook; it expires after 30 minutes.
 

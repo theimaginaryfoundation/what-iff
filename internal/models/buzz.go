@@ -72,10 +72,8 @@ type BuzzCommunity struct {
 	Status          BuzzCommunityStatus `json:"status"`
 	LastError       *string             `json:"last_error,omitempty"`
 	LastConnectedAt *time.Time          `json:"last_connected_at,omitempty"`
-	// LastEventAt is the newest event seen from the community (the gateway's resume point).
-	LastEventAt *time.Time `json:"-"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	CreatedAt       time.Time           `json:"created_at"`
+	UpdatedAt       time.Time           `json:"updated_at"`
 }
 
 // BuzzCommunityCreate is a new community for an agent.
@@ -120,6 +118,9 @@ type BuzzListenChannel struct {
 	BindingID uuid.UUID
 	ChannelID string
 	BoundAt   time.Time
+	// LastEventAt is the newest event the gateway saw in the channel (its resume point); nil
+	// when it has not listened since the binding was made or last paused.
+	LastEventAt *time.Time
 }
 
 // BuzzBindingStatus is the health of a binding.

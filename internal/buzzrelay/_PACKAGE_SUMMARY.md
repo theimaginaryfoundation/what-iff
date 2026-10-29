@@ -11,7 +11,7 @@ It talks to a community through `Relay` (the HTTP bridge) and the reconnecting W
   The routes, the gateway and `post_to_buzz` all ask it.
 - **Client (`client.go`):** `ParseEndpoint` (address, wss URL or invite link, the scheme's default port dropped; ws/http only when insecure), NIP-11 `Info`, NIP-98 signed `Query` and `Publish`, `JoinPolicy`, `ClaimInvite` (with the join-terms receipt), and `MintInvite` for rigs and tests.
   Every connection goes through the public-address dial guard unless `AllowPrivate` (local development).
-- **Session (`session.go`):** one WebSocket per persona per community; it answers the NIP-42 challenge (with the owner attestation when there is one and it allows that event), holds the per-binding subscriptions resumed from the newest event seen minus a skew (on first connect, from `Start`), verifies every event, pings, and reconnects with backoff.
+- **Session (`session.go`):** one WebSocket per persona per community; it answers the NIP-42 challenge (with the owner attestation when there is one and it has not expired), holds the per-binding subscriptions resumed from the newest event seen minus a skew (on first connect, from `Start`), verifies every event, pings, and reconnects with backoff.
   Only a connection that stayed up `stableAfter` (a minute) resets the backoff, so a relay that drops every connection after REQ is not redialled every second.
   It reports `active`, `needs_access` (the relay refused the persona) or `error`, and subscriptions the relay closes.
 - **Events (`events.go`, `channels.go`):** kind 0 profiles (bot flag), kind 9 messages with NIP-10 thread tags and p-tag mentions, typing pulses, join requests, `ThreadOf`/`ReplyThread`, `SplitMessage` (64 KiB), and `ListChannels` (relay-signed NIP-29 metadata and rosters).
@@ -43,7 +43,10 @@ It talks to a community through `Relay` (the HTTP bridge) and the reconnecting W
   NIP-98 URLs, the NIP-42 relay tag and the Blossom server tag all name the host the connection was opened on (port included); the relay binds the community from it.
 - **Thread continuations need no mention** when someone replies directly to the persona's message, or the asker writes on in their own thread (`Store.BuzzThreadContinues`); anyone else in the thread must mention the persona.
 - **Model output never notifies anyone but the asker:** only the asker's p tag is added, never mentions parsed from the reply.
-- **An attestation is carried only where its conditions hold** (`Signer.attestationFor`, `nostr.Attestation.Allows`): an expired one, or one for other kinds, is left off events, AUTH and the `x-auth-tag` header, so the relay judges the persona on its own membership rather than rejecting an invalid tag.
+- **An attestation is carried only where its conditions hold.**
+  On published events all clauses count (`nostr.Attestation.Allows`), so a `kind=9` attestation is left off profiles and typing pulses.
+  At admission (AUTH, the `x-auth-tag` header) only `created_at` clauses count (`Signer.admission`), because NIP-AA does not evaluate `kind=` there.
+  An expired attestation is left off everywhere, so the relay judges the persona on its own membership rather than rejecting an invalid tag.
 - **Events older than their binding are never answered** (a connection resumes from its last event, up to an hour back, and a new binding must not answer old mentions).
 
 ## Testing

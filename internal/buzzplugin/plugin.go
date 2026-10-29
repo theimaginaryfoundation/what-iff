@@ -105,7 +105,7 @@ func apply(d plugins.Deps) {
 	sup := &relaykit.Supervisor[models.BuzzConnection]{
 		Name:        "buzz gateway",
 		Locker:      locker(d, logger),
-		List:        d.DataStore.ListActiveBuzzConnections,
+		List:        gw.list(d.DataStore.ListActiveBuzzConnections),
 		Key:         func(c models.BuzzConnection) uuid.UUID { return c.Community.ID },
 		Fingerprint: fingerprint,
 		Dial:        gw.dial,
@@ -163,34 +163,42 @@ type gateway struct {
 type stateStore interface {
 	SetBuzzCommunityState(ctx context.Context, id uuid.UUID, status models.BuzzCommunityStatus, lastError string) error
 	SetBuzzBindingStatus(ctx context.Context, id uuid.UUID, status models.BuzzBindingStatus, lastError string) error
-	MarkBuzzCommunityEvent(ctx context.Context, id uuid.UUID, at time.Time) error
+	MarkBuzzBindingEvent(ctx context.Context, id uuid.UUID, at time.Time) error
+	ClearBuzzBindingEvents(ctx context.Context, ids []uuid.UUID) error
 }
 
-// maxResume bounds how far back a fresh connection reaches. A community quiet for days
-// resumes from an hour back, and mentions older than that are left rather than answered late.
+// maxResume bounds how far back a fresh connection reaches. A channel quiet for days resumes
+// from an hour back, and mentions older than that are left rather than answered late.
 const maxResume = time.Hour
 
-// markEvery bounds how often a community's resume point is written. It is shorter than the
+// markEvery bounds how often a binding's resume point is written. It is shorter than the
 // session's skew (a minute), so the events after the last write are still asked for again.
 const markEvery = 30 * time.Second
 
-// resumeMarks is where each community's connection resumes: the newest event seen, kept in
-// memory across re-dials (a changed binding reopens the connection) and written to the
-// community row across restarts and leader changes.
+// resumeMarks is where each bound channel's subscription resumes: the newest event seen while
+// listening, kept in memory across re-dials (another binding of the community changing reopens
+// the connection) and written to the binding row across restarts and leader changes. A
+// binding the gateway stops listening to (its community or persona paused, inbound off, the
+// binding broken) loses its mark, so listening again starts from now rather than answering
+// what was said meanwhile.
 type resumeMarks struct {
-	mu    sync.Mutex
-	seen  map[uuid.UUID]int64
-	saved map[uuid.UUID]time.Time
+	mu        sync.Mutex
+	seen      map[uuid.UUID]int64
+	saved     map[uuid.UUID]time.Time
+	listening map[uuid.UUID]bool
+	// unsaved are bindings whose stored mark should be gone but could not be cleared yet:
+	// their stored mark is ignored, and clearing is retried at the next listing.
+	unsaved map[uuid.UUID]bool
 }
 
-// start is where a new connection to community id begins: the newer of the stored and the
-// in-memory mark, no earlier than maxResume ago; now when there is neither.
+// start is where binding id's subscription begins: the newer of the stored and the in-memory
+// mark, no earlier than maxResume ago; now when there is neither.
 func (m *resumeMarks) start(id uuid.UUID, stored *time.Time, now time.Time) time.Time {
 	var at int64
-	if stored != nil {
+	m.mu.Lock()
+	if stored != nil && !m.unsaved[id] {
 		at = stored.Unix()
 	}
-	m.mu.Lock()
 	if v := m.seen[id]; v > at {
 		at = v
 	}
@@ -231,17 +239,87 @@ func (m *resumeMarks) note(id uuid.UUID, createdAt int64, now time.Time) bool {
 	return true
 }
 
+// listed takes the bindings the gateway listens to now and returns the ones whose stored marks
+// must be cleared: those it listened to at the previous listing and no longer does (their
+// in-memory marks are forgotten here), plus earlier ones whose clearing failed.
+func (m *resumeMarks) listed(ids []uuid.UUID) (stale []uuid.UUID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := make(map[uuid.UUID]bool, len(ids))
+	for _, id := range ids {
+		now[id] = true
+	}
+	if m.unsaved == nil {
+		m.unsaved = map[uuid.UUID]bool{}
+	}
+	for id := range m.listening {
+		if !now[id] {
+			m.unsaved[id] = true
+			delete(m.seen, id)
+			delete(m.saved, id)
+		}
+	}
+	m.listening = now
+	for id := range m.unsaved {
+		stale = append(stale, id)
+	}
+	return stale
+}
+
+// cleared records that the stored marks of ids are gone.
+func (m *resumeMarks) cleared(ids []uuid.UUID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, id := range ids {
+		delete(m.unsaved, id)
+	}
+}
+
+// list wraps the gateway's work list: bindings that dropped out of it since the last listing
+// lose their resume points, here and on their rows.
+func (g *gateway) list(next func(context.Context) ([]models.BuzzConnection, error)) func(context.Context) ([]models.BuzzConnection, error) {
+	return func(ctx context.Context) ([]models.BuzzConnection, error) {
+		conns, err := next(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var ids []uuid.UUID
+		for _, c := range conns {
+			for _, ch := range c.Channels {
+				ids = append(ids, ch.BindingID)
+			}
+		}
+		if stale := g.marks.listed(ids); len(stale) > 0 {
+			if err := g.store.ClearBuzzBindingEvents(ctx, stale); err != nil {
+				// Kept as unsaved: their stored marks are ignored until a later listing clears them.
+				g.logger.Warn("buzz gateway: forget resume points; retrying at the next listing", zap.Error(err))
+			} else {
+				g.marks.cleared(stale)
+			}
+		}
+		return conns, nil
+	}
+}
+
 func (g *gateway) dial(ctx context.Context, c models.BuzzConnection) (relaykit.Conn, error) {
 	ep, signer, err := endpointSigner(&c)
 	if err != nil {
 		return nil, err
 	}
 	subs := map[string]buzzrelay.Filter{}
-	start := g.marks.start(c.Community.ID, c.Community.LastEventAt, time.Now())
+	now := time.Now()
+	start := now
 	for _, ch := range c.Channels {
+		from := g.marks.start(ch.BindingID, ch.LastEventAt, now)
+		if from.Before(start) {
+			start = from
+		}
 		subs[subPrefix+ch.BindingID.String()] = buzzrelay.Filter{
 			"kinds": []int{buzzrelay.KindStreamMessage},
 			"#h":    []string{ch.ChannelID},
+			// Each channel from its own mark, minus the session's skew. The session's own
+			// bound (Start, then the newest event seen) takes over when it is later.
+			"since": from.Add(-time.Minute).Unix(),
 		}
 	}
 	log := g.logger.With(zap.String("community_id", c.Community.ID.String()), zap.String("relay", c.Community.RelayURL))
@@ -254,10 +332,14 @@ func (g *gateway) dial(ctx context.Context, c models.BuzzConnection) (relaykit.C
 		Start:    start,
 		Logger:   log,
 		OnEvent: func(subID string, ev nostr.Event) {
-			if g.marks.note(communityID, ev.CreatedAt, time.Now()) {
+			id, err := uuid.Parse(strings.TrimPrefix(subID, subPrefix))
+			if err != nil {
+				return
+			}
+			if g.marks.note(id, ev.CreatedAt, time.Now()) {
 				at := time.Unix(ev.CreatedAt, 0)
 				go func() {
-					if err := g.store.MarkBuzzCommunityEvent(context.WithoutCancel(ctx), communityID, at); err != nil {
+					if err := g.store.MarkBuzzBindingEvent(context.WithoutCancel(ctx), id, at); err != nil {
 						log.Warn("buzz gateway: record resume point", zap.Error(err))
 					}
 				}()
@@ -265,10 +347,6 @@ func (g *gateway) dial(ctx context.Context, c models.BuzzConnection) (relaykit.C
 			// Most of a channel's traffic is not for the persona: drop it here, before a
 			// goroutine and a binding lookup (with key decryption) are spent on it.
 			if !buzzrelay.MayConcern(ev, personaPub) {
-				return
-			}
-			id, err := uuid.Parse(strings.TrimPrefix(subID, subPrefix))
-			if err != nil {
 				return
 			}
 			go g.svc.HandleEvent(ctx, id, ev)

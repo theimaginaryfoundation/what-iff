@@ -8,8 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// A fresh connection (a changed binding, a deploy, a new leader) resumes from the newest event
-// seen before, not from now, so mentions sent while it was down are still answered.
+// A fresh connection (another binding changing, a deploy, a new leader) resumes each channel from
+// the newest event seen in it, not from now, so mentions sent while it was down are still
+// answered.
 func TestResumeMarks(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	id := uuid.New()
@@ -17,7 +18,7 @@ func TestResumeMarks(t *testing.T) {
 
 	assert.Equal(t, now, m.start(id, nil, now), "nothing seen yet: now")
 	stored := now.Add(-10 * time.Minute)
-	assert.Equal(t, stored, m.start(id, &stored, now), "across a restart: the community row")
+	assert.Equal(t, stored, m.start(id, &stored, now), "across a restart: the binding row")
 	ancient := now.Add(-72 * time.Hour)
 	assert.Equal(t, now.Add(-maxResume), m.start(id, &ancient, now), "no further back than maxResume")
 
@@ -27,5 +28,18 @@ func TestResumeMarks(t *testing.T) {
 	assert.False(t, m.note(id, now.Add(-6*time.Minute).Unix(), now.Add(time.Hour)), "older events do not move it back")
 	assert.False(t, m.note(id, now.Add(time.Hour).Unix(), now), "nor do events from the future")
 	assert.True(t, m.note(id, now.Add(-time.Minute).Unix(), now.Add(markEvery)), "written again after markEvery")
-	assert.Equal(t, now, m.start(uuid.New(), nil, now), "per community")
+	assert.Equal(t, now, m.start(uuid.New(), nil, now), "per binding")
+
+	// A binding the gateway stops listening to (a pause, inbound off) loses its mark, so
+	// listening again does not answer what was said meanwhile.
+	other := uuid.New()
+	assert.Empty(t, m.listed([]uuid.UUID{id, other}))
+	assert.Equal(t, []uuid.UUID{id}, m.listed([]uuid.UUID{other}))
+	assert.Equal(t, now, m.start(id, nil, now), "forgotten")
+	// Until its row is cleared, the stored mark is not trusted either, and clearing is retried.
+	assert.Equal(t, now, m.start(id, &stored, now), "a stored mark awaiting its clear is ignored")
+	assert.Equal(t, []uuid.UUID{id}, m.listed([]uuid.UUID{id, other}), "retried at the next listing")
+	m.cleared([]uuid.UUID{id})
+	assert.Empty(t, m.listed([]uuid.UUID{id, other}), "listening again is not a stop")
+	assert.Equal(t, stored, m.start(id, &stored, now), "a cleared binding trusts its row again")
 }
