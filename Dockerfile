@@ -39,8 +39,11 @@ WORKDIR /app
 COPY --from=builder --chown=nonroot:nonroot /app/api-server ./api-server
 COPY --from=builder --chown=nonroot:nonroot /tmp/chat-app-files /tmp/chat-app-files
 
+# Inside the container, localhost is the container itself; a model server on
+# the same computer (Ollama, LM Studio) is reached through the host's name.
 ENV SERVER_HOST=0.0.0.0 \
-    SERVER_PORT=8080
+    SERVER_PORT=8080 \
+    LOCAL_SERVER_HOST=host.docker.internal
 
 EXPOSE 8080
 

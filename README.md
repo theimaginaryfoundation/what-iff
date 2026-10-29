@@ -100,6 +100,15 @@ Docker volume; nothing is shipped in the repository. Values you set in your shel
 | API | http://localhost:8080 |
 | PostgreSQL | localhost:5432 |
 
+**Models on this computer.** The API runs in a container, where `localhost` is the
+container itself, so it reaches a model server on your machine (Ollama, LM Studio) as
+`host.docker.internal`. Two things on the host have to allow that:
+
+- **The server has to listen beyond loopback.** Ollama listens on `127.0.0.1` by default;
+  start it with `OLLAMA_HOST=0.0.0.0`. In LM Studio, turn on serving on the local network.
+- **A host firewall has to let the Docker network in** on that port (11434 for Ollama,
+  1234 for LM Studio). Firewalls such as ufw drop that traffic by default.
+
 > Compose is for **local development only**. Its defaults (`DESTRUCTIVE_MIGRATION=false`, `DB_SSL_MODE=disable`, no secret fallbacks) are deliberately conservative — every deployed environment must set its own real secrets and connection settings explicitly.
 
 ## 🧑‍💻 Local development
@@ -135,6 +144,7 @@ Configuration is via environment variables. The essentials:
 | `SERVER_HOST`, `SERVER_PORT` | API bind address (default `localhost:8080`) |
 | `ENVIRONMENT` | `development` \| `staging` \| `production` |
 | `AUTO_MIGRATE` | Run migrations on boot (`true`/`false`) |
+| `LOCAL_SERVER_HOST` | The name a model server on this computer is reached by: `localhost` by default, `host.docker.internal` in the container image |
 | `DESTRUCTIVE_MIGRATION` | Allow dropping columns/indexes during auto-migrate — keep `false` in deployed envs |
 
 See `.env.example` and `docker-compose.yml` for the full set.
