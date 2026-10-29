@@ -7,6 +7,7 @@ import { integrationTabProviders } from '../../extensions/integration-tabs.provi
 import { threadAutomationProviders } from '../../extensions/thread-automations.providers';
 import { DISCORD_TAB } from '../discord/discord-sources';
 import { DiscordService } from '../discord/discord.service';
+import { RemoteSyncService } from '../remote-sync/remote-sync.service';
 import { SlackService } from '../slack/slack.service';
 import { BUZZ_TAB, BuzzIntegrationTabSource, BuzzThreadAutomationSource, buzzBindingAutomation } from './buzz-sources';
 import { BuzzBinding, BuzzService } from './buzz.service';
@@ -110,7 +111,7 @@ describe('combined sources', () => {
     expect(await firstValueFrom(new CombinedThreadAutomations([]).list())).toEqual([]);
   });
 
-  it('provides Discord, Buzz and Slack from the extension files', async () => {
+  it('provides Discord, Buzz, Slack and Remote sync from the extension files', async () => {
     TestBed.configureTestingModule({
       providers: [
         ...integrationTabProviders,
@@ -124,10 +125,11 @@ describe('combined sources', () => {
           provide: SlackService,
           useValue: { available: () => of(true), listBindings: () => of([{ ...binding(), chat_id: 'slack-chat', team_name: 'Acme' }]) },
         },
+        { provide: RemoteSyncService, useValue: { available: () => of(true) } },
       ],
     });
     const shown = await firstValueFrom(TestBed.inject(IntegrationTabSource).tabs());
-    expect(shown.map(t => t.id)).toEqual(['discord', 'buzz', 'slack']);
+    expect(shown.map(t => t.id)).toEqual(['discord', 'buzz', 'slack', 'remote-sync']);
     const listed = await firstValueFrom(TestBed.inject(ThreadAutomationSource).list());
     expect(listed.map(t => t.chatId)).toEqual(['discord-chat', 'chat-1', 'slack-chat']);
   });
