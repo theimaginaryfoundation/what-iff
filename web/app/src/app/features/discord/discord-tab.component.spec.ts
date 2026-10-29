@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
+import { of, throwError } from 'rxjs';
 
 import { ChatService } from '../../core/services/chat.service';
 import { ConfirmationService } from '../../core/services/confirmation.service';
@@ -219,6 +220,23 @@ describe('DiscordTabComponent', () => {
       box.dispatchEvent(new Event('change'));
       await settle();
       expect(discord['updateBinding']).toHaveBeenCalledWith('b1', { allow_unrestricted: true });
+    });
+
+    it.each([
+      ['discord-binding-ack', { chat_sandboxed: false, allow_unrestricted: false }, false],
+      ['discord-binding-inbound', { inbound_enabled: true }, true],
+    ] as const)('puts %s back and says why when the save fails', async (testId, fields, saved) => {
+      const fixture = await create([{ ...binding, ...fields }]);
+      discord['updateBinding'].mockReturnValue(
+        throwError(() => new HttpErrorResponse({ status: 500, error: { message: 'Relay is down' } })),
+      );
+      const box = q(fixture, testId) as HTMLInputElement;
+      box.checked = !saved;
+      box.dispatchEvent(new Event('change'));
+      await settle();
+      fixture.detectChanges();
+      expect(box.checked).toBe(saved);
+      expect(fixture.nativeElement.textContent).toContain('Relay is down');
     });
 
     it('marks a sandboxed binding and offers no acknowledgement for it', async () => {

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, linkedSignal, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MarkdownModule } from 'ngx-markdown';
 
@@ -90,7 +90,12 @@ export class BuzzTermsComponent {
   readonly cancel = output<void>();
 
   readonly ui = BUZZ_UI;
-  readonly accepted = signal(false);
-  readonly ageConfirmed = signal(false);
+  /**
+   * Both ticks belong to the policy they were given for. When the terms change between showing and
+   * accepting, the server answers 409 with the new policy and the parent passes it to this same
+   * instance, so they reset with every policy it is given rather than carrying over to unread text.
+   */
+  readonly accepted = linkedSignal({ source: this.policy, computation: () => false });
+  readonly ageConfirmed = linkedSignal({ source: this.policy, computation: () => false });
   readonly canAccept = computed(() => this.accepted() && (!this.policy().age_attestation_required || this.ageConfirmed()));
 }

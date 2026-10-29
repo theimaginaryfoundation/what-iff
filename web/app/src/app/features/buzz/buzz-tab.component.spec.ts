@@ -291,6 +291,33 @@ describe('BuzzTabComponent', () => {
       });
     });
 
+    it('shows changed terms unticked when they change before they are accepted', async () => {
+      const { click, type, tick, q } = await create();
+      const age = { ...policy, age_attestation_required: true };
+      buzz['addCommunity']
+        .mockReturnValueOnce(throwError(() => termsConflict(age)))
+        .mockReturnValueOnce(throwError(() => termsConflict({ ...age, terms_markdown: '# New rules', version: 'v4' })));
+      await click('buzz-add-community-open');
+      await type('buzz-community-address', 'https://beta.communities.buzz.xyz/invite/abc');
+      await click('buzz-add-community-submit');
+      await tick('buzz-terms-accept');
+      await tick('buzz-terms-age');
+      await click('buzz-terms-submit');
+
+      expect(q('buzz-terms')!.textContent).toContain('New rules');
+      expect(q<HTMLInputElement>('buzz-terms-accept')!.checked).toBe(false);
+      expect(q<HTMLInputElement>('buzz-terms-age')!.checked).toBe(false);
+      expect(q<HTMLButtonElement>('buzz-terms-submit')!.disabled).toBe(true);
+
+      await tick('buzz-terms-accept');
+      await tick('buzz-terms-age');
+      await click('buzz-terms-submit');
+      expect(buzz['addCommunity']).toHaveBeenLastCalledWith(
+        'a1',
+        expect.objectContaining({ accept_terms_version: 'v4', confirm_age: true }),
+      );
+    });
+
     it("shows the server's reason when the community refuses", async () => {
       const { click, type, q } = await create();
       buzz['addCommunity'].mockReturnValueOnce(
@@ -420,6 +447,21 @@ describe('BuzzTabComponent', () => {
       expect(buzz['updateBinding']).toHaveBeenCalledWith('b1', { answer_agents: true });
       await tick('buzz-binding-inbound', false);
       expect(buzz['updateBinding']).toHaveBeenLastCalledWith('b1', { inbound_enabled: false });
+    });
+
+    it.each([
+      ['buzz-binding-ack', false],
+      ['buzz-binding-inbound', true],
+      ['buzz-binding-agents', false],
+    ])('puts %s back and says why when the save fails', async (id, saved) => {
+      const { tick, q } = await create({ bindings: [{ ...binding, chat_sandboxed: false }] });
+      buzz['updateBinding'].mockReturnValueOnce(
+        throwError(() => new HttpErrorResponse({ status: 500, error: { message: 'Relay is down.' } })),
+      );
+      expect(q<HTMLInputElement>(id)!.checked).toBe(saved);
+      await tick(id, !saved);
+      expect(q<HTMLInputElement>(id)!.checked).toBe(saved);
+      expect(q('buzz-error')!.textContent).toContain('Relay is down.');
     });
 
     it('saves who can mention the persona, as hex keys', async () => {

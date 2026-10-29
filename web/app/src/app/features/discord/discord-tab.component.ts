@@ -8,6 +8,7 @@ import { firstValueFrom } from 'rxjs';
 import { PersonalityService } from '../../core/services/personality.service';
 import { Personality } from '../../core/models/personality.model';
 import { ConfirmationService } from '../../core/services/confirmation.service';
+import { saveCheckbox } from '../../core/utils/checkbox.helpers';
 import { ChatService } from '../../core/services/chat.service';
 import { Chat, isSandboxed } from '../../core/models/chat.model';
 import {
@@ -251,7 +252,7 @@ interface AccessDraft {
                           type="checkbox"
                           class="mt-0.5"
                           [checked]="b.allow_unrestricted"
-                          (change)="setAcknowledged(b, $any($event.target).checked)"
+                          (change)="setAcknowledged(b, $any($event.target))"
                           data-testid="discord-binding-ack"
                         />
                         <span>
@@ -263,7 +264,12 @@ interface AccessDraft {
                   </div>
                   <div class="flex flex-wrap items-center gap-2">
                     <label class="inline-flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
-                      <input type="checkbox" [checked]="b.inbound_enabled" (change)="setInbound(b, $any($event.target).checked)" />
+                      <input
+                        type="checkbox"
+                        [checked]="b.inbound_enabled"
+                        (change)="setInbound(b, $any($event.target))"
+                        data-testid="discord-binding-inbound"
+                      />
                       Answer when tagged
                     </label>
                     @if (b.status === 'broken') {
@@ -632,10 +638,12 @@ export class DiscordTabComponent implements OnInit {
     }, 'Could not connect the channel.');
   }
 
-  async setInbound(b: DiscordBinding, on: boolean): Promise<void> {
-    await this.run(
-      async () => this.replaceBinding(await firstValueFrom(this.discord.updateBinding(b.id, { inbound_enabled: on }))),
-      'Could not update the channel.',
+  async setInbound(b: DiscordBinding, box: HTMLInputElement): Promise<void> {
+    await saveCheckbox(box, on =>
+      this.run(
+        async () => this.replaceBinding(await firstValueFrom(this.discord.updateBinding(b.id, { inbound_enabled: on }))),
+        'Could not update the channel.',
+      ),
     );
   }
 
@@ -644,10 +652,12 @@ export class DiscordTabComponent implements OnInit {
     this.replaceBinding(updated);
   }
 
-  async setAcknowledged(b: DiscordBinding, on: boolean): Promise<void> {
-    await this.run(
-      async () => this.replaceBinding(await firstValueFrom(this.discord.updateBinding(b.id, { allow_unrestricted: on }))),
-      'Could not update the channel.',
+  async setAcknowledged(b: DiscordBinding, box: HTMLInputElement): Promise<void> {
+    await saveCheckbox(box, on =>
+      this.run(
+        async () => this.replaceBinding(await firstValueFrom(this.discord.updateBinding(b.id, { allow_unrestricted: on }))),
+        'Could not update the channel.',
+      ),
     );
   }
 
@@ -721,13 +731,16 @@ export class DiscordTabComponent implements OnInit {
     }));
   }
 
-  private async run(fn: () => Promise<void>, fallback: string): Promise<void> {
+  /** Runs fn with the busy flag up; reports whether it succeeded (a failure is shown as the tab's error). */
+  private async run(fn: () => Promise<void>, fallback: string): Promise<boolean> {
     this.busy.set(true);
     this.error.set(null);
     try {
       await fn();
+      return true;
     } catch (e) {
       this.fail(e, fallback);
+      return false;
     } finally {
       this.busy.set(false);
     }
