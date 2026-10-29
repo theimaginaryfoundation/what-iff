@@ -2,10 +2,12 @@ package providerconnections
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -36,6 +38,44 @@ type ListedModel struct {
 	ID string `json:"id"`
 	// DisplayName is the provider's own name for the model, when it gives one.
 	DisplayName string `json:"display_name,omitempty"`
+	// ToolSupport and VisionSupport are what the provider reports about the
+	// model, or nil where it reports nothing (ADR 0x027). OpenRouter reports
+	// both; most OpenAI-compatible servers report neither.
+	ToolSupport   *bool `json:"tool_support,omitempty"`
+	VisionSupport *bool `json:"vision_support,omitempty"`
+}
+
+// reportedCapabilities is the part of an OpenAI-compatible model entry that
+// some providers add beyond the id: OpenRouter's name, supported parameters and
+// input modalities.
+type reportedCapabilities struct {
+	Name                string   `json:"name"`
+	SupportedParameters []string `json:"supported_parameters"`
+	Architecture        struct {
+		InputModalities []string `json:"input_modalities"`
+	} `json:"architecture"`
+}
+
+// listedFromOpenAI reads one OpenAI-compatible model entry, with whatever
+// capabilities the provider reports about it.
+func listedFromOpenAI(id, raw string) ListedModel {
+	m := ListedModel{ID: id}
+	var extra reportedCapabilities
+	if json.Unmarshal([]byte(raw), &extra) != nil {
+		return m
+	}
+	if extra.Name != "" && extra.Name != id {
+		m.DisplayName = extra.Name
+	}
+	if extra.SupportedParameters != nil {
+		tools := slices.Contains(extra.SupportedParameters, "tools")
+		m.ToolSupport = &tools
+	}
+	if extra.Architecture.InputModalities != nil {
+		vision := slices.Contains(extra.Architecture.InputModalities, "image")
+		m.VisionSupport = &vision
+	}
+	return m
 }
 
 // ConnectError says why a provider could not be listed, as a stable code
@@ -200,7 +240,8 @@ func (l *Lister) listOpenAI(ctx context.Context, baseURL, key string) ([]ListedM
 	var out []ListedModel
 	iter := svc.ListAutoPaging(ctx)
 	for len(out) < maxListModels && iter.Next() {
-		out = append(out, ListedModel{ID: iter.Current().ID})
+		m := iter.Current()
+		out = append(out, listedFromOpenAI(m.ID, m.RawJSON()))
 	}
 	return out, iter.Err()
 }

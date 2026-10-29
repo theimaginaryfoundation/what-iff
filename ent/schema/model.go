@@ -2,7 +2,10 @@ package schema
 
 import (
 	"entgo.io/ent"
+	"entgo.io/ent/dialect/entsql"
+	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
+	"entgo.io/ent/schema/index"
 	"github.com/google/uuid"
 )
 
@@ -25,9 +28,15 @@ func (Model) Fields() []ent.Field {
 			Comment("The user-facing display name of the model"),
 		field.String("description"),
 		field.Enum("provider").
-			Values("openai", "anthropic", "zai", "google", "mistral", "deepseek", "qwen", "xiaomi").
+			Values("openai", "anthropic", "zai", "google", "mistral", "deepseek", "qwen", "xiaomi",
+				"openrouter", "ollama", "lmstudio", "custom").
 			Default("openai").
-			Comment("Provider backing this model"),
+			Comment("Provider backing this model: a built-in provider, or for a model from a provider connection, the preset it was made from (ADR 0x027). Stored as text, so adding a value needs no migration"),
+		field.UUID("connection_id", uuid.UUID{}).
+			Optional().
+			Nillable().
+			Immutable().
+			Comment("The provider connection serving this model (ADR 0x027). Empty for the deployment's own catalog; set, the model is visible only to whoever can use the connection, and is deleted with it"),
 		field.Bool("tool_support").
 			Default(false).
 			Comment("Whether the model supports tool calling"),
@@ -53,5 +62,28 @@ func (Model) Fields() []ent.Field {
 		field.Bool("is_default").
 			Default(false).
 			Comment("Whether this is the application-wide default model. At most one active model may have this set; enforced by the datastore. When none is set, the env/const default is used as a bootstrap fallback"),
+	}
+}
+
+// Edges of the Model.
+func (Model) Edges() []ent.Edge {
+	return []ent.Edge{
+		// One-way, so ProviderConnection's schema does not change. Deleting a
+		// connection (or the account that owns it) deletes its models: a chat on
+		// one falls back to the default model, and a job on one fails clearly.
+		edge.To("connection", ProviderConnection.Type).
+			Field("connection_id").
+			Unique().
+			Immutable().
+			Annotations(entsql.OnDelete(entsql.Cascade)),
+	}
+}
+
+// Indexes of the Model.
+func (Model) Indexes() []ent.Index {
+	return []ent.Index{
+		// One row per model per connection: disabling a model soft-deletes it, and
+		// enabling it again brings the same row back.
+		index.Fields("connection_id", "name").Unique(),
 	}
 }

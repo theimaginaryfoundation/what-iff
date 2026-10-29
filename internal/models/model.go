@@ -26,6 +26,9 @@ type Model struct {
 	// IsDefault marks the application-wide default model. At most one active model
 	// has this set; it is used as the default for new users when present.
 	IsDefault bool `json:"is_default"`
+	// ConnectionID is the provider connection serving the model (ADR 0x027), or
+	// nil for the deployment's own catalog.
+	ConnectionID *uuid.UUID `json:"connection_id,omitempty"`
 	// ReasoningSupport is how the model takes a reasoning effort (ADR 0x026): the admin's
 	// ReasoningSupportOverride when set, otherwise derived from the provider and name
 	// (ReasoningSupportFor). Read-only.
