@@ -50,7 +50,8 @@ func ParseProfile(ev nostr.Event) Profile {
 }
 
 // sign signs an event as the persona, with its owner attestation (when it has one and its
-// conditions allow this event) on every event, as Buzz's own agents do.
+// conditions allow this event, kind= clauses included: NIP-OA checks them per published event)
+// on every event, as Buzz's own agents do.
 func sign(s Signer, ev *nostr.Event) error {
 	if ev.CreatedAt == 0 {
 		ev.CreatedAt = time.Now().Unix()

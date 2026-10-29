@@ -119,8 +119,10 @@ func (s *Service) runInbound(ctx context.Context, batch []inboundWork) {
 	}
 	s.setWaiter(resp.ID, done)
 	defer s.clearWaiter(resp.ID)
-	for _, tag := range tags {
-		if err := s.Store.AttachDiscordLinkMessage(ctx, tag.link.ID, resp.ID); err != nil {
+	// Newest first: the reply hook posts to the newest attached link, so a reply that finishes
+	// while these are attached must already find the newest, not the oldest, tag.
+	for i := len(tags) - 1; i >= 0; i-- {
+		if err := s.Store.AttachDiscordLinkMessage(ctx, tags[i].link.ID, resp.ID); err != nil {
 			log.Error("discord relay: attach inbound message", zap.Error(err))
 		}
 	}
@@ -134,15 +136,25 @@ func (s *Service) runInbound(ctx context.Context, batch []inboundWork) {
 	s.waitForReply(ctx, bot, last, jobID, done)
 }
 
+// lastInbound is the binding's previous message for the loop guard (nil: none within its
+// Since). A failed read counts as the chain at its cap (LoopGuard.Saturated): bots are dropped,
+// people still answered, rather than a failed read restarting an exchange.
+func (s *Service) lastInbound(ctx context.Context, bindingID uuid.UUID) *relaykit.LastInbound {
+	last, err := s.Store.LastInboundDiscordLink(ctx, bindingID, s.guard.Since())
+	if err != nil {
+		s.Logger.Warn("discord relay: read the loop guard's previous message", zap.String("binding_id", bindingID.String()), zap.Error(err))
+		return s.guard.Saturated()
+	}
+	if last == nil {
+		return nil
+	}
+	return &relaykit.LastInbound{Depth: last.AgentDepth, At: last.CreatedAt}
+}
+
 // guardBatch applies the loop guard to a batch's tags (relaykit.LoopGuard.Batch), from the
 // binding's newest inbound link: each tag's agent depth, or -1 when it is dropped past the cap.
 func (s *Service) guardBatch(ctx context.Context, bindingID uuid.UUID, msgs []InboundMessage, log *zap.Logger) (depths []int, turnDepth int, ok bool) {
-	var prev *relaykit.LastInbound
-	if last, err := s.Store.LastInboundDiscordLink(ctx, bindingID, s.guard.Since()); err != nil {
-		log.Warn("discord relay: read the loop guard's previous message", zap.Error(err))
-	} else if last != nil {
-		prev = &relaykit.LastInbound{Depth: last.AgentDepth, At: last.CreatedAt}
-	}
+	prev := s.lastInbound(ctx, bindingID)
 	fromBot := make([]bool, len(msgs))
 	for i, m := range msgs {
 		fromBot[i] = m.AuthorIsBot

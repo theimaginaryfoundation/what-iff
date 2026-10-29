@@ -247,14 +247,26 @@ func (d *Datastore) SetBuzzCommunityState(ctx context.Context, id uuid.UUID, sta
 	return nil
 }
 
-// MarkBuzzCommunityEvent moves a community's resume point forward to at (never back).
-func (d *Datastore) MarkBuzzCommunityEvent(ctx context.Context, id uuid.UUID, at time.Time) error {
-	_, err := d.dbClient.BuzzCommunity.Update().
-		Where(buzzcommunity.ID(id), buzzcommunity.Or(buzzcommunity.LastEventAtIsNil(), buzzcommunity.LastEventAtLT(at))).
+// MarkBuzzBindingEvent moves a binding's resume point forward to at (never back).
+func (d *Datastore) MarkBuzzBindingEvent(ctx context.Context, id uuid.UUID, at time.Time) error {
+	_, err := d.dbClient.BuzzBinding.Update().
+		Where(buzzbinding.ID(id), buzzbinding.Or(buzzbinding.LastEventAtIsNil(), buzzbinding.LastEventAtLT(at))).
 		SetLastEventAt(at).
 		Save(ctx)
 	if err != nil {
-		return fmt.Errorf("mark buzz community event: %w", err)
+		return fmt.Errorf("mark buzz binding event: %w", err)
+	}
+	return nil
+}
+
+// ClearBuzzBindingEvents forgets the resume points of bindings the gateway stopped listening
+// to, so listening again starts from now.
+func (d *Datastore) ClearBuzzBindingEvents(ctx context.Context, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if _, err := d.dbClient.BuzzBinding.Update().Where(buzzbinding.IDIn(ids...)).ClearLastEventAt().Save(ctx); err != nil {
+		return fmt.Errorf("clear buzz binding events: %w", err)
 	}
 	return nil
 }
@@ -374,7 +386,7 @@ func (d *Datastore) ListActiveBuzzConnections(ctx context.Context) ([]models.Buz
 		}
 		conn := models.BuzzConnection{Agent: *creds, Community: *buzzCommunityModel(r, agent.ID), AuthTag: tag}
 		for _, b := range r.Edges.Bindings {
-			conn.Channels = append(conn.Channels, models.BuzzListenChannel{BindingID: b.ID, ChannelID: b.ChannelID, BoundAt: b.CreatedAt})
+			conn.Channels = append(conn.Channels, models.BuzzListenChannel{BindingID: b.ID, ChannelID: b.ChannelID, BoundAt: b.CreatedAt, LastEventAt: b.LastEventAt})
 		}
 		out = append(out, conn)
 	}
@@ -1054,7 +1066,6 @@ func buzzCommunityModel(r *ent.BuzzCommunity, agentID uuid.UUID) *models.BuzzCom
 		Status:          models.BuzzCommunityStatus(r.Status),
 		LastError:       r.LastError,
 		LastConnectedAt: r.LastConnectedAt,
-		LastEventAt:     r.LastEventAt,
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.UpdatedAt,
 	}

@@ -189,6 +189,12 @@ func (s *Service) HandleEvent(ctx context.Context, bindingID uuid.UUID, ev nostr
 	if !ok || !s.threadOpen(ctx, *target) {
 		return
 	}
+	if agent && s.guard.Closed(bindingID, s.lastInbound(ctx, bindingID)) {
+		// Past the loop guard's cap: dropped now, so it takes no place from people in the queue.
+		s.Logger.Info("buzz relay: loop guard: too many agent turns in a row; dropping mention",
+			zap.String("binding_id", bindingID.String()), zap.String("event_id", ev.ID))
+		return
+	}
 	if s.turns.Enqueue(ctx, target.Binding.ChatID, inboundWork{target: *target, ev: ev, agent: agent}) {
 		return
 	}
@@ -257,7 +263,9 @@ func (s *Service) isAgent(ctx context.Context, t models.BuzzBindingTarget, ev no
 	if err != nil {
 		return true
 	}
-	return s.names.profile(ctx, s.Relay, ep, signer, ev.PubKey).bot
+	// A profile that could not be read counts as a bot: the loop guard fails closed.
+	p := s.names.profile(ctx, s.Relay, ep, signer, ev.PubKey)
+	return p.bot || p.unknown
 }
 
 // threadOpen is the fail-closed check on the bound thread (relaykit.ThreadOpen).
@@ -476,8 +484,15 @@ func (s *Service) recordPublishError(ctx context.Context, t models.BuzzBindingTa
 	}
 }
 
-// notice publishes a short reply to the triggering message; failures are ignored.
+// notice publishes a short reply to the triggering message; failures are ignored. The binding
+// is read again first: a notice can come long after the turn started, and nothing is posted
+// once the persona or community is paused or the binding broken.
 func (s *Service) notice(ctx context.Context, t models.BuzzBindingTarget, ev nostr.Event, text string) {
+	fresh, err := s.Store.GetBuzzBindingTarget(ctx, t.Binding.ID)
+	if err != nil || fresh == nil || !fresh.Live() {
+		return
+	}
+	t = *fresh
 	ep, err := EndpointFor(t.Community)
 	if err != nil {
 		return

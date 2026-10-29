@@ -43,7 +43,6 @@ func createBuzzTestTables(t *testing.T, db *sql.DB) {
 			status text NOT NULL DEFAULT 'needs_access',
 			last_error text,
 			last_connected_at datetime,
-			last_event_at datetime,
 			buzz_agent_communities uuid NOT NULL REFERENCES buzz_agents(id) ON DELETE CASCADE,
 			UNIQUE (relay_url, buzz_agent_communities)
 		)`,
@@ -62,6 +61,7 @@ func createBuzzTestTables(t *testing.T, db *sql.DB) {
 			status text NOT NULL DEFAULT 'active',
 			last_error text,
 			last_activity_at datetime,
+			last_event_at datetime,
 			buzz_community_bindings uuid NOT NULL REFERENCES buzz_communities(id) ON DELETE CASCADE,
 			UNIQUE (channel_id, buzz_community_bindings)
 		)`,
@@ -208,16 +208,20 @@ func TestBuzzActiveConnectionsListBoundChannels(t *testing.T) {
 	assert.Equal(t, f.owner, conns[0].Agent.OwnerID)
 	require.Len(t, conns[0].Channels, 1, "only bindings with inbound on are listened to")
 	assert.Equal(t, b.ID, conns[0].Channels[0].BindingID)
-	assert.Nil(t, conns[0].Community.LastEventAt, "no resume point yet")
+	assert.Nil(t, conns[0].Channels[0].LastEventAt, "no resume point yet")
 	assert.Equal(t, models.BuzzAgentActive, conns[0].Agent.Status)
 
 	at := time.Now().Add(-5 * time.Minute).Truncate(time.Second)
-	require.NoError(t, f.ds.MarkBuzzCommunityEvent(ctx, c.ID, at))
-	require.NoError(t, f.ds.MarkBuzzCommunityEvent(ctx, c.ID, at.Add(-time.Hour)))
+	require.NoError(t, f.ds.MarkBuzzBindingEvent(ctx, b.ID, at))
+	require.NoError(t, f.ds.MarkBuzzBindingEvent(ctx, b.ID, at.Add(-time.Hour)))
 	conns, err = f.ds.ListActiveBuzzConnections(ctx)
 	require.NoError(t, err)
-	require.NotNil(t, conns[0].Community.LastEventAt)
-	assert.True(t, at.Equal(*conns[0].Community.LastEventAt), "the resume point only moves forward")
+	require.NotNil(t, conns[0].Channels[0].LastEventAt)
+	assert.True(t, at.Equal(*conns[0].Channels[0].LastEventAt), "the resume point only moves forward")
+	require.NoError(t, f.ds.ClearBuzzBindingEvents(ctx, []uuid.UUID{b.ID}))
+	conns, err = f.ds.ListActiveBuzzConnections(ctx)
+	require.NoError(t, err)
+	assert.Nil(t, conns[0].Channels[0].LastEventAt, "cleared when the gateway stops listening")
 
 	disabled := models.BuzzCommunityDisabled
 	_, err = f.ds.UpdateBuzzCommunity(ctx, f.owner, c.ID, models.BuzzCommunityPatch{Status: &disabled})

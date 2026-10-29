@@ -188,20 +188,21 @@ type Signer struct {
 	Attestation *nostr.Attestation
 }
 
-// attestationFor is the attestation to carry on an event of kind signed now, or nil when it
-// has none or its conditions do not allow that event (it has expired, or is for other
-// kinds). The relay then judges the persona on its own membership instead of rejecting an
-// invalid tag.
-func (s Signer) attestationFor(kind int) *nostr.Attestation {
-	if s.Attestation == nil || !s.Attestation.Allows(kind, time.Now()) {
+// admission is the attestation to present for access (the NIP-42 AUTH event and the
+// x-auth-tag header), or nil when there is none or it has expired. Only its created_at clauses
+// are checked: NIP-AA does not evaluate kind= clauses at admission, so an attestation scoped to
+// kind 9 still admits the persona. Leaving an expired one off lets the relay judge the persona
+// on its own membership instead of rejecting an invalid tag.
+func (s Signer) admission() *nostr.Attestation {
+	if s.Attestation == nil || !s.Attestation.ValidAt(time.Now()) {
 		return nil
 	}
 	return s.Attestation
 }
 
-// setAuthTag adds the x-auth-tag header for a request authorized by an event of kind.
-func (s Signer) setAuthTag(req *http.Request, kind int) {
-	if att := s.attestationFor(kind); att != nil {
+// setAuthTag adds the x-auth-tag header (the admission attestation) to a request.
+func (s Signer) setAuthTag(req *http.Request) {
+	if att := s.admission(); att != nil {
 		req.Header.Set("x-auth-tag", att.JSON())
 	}
 }
@@ -353,7 +354,7 @@ func (c *Client) signedPost(ctx context.Context, ep Endpoint, s Signer, path str
 	}
 	req.Header.Set("Authorization", auth)
 	req.Header.Set("Content-Type", "application/json")
-	s.setAuthTag(req, nostr.KindHTTPAuth)
+	s.setAuthTag(req)
 	return req, nil
 }
 
