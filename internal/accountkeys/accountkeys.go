@@ -77,6 +77,9 @@ func toSummary(row *ent.ProviderConnection) models.ProviderKeySummary {
 }
 
 // builtinConnection selects the account's connection for a built-in provider.
+// It matches on the account, so it never selects a deployment-owned connection,
+// which has no account; the unique (user_id, builtin) index does not cover those
+// either (ADR 0x027).
 func builtinConnection(userID uuid.UUID, provider models.ModelProvider) predicate.ProviderConnection {
 	return providerconnection.And(
 		providerconnection.UserID(userID),

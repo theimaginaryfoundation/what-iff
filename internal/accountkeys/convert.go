@@ -26,6 +26,10 @@ const SourceConverted = "converted"
 // old row is removed either way. A deployment that supplies its own keys has no
 // rows, so it does nothing there. It reports how many old rows it handled,
 // including any whose connection already existed.
+//
+// It runs in one transaction. That suits the table it reads: at most one row
+// per provider per account, written only on self-hosted installs, where
+// accounts are few.
 func ConvertStoredKeys(ctx context.Context, client *ent.Client, logger *zap.Logger) (int, error) {
 	tx, err := client.Tx(ctx)
 	if err != nil {
@@ -54,7 +58,7 @@ func ConvertStoredKeys(ctx context.Context, client *ent.Client, logger *zap.Logg
 			Ignore().
 			Exec(ctx)
 		if err != nil {
-			return 0, fmt.Errorf("convert stored key: %w", err)
+			return 0, fmt.Errorf("convert stored %s key for user %s: %w", row.Provider, row.UserID, err)
 		}
 	}
 	if _, err := tx.AccountProviderKey.Delete().

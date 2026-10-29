@@ -70,10 +70,18 @@ The conversion and the `account_provider_keys` table are removed together, once 
 ### 4. Connecting lists the provider's models
 
 Adding a connection checks it before saving: the request lists the provider's models, and saves only if the listing works.
-On failure nothing is saved, and the response carries a stable code for what went wrong: unreachable, key rejected, not a compatible server, or the account password not confirmed.
+On failure nothing is saved, and the response carries a stable code for what went wrong: unreachable, key rejected, not a compatible server, the provider failing or rate-limiting (worth retrying), or the account password not confirmed.
 The frontend keeps the form filled in and points at the field to fix.
 
 Listing depends on the flavor: `GET {base}/models` for OpenAI-compatible, and `GET {base}/v1/models` for Anthropic-compatible.
+
+A listing only proves the key where the provider checks it. Listing each built-in provider with a key it does not know showed three that need more:
+
+- **z.ai's** Anthropic-compatible model list answers without checking the key. z.ai is listed through its OpenAI-compatible endpoint, which does.
+- **OpenRouter's** model list is public. Its key is also checked against its key endpoint.
+- **Google** answers a bad key with 400, not 401. For Google, that counts as a rejected key.
+
+These are settings on each preset, not branches in the listing code.
 
 A listing call uses a client built for that request, with the connection's key passed directly.
 It does not go through the shared credential transport, which would replace a key being tested with the account's stored one.
