@@ -56,6 +56,10 @@ func (f ConnectionResolverFunc) Endpoint(ctx context.Context, userID, connection
 // used: removed, not the account's, or not reachable on this deployment.
 var ErrConnectionUnavailable = errors.New("this model's provider connection is not available")
 
+// ErrNoModelSelected is returned for a turn with no model to run on: its chat
+// names none and the account has no default, having enabled no model yet.
+var ErrNoModelSelected = errors.New("no model is selected for this account")
+
 // ErrModelDisabled is returned for a connection model the account turned off.
 var ErrModelDisabled = errors.New("this model is turned off")
 

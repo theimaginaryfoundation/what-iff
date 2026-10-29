@@ -47,13 +47,13 @@ func newConnectionFixture(t *testing.T) *connectionFixture {
 	db, err := sql.Open("sqlite3", "file:"+uuid.NewString()+"?mode=memory&_fk=1")
 	require.NoError(t, err)
 	// The tables from the ent schema, so they match any build's (a build may add
-	// columns to users), keeping only the foreign keys among these three.
+	// columns to users), keeping only the foreign keys among them.
 	migrator, err := schema.NewMigrate(entsql.OpenDB(dialect.SQLite, db))
 	require.NoError(t, err)
 	// The migrator writes to the shared table definitions, and these tests run
 	// in parallel: one fixture creates its tables at a time.
 	schemaMu.Lock()
-	err = migrator.Create(ctx, schemaTables(migrate.UsersTable, migrate.ProviderConnectionsTable, migrate.ModelsTable)...)
+	err = migrator.Create(ctx, schemaTables(migrate.UsersTable, migrate.ProviderConnectionsTable, migrate.ModelsTable, migrate.UserPreferencesTable)...)
 	schemaMu.Unlock()
 	require.NoError(t, err)
 	client := ent.NewClient(ent.Driver(entsql.OpenDB(dialect.SQLite, db)))
@@ -310,4 +310,25 @@ func schemaTables(tables ...*schema.Table) []*schema.Table {
 		out = append(out, c)
 	}
 	return out
+}
+
+// A chat with no model runs on the account's default; an account with none
+// (on an install without a catalog, before it enables a model) has nothing to
+// run on, and the turn fails with no_model_selected (ADR 0x027).
+func TestResolveModelForChat_AccountDefault(t *testing.T) {
+	t.Parallel()
+	f := newConnectionFixture(t)
+	ctx := context.Background()
+	_, err := f.ent.UserPreference.Create().SetUserID(f.alice).SetDefaultModel(f.aliceModel.ID).Save(ctx)
+	require.NoError(t, err)
+	_, err = f.ent.UserPreference.Create().SetUserID(f.bob).Save(ctx)
+	require.NoError(t, err)
+
+	got := f.a.resolveModelForChat(ctx, &models.Chat{ID: uuid.New(), UserID: f.alice})
+	require.Equal(t, f.aliceModel.Name, got.name)
+	require.Equal(t, f.aliceModel.ID, got.row.ID, "the row, so the turn goes through the model's connection")
+
+	got = f.a.resolveModelForChat(ctx, &models.Chat{ID: uuid.New(), UserID: f.bob, ModelID: uuid.New()})
+	require.Empty(t, got.name, "no default and no deployment default: no model")
+	require.Equal(t, models.ErrCodeNoModelSelected, failureCode(ErrNoModelSelected))
 }

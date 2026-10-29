@@ -91,6 +91,10 @@ const (
 	// ErrCodeConnectionNameTaken: the account already has a provider connection
 	// by that name (ignoring case); it picks another.
 	ErrCodeConnectionNameTaken = "connection_name_taken"
+	// ErrCodeNoModelSelected: the account has no model to run the turn on: the
+	// chat names none and the account has no default, since it has not enabled
+	// one yet.
+	ErrCodeNoModelSelected = "no_model_selected"
 )
 
 // AllErrorCodes is every code this API can emit. It is the source the
@@ -130,6 +134,7 @@ var AllErrorCodes = []string{
 	ErrCodeProviderConnectionExists,
 	ErrCodeDefaultModelInUse,
 	ErrCodeConnectionNameTaken,
+	ErrCodeNoModelSelected,
 }
 
 // genericErrorCodes maps HTTP statuses to their generic code.

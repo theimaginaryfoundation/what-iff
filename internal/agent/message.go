@@ -2249,6 +2249,9 @@ func (a *Agent) prepareChatContextOn(ctx context.Context, userID uuid.UUID, chat
 	} else {
 		resolved = a.resolveModelForChat(ctx, parentChat)
 	}
+	if resolved.name == "" {
+		return nil, ErrNoModelSelected
+	}
 	if err := a.assertUserCanRunChatModel(ctx, userID, parentChat, resolved.provider); err != nil {
 		return nil, err
 	}
@@ -2344,7 +2347,7 @@ func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat
 	}
 
 	if parentChat == nil {
-		return fallback(defaultModel)
+		return a.fallbackModel(ctx, uuid.Nil, fallback)
 	}
 
 	var dbModel *models.Model
@@ -2394,7 +2397,7 @@ func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat
 			a.logger.Info("chat's model is gone; using the default model",
 				zap.String("chat_id", parentChat.ID.String()),
 				zap.String("model_name", name))
-			return fallback(defaultModel)
+			return a.fallbackModel(ctx, parentChat.UserID, fallback)
 		}
 		return fallback(name)
 	}
@@ -2403,10 +2406,31 @@ func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat
 		a.logger.Warn("chat has model_id but model row is missing; using default model",
 			zap.String("chat_id", parentChat.ID.String()),
 			zap.String("model_id", parentChat.ModelID.String()),
-			zap.String("default_model", defaultModel),
 		)
 	}
-	return fallback(defaultModel)
+	return a.fallbackModel(ctx, parentChat.UserID, fallback)
+}
+
+// fallbackModel is what a turn runs on when its chat names no model it can
+// use: the account's default model, then the deployment's. It is empty when
+// there is neither, as for an account on a self-hosted install that has not
+// enabled a model yet (ADR 0x027); prepareChatContext then fails the turn with
+// ErrNoModelSelected. Without a datastore it is the built-in default name.
+func (a *Agent) fallbackModel(ctx context.Context, userID uuid.UUID, byName func(string) resolvedChatModel) resolvedChatModel {
+	if a.ds == nil {
+		return byName(defaultModel)
+	}
+	if userID != uuid.Nil {
+		if prefs, err := a.ds.GetUserPreferences(ctx, userID); err == nil && prefs.DefaultModelID != uuid.Nil {
+			if m, err := a.ds.GetModel(ctx, prefs.DefaultModelID); err == nil {
+				return resolvedFromRow(m)
+			}
+		}
+	}
+	if m, err := a.ds.GetModelByName(ctx, a.ds.ResolveDefaultModelName(ctx)); err == nil {
+		return resolvedFromRow(m)
+	}
+	return resolvedChatModel{}
 }
 
 func (a *Agent) assertUserCanRunChatModel(ctx context.Context, userID uuid.UUID, parentChat *models.Chat, modelProvider string) error {
