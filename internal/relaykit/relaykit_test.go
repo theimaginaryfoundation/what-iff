@@ -260,7 +260,9 @@ func TestLoopGuardBatch(t *testing.T) {
 		ok        bool
 	}{
 		{name: "a person's message", fromAgent: []bool{false}, want: []int{0}, ok: true},
-		{name: "agents chain within the batch", fromAgent: []bool{true, true}, prev: &LastInbound{Depth: 1}, want: []int{2, 3}, turnDepth: 2, ok: true},
+		// The hint counts from where the chain stands after the turn: its deepest message.
+		{name: "agents chain within the batch", fromAgent: []bool{true, true}, prev: &LastInbound{Depth: 1}, want: []int{2, 3}, turnDepth: 3, ok: true},
+		{name: "agents from the start of a chain", fromAgent: []bool{true, true, true}, want: []int{1, 2, 3}, turnDepth: 3, ok: true},
 		{name: "past the cap is dropped, the rest kept", fromAgent: []bool{true, true, true}, prev: &LastInbound{Depth: 2}, want: []int{3, -1, -1}, turnDepth: 3, ok: true},
 		{name: "a person in the batch resets it", fromAgent: []bool{true, false, true}, prev: &LastInbound{Depth: 3}, want: []int{-1, 0, 1}, turnDepth: 0, ok: true},
 		{name: "nothing left", fromAgent: []bool{true}, prev: &LastInbound{Depth: 3}, want: []int{-1}},
@@ -286,6 +288,39 @@ func TestLoopGuardBatch(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Dropped messages are not recorded, so the chain must stay closed while an agent keeps
+// posting, not reopen ChainGap after the last answered message; a person still reopens it.
+func TestLoopGuardStaysClosedWhileAnAgentKeepsTrying(t *testing.T) {
+	clock := newFakeClock()
+	g := &LoopGuard{MaxDepth: 3, Clock: clock}
+	binding := uuid.New()
+	capped := &LastInbound{Depth: 3, At: clock.Now()}
+	assert.True(t, g.Closed(binding, capped))
+	for range 3 {
+		clock.Advance(20 * time.Minute) // past ChainGap from the last answered message
+		depths, _, ok := g.Batch(binding, []bool{true}, capped)
+		assert.Equal(t, []int{-1}, depths)
+		assert.False(t, ok)
+	}
+	clock.Advance(DefaultChainGap + time.Minute)
+	assert.False(t, g.Closed(binding, capped), "an agent quiet for ChainGap starts over")
+
+	person := &LastInbound{Depth: 0, At: clock.Now().Add(time.Second)}
+	g.noteDropped(binding)
+	clock.Advance(2 * time.Second)
+	assert.False(t, g.Closed(binding, person), "a person speaking after the drop reopens the chain")
+}
+
+// A previous message that could not be read counts as the chain at its cap: agents are
+// dropped, people are still answered.
+func TestLoopGuardSaturated(t *testing.T) {
+	g := &LoopGuard{MaxDepth: 3, Clock: newFakeClock()}
+	depths, turnDepth, ok := g.Batch(uuid.New(), []bool{true, false}, g.Saturated())
+	assert.Equal(t, []int{-1, 0}, depths)
+	assert.True(t, ok)
+	assert.Equal(t, 0, turnDepth)
 }
 
 func TestLoopGuardRateLimitsAgentTurns(t *testing.T) {

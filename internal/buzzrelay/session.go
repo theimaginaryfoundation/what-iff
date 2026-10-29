@@ -262,7 +262,7 @@ func (s *Session) authenticate(ws *websocket.Conn, send func(any) error) error {
 			if json.Unmarshal(msg[1], &challenge) != nil || challenge == "" {
 				continue
 			}
-			ev, err := nostr.AuthEvent(s.cfg.Signer.Keys, s.cfg.Endpoint.WS, challenge, s.cfg.Signer.attestationFor(nostr.KindClientAuth))
+			ev, err := nostr.AuthEvent(s.cfg.Signer.Keys, s.cfg.Endpoint.WS, challenge, s.cfg.Signer.admission())
 			if err != nil {
 				return err
 			}

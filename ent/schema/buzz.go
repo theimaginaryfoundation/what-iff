@@ -79,9 +79,6 @@ func (BuzzCommunity) Fields() []ent.Field {
 		field.Enum("status").Values("active", "needs_access", "error", "disabled").Default("needs_access"),
 		field.String("last_error").Optional().Nillable(),
 		field.Time("last_connected_at").Optional().Nillable(),
-		// The newest event the gateway has seen from the community, so a fresh connection (a
-		// deploy, a new gateway leader, a changed binding) resumes from there rather than now.
-		field.Time("last_event_at").Optional().Nillable(),
 	}
 }
 
@@ -128,6 +125,11 @@ func (BuzzBinding) Fields() []ent.Field {
 		field.Enum("status").Values("active", "broken").Default("active"),
 		field.String("last_error").Optional().Nillable(),
 		field.Time("last_activity_at").Optional().Nillable(),
+		// The newest event the gateway has seen in the channel while listening, so a fresh
+		// connection (a deploy, a new gateway leader, another binding changing) resumes from
+		// there rather than now. Cleared when the gateway stops listening (a pause, inbound off),
+		// so turning it back on does not answer what was said meanwhile.
+		field.Time("last_event_at").Optional().Nillable(),
 	}
 }
 

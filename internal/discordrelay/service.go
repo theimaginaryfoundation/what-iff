@@ -178,6 +178,12 @@ func (s *Service) HandleInbound(ctx context.Context, botID uuid.UUID, botUserID 
 	if !s.threadOpen(ctx, *target) {
 		return
 	}
+	if msg.AuthorIsBot && s.guard.Closed(b.ID, s.lastInbound(ctx, b.ID)) {
+		// Past the loop guard's cap: dropped now, so it takes no place from people in the queue.
+		s.Logger.Info("discord relay: loop guard: too many bot turns in a row; dropping tag",
+			zap.String("binding_id", b.ID.String()), zap.String("discord_message_id", msg.ID))
+		return
+	}
 
 	if s.enqueue(ctx, b.ChatID, inboundWork{target: *target, msg: msg}) {
 		return

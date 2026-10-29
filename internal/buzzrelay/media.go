@@ -97,7 +97,7 @@ func (c *Client) Upload(ctx context.Context, ep Endpoint, s Signer, name, conten
 		req.Header.Set("Content-Type", contentType)
 	}
 	req.Header.Set("X-SHA-256", digest)
-	s.setAuthTag(req, KindBlossomAuth)
+	s.setAuthTag(req)
 	var blob Blob
 	if err := c.do(req, &blob); err != nil {
 		return nil, err
@@ -155,7 +155,7 @@ func (c *Client) FetchMedia(ctx context.Context, ep Endpoint, s Signer, rawURL s
 		return nil, err
 	}
 	req.Header.Set("Authorization", auth)
-	s.setAuthTag(req, KindBlossomAuth)
+	s.setAuthTag(req)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, err

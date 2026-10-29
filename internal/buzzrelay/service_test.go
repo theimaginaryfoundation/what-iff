@@ -236,6 +236,7 @@ type fakeRelay struct {
 	// metadata answers channel metadata (kind 39000) queries.
 	metadata []nostr.Event
 	err      error
+	queryErr error
 	fetches  int
 }
 
@@ -264,6 +265,9 @@ func (r *fakeRelay) messages() []nostr.Event {
 func (r *fakeRelay) Query(_ context.Context, _ Endpoint, _ Signer, filters ...Filter) ([]nostr.Event, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.queryErr != nil {
+		return nil, r.queryErr
+	}
 	f := filters[0]
 	if ids, ok := f["ids"].([]string); ok {
 		if ev, ok := r.events[ids[0]]; ok {
@@ -484,6 +488,24 @@ func TestAgentsWithoutAnAttestationAreStillAgents(t *testing.T) {
 	require.Eventually(t, func() bool { return h.turns.count() == 1 }, time.Second, 5*time.Millisecond, "answer_agents lets them in")
 }
 
+// A profile the relay could not be asked for counts as a bot, and the failure is not cached:
+// one timeout must not let a peer persona in as a person for the cache's lifetime.
+func TestAnUnreadableProfileCountsAsAnAgent(t *testing.T) {
+	h := newHarness(t)
+	h.relay.mu.Lock()
+	h.relay.queryErr = errors.New("relay timeout")
+	h.relay.mu.Unlock()
+	h.svc.HandleEvent(h.ctx, h.target.Binding.ID, h.say(t, h.alice, "@vix hi", nil, h.agent.PublicKey()))
+	time.Sleep(20 * time.Millisecond)
+	assert.Equal(t, 0, h.turns.count(), "dropped while the profile cannot be read")
+
+	h.relay.mu.Lock()
+	h.relay.queryErr = nil
+	h.relay.mu.Unlock()
+	h.svc.HandleEvent(h.ctx, h.target.Binding.ID, h.say(t, h.alice, "@vix hi again", nil, h.agent.PublicKey()))
+	require.Eventually(t, func() bool { return h.turns.count() == 1 }, time.Second, 5*time.Millisecond, "answered once it can")
+}
+
 // Pausing the persona or the community, or a broken binding, stops posts already armed (the
 // composer, post_to_buzz) and replies to turns that were running when the pause landed.
 func TestNothingIsPostedThroughAPausedBinding(t *testing.T) {
@@ -506,6 +528,17 @@ func TestNothingIsPostedThroughAPausedBinding(t *testing.T) {
 			assert.Equal(t, 0, h.turns.count(), "mentions are not answered either")
 		})
 	}
+}
+
+// A turn that fails after the owner paused the binding posts no "couldn't reply" notice.
+func TestNoNoticeIsPostedThroughAPausedBinding(t *testing.T) {
+	h := newHarness(t)
+	ask := h.say(t, h.alice, "@vix hi", nil, h.agent.PublicKey())
+	h.store.mu.Lock()
+	h.store.target.Community.Status = models.BuzzCommunityDisabled
+	h.store.mu.Unlock()
+	h.svc.notice(h.ctx, h.target, ask, NoticeFailed)
+	assert.Empty(t, h.relay.messages())
 }
 
 func TestARedeliveredEventIsAnsweredOnce(t *testing.T) {
@@ -692,7 +725,11 @@ func TestAnAttestationIsCarriedOnlyWhereItHolds(t *testing.T) {
 	assert.False(t, carries(fmt.Sprintf("created_at<%d", time.Now().Add(-time.Hour).Unix()), KindStreamMessage), "expired")
 
 	expired, _ := nostr.Attest(owner, agent.PublicKey(), fmt.Sprintf("created_at<%d", time.Now().Add(-time.Hour).Unix()))
-	assert.Nil(t, Signer{Keys: agent, Attestation: expired}.attestationFor(nostr.KindClientAuth), "nor on AUTH or the x-auth-tag header")
+	assert.Nil(t, Signer{Keys: agent, Attestation: expired}.admission(), "nor on AUTH or the x-auth-tag header")
+	// NIP-AA does not evaluate kind= clauses at admission: a chat-scoped attestation still
+	// admits the persona.
+	chatOnly, _ := nostr.Attest(owner, agent.PublicKey(), "kind=9")
+	assert.NotNil(t, Signer{Keys: agent, Attestation: chatOnly}.admission())
 }
 
 func TestMayConcern(t *testing.T) {

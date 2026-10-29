@@ -59,8 +59,8 @@ The same holds for the "couldn't reply" failure notice.
 
 - The turn's user message is the batch's relayed lines, oldest first, each with its speaker label as before (`bob (Discord, #general): …`).
   A batch of several opens with a relay note: the messages arrived together; write one reply; answer several at once or only those worth answering; it is posted once, as a reply to the last message, so address anyone else by name (`relaykit.BatchPrompt`).
-- Every message of the batch gets its own inbound message link, all attached to the turn's one saved message.
-  `FindInbound…Link` returns the newest of them, so the reply goes where the newest message is:
+- Every message of the batch gets its own inbound message link, all attached to the turn's one saved message, newest first.
+  `FindInbound…Link` returns the newest attached one, so the reply goes where the newest message is, even when the turn finishes while the links are still being attached:
   - Discord: a reply to the newest message, which pings only its author (`allowed_mentions` is unchanged, ADR 0x025 §4);
   - Buzz: into the newest message's thread, p-tagging only its author.
 - The other askers are named in the text, not pinged.
@@ -81,9 +81,15 @@ The same holds for the "couldn't reply" failure notice.
 - The chain is the bound channel, not a thread.
   An agent cannot escape the count by starting a new thread or a top-level message, and anyone tagging the persona there resets it.
 - A message deeper than `RELAY_AGENT_MAX_DEPTH` (default **3**) is not answered and not recorded; nothing is posted, since an agent would answer a refusal.
+  It is dropped before it is queued, so an agent past the cap takes no place from the people waiting behind a running turn.
+- A drop keeps the chain closed: the guard remembers when it last dropped an agent on the binding and counts that as a message at the cap, so an agent that keeps posting is not answered again 30 minutes after the last answered message.
+  Only 30 quiet minutes or a person speaking reopen it.
+  The time of the drop is kept in memory, so a restart can reopen a closed chain once; the hourly budget bounds that.
+- A failed read of the binding's previous message counts as the chain at its cap: agents are dropped and people still answered, rather than a database error restarting an exchange.
 - Near the cap the turn carries a relay note:
   at depth `max − 1` "start wrapping up; you can reply N more time", at depth `max` "this is your last reply in this exchange; do not ask a question or invite another reply".
-- A batch's depth is its shallowest message's: a person in the batch makes it a person's turn.
+- A batch with a person in it is a person's turn (depth 0, no note).
+  An agents-only batch counts as its deepest message, which is where the chain stands after the turn, so the wrap-up note is not one reply behind.
 - Backstop: at most `RELAY_AGENT_TURNS_PER_HOUR` (default **20**) agent-started turns per binding per hour.
   This counter is in memory, so a restart resets it; the persisted depth cap is what bounds a loop.
 

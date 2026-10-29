@@ -95,6 +95,52 @@ type LoopGuard struct {
 	// turns holds each binding's agent-started turns of the past hour; its keys are bounded
 	// by the bindings this process serves.
 	turns map[uuid.UUID][]time.Time
+	// dropped is when each binding last dropped an agent's message past the cap. Dropped
+	// messages are not recorded, so without this an agent that keeps posting would start a new
+	// chain ChainGap after the last answered one; with it, the chain stays closed while the
+	// agent keeps trying. Kept in memory: a restart reopens the chain once, within the hourly
+	// budget.
+	dropped map[uuid.UUID]time.Time
+}
+
+// effective is prev as the chain stands: a drop newer than the binding's last recorded message
+// counts as a message at the cap.
+func (g *LoopGuard) effective(bindingID uuid.UUID, prev *LastInbound) *LastInbound {
+	g.mu.Lock()
+	at, ok := g.dropped[bindingID]
+	g.mu.Unlock()
+	if !ok || (prev != nil && !at.After(prev.At)) {
+		return prev
+	}
+	return &LastInbound{Depth: g.maxDepth(), At: at}
+}
+
+func (g *LoopGuard) noteDropped(bindingID uuid.UUID) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.dropped == nil {
+		g.dropped = map[uuid.UUID]time.Time{}
+	}
+	g.dropped[bindingID] = g.clock().Now()
+}
+
+// Closed reports whether an agent's message on the binding would be dropped now, given its
+// previous message (nil: none within Since). Relays check it before queueing an agent's
+// message, so an agent past the cap takes no place in the queue from the people waiting.
+// A drop it causes extends the chain like one in Batch.
+func (g *LoopGuard) Closed(bindingID uuid.UUID, prev *LastInbound) bool {
+	if g.Allows(g.Depth(true, g.effective(bindingID, prev))) {
+		return false
+	}
+	g.noteDropped(bindingID)
+	return true
+}
+
+// Saturated stands in for the previous message when it could not be read: the chain counts
+// as at its cap, so agents are dropped (people are still answered) rather than a failed read
+// restarting an exchange.
+func (g *LoopGuard) Saturated() *LastInbound {
+	return &LastInbound{Depth: g.maxDepth(), At: g.clock().Now()}
 }
 
 func (g *LoopGuard) clock() Clock {
@@ -160,25 +206,32 @@ func (g *LoopGuard) Hint(depth int) string {
 // agent and the binding's previous message (nil: none within Since). Each message gets its
 // depth, or -1 when it is past the cap and must be dropped. Every kept message is recorded
 // as the batch runs, so it is the next one's previous message as of now (its link's
-// created_at), not as of when it arrived. turnDepth is the shallowest kept depth: a person
-// in the batch makes it a person's turn. ok is false when nothing is left to answer, or when
-// only agents are left and the binding has spent its hourly budget (TakeAgentTurn).
+// created_at), not as of when it arrived. turnDepth is 0 when a person is in the batch (a
+// person's turn), and otherwise the deepest kept depth, which is where the chain stands after
+// this turn and so what the wrap-up hint must count from. ok is false when nothing is left to
+// answer, or when only agents are left and the binding has spent its hourly budget
+// (TakeAgentTurn).
 func (g *LoopGuard) Batch(bindingID uuid.UUID, fromAgent []bool, prev *LastInbound) (depths []int, turnDepth int, ok bool) {
-	turnDepth = -1
+	prev = g.effective(bindingID, prev)
+	deepest, person := -1, false
 	for _, agent := range fromAgent {
 		d := g.Depth(agent, prev)
 		if !g.Allows(d) {
 			depths = append(depths, -1)
+			g.noteDropped(bindingID)
 			continue
 		}
 		depths = append(depths, d)
 		prev = &LastInbound{Depth: d, At: g.clock().Now()}
-		if turnDepth < 0 || d < turnDepth {
-			turnDepth = d
-		}
+		person = person || d == 0
+		deepest = max(deepest, d)
 	}
-	if turnDepth < 0 {
+	if deepest < 0 {
 		return depths, 0, false
+	}
+	turnDepth = deepest
+	if person {
+		turnDepth = 0
 	}
 	if turnDepth > 0 && !g.TakeAgentTurn(bindingID) {
 		return depths, 0, false

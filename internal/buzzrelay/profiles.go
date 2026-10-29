@@ -24,7 +24,9 @@ type cachedName struct {
 	name string
 	// bot: the profile marks an automated account.
 	bot bool
-	at  time.Time
+	// unknown: the relay could not be asked. Not cached, so the next lookup asks again.
+	unknown bool
+	at      time.Time
 }
 
 // name is pubkey's display name in the community, or a short npub when it has no profile.
@@ -42,9 +44,12 @@ func (c *nameCache) profile(ctx context.Context, relay Relay, ep Endpoint, signe
 	}
 	c.mu.Unlock()
 
-	var p Profile
 	events, err := relay.Query(ctx, ep, signer, Filter{"kinds": []int{KindProfile}, "authors": []string{pubkey}, "limit": 1})
-	if err == nil && len(events) > 0 && events[0].Verify() == nil && events[0].PubKey == pubkey {
+	if err != nil {
+		return cachedName{name: ShortNPub(pubkey), unknown: true}
+	}
+	var p Profile
+	if len(events) > 0 && events[0].Verify() == nil && events[0].PubKey == pubkey {
 		p = ParseProfile(events[0])
 	}
 	n := cachedName{name: p.Label(), bot: p.Bot, at: time.Now()}

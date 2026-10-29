@@ -47,7 +47,9 @@ Each relay keeps its own storage, wire format and trigger rules; what is the sam
 - **Enqueue is race-free:** an item is added under the lock the idle worker takes before retiring, so it can never land in a thread whose worker just exited.
 - **Overflow is dropped, not rolled over:** past `Max` the relay posts its throttled busy notice (never to an agent), which keeps memory bounded and the channel quiet.
 - **The loop guard keeps no depth of its own:** the relays persist each message's depth on its inbound link and hand the newest back (`LastInbound`), so a restart does not reset a loop.
-  Only the hourly rate limit is in memory.
+  In memory are only the hourly rate limit and when each binding last dropped an agent (`effective`), which keeps the chain closed while a dropped agent keeps posting, since dropped messages are not recorded.
+  `Closed` lets a relay drop an agent past the cap before queueing it; `Saturated` stands in for a previous message that could not be read, so a failed read drops agents rather than restarting a chain.
+- **An agents-only batch counts as its deepest message** (`Batch`'s `turnDepth`), so the wrap-up hint counts from where the chain will stand after the turn.
 
 ## Testing
 
