@@ -136,9 +136,7 @@ func (a *Agent) advancedQuotaAllowed(ctx context.Context, userID uuid.UUID, chat
 		CallsReported: true,
 		TurnID:        chatCtx.turnID,
 	}
-	if chatCtx.turnSettings.ReasoningEffortSource != models.SettingSourceUnset {
-		u.ReasoningEffort = string(chatCtx.reasoningEffort)
-	}
+	u.ReasoningEffort = chatCtx.meteredReasoningEffort()
 	ctx = metering.WithPendingUsage(ctx, u)
 	d := a.meter.Check(ctx, userID, chatCtx.modelSubscriptionTier, chatCtx.meteredActionType())
 	if d.Err != nil && ctx.Err() == nil {

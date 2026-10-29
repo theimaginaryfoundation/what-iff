@@ -849,8 +849,8 @@ type chatContext struct {
 	model         string
 	modelProvider string
 	// modelSubscriptionTier is the model's raw SubscriptionTier string
-	// ("low"/"medium"/"high"/"ultra"), passed to the meter which classifies it for
-	// free-chat gating. Empty means unknown; the meter treats that conservatively.
+	// ("low"/"medium"/"high"/"ultra"), passed to the meter, which may use it to
+	// decide access. Empty means unknown. NoopMeter ignores it.
 	modelSubscriptionTier string
 	// modelVisionSupport is the model's vision_support flag; when false, images are
 	// stripped from the context before any provider sees it.
