@@ -35,6 +35,7 @@ Defines the implementation-independent metering contract used by the agent.
   `WithAgentLoop` / `AgentLoopFromContext` (`source.go`) let `Check` see an Advanced turn before it runs.
   The public build prices none of it.
 - `New` is intentionally nil when no implementation is linked.
+- `Linked()` reports `New != nil`. Model subscription tiers mean something only to a linked meter, so the model list sends them only when it is true.
   `Agent.NewAgent` then chooses `NoopMeter`, so removing the production meter does not require agent or server changes.
 
 ## Testing

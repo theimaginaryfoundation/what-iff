@@ -6,6 +6,7 @@ import (
 
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/handlers/handlerutils"
+	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/middleware"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 
@@ -17,13 +18,17 @@ import (
 type Handler struct {
 	ds     *datastore.Datastore
 	logger *zap.Logger
+	// tiersApply reports whether model subscription tiers mean anything here;
+	// when they do not, the list omits them. A field so tests can set it.
+	tiersApply func() bool
 }
 
 // NewHandler creates a new model handler instance
 func NewHandler(ds *datastore.Datastore, logger *zap.Logger) *Handler {
 	return &Handler{
-		ds:     ds,
-		logger: logger,
+		ds:         ds,
+		logger:     logger,
+		tiersApply: metering.Linked,
 	}
 }
 
@@ -37,6 +42,7 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 // ListModels lists models. Authenticated users receive a catalog filtered by
 // enable_experimental_models; unauthenticated callers see the default catalog
 // (experimental providers hidden, same as enable_experimental_models=false).
+// Subscription tiers are included only where they apply (metering.Linked).
 func (h *Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -53,6 +59,12 @@ func (h *Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("failed to list models", zap.Error(err))
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to list models", err)
 		return
+	}
+
+	if !h.tiersApply() {
+		for _, m := range modelList {
+			m.SubscriptionTier = ""
+		}
 	}
 
 	json.NewEncoder(w).Encode(modelList)
