@@ -123,6 +123,12 @@ func (h *Handler) respondConnectError(w http.ResponseWriter, preset string, err 
 		map[string]string{"preset": preset}, nil)
 }
 
+// respondExists answers an attempt to add a second connection to a built-in
+// provider.
+func (h *Handler) respondExists(w http.ResponseWriter) {
+	handlerutils.RespondWithError(w, h.logger, http.StatusConflict, models.ErrCodeProviderConnectionExists, ErrBuiltinExists.Error(), nil)
+}
+
 func badRequest(w http.ResponseWriter, logger *zap.Logger, message string) {
 	handlerutils.RespondWithError(w, logger, http.StatusBadRequest, handlerutils.CodeNotSet, message, nil)
 }
@@ -182,9 +188,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, h.logger, "Unknown preset")
 		return
 	}
-	if preset.AddressEditable && !CustomAddressesAllowed() {
-		handlerutils.RespondWithError(w, h.logger, http.StatusForbidden, models.ErrCodeCustomAddressNotAllowed,
-			"This server does not allow choosing a provider's address", nil)
+	if !h.addressAllowed(w, preset) {
 		return
 	}
 	nc, flavor, listURL, msg := resolveNew(preset, req)
@@ -202,7 +206,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if exists {
-			handlerutils.RespondWithError(w, h.logger, http.StatusConflict, handlerutils.CodeNotSet, ErrBuiltinExists.Error(), nil)
+			h.respondExists(w)
 			return
 		}
 	}
@@ -215,7 +219,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	conn, err := h.store.Create(r.Context(), userID, nc)
 	switch {
 	case errors.Is(err, ErrBuiltinExists):
-		handlerutils.RespondWithError(w, h.logger, http.StatusConflict, handlerutils.CodeNotSet, err.Error(), nil)
+		h.respondExists(w)
 	case err != nil:
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to add the provider connection", err)
 	default:
@@ -272,7 +276,8 @@ func resolveNew(preset Preset, req createRequest) (nc NewConnection, flavor Flav
 		if err != nil {
 			return nc, "", "", err.Error()
 		}
-		nc.BaseURL, listURL = addr, addr
+		listURL = addr
+		nc.BaseURL = storedAddress(addr, preset)
 	} else if strings.TrimSpace(req.BaseURL) != "" {
 		return nc, "", "", "This provider's address is set by its preset"
 	}
@@ -307,6 +312,19 @@ func (h *Handler) connectionFor(w http.ResponseWriter, r *http.Request, userID u
 		preset, _ = findPreset(h.presets, PresetCustom)
 	}
 	return row, preset, true
+}
+
+// storedAddress is what a connection stores for an address the account gave:
+// empty when it is the preset's own, so the connection follows the preset if
+// its default changes (as a local server's does with LOCAL_SERVER_HOST), and
+// the address otherwise.
+func storedAddress(addr string, preset Preset) string {
+	if preset.BaseURL != "" {
+		if def, err := normalizeAddress(preset.BaseURL); err == nil && def == addr {
+			return ""
+		}
+	}
+	return addr
 }
 
 // flavorOf is the API a stored connection speaks.
@@ -360,7 +378,8 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, h.logger, err.Error())
 			return
 		}
-		changes.BaseURL, address = &addr, addr
+		stored := storedAddress(addr, preset)
+		changes.BaseURL, address = &stored, addr
 	}
 	if req.Key != nil {
 		key := strings.TrimSpace(*req.Key)

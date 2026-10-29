@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -313,4 +314,69 @@ func TestList_ErrorNeverCarriesTheKey(t *testing.T) {
 	require.Equal(t, models.ErrCodeProviderIncompatible, ce.Code, "classified before redacting")
 	require.NotContains(t, ce.Error(), echoed)
 	require.Contains(t, ce.Error(), "[redacted]")
+}
+
+// An Anthropic-compatible server that ignores after_id answers the same page
+// every time. The listing stops instead of asking until the timeout.
+func TestListAnthropic_StopsWhenTheCursorDoesNotMove(t *testing.T) {
+	for name, body := range map[string]string{
+		"has_more left out":             `{"data":[{"id":"m1","display_name":"M1","created_at":"2026-01-01T00:00:00Z","type":"model"}],"first_id":"m1","last_id":"m1"}`,
+		"has_more true, cursor repeats": `{"data":[{"id":"m1","display_name":"M1","created_at":"2026-01-01T00:00:00Z","type":"model"}],"has_more":true,"first_id":"m1","last_id":"m1"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var s seen
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				s.record(r)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprint(w, body)
+			}))
+			t.Cleanup(srv.Close)
+
+			got, err := NewLister(nil, false).List(context.Background(), Target{Flavor: FlavorAnthropic, BaseURL: srv.URL})
+			require.NoError(t, err)
+			require.LessOrEqual(t, len(s.requests), 2)
+			require.NotEmpty(t, got)
+		})
+	}
+}
+
+// A server that always says there is more, with a new cursor each time, is
+// asked a bounded number of times.
+func TestListAnthropic_StopsAtThePageCap(t *testing.T) {
+	var s seen
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.record(r)
+		id := fmt.Sprintf("m%d", len(s.requests))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"data":[{"id":%q,"display_name":"x","created_at":"2026-01-01T00:00:00Z","type":"model"}],"has_more":true,"first_id":%q,"last_id":%q}`, id, id, id)
+	}))
+	t.Cleanup(srv.Close)
+
+	got, err := NewLister(nil, false).List(context.Background(), Target{Flavor: FlavorAnthropic, BaseURL: srv.URL})
+	require.NoError(t, err)
+	require.Len(t, s.requests, maxListPages)
+	require.Len(t, got, maxListPages)
+}
+
+// z.ai is listed through its OpenAI-compatible endpoint only at its default
+// address; pointed elsewhere, it is listed where it was pointed.
+func TestZAIListingFollowsTheConfiguredAddress(t *testing.T) {
+	require.Equal(t, provider.DefaultZAIBaseURL, zaiDefaultURL, "the default the redirect is keyed on")
+
+	atDefault := Presets(map[models.ModelProvider]string{models.ModelProviderZAI: provider.DefaultZAIBaseURL}, "localhost")
+	zai, _ := findPreset(atDefault, "zai")
+	require.Equal(t, zaiListURL, zai.target(zai.Flavor, zai.BaseURL, "k").BaseURL)
+
+	elsewhere := Presets(map[models.ModelProvider]string{models.ModelProviderZAI: "https://open.bigmodel.cn/api/anthropic"}, "localhost")
+	zai, _ = findPreset(elsewhere, "zai")
+	got := zai.target(zai.Flavor, zai.BaseURL, "k")
+	require.Equal(t, Target{Flavor: FlavorAnthropic, BaseURL: "https://open.bigmodel.cn/api/anthropic", Key: "k"}, got)
+}
+
+func TestPresetKeysURLs(t *testing.T) {
+	presets := Presets(nil, "localhost")
+	openai, _ := findPreset(presets, "openai")
+	require.Equal(t, "https://platform.openai.com/api-keys", openai.KeysURL)
+	openrouter, _ := findPreset(presets, PresetOpenRouter)
+	require.Equal(t, "https://openrouter.ai/keys", openrouter.KeysURL)
 }

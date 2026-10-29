@@ -23,6 +23,14 @@ import (
 // answered by then is reported as unreachable.
 const listTimeout = 20 * time.Second
 
+// A listing stops at whichever of these it reaches first, keeping what it has.
+// They are far above any real provider (OpenRouter lists a few hundred models)
+// and keep a misbehaving server from being asked forever.
+const (
+	maxListPages  = 50
+	maxListModels = 5000
+)
+
 // ListedModel is one model a connection's provider offers.
 type ListedModel struct {
 	ID string `json:"id"`
@@ -191,7 +199,7 @@ func (l *Lister) listOpenAI(ctx context.Context, baseURL, key string) ([]ListedM
 	svc := openai.NewModelService(opts...)
 	var out []ListedModel
 	iter := svc.ListAutoPaging(ctx)
-	for iter.Next() {
+	for len(out) < maxListModels && iter.Next() {
 		out = append(out, ListedModel{ID: iter.Current().ID})
 	}
 	return out, iter.Err()
@@ -209,13 +217,31 @@ func (l *Lister) listAnthropic(ctx context.Context, baseURL, key string) ([]List
 		opts = append(opts, anthropicoption.WithAPIKey(key))
 	}
 	svc := anthropic.NewModelService(opts...)
+	// Paged by hand rather than with the SDK's auto-pager, which keeps asking
+	// while a page has a cursor and never checks that the cursor moved: a server
+	// that ignores after_id would be asked for the same page until the timeout.
 	var out []ListedModel
-	iter := svc.ListAutoPaging(ctx, anthropic.ModelListParams{})
-	for iter.Next() {
-		m := iter.Current()
-		out = append(out, ListedModel{ID: m.ID, DisplayName: m.DisplayName})
+	params := anthropic.ModelListParams{}
+	lastID := ""
+	for pages := 0; pages < maxListPages; pages++ {
+		page, err := svc.List(ctx, params)
+		if err != nil {
+			return out, err
+		}
+		for _, m := range page.Data {
+			out = append(out, ListedModel{ID: m.ID, DisplayName: m.DisplayName})
+		}
+		// Go on only when the server says there is more and the cursor moved.
+		if !page.HasMore || page.LastID == "" || page.LastID == lastID || len(out) >= maxListModels {
+			break
+		}
+		lastID = page.LastID
+		params.AfterID = anthropic.String(lastID)
 	}
-	return out, iter.Err()
+	if len(out) > maxListModels {
+		out = out[:maxListModels]
+	}
+	return out, nil
 }
 
 // ErrInvalidAddress is returned for an address that is not an absolute http or

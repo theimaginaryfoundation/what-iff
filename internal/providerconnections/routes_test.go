@@ -163,6 +163,7 @@ func TestCreate_SecondBuiltinIsAConflictAndCallsNothing(t *testing.T) {
 		"preset": "openai", "key": "sk-alice-key-9999", "current_password": "right",
 	})
 	require.Equal(t, http.StatusConflict, rec.Code)
+	require.Equal(t, models.ErrCodeProviderConnectionExists, errorCode(t, rec))
 	require.Empty(t, f.openai.requests, "no listing for a connection that cannot be added")
 }
 
@@ -379,4 +380,22 @@ func TestCustomAddressesOff_StopsStoredConnections(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, f.call(t, f.alice, http.MethodPatch, path, map[string]string{"name": "Old box"}).Code, "renaming reaches nothing")
 	require.Equal(t, http.StatusNoContent, f.call(t, f.alice, http.MethodDelete, path, nil).Code, "and it can still be removed")
+}
+
+// A local server at the preset's own address stores no address, so it follows
+// the preset if LOCAL_SERVER_HOST changes; another address is stored.
+func TestLocalAddressIsStoredOnlyWhenItDiffers(t *testing.T) {
+	f := newFixture(t)
+	url, _ := localServer(t)
+
+	require.Equal(t, "", storedAddress("http://localhost:11434/v1", Preset{BaseURL: "http://localhost:11434/v1"}))
+	require.Equal(t, "", storedAddress("http://localhost:11434/v1", Preset{BaseURL: "http://localhost:11434/v1/"}), "trailing slash alike")
+	require.Equal(t, "http://localhost:11500/v1", storedAddress("http://localhost:11500/v1", Preset{BaseURL: "http://localhost:11434/v1"}))
+	require.Equal(t, "http://box:8000/v1", storedAddress("http://box:8000/v1", Preset{}), "Custom has no default")
+
+	// Through the route, an address other than the default is kept.
+	created := decode[connected](t, f.call(t, f.alice, http.MethodPost, "/provider-connections", map[string]string{
+		"preset": PresetOllama, "base_url": url, "current_password": "right",
+	}))
+	require.Equal(t, url, created.Connection.BaseURL)
 }

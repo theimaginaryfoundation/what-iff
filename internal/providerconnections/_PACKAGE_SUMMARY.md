@@ -12,7 +12,10 @@ How accounts reach model providers (ADR 0x027): the `provider_connections` table
   `Create`, `Update`, `Delete` and `List` serve any connection; `List` puts built-in connections first.
 - **Presets (`presets.go`):** `Presets` lists the eight built-in providers (at the addresses the deployment reaches them at), OpenRouter, Ollama, LM Studio and Custom.
   Ollama and LM Studio default to the deployment's `LOCAL_SERVER_HOST` (`localhost`, or `host.docker.internal` in the container image), and their address is editable, as Custom's is.
-- **Listing (`listing.go`):** `Lister.List` reads a provider's models through its OpenAI-compatible `GET {base}/models` or Anthropic-compatible `GET {base}/v1/models`, every page, sorted by id.
+  A connection given exactly its preset's address stores none, so it follows the preset if that default changes.
+  `KeysURL` says where to create a key, for the presets where that is known.
+- **Listing (`listing.go`):** `Lister.List` reads a provider's models through its OpenAI-compatible `GET {base}/models` or Anthropic-compatible `GET {base}/v1/models`, sorted by id.
+  Anthropic pages are walked by hand, going on only while `has_more` is true and the cursor moved (the SDK's auto-pager never checks that, so a server ignoring `after_id` would be asked until the timeout); every listing stops at 50 pages or 5,000 models.
   A failure is a `ConnectError` with a stable code: `provider_unreachable` (network or timeout), `provider_key_rejected` (401/403), `provider_unavailable` (5xx or 429) or `provider_incompatible` (anything else, such as a 404 or a page that is not JSON).
   Under the mock LLM backend it answers a fixed list and sends nothing.
 - **Routes (`routes.go`):** on the authenticated router, mounted with the key routes only when accounts supply keys.
@@ -23,7 +26,7 @@ How accounts reach model providers (ADR 0x027): the `provider_connections` table
   `GET /provider-access` reports it.
 
 - **Provider quirks, found by listing each real provider with a key it does not know (2026-10-29):** OpenAI, Anthropic, Mistral, DeepSeek, Qwen and Xiaomi answer 401 from the model list itself.
-  z.ai's Anthropic-compatible model list answers without checking the key, so z.ai is listed through its OpenAI-compatible endpoint, which does.
+  z.ai's Anthropic-compatible model list answers without checking the key, so at its default address z.ai is listed through its OpenAI-compatible endpoint, which does; pointed elsewhere by `ZAI_BASE_URL`, it is listed where it was pointed, so the key never goes to a host the deployment did not configure.
   OpenRouter's model list is public, so its key is also checked against `/api/v1/key`.
   Google answers a bad key with 400, which for Google alone counts as a rejected key.
   Each quirk is a field on its preset (`Target`), not a branch in the listing code.
@@ -49,8 +52,8 @@ How accounts reach model providers (ADR 0x027): the `provider_connections` table
 
 ## Testing
 
-- `listing_test.go` — against local test servers: a key echoed in a provider's error is redacted (mutation-checked); the connection's key is sent and the deployment's environment keys never are (mutation-checked: building the SDK client the usual way fails it), Anthropic paging, the stable code for each failure, the mock listing, address checks, and the presets.
-- `routes_test.go` — over in-memory SQLite (tables written by hand): adding a built-in connection that the key resolver then reads, a second one refused before any call, a local server without a key, Custom (any number), bad input rejected before any call, the password checked before any call (mutation-checked), a failed listing storing nothing, custom addresses turned off (for adding, and for connections already stored), edits (rename without a password; a new key tested and saved; a dead address leaving the connection as it was), a fixed built-in address, listing and deleting, other accounts' connections, and that every route needs an account.
+- `listing_test.go` — against local test servers: a key echoed in a provider's error is redacted (mutation-checked); the connection's key is sent and the deployment's environment keys never are (mutation-checked: building the SDK client the usual way fails it), Anthropic paging, the stable code for each failure, the mock listing, address checks, and the presets, Anthropic paging that stops when the cursor does not move (mutation-checked) or at the page cap, z.ai listed at the configured address, and `keys_url`.
+- `routes_test.go` — over in-memory SQLite (tables written by hand): adding a built-in connection that the key resolver then reads, a second one refused before any call (`provider_connection_exists`), a local server without a key and an address stored only when it differs from the preset's, Custom (any number), bad input rejected before any call, the password checked before any call (mutation-checked), a failed listing storing nothing, custom addresses turned off (for adding, and for connections already stored), edits (rename without a password; a new key tested and saved; a dead address leaving the connection as it was), a fixed built-in address, listing and deleting, other accounts' connections, and that every route needs an account.
 
 ## Related documentation
 

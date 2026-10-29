@@ -1905,7 +1905,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description The account already has a connection to that built-in provider */
+                /** @description The account already has a connection to that built-in provider; `code` is `provider_connection_exists` */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -12091,7 +12091,7 @@ export interface components {
              * @enum {string}
              */
             flavor?: "openai" | "anthropic";
-            /** @description The address the account chose. Absent means the preset's own. */
+            /** @description The address the account chose. Absent means the preset's own, including when the account gave exactly that, so the connection follows the preset. */
             base_url?: string;
             /** @description The key's last four characters. Absent when there is no key. */
             hint?: string;
@@ -12122,6 +12122,8 @@ export interface components {
             builtin: boolean;
             /** @description A server expected on the same computer. */
             local: boolean;
+            /** @description Where to create a key, when known. */
+            keys_url?: string;
         };
         /** @description A model a provider offers. */
         ListedModel: {
@@ -13309,7 +13311,7 @@ export interface components {
          *       on a generic code — use the HTTP status instead.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists";
         /** @description A single hit inside a search section. */
         SearchResult: {
             /**

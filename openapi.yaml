@@ -1082,7 +1082,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: The account already has a connection to that built-in provider
+          description: The account already has a connection to that built-in provider; `code` is `provider_connection_exists`
           content:
             application/json:
               schema:
@@ -9295,7 +9295,9 @@ components:
           description: The API a custom connection speaks. Absent for a preset, which implies it.
         base_url:
           type: string
-          description: The address the account chose. Absent means the preset's own.
+          description: >-
+            The address the account chose. Absent means the preset's own, including
+            when the account gave exactly that, so the connection follows the preset.
         hint:
           type: string
           description: The key's last four characters. Absent when there is no key.
@@ -9341,6 +9343,9 @@ components:
         local:
           type: boolean
           description: A server expected on the same computer.
+        keys_url:
+          type: string
+          description: Where to create a key, when known.
     ListedModel:
       type: object
       description: A model a provider offers.
@@ -11409,6 +11414,7 @@ components:
         - provider_incompatible
         - provider_unavailable
         - custom_address_not_allowed
+        - provider_connection_exists
 
     # Cross-resource search schemas (GET /search)
     SearchResult:

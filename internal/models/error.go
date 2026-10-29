@@ -78,6 +78,9 @@ const (
 	// ErrCodeCustomAddressNotAllowed: this deployment does not let accounts
 	// choose a provider's address.
 	ErrCodeCustomAddressNotAllowed = "custom_address_not_allowed"
+	// ErrCodeProviderConnectionExists: the account already has a connection to
+	// that built-in provider, and has at most one; it edits that one instead.
+	ErrCodeProviderConnectionExists = "provider_connection_exists"
 )
 
 // AllErrorCodes is every code this API can emit. It is the source the
@@ -113,6 +116,7 @@ var AllErrorCodes = []string{
 	ErrCodeProviderIncompatible,
 	ErrCodeProviderUnavailable,
 	ErrCodeCustomAddressNotAllowed,
+	ErrCodeProviderConnectionExists,
 }
 
 // genericErrorCodes maps HTTP statuses to their generic code.

@@ -233,7 +233,9 @@ func (s *Store) List(ctx context.Context, userID uuid.UUID) ([]Connection, error
 		return nil, fmt.Errorf("list provider connections: %w", err)
 	}
 	out := toConnections(rows)
-	// Built-in rows sort first wherever the database puts NULLs.
+	// The SQL order is not enough on its own: Postgres sorts NULLs last and
+	// SQLite first, so the non-built-in rows (builtin NULL) would land on
+	// either side. The split puts built-in rows first on both.
 	builtin, other := out[:0:0], out[:0:0]
 	for _, c := range out {
 		if c.Builtin {

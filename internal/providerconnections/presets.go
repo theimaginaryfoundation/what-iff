@@ -1,6 +1,8 @@
 package providerconnections
 
 import (
+	"strings"
+
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
@@ -43,6 +45,8 @@ type Preset struct {
 	Builtin bool `json:"builtin"`
 	// Local is true for servers expected on the same computer.
 	Local bool `json:"local"`
+	// KeysURL is where to create a key, when known.
+	KeysURL string `json:"keys_url,omitempty"`
 
 	// How this provider differs from the plain flavor when a connection is
 	// checked; see Target. Not part of the API.
@@ -55,9 +59,12 @@ type Preset struct {
 // Where a provider's model list does not check the key, or reports a bad key
 // unusually. Found by listing each provider with a key it does not know.
 const (
-	// z.ai's Anthropic-compatible model list answers without checking the key;
-	// its OpenAI-compatible one checks it.
-	zaiListURL = "https://api.z.ai/api/paas/v4"
+	// z.ai's Anthropic-compatible model list, at its default address, answers
+	// without checking the key; its OpenAI-compatible one checks it. Only that
+	// default is redirected: a deployment that points z.ai elsewhere is listed
+	// where it pointed it, so the key never goes to a host it did not configure.
+	zaiDefaultURL = "https://api.z.ai/api/anthropic"
+	zaiListURL    = "https://api.z.ai/api/paas/v4"
 	// OpenRouter's model list is public; this endpoint checks the key.
 	openRouterKeyCheckURL = "https://openrouter.ai/api/v1/key"
 )
@@ -118,7 +125,11 @@ func Presets(builtinURLs map[models.ModelProvider]string, localHost string) []Pr
 		}
 		switch p {
 		case models.ModelProviderZAI:
-			preset.listFlavor, preset.listURL = FlavorOpenAI, zaiListURL
+			if strings.TrimRight(preset.BaseURL, "/") == zaiDefaultURL {
+				preset.listFlavor, preset.listURL = FlavorOpenAI, zaiListURL
+			}
+		case models.ModelProviderOpenAI:
+			preset.KeysURL = "https://platform.openai.com/api-keys"
 		case models.ModelProviderGoogle:
 			// Google answers a key it does not know with 400, "API key not valid".
 			preset.badKeyStatus = 400
@@ -132,6 +143,7 @@ func Presets(builtinURLs map[models.ModelProvider]string, localHost string) []Pr
 			Flavor:      FlavorOpenAI,
 			BaseURL:     "https://openrouter.ai/api/v1",
 			KeyRequired: true,
+			KeysURL:     "https://openrouter.ai/keys",
 			keyCheckURL: openRouterKeyCheckURL,
 		},
 		Preset{
