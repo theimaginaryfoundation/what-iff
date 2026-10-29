@@ -58,7 +58,7 @@ The step is idempotent and safe on two instances at once. Where a connection alr
 That covers a key replaced on an instance still running the previous build during an upgrade. A key *removed* there leaves no row to see, so instances of the previous build are stopped before this one starts.
 It does nothing on a deployment that supplies its own keys, whose table is empty.
 
-Until models point at connections (section 5), an account has at most one connection per built-in preset.
+An account has at most one connection per built-in preset: a built-in provider's models, including ones enabled on that connection (section 5), are sent with the account's key for the provider.
 The account resolver then answers "this account's OpenAI key" from its `openai` connection, and its interface does not change.
 A unique index on account and provider enforces it. Deployment-owned connections have no account, and a unique index treats each empty value as different, so a second, partial unique index (provider, where there is no account) keeps the deployment to one per built-in provider too.
 `/provider-keys` stays as a thin layer over preset connections, so existing clients keep working.
@@ -96,8 +96,23 @@ Models have no owner of their own, so visibility cannot drift from the connectio
 
 - **Rows are created on enable.** "Found 312 models" is a live listing, not 312 rows. A re-scan adds new models and flags ones the provider no longer lists.
 - **"Enabled" has one meaning:** offered to whoever can use the connection. A model that is not enabled cannot be chosen for chat or for a utility role.
-- **Deleting a connection disables its models** rather than deleting them. Anything still referring to one fails with `provider_not_configured`, and the delete warns first, saying how many enabled models it disconnects.
-- **Once models point at connections,** a model's requests use its own connection's key, the one-per-preset limit lifts, and a new provider no longer needs a migration.
+- **Disabling a model keeps its row** (soft delete), so anything still naming it fails clearly, and enabling it again brings the same row back.
+- **Deleting a connection deletes its models**, as does deleting the account that owns it. A chat on one falls back to the default model, and an agent job on one fails with a clear error. While one of them is the account's default model, the delete is refused (`default_model_in_use`) until another default is chosen; disabling the default is refused the same way.
+- **A model's `provider` is the preset its connection was made from.** The column is text, so a new preset adds a value without a migration. A model from a built-in provider's connection goes through that provider's existing path with the account's key; only OpenRouter, local servers and Custom need a client built for their connection.
+
+*Amended (step 4).* Models were first meant to outlive a deleted connection, disabled. But a model with no connection means the deployment's catalog, so a model whose connection went away (with its account) would have shown in other accounts' pickers on a shared install, and every catalog check would have needed an exception for such rows. A model now exists exactly while its connection does.
+
+**Capabilities.** Whether a model takes tools and images is known before the capability suite (step 6) can measure it only where something says so:
+
+- the provider's own listing: OpenRouter reports, per model, its supported parameters (tools among them) and input modalities;
+- what is known about the API: Anthropic-compatible servers take tools, and Anthropic's own models take images;
+- otherwise the account confirms it, on each model it enables, prefilled with whatever is known.
+
+The suite later writes the same fields from measurement.
+
+**No seed catalog.** The design assumes no hand-kept catalog: every model an account can pick is one it enabled on one of its connections, and the default model is per account (the one it marks, or the first it enabled) rather than one the server requires at startup. Self-hosted installs convert the seeded models their accounts use onto the matching connections, as stored keys were converted (section 3), and then stop seeding. A deployment's own models (no connection) are unchanged.
+
+**Where connection models work.** A model is used for chat, for subagents and for agent jobs. All three choose their adapter from the model through one shared function, so a model that works in chat works in a job, rather than failing at every scheduled run.
 
 Chat through a Custom OpenAI-compatible connection must stream.
 It builds on the existing Chat Completions streaming path, not on the non-streaming local adapter.
@@ -135,7 +150,7 @@ Each step merges before the next begins.
 1. **Connections replace the key table** (sections 1 and 3). No visible change.
 2. **Connection routes, model listing, the new presets and the Custom-address fact** (sections 2 and 4).
 3. **The Providers screen** becomes a list of connections with one "Add provider" form, where a preset fills in the details.
-4. **The models screen** (section 5).
+4. **The models screen** (section 5), in four parts: models on connections (enabling, visibility, capabilities); one model-to-adapter path for chat, subagents and jobs; converting the seed catalog and the per-account default; then the screens, including onboarding's "select models" step.
 5. **Utility models** (section 6).
 6. **The model capability test suite.**
 

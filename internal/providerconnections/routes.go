@@ -50,6 +50,7 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/provider-connections/{id}", h.handleUpdate).Methods(http.MethodPatch)
 	router.HandleFunc("/provider-connections/{id}", h.handleDelete).Methods(http.MethodDelete)
 	router.HandleFunc("/provider-connections/{id}/models", h.handleModels).Methods(http.MethodGet)
+	router.HandleFunc("/provider-connections/{id}/models", h.handleSetModels).Methods(http.MethodPut)
 }
 
 // offered lists the presets this deployment lets accounts use.
@@ -443,6 +444,17 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	inUse, err := h.store.defaultModelOn(r.Context(), userID, row.ID)
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to delete the provider connection", err)
+		return
+	}
+	if inUse {
+		h.respondDefaultInUse(w)
+		return
+	}
+	// Its models go with it (ADR 0x027): a chat on one falls back to the
+	// default model, and a job on one fails clearly.
 	if err := h.store.Delete(r.Context(), userID, row.ID); err != nil && !errors.Is(err, ErrNotFound) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to delete the provider connection", err)
 		return
@@ -464,10 +476,79 @@ func (h *Handler) handleModels(w http.ResponseWriter, r *http.Request) {
 		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read the provider connection", err)
 		return
 	}
-	listed, err := h.lister.List(r.Context(), preset.target(flavorOf(row, preset), addressOf(row, preset), key))
+	flavor := flavorOf(row, preset)
+	listed, err := h.lister.List(r.Context(), preset.target(flavor, addressOf(row, preset), key))
 	if err != nil {
 		h.respondConnectError(w, preset.ID, err)
 		return
 	}
-	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, listed)
+	merged, err := h.store.withEnabled(r.Context(), row.ID, withKnownCapabilities(preset, flavor, listed))
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read the connection's models", err)
+		return
+	}
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, merged)
+}
+
+// withKnownCapabilities fills in what is known about a flavor where the
+// provider reported nothing: Anthropic-compatible servers take tools, and
+// Anthropic's own models take images too. Anything still unknown is left for
+// the account to confirm.
+func withKnownCapabilities(preset Preset, flavor Flavor, listed []ListedModel) []ListedModel {
+	yes := true
+	for i := range listed {
+		if flavor == FlavorAnthropic && listed[i].ToolSupport == nil {
+			listed[i].ToolSupport = &yes
+		}
+		if preset.ID == "anthropic" && listed[i].VisionSupport == nil {
+			listed[i].VisionSupport = &yes
+		}
+	}
+	return listed
+}
+
+type setModelsRequest struct {
+	Models []ModelChoice `json:"models"`
+}
+
+// handleSetModels enables and disables models on a connection. It reaches no
+// address and changes no key, so it needs no password.
+func (h *Handler) handleSetModels(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.requireAccount(w, r)
+	if !ok {
+		return
+	}
+	row, _, ok := h.connectionFor(w, r, userID)
+	if !ok {
+		return
+	}
+	var req setModelsRequest
+	if err := handlerutils.DecodeJSON(r, &req); err != nil || len(req.Models) == 0 || len(req.Models) > maxListModels {
+		badRequest(w, h.logger, "Send the models to enable or disable")
+		return
+	}
+	err := h.store.SetModels(r.Context(), userID, row, req.Models)
+	switch {
+	case errors.Is(err, ErrInvalidModelID):
+		badRequest(w, h.logger, err.Error())
+		return
+	case errors.Is(err, ErrDefaultModelInUse):
+		h.respondDefaultInUse(w)
+		return
+	case err != nil:
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to change the connection's models", err)
+		return
+	}
+	enabled, err := h.store.withEnabled(r.Context(), row.ID, nil)
+	if err != nil {
+		handlerutils.RespondWithError(w, h.logger, http.StatusInternalServerError, handlerutils.CodeNotSet, "Failed to read the connection's models", err)
+		return
+	}
+	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, enabled)
+}
+
+// respondDefaultInUse answers a change that would take away the account's
+// default model.
+func (h *Handler) respondDefaultInUse(w http.ResponseWriter) {
+	handlerutils.RespondWithError(w, h.logger, http.StatusConflict, models.ErrCodeDefaultModelInUse, ErrDefaultModelInUse.Error(), nil)
 }

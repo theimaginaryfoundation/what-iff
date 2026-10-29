@@ -380,3 +380,38 @@ func TestPresetKeysURLs(t *testing.T) {
 	openrouter, _ := findPreset(presets, PresetOpenRouter)
 	require.Equal(t, "https://openrouter.ai/keys", openrouter.KeysURL)
 }
+
+// OpenRouter reports each model's name, parameters and input modalities;
+// most servers report only the id, which leaves capabilities unknown.
+func TestListedFromOpenAI_ReadsReportedCapabilities(t *testing.T) {
+	m := listedFromOpenAI("openai/gpt-4o", `{"id":"openai/gpt-4o","name":"OpenAI: GPT-4o","supported_parameters":["tools","temperature"],"architecture":{"input_modalities":["text","image"]}}`)
+	require.Equal(t, "OpenAI: GPT-4o", m.DisplayName)
+	require.True(t, *m.ToolSupport)
+	require.True(t, *m.VisionSupport)
+
+	m = listedFromOpenAI("text-only", `{"id":"text-only","supported_parameters":["temperature"],"architecture":{"input_modalities":["text"]}}`)
+	require.False(t, *m.ToolSupport, "reported as not supported")
+	require.False(t, *m.VisionSupport)
+
+	m = listedFromOpenAI("llama3", `{"id":"llama3","object":"model","owned_by":"library"}`)
+	require.Nil(t, m.ToolSupport, "not reported")
+	require.Nil(t, m.VisionSupport)
+	require.Empty(t, m.DisplayName)
+}
+
+func TestWithKnownCapabilities(t *testing.T) {
+	no := false
+	anthropic := Preset{ID: "anthropic"}
+	got := withKnownCapabilities(anthropic, FlavorAnthropic, []ListedModel{{ID: "claude"}})
+	require.True(t, *got[0].ToolSupport)
+	require.True(t, *got[0].VisionSupport)
+
+	custom := Preset{ID: PresetCustom}
+	got = withKnownCapabilities(custom, FlavorAnthropic, []ListedModel{{ID: "glm"}})
+	require.True(t, *got[0].ToolSupport, "Anthropic-compatible servers take tools")
+	require.Nil(t, got[0].VisionSupport, "images unknown for others")
+
+	got = withKnownCapabilities(custom, FlavorOpenAI, []ListedModel{{ID: "x", ToolSupport: &no}})
+	require.False(t, *got[0].ToolSupport, "what the provider reported wins")
+	require.Nil(t, got[0].VisionSupport)
+}

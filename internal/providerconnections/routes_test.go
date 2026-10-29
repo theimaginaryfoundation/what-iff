@@ -74,6 +74,29 @@ func newFixture(t *testing.T) fixture {
 			UNIQUE (user_id, builtin),
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE models (
+			id uuid PRIMARY KEY,
+			name text NOT NULL,
+			display_name text NOT NULL,
+			description text NOT NULL,
+			provider text NOT NULL DEFAULT 'openai',
+			tool_support bool NOT NULL DEFAULT false,
+			reasoning_support_override text NULL,
+			vision_support bool NULL,
+			base_credits_per_slab integer NOT NULL DEFAULT 1,
+			subscription_tier text NOT NULL DEFAULT 'high',
+			deleted bool NOT NULL DEFAULT false,
+			is_default bool NOT NULL DEFAULT false,
+			connection_id uuid NULL,
+			UNIQUE (connection_id, name),
+			FOREIGN KEY (connection_id) REFERENCES provider_connections(id) ON DELETE CASCADE
+		)`,
+		// Only the columns the default-model check reads.
+		`CREATE TABLE user_preferences (
+			id uuid PRIMARY KEY,
+			user_preferences uuid UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+			default_model uuid NOT NULL REFERENCES models(id)
+		)`,
 	} {
 		_, err := db.Exec(stmt)
 		require.NoError(t, err)
@@ -398,4 +421,111 @@ func TestLocalAddressIsStoredOnlyWhenItDiffers(t *testing.T) {
 		"preset": PresetOllama, "base_url": url, "current_password": "right",
 	}))
 	require.Equal(t, url, created.Connection.BaseURL)
+}
+
+// enableModels sends a PUT of model choices for a connection.
+func (f fixture) enableModels(t *testing.T, userID uuid.UUID, connID uuid.UUID, choices ...ModelChoice) *httptest.ResponseRecorder {
+	t.Helper()
+	return f.call(t, userID, http.MethodPut, "/provider-connections/"+connID.String()+"/models", setModelsRequest{Models: choices})
+}
+
+func addLocal(t *testing.T, f fixture) Connection {
+	t.Helper()
+	url, _ := localServer(t)
+	return decode[connected](t, f.call(t, f.alice, http.MethodPost, "/provider-connections", map[string]string{
+		"preset": PresetOllama, "base_url": url, "current_password": "right",
+	})).Connection
+}
+
+func TestModels_EnableShowsInTheListingWithItsCapabilities(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	yes, no := true, false
+
+	rec := f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true, ToolSupport: &yes, VisionSupport: &no})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	enabled := decode[[]ConnectionModel](t, rec)
+	require.Len(t, enabled, 1)
+
+	listed := decode[[]ConnectionModel](t, f.call(t, f.alice, http.MethodGet, "/provider-connections/"+conn.ID.String()+"/models", nil))
+	require.Len(t, listed, 2)
+	byID := map[string]ConnectionModel{}
+	for _, m := range listed {
+		byID[m.ID] = m
+	}
+	require.True(t, byID["alpha"].Enabled)
+	require.True(t, *byID["alpha"].ToolSupport)
+	require.False(t, *byID["alpha"].VisionSupport)
+	require.False(t, byID["zeta"].Enabled)
+
+	row, err := f.store.client.Model.Query().Only(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "ollama", string(row.Provider), "the preset the connection was made from")
+	require.Equal(t, conn.ID, *row.ConnectionID)
+}
+
+// Disabling soft-deletes the row, so anything naming it fails clearly; enabling
+// again brings the same row back.
+func TestModels_DisableThenEnableKeepsTheRow(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true}).Code)
+	first, err := f.store.client.Model.Query().Only(context.Background())
+	require.NoError(t, err)
+
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: false}).Code)
+	row, err := f.store.client.Model.Get(context.Background(), first.ID)
+	require.NoError(t, err)
+	require.True(t, row.Deleted)
+
+	yes := true
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true, ToolSupport: &yes}).Code)
+	row, err = f.store.client.Model.Get(context.Background(), first.ID)
+	require.NoError(t, err)
+	require.False(t, row.Deleted)
+	require.True(t, row.ToolSupport)
+	require.Equal(t, 1, f.store.client.Model.Query().CountX(context.Background()))
+}
+
+// The account's default model can't be taken away: neither disabled nor removed
+// with its connection, until another default is chosen.
+func TestModels_TheDefaultModelIsProtected(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true}).Code)
+	row, err := f.store.client.Model.Query().Only(context.Background())
+	require.NoError(t, err)
+	_, err = f.db.Exec(`INSERT INTO user_preferences (id, user_preferences, default_model) VALUES (?, ?, ?)`, uuid.New(), f.alice, row.ID)
+	require.NoError(t, err)
+
+	rec := f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: false})
+	require.Equal(t, http.StatusConflict, rec.Code)
+	require.Equal(t, models.ErrCodeDefaultModelInUse, errorCode(t, rec))
+
+	rec = f.call(t, f.alice, http.MethodDelete, "/provider-connections/"+conn.ID.String(), nil)
+	require.Equal(t, http.StatusConflict, rec.Code)
+	require.Equal(t, models.ErrCodeDefaultModelInUse, errorCode(t, rec))
+	require.Len(t, decode[[]Connection](t, f.call(t, f.alice, http.MethodGet, "/provider-connections", nil)), 1)
+}
+
+// Removing a connection takes its models with it.
+func TestModels_GoWithTheirConnection(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID,
+		ModelChoice{ID: "alpha", Enabled: true}, ModelChoice{ID: "zeta", Enabled: true}).Code)
+	require.Equal(t, 2, f.store.client.Model.Query().CountX(context.Background()))
+
+	require.Equal(t, http.StatusNoContent, f.call(t, f.alice, http.MethodDelete, "/provider-connections/"+conn.ID.String(), nil).Code)
+	require.Zero(t, f.store.client.Model.Query().CountX(context.Background()))
+}
+
+func TestModels_RejectBadChoicesAndOtherAccounts(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	require.Equal(t, http.StatusBadRequest, f.enableModels(t, f.alice, conn.ID).Code, "nothing to change")
+	require.Equal(t, http.StatusBadRequest, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "  ", Enabled: true}).Code)
+	require.Equal(t, http.StatusBadRequest, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: strings.Repeat("m", maxModelIDLen+1), Enabled: true}).Code)
+	require.Equal(t, http.StatusNotFound, f.enableModels(t, f.bob, conn.ID, ModelChoice{ID: "alpha", Enabled: true}).Code)
+	require.Zero(t, f.store.client.Model.Query().CountX(context.Background()))
 }

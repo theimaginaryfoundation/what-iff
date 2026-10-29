@@ -83,6 +83,22 @@ func TestListModelsForUser(t *testing.T) {
 	got, err := ds.ListModelsForUser(context.Background(), userID)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
+
+	// A model the user enabled on their own connection follows the catalog;
+	// another user's does not appear (ADR 0x027).
+	ctx := context.Background()
+	own, err := ds.dbClient.ProviderConnection.Create().SetUserID(userID).SetPreset("ollama").SetName("Ollama").Save(ctx)
+	require.NoError(t, err)
+	createCatalogTestModel(t, ds, func(c *ent.ModelCreate) { c.SetProvider("ollama").SetConnectionID(own.ID) })
+	other, err := ds.dbClient.ProviderConnection.Create().SetUserID(createCatalogTestUser(t, ds)).SetPreset("ollama").SetName("Theirs").Save(ctx)
+	require.NoError(t, err)
+	createCatalogTestModel(t, ds, func(c *ent.ModelCreate) { c.SetProvider("ollama").SetConnectionID(other.ID) })
+
+	got, err = ds.ListModelsForUser(ctx, userID)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	require.Nil(t, got[0].ConnectionID, "the catalog first")
+	require.Equal(t, own.ID, *got[1].ConnectionID)
 }
 
 func TestListModelsForUser_UserNotFound(t *testing.T) {
