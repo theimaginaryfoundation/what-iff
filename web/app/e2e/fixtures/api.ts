@@ -1,4 +1,11 @@
-import { createApiClient, deleteUser as sdkDeleteUser, loginUser as sdkLoginUser, registerUser as sdkRegisterUser } from '../sdk/client';
+import {
+  createApiClient,
+  deleteUser as sdkDeleteUser,
+  getProviderAccess,
+  loginUser as sdkLoginUser,
+  registerUser as sdkRegisterUser,
+  setProviderKey,
+} from '../sdk/client';
 import { uniqueId } from './unique';
 
 /**
@@ -52,4 +59,25 @@ export async function loginUser(user: Pick<TestUser, 'username' | 'password'>): 
 export async function deleteUser(accessToken: string): Promise<void> {
   const client = createApiClient(accessToken);
   await sdkDeleteUser(client);
+}
+
+/**
+ * A stand-in OpenAI key for test accounts. The mock LLM serves every model
+ * call in process and provider egress is denied, so it is never sent anywhere;
+ * it only stands for "this account has finished key setup".
+ */
+export const TEST_PROVIDER_KEY = 'sk-e2e-not-a-real-key-0000';
+
+/**
+ * Where accounts bring their own provider keys, gives the account a stand-in
+ * OpenAI key so it starts past the first-run key prompt, as an account that
+ * finished setup would. Does nothing where the deployment supplies keys.
+ */
+export async function giveProviderKey(accessToken: string, password: string): Promise<void> {
+  const client = createApiClient(accessToken);
+  const access = await getProviderAccess(client);
+  if (access.keys_from !== 'account' || access.providers.length > 0) {
+    return;
+  }
+  await setProviderKey(client, 'openai', TEST_PROVIDER_KEY, password);
 }

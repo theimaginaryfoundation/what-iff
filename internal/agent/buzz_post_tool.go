@@ -19,6 +19,7 @@ import (
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/buzzrelay"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/relaykit"
 )
 
 const buzzPostToolName = "post_to_buzz"
@@ -199,7 +200,7 @@ func buzzDeveloperContext(bindings []models.BuzzBinding, chat *models.Chat, tool
 	}
 	for _, bd := range bindings {
 		if chat != nil && bd.ChatID == chat.ID {
-			b.WriteString(" This thread is the relay for " + buzzChannelLabel(bd, false) + " on Buzz: messages from Buzz appear here as \"name (Buzz, #channel): text\", and your replies to them are posted back into that conversation automatically, where other people can read them. Buzz shows Markdown.")
+			b.WriteString(" This thread is the relay for " + buzzChannelLabel(bd, false) + " on Buzz: messages from Buzz appear here as \"name (Buzz, #channel): text\", and your replies to them are posted back into that conversation automatically, where other people can read them. Buzz shows Markdown." + relaykit.ContinuationNote)
 			break
 		}
 	}

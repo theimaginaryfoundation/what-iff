@@ -42,6 +42,7 @@ import { ContextPanelService } from '../features/chat/services/context-panel.ser
 import { PersonaPickerDialogComponent } from '../features/personality/picker/persona-picker-dialog.component';
 import { PersonalityGenerateComponent } from '../features/personality/personality-generate/personality-generate.component';
 import { ProfileSettingsModalHostComponent } from '../features/profile-settings/profile-settings-modal-host.component';
+import { ProviderKeyPromptComponent } from '../features/provider-keys/provider-key-prompt.component';
 import { HelpExtensionOutletComponent } from '../extensions/help-extension-outlet.component';
 import { RightPanelHostComponent } from './right-panel/right-panel-host.component';
 import { AppSidebarComponent } from './sidebar/app-sidebar.component';
@@ -78,6 +79,7 @@ import {
     PersonaPickerDialogComponent,
     PersonalityGenerateComponent,
     ProfileSettingsModalHostComponent,
+    ProviderKeyPromptComponent,
     RightPanelHostComponent,
     RouterOutlet,
     SheetComponent,

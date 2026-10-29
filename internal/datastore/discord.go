@@ -739,6 +739,11 @@ func (d *Datastore) ExternalSpeakerForTurn(ctx context.Context, userID, chatID, 
 // relay's whole batch; relaykit.DefaultBatchMax is 8).
 const maxBatchSpeakers = 16
 
+// pendingSpeakerWindow is how long an inbound link without its saved message still counts as
+// the turn being started (ExternalSpeakerForTurn's fallback): longer than a relay turn takes to
+// start, shorter than anyone would mind an old, never-attached link being forgotten.
+const pendingSpeakerWindow = 15 * time.Minute
+
 // joinSpeakers lists a turn's speakers once each, in order: "alice", or "alice, bob" for a
 // batched turn.
 func joinSpeakers(names []string) string {
@@ -784,6 +789,9 @@ func (d *Datastore) discordSpeakerForTurn(ctx context.Context, userID, chatID, c
 	rows, err := d.dbClient.DiscordMessageLink.Query().
 		Where(
 			discordmessagelink.ChatMessageIDIsNil(),
+			// Only links of a turn that may still be starting: one that never got its message
+			// (a failed attach, a shutdown before the cleanup) must not be credited forever.
+			discordmessagelink.CreatedAtGT(time.Now().Add(-pendingSpeakerWindow)),
 			inbound,
 			discordmessagelink.HasBindingWith(discordbinding.ChatID(chatID)),
 			owned,

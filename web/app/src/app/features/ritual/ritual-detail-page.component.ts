@@ -14,11 +14,12 @@ import { ConfirmationService } from '../../core/services/confirmation.service';
 import { RitualFormComponent, RitualFormSave } from './components/ritual-form.component';
 import { RitualSelectOption } from './components/ritual-filter-bar.component';
 import { RitualAvailablePreviewComponent } from './components/ritual-available-preview.component';
+import { EntityMarketplaceOutletComponent } from '../../extensions/entity-marketplace-outlet.component';
 
 @Component({
   selector: 'app-ritual-detail-page',
   standalone: true,
-  imports: [CommonModule, DatePipe, FormsModule, RitualFormComponent, RitualAvailablePreviewComponent],
+  imports: [CommonModule, DatePipe, FormsModule, RitualFormComponent, RitualAvailablePreviewComponent, EntityMarketplaceOutletComponent],
   templateUrl: './ritual-detail-page.component.html',
   styleUrl: './ritual-detail-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

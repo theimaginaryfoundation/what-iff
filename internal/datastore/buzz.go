@@ -124,7 +124,23 @@ func (d *Datastore) SetBuzzAgentStatus(ctx context.Context, userID, id uuid.UUID
 	if err != nil {
 		return nil, fmt.Errorf("update buzz agent: %w", err)
 	}
+	if status == models.BuzzAgentDisabled {
+		if err := d.forgetBuzzResume(ctx, buzzbinding.HasCommunityWith(buzzcommunity.HasAgentWith(buzzagent.ID(id)))); err != nil {
+			return nil, err
+		}
+	}
 	return buzzAgentModel(row), nil
+}
+
+// forgetBuzzResume clears the gateway's resume point on bindings that were just paused or
+// broken, in the write that does it: whichever process leads the gateway next, listening again
+// starts from now, not from before the pause. (MarkBuzzBindingEvent refuses such bindings, so a
+// late write cannot bring the mark back.)
+func (d *Datastore) forgetBuzzResume(ctx context.Context, where ...predicate.BuzzBinding) error {
+	if _, err := d.dbClient.BuzzBinding.Update().Where(where...).ClearLastEventAt().Save(ctx); err != nil {
+		return fmt.Errorf("clear buzz resume points: %w", err)
+	}
+	return nil
 }
 
 // DeleteBuzzAgent removes one of the user's Buzz identities and, by cascade, its communities,
@@ -247,10 +263,21 @@ func (d *Datastore) SetBuzzCommunityState(ctx context.Context, id uuid.UUID, sta
 	return nil
 }
 
-// MarkBuzzBindingEvent moves a binding's resume point forward to at (never back).
+// MarkBuzzBindingEvent moves a binding's resume point forward to at (never back), only while
+// the gateway should be listening to it: inbound on, active, its community and persona not
+// paused. A write that arrives after a pause therefore cannot bring a cleared mark back.
 func (d *Datastore) MarkBuzzBindingEvent(ctx context.Context, id uuid.UUID, at time.Time) error {
 	_, err := d.dbClient.BuzzBinding.Update().
-		Where(buzzbinding.ID(id), buzzbinding.Or(buzzbinding.LastEventAtIsNil(), buzzbinding.LastEventAtLT(at))).
+		Where(
+			buzzbinding.ID(id),
+			buzzbinding.Or(buzzbinding.LastEventAtIsNil(), buzzbinding.LastEventAtLT(at)),
+			buzzbinding.InboundEnabled(true),
+			buzzbinding.StatusEQ(buzzbinding.StatusActive),
+			buzzbinding.HasCommunityWith(
+				buzzcommunity.StatusNEQ(buzzcommunity.StatusDisabled),
+				buzzcommunity.HasAgentWith(buzzagent.StatusEQ(buzzagent.StatusActive)),
+			),
+		).
 		SetLastEventAt(at).
 		Save(ctx)
 	if err != nil {
@@ -302,6 +329,11 @@ func (d *Datastore) patchBuzzCommunity(ctx context.Context, id uuid.UUID, p mode
 	}
 	if p.Status != nil {
 		upd.SetStatus(buzzcommunity.Status(*p.Status))
+		if *p.Status == models.BuzzCommunityDisabled {
+			if err := d.forgetBuzzResume(ctx, buzzbinding.HasCommunityWith(buzzcommunity.ID(id))); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if p.LastError != nil {
 		if *p.LastError == "" {
@@ -554,6 +586,11 @@ func (d *Datastore) patchBuzzBinding(ctx context.Context, id uuid.UUID, p models
 	}
 	if p.Status != nil {
 		upd.SetStatus(buzzbinding.Status(*p.Status))
+	}
+	// Inbound off or broken: the gateway stops listening, so forget where it was (as in
+	// forgetBuzzResume).
+	if (p.InboundEnabled != nil && !*p.InboundEnabled) || (p.Status != nil && *p.Status == models.BuzzBindingBroken) {
+		upd.ClearLastEventAt()
 	}
 	if p.LastError != nil {
 		if *p.LastError == "" {
@@ -951,6 +988,9 @@ func (d *Datastore) buzzSpeakerForTurn(ctx context.Context, userID, chatID, chat
 	rows, err := d.dbClient.BuzzMessageLink.Query().
 		Where(
 			buzzmessagelink.ChatMessageIDIsNil(),
+			// Only links of a turn that may still be starting: one that never got its message
+			// (a failed attach, a shutdown before the cleanup) must not be credited forever.
+			buzzmessagelink.CreatedAtGT(time.Now().Add(-pendingSpeakerWindow)),
 			inbound,
 			buzzmessagelink.HasBindingWith(buzzbinding.ChatID(chatID)),
 			owned,

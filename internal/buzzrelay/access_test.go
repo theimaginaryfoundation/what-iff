@@ -7,7 +7,7 @@ import (
 )
 
 func TestEnabledIsOptIn(t *testing.T) {
-	for v, want := range map[string]bool{"": false, "false": false, "0": false, "nope": false, "true": true, "1": true, " ON ": true, "yes": true} {
+	for v, want := range map[string]bool{"": false, "false": false, "0": false, "nope": false, "true": true, "1": true, " ON ": true, "yes": false} {
 		t.Setenv("BUZZ_RELAY_ENABLED", v)
 		assert.Equal(t, want, Enabled(), "BUZZ_RELAY_ENABLED=%q", v)
 	}

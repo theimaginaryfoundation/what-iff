@@ -57,7 +57,7 @@ HTTP **API server**: Gorilla mux router, OpenTelemetry/metrics middleware, CORS,
 - `server_test.go` — `httpStatusClass`, route normalization / `metricHTTPRoute`.
 - `plugin_turns_test.go` — the turn starter's and attachment ingester's guards, and the mapping of a rejected upload to the plugin-facing errors.
 - `plugin_attachments_test.go` — the ingester end to end over fakes: size limit, chat lookup, save, unsupported type, provider and object-store failures.
-- `account_key_routes_test.go` — the key routes follow the resolver's `AccountsSupplyKeys()`, including through a wrapping resolver, and the default `providerkeys.New` mounts none.
+- `account_key_routes_test.go` — the key routes follow the resolver's `AccountsSupplyKeys()`, including through a wrapping resolver.
 
 ## Related documentation
 

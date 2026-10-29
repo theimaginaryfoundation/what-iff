@@ -61,7 +61,8 @@ A persona joins a community (`buzz_community`: the agent plus a relay URL) in on
 - Each bound channel's subscription resumes from the newest event seen in it, minus a minute's skew, so a short outage loses no mention that had already been recorded or had not yet arrived; redelivered events are deduplicated on the event id (§4).
   The mark survives a re-dial (another binding changing reopens the connection) in memory, and a restart or leader change on the binding row (`last_event_at`, written at most every 30 s).
   It reaches back at most an hour: a channel quiet for longer resumes from an hour ago, and mentions older than that are left unanswered rather than answered late.
-  A binding the gateway stops listening to (its community or persona paused, inbound off, broken) loses its mark, so turning it back on does not answer what was said meanwhile.
+  A binding the gateway stops listening to (its community or persona paused, inbound off, broken) loses its mark, in the same write that pauses or breaks it, so turning it back on does not answer what was said meanwhile, whichever process leads the gateway by then.
+  A mark is written only while the binding is listened to, so a late write from a closing session cannot bring it back.
   The mark moves when an event arrives, not when it is answered: mentions still waiting behind a running turn when the process stops can be lost.
 - A connection that drops soon after subscribing does not reset the reconnect backoff; only one that stayed up for a minute does.
 - Events are verified (id and Schnorr signature) before anything else; an event whose signature does not check out, or whose id, pubkey or signature is not lowercase hex as NIP-01 requires, is dropped.
@@ -89,7 +90,7 @@ The Discord tables are not generalised into shared `relay_*` tables (see Alterna
   This is checked again just before each post, so a pause also stops a reply already armed (composer, `post_to_buzz`) or a turn already running; arming a post on such a binding is refused (409).
 - The allow and deny lists are pubkeys (hex or `npub`); deny always wins and an empty allow list means anyone in the channel.
 - The message is saved as a user message in the relay thread as `alice (Buzz, #general): text`.
-  The persona's own `@name` and `nostr:npub…` mention are removed (with the spaces after them); everything else, line breaks included, is kept as written. The author's name is their kind 0 `display_name` (or `name`), read from the relay and cached; it is cleaned the same way as Discord names (`relaykit.SpeakerLabel`), so a name cannot pose as another speaker's label.
+  The persona's own `@name` and `nostr:npub…` mention are removed (with the spaces after them); everything else, line breaks included, is kept as written, with every line after the first marked `│ ` (`relaykit.MessageBody`) so a line of one message cannot pose as another speaker's turn; the relay thread's developer context says so. The author's name is their kind 0 `display_name` (or `name`), read from the relay and cached; it is cleaned the same way as Discord names (`relaykit.SpeakerLabel`), so a name cannot pose as another speaker's label.
 - A message replying to someone else's is quoted (up to 500 characters) when that parent is a message in the same channel; a parent id pointing elsewhere quotes nothing, so a reply cannot pull in what was said in a channel its sender cannot read.
 - At most 4 files are read from a message (fewer when earlier mentions in the same batch already added some), counting attempts rather than successes: files past that get one note, so a message cannot hold the thread's queue with downloads or flood the prompt.
 - The turn runs through the plugin turn starter, metered against the persona's owner with source `buzz`; one turn at a time per relay thread, up to 5 queued behind it (`relaykit.TurnQueue`, shared with Discord).
@@ -135,7 +136,7 @@ ADR 0x025 §7 applies as written, with Buzz as a second source:
 - `BUZZ_GATEWAY_LOCK_KEY`, `BUZZ_GATEWAY_SINGLE_INSTANCE` as in §3.
 - `BUZZ_ALLOW_PRIVATE_RELAYS=true` lets a persona connect to relays on loopback or private addresses, and over `ws://`/`http://`.
   It is for local development: without it, the server connects only to public addresses (checked after DNS on every connection, the Discord CDN fetcher's guard, now `relaykit.PublicOnlyControl`), over TLS, because a relay URL is user input and the server would otherwise connect wherever it points.
-- Routes (authenticated): `/api/buzz/agents`, `/agents/{id}` (update, remove), `/agents/{id}/sync-profile`, `/agents/{id}/communities` (re-adding a community the persona is in is a 409 before any invite is claimed), `/policy?relay_url=` (preview join terms), `/communities/{id}` (update, check again, remove), `/communities/{id}/channels`, `/communities/{id}/channels/{channelId}/join`, `/bindings`, `/bindings/{id}`, `/chats/{chatId}`, `/chats/{chatId}/pending/{bindingId}`. Everything is owner-scoped; another account's rows are a 404.
+- Routes (authenticated): `/api/buzz/agents`, `/agents/{id}` (update, remove), `/agents/{id}/sync-profile`, `/agents/{id}/communities` (re-adding a community the persona is in is a 409 before any invite is claimed), `/policy?relay_url=` (preview join terms), `/communities/{id}` (update, check again, remove), `/communities/{id}/channels` (only channel state signed by the relay's NIP-11 key counts, so a community that names no key lists no channels), `/communities/{id}/channels/{channelId}/join`, `/bindings`, `/bindings/{id}`, `/chats/{chatId}`, `/chats/{chatId}/pending/{bindingId}`. Everything is owner-scoped; another account's rows are a 404.
 - Web app: an Integrations → Buzz tab; Buzz relay threads in the Thread Manager's Jobs tab; the composer toggle in a relay thread.
 
 ## Alternatives considered
@@ -199,7 +200,7 @@ The relay can be tried end to end without the Buzz desktop app:
 - Deleting a persona or a relay thread leaves its Buzz identity or binding in place (as for Discord): the gateway keeps connecting, and mentions try to start turns in a missing chat until the binding is marked broken.
   Cleaning these up belongs with the same fix for Discord.
 - DMs, reactions, edits and deletes from Buzz, forum channels, canvases and artifacts, and NIP-AE engrams.
-- Keeping relay turns out of the owner's own chat allowance in the private overlay (it keys on `metering.TurnSource`; `buzz` needs the same treatment as `discord`).
+- Checking, on the first hosted run, that relay turns stay out of the owner's own chat allowance: the private overlay treats every `metering.TurnSource` other than the app's as external, so `buzz` should need nothing of its own.
 - Moving a Buzz binding to another thread in the app (Discord has it), and sharing the composer toggle and key-chip components between the two relays.
 - An author without a Buzz profile is labelled by a shortened npub, which a small model can misread in the extraction note (it once took "Buzz" for the speaker's name); a clearer fallback label is a cheap follow-up.
 - Persona presence in Buzz (online/offline), and showing "via Buzz · alice" on relayed messages in the app.

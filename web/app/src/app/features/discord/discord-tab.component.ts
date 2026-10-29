@@ -280,7 +280,7 @@ interface AccessDraft {
                       <input
                         type="checkbox"
                         [checked]="b.answer_agents"
-                        (change)="setAnswerAgents(b, $any($event.target).checked)"
+                        (change)="setAnswerAgents(b, $any($event.target))"
                         data-testid="discord-binding-agents"
                       />
                       Answer other bots
@@ -664,10 +664,12 @@ export class DiscordTabComponent implements OnInit {
     );
   }
 
-  async setAnswerAgents(b: DiscordBinding, on: boolean): Promise<void> {
-    await this.run(
-      async () => this.replaceBinding(await firstValueFrom(this.discord.updateBinding(b.id, { answer_agents: on }))),
-      'Could not update the channel.',
+  async setAnswerAgents(b: DiscordBinding, box: HTMLInputElement): Promise<void> {
+    await saveCheckbox(box, on =>
+      this.run(
+        async () => this.replaceBinding(await firstValueFrom(this.discord.updateBinding(b.id, { answer_agents: on }))),
+        'Could not update the channel.',
+      ),
     );
   }
 

@@ -91,7 +91,7 @@ func PromptText(text, author, channelName, quoteAuthor, quote string) string {
 		}
 		fmt.Fprintf(&b, "(in a thread started by %s: %q)\n", relaykit.SpeakerLabel(quoteAuthor), quoted)
 	}
-	fmt.Fprintf(&b, "%s (%s): %s", relaykit.SpeakerLabel(author), where, text)
+	fmt.Fprintf(&b, "%s (%s): %s", relaykit.SpeakerLabel(author), where, relaykit.MessageBody(text))
 	return b.String()
 }
 

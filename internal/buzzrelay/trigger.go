@@ -64,7 +64,7 @@ func PromptText(content, author, channelName, personaName, personaNPub, quoteAut
 		}
 		fmt.Fprintf(&b, "(replying to %s: %q)\n", relaykit.SpeakerLabel(quoteAuthor), quoted)
 	}
-	fmt.Fprintf(&b, "%s (%s): %s", relaykit.SpeakerLabel(author), where, content)
+	fmt.Fprintf(&b, "%s (%s): %s", relaykit.SpeakerLabel(author), where, relaykit.MessageBody(content))
 	return b.String()
 }
 

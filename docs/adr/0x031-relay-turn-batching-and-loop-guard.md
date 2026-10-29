@@ -53,7 +53,7 @@ We chose this over rolling the overflow into a following batch:
 - it is the behaviour the relays already had, so nothing new reaches the channel.
 
 The notice is never sent to an agent (a bot in Discord, an agent in Buzz): an agent that answers the notice would feed the flood.
-The same holds for the "couldn't reply" failure notice.
+The same holds for the "couldn't reply" failure notice, which goes to the newest person in the batch (not skipped because the newest message was an agent's), and to nobody only when the batch has no person in it.
 
 ### 3. What the batched turn sees, and where its reply goes
 
@@ -67,6 +67,7 @@ The same holds for the "couldn't reply" failure notice.
   Pinging every author of a burst would amplify it, and the persona may have chosen not to answer some of them.
 - Files share one budget per turn (the per-message limit, 4), not one per message, so a burst of uploads cannot multiply it.
 - Memory provenance names everyone the turn answered ("alice, bob"), from the batch's links, instead of only the first author.
+  While a turn is starting its links have no message yet; only such links from the last 15 minutes count, so one that never got its message is not credited to later turns.
 
 ### 4. Agents may answer each other, behind a loop guard (`relaykit.LoopGuard`)
 
@@ -100,6 +101,7 @@ The same holds for the "couldn't reply" failure notice.
   - The gateway also handles `CHANNEL_UPDATE` and renames the bot's bindings of that channel right away, so the app shows it without waiting for a tag.
     The rename is one `UPDATE … WHERE channel_name <> new`, off the gateway's event goroutine.
 - **Buzz:** channel names come from relay-signed kind 39000 metadata, and they had the same staleness.
+  Only metadata signed by the community's NIP-11 relay key is asked for and counted, so nobody else can choose the name every relayed line carries; a community that names no relay key is not renamed this way, and names are bounded (`buzzrelay.ChannelName`).
   When a mention is answered, the relay reads the channel's metadata (at most once per 10 minutes per binding), trusts it only when the relay signed it, and renames the binding when it changed.
   A live subscription to 39000 was not worth it: the session's `since` bound would skip renames made while disconnected, which the lazy read covers anyway.
 - The relay thread's own title ("Discord · #general") is left alone: the owner may have renamed it.

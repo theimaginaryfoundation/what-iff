@@ -93,12 +93,16 @@ func (c *channelCheck) due(bindingID uuid.UUID) bool {
 
 // channelName is the bound channel's current name from its relay-signed metadata (kind
 // 39000), read when a mention is answered and at most once per ttl; "" when not due or unknown.
-// A channel renamed in Buzz is then renamed on the binding, as the Discord relay does.
+// A channel renamed in Buzz is then renamed on the binding, as the Discord relay does. Only
+// metadata signed by the community's relay key counts, and only that is asked for, so nobody
+// else can choose the name every relayed line carries; a community that names no relay key is
+// never renamed this way.
 func (s *Service) channelName(ctx context.Context, t models.BuzzBindingTarget, ep Endpoint, signer Signer) string {
-	if !s.channels.due(t.Binding.ID) {
+	relayPub := t.Community.RelayPubKey
+	if relayPub == "" || !s.channels.due(t.Binding.ID) {
 		return ""
 	}
-	events, err := s.Relay.Query(ctx, ep, signer, Filter{"kinds": []int{KindGroupMetadata}, "#d": []string{t.Binding.ChannelID}, "limit": 1})
+	events, err := s.Relay.Query(ctx, ep, signer, Filter{"kinds": []int{KindGroupMetadata}, "authors": []string{relayPub}, "#d": []string{t.Binding.ChannelID}, "limit": 1})
 	if err != nil {
 		return ""
 	}
@@ -107,7 +111,7 @@ func (s *Service) channelName(ctx context.Context, t models.BuzzBindingTarget, e
 		if ev.Verify() != nil || ev.Tags.Value("d") != t.Binding.ChannelID {
 			continue
 		}
-		if t.Community.RelayPubKey != "" && ev.PubKey != t.Community.RelayPubKey {
+		if ev.PubKey != relayPub {
 			continue // channel state is relay-signed
 		}
 		if newest == nil || ev.CreatedAt > newest.CreatedAt {
@@ -117,5 +121,5 @@ func (s *Service) channelName(ctx context.Context, t models.BuzzBindingTarget, e
 	if newest == nil {
 		return ""
 	}
-	return strings.TrimPrefix(strings.TrimSpace(newest.Tags.Value("name")), "#")
+	return ChannelName(newest.Tags.Value("name"))
 }

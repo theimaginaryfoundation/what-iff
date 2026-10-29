@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
+	"github.com/theimaginaryfoundation/what-iff/internal/relaykit"
 	"github.com/theimaginaryfoundation/what-iff/internal/slackrelay"
 )
 
@@ -199,7 +200,7 @@ func slackDeveloperContext(bindings []models.SlackBinding, chat *models.Chat, to
 	}
 	for _, bd := range bindings {
 		if chat != nil && bd.ChatID == chat.ID {
-			b.WriteString(" This thread is the relay for " + slackChannelLabel(bd, false) + " on Slack: messages from Slack appear here as \"name (Slack, #channel): text\", and your replies to them are posted back into that Slack thread automatically, where other people can read them. Write Markdown as usual: it is converted for Slack, and tables are shown as code blocks.")
+			b.WriteString(" This thread is the relay for " + slackChannelLabel(bd, false) + " on Slack: messages from Slack appear here as \"name (Slack, #channel): text\", and your replies to them are posted back into that Slack thread automatically, where other people can read them. Write Markdown as usual: it is converted for Slack, and tables are shown as code blocks." + relaykit.ContinuationNote)
 			break
 		}
 	}

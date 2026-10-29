@@ -29,11 +29,11 @@ Each relay keeps its own storage, wire format and trigger rules; what is the sam
 - **`LoadReplyFiles`, `SkippedNote`:** the files a reply produced, within a platform's limits, never the context-only ones, and the note naming those left out.
 - **`SplitText`, `TablesToCodeBlocks`, `IsFenceLine`:** a reply split into messages of a platform's length (Discord 2000, Slack 4000) on paragraphs, then lines, with a split code block closed and reopened, and Markdown tables turned into code blocks.
 - **`PublicOnlyControl`, `IsPublicIP`:** the `net.Dialer` hook that refuses non-public addresses after DNS on every connection.
-- **`SpeakerLabel`, `Allowed`, `SleepCtx`:** speaker names cleaned so they cannot forge the `name (Platform, #channel):` label; allow and deny lists where deny wins.
+- **`SpeakerLabel`, `MessageBody`, `Allowed`, `SleepCtx`:** speaker names cleaned so they cannot forge the `name (Platform, #channel):` label, and message text whose further lines are marked `│ ` so a line cannot pose as another speaker's turn (`ContinuationNote` tells the persona); allow and deny lists where deny wins.
 
 ## Key types and entry points
 
-- `TurnQueue`, `LoopGuard`, `LastInbound`, `Policy`, `PolicyFromEnv`, `BatchPrompt`, `Clock`, `Replies`, `Throttle`, `Supervisor`, `Lock`, `Locker`, `Conn`, `AdvisoryLocker`, `SingleInstanceLocker`, `PublicOnlyControl`, `IsPublicIP`, `SpeakerLabel`, `Allowed`, `SleepCtx`, `LoadReplyFiles`, `SkippedNote`, `SplitText`, `TablesToCodeBlocks`, `IsFenceLine`.
+- `TurnQueue`, `LoopGuard`, `LastInbound`, `Policy`, `PolicyFromEnv`, `BatchPrompt`, `Clock`, `Replies`, `Throttle`, `Supervisor`, `Lock`, `Locker`, `Conn`, `AdvisoryLocker`, `SingleInstanceLocker`, `PublicOnlyControl`, `IsPublicIP`, `SpeakerLabel`, `MessageBody`, `ContinuationNote`, `Allowed`, `SleepCtx`, `LoadReplyFiles`, `SkippedNote`, `SplitText`, `TablesToCodeBlocks`, `IsFenceLine`.
 
 ## Dependencies
 

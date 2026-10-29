@@ -76,6 +76,15 @@ func (s *Service) runInbound(ctx context.Context, batch []inboundWork) {
 		return
 	}
 	last := tags[len(tags)-1].msg
+	// Who is told when the turn fails: the newest person in the batch. Never a bot, which would
+	// answer the notice; and only when there is no person in the batch is nobody told.
+	var asker *InboundMessage
+	for i := len(tags) - 1; i >= 0; i-- {
+		if !tags[i].msg.AuthorIsBot {
+			asker = &tags[i].msg
+			break
+		}
+	}
 
 	var (
 		lines       []string
@@ -112,8 +121,8 @@ func (s *Service) runInbound(ctx context.Context, batch []inboundWork) {
 		for _, tag := range tags {
 			_ = s.Store.DeleteDiscordLink(ctx, tag.link.ID)
 		}
-		if !last.AuthorIsBot {
-			s.notice(ctx, bot.Token, last.ChannelID, last.ID, NoticeFailed)
+		if asker != nil {
+			s.notice(ctx, bot.Token, asker.ChannelID, asker.ID, NoticeFailed)
 		}
 		return
 	}
@@ -133,7 +142,7 @@ func (s *Service) runInbound(ctx context.Context, batch []inboundWork) {
 	}
 
 	jobID, _ := uuid.Parse(resp.JobID)
-	s.waitForReply(ctx, bot, last, jobID, done)
+	s.waitForReply(ctx, bot, last, asker, jobID, done)
 }
 
 // lastInbound is the binding's previous message for the loop guard (nil: none within its
@@ -171,7 +180,7 @@ func (s *Service) guardBatch(ctx context.Context, bindingID uuid.UUID, msgs []In
 	return depths, turnDepth, ok
 }
 
-func (s *Service) waitForReply(ctx context.Context, bot models.DiscordBotCredentials, msg InboundMessage, jobID uuid.UUID, done <-chan struct{}) {
+func (s *Service) waitForReply(ctx context.Context, bot models.DiscordBotCredentials, msg InboundMessage, asker *InboundMessage, jobID uuid.UUID, done <-chan struct{}) {
 	_ = s.Discord.Typing(ctx, bot.Token, msg.ChannelID)
 	typing := time.NewTicker(s.TypingEvery)
 	defer typing.Stop()
@@ -199,8 +208,8 @@ func (s *Service) waitForReply(ctx context.Context, bot models.DiscordBotCredent
 				continue
 			}
 			if job.Status == models.JobStatusFailed || job.Status == models.JobStatusCancelled {
-				if !msg.AuthorIsBot {
-					s.notice(ctx, bot.Token, msg.ChannelID, msg.ID, NoticeFailed)
+				if asker != nil {
+					s.notice(ctx, bot.Token, asker.ChannelID, asker.ID, NoticeFailed)
 				}
 				return
 			}

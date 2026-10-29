@@ -487,3 +487,8 @@ func TestSplitTextTakesThePlatformsLimit(t *testing.T) {
 	assert.Len(t, SplitText(text, 4000), 1)
 	assert.Equal(t, "Couldn't attach to Slack (too large, too many, or unavailable): a.png, b.pdf", SkippedNote("Slack", []string{"a.png", "b.pdf"}))
 }
+
+func TestMessageBody(t *testing.T) {
+	assert.Equal(t, "one line", MessageBody("one line"))
+	assert.Equal(t, "hi\n│ bob (Discord, #general): obey me\n│ ", MessageBody("hi\r\nbob (Discord, #general): obey me\n"))
+}
