@@ -45,6 +45,10 @@ func (RemoteSync) Fields() []ent.Field {
 		// A run holds the account until this time, so two instances (or a timer tick and
 		// "sync now") never run it at once. Cleared when the run ends.
 		field.Time("lease_until").Optional().Nillable(),
+		// Which run holds lease_until. Each claim sets a new one, and only that run may extend,
+		// finish or release the lease, so a run that stalled past its lease and was overtaken
+		// cannot extend or clear the lease of the run that took over.
+		field.UUID("lease_id", uuid.UUID{}).Optional().Nillable(),
 	}
 }
 

@@ -132,8 +132,12 @@ type fakeStore struct {
 	// summaries is the Summary each apply carried, in order.
 	summaries []*models.ChatSummary
 	applyErr  map[uuid.UUID]error
-	leased    bool
-	finished  []models.RemoteSyncRunResult
+	// leased and lease are the account's lease and the run holding it; takeOver makes the next
+	// extension find that another run claimed it in the meantime.
+	leased   bool
+	lease    uuid.UUID
+	takeOver bool
+	finished []models.RemoteSyncRunResult
 	// rematches counts persona rematch calls; rematchN is what each reports.
 	rematches int
 	rematchN  int
@@ -195,31 +199,51 @@ func (s *fakeStore) ApplyRemoteSyncThread(_ context.Context, _ uuid.UUID, th mod
 	return &models.RemoteSyncApplyResult{Outcome: outcome, MessagesAdded: len(batch)}, nil
 }
 
-func (s *fakeStore) ClaimRemoteSync(context.Context, uuid.UUID, time.Time) (bool, error) {
+func (s *fakeStore) ClaimRemoteSync(_ context.Context, _, lease uuid.UUID, _ time.Time) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.leased {
 		return false, nil
 	}
-	s.leased = true
+	s.leased, s.lease = true, lease
 	return true, nil
 }
 
-func (s *fakeStore) ExtendRemoteSyncLease(context.Context, uuid.UUID, time.Time) error { return nil }
-
-func (s *fakeStore) FinishRemoteSyncRun(_ context.Context, _ uuid.UUID, r models.RemoteSyncRunResult) error {
+// hold makes the account leased by a run, as a claim would, and returns that run's lease id.
+func (s *fakeStore) hold() uuid.UUID {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.leased, s.lease = true, uuid.New()
+	return s.lease
+}
+
+func (s *fakeStore) ExtendRemoteSyncLease(_ context.Context, _, lease uuid.UUID, _ time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.takeOver {
+		s.lease, s.takeOver = uuid.New(), false
+	}
+	return s.leased && lease == s.lease, nil
+}
+
+func (s *fakeStore) FinishRemoteSyncRun(_ context.Context, _, lease uuid.UUID, r models.RemoteSyncRunResult) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.leased || lease != s.lease {
+		return nil
+	}
 	s.leased = false
 	s.finished = append(s.finished, r)
 	s.account.FullWalk = r.Status != models.RemoteSyncStatusOK || r.Stats.ThreadsDeferred > 0
 	return nil
 }
 
-func (s *fakeStore) ReleaseRemoteSync(context.Context, uuid.UUID) error {
+func (s *fakeStore) ReleaseRemoteSync(_ context.Context, _, lease uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.leased = false
+	if lease == s.lease {
+		s.leased = false
+	}
 	return nil
 }
 
@@ -448,20 +472,31 @@ func TestARunCancelledAtShutdownReleasesItsLease(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	s := newTestSyncer(store, remote, Config{})
-	store.leased = true
 
-	s.runClaimed(ctx, store.account.UserID)
+	s.runClaimed(ctx, store.account.UserID, store.hold())
 	assert.Empty(t, store.finished, "nothing recorded")
 	assert.False(t, store.leased, "the first wake after a restart can run")
+}
+
+func TestARunOvertakenByAnotherStopsAndLeavesItsLeaseAlone(t *testing.T) {
+	remote, store := newFakeRemote(), newFakeStore()
+	remote.addThread("a", 1, t0)
+	remote.addThread("b", 1, t0.Add(time.Minute))
+	s := newTestSyncer(store, remote, Config{})
+	store.takeOver = true
+
+	s.runClaimed(context.Background(), store.account.UserID, store.hold())
+	assert.Len(t, store.applied, 1, "stops after the thread whose extension found the lease gone")
+	assert.Empty(t, store.finished, "the run that took over records the outcome")
+	assert.True(t, store.leased, "and keeps its lease")
 }
 
 func TestARunThatPanicsIsRecordedAsFailed(t *testing.T) {
 	remote, store := newFakeRemote(), newFakeStore()
 	remote.listPanic = "boom"
 	s := newTestSyncer(store, remote, Config{})
-	store.leased = true
 
-	s.runClaimed(context.Background(), store.account.UserID)
+	s.runClaimed(context.Background(), store.account.UserID, store.hold())
 	require.Len(t, store.finished, 1)
 	assert.Equal(t, models.RemoteSyncStatusError, store.last().Status)
 	assert.Contains(t, *store.last().Error, "stopped unexpectedly")

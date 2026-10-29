@@ -140,7 +140,10 @@ func TestRemoteSyncUpsertNeedsATokenFirstAndKeepsItAfter(t *testing.T) {
 
 	// A later save without a token keeps the stored one and clears needs_attention.
 	msg := "token was revoked"
-	require.NoError(t, f.ds.FinishRemoteSyncRun(ctx, f.owner, models.RemoteSyncRunResult{Status: models.RemoteSyncStatusNeedsAttention, Error: &msg}))
+	lease := uuid.New()
+	_, err = f.ds.ClaimRemoteSync(ctx, f.owner, lease, time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	require.NoError(t, f.ds.FinishRemoteSyncRun(ctx, f.owner, lease, models.RemoteSyncRunResult{Status: models.RemoteSyncStatusNeedsAttention, Error: &msg}))
 	off := false
 	require.NoError(t, f.ds.UpsertRemoteSync(ctx, f.owner, models.RemoteSyncUpsert{BaseURL: "https://example.test", Enabled: &off}))
 	s, err := f.ds.GetRemoteSyncSettings(ctx, f.owner)
@@ -164,10 +167,11 @@ func TestRemoteSyncLeaseAndDueList(t *testing.T) {
 	assert.Equal(t, f.owner, due[0].UserID)
 	assert.Nil(t, due[0].LastRunAt)
 
-	got, err := f.ds.ClaimRemoteSync(ctx, f.owner, time.Now().Add(time.Minute))
+	lease := uuid.New()
+	got, err := f.ds.ClaimRemoteSync(ctx, f.owner, lease, time.Now().Add(time.Minute))
 	require.NoError(t, err)
 	assert.True(t, got)
-	got, err = f.ds.ClaimRemoteSync(ctx, f.owner, time.Now().Add(time.Minute))
+	got, err = f.ds.ClaimRemoteSync(ctx, f.owner, uuid.New(), time.Now().Add(time.Minute))
 	require.NoError(t, err)
 	assert.False(t, got, "a held lease is not claimed twice")
 	s, err := f.ds.GetRemoteSyncSettings(ctx, f.owner)
@@ -177,7 +181,7 @@ func TestRemoteSyncLeaseAndDueList(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, due, "a running account is not due")
 
-	require.NoError(t, f.ds.FinishRemoteSyncRun(ctx, f.owner, models.RemoteSyncRunResult{
+	require.NoError(t, f.ds.FinishRemoteSyncRun(ctx, f.owner, lease, models.RemoteSyncRunResult{
 		Status: models.RemoteSyncStatusOK, Stats: models.RemoteSyncRunStats{ThreadsCreated: 2, MessagesAdded: 7},
 	}))
 	s, err = f.ds.GetRemoteSyncSettings(ctx, f.owner)
@@ -202,10 +206,48 @@ func TestRemoteSyncLeaseAndDueList(t *testing.T) {
 	assert.NotNil(t, due[0].LastRunAt, "the runner spreads runs out from it")
 
 	msg := "token refused"
-	require.NoError(t, f.ds.FinishRemoteSyncRun(ctx, f.owner, models.RemoteSyncRunResult{Status: models.RemoteSyncStatusNeedsAttention, Error: &msg}))
+	lease = uuid.New()
+	_, err = f.ds.ClaimRemoteSync(ctx, f.owner, lease, time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	require.NoError(t, f.ds.FinishRemoteSyncRun(ctx, f.owner, lease, models.RemoteSyncRunResult{Status: models.RemoteSyncStatusNeedsAttention, Error: &msg}))
 	due, err = f.ds.ListDueRemoteSyncs(ctx, time.Now().Add(time.Minute))
 	require.NoError(t, err)
 	assert.Empty(t, due, "needs_attention waits for its owner")
+}
+
+func TestAnOvertakenRunCannotExtendFinishOrReleaseTheNewLease(t *testing.T) {
+	f := newRemoteSyncFixture(t)
+	ctx := context.Background()
+	running := func() bool {
+		s, err := f.ds.GetRemoteSyncSettings(ctx, f.owner)
+		require.NoError(t, err)
+		return s.Running
+	}
+
+	// Run A claims, then stalls past its lease; run B claims the expired lease.
+	a, b := uuid.New(), uuid.New()
+	got, err := f.ds.ClaimRemoteSync(ctx, f.owner, a, time.Now().Add(-time.Second))
+	require.NoError(t, err)
+	require.True(t, got)
+	got, err = f.ds.ClaimRemoteSync(ctx, f.owner, b, time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	require.True(t, got)
+
+	held, err := f.ds.ExtendRemoteSyncLease(ctx, f.owner, a, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	assert.False(t, held, "A learns it lost the lease")
+	require.NoError(t, f.ds.FinishRemoteSyncRun(ctx, f.owner, a, models.RemoteSyncRunResult{Status: models.RemoteSyncStatusOK}))
+	require.NoError(t, f.ds.ReleaseRemoteSync(ctx, f.owner, a))
+	assert.True(t, running(), "B's lease survives everything A does")
+	s, err := f.ds.GetRemoteSyncSettings(ctx, f.owner)
+	require.NoError(t, err)
+	assert.Equal(t, models.RemoteSyncStatusPending, s.Status, "A recorded nothing")
+
+	held, err = f.ds.ExtendRemoteSyncLease(ctx, f.owner, b, time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	assert.True(t, held)
+	require.NoError(t, f.ds.ReleaseRemoteSync(ctx, f.owner, b))
+	assert.False(t, running())
 }
 
 func TestApplyCreatesAMirrorThenAppendsWithoutDuplicates(t *testing.T) {

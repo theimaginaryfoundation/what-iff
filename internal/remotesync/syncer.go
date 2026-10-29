@@ -30,10 +30,10 @@ type Store interface {
 	GetRemoteSyncAccount(ctx context.Context, userID uuid.UUID) (*models.RemoteSyncAccount, error)
 	ListRemoteSyncChatLinks(ctx context.Context, userID uuid.UUID) (map[uuid.UUID]models.RemoteSyncChatLink, error)
 	ApplyRemoteSyncThread(ctx context.Context, userID uuid.UUID, thread models.RemoteSyncThread, batch []models.RemoteSyncMessage) (*models.RemoteSyncApplyResult, error)
-	ClaimRemoteSync(ctx context.Context, userID uuid.UUID, leaseUntil time.Time) (bool, error)
-	ExtendRemoteSyncLease(ctx context.Context, userID uuid.UUID, leaseUntil time.Time) error
-	FinishRemoteSyncRun(ctx context.Context, userID uuid.UUID, result models.RemoteSyncRunResult) error
-	ReleaseRemoteSync(ctx context.Context, userID uuid.UUID) error
+	ClaimRemoteSync(ctx context.Context, userID, leaseID uuid.UUID, leaseUntil time.Time) (bool, error)
+	ExtendRemoteSyncLease(ctx context.Context, userID, leaseID uuid.UUID, leaseUntil time.Time) (bool, error)
+	FinishRemoteSyncRun(ctx context.Context, userID, leaseID uuid.UUID, result models.RemoteSyncRunResult) error
+	ReleaseRemoteSync(ctx context.Context, userID, leaseID uuid.UUID) error
 	ListDueRemoteSyncs(ctx context.Context, lastRunBefore time.Time) ([]models.RemoteSyncDue, error)
 	RematchRemoteSyncPersonas(ctx context.Context, userID uuid.UUID) (int, error)
 }
@@ -140,14 +140,14 @@ func (s *Syncer) Start(ctx context.Context, userID uuid.UUID) error {
 	if !acct.Enabled {
 		return ErrDisabled
 	}
-	ok, err := s.store.ClaimRemoteSync(ctx, userID, time.Now().Add(s.cfg.Lease))
+	lease, ok, err := s.claim(ctx, userID)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return ErrBusy
 	}
-	go s.runClaimed(ctx, userID)
+	go s.runClaimed(ctx, userID, lease)
 	return nil
 }
 
@@ -184,11 +184,11 @@ func (s *Syncer) Wake(ctx context.Context, userID uuid.UUID) (WakeResult, error)
 	if acct.LastRunAt != nil && time.Since(*acct.LastRunAt) < s.cfg.WakeMinAge {
 		return res, nil
 	}
-	ok, err := s.store.ClaimRemoteSync(ctx, userID, time.Now().Add(s.cfg.Lease))
+	lease, ok, err := s.claim(ctx, userID)
 	if err != nil || !ok {
 		return res, err
 	}
-	go s.runClaimed(ctx, userID)
+	go s.runClaimed(ctx, userID, lease)
 	res.Started = true
 	return res, nil
 }
@@ -209,13 +209,13 @@ func (s *Syncer) RunDue(ctx context.Context) {
 			continue
 		}
 		userID := d.UserID
-		ok, err := s.store.ClaimRemoteSync(ctx, userID, time.Now().Add(s.cfg.Lease))
+		lease, ok, err := s.claim(ctx, userID)
 		if err != nil {
 			s.logger.Warn("remote sync: claim", zap.String("user_id", userID.String()), zap.Error(err))
 			continue
 		}
 		if ok {
-			s.runClaimed(ctx, userID)
+			s.runClaimed(ctx, userID, lease)
 		}
 	}
 }
@@ -249,17 +249,17 @@ func backgroundJitter(userID uuid.UUID, lastRun time.Time, interval time.Duratio
 // interval. Later rounds walk the whole list, because the newest threads are now unchanged and
 // would stop an incremental walk before it reached the rest. Rounds stop when nothing is left,
 // on any failure, or when a round leaves no fewer threads than the one before.
-func (s *Syncer) runClaimed(ctx context.Context, userID uuid.UUID) {
+func (s *Syncer) runClaimed(ctx context.Context, userID, lease uuid.UUID) {
 	defer func() {
 		if v := recover(); v != nil {
 			s.logger.Error("remote sync: run panicked", zap.String("user_id", userID.String()), zap.Any("panic", v))
 			msg := "Sync stopped unexpectedly. It will try again."
-			s.finish(ctx, userID, models.RemoteSyncRunResult{Status: models.RemoteSyncStatusError, Error: &msg})
+			s.finish(ctx, userID, lease, models.RemoteSyncRunResult{Status: models.RemoteSyncStatusError, Error: &msg})
 		}
 	}()
-	result := s.run(ctx, userID, false)
+	result := s.run(ctx, userID, lease, false)
 	for result.Status == models.RemoteSyncStatusOK && result.Stats.ThreadsDeferred > 0 {
-		next := s.run(ctx, userID, true)
+		next := s.run(ctx, userID, lease, true)
 		if next.Status == "" {
 			break
 		}
@@ -269,7 +269,7 @@ func (s *Syncer) runClaimed(ctx context.Context, userID uuid.UUID) {
 			break
 		}
 	}
-	s.finish(ctx, userID, result)
+	s.finish(ctx, userID, lease, result)
 	if result.Status == "" {
 		return
 	}
@@ -287,16 +287,24 @@ func (s *Syncer) runClaimed(ctx context.Context, userID uuid.UUID) {
 		zap.Int("messages_added", st.MessagesAdded))
 }
 
-// finish records a run's result and releases the lease; a result with no status (a cancelled run)
-// only releases it. It uses a fresh context, so a run that ends at shutdown still lets go.
-func (s *Syncer) finish(ctx context.Context, userID uuid.UUID, result models.RemoteSyncRunResult) {
+// claim takes the account's lease for a new run, and returns the run's lease id.
+func (s *Syncer) claim(ctx context.Context, userID uuid.UUID) (uuid.UUID, bool, error) {
+	lease := uuid.New()
+	ok, err := s.store.ClaimRemoteSync(ctx, userID, lease, time.Now().Add(s.cfg.Lease))
+	return lease, ok, err
+}
+
+// finish records a run's result and releases the lease; a result with no status (a cancelled or
+// overtaken run) only releases it. Both are no-ops once another run holds the lease. It uses a
+// fresh context, so a run that ends at shutdown still lets go.
+func (s *Syncer) finish(ctx context.Context, userID, lease uuid.UUID, result models.RemoteSyncRunResult) {
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	var err error
 	if result.Status == "" {
-		err = s.store.ReleaseRemoteSync(finishCtx, userID)
+		err = s.store.ReleaseRemoteSync(finishCtx, userID, lease)
 	} else {
-		err = s.store.FinishRemoteSyncRun(finishCtx, userID, result)
+		err = s.store.FinishRemoteSyncRun(finishCtx, userID, lease, result)
 	}
 	if err != nil {
 		s.logger.Warn("remote sync: record run", zap.String("user_id", userID.String()), zap.Error(err))
@@ -322,7 +330,7 @@ func addRounds(run, next models.RemoteSyncRunResult) models.RemoteSyncRunResult 
 
 // run does one round of an account's sync. fullWalk forces a walk of the whole thread list (a
 // follow-up round); the account may also ask for one. A zero Status means it was cancelled.
-func (s *Syncer) run(ctx context.Context, userID uuid.UUID, fullWalk bool) models.RemoteSyncRunResult {
+func (s *Syncer) run(ctx context.Context, userID, lease uuid.UUID, fullWalk bool) models.RemoteSyncRunResult {
 	fail := func(status models.RemoteSyncStatus, err error, stats models.RemoteSyncRunStats) models.RemoteSyncRunResult {
 		if ctx.Err() != nil {
 			return models.RemoteSyncRunResult{}
@@ -383,8 +391,14 @@ func (s *Syncer) run(ctx context.Context, userID uuid.UUID, fullWalk bool) model
 			continue
 		}
 		countOutcome(&stats, res)
-		if err := s.store.ExtendRemoteSyncLease(ctx, userID, time.Now().Add(s.cfg.Lease)); err != nil {
+		held, err := s.store.ExtendRemoteSyncLease(ctx, userID, lease, time.Now().Add(s.cfg.Lease))
+		if err != nil {
 			s.logger.Warn("remote sync: extend lease", zap.String("user_id", userID.String()), zap.Error(err))
+		} else if !held {
+			// This run stalled past its lease and another took over: stop, and leave the
+			// account to that run (it records the outcome).
+			s.logger.Warn("remote sync: lease taken over, stopping", zap.String("user_id", userID.String()))
+			return models.RemoteSyncRunResult{}
 		}
 	}
 

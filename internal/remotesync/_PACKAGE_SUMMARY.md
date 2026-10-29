@@ -49,6 +49,7 @@ It talks to the remote through a small `Remote` interface and to storage through
 - **Detached threads are seen, not read:** a link whose local thread was deleted records the remote's `last_message_time` without fetching messages, so it stops counting as changed.
 - **Leases, not leader locks.**
   Any instance may run any account it claims; the lease is renewed after each thread and released when a run ends, however it ends.
+  Every claim carries its own lease id, and a run whose renewal finds the lease taken over (it stalled past it) stops without recording, so two runs never both believe they hold an account.
 
 ## Testing
 

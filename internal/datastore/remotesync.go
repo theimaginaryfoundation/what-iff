@@ -194,16 +194,18 @@ func (d *Datastore) GetRemoteSyncAccount(ctx context.Context, userID uuid.UUID) 
 	}, nil
 }
 
-// ExtendRemoteSyncLease keeps a long run's lease from expiring under it.
-func (d *Datastore) ExtendRemoteSyncLease(ctx context.Context, userID uuid.UUID, leaseUntil time.Time) error {
-	_, err := d.dbClient.RemoteSync.Update().
-		Where(remotesync.HasOwnerWith(user.ID(userID)), remotesync.LeaseUntilNotNil()).
+// ExtendRemoteSyncLease keeps a long run's lease from expiring under it, and reports whether the
+// run still holds it. A run whose lease another claim took over (it stalled past lease_until)
+// gets false and must stop; its extension changes nothing.
+func (d *Datastore) ExtendRemoteSyncLease(ctx context.Context, userID, leaseID uuid.UUID, leaseUntil time.Time) (bool, error) {
+	n, err := d.dbClient.RemoteSync.Update().
+		Where(remotesync.HasOwnerWith(user.ID(userID)), remotesync.LeaseID(leaseID)).
 		SetLeaseUntil(leaseUntil).
 		Save(ctx)
 	if err != nil {
-		return fmt.Errorf("extend remote sync lease: %w", err)
+		return false, fmt.Errorf("extend remote sync lease: %w", err)
 	}
-	return nil
+	return n == 1, nil
 }
 
 // ListDueRemoteSyncs returns the accounts whose enabled sync last ran before lastRunBefore (or
@@ -231,16 +233,19 @@ func (d *Datastore) ListDueRemoteSyncs(ctx context.Context, lastRunBefore time.T
 	return out, nil
 }
 
-// ClaimRemoteSync takes the user's sync lease until leaseUntil, and reports whether this caller
-// got it. The conditional update is the whole lock: of two instances (or a tick and "sync now")
-// trying at once, exactly one wins, and a run that died leaves a lease that simply expires.
-func (d *Datastore) ClaimRemoteSync(ctx context.Context, userID uuid.UUID, leaseUntil time.Time) (bool, error) {
+// ClaimRemoteSync takes the user's sync lease until leaseUntil for the run leaseID, and reports
+// whether this caller got it. The conditional update is the whole lock: of two instances (or a
+// tick and "sync now") trying at once, exactly one wins, and a run that died leaves a lease that
+// simply expires. The lease id fences the rest: extending, finishing and releasing only touch
+// the lease while it is still this run's.
+func (d *Datastore) ClaimRemoteSync(ctx context.Context, userID, leaseID uuid.UUID, leaseUntil time.Time) (bool, error) {
 	n, err := d.dbClient.RemoteSync.Update().
 		Where(
 			remotesync.HasOwnerWith(user.ID(userID)),
 			remotesync.Or(remotesync.LeaseUntilIsNil(), remotesync.LeaseUntilLT(time.Now())),
 		).
 		SetLeaseUntil(leaseUntil).
+		SetLeaseID(leaseID).
 		Save(ctx)
 	if err != nil {
 		return false, fmt.Errorf("claim remote sync: %w", err)
@@ -248,15 +253,17 @@ func (d *Datastore) ClaimRemoteSync(ctx context.Context, userID uuid.UUID, lease
 	return n == 1, nil
 }
 
-// FinishRemoteSyncRun records a run's outcome and releases the lease.
-func (d *Datastore) FinishRemoteSyncRun(ctx context.Context, userID uuid.UUID, result models.RemoteSyncRunResult) error {
+// FinishRemoteSyncRun records a run's outcome and releases the lease. A run that no longer holds
+// the lease records nothing: the run that took over records its own.
+func (d *Datastore) FinishRemoteSyncRun(ctx context.Context, userID, leaseID uuid.UUID, result models.RemoteSyncRunResult) error {
 	now := time.Now()
 	upd := d.dbClient.RemoteSync.Update().
-		Where(remotesync.HasOwnerWith(user.ID(userID))).
+		Where(remotesync.HasOwnerWith(user.ID(userID)), remotesync.LeaseID(leaseID)).
 		SetStatus(remotesync.Status(result.Status)).
 		SetLastRunAt(now).
 		SetLastRun(result.Stats.AsMap()).
-		ClearLeaseUntil()
+		ClearLeaseUntil().
+		ClearLeaseID()
 	if result.Error != nil {
 		upd.SetLastError(*result.Error)
 	} else {
@@ -271,12 +278,14 @@ func (d *Datastore) FinishRemoteSyncRun(ctx context.Context, userID uuid.UUID, r
 	return nil
 }
 
-// ReleaseRemoteSync gives up the user's sync lease without recording a run (a run cancelled at
-// shutdown), so the next wake or tick can claim it straight away.
-func (d *Datastore) ReleaseRemoteSync(ctx context.Context, userID uuid.UUID) error {
+// ReleaseRemoteSync gives up the run's sync lease without recording a run (a run cancelled at
+// shutdown), so the next wake or tick can claim it straight away. A lease another run has since
+// claimed is left alone.
+func (d *Datastore) ReleaseRemoteSync(ctx context.Context, userID, leaseID uuid.UUID) error {
 	_, err := d.dbClient.RemoteSync.Update().
-		Where(remotesync.HasOwnerWith(user.ID(userID))).
+		Where(remotesync.HasOwnerWith(user.ID(userID)), remotesync.LeaseID(leaseID)).
 		ClearLeaseUntil().
+		ClearLeaseID().
 		Save(ctx)
 	if err != nil {
 		return fmt.Errorf("release remote sync: %w", err)

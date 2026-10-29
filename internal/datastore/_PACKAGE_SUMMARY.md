@@ -211,6 +211,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   A fork copies the tracking thread's linked messages and takes the remote id's import hash with the link, so a sync set up again re-adopts the fork rather than forking the old thread twice.
   A deleted mirror detaches its link instead of being recreated.
   `ReleaseRemoteSync` drops the lease without recording a run.
+  Each claim writes a new `lease_id`; extending, finishing and releasing are conditional on it, so a run overtaken after its lease expired cannot extend or clear the lease of the run that took over (`ExtendRemoteSyncLease` reports false instead).
   `RematchRemoteSyncPersonas` gives copies without a persona the local persona named like their remote one, once it exists; `GetRemoteSyncSettings` lists the names still waiting (`UnmatchedPersonas`).
   Tests auto-migrate the generated schema on SQLite (`createGeneratedTestSchema`), minus the vector tables.
   `CreateChat` honours `Chat.DisabledTools`, so a server-created relay thread never exists with its default-off tools on (the app's create route drops the field).
