@@ -5420,7 +5420,7 @@ paths:
 
     post:
       summary: Create chat
-      description: Creates a new chat session. Optional `personality_id` and `model_id` let callers start a thread with a specific persona/model in one round trip; both must be owned by the authenticated user (model must be active). When omitted, the user's default preferences are used.
+      description: Creates a new chat session. Optional `personality_id` and `model_id` let callers start a thread with a specific persona/model in one round trip; both must be owned by the authenticated user (model must be active). When omitted, the user's default preferences are used. An account with no default model gets a chat with no model, whose turns use the account's default once it has one; until then a turn fails with `no_model_selected`.
       tags: [Chat Management]
       requestBody:
         required: true
@@ -8997,7 +8997,11 @@ components:
         default_model_id:
           type: string
           format: uuid
-          description: ID of the user's preferred default AI model
+          description: |
+            ID of the user's default model for new chats. Returned as the nil UUID
+            (00000000-0000-0000-0000-000000000000) when the account has none, as on an install
+            without a model catalog before the account enables a model; the first model it
+            enables then becomes its default.
         default_personality_id:
           type: string
           format: uuid
@@ -13245,6 +13249,7 @@ components:
         - custom_address_not_allowed
         - provider_connection_exists
         - default_model_in_use
+        - no_model_selected
 
     # Cross-resource search schemas (GET /search)
     SearchResult:

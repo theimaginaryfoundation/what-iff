@@ -279,13 +279,17 @@ func (d *Datastore) CreateChat(ctx context.Context, userID uuid.UUID, chat model
 	create := tx.Chat.Create().
 		SetName(chat.Name).
 		SetOwnerID(userID).
-		SetModelID(chat.ModelID).
 		SetTags(normalizedTags).
 		SetNillableIsFavorite(chat.IsFavorite).
 		SetIsAutoMood(true).
 		SetContextScope(entchat.ContextScope(scope)).
 		SetNillableReasoningEffort(entEffort[entchat.ReasoningEffort](chat.ReasoningEffort)).
 		SetNillableAgentLoop(entLoop[entchat.AgentLoop](chat.AgentLoop))
+	// No model means the account's default, which an account that has not
+	// enabled a model yet does not have (ADR 0x027).
+	if chat.ModelID != uuid.Nil {
+		create.SetModelID(chat.ModelID)
+	}
 	if len(disabledTools) > 0 {
 		// Server-created threads (a Discord relay thread, say) start with tools switched off in the
 		// same transaction, so the thread never exists with them on.

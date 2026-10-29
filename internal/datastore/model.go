@@ -904,7 +904,7 @@ func (d *Datastore) AdminSetDefaultModel(ctx context.Context, id uuid.UUID) (*mo
 // the default model" outside of a user-creation transaction.
 func (d *Datastore) ResolveDefaultModelName(ctx context.Context) string {
 	if m, err := d.dbClient.Model.Query().
-		Where(entmodel.IsDefault(true), entmodel.Deleted(false)).
+		Where(entmodel.IsDefault(true), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		First(ctx); err == nil && m != nil {
 		return m.Name
 	}
@@ -913,10 +913,13 @@ func (d *Datastore) ResolveDefaultModelName(ctx context.Context) string {
 
 // resolveDefaultModelTx resolves the model to seed a new user's preferences with,
 // inside the user-creation transaction. Preference order: admin-configured default,
-// then the env/const named default, then any active model.
+// then the env/const named default, then any active model, all from the
+// deployment's own catalog. It returns nil, with no error, when the deployment
+// has no catalog: the account then has no default until it enables a model on
+// one of its connections (ADR 0x027).
 func resolveDefaultModelTx(ctx context.Context, tx *ent.Tx) (*ent.Model, error) {
 	if m, err := tx.Model.Query().
-		Where(entmodel.IsDefault(true), entmodel.Deleted(false)).
+		Where(entmodel.IsDefault(true), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		First(ctx); err == nil && m != nil {
 		return m, nil
 	}
@@ -924,10 +927,14 @@ func resolveDefaultModelTx(ctx context.Context, tx *ent.Tx) (*ent.Model, error) 
 	m, err := tx.Model.Query().
 		Where(entmodel.Name(name), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
+	if !ent.IsNotFound(err) {
+		return m, err
+	}
+	m, err = tx.Model.Query().
+		Where(entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
+		First(ctx)
 	if ent.IsNotFound(err) {
-		return tx.Model.Query().
-			Where(entmodel.Deleted(false)).
-			First(ctx)
+		return nil, nil
 	}
 	return m, err
 }

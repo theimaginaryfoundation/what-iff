@@ -12,12 +12,14 @@ import (
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
+	"entgo.io/ent/dialect/sql/schema"
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
+	"github.com/theimaginaryfoundation/what-iff/ent/migrate"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
@@ -97,6 +99,11 @@ func newConnectionFixture(t *testing.T) *connectionFixture {
 		_, err := db.Exec(stmt)
 		require.NoError(t, err)
 	}
+	// Preferences from the ent schema, without the foreign keys that reach the rest of it.
+	migrator, err := schema.NewMigrate(entsql.OpenDB(dialect.SQLite, db), schema.WithForeignKeys(false))
+	require.NoError(t, err)
+	prefs := migrate.UserPreferencesTable
+	require.NoError(t, migrator.Create(ctx, &schema.Table{Name: prefs.Name, Columns: prefs.Columns, PrimaryKey: prefs.PrimaryKey, Indexes: prefs.Indexes}))
 	client := ent.NewClient(ent.Driver(entsql.OpenDB(dialect.SQLite, db)))
 	t.Cleanup(func() { _ = client.Close(); _ = db.Close() })
 	ds, err := datastore.NewDatastore(client, db, zap.NewNop(), "12345678901234567890123456789012", nil)
@@ -331,4 +338,25 @@ func TestSubagentCapabilitiesFor_DatastoreErrorsAreNotMissingModels(t *testing.T
 	_, err = f.a.subagentCapabilitiesFor(context.Background(), f.alice, f.aliceModel.ID, f.aliceModel.Name)
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrConnectionUnavailable)
+}
+
+// A chat with no model runs on the account's default; an account with none
+// (on an install without a catalog, before it enables a model) has nothing to
+// run on, and the turn fails with no_model_selected (ADR 0x027).
+func TestResolveModelForChat_AccountDefault(t *testing.T) {
+	t.Parallel()
+	f := newConnectionFixture(t)
+	ctx := context.Background()
+	_, err := f.ent.UserPreference.Create().SetUserID(f.alice).SetDefaultModel(f.aliceModel.ID).Save(ctx)
+	require.NoError(t, err)
+	_, err = f.ent.UserPreference.Create().SetUserID(f.bob).Save(ctx)
+	require.NoError(t, err)
+
+	got := f.a.resolveModelForChat(ctx, &models.Chat{ID: uuid.New(), UserID: f.alice})
+	require.Equal(t, f.aliceModel.Name, got.name)
+	require.Equal(t, f.aliceModel.ID, got.row.ID, "the row, so the turn goes through the model's connection")
+
+	got = f.a.resolveModelForChat(ctx, &models.Chat{ID: uuid.New(), UserID: f.bob, ModelID: uuid.New()})
+	require.Empty(t, got.name, "no default and no deployment default: no model")
+	require.Equal(t, models.ErrCodeNoModelSelected, failureCode(ErrNoModelSelected))
 }

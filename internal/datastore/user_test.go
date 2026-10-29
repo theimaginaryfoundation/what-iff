@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/auth"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -163,6 +164,27 @@ func TestCreateUser(t *testing.T) {
 		require.Equal(t, defaultTheme.String(), resp.Theme)
 	})
 
+	// Without a catalog (a self-hosted install, ADR 0x027) an account starts with
+	// no default model, and never with another account's connection model.
+	t.Run("no catalog: no default model", func(t *testing.T) {
+		ds, cleanup := newUserTestDatastore(t)
+		defer cleanup()
+		createUserTestRole(t, ds, "user")
+		ctx := context.Background()
+		other := createCatalogTestUser(t, ds)
+		conn, err := ds.dbClient.ProviderConnection.Create().SetUserID(other).SetPreset("ollama").SetName("Ollama").Save(ctx)
+		require.NoError(t, err)
+		createCatalogTestModel(t, ds, func(c *ent.ModelCreate) { c.SetProvider("ollama").SetConnectionID(conn.ID) })
+
+		resp, _, err := ds.CreateUser(ctx, models.UserRegisterRequest{
+			Username: "fresh", Email: "fresh@example.com", Password: "supersecret", TermsAccepted: true,
+		})
+		require.NoError(t, err)
+		prefs, err := ds.GetUserPreferences(ctx, resp.ID)
+		require.NoError(t, err)
+		require.Equal(t, uuid.Nil, prefs.DefaultModelID)
+	})
+
 	t.Run("username already exists", func(t *testing.T) {
 		ds, cleanup := newUserTestDatastore(t)
 		defer cleanup()
@@ -214,18 +236,6 @@ func TestCreateUser(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("no default model configured", func(t *testing.T) {
-		ds, cleanup := newUserTestDatastore(t)
-		defer cleanup()
-		createUserTestRole(t, ds, "user")
-
-		_, _, err := ds.CreateUser(context.Background(), models.UserRegisterRequest{
-			Username: "nomodel",
-			Email:    "nomodel@example.com",
-			Password: "supersecret",
-		})
-		require.Error(t, err)
-	})
 }
 
 func TestGetUserByCredentials(t *testing.T) {

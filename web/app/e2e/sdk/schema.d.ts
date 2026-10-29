@@ -8551,7 +8551,7 @@ export interface paths {
         put?: never;
         /**
          * Create chat
-         * @description Creates a new chat session. Optional `personality_id` and `model_id` let callers start a thread with a specific persona/model in one round trip; both must be owned by the authenticated user (model must be active). When omitted, the user's default preferences are used.
+         * @description Creates a new chat session. Optional `personality_id` and `model_id` let callers start a thread with a specific persona/model in one round trip; both must be owned by the authenticated user (model must be active). When omitted, the user's default preferences are used. An account with no default model gets a chat with no model, whose turns use the account's default once it has one; until then a turn fails with `no_model_selected`.
          */
         post: {
             parameters: {
@@ -13035,7 +13035,10 @@ export interface components {
             user_id: string;
             /**
              * Format: uuid
-             * @description ID of the user's preferred default AI model
+             * @description ID of the user's default model for new chats. Returned as the nil UUID
+             *     (00000000-0000-0000-0000-000000000000) when the account has none, as on an install
+             *     without a model catalog before the account enables a model; the first model it
+             *     enables then becomes its default.
              */
             default_model_id: string;
             /**
@@ -15547,7 +15550,7 @@ export interface components {
          *       on a generic code — use the HTTP status instead.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use" | "no_model_selected";
         /** @description A single hit inside a search section. */
         SearchResult: {
             /**

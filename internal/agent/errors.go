@@ -24,6 +24,8 @@ func failureCode(err error) string {
 		return models.ErrCodeProviderNotConfigured
 	case errors.Is(err, ErrQuotaExceeded):
 		return models.ErrCodeQuotaExceeded
+	case errors.Is(err, ErrNoModelSelected):
+		return models.ErrCodeNoModelSelected
 	}
 	return ""
 }
