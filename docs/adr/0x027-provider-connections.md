@@ -104,7 +104,7 @@ Models have no owner of their own, so visibility cannot drift from the connectio
 
 **Capabilities.** Whether a model takes tools and images is known before the capability suite (step 6) can measure it only where something says so:
 
-- the provider's own listing: OpenRouter reports, per model, its supported parameters (tools among them) and input modalities; Ollama's OpenAI-compatible list reports only ids, so each model is also asked about through Ollama's native `/api/show`, which lists its capabilities;
+- the provider's own listing: OpenRouter reports, per model, its supported parameters (tools among them) and input modalities; Ollama's and LM Studio's OpenAI-compatible lists report only ids, so their native APIs are asked too: Ollama's `/api/show` per model, and LM Studio's model list (version 1, or 0 on older releases) in one request. Both also mark models that can't chat, such as embedding models, which are not offered;
 - what is known about the API: Anthropic-compatible servers take tools, and Anthropic's own models take images;
 - otherwise the account confirms it, on each model it enables, prefilled with whatever is known.
 

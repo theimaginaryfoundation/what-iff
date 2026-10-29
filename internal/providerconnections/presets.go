@@ -58,6 +58,9 @@ type Preset struct {
 	// its OpenAI-compatible list reports only ids, while /api/show reports the
 	// model's capabilities.
 	ollamaDetails bool
+	// lmStudioDetails reads LM Studio's native model list after listing: its
+	// OpenAI-compatible list reports only ids, and includes embedding models.
+	lmStudioDetails bool
 }
 
 // Where a provider's model list does not check the key, or reports a bad key
@@ -87,12 +90,15 @@ type Target struct {
 	// OllamaDetails, when set, reads each model's capabilities from Ollama's
 	// native /api/show after listing.
 	OllamaDetails bool
+	// LMStudioDetails, when set, reads every model's name, type and capabilities
+	// from LM Studio's native model list after listing.
+	LMStudioDetails bool
 }
 
 // target is the check for a connection made from p, speaking flavor at
 // address with key.
 func (p Preset) target(flavor Flavor, address, key string) Target {
-	t := Target{Flavor: flavor, BaseURL: address, Key: key, KeyCheckURL: p.keyCheckURL, BadKeyStatus: p.badKeyStatus, OllamaDetails: p.ollamaDetails}
+	t := Target{Flavor: flavor, BaseURL: address, Key: key, KeyCheckURL: p.keyCheckURL, BadKeyStatus: p.badKeyStatus, OllamaDetails: p.ollamaDetails, LMStudioDetails: p.lmStudioDetails}
 	if p.listURL != "" {
 		t.Flavor, t.BaseURL = p.listFlavor, p.listURL
 	}
@@ -169,6 +175,7 @@ func Presets(builtinURLs map[models.ModelProvider]string, localHost string) []Pr
 			BaseURL:         "http://" + localHost + ":1234/v1",
 			AddressEditable: true,
 			Local:           true,
+			lmStudioDetails: true,
 		},
 		Preset{
 			ID:              PresetCustom,
