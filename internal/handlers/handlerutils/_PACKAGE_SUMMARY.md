@@ -18,7 +18,7 @@
   `TriggerAsyncFileChunking` runs its embeddings as the attachment's owner (`apicontext.WithUserID`), so they use that account's provider key after the request has ended.
   Callers must not count uploads themselves.
   A caller whose attachment record fails to save calls `AbandonFileAttachmentUpload`, which counts the failure and removes the temp file.
-- **`httpresponse.go`:** The response helpers every handler writes through — `RespondWithJSON`, `RespondWithHTML`, `RespondWithNoContent`, and `RespondWithError`.
+- **`httpresponse.go`:** The response helpers every handler writes through — `RespondWithJSON`, `RespondWithHTML`, `RespondWithNoContent`, and `RespondWithError` (`RespondWithErrorDetails` adds the envelope's structured `details`).
   The last takes a code as its fourth argument: either a specific code from the models taxonomy, or `CodeNotSet` where none has been assigned yet, in which case the helper fills in the generic code for the status.
   A blank or whitespace-only code is treated as `CodeNotSet`.
 
