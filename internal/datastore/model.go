@@ -923,17 +923,23 @@ func (d *Datastore) ResolveDefaultModelName(ctx context.Context) string {
 // creation treats that as "no default yet", until the account enables a model
 // on one of its connections (ADR 0x027).
 func resolveDefaultModelTx(ctx context.Context, tx *ent.Tx) (*ent.Model, error) {
-	if m, err := tx.Model.Query().
-		Where(entmodel.IsDefault(true), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
-		First(ctx); err == nil && m != nil {
-		return m, nil
-	}
-	name := getDefaultModelName()
 	m, err := tx.Model.Query().
-		Where(entmodel.Name(name), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
+		Where(entmodel.IsDefault(true), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
+		First(ctx)
+	switch {
+	case err == nil:
+		return m, nil
+	case !ent.IsNotFound(err):
+		return nil, err
+	}
+	m, err = tx.Model.Query().
+		Where(entmodel.Name(getDefaultModelName()), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
-	if !ent.IsNotFound(err) {
-		return m, err
+	switch {
+	case err == nil:
+		return m, nil
+	case !ent.IsNotFound(err):
+		return nil, err
 	}
 	return tx.Model.Query().
 		Where(entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).

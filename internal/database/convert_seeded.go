@@ -289,12 +289,18 @@ func (c *seedConversion) convertFavorites(userID uuid.UUID, favorites []string, 
 	return out, changed
 }
 
+// formerlySeeded are models AvailableModels listed once and no longer does.
+// Seeding never removes a row, so an install seeded while one was listed still
+// has it; it is converted like the rest. A model leaving AvailableModels joins
+// this list.
+var formerlySeeded = []string{"gpt-5.1-nano"}
+
 func seededNames() []string {
-	names := make([]string, 0, len(appmodels.AvailableModels))
+	names := make([]string, 0, len(appmodels.AvailableModels)+len(formerlySeeded))
 	for _, m := range appmodels.AvailableModels {
 		names = append(names, m.Name)
 	}
-	return names
+	return append(names, formerlySeeded...)
 }
 
 func modelIDs(rows []*ent.Model) []uuid.UUID {
