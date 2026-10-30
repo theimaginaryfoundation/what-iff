@@ -76,8 +76,8 @@ func TestDisabledToolsSetReturnsEmptyMapForEmptyInput(t *testing.T) {
 	require.Empty(t, set)
 }
 
+// Not parallel: it swaps a package-level hook that every turn's policy reads.
 func TestBuildTurnToolPolicy_StripsMoodToolsAndMergesAdditionalDisabled(t *testing.T) {
-	t.Parallel()
 	prev := additionalDisabledToolsForChat
 	t.Cleanup(func() { additionalDisabledToolsForChat = prev })
 
