@@ -71,6 +71,9 @@ func (Model) Edges() []ent.Edge {
 		// One-way, so ProviderConnection's schema does not change. Deleting a
 		// connection (or the account that owns it) deletes its models: a chat on
 		// one falls back to the default model, and a job on one fails clearly.
+		// Unique() is the model's side: each model has at most one connection, and
+		// a connection has many models (many-to-one; connection_id alone is not
+		// unique, only (connection_id, name) is).
 		edge.To("connection", ProviderConnection.Type).
 			Field("connection_id").
 			Unique().
