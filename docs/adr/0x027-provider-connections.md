@@ -110,7 +110,7 @@ Models have no owner of their own, so visibility cannot drift from the connectio
 
 The suite later writes the same fields from measurement.
 
-**No seed catalog.** The design assumes no hand-kept catalog: every model an account can pick is one it enabled on one of its connections, and the default model is per account (the one it marks, or the first it enabled) rather than one the server requires at startup. Self-hosted installs convert the seeded models their accounts use onto the matching connections, as stored keys were converted (section 3), and then stop seeding. A deployment's own models (no connection) are unchanged. An account with no model has no default; its turns fail with `no_model_selected` until it enables one.
+**No seed catalog.** The design assumes no hand-kept catalog: every model an account can pick is one it enabled on one of its connections, and the default model is per account (the one it marks, or the first it enabled) rather than one the server requires at startup. Self-hosted installs convert the seeded models their accounts use onto the matching connections, as stored keys were converted (section 3), and then stop seeding. A deployment's own models (no connection) are unchanged. An account with no model has no default; its turns fail with `no_model_selected` until it enables one. The mock and local test backends keep the seeded models, which their end-to-end suites expect.
 
 **Where connection models work.** A model is used for chat, for subagents and for agent jobs. All three choose their adapter from the model through one shared function, so a model that works in chat works in a job, rather than failing at every scheduled run.
 
