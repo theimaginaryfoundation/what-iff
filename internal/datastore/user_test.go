@@ -183,6 +183,15 @@ func TestCreateUser(t *testing.T) {
 		prefs, err := ds.GetUserPreferences(ctx, resp.ID)
 		require.NoError(t, err)
 		require.Equal(t, uuid.Nil, prefs.DefaultModelID)
+
+		// The lookup itself still reports "not found" with no catalog, so a caller
+		// that needs a default fails cleanly rather than getting none.
+		tx, err := ds.dbClient.Tx(ctx)
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback() }()
+		m, err := resolveDefaultModelTx(ctx, tx)
+		require.Nil(t, m)
+		require.True(t, ent.IsNotFound(err), "got %v", err)
 	})
 
 	t.Run("username already exists", func(t *testing.T) {
