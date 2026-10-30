@@ -42,6 +42,9 @@ func toModelModel(e *ent.Model) *models.Model {
 		IsDefault:          e.IsDefault,
 		ConnectionID:       e.ConnectionID,
 	}
+	if conn := e.Edges.Connection; conn != nil {
+		m.ConnectionName = conn.Name
+	}
 	if e.ReasoningSupportOverride != nil {
 		o := models.ReasoningSupport(*e.ReasoningSupportOverride)
 		if o.Valid() {
@@ -209,6 +212,7 @@ func (d *Datastore) connectionModels(ctx context.Context, userID uuid.UUID) ([]*
 			entmodel.Deleted(false),
 			entmodel.HasConnectionWith(providerconnection.UserID(userID)),
 		).
+		WithConnection().
 		Order(ent.Asc(entmodel.FieldDisplayName)).
 		All(ctx)
 	if err != nil {

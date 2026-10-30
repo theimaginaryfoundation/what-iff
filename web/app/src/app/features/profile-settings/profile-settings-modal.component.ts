@@ -33,6 +33,7 @@ import { ProviderKeysService } from '../../core/services/provider-keys.service';
 import { ThemeMode, ThemeService } from '../../core/services/theme.service';
 import { UserPreferencesService } from '../../core/services/user-preferences.service';
 import { hasDefaultModel } from '../../core/utils/default-model';
+import { isConnectionGroup } from '../chat/helpers/model-picker.helpers';
 import { TIMEZONE_MAX_LENGTH, detectBrowserTimezone, listTimezones, timezoneValidator } from '../../core/utils/timezone.helpers';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { ShieldIconComponent, UserIconComponent } from '../../shared/ui/icons/icons';
@@ -116,6 +117,11 @@ export class ProfileSettingsModalComponent {
    * until it enables a model on one of its connections (ADR 0x027).
    */
   readonly hasDefaultModel = computed(() => hasDefaultModel(this.preferences()));
+
+  /** A model as the default-model list shows it: with the connection serving it, as the picker does. */
+  modelOptionLabel(model: Model): string {
+    return isConnectionGroup(model) && model.connection_name ? `${model.display_name} · ${model.connection_name}` : model.display_name;
+  }
   readonly personalities = signal<readonly Personality[]>([]);
   readonly themeMode = signal<ThemeMode>('system');
   /**
