@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -754,4 +755,41 @@ func TestListFilesRejectsAnInvalidFolderWithoutQuerying(t *testing.T) {
 	if res.Error == "" || store.lastPageNum != 0 {
 		t.Fatalf("expected an error result and no query, got %+v (page %d)", res, store.lastPageNum)
 	}
+}
+
+func TestListFilesOriginAndTreeView(t *testing.T) {
+	chat := listTestChat()
+	store := &fakeListStore{files: []*models.FileAttachment{
+		{ID: uuid.New(), Name: "journal.md", FileType: "text/markdown", Folder: "notes", AgentAuthored: true},
+		{ID: uuid.New(), Name: "Ideas.md", FileType: "text/markdown", Folder: "notes/later", AgentAuthored: true},
+		{ID: uuid.New(), Name: "brief.pdf", FileType: "application/pdf"},
+		{ID: uuid.New(), Name: "a.md", FileType: "text/markdown", Folder: "notes"},
+	}}
+	tool := newTestListTool(store)
+
+	out, err := tool.List(context.Background(), chat, []byte(`{"kind":"files","origin":"agent"}`))
+	require.NoError(t, err)
+	res := decodeList(t, out)
+	require.Equal(t, models.FileOriginAgent, store.lastFileFilters.Origin)
+	require.Equal(t, "agent", res.Items[0].Origin)
+	require.Empty(t, res.Items[2].Origin)
+
+	out, err = tool.List(context.Background(), chat, []byte(`{"kind":"files","view":"tree"}`))
+	require.NoError(t, err)
+	res = decodeList(t, out)
+	require.Empty(t, res.Items)
+	require.Equal(t, 4, res.Count)
+	require.Equal(t, strings.Join([]string{
+		".",
+		"├── notes/",
+		"│   ├── later/",
+		"│   │   └── Ideas.md (agent)",
+		"│   ├── a.md",
+		"│   └── journal.md (agent)",
+		"└── brief.pdf",
+	}, "\n"), res.Tree)
+
+	out, err = tool.List(context.Background(), chat, []byte(`{"kind":"files","origin":"robots"}`))
+	require.NoError(t, err)
+	require.Contains(t, decodeList(t, out).Error, "unknown origin")
 }

@@ -25,6 +25,10 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
       Rows that fail to embed are logged by ID and passed over, so they cannot stall the rows behind them; when a whole page fails, a probe input decides between bad input (skip) and an unavailable provider (stop).
     `memory_merge.go`'s `ListMemoryMergeEvents` takes a `models.MemoryMergeEventFilters` (query/survivor-memory/date-range/exclude-reverted) for both the merge-audit HTTP endpoint and `find_context`'s `mode=lifecycle_events`.
   - Files: `fileattachment.go`, `fileattachment_folders.go`, `filechunk.go` (chunk storage + search).
+    `agentfile.go` backs the agent file tools (ADR 0x034): `FindFileAttachmentsAtPath` (folder + case-insensitive name, gallery rows only), `SwapAgentFileObject` (compare-and-swap of an agent-authored row's `s3_key`) and `CountAgentFiles`.
+    `FileAttachmentFilters.Origin` narrows listings to agent-authored files or the rest.
+  - Entity wiki: `agententity.go` (ADR 0x034) — `GetAgentEntity`, `CreateAgentEntity`, `UpdateAgentEntity` (compare-and-swap on the body, retried), `ListAgentEntities`, `SetAgentEntityBody`, `DeleteAgentEntity`.
+    Visibility follows memories: global entities plus those pinned to the active personality, the pinned one winning; a new entity is pinned when the writing personality has `auto_pin_memories` on.
     **Gallery folders** are a normalized path string on `file_attachments.folder` (a label; the `s3_key` never changes), indexed with the owner.
     `FileAttachmentFilters.Folder` matches one folder exactly and `FolderPrefix` matches a folder and everything beneath it (the trailing `/` keeps `charts` from matching `charts-old`).
     `fileattachment_folders.go` holds `ListGalleryFolders` (files of one `models.GalleryKind` directly in each folder), `MoveFileAttachmentsToFolder` and `MoveGalleryFolder` (a rename that carries every folder beneath it).

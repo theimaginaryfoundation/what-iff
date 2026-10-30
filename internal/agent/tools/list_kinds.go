@@ -149,6 +149,18 @@ func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs)
 		}
 	}
 
+	switch origin := models.FileOrigin(strings.ToLower(strings.TrimSpace(a.Origin))); origin {
+	case "":
+	case models.FileOriginAgent, models.FileOriginUser:
+		filters.Origin = origin
+	default:
+		return t.fail(listKindFiles, fmt.Sprintf("unknown origin %q; use \"agent\" or \"user\"", a.Origin))
+	}
+	view := strings.ToLower(strings.TrimSpace(a.View))
+	if view != "" && view != listFileViewList && view != listFileViewTree {
+		return t.fail(listKindFiles, fmt.Sprintf("unknown view %q; use \"list\" or \"tree\"", a.View))
+	}
+
 	switch normalizeFileScope(a.Scope) {
 	case listFileScopePersonality:
 		if chat.PersonalityID == uuid.Nil {
@@ -171,14 +183,24 @@ func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs)
 		if !ok || fa == nil {
 			continue
 		}
-		items = append(items, listItem{
+		item := listItem{
 			ID:       fa.ID.String(),
 			Name:     fa.Name,
 			FileType: fa.FileType,
 			Folder:   fa.Folder,
-		})
+		}
+		if fa.AgentAuthored {
+			item.Origin = string(models.FileOriginAgent)
+		}
+		items = append(items, item)
 	}
 	meta := listPageMeta{Page: pageNum, Limit: limit, TotalCount: page.TotalCount}
+	if view == listFileViewTree {
+		res := pagedListResult(listKindFiles, items, listTruncationNote("files", meta, len(items)), meta)
+		res.Tree = renderFileTree(items)
+		res.Items = []listItem{}
+		return marshalToolResult(res, listToolName)
+	}
 	return t.okPaged(listKindFiles, items, listTruncationNote("files", meta, len(items)), meta)
 }
 

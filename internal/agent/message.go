@@ -117,6 +117,8 @@ type Agent struct {
 	recallTool     *tools.RecallTool
 	listTool       *tools.ListTool
 	moveFilesTool  *tools.MoveFilesTool
+	entityTool     *tools.EntityTool
+	agentFileTool  *tools.AgentFileTool
 	chunkPipeline  *filechunker.FileChunkPipeline
 	fileStore      storage.FileStore
 	// expressionPortraitThumbCache caches thumbnails loaded for expression continuity in message context (bounded).
@@ -290,6 +292,8 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 		scratchpadTool:               tools.NewScratchpadTool(ds, logger),
 		listTool:                     tools.NewListTool(ds, logger),
 		moveFilesTool:                tools.NewMoveFilesTool(ds, logger),
+		entityTool:                   tools.NewEntityTool(ds, logger),
+		agentFileTool:                tools.NewAgentFileTool(ds, fileStore, logger),
 		mcpClient:                    mcpclient.New(nil, logger),
 		chunkPipeline:                newChunkPipelineForMode(cfg.LLMBackend != "vendor", &oaiClient, ds, logger),
 		fileStore:                    fileStore,

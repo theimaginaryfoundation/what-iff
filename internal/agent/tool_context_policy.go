@@ -27,8 +27,10 @@ type toolContextPolicy struct {
 const (
 	webSearchTTLTurns   = 5
 	mcpFileReadTTLTurns = 10
-	mcpMessagesTTLTurns = 3
-	noTTL               = 0
+	// agentStoreReadTTLTurns keeps agent_file_read and entity_get results (ADR 0x034).
+	agentStoreReadTTLTurns = 10
+	mcpMessagesTTLTurns    = 3
+	noTTL                  = 0
 )
 
 // MCP tool-name prefixes. Provider-side MCP tool calls are not currently persisted
@@ -68,11 +70,17 @@ func toolContextPolicyFor(toolName string) toolContextPolicy {
 		tools.UpdateScratchpadToolSpec.Name,
 		tools.ChangeMoodToolSpec.Name,
 		tools.CreateAgentJobToolSpec.Name,
-		tools.UpdateAgentJobToolSpec.Name:
+		tools.UpdateAgentJobToolSpec.Name,
+		tools.EntityWriteToolSpec.Name,
+		tools.AgentFileWriteToolSpec.Name:
 		// Write/side-effect confirmations: small acknowledgements. Persisting them adds
 		// little value and their effect is captured elsewhere (scratchpad, memories,
 		// mood, jobs). Drop from cross-turn context.
 		return toolContextPolicy{persist: false}
+	case tools.AgentFileReadToolSpec.Name, tools.EntityGetToolSpec.Name:
+		// File reads can be long (up to ~24k chars) and both go stale once the agent writes again;
+		// keep them for a while, then re-read.
+		return toolContextPolicy{persist: true, ttlTurns: agentStoreReadTTLTurns}
 	case tools.ToolNameWebSearch, tools.ToolNameFetchPage:
 		// Web search snapshots and fetched pages go stale; keep for a handful of turns. Pages can
 		// be long (up to ~20k chars), so they must not fall through to the no-expiry default.

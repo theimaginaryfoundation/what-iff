@@ -80,6 +80,10 @@ func (h *Handler) RegisterRoutes(router *mux.Router) {
 	memoryRouter.HandleFunc("/compaction-events", h.ListCompactionEvents).Methods("GET")
 	memoryRouter.HandleFunc("/compaction-events/{id}", h.GetCompactionEvent).Methods("GET")
 	memoryRouter.HandleFunc("/snapshots/{id}/revert", h.RevertCheckpointSnapshot).Methods("POST")
+	// Entity wiki (ADR 0x034); before /{id} so "entities" is not read as a memory id.
+	memoryRouter.HandleFunc("/entities", h.ListAgentEntities).Methods("GET")
+	memoryRouter.HandleFunc("/entities/{id}", h.PatchAgentEntity).Methods("PATCH")
+	memoryRouter.HandleFunc("/entities/{id}", h.DeleteAgentEntity).Methods("DELETE")
 	memoryRouter.HandleFunc("/{id}", h.GetMemory).Methods("GET")
 	memoryRouter.HandleFunc("/{id}", h.PatchMemory).Methods("PATCH")
 	memoryRouter.HandleFunc("/{id}", h.DeleteMemory).Methods("DELETE")

@@ -25,6 +25,12 @@ const (
 	listKindMCPServers    = "mcp_servers"
 )
 
+// File view values (files kind).
+const (
+	listFileViewList = "list"
+	listFileViewTree = "tree"
+)
+
 // File scope values (files kind).
 const (
 	listFileScopeAll          = "all"
@@ -51,7 +57,7 @@ const ListDescription = `List your available resources. Pick a kind:
 - models — chat models you can run (id, name, provider, tool support).
 - personalities — personalities you can switch to or run as a subagent.
 - skills — skills you can attach to a subagent or scheduled job (id, name, description).
-- files — your uploaded files, most-recent first. Filter with file_type (e.g. "image", "pdf"), scope ("personality" docs, "conversation" attachments, or "all") and folder. Images dominate most libraries, so pass file_type to cut through them. Files, images and documents alike, can be filed in gallery folders (e.g. "charts/oura"); folder lists that folder and everything beneath it, and each row shows its folder.
+- files — your uploaded files, most-recent first. Filter with file_type (e.g. "image", "pdf"), scope ("personality" docs, "conversation" attachments, or "all"), folder, and origin ("agent" for files agents wrote, "user" for the rest). view="tree" draws them as a folder tree. Images dominate most libraries, so pass file_type to cut through them. Files, images and documents alike, can be filed in gallery folders (e.g. "charts/oura"); folder lists that folder and everything beneath it, and each row shows its folder.
 - conversations — your past conversations, including archived imports, that have messages, most-recent first (id, name). Pass an id to find_context (mode="conversation"/"origin") to read one.
 - jobs — your scheduled jobs (id, name, status, schedule, thread_id, next_runtime for still-active ones, and the start of each prompt as description). Active by default; set include_completed=true to also see paused jobs and finished/failed one-offs. Pass a job's id as filter to read that job in full: its whole prompt, model_id and skill_ids.
 - mcp_servers — MCP servers available to the current conversation (attached to it, or linked to a skill that is active now), with discoverable MCP tools and currently loaded tools for this chat.
@@ -85,6 +91,16 @@ var ListToolSpec = FunctionToolSpec{
 			"type":        "string",
 			"enum":        []string{listFileScopeAll, listFileScopePersonality, listFileScopeConversation},
 			"description": "files only: 'personality' (this personality's docs), 'conversation' (conversation uploads), or 'all' (default).",
+		},
+		"origin": map[string]interface{}{
+			"type":        "string",
+			"enum":        []string{string(models.FileOriginAgent), string(models.FileOriginUser)},
+			"description": "files only: 'agent' for files agents wrote with agent_file_write, 'user' for everything else. Omit for both.",
+		},
+		"view": map[string]interface{}{
+			"type":        "string",
+			"enum":        []string{listFileViewList, listFileViewTree},
+			"description": "files only: 'list' (default) returns rows with ids; 'tree' draws the page's files as a folder tree of paths, like the tree command.",
 		},
 		"include_completed": map[string]interface{}{
 			"type":        "boolean",
@@ -152,6 +168,8 @@ type listArgs struct {
 	FileType         string `json:"file_type,omitempty"`
 	Scope            string `json:"scope,omitempty"`
 	Folder           string `json:"folder,omitempty"`
+	Origin           string `json:"origin,omitempty"`
+	View             string `json:"view,omitempty"`
 	IncludeCompleted bool   `json:"include_completed,omitempty"`
 	Limit            int    `json:"limit,omitempty"`
 	Page             int    `json:"page,omitempty"`
@@ -167,6 +185,7 @@ type listItem struct {
 	ToolSupport  *bool    `json:"tool_support,omitempty"`  // models
 	FileType     string   `json:"file_type,omitempty"`     // files
 	Folder       string   `json:"folder,omitempty"`        // files (gallery files that are filed in a folder)
+	Origin       string   `json:"origin,omitempty"`        // files: "agent" for files an agent wrote (ADR 0x034)
 	Status       string   `json:"status,omitempty"`        // jobs, mcp_servers
 	StatusDetail string   `json:"status_detail,omitempty"` // mcp_servers
 	MCPTools     []string `json:"tools,omitempty"`         // mcp_servers
@@ -188,6 +207,7 @@ type listResult struct {
 	TotalCount int        `json:"total_count,omitempty"`
 	HasMore    bool       `json:"has_more,omitempty"`
 	Items      []listItem `json:"items"`
+	Tree       string     `json:"tree,omitempty"` // files with view="tree", in place of items
 	Note       string     `json:"note,omitempty"`
 	Error      string     `json:"error,omitempty"`
 }
@@ -275,6 +295,10 @@ func (t *ListTool) ok(kind string, items []listItem, note string) (string, error
 }
 
 func (t *ListTool) okPaged(kind string, items []listItem, note string, meta listPageMeta) (string, error) {
+	return marshalToolResult(pagedListResult(kind, items, note, meta), listToolName)
+}
+
+func pagedListResult(kind string, items []listItem, note string, meta listPageMeta) listResult {
 	if items == nil {
 		items = []listItem{}
 	}
@@ -285,7 +309,7 @@ func (t *ListTool) okPaged(kind string, items []listItem, note string, meta list
 		shownThrough := (meta.Page-1)*meta.Limit + len(items)
 		res.HasMore = shownThrough < meta.TotalCount
 	}
-	return marshalToolResult(res, listToolName)
+	return res
 }
 
 // clampLimit resolves a requested limit against a default and hard maximum.

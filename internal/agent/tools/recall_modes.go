@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
@@ -415,7 +416,43 @@ func (t *RecallTool) fetchFile(ctx context.Context, userID uuid.UUID, fa *models
 	if strings.HasPrefix(fa.FileType, models.ImageMIMEPrefix) {
 		return t.fetchImage(ctx, userID, fa)
 	}
+	if fa.AgentAuthored {
+		return t.fetchAgentFile(ctx, fa)
+	}
 	return t.fetchFileChunks(ctx, fa.ID, fa.Name, token, maxChunks)
+}
+
+// recallAgentFileMaxChars caps an agent file's text in one fetch; agent_file_read pages further.
+const recallAgentFileMaxChars = 24000
+
+// fetchAgentFile returns an agent-authored file's text (ADR 0x034). Those files are never chunked
+// for search, so their text comes straight from the object store rather than from chunks.
+func (t *RecallTool) fetchAgentFile(ctx context.Context, fa *models.FileAttachment) (string, []*models.Memory, []*models.FileAttachment, error) {
+	var data []byte
+	if t.fileStore != nil {
+		var err error
+		if data, err = t.fileStore.DownloadFile(ctx, fa.S3Key); err != nil {
+			t.logger.Warn("find_context: agent file download failed", zap.String("file_attachment_id", fa.ID.String()), zap.Error(err))
+		}
+	}
+	if len(data) == 0 {
+		return t.ok(recallResult{Mode: recallModeFetch, Note: fmt.Sprintf("Found %q but it is empty or could not be loaded.", fa.Name)}, nil, nil)
+	}
+	text := strings.ToValidUTF8(string(data), "\uFFFD")
+	note := ""
+	if len(text) > recallAgentFileMaxChars {
+		cut := recallAgentFileMaxChars
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		text = text[:cut]
+		note = fmt.Sprintf("Showing the start of %q; read the rest with agent_file_read (action \"read\").", fa.Name)
+	}
+	return t.ok(recallResult{
+		Mode:   recallModeFetch,
+		Chunks: []recallChunk{{SourceType: "file", Name: fa.Name, AttachmentID: fa.ID.String(), Text: text}},
+		Note:   note,
+	}, nil, nil)
 }
 
 // fetchImage loads an image attachment's bytes and returns it as a tool-result attachment,

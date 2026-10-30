@@ -49,6 +49,24 @@ func (FileAttachment) Fields() []ent.Field {
 		field.Time("created_at").
 			Immutable().
 			Default(time.Now),
+		// Agent-authored files (ADR 0x034). An agent may change only the files its personality
+		// wrote, or, with no personality, the files written in its conversation; every other file,
+		// including all of the user's uploads, is read-only to agents.
+		field.Bool("agent_authored").
+			Default(false).
+			Comment("Written by an agent's file tools; only these files can be changed by an agent."),
+		field.UUID("created_by_personality_id", uuid.UUID{}).
+			Optional().
+			Nillable().
+			Comment("Personality whose agent created the file; the owner for agent edits. Null with no personality."),
+		field.UUID("created_by_chat_id", uuid.UUID{}).
+			Optional().
+			Nillable().
+			Comment("Conversation the agent created the file in; the owner for agent edits when there is no personality."),
+		field.Time("updated_at").
+			Optional().
+			Nillable().
+			Comment("When an agent last changed the content. Null for files never changed after upload."),
 	}
 }
 

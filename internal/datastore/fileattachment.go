@@ -45,6 +45,11 @@ func toFileAttachmentModel(e *ent.FileAttachment) *models.FileAttachment {
 		Folder:      e.Folder,
 		ContextOnly: e.ContextOnly,
 		CreatedAt:   e.CreatedAt,
+
+		AgentAuthored:          e.AgentAuthored,
+		CreatedByPersonalityID: e.CreatedByPersonalityID,
+		CreatedByChatID:        e.CreatedByChatID,
+		UpdatedAt:              e.UpdatedAt,
 	}
 
 	if e.FileID != "" {
@@ -97,6 +102,9 @@ func classifyFileAttachmentSource(e *ent.FileAttachment) models.FileAttachmentSo
 			return models.FileAttachmentSourceGenerated
 		}
 		return models.FileAttachmentSourceImported
+	}
+	if e.AgentAuthored {
+		return models.FileAttachmentSourceGenerated
 	}
 	if strings.HasPrefix(strings.ToLower(e.FileType), models.ImageMIMEPrefix) &&
 		generatedUnlinkedImageName.MatchString(strings.TrimSpace(e.Name)) {
@@ -223,6 +231,12 @@ func (d *Datastore) CreateFileAttachment(ctx context.Context, userID uuid.UUID, 
 
 	if fileAttachment.ContextOnly {
 		create.SetContextOnly(true)
+	}
+
+	if fileAttachment.AgentAuthored {
+		create.SetAgentAuthored(true).
+			SetNillableCreatedByPersonalityID(fileAttachment.CreatedByPersonalityID).
+			SetNillableCreatedByChatID(fileAttachment.CreatedByChatID)
 	}
 
 	entFileAttachment, err := create.Save(ctx)
@@ -483,6 +497,13 @@ func (d *Datastore) ListFileAttachments(ctx context.Context, userID uuid.UUID, p
 			entfileattachment.FolderEQ(*filters.FolderPrefix),
 			entfileattachment.FolderHasPrefix(*filters.FolderPrefix+"/"),
 		))
+	}
+
+	switch filters.Origin {
+	case models.FileOriginAgent:
+		query = query.Where(entfileattachment.AgentAuthored(true))
+	case models.FileOriginUser:
+		query = query.Where(entfileattachment.AgentAuthored(false))
 	}
 
 	if filters.ExcludeReferenceCopies {
