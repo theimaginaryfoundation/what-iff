@@ -2,7 +2,6 @@ package database
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"entgo.io/ent/dialect"
@@ -74,22 +73,19 @@ func TestEnsureSeedData_CatalogSeedingOffStillRequiresTheDefaultModel(t *testing
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}))
 
 	err := EnsureSeedData(context.Background(), client, zap.NewNop())
-	require.ErrorContains(t, err, "default model not found")
+	require.ErrorContains(t, err, "default model not found in the catalog")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-// With seeding on (the default), the catalog step runs: its first lookup is
-// reached and its error is returned. Guards against the switch silently
-// disabling seeding for self-hosted installs.
-func TestEnsureSeedData_CatalogSeedingOnSeedsTheCatalog(t *testing.T) {
+// A seeded install (the default) no longer seeds, and has no catalog default
+// to require: boot reads no model rows at all. Its seeded models are converted
+// separately (ConvertSeededModels).
+func TestEnsureSeedData_SeededInstallTouchesNoModels(t *testing.T) {
 	withCatalogSeeding(t, true)
 	client, mock := newMockClient(t)
 
 	expectExistingRoles(mock)
-	stop := errors.New("catalog step reached")
-	mock.ExpectQuery(`SELECT .* FROM "models"`).WillReturnError(stop)
 
-	err := EnsureSeedData(context.Background(), client, zap.NewNop())
-	require.ErrorIs(t, err, stop)
+	require.NoError(t, EnsureSeedData(context.Background(), client, zap.NewNop()))
 	require.NoError(t, mock.ExpectationsWereMet())
 }

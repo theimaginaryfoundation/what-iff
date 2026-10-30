@@ -80,8 +80,8 @@ The fastest way to run the full stack locally is Docker Compose.
 **Prerequisites:** Docker, and an OpenAI API key, which you add in the app.
 
 ```bash
-# Start the stack. On first run it generates this install's secrets, runs
-# migrations, and seeds the model catalog.
+# Start the stack. On first run it generates this install's secrets and runs
+# migrations.
 docker compose up --build
 ```
 

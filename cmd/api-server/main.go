@@ -212,6 +212,18 @@ func init() {
 			zap.Error(err))
 	}
 
+	// A self-hosted install's seeded models move onto its accounts' connections
+	// (ADR 0x027). The test backends keep the seeded catalog their suites expect.
+	if database.SeedModelCatalog() {
+		if config.LLMBackend == "vendor" {
+			if _, err := database.ConvertSeededModels(context.Background(), client, logger); err != nil {
+				logger.Fatal("Failed to convert seeded models onto accounts' connections", zap.Error(err))
+			}
+		} else if err := database.SeedTestCatalog(context.Background(), client, logger); err != nil {
+			logger.Fatal("Failed to seed the test model catalog", zap.Error(err))
+		}
+	}
+
 	// Create and configure server
 	srv = server.NewServer(config, logger, tel, client, sqlDB)
 }

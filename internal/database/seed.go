@@ -18,11 +18,13 @@ import (
 	"go.uber.org/zap"
 )
 
-// SeedModelCatalog reports whether boot seeds the model catalog from
-// models.AvailableModels. A self-hosted install needs it until models are chosen
-// per account. A build whose operator curates the catalog replaces it in an
-// init(), so boot never adds a model the operator did not choose, with whatever
-// pricing and tier the schema defaults happen to give it.
+// SeedModelCatalog reports whether this install's model catalog is the one
+// boot used to seed from models.AvailableModels, as on a self-hosted install,
+// rather than one its operator curates. Boot no longer seeds it: each account
+// enables the models it uses on its own connections, and ConvertSeededModels
+// moves an existing install's seeded models there (ADR 0x027). A build whose
+// operator curates the catalog replaces it in an init(), so boot leaves that
+// catalog alone and requires its default model to exist.
 //
 // It is a function rather than a value because it is consulted when
 // EnsureSeedData runs, after the server has loaded its configuration. A
@@ -38,22 +40,20 @@ func EnsureSeedData(ctx context.Context, client *ent.Client, logger *zap.Logger)
 		return err
 	}
 
-	if SeedModelCatalog() {
-		if err := ensureAllModels(ctx, client, logger); err != nil {
-			return err
+	// A curated catalog must hold its default model: fail fast if
+	// DEFAULT_MODEL_NAME does not name an active one. A seeded install has no
+	// catalog once its models are converted, and each account has its own default.
+	if !SeedModelCatalog() {
+		defaultModelName := envOrDefault("DEFAULT_MODEL_NAME", appmodels.DefaultModelName)
+		if _, err := client.Model.Query().
+			Where(
+				model.Name(defaultModelName),
+				model.Deleted(false),
+				model.ConnectionIDIsNil(),
+			).
+			Only(ctx); err != nil {
+			return errors.New("default model not found in the catalog: " + defaultModelName)
 		}
-	}
-
-	// Fail fast if DEFAULT_MODEL_NAME does not name an active model
-	defaultModelName := envOrDefault("DEFAULT_MODEL_NAME", appmodels.DefaultModelName)
-	if _, err := client.Model.Query().
-		Where(
-			model.Name(defaultModelName),
-			model.Deleted(false),
-			model.ConnectionIDIsNil(),
-		).
-		Only(ctx); err != nil {
-		return errors.New("default model not found after seeding: " + defaultModelName)
 	}
 
 	// Store default role IDs for later use (can be accessed via GetDefaultRole)
@@ -63,7 +63,12 @@ func EnsureSeedData(ctx context.Context, client *ent.Client, logger *zap.Logger)
 	return nil
 }
 
-func ensureAllModels(ctx context.Context, client *ent.Client, logger *zap.Logger) error {
+// SeedTestCatalog seeds the model catalog from models.AvailableModels, as boot
+// did before accounts chose their own models. Only the test backends (mock and
+// local LLM) call it: their end-to-end suites and visual baselines start from a
+// fresh database and expect the seeded models, which they never send to a
+// provider. A real install converts them instead (ConvertSeededModels).
+func SeedTestCatalog(ctx context.Context, client *ent.Client, logger *zap.Logger) error {
 	for _, modelConfig := range appmodels.AvailableModels {
 		existing, err := client.Model.Query().Where(model.Name(modelConfig.Name), model.ConnectionIDIsNil()).Only(ctx)
 		if err == nil {
