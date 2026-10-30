@@ -32,6 +32,7 @@ import { PersonalityService } from '../../core/services/personality.service';
 import { ProviderKeysService } from '../../core/services/provider-keys.service';
 import { ThemeMode, ThemeService } from '../../core/services/theme.service';
 import { UserPreferencesService } from '../../core/services/user-preferences.service';
+import { hasDefaultModel } from '../../core/utils/default-model';
 import { TIMEZONE_MAX_LENGTH, detectBrowserTimezone, listTimezones, timezoneValidator } from '../../core/utils/timezone.helpers';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
 import { ShieldIconComponent, UserIconComponent } from '../../shared/ui/icons/icons';
@@ -108,8 +109,13 @@ export class ProfileSettingsModalComponent {
   readonly defaultModelUnlisted = computed(() => {
     const id = this.preferences()?.default_model_id;
     const models = this.models();
-    return !!id && models.length > 0 && !models.some((model) => model.id === id);
+    return this.hasDefaultModel() && models.length > 0 && !models.some((model) => model.id === id);
   });
+  /**
+   * False until the account has a default model: on an install without a model catalog that is
+   * until it enables a model on one of its connections (ADR 0x027).
+   */
+  readonly hasDefaultModel = computed(() => hasDefaultModel(this.preferences()));
   readonly personalities = signal<readonly Personality[]>([]);
   readonly themeMode = signal<ThemeMode>('system');
   /**

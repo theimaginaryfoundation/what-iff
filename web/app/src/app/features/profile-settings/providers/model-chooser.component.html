@@ -1,0 +1,148 @@
+<ui-modal [open]="open()" size="lg" labelledBy="model-chooser-title" (dismiss)="close()">
+  <div modal-header>
+    <h2 id="model-chooser-title" class="chooser__title">{{ connection()?.name }} models</h2>
+    <p class="chooser__subtitle">The models you enable appear in your model picker.</p>
+  </div>
+
+  <div class="chooser" data-testid="model-chooser">
+    @if (loading()) {
+      <div class="chooser__state">Listing {{ connection()?.name }}'s models...</div>
+    } @else if (loadError()) {
+      <div class="chooser__message" role="alert">
+        <span>{{ loadError() }}</span>
+        @if (connection(); as c) {
+          <button class="chooser__button" type="button" (click)="load(c)">Retry</button>
+        }
+      </div>
+    } @else if (rows().length === 0) {
+      <div class="chooser__state">{{ connection()?.name }} doesn't list any models yet.</div>
+    } @else {
+      @if (defaultBlocked(); as name) {
+        <div class="chooser__message" role="alert" data-testid="model-chooser-default">
+          <span>{{ name }} is your default model, so it can't be turned off. Choose another default first.</span>
+          <button class="chooser__button" type="button" (click)="changeDefault.emit()">Change default</button>
+        </div>
+      }
+
+      <div class="chooser__search">
+        <input
+          type="search"
+          autocomplete="off"
+          aria-label="Search models"
+          [placeholder]="'Search ' + rows().length + ' models…'"
+          [value]="query()"
+          (input)="setQuery($any($event.target).value)"
+          (keydown)="onSearchKeydown($event)"
+          data-testid="model-chooser-search"
+        />
+        @if (query()) {
+          <button class="chooser__clear" type="button" aria-label="Clear search" (click)="setQuery('')">×</button>
+        }
+      </div>
+
+      <div class="chooser__filters" role="group" aria-label="Show">
+        @for (f of filters; track f.id) {
+          <button
+            class="chooser__chip"
+            type="button"
+            [class.chooser__chip--on]="filter() === f.id"
+            [attr.aria-pressed]="filter() === f.id"
+            (click)="setFilter(f.id)"
+          >
+            {{ f.label }}@if (f.id === 'enabled') { ({{ enabledCount() }})}
+          </button>
+        }
+        @if (narrowed()) {
+          <span class="chooser__results" aria-live="polite">{{ shown().length }} of {{ rows().length }}</span>
+        }
+      </div>
+
+      <div class="chooser__list" role="list" data-testid="model-chooser-list">
+        @for (row of shown(); track row.id) {
+          <div class="chooser__item" role="listitem" [class.chooser__item--on]="row.enabled">
+            <input
+              class="chooser__checkbox"
+              type="checkbox"
+              [id]="'model-' + row.id"
+              [checked]="row.enabled"
+              (change)="toggle(row, $any($event.target).checked)"
+            />
+            <label class="chooser__label" [for]="'model-' + row.id">
+              <span class="chooser__name">
+                @for (p of parts(row.name); track $index) {
+                  @if (p.match) {
+                    <mark>{{ p.text }}</mark>
+                  } @else {
+                    <span>{{ p.text }}</span>
+                  }
+                }
+                @if (row.id === defaultModelId()) {
+                  <span class="chooser__default"><span class="sr-only">, </span>Default</span>
+                }
+              </span>
+              @if (row.name !== row.id) {
+                <span class="chooser__id">
+                  @for (p of parts(row.id); track $index) {
+                    @if (p.match) {
+                      <mark>{{ p.text }}</mark>
+                    } @else {
+                      <span>{{ p.text }}</span>
+                    }
+                  }
+                </span>
+              }
+            </label>
+            <div class="chooser__caps">
+              @for (cap of capabilities; track cap.id) {
+                @let value = row[cap.id];
+                <button
+                  class="chooser__cap"
+                  type="button"
+                  [class.chooser__cap--on]="value === true"
+                  [class.chooser__cap--ask]="value === undefined && row.enabled"
+                  [attr.aria-pressed]="value === true"
+                  [attr.aria-label]="cap.label + ' for ' + row.name + (value === undefined ? ', not reported' : '')"
+                  (click)="toggleCapability(row, cap.id)"
+                >
+                  {{ cap.label }}@if (value === undefined && row.enabled) {?}
+                </button>
+              }
+            </div>
+          </div>
+        } @empty {
+          <div class="chooser__state">
+            <span>{{ emptyText() }}</span>
+            <button class="chooser__chip" type="button" (click)="showAll()">Show all models</button>
+          </div>
+        }
+      </div>
+
+      @if (unconfirmed()) {
+        <p class="chooser__note">
+          <strong>Tools? / Images?</strong> {{ connection()?.name }} doesn't say what these models support. Turn on what
+          yours does: a model offered tools it can't use fails its turns, and one without images is sent text only.
+        </p>
+      } @else {
+        <p class="chooser__note">Tools and Images come from what {{ connection()?.name }} reports, where it does.</p>
+      }
+
+      @if (saveError()) {
+        <div class="chooser__message" role="alert">{{ saveError() }}</div>
+      }
+    }
+  </div>
+
+  <div modal-footer class="chooser__actions">
+    <span class="chooser__count">{{ enabledCount() }} enabled</span>
+    <button class="chooser__button" type="button" (click)="close()" [disabled]="saving()">Cancel</button>
+    <button
+      class="chooser__button chooser__button--primary"
+      type="button"
+      (click)="save()"
+      [disabled]="saving() || loading() || !!loadError()"
+      data-testid="model-chooser-save"
+    >
+      {{ saving() ? 'Saving...' : 'Save' }}
+    </button>
+  </div>
+</ui-modal>

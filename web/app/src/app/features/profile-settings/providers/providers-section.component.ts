@@ -1,16 +1,21 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
-import { ProviderConnected, ProviderConnection, ProviderPreset } from '../../../core/models/provider-connection.model';
+import { Model } from '../../../core/models/model.model';
+import { ConnectionModel, ProviderConnected, ProviderConnection, ProviderPreset } from '../../../core/models/provider-connection.model';
 import { PROVIDERS } from '../../../core/models/provider-key.model';
 import { AuthService } from '../../../core/services/auth.service';
 import { ConfirmationService } from '../../../core/services/confirmation.service';
+import { ModelService } from '../../../core/services/model.service';
 import { PersonalityService } from '../../../core/services/personality.service';
 import { ProviderConnectionsService } from '../../../core/services/provider-connections.service';
 import { ProviderKeysService } from '../../../core/services/provider-keys.service';
+import { UserPreferencesService } from '../../../core/services/user-preferences.service';
+import { hasDefaultModel } from '../../../core/utils/default-model';
 import { apiErrorMessage } from '../../../core/utils/api-error.helpers';
 import { ProfileSettingsModalService } from '../profile-settings-modal.service';
+import { ModelChooserComponent } from './model-chooser.component';
 import { ProviderFormComponent } from './provider-form.component';
 
 interface ProviderRow {
@@ -19,6 +24,8 @@ interface ProviderRow {
   detail: string;
   required: boolean;
   local: boolean;
+  /** How many of its models the account enabled. */
+  models: number;
 }
 
 /** Remembers, per account in this browser, that the "saved keys are now connections" notice was dismissed. */
@@ -35,7 +42,7 @@ const CONVERTED_NOTICE_KEY = 'whatiff.providers.convertedNoticeDismissed';
 @Component({
   selector: 'app-providers-section',
   standalone: true,
-  imports: [ProviderFormComponent],
+  imports: [ProviderFormComponent, ModelChooserComponent],
   templateUrl: './providers-section.component.html',
   styleUrl: './providers-section.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -48,6 +55,8 @@ export class ProvidersSectionComponent implements OnInit {
   private readonly personalities = inject(PersonalityService);
   private readonly modal = inject(ProfileSettingsModalService);
   private readonly router = inject(Router);
+  private readonly modelService = inject(ModelService);
+  private readonly preferences = inject(UserPreferencesService);
 
   readonly loading = signal(true);
   readonly loadError = signal('');
@@ -60,6 +69,13 @@ export class ProvidersSectionComponent implements OnInit {
   readonly formConnection = signal<ProviderConnection | null>(null);
   readonly formPreset = signal<string | null>(null);
 
+  /** The connection whose models are being chosen, or null. */
+  readonly chooserConnection = signal<ProviderConnection | null>(null);
+
+  /** The account's models, to count each connection's, and whether it has a default model yet. */
+  private readonly models = signal<Model[]>([]);
+  private readonly hasDefault = signal(true);
+
   /** True while the account has no personality: connecting OpenAI points onward to creating one. */
   readonly onboarding = signal(false);
 
@@ -67,6 +83,7 @@ export class ProvidersSectionComponent implements OnInit {
 
   readonly rows = computed<ProviderRow[]>(() =>
     this.connections().map(connection => {
+      const models = this.models().filter(m => m.connection_id === connection.id).length;
       const preset = this.presets().find(p => p.id === connection.preset);
       const info = PROVIDERS.find(p => p.id === connection.preset);
       return {
@@ -74,6 +91,7 @@ export class ProvidersSectionComponent implements OnInit {
         detail: info?.usedFor ?? hostOf(connection.base_url || preset?.base_url || ''),
         required: info?.required ?? false,
         local: preset?.local ?? false,
+        models,
       };
     }),
   );
@@ -81,10 +99,40 @@ export class ProvidersSectionComponent implements OnInit {
   /** WhatIff needs an OpenAI connection for memory, summaries and images. */
   readonly needsOpenAI = computed(() => !this.loading() && !this.connections().some(c => c.preset === 'openai'));
 
+  /**
+   * Onboarding's step after a key: the account has a connection but no model to
+   * chat with yet (no default model, since the first one enabled becomes it).
+   */
+  readonly needsModels = computed(() => !this.loading() && this.connections().length > 0 && !this.hasDefault());
+
+  /** Where "Choose models" goes first: the OpenAI connection, else the first. */
+  readonly firstChoice = computed(
+    () => this.connections().find(c => c.preset === 'openai') ?? this.connections()[0] ?? null,
+  );
+
   /** Shown once to an account whose saved keys were converted into connections. */
   readonly showConvertedNotice = computed(
     () => !this.noticeDismissed() && this.connections().some(c => c.source === 'converted'),
   );
+
+  constructor() {
+    // A request from elsewhere (the first-run prompt, a chat with no model) to
+    // open a connection's model chooser, taken once the connections are known.
+    effect(() => {
+      const request = this.modal.modelChooserRequest();
+      if (request === null || this.loading()) {
+        return;
+      }
+      this.modal.modelChooserRequest.set(null);
+      const target =
+        this.connections().find(c => c.id === request) ??
+        this.connections().find(c => c.preset === request) ??
+        this.firstChoice();
+      if (target) {
+        this.chooseModels(target);
+      }
+    });
+  }
 
   async ngOnInit(): Promise<void> {
     this.noticeDismissed.set(this.readDismissed());
@@ -101,10 +149,25 @@ export class ProvidersSectionComponent implements OnInit {
       ]);
       this.connections.set(connections);
       this.presets.set(presets);
+      await this.loadModels();
     } catch (err) {
       this.loadError.set(apiErrorMessage(err, 'Could not load your providers.'));
     } finally {
       this.loading.set(false);
+    }
+  }
+
+  /** The account's models and default, best effort: without them rows show no counts. */
+  private async loadModels(): Promise<void> {
+    try {
+      const [models, prefs] = await Promise.all([
+        firstValueFrom(this.modelService.getModels()),
+        firstValueFrom(this.preferences.getUserPreferences()),
+      ]);
+      this.models.set(models);
+      this.hasDefault.set(hasDefaultModel(prefs));
+    } catch {
+      this.models.set([]);
     }
   }
 
@@ -133,6 +196,30 @@ export class ProvidersSectionComponent implements OnInit {
 
   closeForm(): void {
     this.formOpen.set(false);
+  }
+
+  chooseModels(connection: ProviderConnection): void {
+    this.formOpen.set(false);
+    this.notice.set('');
+    this.chooserConnection.set(connection);
+  }
+
+  closeChooser(): void {
+    this.chooserConnection.set(null);
+  }
+
+  /** Models were enabled or disabled: say so, and recount. */
+  async onModelsSaved(enabled: ConnectionModel[]): Promise<void> {
+    const name = this.chooserConnection()?.name ?? 'Provider';
+    this.chooserConnection.set(null);
+    this.notice.set(`${name}: ${enabled.length} ${enabled.length === 1 ? 'model' : 'models'} enabled.`);
+    await this.loadModels();
+  }
+
+  /** The default model can't be turned off: choose another on the Profile tab first. */
+  changeDefault(): void {
+    this.chooserConnection.set(null);
+    this.modal.setTab('profile');
   }
 
   /** A connection was added or changed: show it, and refresh what the rest of the app knows. */
