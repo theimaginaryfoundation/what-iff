@@ -60,6 +60,14 @@ describe('ModelPickerComponent', () => {
         fixture.detectChanges();
     });
 
+    it('counts each vendor\'s models, in the singular for one', () => {
+        fixture.componentRef.setInput('selectedId', null);
+        fixture.nativeElement.querySelector('.model-picker__trigger').click();
+        fixture.detectChanges();
+        const counts = [...fixture.nativeElement.querySelectorAll('.model-picker__vendor-count')].map((el: Element) => el.textContent?.replace(/\s+/g, ' ').trim());
+        expect(counts).toEqual(['2 models', '1 model']);
+    });
+
     it('renders current model and emits selection from vendor flow', () => {
         const spy = vi.fn().mockName('selected');
         fixture.componentInstance.selected.subscribe(spy);

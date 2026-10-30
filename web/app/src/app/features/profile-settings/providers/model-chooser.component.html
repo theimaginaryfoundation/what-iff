@@ -26,10 +26,11 @@
 
       <div class="chooser__search">
         <input
+          #search
           type="search"
           autocomplete="off"
           aria-label="Search models"
-          [placeholder]="'Search ' + rows().length + ' models…'"
+          [placeholder]="'Search ' + rows().length + (rows().length === 1 ? ' model…' : ' models…')"
           [value]="query()"
           (input)="setQuery($any($event.target).value)"
           (keydown)="onSearchKeydown($event)"
@@ -65,7 +66,7 @@
               type="checkbox"
               [id]="'model-' + row.id"
               [checked]="row.enabled"
-              (change)="toggle(row, $any($event.target).checked)"
+              (change)="toggle(row, $any($event.target).checked, $any($event.target))"
             />
             <label class="chooser__label" [for]="'model-' + row.id">
               <span class="chooser__name">

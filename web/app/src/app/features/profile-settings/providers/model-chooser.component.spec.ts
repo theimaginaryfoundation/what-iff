@@ -214,7 +214,11 @@ describe('ModelChooserComponent', () => {
   describe('the default model', () => {
     it("can't be unticked, and says how to change it", async () => {
       await render();
-      chooser.toggle(row('anthropic/claude-sonnet-4.6'), false);
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = false; // as the click left it
+      chooser.toggle(row('anthropic/claude-sonnet-4.6'), false, box);
+      expect(box.checked).toBe(true);
       expect(row('anthropic/claude-sonnet-4.6').enabled).toBe(true);
       expect(chooser.defaultBlocked()).toBe('Claude Sonnet 4.6');
       fixture.detectChanges();
