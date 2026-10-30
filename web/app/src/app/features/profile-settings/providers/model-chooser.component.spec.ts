@@ -211,6 +211,60 @@ describe('ModelChooserComponent', () => {
     });
   });
 
+  describe('renaming', () => {
+    function renameButton(name: string): HTMLButtonElement | null {
+      return fixture.nativeElement.ownerDocument.querySelector(`button[aria-label="Rename ${name}"]`);
+    }
+
+    function field(): HTMLInputElement {
+      return fixture.nativeElement.ownerDocument.querySelector('.chooser__rename') as HTMLInputElement;
+    }
+
+    it('renames an enabled model in place, and saves the new name', async () => {
+      await render();
+      fixture.detectChanges();
+      expect(renameButton('Claude Sonnet 5.5')).toBeNull();
+      renameButton('Claude Sonnet 4.6')!.click();
+      fixture.detectChanges();
+      expect(document.activeElement).toBe(field());
+      field().value = '  Sonnet  ';
+      field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+      fixture.detectChanges();
+
+      expect(field()).toBeNull();
+      expect(row('anthropic/claude-sonnet-4.6').name).toBe('Sonnet');
+      expect(fixture.nativeElement.ownerDocument.body.textContent).toContain('anthropic/claude-sonnet-4.6');
+      await chooser.save();
+      expect(connections.setModels).toHaveBeenCalledWith('c-or', [
+        { id: 'anthropic/claude-sonnet-4.6', enabled: true, display_name: 'Sonnet', tool_support: true, vision_support: true },
+      ]);
+    });
+
+    it('keeps the name on Escape, without closing the dialog', async () => {
+      await render();
+      fixture.detectChanges();
+      renameButton('Claude Sonnet 4.6')!.click();
+      fixture.detectChanges();
+      field().value = 'Something else';
+      const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      field().dispatchEvent(escape);
+      fixture.detectChanges();
+
+      expect(escape.defaultPrevented).toBe(true);
+      expect(field()).toBeNull();
+      expect(row('anthropic/claude-sonnet-4.6').name).toBe('Claude Sonnet 4.6');
+      expect(fixture.componentInstance.closes).toBe(0);
+      expect(chooser.changes()).toEqual([]);
+    });
+
+    it('goes back to the id when the name is cleared', async () => {
+      await render();
+      chooser.startRename(row('anthropic/claude-sonnet-4.6'));
+      chooser.commitRename(row('anthropic/claude-sonnet-4.6'), '   ');
+      expect(row('anthropic/claude-sonnet-4.6').name).toBe('anthropic/claude-sonnet-4.6');
+    });
+  });
+
   describe('the default model', () => {
     it("can't be unticked, and says how to change it", async () => {
       await render();
@@ -277,9 +331,18 @@ describe('model chooser helpers', () => {
     ]);
   });
 
+  it("sends an enabled model's new name, and nothing for one renamed back", () => {
+    const base = { id: 'm', enabled: true, tools: true, images: false };
+    const initial = { name: 'Old', enabled: true, tools: true, images: false };
+    expect(choicesFrom([{ ...base, name: 'New', initial }])).toEqual([
+      { id: 'm', enabled: true, display_name: 'New', tool_support: true, vision_support: false },
+    ]);
+    expect(choicesFrom([{ ...base, name: 'Old', initial }])).toEqual([]);
+  });
+
   it('turning a model off sends no capabilities', () => {
     const rows: ChooserRow[] = [
-      { id: 'm', name: 'M', enabled: false, tools: true, images: false, initial: { enabled: true, tools: true, images: false } },
+      { id: 'm', name: 'M', enabled: false, tools: true, images: false, initial: { name: 'M', enabled: true, tools: true, images: false } },
     ];
     expect(choicesFrom(rows)).toEqual([{ id: 'm', enabled: false }]);
   });

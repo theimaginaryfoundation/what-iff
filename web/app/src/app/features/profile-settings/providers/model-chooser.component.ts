@@ -6,6 +6,7 @@ import { ModelService } from '../../../core/services/model.service';
 import { ProviderConnectionsService } from '../../../core/services/provider-connections.service';
 import { UserPreferencesService } from '../../../core/services/user-preferences.service';
 import { apiErrorMessage, hasErrorCode } from '../../../core/utils/api-error.helpers';
+import { EditIconComponent } from '../../../shared/ui/icons/icons';
 import { ModalComponent } from '../../../shared/ui/modal/modal.component';
 
 /** What the list shows. */
@@ -14,13 +15,14 @@ export type ModelFilter = 'all' | 'enabled' | 'tools' | 'images';
 /** One of the connection's models while the account chooses. */
 export interface ChooserRow {
   id: string;
+  /** What the picker calls it: the provider's name, or the account's own. */
   name: string;
   enabled: boolean;
   /** Whether it takes tools: confirmed, as reported, or undefined when nothing says. */
   tools: boolean | undefined;
   images: boolean | undefined;
   /** As loaded, to send only what changed. */
-  readonly initial: Readonly<{ enabled: boolean; tools: boolean | undefined; images: boolean | undefined }>;
+  readonly initial: Readonly<{ name: string; enabled: boolean; tools: boolean | undefined; images: boolean | undefined }>;
 }
 
 /**
@@ -36,7 +38,7 @@ export interface ChooserRow {
 @Component({
   selector: 'app-model-chooser',
   standalone: true,
-  imports: [ModalComponent],
+  imports: [EditIconComponent, ModalComponent],
   templateUrl: './model-chooser.component.html',
   styleUrl: './model-chooser.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -67,6 +69,7 @@ export class ModelChooserComponent {
   ];
 
   private readonly search = viewChild<ElementRef<HTMLInputElement>>('search');
+  private readonly renameInput = viewChild<ElementRef<HTMLInputElement>>('renameInput');
 
   readonly loading = signal(false);
   readonly loadError = signal('');
@@ -79,6 +82,8 @@ export class ModelChooserComponent {
   readonly defaultBlocked = signal<string | null>(null);
   /** The account's default model's id on this connection, when it is one of its models. */
   readonly defaultModelId = signal<string | null>(null);
+  /** The id of the model being renamed, if any. */
+  readonly renaming = signal<string | null>(null);
 
   readonly words = computed(() => this.query().trim().toLowerCase().split(/\s+/).filter(Boolean));
   readonly shown = computed(() => {
@@ -122,6 +127,13 @@ export class ModelChooserComponent {
         search.nativeElement.focus();
       }
     });
+    afterRenderEffect(() => {
+      const field = this.renameInput()?.nativeElement;
+      if (field) {
+        field.focus();
+        field.select();
+      }
+    });
   }
 
   async load(connection: ProviderConnection): Promise<void> {
@@ -129,6 +141,7 @@ export class ModelChooserComponent {
     this.loadError.set('');
     this.saveError.set('');
     this.defaultBlocked.set(null);
+    this.renaming.set(null);
     this.query.set('');
     this.filter.set('all');
     try {
@@ -190,6 +203,26 @@ export class ModelChooserComponent {
     this.patch(row.id, { enabled });
   }
 
+  startRename(row: ChooserRow): void {
+    this.renaming.set(row.id);
+  }
+
+  /** Keeps the name typed; an empty one goes back to the model's id. */
+  commitRename(row: ChooserRow, value: string): void {
+    if (this.renaming() !== row.id) {
+      return;
+    }
+    this.renaming.set(null);
+    this.patch(row.id, { name: value.trim() || row.id });
+  }
+
+  /** Escape leaves the name as it was, and keeps the dialog open. */
+  cancelRename(event: Event): void {
+    event.stopPropagation();
+    event.preventDefault();
+    this.renaming.set(null);
+  }
+
   toggleCapability(row: ChooserRow, capability: 'tools' | 'images'): void {
     this.patch(row.id, { [capability]: !(row[capability] ?? false) });
   }
@@ -228,7 +261,7 @@ export class ModelChooserComponent {
     }
   }
 
-  private patch(id: string, change: Partial<Pick<ChooserRow, 'enabled' | 'tools' | 'images'>>): void {
+  private patch(id: string, change: Partial<Pick<ChooserRow, 'name' | 'enabled' | 'tools' | 'images'>>): void {
     this.rows.update(rows => rows.map(row => (row.id === id ? { ...row, ...change } : row)));
   }
 }
@@ -248,7 +281,7 @@ function toRow(model: ConnectionModel): ChooserRow {
     tools: model.tool_support,
     images: model.vision_support,
   };
-  return { ...row, initial: { enabled: row.enabled, tools: row.tools, images: row.images } };
+  return { ...row, initial: { name: row.name, enabled: row.enabled, tools: row.tools, images: row.images } };
 }
 
 /** A piece of text, and whether it matched the search. */
@@ -276,13 +309,13 @@ export function matchesWords(row: Pick<ChooserRow, 'id' | 'name'>, words: string
   return words.every(word => haystack.includes(word));
 }
 
-/** The changes to send: models switched on or off, and enabled models whose capabilities changed. */
+/** The changes to send: models switched on or off, and enabled models renamed or whose capabilities changed. */
 export function choicesFrom(rows: ChooserRow[]): ConnectionModelChoice[] {
   const out: ConnectionModelChoice[] = [];
   for (const row of rows) {
     const changed =
       row.enabled !== row.initial.enabled ||
-      (row.enabled && (row.tools !== row.initial.tools || row.images !== row.initial.images));
+      (row.enabled && (row.name !== row.initial.name || row.tools !== row.initial.tools || row.images !== row.initial.images));
     if (!changed) {
       continue;
     }
