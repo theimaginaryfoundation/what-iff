@@ -54,6 +54,7 @@ func TestConvertSeededModels(t *testing.T) {
 	gpt := seeded("gpt-5.6-luna", "openai")
 	claude := seeded("claude-sonnet-4-6", "anthropic")
 	unused := seeded("gpt-5.1", "openai")
+	former := seeded("gpt-5.1-nano", "openai") // seeded once, since dropped from the list
 	admins, err := client.Model.Create().SetName("house-model").SetDisplayName("House").SetDescription("").Save(ctx)
 	require.NoError(t, err, "a model the deployment added itself, not from the seed list")
 
@@ -87,6 +88,7 @@ func TestConvertSeededModels(t *testing.T) {
 		SetProvider("openai").SetConnectionID(aliceOpenAI.ID).SetDeleted(true).Save(ctx)
 	require.NoError(t, err)
 	aliceChat, aliceClaudeChat, aliceJob := chatOn(alice, gpt), chatOn(alice, claude), jobOn(alice, claude)
+	aliceFormerChat := chatOn(alice, former)
 	// Bob has only an Anthropic key: his default and a chat are on the OpenAI model.
 	bob := account("bob", gpt, gpt.ID.String())
 	bobAnthropic := builtin(bob, "anthropic")
@@ -94,7 +96,7 @@ func TestConvertSeededModels(t *testing.T) {
 
 	n, err := ConvertSeededModels(ctx, client, zap.NewNop())
 	require.NoError(t, err)
-	require.Equal(t, 3, n)
+	require.Equal(t, 4, n)
 
 	// Seeded rows are gone; the deployment's own model stays.
 	catalog, err := client.Model.Query().Where(model.ConnectionIDIsNil()).All(ctx)
@@ -138,6 +140,7 @@ func TestConvertSeededModels(t *testing.T) {
 	require.Equal(t, aliceGPT.ID, *chatModel(aliceChat))
 	require.Equal(t, aliceClaude.ID, *chatModel(aliceClaudeChat))
 	require.Equal(t, aliceClaude.ID, *jobModel(aliceJob))
+	require.Equal(t, on(aliceOpenAI, "gpt-5.1-nano").ID, *chatModel(aliceFormerChat), "a model no longer seeded converts like the rest")
 
 	// Bob: what he has a connection for moves; the rest is cleared, and his job
 	// keeps naming a model that no longer exists, so it fails clearly.
