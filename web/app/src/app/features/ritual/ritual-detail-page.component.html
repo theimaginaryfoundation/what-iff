@@ -19,9 +19,14 @@
   } @else {
     <div class="grid gap-4 lg:grid-cols-[1fr_300px]">
       <div class="rounded-2xl border border-border-base bg-surface-card p-4">
-        <h1 class="mb-4 text-xl font-semibold text-text-primary">
-          {{ creating() ? 'Create skill' : 'Edit skill' }}
-        </h1>
+        <div class="mb-4 flex flex-wrap items-center gap-2">
+          <h1 class="text-xl font-semibold text-text-primary">
+            {{ creating() ? 'Create skill' : 'Edit skill' }}
+          </h1>
+          @if (ritual() && !creating()) {
+            <app-entity-marketplace-outlet kind="skill" [entityId]="ritual()!.id" />
+          }
+        </div>
 
         <app-ritual-form
           [ritual]="ritual()"
@@ -57,7 +62,6 @@
           [chatId]="selectedChatId()" />
 
         @if (ritual() && !creating()) {
-          <app-entity-marketplace-outlet kind="skill" [entityId]="ritual()!.id" [entityName]="ritual()!.name" layout="card" />
           <section class="rounded-2xl border border-border-base bg-surface-card p-4 text-sm">
             <h2 class="font-semibold text-text-primary">Metadata</h2>
             <dl class="mt-2 space-y-1 text-text-secondary">

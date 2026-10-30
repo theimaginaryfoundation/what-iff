@@ -28,13 +28,14 @@ import { resolveDefaultTimezone } from '../../core/utils/timezone.helpers';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 import { isTerminalStatus, jobStatusDescription, jobStatusLabel, scheduleFailureReason } from './helpers/job-status.helpers';
+import { EntityMarketplaceOutletComponent } from '../../extensions/entity-marketplace-outlet.component';
 import { JobFormComponent } from './components/job-form.component';
 import { JobRunHistoryComponent } from './components/job-run-history.component';
 
 @Component({
   selector: 'app-job-detail-page',
   standalone: true,
-  imports: [FormsModule, JobFormComponent, JobRunHistoryComponent, HelpHintComponent, TooltipDirective],
+  imports: [FormsModule, JobFormComponent, JobRunHistoryComponent, HelpHintComponent, TooltipDirective, EntityMarketplaceOutletComponent],
   templateUrl: './job-detail-page.component.html',
   styleUrl: './job-detail-page.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

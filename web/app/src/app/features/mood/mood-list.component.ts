@@ -8,10 +8,12 @@ import { ModeGridComponent } from './components/mode-grid.component';
 import { MoodListFacade } from './services/mood-list.facade';
 import { HelpHintComponent } from '../../shared/ui/help-hint/help-hint.component';
 
+import { MarketplaceBrowseLinkComponent } from '../../extensions/marketplace-browse-link.component';
+
 @Component({
   selector: 'app-mood-list',
   standalone: true,
-  imports: [ModeGridComponent, ModeEditModalComponent, HelpHintComponent],
+  imports: [ModeGridComponent, ModeEditModalComponent, HelpHintComponent, MarketplaceBrowseLinkComponent],
   providers: [MoodListFacade],
   templateUrl: './mood-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

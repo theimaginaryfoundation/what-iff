@@ -31,11 +31,16 @@ import { TooltipDirective } from '../../shared/ui/tooltip/tooltip.directive';
 
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 
+import { EntityMarketplaceOutletComponent } from '../../extensions/entity-marketplace-outlet.component';
+import { MarketplaceBrowseLinkComponent } from '../../extensions/marketplace-browse-link.component';
+
 @Component({
   selector: 'app-rituals-page',
   standalone: true,
   imports: [
     CommonModule,
+    EntityMarketplaceOutletComponent,
+    MarketplaceBrowseLinkComponent,
     RitualFormComponent,
     PersonaPickerDialogComponent,
     PersonaCoverComponent,

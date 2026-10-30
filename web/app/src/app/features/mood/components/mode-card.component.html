@@ -1,7 +1,10 @@
 <article class="mode-card">
   <div class="mode-card__header">
     <div class="mode-card__title-group">
-      <h3>{{ card().title }}</h3>
+      <div class="mode-card__title-row">
+        <h3>{{ card().title }}</h3>
+        <app-entity-marketplace-outlet kind="mode" [entityId]="card().mood.id" />
+      </div>
       <p>{{ card().description }}</p>
       <div class="mode-card__chips">
         <span

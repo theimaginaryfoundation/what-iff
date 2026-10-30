@@ -19,6 +19,18 @@
   min-height: 0;
   overflow: auto;
   padding: 1rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
+}
+/* A thin, themed scrollbar set in from the edge, so a long body doesn't end
+   in a native bar pressed against the content. */
+.ui-modal__body::-webkit-scrollbar { width: 12px; }
+.ui-modal__body::-webkit-scrollbar-track { background: transparent; }
+.ui-modal__body::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  background-clip: padding-box;
+  border: 4px solid transparent;
+  border-radius: 999px;
 }
 .ui-modal__close { display: inline-flex; min-height: 2.75rem; min-width: 2.75rem; align-items: center; justify-content: center; border-radius: .75rem; color: var(--text-secondary); transition: background-color .15s ease, color .15s ease; }
 .ui-modal__close:hover { background: var(--accent-bg); color: var(--text-primary); }

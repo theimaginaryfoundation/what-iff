@@ -45,7 +45,7 @@
               {{ mood()!.ritual_ids.length }} skill{{ mood()!.ritual_ids.length !== 1 ? 's' : '' }}
             </p>
           </div>
-          <app-entity-marketplace-outlet kind="mode" [entityId]="mood()!.id" [entityName]="mood()!.name" layout="actions" />
+          <app-entity-marketplace-outlet kind="mode" [entityId]="mood()!.id" />
         </div>
 
         <!-- Status messages -->

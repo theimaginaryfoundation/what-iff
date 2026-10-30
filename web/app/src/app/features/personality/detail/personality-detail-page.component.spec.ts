@@ -132,15 +132,13 @@ describe('PersonalityDetailPageComponent', () => {
         expect(nameInput.value).toBe('Vera Calder');
     });
 
-    it('mounts the marketplace outlet in the header actions with the personality identity', () => {
+    it('mounts the marketplace outlet in the header with the personality identity', () => {
         fixture.detectChanges();
         const outlet = fixture.debugElement.query(By.directive(EntityMarketplaceOutletComponent));
         expect(outlet).toBeTruthy();
         const instance = outlet.componentInstance as EntityMarketplaceOutletComponent;
         expect(instance.kind()).toBe('personality');
         expect(instance.entityId()).toBe('p-1');
-        expect(instance.entityName()).toBe('Vera Calder');
-        expect(instance.layout()).toBe('actions');
         expect((outlet.nativeElement as HTMLElement).closest('header')).toBeTruthy();
     });
 
