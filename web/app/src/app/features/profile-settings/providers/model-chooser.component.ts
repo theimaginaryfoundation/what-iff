@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, afterRenderEffect, computed, effect, inject, input, output, signal, viewChild } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
 import { ConnectionModel, ConnectionModelChoice, ProviderConnection } from '../../../core/models/provider-connection.model';
@@ -66,6 +66,8 @@ export class ModelChooserComponent {
     { id: 'images', label: 'Images' },
   ];
 
+  private readonly search = viewChild<ElementRef<HTMLInputElement>>('search');
+
   readonly loading = signal(false);
   readonly loadError = signal('');
   readonly rows = signal<ChooserRow[]>([]);
@@ -111,6 +113,13 @@ export class ModelChooserComponent {
       const connection = this.connection();
       if (this.open() && connection) {
         void this.load(connection);
+      }
+    });
+    // Searching is how a long listing is used, so the search box has focus once the listing shows.
+    afterRenderEffect(() => {
+      const search = this.search();
+      if (search && !this.loading()) {
+        search.nativeElement.focus();
       }
     });
   }
@@ -167,11 +176,14 @@ export class ModelChooserComponent {
     }
   }
 
-  toggle(row: ChooserRow, enabled: boolean): void {
+  toggle(row: ChooserRow, enabled: boolean, checkbox?: HTMLInputElement): void {
     if (!enabled && row.id === this.defaultModelId()) {
-      // Refused here rather than at Save, so the box never shows a state that won't save.
+      // Refused here rather than at Save, so the box never shows a state that won't save. The
+      // row is still enabled, so nothing re-renders the box: tick it back by hand.
       this.defaultBlocked.set(row.name);
-      this.patch(row.id, { enabled: true });
+      if (checkbox) {
+        checkbox.checked = true;
+      }
       return;
     }
     this.defaultBlocked.set(null);

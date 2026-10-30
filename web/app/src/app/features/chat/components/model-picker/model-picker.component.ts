@@ -143,7 +143,7 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
                       (click)="chooseProvider(provider)"
                     >
                       <span class="model-picker__vendor-label">{{ providerLabel(provider) }}</span>
-                      <span class="model-picker__vendor-count">{{ providerModelCount(provider) }} models</span>
+                      <span class="model-picker__vendor-count">{{ providerModelCount(provider) }} {{ providerModelCount(provider) === 1 ? 'model' : 'models' }}</span>
                     </button>
                   }
                 } @else {
