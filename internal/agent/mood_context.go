@@ -451,6 +451,7 @@ func (a *Agent) changeMoodTool(ctx context.Context, chatCtx *chatContext, args [
 		m, err := a.resolveModelByReference(ctx, chosenModel, modelResolverOptions{
 			AllowDisplayName: true,
 			AllowPrefixMatch: true,
+			UserID:           chatCtx.chat.UserID,
 		})
 		if err == nil {
 			id := m.ID

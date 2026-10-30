@@ -194,3 +194,13 @@ func findPreset(presets []Preset, id string) (Preset, bool) {
 	}
 	return Preset{}, false
 }
+
+// presetOf is the preset a stored connection was made from, or Custom for a
+// preset this build no longer offers.
+func presetOf(presets []Preset, id string) Preset {
+	if p, ok := findPreset(presets, id); ok {
+		return p
+	}
+	p, _ := findPreset(presets, PresetCustom)
+	return p
+}

@@ -385,7 +385,32 @@ func (d *Datastore) GetModel(ctx context.Context, id uuid.UUID) (*models.Model, 
 	return toModelModel(dbModel), nil
 }
 
-// GetModelByName returns a non-deleted model by API name, or ErrModelNotFound.
+// GetDisabledConnectionModel returns a provider connection's model that its
+// account disabled (soft-deleted), or ErrModelNotFound. A chat or job can still
+// name one, and is told it is disabled rather than routed elsewhere (ADR 0x027).
+func (d *Datastore) GetDisabledConnectionModel(ctx context.Context, id uuid.UUID) (*models.Model, error) {
+	row, err := d.dbClient.Model.Query().
+		Where(entmodel.ID(id), entmodel.Deleted(true), entmodel.ConnectionIDNotNil()).
+		Only(ctx)
+	if ent.IsNotFound(err) {
+		return nil, ErrModelNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return toModelModel(row), nil
+}
+
+// ModelRowExists reports whether a model row exists at all, deleted or not. A
+// catalog model is only ever soft-deleted; a provider connection's is deleted
+// with its connection, so a missing row means one of those is gone.
+func (d *Datastore) ModelRowExists(ctx context.Context, id uuid.UUID) (bool, error) {
+	return d.dbClient.Model.Query().Where(entmodel.ID(id)).Exist(ctx)
+}
+
+// GetModelByName returns a non-deleted catalog model by API name, or
+// ErrModelNotFound. Only the deployment's own catalog: a name is not unique
+// across accounts' provider connections (ADR 0x027), so those are found by id.
 func (d *Datastore) GetModelByName(ctx context.Context, name string) (*models.Model, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {

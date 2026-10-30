@@ -19,6 +19,9 @@ type modelResolverOptions struct {
 	// prefix specific enough to produce a single match; if multiple models share the prefix the
 	// resolver returns an "ambiguous" error.
 	AllowPrefixMatch bool
+	// UserID, when set, adds the models the account enabled on its own provider
+	// connections (ADR 0x027). Another account's connection models are never found.
+	UserID uuid.UUID
 }
 
 // resolveModelByReference resolves a model from a raw string by trying, in order:
@@ -36,27 +39,25 @@ func (a *Agent) resolveModelByReference(ctx context.Context, raw string, opts mo
 		return nil, fmt.Errorf("model %q not found", query)
 	}
 
-	if parsed, err := uuid.Parse(query); err == nil {
-		model, getErr := a.ds.GetModel(ctx, parsed)
-		if getErr == nil {
-			return model, nil
-		}
-		if !errors.Is(getErr, datastore.ErrModelNotFound) {
-			return nil, fmt.Errorf("failed to get model: %w", getErr)
-		}
-	}
-
-	allModels, err := a.ds.ListModels(ctx)
+	allModels, err := a.modelsVisibleTo(ctx, opts.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models: %w", err)
 	}
 
+	if parsed, err := uuid.Parse(query); err == nil {
+		model, getErr := a.ds.GetModel(ctx, parsed)
+		if getErr == nil && (model.ConnectionID == nil || containsModel(allModels, model.ID)) {
+			return model, nil
+		}
+		if getErr != nil && !errors.Is(getErr, datastore.ErrModelNotFound) {
+			return nil, fmt.Errorf("failed to get model: %w", getErr)
+		}
+	}
+
 	var exactMatches []*models.Model
 	for _, m := range allModels {
-		if strings.EqualFold(m.Name, query) {
-			exactMatches = append(exactMatches, m)
-		}
-		if opts.AllowDisplayName && strings.EqualFold(m.DisplayName, query) {
+		// A model whose display name is its name matches once.
+		if strings.EqualFold(m.Name, query) || (opts.AllowDisplayName && strings.EqualFold(m.DisplayName, query)) {
 			exactMatches = append(exactMatches, m)
 		}
 	}
@@ -88,4 +89,22 @@ func (a *Agent) resolveModelByReference(ctx context.Context, raw string, opts mo
 	}
 
 	return nil, fmt.Errorf("model %q not found", query)
+}
+
+// modelsVisibleTo is the catalog, plus the account's own connection models when
+// userID is set.
+func (a *Agent) modelsVisibleTo(ctx context.Context, userID uuid.UUID) ([]*models.Model, error) {
+	if userID == uuid.Nil {
+		return a.ds.ListModels(ctx)
+	}
+	return a.ds.ListModelsForUser(ctx, userID)
+}
+
+func containsModel(list []*models.Model, id uuid.UUID) bool {
+	for _, m := range list {
+		if m.ID == id {
+			return true
+		}
+	}
+	return false
 }

@@ -147,6 +147,7 @@ func (a *Agent) createAgentJobTool(ctx context.Context, chat *models.Chat, args 
 		m, err := a.resolveModelByReference(ctx, chosenModel, modelResolverOptions{
 			AllowDisplayName: true,
 			AllowPrefixMatch: true,
+			UserID:           chat.UserID,
 		})
 		if err != nil {
 			return marshalAgentJobToolResult(createAgentJobToolResult{

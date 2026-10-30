@@ -142,6 +142,12 @@ type Agent struct {
 	// keyResolver answers which vendors the caller holds a key for; nil (an Agent
 	// built without NewAgent) treats every registered image generator as usable.
 	keyResolver providerkeys.Resolver
+	// connections finds the provider connection behind a model from OpenRouter,
+	// a local server or a Custom server, and connectionClient is the HTTP client
+	// its calls go through (ADR 0x027). Nil connections makes such a model
+	// unusable rather than misrouted.
+	connections      ConnectionResolver
+	connectionClient *http.Client
 	// pushEnabled is true when a real push implementation was wired (a non-nil
 	// PushNotifier). It lets the completion hook skip spawning a detached
 	// goroutine when push is off (the open-source default).
@@ -222,6 +228,12 @@ type AgentConfig struct {
 	// receive this client) — a one-off openai.NewClient(...) elsewhere would be
 	// an accidental escape hatch from the no-egress guarantee.
 	HTTPClient *http.Client
+	// Connections finds the provider connection behind a model that has one
+	// (ADR 0x027), and ConnectionHTTPClient is the client for those calls: like
+	// HTTPClient (the network block, timeouts, instrumentation) but without the
+	// credential transport, since a connection carries its own key.
+	Connections          ConnectionResolver
+	ConnectionHTTPClient *http.Client
 	// LLMBackend selects assistant generation: "vendor" (default, real
 	// providers), "mock" (in-process MockAdapter), or "local" (a real local
 	// OpenAI-compatible server).
@@ -377,6 +389,8 @@ func NewAgent(ds *datastore.Datastore, logger *zap.Logger, tel *telemetry.Teleme
 
 	a.imageGenerators = buildImageGenerators(cfg, a)
 	a.keyResolver = cfg.KeyResolver
+	a.connections = cfg.Connections
+	a.connectionClient = cfg.ConnectionHTTPClient
 
 	if a.localLLM {
 		// LocalProvider deliberately does NOT use cfg.HTTPClient: under
@@ -851,6 +865,10 @@ type chatContext struct {
 	offeredTools  map[string]struct{}
 	model         string
 	modelProvider string
+	// connection is the provider connection the model is reached through, for a
+	// model from OpenRouter, a local server or a Custom server (ADR 0x027); nil
+	// for a model on a built-in provider's own path.
+	connection *ConnectionEndpoint
 	// modelSubscriptionTier is the model's raw SubscriptionTier string
 	// ("low"/"medium"/"high"/"ultra"), passed to the meter, which may use it to
 	// decide access. Empty means unknown. NoopMeter ignores it.
@@ -1172,6 +1190,14 @@ func (a *Agent) dispatchAssistantGeneration(ctx context.Context, userID uuid.UUI
 	if a.localLLM {
 		return a.generateAssistantForMessageLocal(ctx, userID, chatJob, chatMessage, chatCtx, modelContext)
 	}
+	// A provider connection's model goes by the API its connection speaks, never by
+	// its provider name (ADR 0x027).
+	if chatCtx.connection != nil {
+		if chatCtx.connection.Flavor == ConnectionFlavorAnthropic {
+			return a.generateAssistantForMessageClaude(ctx, userID, chatJob, chatMessage, chatCtx, modelContext)
+		}
+		return a.generateAssistantForMessageOpenAIChatCompletions(ctx, userID, chatJob, chatMessage, chatCtx, modelContext)
+	}
 	if models.IsGeminiModel(chatCtx.modelProvider, chatCtx.model) {
 		return a.generateAssistantForMessageGemini(ctx, userID, chatJob, chatMessage, chatCtx, modelContext)
 	}
@@ -1457,6 +1483,9 @@ func (a *Agent) generateAssistantForMessageOpenAI(ctx context.Context, userID uu
 // but use a different client (a.ZAIProvider) and do not support Anthropic-native tool
 // features (web search, beta MCP).
 func (a *Agent) claudeProviderForModel(chatCtx *chatContext) (prov *provider.ClaudeProvider, nativeAnthropic bool, err error) {
+	if chatCtx.connection != nil {
+		return a.connectionClaudeProvider(chatCtx.connection), false, nil
+	}
 	if models.IsZAIModel(chatCtx.modelProvider, chatCtx.model) {
 		if a.ZAIProvider == nil {
 			return nil, false, fmt.Errorf("z.ai model %q requested but ZAI_API_KEY is not configured", chatCtx.model)
@@ -1672,6 +1701,9 @@ func visionRenderContext(chatCtx *chatContext, modelContext *provider.ModelConte
 }
 
 func (a *Agent) openAIChatCompletionsAdapter(chatCtx *chatContext, params openai.ChatCompletionNewParams, functionTools []openai.ChatCompletionToolUnionParam, disabledTools map[string]bool) (provider.AgentAdapter, error) {
+	if chatCtx.connection != nil {
+		return provider.NewConnectionChatAdapter(a.connectionChatProvider(chatCtx.connection), params, functionTools, disabledTools), nil
+	}
 	switch models.ProviderForModel(chatCtx.modelProvider, chatCtx.model) {
 	case models.ModelProviderMistral:
 		if a.MistralProvider == nil {
@@ -2198,6 +2230,15 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 	if err := a.assertUserCanRunChatModel(ctx, userID, parentChat, resolved.provider); err != nil {
 		return nil, err
 	}
+	connection, err := a.connectionFor(ctx, userID, resolved.row)
+	if err != nil {
+		return nil, err
+	}
+	// A connection model's tool support is what its provider reported or the
+	// account confirmed; offering tools to a model without it only fails the turn.
+	if connection != nil && !resolved.row.ToolSupport {
+		parentChat.ToolsEnabled = false
+	}
 
 	// ExpressionsEnabled comes from the personality edge already eager-loaded by GetChat.
 	expressionsEnabled := parentChat.PersonalityExpressionsEnabled
@@ -2214,6 +2255,7 @@ func (a *Agent) prepareChatContext(ctx context.Context, userID uuid.UUID, chatMe
 		memoryEnrichmentFailed: memoryEnrichmentFailed,
 		model:                  resolved.name,
 		modelProvider:          resolved.provider,
+		connection:             connection,
 		modelSubscriptionTier:  resolved.subscriptionTier,
 		modelVisionSupport:     resolved.visionSupport,
 		modelReasoningSupport:  resolved.reasoningSupport,
@@ -2237,6 +2279,8 @@ type resolvedChatModel struct {
 	// reasoningSupport is the model row's reasoning support (its admin override, or derived);
 	// "" when there is no row, and derived from the name.
 	reasoningSupport models.ReasoningSupport
+	// row is the model's row, nil when there is none.
+	row *models.Model
 }
 
 // resolveModelForChat loads the effective model for a chat turn. model_id on the
@@ -2261,6 +2305,10 @@ func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat
 	if a.ds != nil && parentChat.ModelID != uuid.Nil {
 		if m, err := a.ds.GetModel(ctx, parentChat.ModelID); err == nil {
 			dbModel = m
+		} else if disabled, derr := a.ds.GetDisabledConnectionModel(ctx, parentChat.ModelID); derr == nil {
+			// A connection model the account turned off: the turn fails clearly
+			// (connectionFor) instead of being sent somewhere by its name.
+			return resolvedChatModel{name: disabled.Name, provider: disabled.Provider, row: disabled}
 		} else {
 			a.logger.Warn("chat model_id lookup failed; falling back to model_name or default",
 				zap.String("chat_id", parentChat.ID.String()),
@@ -2283,16 +2331,32 @@ func (a *Agent) resolveModelForChat(ctx context.Context, parentChat *models.Chat
 		}
 	}
 	if dbModel != nil {
+		provider := string(models.ProviderForModel(dbModel.Provider, dbModel.Name))
+		if provider == "" && dbModel.ConnectionID != nil {
+			// A provider connection's model (ADR 0x027): keep its preset, so it is
+			// reached through its connection and never falls through to another path.
+			provider = dbModel.Provider
+		}
 		return resolvedChatModel{
 			name:             dbModel.Name,
-			provider:         string(models.ProviderForModel(dbModel.Provider, dbModel.Name)),
+			provider:         provider,
 			subscriptionTier: dbModel.SubscriptionTier,
 			visionSupport:    dbModel.VisionSupport,
 			reasoningSupport: dbModel.ReasoningSupport,
+			row:              dbModel,
 		}
 	}
 
 	if name := strings.TrimSpace(parentChat.ModelName); name != "" {
+		// A chat whose model row went away (a provider connection's, deleted with its
+		// connection) keeps only the name, which no catalog knows: use the default
+		// model rather than send that name to a provider it never belonged to.
+		if parentChat.ModelID == uuid.Nil && models.CatalogModel(name) == nil {
+			a.logger.Info("chat's model is gone; using the default model",
+				zap.String("chat_id", parentChat.ID.String()),
+				zap.String("model_name", name))
+			return fallback(defaultModel)
+		}
 		return fallback(name)
 	}
 

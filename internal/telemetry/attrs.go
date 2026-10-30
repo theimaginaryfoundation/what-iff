@@ -63,7 +63,9 @@ const (
 	DependencyQwen      = "qwen"
 	DependencyXiaomi    = "xiaomi"
 	DependencyLocalLLM  = "local_llm"
-	DependencyOther     = "other"
+	// DependencyOpenRouter labels calls through an OpenRouter provider connection.
+	DependencyOpenRouter = "openrouter"
+	DependencyOther      = "other"
 )
 
 // Token types for AttrGenAITokenType. "input" and "output" are semconv; cached input and
