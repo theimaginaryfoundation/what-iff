@@ -4,6 +4,8 @@ import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ModelPickerComponent } from './model-picker.component';
 import { Model } from '../../../../core/models/model.model';
 import { ModelFavoritesService } from '../../services/model-favorites.service';
+import { ProviderKeysService } from '../../../../core/services/provider-keys.service';
+import { ProfileSettingsModalService } from '../../../profile-settings/profile-settings-modal.service';
 
 /**
  * Signal-backed stand-in for ModelFavoritesService. The real service reads and writes
@@ -265,3 +267,80 @@ describe('ModelPickerComponent', () => {
         expect(names).toEqual(['GPT-4o Mini']);
     });
 });
+
+describe('ModelPickerComponent with provider connections (ADR 0x027)', () => {
+    let fixture: ComponentFixture<ModelPickerComponent>;
+    let favorites: FakeModelFavoritesService;
+    let settings: ProfileSettingsModalService;
+    const accountsSupplyKeys = signal(true);
+    const models: Model[] = [
+        { id: 'm1', name: 'gpt-5.1', display_name: 'GPT-5.1', description: '', provider: 'openai', tool_support: true },
+        { id: 'm2', name: 'qwen3:4b', display_name: 'qwen3:4b', description: '', provider: 'ollama', tool_support: true, connection_id: 'c-desk', connection_name: 'Desk Ollama' },
+        { id: 'm3', name: 'qwen3:4b', display_name: 'qwen3:4b', description: '', provider: 'ollama', tool_support: true, connection_id: 'c-attic', connection_name: 'Attic Ollama' },
+    ];
+
+    async function render(list: Model[]): Promise<HTMLElement> {
+        await TestBed.configureTestingModule({
+            imports: [ModelPickerComponent],
+            providers: [
+                provideZonelessChangeDetection(),
+                ProfileSettingsModalService,
+                { provide: ModelFavoritesService, useClass: FakeModelFavoritesService },
+                { provide: ProviderKeysService, useValue: { accountsSupplyKeys } },
+            ],
+        }).compileComponents();
+        favorites = TestBed.inject(ModelFavoritesService) as unknown as FakeModelFavoritesService;
+        settings = TestBed.inject(ProfileSettingsModalService);
+        fixture = TestBed.createComponent(ModelPickerComponent);
+        fixture.componentRef.setInput('models', list);
+        fixture.componentRef.setInput('selectedId', null);
+        fixture.detectChanges();
+        fixture.nativeElement.querySelector('.model-picker__trigger').click();
+        fixture.detectChanges();
+        return fixture.nativeElement as HTMLElement;
+    }
+
+    const texts = (el: HTMLElement, selector: string) =>
+        [...el.querySelectorAll(selector)].map(e => e.textContent?.replace(/\s+/g, ' ').trim());
+
+    beforeEach(() => accountsSupplyKeys.set(true));
+
+    it('lists each server of the same kind as its own group, by name', async () => {
+        const el = await render(models);
+        expect(texts(el, '.model-picker__vendor-label')).toEqual(['GPT', 'Attic Ollama', 'Desk Ollama']);
+    });
+
+    it('opens a group with only that connection\'s models', async () => {
+        const el = await render(models);
+        fixture.componentInstance.chooseGroup('connection:c-desk');
+        fixture.detectChanges();
+        expect(fixture.componentInstance.providerModels().map(m => m.id)).toEqual(['m2']);
+        expect(texts(el, '.model-picker__back')).toEqual(['← Desk Ollama']);
+    });
+
+    it('says which connection a model comes from where there is no group heading', async () => {
+        const el = await render(models);
+        favorites.toggle('m1');
+        favorites.toggle('m2');
+        favorites.toggle('m3');
+        fixture.componentInstance.setViewMode('favorites');
+        fixture.detectChanges();
+        expect(texts(el, '.model-picker__source')).toEqual(['· Attic Ollama', '· Desk Ollama']);
+    });
+
+    it('says when there are no models, and leads to choosing them', async () => {
+        const el = await render([]);
+        expect(el.querySelector('[data-testid="model-picker-empty"]')?.textContent).toContain('No models yet');
+        (el.querySelector('[data-testid="model-picker-manage"]') as HTMLButtonElement).click();
+        expect(settings.openState()).toBe(true);
+        expect(settings.activeTab()).toBe('providers');
+        expect(fixture.componentInstance.open()).toBe(false);
+    });
+
+    it('offers no model choosing where the deployment supplies keys', async () => {
+        accountsSupplyKeys.set(false);
+        const el = await render(models);
+        expect(el.querySelector('[data-testid="model-picker-manage"]')).toBeNull();
+    });
+});
+

@@ -1,5 +1,5 @@
 import { Model } from '../../../core/models/model.model';
-import { groupModelsByTier, modelProvider, providerLabel, sortedProviders } from './model-picker.helpers';
+import { groupModelsByTier, modelGroupKey, modelGroupLabel, modelProvider, providerLabel, sortedGroups, sortedProviders } from './model-picker.helpers';
 
 function makeModel(overrides: Partial<Model> = {}): Model {
     return {
@@ -73,4 +73,38 @@ describe('model-picker.helpers', () => {
             expect(groups[1].rank).toBeNull();
         });
     });
+
+    describe('groups (ADR 0x027)', () => {
+        const model = (id: string, provider: string, connection?: { id: string; name?: string }): Model => ({
+            id, name: id, display_name: id, description: '', provider, tool_support: true,
+            ...(connection ? { connection_id: connection.id, connection_name: connection.name } : {}),
+        });
+
+        it("puts a built-in provider's catalog and connection models in one group", () => {
+            const models = [model('gpt-catalog', 'openai'), model('gpt-mine', 'openai', { id: 'c-openai', name: 'OpenAI' })];
+            expect(sortedGroups(models)).toEqual([{ key: 'openai', label: 'GPT' }]);
+        });
+
+        it('gives every other connection its own group, by its name, after the built-ins', () => {
+            const models = [
+                model('qwen', 'custom', { id: 'c2', name: 'My server' }),
+                model('llama', 'ollama', { id: 'c1', name: 'Desk Ollama' }),
+                model('phi', 'custom', { id: 'c3', name: 'Attic box' }),
+                model('claude', 'anthropic'),
+            ];
+            expect(sortedGroups(models)).toEqual([
+                { key: 'anthropic', label: 'Claude' },
+                { key: 'connection:c3', label: 'Attic box' },
+                { key: 'connection:c1', label: 'Desk Ollama' },
+                { key: 'connection:c2', label: 'My server' },
+            ]);
+        });
+
+        it("falls back to the preset's label when a connection's name is missing", () => {
+            const m = model('x', 'openrouter', { id: 'c9' });
+            expect(modelGroupKey(m)).toBe('connection:c9');
+            expect(modelGroupLabel(m)).toBe('OpenRouter');
+        });
+    });
 });
+

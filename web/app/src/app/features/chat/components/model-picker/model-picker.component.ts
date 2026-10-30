@@ -11,10 +11,12 @@ import {
 import {
   ModelTierGroup,
   groupModelsByTier,
-  modelProvider,
-  providerLabel as formatProviderLabel,
-  sortedProviders,
+  isConnectionGroup,
+  modelGroupKey,
+  sortedGroups,
 } from '../../helpers/model-picker.helpers';
+import { ProviderKeysService } from '../../../../core/services/provider-keys.service';
+import { ProfileSettingsModalService } from '../../../profile-settings/profile-settings-modal.service';
 import { ModelFavoritesService } from '../../services/model-favorites.service';
 import { EyeOffIconComponent } from '../../../../shared/ui/icons/icons';
 import { TooltipDirective } from '../../../../shared/ui/tooltip/tooltip.directive';
@@ -136,15 +138,22 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
               }
               @default {
                 @if (vendorStep() === 'vendor') {
-                  @for (provider of availableProviders(); track provider) {
+                  @for (group of availableGroups(); track group.key) {
                     <button
                       type="button"
                       class="model-picker__vendor"
-                      (click)="chooseProvider(provider)"
+                      (click)="chooseGroup(group.key)"
                     >
-                      <span class="model-picker__vendor-label">{{ providerLabel(provider) }}</span>
-                      <span class="model-picker__vendor-count">{{ providerModelCount(provider) }} {{ providerModelCount(provider) === 1 ? 'model' : 'models' }}</span>
+                      <span class="model-picker__vendor-label">{{ group.label }}</span>
+                      <span class="model-picker__vendor-count">{{ groupModelCount(group.key) }} {{ groupModelCount(group.key) === 1 ? 'model' : 'models' }}</span>
                     </button>
+                  } @empty {
+                    <p class="model-picker__empty" data-testid="model-picker-empty">
+                      No models yet.
+                      @if (canChooseModels()) {
+                        Choose the ones you'll chat with from your providers.
+                      }
+                    </p>
                   }
                 } @else {
                   @for (model of providerModels(); track model.id) {
@@ -154,6 +163,11 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
               }
             }
           </div>
+          @if (canChooseModels()) {
+            <button type="button" class="model-picker__manage" data-testid="model-picker-manage" (click)="chooseModels()">
+              Choose models…
+            </button>
+          }
         </div>
       }
     </div>
@@ -168,6 +182,10 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
           (click)="choose(model)"
         >
           <span class="model-picker__option-name" [uiTooltip]="model.display_name" truncatedOnly>{{ model.display_name }}</span>
+          @if (viewMode() !== 'vendor' && sourceLabel(model); as source) {
+            <!-- Flat views have no group heading: say which connection serves it. -->
+            <span class="model-picker__source">· {{ source }}</span>
+          }
           @if (lacksVision(model)) {
             <span class="model-picker__no-vision" role="img" [attr.aria-label]="noVisionLabel" [uiTooltip]="noVisionLabel">
               <ui-eye-off-icon [size]="14" />
@@ -391,6 +409,26 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
       font-weight: 700;
     }
 
+    .model-picker__source {
+      color: var(--color-text-muted);
+      flex-shrink: 0;
+      font-size: 0.6875rem;
+      white-space: nowrap;
+    }
+
+    .model-picker__manage {
+      background: none;
+      border: 0;
+      border-top: 1px solid var(--color-border-base);
+      color: var(--color-accent);
+      cursor: pointer;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.5rem 0.75rem;
+      text-align: left;
+      width: 100%;
+    }
+
     .model-picker__vendor-count {
       color: var(--color-text-muted);
       font-size: 0.6875rem;
@@ -429,6 +467,11 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
 export class ModelPickerComponent {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly favoritesService = inject(ModelFavoritesService);
+  private readonly providerKeys = inject(ProviderKeysService);
+  private readonly settings = inject(ProfileSettingsModalService);
+
+  /** Accounts that bring their own keys choose their models; elsewhere the deployment does. */
+  readonly canChooseModels = computed(() => this.providerKeys.accountsSupplyKeys());
   readonly models = input<readonly Model[]>([]);
   readonly selectedId = input<string | null>(null);
   readonly disabled = input(false);
@@ -436,7 +479,8 @@ export class ModelPickerComponent {
   readonly open = signal(false);
   readonly viewMode = signal<ViewMode>('vendor');
   readonly vendorStep = signal<VendorStep>('vendor');
-  readonly activeProvider = signal<string | null>(null);
+  /** The vendor view's open group (modelGroupKey), or null on the list of groups. */
+  readonly activeGroup = signal<string | null>(null);
   readonly tierStep = signal<TierStep>('tier');
   readonly activeTier = signal<TierKey | null>(null);
   readonly menuPlacement = signal<'above' | 'below'>('above');
@@ -444,16 +488,13 @@ export class ModelPickerComponent {
   readonly sortedModels = computed(() => sortedModelsByName(this.models()));
   /** The API sends tiers only where a deployment bills by them; without any, there is no Tier tab. */
   readonly hasTiers = computed(() => this.models().some(model => modelTierRank(model.subscription_tier) != null));
-  readonly availableProviders = computed(() => {
-    const providers = this.sortedModels().map(model => modelProvider(model));
-    return sortedProviders(providers);
-  });
+  readonly availableGroups = computed(() => sortedGroups(this.sortedModels()));
   readonly providerModels = computed(() => {
-    const provider = this.activeProvider();
-    if (!provider) {
+    const group = this.activeGroup();
+    if (!group) {
       return [];
     }
-    return this.sortedModels().filter(model => modelProvider(model) === provider);
+    return this.sortedModels().filter(model => modelGroupKey(model) === group);
   });
   readonly tierGroups = computed<ModelTierGroup[]>(() => groupModelsByTier(this.models()));
   readonly tierModels = computed(() => {
@@ -481,8 +522,8 @@ export class ModelPickerComponent {
     if (this.viewMode() === 'tier') {
       return this.activeTierLabel();
     }
-    const provider = this.activeProvider();
-    return provider ? formatProviderLabel(provider) : 'Vendors';
+    const group = this.activeGroup();
+    return (group && this.availableGroups().find(g => g.key === group)?.label) || 'Vendors';
   });
   private readonly favoriteIdSet = computed(() => this.favoritesService.favoriteIds());
   /**
@@ -493,7 +534,10 @@ export class ModelPickerComponent {
   readonly favoritesError = computed(() => this.favoritesService.error());
   readonly favoriteModels = computed(() => {
     const ids = this.favoriteIdSet();
-    return this.models().filter(model => ids.has(model.id)).sort(compareModelsByName);
+    // The same model from two connections sorts by where it comes from.
+    return this.models()
+      .filter(model => ids.has(model.id))
+      .sort((a, b) => compareModelsByName(a, b) || (a.connection_name ?? '').localeCompare(b.connection_name ?? ''));
   });
 
   isFavorite(model: Model): boolean {
@@ -536,12 +580,19 @@ export class ModelPickerComponent {
     return this.lacksVision(model) ? `${name}: can't see images` : name;
   });
 
-  providerLabel(provider: string): string {
-    return formatProviderLabel(provider);
+  groupModelCount(group: string): number {
+    return this.sortedModels().filter(model => modelGroupKey(model) === group).length;
   }
 
-  providerModelCount(provider: string): number {
-    return this.sortedModels().filter(model => modelProvider(model) === provider).length;
+  /** The connection a model comes from, where that isn't a built-in provider. */
+  sourceLabel(model: Model): string | null {
+    return isConnectionGroup(model) ? model.connection_name || null : null;
+  }
+
+  /** Opens Profile & Settings on the Providers tab, where the account chooses its models. */
+  chooseModels(): void {
+    this.close();
+    this.settings.open('providers');
   }
 
   toggle(): void {
@@ -555,14 +606,14 @@ export class ModelPickerComponent {
     this.open.set(true);
   }
 
-  chooseProvider(provider: string): void {
-    this.activeProvider.set(provider);
+  chooseGroup(group: string): void {
+    this.activeGroup.set(group);
     this.vendorStep.set('model');
   }
 
   backToProviders(): void {
     this.vendorStep.set('vendor');
-    this.activeProvider.set(null);
+    this.activeGroup.set(null);
   }
 
   chooseTier(group: ModelTierGroup): void {
@@ -600,7 +651,7 @@ export class ModelPickerComponent {
   private close(): void {
     this.open.set(false);
     this.vendorStep.set('vendor');
-    this.activeProvider.set(null);
+    this.activeGroup.set(null);
     this.tierStep.set('tier');
     this.activeTier.set(null);
   }
@@ -616,11 +667,11 @@ export class ModelPickerComponent {
   private resetVendorStep(): void {
     const current = this.selectedModel();
     if (current) {
-      this.activeProvider.set(modelProvider(current));
+      this.activeGroup.set(modelGroupKey(current));
       this.vendorStep.set('model');
       return;
     }
-    this.activeProvider.set(null);
+    this.activeGroup.set(null);
     this.vendorStep.set('vendor');
   }
 

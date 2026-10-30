@@ -13224,6 +13224,8 @@ export interface components {
              * @description The provider connection serving the model (ADR 0x027). Absent for the deployment's own catalog; present only on the account's own models.
              */
             connection_id?: string;
+            /** @description That connection's name, as the account named it (e.g. "Desk Ollama"), in the account's model list; absent where connection_id is. */
+            connection_name?: string;
         };
         /**
          * @example pending

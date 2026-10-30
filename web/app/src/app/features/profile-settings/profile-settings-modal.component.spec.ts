@@ -262,6 +262,19 @@ describe('ProfileSettingsModalComponent (open-source profile-only)', () => {
     expect(modelSelect.selectedOptions[0]?.textContent).toContain('Current default is unavailable');
   });
 
+  it("names the connection a model comes from in the default-model list", async () => {
+    modelService.getModels.mockReturnValue(
+      of([
+        { id: 'model-1', name: 'gpt-5.1', display_name: 'GPT-5.1', description: '', provider: 'openai', tool_support: true },
+        { id: 'model-2', name: 'qwen3:4b', display_name: 'qwen3:4b', description: '', provider: 'ollama', tool_support: true, connection_id: 'c1', connection_name: 'Desk Ollama' },
+      ]),
+    );
+    const fixture = TestBed.createComponent(ProfileSettingsModalComponent);
+    await openAndWaitForProfile(fixture);
+    const options = [...(fixture.nativeElement.querySelector('[data-testid="default-model-select"]') as HTMLSelectElement).options].map(o => o.textContent?.trim());
+    expect(options).toEqual(['GPT-5.1', 'qwen3:4b · Desk Ollama']);
+  });
+
   // ADR 0x027: on an install without a model catalog an account has no default until it enables a model.
   it('says there is no default model yet, and where to choose one', async () => {
     preferencesService.getUserPreferences.mockReturnValue(
