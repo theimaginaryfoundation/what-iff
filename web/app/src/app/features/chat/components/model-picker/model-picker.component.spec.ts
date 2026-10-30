@@ -226,6 +226,7 @@ describe('ModelPickerComponent', () => {
         expect(tiers.some(text => text.includes('Tier 3'))).toBe(true);
 
         const tier1 = [...fixture.nativeElement.querySelectorAll('.model-picker__vendor')].find((n: Element) => n.textContent?.includes('Tier 1')) as HTMLButtonElement;
+        expect(tier1.querySelector('.model-picker__vendor-count')?.textContent?.trim()).toBe('1 model');
         tier1.click();
         fixture.detectChanges();
 

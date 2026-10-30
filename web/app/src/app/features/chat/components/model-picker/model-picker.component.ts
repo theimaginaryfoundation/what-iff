@@ -79,7 +79,7 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
               [attr.aria-selected]="viewMode() === 'vendor'"
               (click)="setViewMode('vendor')"
             >
-              Vendor
+              Provider
             </button>
             @if (hasTiers()) {
               <button
@@ -127,7 +127,7 @@ type ViewMode = 'favorites' | 'vendor' | 'tier';
                       (click)="chooseTier(group)"
                     >
                       <span class="model-picker__vendor-label">{{ group.label }}</span>
-                      <span class="model-picker__vendor-count">{{ group.models.length }} models</span>
+                      <span class="model-picker__vendor-count">{{ group.models.length }} {{ group.models.length === 1 ? 'model' : 'models' }}</span>
                     </button>
                   }
                 } @else {
@@ -656,7 +656,7 @@ export class ModelPickerComponent {
     this.activeTier.set(null);
   }
 
-  /** Pick the default view on open: Favorites when the personality has any, else Vendor. */
+  /** Pick the default view on open: Favorites when the personality has any, else Provider. */
   private resetPickerStep(): void {
     this.resetVendorStep();
     this.resetTierStep();
