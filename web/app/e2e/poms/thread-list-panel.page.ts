@@ -1,4 +1,5 @@
 import type { Locator, Page, Response } from '@playwright/test';
+import { AppShell } from './app-shell.page';
 import { ConfirmationModal } from './confirmation.modal';
 import { MUTATION_ACK_TIMEOUT } from '../timeouts';
 
@@ -307,12 +308,21 @@ export class ThreadListPanel {
     await this.page.getByRole('button', { name: 'Cancel', exact: true }).click();
   }
 
-  /** Opens the Import & Export screen from the panel header action. */
+  /**
+   * Opens the Import & Export screen from the panel header action. Below
+   * 768px the panel hides that action, so phones use the sidebar's.
+   */
   async openImport(): Promise<void> {
+    await this.panel.waitFor();
     const headerButton = this.panel.getByRole('button', {
       name: 'Import threads',
     });
-    await headerButton.click();
+    if (await headerButton.isVisible()) {
+      await headerButton.click();
+    } else {
+      await new AppShell(this.page).prepareSidebar();
+      await this.page.locator('aside.app-sidebar').getByRole('button', { name: 'Import threads' }).click();
+    }
     await this.page.waitForURL(/\/data$/);
   }
 }
