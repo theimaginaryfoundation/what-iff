@@ -202,8 +202,10 @@ func (l *Lister) List(ctx context.Context, t Target) ([]ListedModel, error) {
 	return out, nil
 }
 
-// vendorPrefix is the "Anthropic: " OpenRouter puts before a model's name. The
-// picker already groups models by where they come from, so it only adds length.
+// vendorPrefix is a short "Something: " before a listed model's name, such as
+// the "Anthropic: " OpenRouter adds. The picker already says where a model
+// comes from, so the prefix only adds length. It applies only to names a
+// provider lists, never to a name the account gave a model.
 var vendorPrefix = regexp.MustCompile(`^[^:/]{1,40}: `)
 
 // shortName is the name a model is offered under: the provider's own without a
@@ -213,7 +215,11 @@ var vendorPrefix = regexp.MustCompile(`^[^:/]{1,40}: `)
 func shortName(id, providerName string) string {
 	name := vendorPrefix.ReplaceAllString(strings.TrimSpace(providerName), "")
 	if name == "" {
-		name = strings.TrimSuffix(id[strings.LastIndex(id, "/")+1:], ":latest")
+		name = id
+		if i := strings.LastIndex(id, "/"); i >= 0 {
+			name = id[i+1:]
+		}
+		name = strings.TrimSuffix(name, ":latest")
 	}
 	if name == id {
 		return ""
