@@ -914,9 +914,10 @@ func (d *Datastore) ResolveDefaultModelName(ctx context.Context) string {
 // resolveDefaultModelTx resolves the model to seed a new user's preferences with,
 // inside the user-creation transaction. Preference order: admin-configured default,
 // then the env/const named default, then any active model, all from the
-// deployment's own catalog. It returns nil, with no error, when the deployment
-// has no catalog: the account then has no default until it enables a model on
-// one of its connections (ADR 0x027).
+// deployment's own catalog. With no catalog it returns an ent not-found error,
+// as it always has, so a caller that needs a default still fails cleanly; account
+// creation treats that as "no default yet", until the account enables a model
+// on one of its connections (ADR 0x027).
 func resolveDefaultModelTx(ctx context.Context, tx *ent.Tx) (*ent.Model, error) {
 	if m, err := tx.Model.Query().
 		Where(entmodel.IsDefault(true), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
@@ -930,11 +931,7 @@ func resolveDefaultModelTx(ctx context.Context, tx *ent.Tx) (*ent.Model, error) 
 	if !ent.IsNotFound(err) {
 		return m, err
 	}
-	m, err = tx.Model.Query().
+	return tx.Model.Query().
 		Where(entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		First(ctx)
-	if ent.IsNotFound(err) {
-		return nil, nil
-	}
-	return m, err
 }

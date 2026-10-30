@@ -2386,14 +2386,27 @@ func (a *Agent) fallbackModel(ctx context.Context, userID uuid.UUID, byName func
 	if a.ds == nil {
 		return byName(defaultModel)
 	}
+	// A missing model or preference is an answer ("no model"); anything else is
+	// the datastore failing, logged so it isn't mistaken for an account with no model.
+	logUnexpected := func(what string, err error) {
+		if err != nil && !errors.Is(err, datastore.ErrModelNotFound) {
+			a.logger.Warn("default model lookup failed", zap.String("lookup", what), zap.String("user_id", userID.String()), zap.Error(err))
+		}
+	}
 	if userID != uuid.Nil {
-		if prefs, err := a.ds.GetUserPreferences(ctx, userID); err == nil && prefs.DefaultModelID != uuid.Nil {
-			if m, err := a.ds.GetModel(ctx, prefs.DefaultModelID); err == nil {
+		prefs, err := a.ds.GetUserPreferences(ctx, userID)
+		logUnexpected("preferences", err)
+		if err == nil && prefs.DefaultModelID != uuid.Nil {
+			m, err := a.ds.GetModel(ctx, prefs.DefaultModelID)
+			logUnexpected("account default", err)
+			if err == nil {
 				return resolvedFromRow(m)
 			}
 		}
 	}
-	if m, err := a.ds.GetModelByName(ctx, a.ds.ResolveDefaultModelName(ctx)); err == nil {
+	m, err := a.ds.GetModelByName(ctx, a.ds.ResolveDefaultModelName(ctx))
+	logUnexpected("deployment default", err)
+	if err == nil {
 		return resolvedFromRow(m)
 	}
 	return resolvedChatModel{}

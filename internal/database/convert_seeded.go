@@ -139,9 +139,11 @@ func (c *seedConversion) usersOf(ctx context.Context, modelID uuid.UUID) ([]uuid
 	if err != nil {
 		return nil, err
 	}
+	seen := map[uuid.UUID]bool{}
 	for _, ids := range [][]uuid.UUID{byDefault, byChat, byJob, byFavorite} {
 		for _, id := range ids {
-			if !slices.Contains(users, id) {
+			if !seen[id] {
+				seen[id] = true
 				users = append(users, id)
 			}
 		}
@@ -246,6 +248,11 @@ func (c *seedConversion) clearRest(ctx context.Context, seeded []uuid.UUID) erro
 // repointFavorites replaces each account's seeded favourites with their
 // converted models, and drops the ones that were not converted.
 func (c *seedConversion) repointFavorites(ctx context.Context, seeded []*ent.Model) error {
+	// Favourites are stored as id strings: the seeded models by that string.
+	seededIDs := make(map[string]uuid.UUID, len(seeded))
+	for _, m := range seeded {
+		seededIDs[m.ID.String()] = m.ID
+	}
 	prefs, err := c.tx.UserPreference.Query().WithUser().All(ctx)
 	if err != nil {
 		return fmt.Errorf("read favourite models: %w", err)
@@ -254,7 +261,7 @@ func (c *seedConversion) repointFavorites(ctx context.Context, seeded []*ent.Mod
 		if p.Edges.User == nil || len(p.FavoriteModelIds) == 0 {
 			continue
 		}
-		favorites, changed := c.convertFavorites(p.Edges.User.ID, p.FavoriteModelIds, seeded)
+		favorites, changed := c.convertFavorites(p.Edges.User.ID, p.FavoriteModelIds, seededIDs)
 		if !changed {
 			continue
 		}
@@ -265,17 +272,17 @@ func (c *seedConversion) repointFavorites(ctx context.Context, seeded []*ent.Mod
 	return nil
 }
 
-func (c *seedConversion) convertFavorites(userID uuid.UUID, favorites []string, seeded []*ent.Model) ([]string, bool) {
+func (c *seedConversion) convertFavorites(userID uuid.UUID, favorites []string, seededIDs map[string]uuid.UUID) ([]string, bool) {
 	out := make([]string, 0, len(favorites))
 	changed := false
 	for _, id := range favorites {
-		i := slices.IndexFunc(seeded, func(m *ent.Model) bool { return m.ID.String() == id })
-		if i < 0 {
+		seededID, isSeeded := seededIDs[id]
+		if !isSeeded {
 			out = append(out, id)
 			continue
 		}
 		changed = true
-		if to, ok := c.converted[seeded[i].ID][userID]; ok && !slices.Contains(out, to.String()) {
+		if to, ok := c.converted[seededID][userID]; ok && !slices.Contains(out, to.String()) {
 			out = append(out, to.String())
 		}
 	}
