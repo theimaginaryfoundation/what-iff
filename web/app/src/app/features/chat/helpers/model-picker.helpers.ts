@@ -118,7 +118,7 @@ function titleCaseProvider(provider: string): string {
 }
 
 /**
- * A group in the picker's vendor view. The built-in providers each have one,
+ * A group in the picker's provider view. The built-in providers each have one,
  * holding the deployment's models and the account's own from its connection to
  * that provider, since they go through the same path and key. Every other
  * connection (OpenRouter, a server on this computer, Custom) is its own group,

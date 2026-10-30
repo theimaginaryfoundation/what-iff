@@ -523,7 +523,7 @@ export class ModelPickerComponent {
       return this.activeTierLabel();
     }
     const group = this.activeGroup();
-    return (group && this.availableGroups().find(g => g.key === group)?.label) || 'Vendors';
+    return (group && this.availableGroups().find(g => g.key === group)?.label) || 'Providers';
   });
   private readonly favoriteIdSet = computed(() => this.favoritesService.favoriteIds());
   /**
