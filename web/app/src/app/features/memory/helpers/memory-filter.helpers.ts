@@ -4,8 +4,11 @@ import { MemoryFilters, MemoryProvenance, MemorySort } from '../../../core/model
 
 export type MemoryScopeFilter = 'all' | 'user' | 'chat';
 export type MemoryLevelFilter = 'all' | 'global' | 'personality' | 'thread' | 'summary';
-/** Active / Archived are status filters; Summaries is a dedicated view of checkpoint summaries. */
-export type MemoryStatusFilter = 'active' | 'inactive' | 'summaries';
+/**
+ * Active / Archived are status filters; Summaries is a dedicated view of checkpoint summaries, and
+ * Entities shows the agent-written entity wiki (ADR 0x034) instead of memories.
+ */
+export type MemoryStatusFilter = 'active' | 'inactive' | 'summaries' | 'entities';
 /** `all` sends no provenance filter; `external` lists what was learned in relay threads (Discord, Buzz or Slack). */
 export type MemoryProvenanceFilter = 'all' | MemoryProvenance;
 /** Persona-filter sentinel for unpinned User memories shared across all personas. */
@@ -106,7 +109,8 @@ export function toApiFilters(filters: MemoryViewFilters): MemoryFilters {
     return api;
   }
 
-  api.status = filters.status;
+  // The Entities tab loads entities, not memories (MemoryViewService.load skips it).
+  api.status = filters.status === 'entities' ? 'active' : filters.status;
   if (filters.scope === 'user') {
     api.scope = 'User';
   }
@@ -168,7 +172,7 @@ function normalizeLevel(raw: unknown): MemoryLevelFilter {
 }
 
 function normalizeStatus(raw: unknown): MemoryStatusFilter {
-  if (raw === 'inactive' || raw === 'summaries') return raw;
+  if (raw === 'inactive' || raw === 'summaries' || raw === 'entities') return raw;
   return 'active';
 }
 

@@ -130,6 +130,14 @@ describe('MemoryViewService', () => {
     expect(filters?.status).toBe('active');
   });
 
+  it('loads no memories on the Entities tab', () => {
+    vi.mocked(memoryApi.getMemories).mockClear();
+    service.setFilters({ status: 'entities' });
+    expect(memoryApi.getMemories).not.toHaveBeenCalled();
+    expect(service.memories()).toEqual([]);
+    expect(service.loading()).toBe(false);
+  });
+
   it('toggles selected ids', () => {
     service.toggleSelection('m-1');
     expect(service.selectedIds()).toEqual(['m-1']);
