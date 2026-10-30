@@ -387,6 +387,22 @@ func TestPresetKeysURLs(t *testing.T) {
 
 // OpenRouter reports each model's name, parameters and input modalities;
 // most servers report only the id, which leaves capabilities unknown.
+func TestShortName(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ id, provider, want string }{
+		{"anthropic/claude-sonnet-4.6", "Anthropic: Claude Sonnet 4.6", "Claude Sonnet 4.6"},
+		{"hf.co/Qwen/Qwen3-0.6B-GGUF:latest", "", "Qwen3-0.6B-GGUF"},
+		{"library/llama3.2:3b", "", "llama3.2:3b"},
+		{"qwen3:latest", "", "qwen3"},
+		{"gpt-5.4", "", ""},
+		{"qwen3:0.6b", "", ""},
+		{"qwen3-0.6b", "Qwen3 0.6B", "Qwen3 0.6B"},
+		{"claude-a", "Claude A", "Claude A"},
+	} {
+		require.Equal(t, tc.want, shortName(tc.id, tc.provider), "%s / %q", tc.id, tc.provider)
+	}
+}
+
 func TestListedFromOpenAI_ReadsReportedCapabilities(t *testing.T) {
 	m := listedFromOpenAI("openai/gpt-4o", `{"id":"openai/gpt-4o","name":"OpenAI: GPT-4o","supported_parameters":["tools","temperature"],"architecture":{"input_modalities":["text","image"]}}`)
 	require.Equal(t, "OpenAI: GPT-4o", m.DisplayName)
