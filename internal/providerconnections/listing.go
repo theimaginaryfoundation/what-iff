@@ -188,6 +188,9 @@ func (l *Lister) List(ctx context.Context, t Target) ([]ListedModel, error) {
 	if t.LMStudioDetails {
 		out = l.addLMStudioDetails(ctx, t.BaseURL, t.Key, out)
 	}
+	if t.CannotChat != nil {
+		out = slices.DeleteFunc(out, func(m ListedModel) bool { return t.CannotChat(m.ID) })
+	}
 	if out == nil {
 		out = []ListedModel{}
 	}

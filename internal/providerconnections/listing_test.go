@@ -295,7 +295,10 @@ func TestPresetTargets(t *testing.T) {
 	require.Equal(t, openRouterKeyCheckURL, openrouter.target(openrouter.Flavor, openrouter.BaseURL, "k").KeyCheckURL)
 
 	openai, _ := findPreset(presets, "openai")
-	require.Equal(t, Target{Flavor: FlavorOpenAI, Key: "k"}, openai.target(openai.Flavor, "", "k"), "no quirks")
+	openaiTarget := openai.target(openai.Flavor, "", "k")
+	require.NotNil(t, openaiTarget.CannotChat, "its listing drops models that can't chat")
+	openaiTarget.CannotChat = nil
+	require.Equal(t, Target{Flavor: FlavorOpenAI, Key: "k"}, openaiTarget, "and no other quirks")
 }
 
 // A provider's error can echo what it was sent. The cause is logged, so the
@@ -415,6 +418,58 @@ func TestWithKnownCapabilities(t *testing.T) {
 	got = withKnownCapabilities(custom, FlavorOpenAI, []ListedModel{{ID: "x", ToolSupport: &no}})
 	require.False(t, *got[0].ToolSupport, "what the provider reported wins")
 	require.Nil(t, got[0].VisionSupport)
+}
+
+// A built-in provider's model the app already knows is prefilled with what it
+// knows; the same id from another provider is not.
+func TestWithKnownCapabilities_FromTheBuiltInModels(t *testing.T) {
+	known := models.CatalogModel("gpt-5.1")
+	require.NotNil(t, known)
+	openai := Preset{ID: "openai", Builtin: true}
+	got := withKnownCapabilities(openai, FlavorOpenAI, []ListedModel{{ID: "gpt-5.1"}, {ID: "gpt-9-unknown"}})
+	require.Equal(t, known.ToolSupport, *got[0].ToolSupport)
+	require.Equal(t, known.VisionSupport, *got[0].VisionSupport)
+	require.Nil(t, got[1].ToolSupport, "a model the app doesn't know stays unknown")
+
+	openrouter := Preset{ID: PresetOpenRouter}
+	got = withKnownCapabilities(openrouter, FlavorOpenAI, []ListedModel{{ID: "gpt-5.1"}})
+	require.Nil(t, got[0].ToolSupport, "only for the provider's own connection")
+}
+
+// OpenAI's listing includes models that can't chat; they are not offered.
+// The ids are from a real listing (October 2026).
+func TestOpenAICannotChat(t *testing.T) {
+	for _, id := range []string{
+		"babbage-002", "davinci-002", "text-embedding-3-small", "omni-moderation-latest", "tts-1-hd",
+		"whisper-1", "gpt-image-2", "chatgpt-image-latest", "sora-2-pro", "gpt-audio-mini",
+		"gpt-realtime-2.1-mini", "gpt-live-1", "gpt-transcribe", "gpt-4o-mini-transcribe",
+		"gpt-4o-mini-tts-2025-12-15", "gpt-3.5-turbo-instruct-0914",
+	} {
+		require.True(t, openAICannotChat(id), id)
+	}
+	for _, id := range []string{
+		"gpt-5.4", "gpt-5.4-mini", "gpt-5.6-luna", "gpt-6-astra", "gpt-4o", "gpt-4.1-nano", "gpt-3.5-turbo",
+		"o3", "o4-mini", "o3-deep-research", "gpt-5-pro", "gpt-5.1-codex-max", "gpt-5-search-api", "chat-latest",
+	} {
+		require.False(t, openAICannotChat(id), id)
+	}
+}
+
+func TestList_DropsModelsTheProviderSaysCannotChat(t *testing.T) {
+	srv := openAIServer(t, &seen{})
+	got, err := NewLister(nil, false).List(context.Background(), Target{
+		Flavor: FlavorOpenAI, BaseURL: srv.URL + "/v1",
+		CannotChat: func(id string) bool { return id == "zeta" },
+	})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, "alpha", got[0].ID)
+
+	presets := Presets(map[models.ModelProvider]string{models.ModelProviderOpenAI: "https://api.openai.com/v1"}, "localhost")
+	openai, _ := findPreset(presets, "openai")
+	require.NotNil(t, openai.target(FlavorOpenAI, openai.BaseURL, "k").CannotChat, "OpenAI's preset filters its listing")
+	openrouter, _ := findPreset(presets, PresetOpenRouter)
+	require.Nil(t, openrouter.target(FlavorOpenAI, openrouter.BaseURL, "k").CannotChat, "others are offered as listed")
 }
 
 // Ollama's OpenAI-compatible list reports only ids; its native /api/show says
