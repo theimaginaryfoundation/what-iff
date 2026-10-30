@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/theimaginaryfoundation/what-iff/internal/agent/mcpclient"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
@@ -155,10 +156,11 @@ func (a *Agent) executeToolUses(ctx context.Context, chatCtx *chatContext, round
 		progress = chatCtx.toolProgress
 	}
 	results := make([]provider.ToolResult, len(uses))
+	toolErrs := make([]error, len(uses))
 	generatedAttachments := make([][]*models.FileAttachment, len(uses))
 	for i, use := range uses {
 		progress.Started(round, use)
-		results[i], generatedAttachments[i] = a.executeToolUseWithRecovery(ctx, chatCtx, use)
+		results[i], generatedAttachments[i], toolErrs[i] = a.executeToolUseWithRecovery(ctx, chatCtx, use)
 		progress.Finished(results[i])
 		a.notifyToolUseGeneratedAttachments(chatCtx, use, generatedAttachments[i])
 		results[i].Images = toolResultImagesFromAttachments(generatedAttachments[i])
@@ -167,11 +169,7 @@ func (a *Agent) executeToolUses(ctx context.Context, chatCtx *chatContext, round
 	modelToolCalls := make([]*models.ToolCall, len(results))
 	for i, r := range results {
 		if r.IsErr {
-			a.logger.Error("tool call failed",
-				zap.String("tool_id", r.ID),
-				zap.String("tool_name", uses[i].Name),
-				zap.String("error", r.Output),
-			)
+			a.logToolFailure(chatCtx, round, uses[i], r, toolErrs[i])
 		}
 		tc := &models.ToolCall{
 			ToolName:  uses[i].Name,
@@ -205,12 +203,46 @@ func (a *Agent) notifyToolUseGeneratedAttachments(chatCtx *chatContext, use prov
 // errToolPanicked stands in for a tool call that panicked, for its error.type label.
 var errToolPanicked = errors.New("tool panicked")
 
+// logToolFailure records one failed tool call.
+//
+// A failure an MCP server reported itself (isError: true) is the model's to read and recover
+// from, not a fault here, so it is a Warn and carries only metadata that helps debug a customer's
+// report: which tool, which round, which chat, and how big the exchange was. Never its text or
+// its input: both come from the server or the user and can hold personal data. (The text is still
+// stored on the tool call's ToolError, which is how the person sees what happened.)
+//
+// Every other failure (dispatch refusals, handler errors, transport errors) is unchanged.
+func (a *Agent) logToolFailure(chatCtx *chatContext, round int, use provider.ToolUse, r provider.ToolResult, err error) {
+	var reported *mcpclient.ToolReportedError
+	if !errors.As(err, &reported) {
+		a.logger.Error("tool call failed",
+			zap.String("tool_id", r.ID),
+			zap.String("tool_name", use.Name),
+			zap.String("error", r.Output),
+		)
+		return
+	}
+	fields := []zap.Field{
+		zap.String("tool_id", r.ID),
+		zap.String("tool_name", use.Name),
+		zap.Int("round", round),
+		zap.Int("input_bytes", len(use.Input)),
+		zap.Int("error_bytes", len(reported.Message)),
+	}
+	if chatCtx != nil && chatCtx.chat != nil {
+		fields = append(fields,
+			zap.String("chat_id", chatCtx.chat.ID.String()),
+			zap.String("user_id", chatCtx.chat.UserID.String()))
+	}
+	a.logger.Warn("mcp tool reported a failure", fields...)
+}
+
 // executeToolUseWithRecovery executes a single tool use with panic recovery, timing it on
-// telemetry.ToolDuration under a bounded tool label (see toolMetricName).
-func (a *Agent) executeToolUseWithRecovery(ctx context.Context, chatCtx *chatContext, use provider.ToolUse) (result provider.ToolResult, attachments []*models.FileAttachment) {
+// telemetry.ToolDuration under a bounded tool label (see toolMetricName). toolErr is why the call
+// failed (nil on success); the result carries the model-facing text.
+func (a *Agent) executeToolUseWithRecovery(ctx context.Context, chatCtx *chatContext, use provider.ToolUse) (result provider.ToolResult, attachments []*models.FileAttachment, toolErr error) {
 	result.ID = use.ID
 	done := a.metrics().Time(ctx, telemetry.ToolDuration, telemetry.AttrTool.String(toolMetricName(use.Name)))
-	var toolErr error
 	defer func() { done(toolErr) }()
 
 	func() {
@@ -240,7 +272,7 @@ func (a *Agent) executeToolUseWithRecovery(ctx context.Context, chatCtx *chatCon
 		}
 	}()
 
-	return result, attachments
+	return result, attachments, toolErr
 }
 
 func logInferenceCall(ctx context.Context, logger *zap.Logger, chatCtx *chatContext, adapter provider.AgentAdapter, round int) {

@@ -176,6 +176,12 @@ func (a *Agent) dispatchMCPToolUse(ctx context.Context, chatCtx *chatContext, us
 	if err != nil {
 		return "", nil, err
 	}
+	if err := out.Err(); err != nil {
+		// A tool-reported failure (isError) reaches the model as its error text and nothing else.
+		// Media in an error result is not kept: no handler returns attachments alongside an error,
+		// and keeping them would send them to the model, the sandbox turn files and the saved reply.
+		return "", nil, err
+	}
 	return out.Output, out.GeneratedAttachments, nil
 }
 
