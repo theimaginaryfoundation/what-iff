@@ -538,7 +538,10 @@ func (a *Agent) runSubagentChatCompletions(ctx context.Context, userID uuid.UUID
 		sv      models.SafetyViolationProvider
 	)
 	if caps.connection != nil {
-		adapter, _ = a.openAIChatCompletionsAdapter(renderCtx, params, functionTools, nil)
+		adapter, err = a.openAIChatCompletionsAdapter(renderCtx, params, functionTools, nil)
+		if err != nil {
+			return nil, err
+		}
 		_, sv = connectionLabels(caps.connection.Preset)
 	} else if models.IsGeminiModel(caps.Provider, modelName) {
 		if a.GeminiProvider == nil {
