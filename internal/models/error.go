@@ -88,6 +88,10 @@ const (
 	// model (disabling it, or removing its connection); it chooses another
 	// default first.
 	ErrCodeDefaultModelInUse = "default_model_in_use"
+	// ErrCodeNoModelSelected: the account has no model to run the turn on: the
+	// chat names none and the account has no default, since it has not enabled
+	// one yet.
+	ErrCodeNoModelSelected = "no_model_selected"
 )
 
 // AllErrorCodes is every code this API can emit. It is the source the
@@ -126,6 +130,7 @@ var AllErrorCodes = []string{
 	ErrCodeCustomAddressNotAllowed,
 	ErrCodeProviderConnectionExists,
 	ErrCodeDefaultModelInUse,
+	ErrCodeNoModelSelected,
 }
 
 // genericErrorCodes maps HTTP statuses to their generic code.

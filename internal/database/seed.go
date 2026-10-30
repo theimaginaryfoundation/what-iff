@@ -229,12 +229,14 @@ func CreateOrPromoteAdmin(ctx context.Context, client *ent.Client, logger *zap.L
 	if err != nil {
 		return AdminProvisionNone, fmt.Errorf("admin role not found; run seeding (EnsureSeedData) first: %w", err)
 	}
+	// The deployment's default model, if it has a catalog; without one the admin,
+	// like any account, has no default until it enables a model (ADR 0x027).
 	defaultModelName := envOrDefault("DEFAULT_MODEL_NAME", appmodels.DefaultModelName)
 	defaultModel, err := client.Model.Query().
 		Where(model.Name(defaultModelName), model.Deleted(false), model.ConnectionIDIsNil()).
 		Only(ctx)
-	if err != nil {
-		return AdminProvisionNone, fmt.Errorf("default model %q not found; run seeding (EnsureSeedData) first: %w", defaultModelName, err)
+	if err != nil && !ent.IsNotFound(err) {
+		return AdminProvisionNone, fmt.Errorf("read default model %q: %w", defaultModelName, err)
 	}
 	return createOrPromoteAdmin(ctx, client, logger, defaultModel, adminRole, email, password)
 }
@@ -397,11 +399,13 @@ func createOrPromoteAdmin(ctx context.Context, client *ent.Client, logger *zap.L
 	}
 
 	// Create user preferences for admin
-	_, err = tx.UserPreference.Create().
+	prefsCreate := tx.UserPreference.Create().
 		SetUserID(adminUser.ID).
-		SetModelID(defaultModel.ID).
-		SetTheme(userpreference.ThemeDark).
-		Save(ctx)
+		SetTheme(userpreference.ThemeDark)
+	if defaultModel != nil {
+		prefsCreate.SetModelID(defaultModel.ID)
+	}
+	_, err = prefsCreate.Save(ctx)
 	if err != nil {
 		logger.Error("failed to create admin preferences", zap.Error(err))
 		if rerr := tx.Rollback(); rerr != nil {

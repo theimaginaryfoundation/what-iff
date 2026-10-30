@@ -150,7 +150,11 @@ func (s *Store) SetModels(ctx context.Context, userID uuid.UUID, conn *ent.Provi
 			}
 			continue
 		}
-		if err := enableModel(ctx, tx, conn, c); err != nil {
+		id, err := enableModel(ctx, tx, conn, c)
+		if err != nil {
+			return err
+		}
+		if err := defaultIfNone(ctx, tx, userID, id); err != nil {
 			return err
 		}
 	}
@@ -160,7 +164,20 @@ func (s *Store) SetModels(ctx context.Context, userID uuid.UUID, conn *ent.Provi
 	return nil
 }
 
-func enableModel(ctx context.Context, tx *ent.Tx, conn *ent.ProviderConnection, c ModelChoice) error {
+// defaultIfNone makes modelID the account's default model when it has none,
+// so the first model an account enables becomes its default (ADR 0x027).
+func defaultIfNone(ctx context.Context, tx *ent.Tx, userID, modelID uuid.UUID) error {
+	if _, err := tx.UserPreference.Update().
+		Where(userpreference.HasUserWith(user.ID(userID)), userpreference.DefaultModelIsNil()).
+		SetDefaultModel(modelID).
+		Save(ctx); err != nil {
+		return fmt.Errorf("set the default model: %w", err)
+	}
+	return nil
+}
+
+// enableModel creates or brings back a model on the connection and returns its ID.
+func enableModel(ctx context.Context, tx *ent.Tx, conn *ent.ProviderConnection, c ModelChoice) (uuid.UUID, error) {
 	displayName := strings.TrimSpace(c.DisplayName)
 	if displayName == "" {
 		displayName = c.ID
@@ -178,12 +195,13 @@ func enableModel(ctx context.Context, tx *ent.Tx, conn *ent.ProviderConnection, 
 			SetProvider(entmodel.Provider(conn.Preset)).
 			SetToolSupport(c.ToolSupport != nil && *c.ToolSupport).
 			SetVisionSupport(c.VisionSupport != nil && *c.VisionSupport)
-		if _, err := create.Save(ctx); err != nil {
-			return fmt.Errorf("enable model %s: %w", c.ID, err)
+		created, err := create.Save(ctx)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("enable model %s: %w", c.ID, err)
 		}
-		return nil
+		return created.ID, nil
 	case err != nil:
-		return fmt.Errorf("read model %s: %w", c.ID, err)
+		return uuid.Nil, fmt.Errorf("read model %s: %w", c.ID, err)
 	}
 	update := existing.Update().SetDeleted(false).SetDisplayName(displayName)
 	if c.ToolSupport != nil {
@@ -193,7 +211,7 @@ func enableModel(ctx context.Context, tx *ent.Tx, conn *ent.ProviderConnection, 
 		update.SetVisionSupport(*c.VisionSupport)
 	}
 	if _, err := update.Save(ctx); err != nil {
-		return fmt.Errorf("enable model %s: %w", c.ID, err)
+		return uuid.Nil, fmt.Errorf("enable model %s: %w", c.ID, err)
 	}
-	return nil
+	return existing.ID, nil
 }

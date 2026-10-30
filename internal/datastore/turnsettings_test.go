@@ -101,3 +101,18 @@ func TestUpdateUserPreferences_TurnSettings(t *testing.T) {
 	_, err = ds.UpdateUserPreferences(ctx, userID, models.UserPreferences{TurnSettingValues: models.TurnSettingValues{ReasoningEffort: &bad}})
 	require.ErrorIs(t, err, ErrInvalidRequestBody)
 }
+
+// An account with no default model (ADR 0x027) can still start a thread; it has
+// no model, and its turns use the account's default once there is one.
+func TestCreateChat_WithoutAnyModel(t *testing.T) {
+	ctx := context.Background()
+	ds, cleanup := newAgentJobTestDatastore(t)
+	defer cleanup()
+	userID := createAgentJobTestUser(t, ds)
+	_, err := ds.dbClient.UserPreference.Create().SetUserID(userID).Save(ctx)
+	require.NoError(t, err)
+
+	chat, err := ds.CreateChat(ctx, userID, models.Chat{Name: "first"})
+	require.NoError(t, err)
+	require.Equal(t, uuid.Nil, chat.ModelID)
+}

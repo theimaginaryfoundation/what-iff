@@ -95,7 +95,7 @@ func newFixture(t *testing.T) fixture {
 		`CREATE TABLE user_preferences (
 			id uuid PRIMARY KEY,
 			user_preferences uuid UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-			default_model uuid NOT NULL REFERENCES models(id)
+			default_model uuid NULL REFERENCES models(id)
 		)`,
 	} {
 		_, err := db.Exec(stmt)
@@ -506,6 +506,26 @@ func TestModels_TheDefaultModelIsProtected(t *testing.T) {
 	require.Equal(t, http.StatusConflict, rec.Code)
 	require.Equal(t, models.ErrCodeDefaultModelInUse, errorCode(t, rec))
 	require.Len(t, decode[[]Connection](t, f.call(t, f.alice, http.MethodGet, "/provider-connections", nil)), 1)
+}
+
+// An account with no default model gets the first model it enables as its
+// default; enabling more leaves it alone (ADR 0x027).
+func TestModels_TheFirstEnabledBecomesTheDefault(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	_, err := f.db.Exec(`INSERT INTO user_preferences (id, user_preferences) VALUES (?, ?)`, uuid.New(), f.alice)
+	require.NoError(t, err)
+	defaultModel := func() string {
+		var name sql.NullString
+		require.NoError(t, f.db.QueryRow(`SELECT m.name FROM user_preferences p LEFT JOIN models m ON m.id = p.default_model WHERE p.user_preferences = ?`, f.alice).Scan(&name))
+		return name.String
+	}
+
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "zeta", Enabled: true}).Code)
+	require.Equal(t, "zeta", defaultModel())
+
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID, ModelChoice{ID: "alpha", Enabled: true}).Code)
+	require.Equal(t, "zeta", defaultModel(), "a default already chosen stays")
 }
 
 // Removing a connection takes its models with it.

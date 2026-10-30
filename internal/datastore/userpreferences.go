@@ -152,7 +152,7 @@ func (d *Datastore) UpdateUserPreferences(ctx context.Context, userID uuid.UUID,
 		if err != nil {
 			return nil, err
 		}
-		if prefs.DefaultModelID != stored.DefaultModel {
+		if stored.DefaultModel == nil || prefs.DefaultModelID != *stored.DefaultModel {
 			if err := d.assertUserCanUseModel(ctx, tx, userID, prefs.DefaultModelID); err != nil {
 				if rerr := tx.Rollback(); rerr != nil {
 					d.logger.Error(i18n.T("tx.rollback_failed"), zap.Error(rerr))
