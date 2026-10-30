@@ -178,3 +178,6 @@ web/app/public/version.json
 /ent/*
 !/ent/schema
 !/ent/generate.go
+
+# embeddings-eval output: real conversation and memory text (cmd/embeddings-eval)
+embeval-out/
