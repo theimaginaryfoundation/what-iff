@@ -33,6 +33,13 @@ describe('model-picker.helpers', () => {
         expect(providerLabel('other')).toBe('Other');
     });
 
+    it('labels models from an account\'s own connections by their preset', () => {
+        expect(providerLabel('openrouter')).toBe('OpenRouter');
+        expect(providerLabel('ollama')).toBe('Ollama');
+        expect(providerLabel('lmstudio')).toBe('LM Studio');
+        expect(providerLabel('custom')).toBe('Custom');
+    });
+
     it('sorts known providers first and others alphabetically', () => {
         expect(sortedProviders(['google', 'anthropic', 'openai', 'zai', 'azure'])).toEqual([
             'openai',

@@ -43,6 +43,29 @@ export interface ProviderPreset {
 export interface ListedModel {
   id: string;
   display_name?: string;
+  /** Whether it takes tools, as the provider reports; absent when unknown. */
+  tool_support?: boolean;
+  /** Whether it takes images, as the provider reports; absent when unknown. */
+  vision_support?: boolean;
+}
+
+/**
+ * One of a connection's models as the account sees it
+ * (GET /provider-connections/{id}/models). An enabled model's capabilities are
+ * the ones the account confirmed; another's are what the provider reports.
+ */
+export interface ConnectionModel extends ListedModel {
+  enabled: boolean;
+}
+
+/** Enables or disables one model (PUT /provider-connections/{id}/models). */
+export interface ConnectionModelChoice {
+  id: string;
+  enabled: boolean;
+  display_name?: string;
+  /** Left out, an enabled model keeps its value and a new one starts off. */
+  tool_support?: boolean;
+  vision_support?: boolean;
 }
 
 /** What adding or editing a connection answers with. */

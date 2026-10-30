@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { test, expect, signInAs, authenticateAsNewUser, attachCoverage } from '../../../fixtures';
 import { deleteUser, type TestUser } from '../../../fixtures/api';
 import { ProfileSettingsModal, ProviderKeyPrompt, ProvidersTab } from '../../../poms';
-import { getProviderAccess } from '../../../sdk/client';
+import { getProviderAccess, listModels } from '../../../sdk/client';
 
 /**
  * Connecting providers (ADR 0x027): the first-run prompt, the Providers tab in
@@ -126,6 +126,48 @@ test('an account adds a server on this computer, renames it, and removes OpenAI'
   // With no OpenAI key left, closing settings brings the first-run prompt back.
   await settings.close();
   await expect(prompt.root).toBeVisible();
+
+  await attachCoverage(page, testInfo);
+});
+
+// Choosing a connection's models (ADR 0x027): straight from connecting, by search,
+// and into the model picker. Under the mock backend the server lists two models.
+test('an account chooses the models of a server it connected', { tag: ['@mock-only', '@mutates-account'] }, async ({ page, apiClient, authenticatedPage, testUser }, testInfo) => {
+  const providers = new ProvidersTab(authenticatedPage);
+  const settings = new ProfileSettingsModal(authenticatedPage);
+
+  await settings.open();
+  await providers.tab.click();
+
+  await test.step('connecting offers to choose the models it found', async () => {
+    await providers.addButton.click();
+    await providers.fill({ provider: 'Ollama', address: 'http://localhost:11501/v1', password: testUser.password });
+    await providers.submit();
+    await expect(providers.form).toContainText('Found 2 models');
+    await providers.chooseModelsFromForm();
+    await expect(providers.chooser).toContainText('Mock Large');
+    await expect(providers.chooser).toContainText('Mock Small');
+  });
+
+  await test.step('search narrows the list as you type', async () => {
+    await providers.searchModels('sma');
+    await expect(providers.modelCheckbox('Mock Small')).toBeVisible();
+    await expect(providers.modelCheckbox('Mock Large')).toHaveCount(0);
+    await expect(providers.chooser).toContainText('1 of 2');
+  });
+
+  await test.step('enabling one puts it in the model picker', async () => {
+    await providers.modelCheckbox('Mock Small').check();
+    await providers.chooser.getByRole('button', { name: 'Tools for Mock Small, not reported' }).click();
+    await providers.saveModels();
+    await expect(providers.chooser).toHaveCount(0);
+    await expect(providers.section).toContainText('Ollama: 1 model enabled.');
+    await expect(providers.row('ollama')).toContainText('1 model');
+
+    const mine = (await listModels(apiClient)).filter(m => m.name === 'mock-small' && m.connection_id);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ provider: 'ollama', tool_support: true });
+  });
 
   await attachCoverage(page, testInfo);
 });

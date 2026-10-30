@@ -52,6 +52,11 @@ const PROVIDER_LABELS: Record<string, string> = {
   deepseek: 'DeepSeek',
   qwen: 'Qwen',
   xiaomi: 'MiMo',
+  // Models enabled on an account's own connections (ADR 0x027), by the preset they came from.
+  openrouter: 'OpenRouter',
+  ollama: 'Ollama',
+  lmstudio: 'LM Studio',
+  custom: 'Custom',
   other: 'Other',
 };
 

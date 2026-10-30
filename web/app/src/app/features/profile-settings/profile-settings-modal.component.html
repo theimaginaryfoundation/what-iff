@@ -128,13 +128,21 @@
               uiTooltip="Model new threads start with; you can switch it in any thread"
               (change)="onDefaultModelChange($any($event.target).value)"
             >
-              @if (defaultModelUnlisted()) {
+              @if (!hasDefaultModel()) {
+                <option value="" disabled selected>None yet</option>
+              } @else if (defaultModelUnlisted()) {
                 <option value="" disabled selected>Current default is unavailable</option>
               }
               @for (model of models(); track model.id) {
                 <option [value]="model.id" [selected]="model.id === preferences()?.default_model_id">{{ model.display_name }}</option>
               }
             </select>
+            @if (!hasDefaultModel() && models().length === 0) {
+              <small data-testid="default-model-none">
+                Choose models from a provider first.
+                <button type="button" class="profile-settings__inline-link" (click)="setTab('providers')">Go to Providers</button>
+              </small>
+            }
           </label>
           <label class="profile-settings__field">
             <span>Default personality</span>
