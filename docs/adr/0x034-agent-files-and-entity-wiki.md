@@ -4,7 +4,7 @@
 - **Date:** 2026-10-30
 - **Deciders:** What Iff maintainers
 - **PR:** _this PR_
-- **Supersedes:** the experimental PRs #257 (`read_file` / `grep_files`) and #262 (revisioned `write_file` workspace), which are closed in favour of this restart.
+- **Supersedes:** the experimental PRs #257 (`read_file` / `grep_files`) and #262 (revisioned `write_file` workspace); this is a restart from scratch that takes their lessons, not their code.
 - **Builds on:** loadable built-in tools (`load_tools`, the catalog's `Loadable` flag), gallery folders, and memory pinning (`Personality.auto_pin_memories`).
 
 ## Context
