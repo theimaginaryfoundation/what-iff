@@ -50,6 +50,7 @@ func EnsureSeedData(ctx context.Context, client *ent.Client, logger *zap.Logger)
 		Where(
 			model.Name(defaultModelName),
 			model.Deleted(false),
+			model.ConnectionIDIsNil(),
 		).
 		Only(ctx); err != nil {
 		return errors.New("default model not found after seeding: " + defaultModelName)
@@ -64,7 +65,7 @@ func EnsureSeedData(ctx context.Context, client *ent.Client, logger *zap.Logger)
 
 func ensureAllModels(ctx context.Context, client *ent.Client, logger *zap.Logger) error {
 	for _, modelConfig := range appmodels.AvailableModels {
-		existing, err := client.Model.Query().Where(model.Name(modelConfig.Name)).Only(ctx)
+		existing, err := client.Model.Query().Where(model.Name(modelConfig.Name), model.ConnectionIDIsNil()).Only(ctx)
 		if err == nil {
 			if existing.Deleted {
 				logger.Info("Skipping seed for soft-deleted model", zap.String("name", modelConfig.Name))
@@ -230,7 +231,7 @@ func CreateOrPromoteAdmin(ctx context.Context, client *ent.Client, logger *zap.L
 	}
 	defaultModelName := envOrDefault("DEFAULT_MODEL_NAME", appmodels.DefaultModelName)
 	defaultModel, err := client.Model.Query().
-		Where(model.Name(defaultModelName), model.Deleted(false)).
+		Where(model.Name(defaultModelName), model.Deleted(false), model.ConnectionIDIsNil()).
 		Only(ctx)
 	if err != nil {
 		return AdminProvisionNone, fmt.Errorf("default model %q not found; run seeding (EnsureSeedData) first: %w", defaultModelName, err)

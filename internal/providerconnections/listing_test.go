@@ -2,6 +2,7 @@ package providerconnections
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -379,4 +380,168 @@ func TestPresetKeysURLs(t *testing.T) {
 	require.Equal(t, "https://platform.openai.com/api-keys", openai.KeysURL)
 	openrouter, _ := findPreset(presets, PresetOpenRouter)
 	require.Equal(t, "https://openrouter.ai/keys", openrouter.KeysURL)
+}
+
+// OpenRouter reports each model's name, parameters and input modalities;
+// most servers report only the id, which leaves capabilities unknown.
+func TestListedFromOpenAI_ReadsReportedCapabilities(t *testing.T) {
+	m := listedFromOpenAI("openai/gpt-4o", `{"id":"openai/gpt-4o","name":"OpenAI: GPT-4o","supported_parameters":["tools","temperature"],"architecture":{"input_modalities":["text","image"]}}`)
+	require.Equal(t, "OpenAI: GPT-4o", m.DisplayName)
+	require.True(t, *m.ToolSupport)
+	require.True(t, *m.VisionSupport)
+
+	m = listedFromOpenAI("text-only", `{"id":"text-only","supported_parameters":["temperature"],"architecture":{"input_modalities":["text"]}}`)
+	require.False(t, *m.ToolSupport, "reported as not supported")
+	require.False(t, *m.VisionSupport)
+
+	m = listedFromOpenAI("llama3", `{"id":"llama3","object":"model","owned_by":"library"}`)
+	require.Nil(t, m.ToolSupport, "not reported")
+	require.Nil(t, m.VisionSupport)
+	require.Empty(t, m.DisplayName)
+}
+
+func TestWithKnownCapabilities(t *testing.T) {
+	no := false
+	anthropic := Preset{ID: "anthropic"}
+	got := withKnownCapabilities(anthropic, FlavorAnthropic, []ListedModel{{ID: "claude"}})
+	require.True(t, *got[0].ToolSupport)
+	require.True(t, *got[0].VisionSupport)
+
+	custom := Preset{ID: PresetCustom}
+	got = withKnownCapabilities(custom, FlavorAnthropic, []ListedModel{{ID: "glm"}})
+	require.True(t, *got[0].ToolSupport, "Anthropic-compatible servers take tools")
+	require.Nil(t, got[0].VisionSupport, "images unknown for others")
+
+	got = withKnownCapabilities(custom, FlavorOpenAI, []ListedModel{{ID: "x", ToolSupport: &no}})
+	require.False(t, *got[0].ToolSupport, "what the provider reported wins")
+	require.Nil(t, got[0].VisionSupport)
+}
+
+// Ollama's OpenAI-compatible list reports only ids; its native /api/show says
+// what each model can do. A failed lookup leaves that model unknown.
+func TestList_OllamaDetails(t *testing.T) {
+	var s seen
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.record(r)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = fmt.Fprint(w, `{"object":"list","data":[{"id":"qwen3:0.6b","object":"model"},{"id":"llava:7b","object":"model"},{"id":"broken","object":"model"}]}`)
+		case "/api/show":
+			var body struct{ Model string }
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			switch body.Model {
+			case "qwen3:0.6b":
+				_, _ = fmt.Fprint(w, `{"capabilities":["completion","tools","thinking"]}`)
+			case "llava:7b":
+				_, _ = fmt.Fprint(w, `{"capabilities":["completion","vision"]}`)
+			default:
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	got, err := NewLister(nil, false).List(context.Background(), Target{Flavor: FlavorOpenAI, BaseURL: srv.URL + "/v1", OllamaDetails: true})
+	require.NoError(t, err, "a failed lookup does not fail the listing")
+	byID := map[string]ListedModel{}
+	for _, m := range got {
+		byID[m.ID] = m
+	}
+	require.True(t, *byID["qwen3:0.6b"].ToolSupport)
+	require.False(t, *byID["qwen3:0.6b"].VisionSupport)
+	require.False(t, *byID["llava:7b"].ToolSupport)
+	require.True(t, *byID["llava:7b"].VisionSupport)
+	require.Nil(t, byID["broken"].ToolSupport)
+	require.Contains(t, s.paths, "/api/show", "asked at the server's root, not under /v1")
+
+	ollama, _ := findPreset(Presets(nil, "localhost"), PresetOllama)
+	require.True(t, ollama.target(ollama.Flavor, ollama.BaseURL, "").OllamaDetails)
+}
+
+// lmStudioServer answers like LM Studio: an OpenAI-compatible list with ids
+// only, and a native list in version 1 or 0 (or none).
+func lmStudioServer(t *testing.T, native string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/v1/models":
+			_, _ = fmt.Fprint(w, `{"object":"list","data":[{"id":"qwen3-0.6b","object":"model"},{"id":"gemma-3-4b","object":"model"},{"id":"text-embedding-nomic-embed-text-v1.5","object":"model"}]}`)
+		case r.URL.Path == "/api/v1/models" && native == "v1":
+			_, _ = fmt.Fprint(w, `{"models":[
+				{"type":"llm","key":"qwen3-0.6b","display_name":"Qwen3 0.6B","capabilities":{"vision":false,"trained_for_tool_use":true}},
+				{"type":"llm","key":"gemma-3-4b","display_name":"Gemma 3 4B","capabilities":{"vision":true,"trained_for_tool_use":false}},
+				{"type":"embedding","key":"text-embedding-nomic-embed-text-v1.5","display_name":"Nomic Embed Text v1.5"}]}`)
+		case r.URL.Path == "/api/v0/models" && native == "v0":
+			_, _ = fmt.Fprint(w, `{"object":"list","data":[
+				{"id":"qwen3-0.6b","type":"llm","capabilities":["tool_use"]},
+				{"id":"gemma-3-4b","type":"vlm"},
+				{"id":"text-embedding-nomic-embed-text-v1.5","type":"embeddings"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestList_LMStudioDetails(t *testing.T) {
+	for _, version := range []string{"v1", "v0"} {
+		t.Run(version, func(t *testing.T) {
+			srv := lmStudioServer(t, version)
+			got, err := NewLister(nil, false).List(context.Background(), Target{Flavor: FlavorOpenAI, BaseURL: srv.URL + "/v1", LMStudioDetails: true})
+			require.NoError(t, err)
+			require.Len(t, got, 2, "the embedding model can't chat, so it is not offered")
+			byID := map[string]ListedModel{}
+			for _, m := range got {
+				byID[m.ID] = m
+			}
+			require.True(t, *byID["qwen3-0.6b"].ToolSupport)
+			require.False(t, *byID["qwen3-0.6b"].VisionSupport)
+			require.False(t, *byID["gemma-3-4b"].ToolSupport)
+			require.True(t, *byID["gemma-3-4b"].VisionSupport)
+			if version == "v1" {
+				require.Equal(t, "Qwen3 0.6B", byID["qwen3-0.6b"].DisplayName)
+			}
+		})
+	}
+
+	t.Run("no native list", func(t *testing.T) {
+		srv := lmStudioServer(t, "none")
+		got, err := NewLister(nil, false).List(context.Background(), Target{Flavor: FlavorOpenAI, BaseURL: srv.URL + "/v1", LMStudioDetails: true})
+		require.NoError(t, err)
+		require.Len(t, got, 3, "kept as listed")
+		require.Nil(t, got[0].ToolSupport)
+	})
+
+	lmstudio, _ := findPreset(Presets(nil, "localhost"), PresetLMStudio)
+	require.True(t, lmstudio.target(lmstudio.Flavor, lmstudio.BaseURL, "").LMStudioDetails)
+}
+
+// An Ollama embedding model lacks "completion", so it is not offered for chat.
+func TestList_OllamaDropsModelsThatCannotChat(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = fmt.Fprint(w, `{"object":"list","data":[{"id":"qwen3:0.6b","object":"model"},{"id":"nomic-embed-text","object":"model"}]}`)
+		case "/api/show":
+			var body struct{ Model string }
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.Model == "nomic-embed-text" {
+				_, _ = fmt.Fprint(w, `{"capabilities":["embedding"]}`)
+				return
+			}
+			_, _ = fmt.Fprint(w, `{"capabilities":["completion","tools"]}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	got, err := NewLister(nil, false).List(context.Background(), Target{Flavor: FlavorOpenAI, BaseURL: srv.URL + "/v1", OllamaDetails: true})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, "qwen3:0.6b", got[0].ID)
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	entmodel "github.com/theimaginaryfoundation/what-iff/ent/model"
+	"github.com/theimaginaryfoundation/what-iff/ent/providerconnection"
 	"github.com/theimaginaryfoundation/what-iff/ent/user"
 	"github.com/theimaginaryfoundation/what-iff/internal/i18n"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
@@ -39,6 +40,7 @@ func toModelModel(e *ent.Model) *models.Model {
 		SubscriptionTier:   string(e.SubscriptionTier),
 		Deleted:            e.Deleted,
 		IsDefault:          e.IsDefault,
+		ConnectionID:       e.ConnectionID,
 	}
 	if e.ReasoningSupportOverride != nil {
 		o := models.ReasoningSupport(*e.ReasoningSupportOverride)
@@ -122,8 +124,10 @@ func (d *Datastore) ListModels(ctx context.Context) ([]*models.Model, error) {
 		}
 	}()
 
+	// The deployment's own catalog only: models from an account's provider
+	// connections are that account's, and ListModelsForUser adds them.
 	dbModels, err := tx.Model.Query().
-		Where(entmodel.Deleted(false)).
+		Where(entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		All(ctx)
 	if err != nil {
 		d.logger.Error(i18n.T1("query.failed", "Entity", "models"), zap.Error(err))
@@ -167,8 +171,10 @@ func (d *Datastore) ListModelsDefault(ctx context.Context) ([]*models.Model, err
 	return filterVisibleModels(all, false), nil
 }
 
-// ListModelsForUser returns active catalog models visible to the given user.
-// Experimental providers are omitted unless enable_experimental_models is set.
+// ListModelsForUser returns active catalog models visible to the given user,
+// followed by the models the user enabled on their own provider connections
+// (ADR 0x027). Experimental providers are omitted unless
+// enable_experimental_models is set.
 // The gated set lives in models.IsExperimentalModelRecord (currently empty —
 // graduated vendors are generally available; add new dogfood vendors there).
 func (d *Datastore) ListModelsForUser(ctx context.Context, userID uuid.UUID) ([]*models.Model, error) {
@@ -184,10 +190,36 @@ func (d *Datastore) ListModelsForUser(ctx context.Context, userID uuid.UUID) ([]
 		d.logger.Error(i18n.T1("query.failed", "Entity", "user"), zap.Error(err))
 		return nil, err
 	}
-	if u.EnableExperimentalModels {
-		return all, nil
+	visible := all
+	if !u.EnableExperimentalModels {
+		visible = filterVisibleModels(all, false)
 	}
-	return filterVisibleModels(all, false), nil
+	own, err := d.connectionModels(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return append(visible, own...), nil
+}
+
+// connectionModels returns the enabled models on the user's own provider
+// connections.
+func (d *Datastore) connectionModels(ctx context.Context, userID uuid.UUID) ([]*models.Model, error) {
+	rows, err := d.dbClient.Model.Query().
+		Where(
+			entmodel.Deleted(false),
+			entmodel.HasConnectionWith(providerconnection.UserID(userID)),
+		).
+		Order(ent.Asc(entmodel.FieldDisplayName)).
+		All(ctx)
+	if err != nil {
+		d.logger.Error(i18n.T1("query.failed", "Entity", "models"), zap.Error(err))
+		return nil, err
+	}
+	out := make([]*models.Model, len(rows))
+	for i, row := range rows {
+		out[i] = toModelModel(row)
+	}
+	return out, nil
 }
 
 func assertUserCanUseModelTx(ctx context.Context, tx *ent.Tx, userID uuid.UUID, modelID uuid.UUID) error {
@@ -202,6 +234,20 @@ func assertUserCanUseModelTx(ctx context.Context, tx *ent.Tx, userID uuid.UUID, 
 			return ErrModelNotFound
 		}
 		return err
+	}
+	// A model from a provider connection is usable only by whoever owns the
+	// connection; to anyone else it does not exist.
+	if dbModel.ConnectionID != nil {
+		owned, err := tx.ProviderConnection.Query().
+			Where(providerconnection.ID(*dbModel.ConnectionID), providerconnection.UserID(userID)).
+			Exist(ctx)
+		if err != nil {
+			return err
+		}
+		if !owned {
+			return ErrModelNotFound
+		}
+		return nil
 	}
 	if !models.IsExperimentalModel(toModelModel(dbModel)) {
 		return nil
@@ -346,7 +392,7 @@ func (d *Datastore) GetModelByName(ctx context.Context, name string) (*models.Mo
 		return nil, ErrModelNotFound
 	}
 	dbModel, err := d.dbClient.Model.Query().
-		Where(entmodel.Name(name), entmodel.Deleted(false)).
+		Where(entmodel.Name(name), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
 	if err != nil {
 		if ent.IsNotFound(err) {
@@ -474,7 +520,7 @@ func (d *Datastore) AdminCreateModel(ctx context.Context, req models.CreateModel
 	}
 
 	existing, err := tx.Model.Query().
-		Where(entmodel.Name(name)).
+		Where(entmodel.Name(name), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
 	if err == nil {
 		if existing.Deleted {
@@ -606,7 +652,7 @@ func (d *Datastore) AdminUpdateModel(ctx context.Context, id uuid.UUID, req mode
 		}
 		if name != current.Name {
 			exists, qerr := tx.Model.Query().
-				Where(entmodel.Name(name), entmodel.Deleted(false)).
+				Where(entmodel.Name(name), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 				Exist(ctx)
 			if qerr != nil {
 				d.logger.Error(i18n.T1("query.failed", "Entity", "model"), zap.Error(qerr))
@@ -851,7 +897,7 @@ func resolveDefaultModelTx(ctx context.Context, tx *ent.Tx) (*ent.Model, error) 
 	}
 	name := getDefaultModelName()
 	m, err := tx.Model.Query().
-		Where(entmodel.Name(name), entmodel.Deleted(false)).
+		Where(entmodel.Name(name), entmodel.Deleted(false), entmodel.ConnectionIDIsNil()).
 		Only(ctx)
 	if ent.IsNotFound(err) {
 		return tx.Model.Query().

@@ -3596,7 +3596,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Remove a provider connection */
+        /**
+         * Remove a provider connection
+         * @description Its models go with it: a chat on one falls back to the default model, and a job on one fails with a clear error. Refused while one of them is the account's default model.
+         */
         delete: {
             parameters: {
                 query?: never;
@@ -3627,6 +3630,15 @@ export interface paths {
                 };
                 /** @description No such connection on this account */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description One of its models is the account's default; `code` is `default_model_in_use` */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -3745,8 +3757,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the models a connection's provider offers
-         * @description Asks the provider now, with the connection's stored key; nothing is cached.
+         * List the models a connection's provider offers, and which are enabled
+         * @description Asks the provider now, with the connection's stored key; nothing is cached. Each model says whether the account enabled it, and its tool and image support: the account's confirmed values for an enabled model, otherwise what the provider reports (or what is known about its API), absent when unknown. An enabled model the provider no longer lists still appears, so it can be turned off.
          */
         get: {
             parameters: {
@@ -3760,13 +3772,13 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Models, sorted by id */
+                /** @description Models, sorted by id, then any enabled ones the provider no longer lists */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ListedModel"][];
+                        "application/json": components["schemas"]["ConnectionModel"][];
                     };
                 };
                 /** @description Unauthorized */
@@ -3807,7 +3819,82 @@ export interface paths {
                 };
             };
         };
-        put?: never;
+        /**
+         * Enable or disable a connection's models
+         * @description Enabled models are offered in the account's model picker. Disabling one keeps its row, so a chat or job naming it fails clearly, and enabling it again brings it back. Changes nothing about where requests go, so it needs no password.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The connection */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SetConnectionModelsRequest"];
+                };
+            };
+            responses: {
+                /** @description The connection's enabled models */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConnectionModel"][];
+                    };
+                };
+                /** @description No models given, or a model id that is empty or over 200 characters */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such connection on this account */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Disabling the account's default model; `code` is `default_model_in_use` */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -13107,10 +13194,10 @@ export interface components {
             /** @description Description of the model's capabilities */
             description: string;
             /**
-             * @description Provider backend used for this model
+             * @description Provider backend used for this model: a built-in provider, or for a model from a provider connection, the preset the connection was made from.
              * @enum {string}
              */
-            provider: "openai" | "anthropic" | "zai" | "google" | "mistral" | "deepseek" | "qwen" | "xiaomi";
+            provider: "openai" | "anthropic" | "zai" | "google" | "mistral" | "deepseek" | "qwen" | "xiaomi" | "openrouter" | "ollama" | "lmstudio" | "custom";
             /** @description Whether the model supports tool/function calling */
             tool_support: boolean;
             /** @description Whether the model accepts image input. Images are stripped from the context sent to models without it. */
@@ -13129,6 +13216,11 @@ export interface components {
             deleted: boolean;
             /** @description Whether this is the application-wide default model (at most one active model) */
             is_default: boolean;
+            /**
+             * Format: uuid
+             * @description The provider connection serving the model (ADR 0x027). Absent for the deployment's own catalog; present only on the account's own models.
+             */
+            connection_id?: string;
         };
         /**
          * @example pending
@@ -13819,6 +13911,25 @@ export interface components {
             id: string;
             /** @description The provider's own name for it, when it gives one. */
             display_name?: string;
+            /** @description Whether it takes tools, as the provider reports; absent when unknown. */
+            tool_support?: boolean;
+            /** @description Whether it takes images, as the provider reports; absent when unknown. */
+            vision_support?: boolean;
+        };
+        /** @description One of a connection's models as the account sees it. */
+        ConnectionModel: components["schemas"]["ListedModel"] & {
+            enabled: boolean;
+        };
+        SetConnectionModelsRequest: {
+            models: {
+                id: string;
+                enabled: boolean;
+                display_name?: string;
+                /** @description Left out, an enabled model keeps its value, and a new one starts off. */
+                tool_support?: boolean;
+                /** @description Left out, an enabled model keeps its value, and a new one starts off. */
+                vision_support?: boolean;
+            }[];
         };
         ProviderConnected: {
             connection: components["schemas"]["ProviderConnection"];
@@ -15436,7 +15547,7 @@ export interface components {
          *       on a generic code — use the HTTP status instead.
          * @enum {string}
          */
-        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists";
+        ErrorCode: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "conflict" | "payload_too_large" | "unprocessable_entity" | "too_many_requests" | "internal_error" | "bad_gateway" | "service_unavailable" | "gateway_timeout" | "client_error" | "server_error" | "message_too_long" | "quota_exceeded" | "system_prompt_too_long" | "buzz_terms_required" | "provider_not_configured" | "reauthentication_required" | "provider_unreachable" | "provider_key_rejected" | "provider_incompatible" | "provider_unavailable" | "custom_address_not_allowed" | "provider_connection_exists" | "default_model_in_use";
         /** @description A single hit inside a search section. */
         SearchResult: {
             /**

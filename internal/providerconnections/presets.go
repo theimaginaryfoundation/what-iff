@@ -54,6 +54,13 @@ type Preset struct {
 	listURL      string
 	keyCheckURL  string
 	badKeyStatus int
+	// ollamaDetails asks Ollama's native API about each model after listing:
+	// its OpenAI-compatible list reports only ids, while /api/show reports the
+	// model's capabilities.
+	ollamaDetails bool
+	// lmStudioDetails reads LM Studio's native model list after listing: its
+	// OpenAI-compatible list reports only ids, and includes embedding models.
+	lmStudioDetails bool
 }
 
 // Where a provider's model list does not check the key, or reports a bad key
@@ -80,12 +87,18 @@ type Target struct {
 	// BadKeyStatus, when set, is a status the provider answers a bad key with
 	// besides 401 and 403.
 	BadKeyStatus int
+	// OllamaDetails, when set, reads each model's capabilities from Ollama's
+	// native /api/show after listing.
+	OllamaDetails bool
+	// LMStudioDetails, when set, reads every model's name, type and capabilities
+	// from LM Studio's native model list after listing.
+	LMStudioDetails bool
 }
 
 // target is the check for a connection made from p, speaking flavor at
 // address with key.
 func (p Preset) target(flavor Flavor, address, key string) Target {
-	t := Target{Flavor: flavor, BaseURL: address, Key: key, KeyCheckURL: p.keyCheckURL, BadKeyStatus: p.badKeyStatus}
+	t := Target{Flavor: flavor, BaseURL: address, Key: key, KeyCheckURL: p.keyCheckURL, BadKeyStatus: p.badKeyStatus, OllamaDetails: p.ollamaDetails, LMStudioDetails: p.lmStudioDetails}
 	if p.listURL != "" {
 		t.Flavor, t.BaseURL = p.listFlavor, p.listURL
 	}
@@ -153,6 +166,7 @@ func Presets(builtinURLs map[models.ModelProvider]string, localHost string) []Pr
 			BaseURL:         "http://" + localHost + ":11434/v1",
 			AddressEditable: true,
 			Local:           true,
+			ollamaDetails:   true,
 		},
 		Preset{
 			ID:              PresetLMStudio,
@@ -161,6 +175,7 @@ func Presets(builtinURLs map[models.ModelProvider]string, localHost string) []Pr
 			BaseURL:         "http://" + localHost + ":1234/v1",
 			AddressEditable: true,
 			Local:           true,
+			lmStudioDetails: true,
 		},
 		Preset{
 			ID:              PresetCustom,

@@ -44,6 +44,9 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     Per-chat loaded tools live in `chat_mcp_tool_states`: one row per connector, plus the built-in tools' row under the nil connector ID (`ListChatLoadedBuiltinTools` / `SetChatLoadedBuiltinTools`), which `ListChatMCPLoadedTools` leaves out.
     `RetainChatLoadedTools` prunes every row of a chat to a kept set in one transaction (the checkpoint's unload step), and `ChatToolNamesUsedSince` (`toolcall.go`) lists the tools a chat's messages called since a time.
   - Models: `model.go`.
+    `ListModels` is the deployment's own catalog (models with no `connection_id`); `ListModelsForUser` adds the models the user enabled on their own provider connections (ADR 0x027).
+    An account may enable a model with a catalog model's name, so lookups by name that mean the catalog (`GetModelByName`, a new account's default, the admin create and rename checks, and boot's seeding) look only at models with no connection.
+    `assertUserCanUseModelTx` treats a connection's model as nonexistent to anyone but the connection's owner, so it can't be set on another account's chat, job or preference.
   - Safety violations: `safety_violation_event.go`.
   - Tool call persistence: `toolcall.go`.
 - **`CheckUserPassword`** reports whether a password is the account's current one (false for identity-provider accounts); it backs `reauth`'s default confirmation.
@@ -223,6 +226,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 ## Testing
 
 - `chat_checkpoint_test.go`, `chatmessage_test.go`, `chatmessage_mark_read_test.go` — message and checkpoint behavior.
+- `model_connection_test.go` — the catalog excludes connection models, a user sees only their own, and the usage check refuses another account's.
 - `turnsettings_test.go` — threads store only explicit values, `InheritedTurnSettings` reads the personality and account default, explicit-only chat writes, and preference update semantics for the turn settings.
 - `memory_test.go`, `memory2_test.go`, `filechunk_test.go` — retrieval (including **`ListMemories`** excluding Summary unless `level=summary`), ZIP export/import helpers, full import count/persist coverage, and chunks.
 - `memory_embedding_test.go` — stale-embedding drop on content edits (not for Summary), missing-embedding queries, the `SetMemoryEmbedding` content guard and replace, non-content patches on untrimmed legacy rows, the dialect-gated row lock, and backfill batching, per-item retry, skipping a page of bad input, and early stop.

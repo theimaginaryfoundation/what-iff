@@ -56,7 +56,24 @@ func createAccountBackupTestSchema(t *testing.T, db *sql.DB) {
 			base_credits_per_slab integer NOT NULL DEFAULT 1,
 			subscription_tier text NOT NULL DEFAULT 'high',
 			deleted bool NOT NULL DEFAULT false,
-			is_default bool NOT NULL DEFAULT false
+			is_default bool NOT NULL DEFAULT false,
+			-- The provider connection serving the model (ADR 0x027); these tests
+			-- use only catalog models, so it stays NULL and needs no foreign key.
+			connection_id uuid NULL
+		)`,
+		`CREATE TABLE provider_connections (
+			id uuid PRIMARY KEY,
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL,
+			user_id uuid NULL,
+			preset text NOT NULL,
+			flavor text NOT NULL DEFAULT '',
+			name text NOT NULL,
+			base_url text NOT NULL DEFAULT '',
+			key text NOT NULL DEFAULT '',
+			hint text NOT NULL DEFAULT '',
+			source text NOT NULL DEFAULT '',
+			builtin text NULL
 		)`,
 		`CREATE TABLE user_preferences (
 			id uuid PRIMARY KEY,

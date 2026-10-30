@@ -1,11 +1,15 @@
 package providerconnections
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -36,6 +40,44 @@ type ListedModel struct {
 	ID string `json:"id"`
 	// DisplayName is the provider's own name for the model, when it gives one.
 	DisplayName string `json:"display_name,omitempty"`
+	// ToolSupport and VisionSupport are what the provider reports about the
+	// model, or nil where it reports nothing (ADR 0x027). OpenRouter reports
+	// both; most OpenAI-compatible servers report neither.
+	ToolSupport   *bool `json:"tool_support,omitempty"`
+	VisionSupport *bool `json:"vision_support,omitempty"`
+}
+
+// reportedCapabilities is the part of an OpenAI-compatible model entry that
+// some providers add beyond the id: OpenRouter's name, supported parameters and
+// input modalities.
+type reportedCapabilities struct {
+	Name                string   `json:"name"`
+	SupportedParameters []string `json:"supported_parameters"`
+	Architecture        struct {
+		InputModalities []string `json:"input_modalities"`
+	} `json:"architecture"`
+}
+
+// listedFromOpenAI reads one OpenAI-compatible model entry, with whatever
+// capabilities the provider reports about it.
+func listedFromOpenAI(id, raw string) ListedModel {
+	m := ListedModel{ID: id}
+	var extra reportedCapabilities
+	if json.Unmarshal([]byte(raw), &extra) != nil {
+		return m
+	}
+	if extra.Name != "" && extra.Name != id {
+		m.DisplayName = extra.Name
+	}
+	if extra.SupportedParameters != nil {
+		tools := slices.Contains(extra.SupportedParameters, "tools")
+		m.ToolSupport = &tools
+	}
+	if extra.Architecture.InputModalities != nil {
+		vision := slices.Contains(extra.Architecture.InputModalities, "image")
+		m.VisionSupport = &vision
+	}
+	return m
 }
 
 // ConnectError says why a provider could not be listed, as a stable code
@@ -140,6 +182,12 @@ func (l *Lister) List(ctx context.Context, t Target) ([]ListedModel, error) {
 		ce.Err = redactKey(ce.Err, t.Key)
 		return nil, ce
 	}
+	if t.OllamaDetails {
+		out = l.addOllamaDetails(ctx, t.BaseURL, t.Key, out)
+	}
+	if t.LMStudioDetails {
+		out = l.addLMStudioDetails(ctx, t.BaseURL, t.Key, out)
+	}
 	if out == nil {
 		out = []ListedModel{}
 	}
@@ -154,6 +202,150 @@ func redactKey(err error, key string) error {
 		return err
 	}
 	return errors.New(strings.ReplaceAll(err.Error(), key, "[redacted]"))
+}
+
+// maxOllamaDetails bounds the per-model lookups after an Ollama listing; a
+// server on this computer holds a handful of models, not thousands.
+const maxOllamaDetails = 200
+
+// ollamaShow is the part of Ollama's POST /api/show answer read here.
+type ollamaShow struct {
+	Capabilities []string `json:"capabilities"`
+}
+
+// nativeRoot is a local server's address without the /v1 its
+// OpenAI-compatible API sits under, where its native API lives.
+func nativeRoot(baseURL string) string {
+	return strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
+}
+
+// nativeRequest calls a local server's native API, with the connection's key
+// when it has one, decoding the answer into into. It reports false for
+// anything but a 200 with a JSON body.
+func (l *Lister) nativeRequest(ctx context.Context, method, url, key string, body io.Reader, into any) bool {
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		return false
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	client := l.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(into) == nil
+}
+
+// addOllamaDetails asks Ollama's native API what each listed model can do,
+// filling in tool and image support, and drops models that can't chat (an
+// embedding model lacks "completion"). It sends the connection's key as the
+// listing did, for an Ollama behind a proxy that checks one. It is best effort:
+// a model whose lookup fails is kept with its capabilities unknown.
+func (l *Lister) addOllamaDetails(ctx context.Context, baseURL, key string, models []ListedModel) []ListedModel {
+	root := nativeRoot(baseURL)
+	out := models[:0]
+	for i, m := range models {
+		var show ollamaShow
+		body, _ := json.Marshal(map[string]string{"model": m.ID})
+		if i < maxOllamaDetails && l.nativeRequest(ctx, http.MethodPost, root+"/api/show", key, bytes.NewReader(body), &show) && show.Capabilities != nil {
+			if !slices.Contains(show.Capabilities, "completion") {
+				continue
+			}
+			tools := slices.Contains(show.Capabilities, "tools")
+			vision := slices.Contains(show.Capabilities, "vision")
+			m.ToolSupport, m.VisionSupport = &tools, &vision
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// lmStudioModel is one entry of LM Studio's native model list. Version 1
+// (/api/v1/models) reports a key, a display name and a capabilities object;
+// the older version 0 (/api/v0/models) an id and a capabilities list, with
+// "vlm" as the type of a vision model.
+type lmStudioModel struct {
+	Key          string          `json:"key"`
+	ID           string          `json:"id"`
+	DisplayName  string          `json:"display_name"`
+	Type         string          `json:"type"`
+	Capabilities json.RawMessage `json:"capabilities"`
+}
+
+// addLMStudioDetails reads LM Studio's native model list, filling in names,
+// tool and image support, and drops models that can't chat (embedding
+// models). It is best effort: without a native list, the models are kept as
+// listed.
+func (l *Lister) addLMStudioDetails(ctx context.Context, baseURL, key string, models []ListedModel) []ListedModel {
+	root := nativeRoot(baseURL)
+	var native []lmStudioModel
+	var v1 struct {
+		Models []lmStudioModel `json:"models"`
+	}
+	var v0 struct {
+		Data []lmStudioModel `json:"data"`
+	}
+	switch {
+	case l.nativeRequest(ctx, http.MethodGet, root+"/api/v1/models", key, nil, &v1) && v1.Models != nil:
+		native = v1.Models
+	case l.nativeRequest(ctx, http.MethodGet, root+"/api/v0/models", key, nil, &v0) && v0.Data != nil:
+		native = v0.Data
+	default:
+		return models
+	}
+	byID := make(map[string]lmStudioModel, len(native))
+	for _, n := range native {
+		id := n.Key
+		if id == "" {
+			id = n.ID
+		}
+		byID[id] = n
+	}
+	out := models[:0]
+	for _, m := range models {
+		n, ok := byID[m.ID]
+		if !ok {
+			out = append(out, m)
+			continue
+		}
+		if n.Type != "llm" && n.Type != "vlm" {
+			continue
+		}
+		if n.DisplayName != "" && n.DisplayName != m.ID {
+			m.DisplayName = n.DisplayName
+		}
+		tools, vision := lmStudioCapabilities(n)
+		m.ToolSupport, m.VisionSupport = &tools, &vision
+		out = append(out, m)
+	}
+	return out
+}
+
+// lmStudioCapabilities reads tool and image support from either version of
+// the native list.
+func lmStudioCapabilities(n lmStudioModel) (tools, vision bool) {
+	var asObject struct {
+		Vision            bool `json:"vision"`
+		TrainedForToolUse bool `json:"trained_for_tool_use"`
+	}
+	if json.Unmarshal(n.Capabilities, &asObject) == nil {
+		return asObject.TrainedForToolUse, asObject.Vision || n.Type == "vlm"
+	}
+	var asList []string
+	_ = json.Unmarshal(n.Capabilities, &asList)
+	return slices.Contains(asList, "tool_use"), n.Type == "vlm"
 }
 
 // keyCheckError is a key check that was answered with something other than
@@ -200,7 +392,8 @@ func (l *Lister) listOpenAI(ctx context.Context, baseURL, key string) ([]ListedM
 	var out []ListedModel
 	iter := svc.ListAutoPaging(ctx)
 	for len(out) < maxListModels && iter.Next() {
-		out = append(out, ListedModel{ID: iter.Current().ID})
+		m := iter.Current()
+		out = append(out, listedFromOpenAI(m.ID, m.RawJSON()))
 	}
 	return out, iter.Err()
 }

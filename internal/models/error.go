@@ -84,6 +84,10 @@ const (
 	// ErrCodeProviderConnectionExists: the account already has a connection to
 	// that built-in provider, and has at most one; it edits that one instead.
 	ErrCodeProviderConnectionExists = "provider_connection_exists"
+	// ErrCodeDefaultModelInUse: the change would take away the account's default
+	// model (disabling it, or removing its connection); it chooses another
+	// default first.
+	ErrCodeDefaultModelInUse = "default_model_in_use"
 )
 
 // AllErrorCodes is every code this API can emit. It is the source the
@@ -121,6 +125,7 @@ var AllErrorCodes = []string{
 	ErrCodeProviderUnavailable,
 	ErrCodeCustomAddressNotAllowed,
 	ErrCodeProviderConnectionExists,
+	ErrCodeDefaultModelInUse,
 }
 
 // genericErrorCodes maps HTTP statuses to their generic code.
