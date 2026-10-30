@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/theimaginaryfoundation/what-iff/internal/agent/provider"
 	agenttools "github.com/theimaginaryfoundation/what-iff/internal/agent/tools"
+	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
 	"github.com/theimaginaryfoundation/what-iff/internal/metering"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 	"github.com/theimaginaryfoundation/what-iff/internal/telemetry"
@@ -321,10 +323,17 @@ func (a *Agent) subagentCapabilitiesFor(ctx context.Context, userID, modelID uui
 		return a.subagentModelCapabilities(ctx, modelName), nil
 	}
 	m, err := a.ds.GetModel(ctx, modelID)
-	if err != nil {
-		if m, err = a.ds.GetDisabledConnectionModel(ctx, modelID); err != nil {
+	if errors.Is(err, datastore.ErrModelNotFound) {
+		m, err = a.ds.GetDisabledConnectionModel(ctx, modelID)
+		if errors.Is(err, datastore.ErrModelNotFound) {
+			// No row by that ID: a catalog model by name, as before.
 			return a.subagentModelCapabilities(ctx, modelName), nil
 		}
+	}
+	if err != nil {
+		// Anything else is the datastore failing, not a missing model: say so
+		// rather than run the sub-agent on what a missing model would get.
+		return subagentModelCapabilities{}, fmt.Errorf("read the sub-agent's model: %w", err)
 	}
 	if m.ConnectionID == nil {
 		return a.subagentModelCapabilities(ctx, modelName), nil

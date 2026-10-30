@@ -743,6 +743,23 @@ func connectionEndpoint(r *providerconnections.Resolver) func(ctx context.Contex
 		if err != nil {
 			return agent.ConnectionEndpoint{}, err
 		}
-		return agent.ConnectionEndpoint{Preset: ep.Preset, Flavor: agent.ConnectionFlavor(ep.Flavor), BaseURL: ep.BaseURL, Key: ep.Key}, nil
+		flavor, err := agentFlavor(ep.Flavor)
+		if err != nil {
+			return agent.ConnectionEndpoint{}, err
+		}
+		return agent.ConnectionEndpoint{Preset: ep.Preset, Flavor: flavor, BaseURL: ep.BaseURL, Key: ep.Key}, nil
 	}
+}
+
+// agentFlavor maps a connection's flavor to the agent's, one case per flavor,
+// so a flavor added to one package and not the other fails a turn clearly
+// instead of being sent down the wrong API.
+func agentFlavor(f providerconnections.Flavor) (agent.ConnectionFlavor, error) {
+	switch f {
+	case providerconnections.FlavorOpenAI:
+		return agent.ConnectionFlavorOpenAI, nil
+	case providerconnections.FlavorAnthropic:
+		return agent.ConnectionFlavorAnthropic, nil
+	}
+	return "", fmt.Errorf("provider connection speaks an unknown flavor %q", f)
 }

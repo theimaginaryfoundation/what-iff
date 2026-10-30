@@ -19,6 +19,7 @@ import (
 
 	"github.com/theimaginaryfoundation/what-iff/ent"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
+	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
 // connectionFixture is an Agent over in-memory SQLite holding two accounts,
@@ -28,6 +29,7 @@ import (
 type connectionFixture struct {
 	a          *Agent
 	ent        *ent.Client
+	db         *sql.DB
 	alice, bob uuid.UUID
 	// aliceModel and bobModel are the models enabled on each account's connection.
 	aliceModel, bobModel *ent.Model
@@ -100,7 +102,7 @@ func newConnectionFixture(t *testing.T) *connectionFixture {
 	ds, err := datastore.NewDatastore(client, db, zap.NewNop(), "12345678901234567890123456789012", nil)
 	require.NoError(t, err)
 
-	f := &connectionFixture{ent: client, owners: map[uuid.UUID]uuid.UUID{}, endpoints: map[uuid.UUID]ConnectionEndpoint{}}
+	f := &connectionFixture{ent: client, db: db, owners: map[uuid.UUID]uuid.UUID{}, endpoints: map[uuid.UUID]ConnectionEndpoint{}}
 	now := time.Now().UTC()
 	account := func(name string) uuid.UUID {
 		id := uuid.New()
@@ -287,4 +289,46 @@ func TestJobModel(t *testing.T) {
 	got, err = f.a.jobModel(ctx, f.catalog.ID)
 	require.NoError(t, err)
 	require.Nil(t, got, "a retired catalog model keeps the old behaviour")
+}
+
+// A chat on a connection model the account turned off keeps that model, so the
+// turn fails clearly at connectionFor rather than running on something else.
+func TestResolveModelForChat_TurnedOffConnectionModel(t *testing.T) {
+	t.Parallel()
+	f := newConnectionFixture(t)
+	ctx := context.Background()
+	_, err := f.ent.Model.UpdateOneID(f.aliceModel.ID).SetDeleted(true).Save(ctx)
+	require.NoError(t, err)
+
+	got := f.a.resolveModelForChat(ctx, &models.Chat{ID: uuid.New(), UserID: f.alice, ModelID: f.aliceModel.ID, ModelName: f.aliceModel.Name})
+	require.Equal(t, f.aliceModel.Name, got.name)
+	require.NotNil(t, got.row)
+	require.True(t, got.row.Deleted)
+	_, err = f.a.connectionFor(ctx, f.alice, got.row)
+	require.ErrorIs(t, err, ErrModelDisabled)
+}
+
+// A chat whose connection model went with its connection keeps only the name,
+// which no catalog knows: it is not sent to a provider by that name.
+func TestResolveModelForChat_ModelGoneWithItsConnection(t *testing.T) {
+	t.Parallel()
+	f := newConnectionFixture(t)
+	ctx := context.Background()
+
+	got := f.a.resolveModelForChat(ctx, &models.Chat{ID: uuid.New(), UserID: f.alice, ModelName: "qwen3:4b-gone"})
+	require.NotEqual(t, "qwen3:4b-gone", got.name, "the name alone is not routed anywhere")
+	require.Nil(t, got.row)
+}
+
+// A datastore failure is not a missing model: the sub-agent says so instead of
+// running on what a missing model would get.
+func TestSubagentCapabilitiesFor_DatastoreErrorsAreNotMissingModels(t *testing.T) {
+	t.Parallel()
+	f := newConnectionFixture(t)
+	_, err := f.db.Exec(`DROP TABLE models`)
+	require.NoError(t, err)
+
+	_, err = f.a.subagentCapabilitiesFor(context.Background(), f.alice, f.aliceModel.ID, f.aliceModel.Name)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrConnectionUnavailable)
 }
