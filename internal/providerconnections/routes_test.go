@@ -464,6 +464,25 @@ func TestModels_EnableShowsInTheListingWithItsCapabilities(t *testing.T) {
 	require.Equal(t, conn.ID, *row.ConnectionID)
 }
 
+// A model enabled under a name of the account's keeps it in the listing, so the
+// chooser shows it and saving again doesn't put the provider's back.
+func TestModels_KeepTheNameTheAccountGaveThem(t *testing.T) {
+	f := newFixture(t)
+	conn := addLocal(t, f)
+	require.Equal(t, http.StatusOK, f.enableModels(t, f.alice, conn.ID,
+		ModelChoice{ID: "alpha", Enabled: true, DisplayName: "My alpha"},
+		ModelChoice{ID: "zeta", Enabled: true},
+	).Code)
+
+	listed := decode[[]ConnectionModel](t, f.call(t, f.alice, http.MethodGet, "/provider-connections/"+conn.ID.String()+"/models", nil))
+	byID := map[string]ConnectionModel{}
+	for _, m := range listed {
+		byID[m.ID] = m
+	}
+	require.Equal(t, "My alpha", byID["alpha"].DisplayName)
+	require.Empty(t, byID["zeta"].DisplayName, "enabled without a name: the listing's, here none")
+}
+
 // Disabling soft-deletes the row, so anything naming it fails clearly; enabling
 // again brings the same row back.
 func TestModels_DisableThenEnableKeepsTheRow(t *testing.T) {

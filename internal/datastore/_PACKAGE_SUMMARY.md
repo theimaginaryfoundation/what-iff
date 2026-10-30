@@ -44,7 +44,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
     Per-chat loaded tools live in `chat_mcp_tool_states`: one row per connector, plus the built-in tools' row under the nil connector ID (`ListChatLoadedBuiltinTools` / `SetChatLoadedBuiltinTools`), which `ListChatMCPLoadedTools` leaves out.
     `RetainChatLoadedTools` prunes every row of a chat to a kept set in one transaction (the checkpoint's unload step), and `ChatToolNamesUsedSince` (`toolcall.go`) lists the tools a chat's messages called since a time.
   - Models: `model.go`.
-    `ListModels` is the deployment's own catalog (models with no `connection_id`); `ListModelsForUser` adds the models the user enabled on their own provider connections (ADR 0x027).
+    `ListModels` is the deployment's own catalog (models with no `connection_id`); `ListModelsForUser` adds the models the user enabled on their own provider connections (ADR 0x027), each with its connection's name (`connection_name`).
     An account may enable a model with a catalog model's name, so lookups by name that mean the catalog (`GetModelByName`, a new account's default, the admin create and rename checks, and boot's seeding) look only at models with no connection.
     `GetDisabledConnectionModel` and `ModelRowExists` let a chat or job tell a model turned off, or gone with its connection, from a retired catalog model.
     An account's default model (`user_preferences.default_model`) is optional: a new account gets the catalog's default (`resolveDefaultModelTx`: the admin-marked one, then `DEFAULT_MODEL_NAME`, then any catalog model, never a connection's), and none on an install without a catalog, until it enables a model.

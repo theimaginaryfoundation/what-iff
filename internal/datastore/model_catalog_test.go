@@ -99,6 +99,8 @@ func TestListModelsForUser(t *testing.T) {
 	require.Len(t, got, 2)
 	require.Nil(t, got[0].ConnectionID, "the catalog first")
 	require.Equal(t, own.ID, *got[1].ConnectionID)
+	require.Equal(t, "Ollama", got[1].ConnectionName, "the connection's name comes with its models")
+	require.Empty(t, got[0].ConnectionName, "a catalog model has none")
 }
 
 func TestListModelsForUser_UserNotFound(t *testing.T) {

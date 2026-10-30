@@ -134,7 +134,7 @@
                 <option value="" disabled selected>Current default is unavailable</option>
               }
               @for (model of models(); track model.id) {
-                <option [value]="model.id" [selected]="model.id === preferences()?.default_model_id">{{ model.display_name }}</option>
+                <option [value]="model.id" [selected]="model.id === preferences()?.default_model_id">{{ modelOptionLabel(model) }}</option>
               }
             </select>
             @if (!hasDefaultModel() && models().length === 0) {

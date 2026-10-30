@@ -116,3 +116,54 @@ function titleCaseProvider(provider: string): string {
     .map(part => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
 }
+
+/**
+ * A group in the picker's provider view. The built-in providers each have one,
+ * holding the deployment's models and the account's own from its connection to
+ * that provider, since they go through the same path and key. Every other
+ * connection (OpenRouter, a server on this computer, Custom) is its own group,
+ * named as the account named it, so two servers of the same kind stay apart
+ * (ADR 0x027).
+ */
+export interface ModelGroup {
+  key: string;
+  label: string;
+}
+
+const BUILTIN_PROVIDERS = new Set<string>(MODEL_PROVIDER_ORDER);
+
+/** Whether a model belongs to one of the account's own connections other than a built-in provider's. */
+export function isConnectionGroup(model: Model): boolean {
+  return !!model.connection_id && !BUILTIN_PROVIDERS.has(modelProvider(model));
+}
+
+/** The key of the group a model is listed under. */
+export function modelGroupKey(model: Model): string {
+  return isConnectionGroup(model) ? `connection:${model.connection_id}` : modelProvider(model);
+}
+
+/** The name of the group a model is listed under. */
+export function modelGroupLabel(model: Model): string {
+  return isConnectionGroup(model) && model.connection_name ? model.connection_name : providerLabel(modelProvider(model));
+}
+
+/**
+ * The groups models fall into: the built-in providers in their usual order,
+ * then any other provider, then the account's connections, by name.
+ */
+export function sortedGroups(models: readonly Model[]): ModelGroup[] {
+  const byKey = new Map<string, ModelGroup>();
+  for (const model of models) {
+    const key = modelGroupKey(model);
+    if (!byKey.has(key)) {
+      byKey.set(key, { key, label: modelGroupLabel(model) });
+    }
+  }
+  const groups = [...byKey.values()];
+  const providerOrder = sortedProviders(groups.filter(g => !g.key.startsWith('connection:')).map(g => g.key));
+  const providers = providerOrder.map(key => byKey.get(key) as ModelGroup);
+  const connections = groups
+    .filter(g => g.key.startsWith('connection:'))
+    .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
+  return [...providers, ...connections];
+}

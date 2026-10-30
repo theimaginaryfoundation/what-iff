@@ -75,6 +75,11 @@ func (s *Store) withEnabled(ctx context.Context, connectionID uuid.UUID, listed 
 		cm := ConnectionModel{ListedModel: m}
 		if row, ok := enabled[m.ID]; ok {
 			cm.Enabled = true
+			// The name the account gave it, or the one it was enabled under. A
+			// model enabled without one was saved under its id.
+			if row.DisplayName != row.Name {
+				cm.DisplayName = row.DisplayName
+			}
 			cm.ToolSupport, cm.VisionSupport = capabilitiesOf(row)
 			delete(enabled, m.ID)
 		}

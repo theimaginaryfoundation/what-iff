@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -191,11 +192,39 @@ func (l *Lister) List(ctx context.Context, t Target) ([]ListedModel, error) {
 	if t.CannotChat != nil {
 		out = slices.DeleteFunc(out, func(m ListedModel) bool { return t.CannotChat(m.ID) })
 	}
+	for i := range out {
+		out[i].DisplayName = shortName(out[i].ID, out[i].DisplayName)
+	}
 	if out == nil {
 		out = []ListedModel{}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+// vendorPrefix is a short "Something: " before a listed model's name, such as
+// the "Anthropic: " OpenRouter adds. The picker already says where a model
+// comes from, so the prefix only adds length. It applies only to names a
+// provider lists, never to a name the account gave a model.
+var vendorPrefix = regexp.MustCompile(`^[^:/]{1,40}: `)
+
+// shortName is the name a model is offered under: the provider's own without a
+// vendor prefix, or else the last part of its id without the ":latest" tag
+// ("hf.co/Qwen/Qwen3-0.6B-GGUF:latest" is "Qwen3-0.6B-GGUF"). It is empty where
+// that is just the id. The account can rename a model when it enables it.
+func shortName(id, providerName string) string {
+	name := vendorPrefix.ReplaceAllString(strings.TrimSpace(providerName), "")
+	if name == "" {
+		name = id
+		if i := strings.LastIndex(id, "/"); i >= 0 {
+			name = id[i+1:]
+		}
+		name = strings.TrimSuffix(name, ":latest")
+	}
+	if name == id {
+		return ""
+	}
+	return name
 }
 
 // redactKey removes key from err's text. A provider's error can echo what it
