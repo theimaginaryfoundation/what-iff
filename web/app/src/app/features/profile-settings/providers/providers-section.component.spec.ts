@@ -163,17 +163,26 @@ describe('ProvidersSectionComponent', () => {
   describe('models (ADR 0x027)', () => {
     const model = (id: string, connectionId: string): Model => ({ id, name: id, display_name: id, description: '', tool_support: true, connection_id: connectionId });
 
-    it("counts each connection's models, and offers to choose them where there are none", async () => {
+    it("counts each connection's models, and opens a connection's chooser", async () => {
       connections.list.mockReturnValue(of([OPENAI, OLLAMA]));
       modelService.getModels.mockReturnValue(of([model('a', 'c-openai'), model('b', 'c-openai'), model('catalog', '')]));
       const fixture = await render();
 
       expect(row(fixture, 'openai').textContent).toContain('2 models');
-      expect(buttonIn(row(fixture, 'openai'), 'Models')).toBeTruthy();
-      expect(row(fixture, 'ollama').textContent).toContain('no models yet');
+      // The account has a default model, so a connection without models is not urged.
+      expect(row(fixture, 'ollama').textContent).toContain('no models');
+      expect(row(fixture, 'ollama').textContent).not.toContain('no models yet');
 
-      buttonIn(row(fixture, 'ollama'), 'Choose models').click();
+      buttonIn(row(fixture, 'ollama'), 'Models').click();
       expect(fixture.componentInstance.chooserConnection()).toEqual(OLLAMA);
+    });
+
+    it('urges choosing models only while the account has none to chat with', async () => {
+      connections.list.mockReturnValue(of([OPENAI]));
+      preferences.getUserPreferences.mockReturnValue(of({ default_model_id: NIL_UUID }));
+      const fixture = await render();
+      expect(row(fixture, 'openai').textContent).toContain('no models yet');
+      expect(buttonIn(row(fixture, 'openai'), 'Choose models')).toBeTruthy();
     });
 
     it('points onboarding at choosing models while the account has no default model', async () => {

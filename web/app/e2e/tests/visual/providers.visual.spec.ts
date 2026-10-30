@@ -54,3 +54,27 @@ test(
     });
   },
 );
+
+/**
+ * A connection's model chooser, searched. Under the mock backend every provider
+ * lists the same two models, so the listing is deterministic.
+ */
+test(
+  'model chooser, searched',
+  { tag: ['@visual', '@mock-only'] },
+  async ({ authenticatedPage: page, profileSettingsModal }) => {
+    const providers = new ProvidersTab(page);
+    await profileSettingsModal.open();
+    await providers.tab.click();
+    await providers.row('openai').getByRole('button', { name: 'Models' }).click();
+    await expect(providers.chooser).toContainText('Mock Large');
+    await providers.searchModels('small');
+    await expect(providers.chooser).toContainText('1 of 2');
+
+    await expect(page).toHaveScreenshot('model-chooser-searched.png', {
+      animations: 'disabled',
+      caret: 'hide',
+      mask: commonMasks(page),
+    });
+  },
+);
