@@ -10,12 +10,15 @@
       </h1>
       <p class="text-sm text-text-secondary">{{ totalCount() }} total jobs</p>
     </div>
-    <button
-      type="button"
-      class="rounded-lg border border-accent-primary bg-accent-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90"
-      (click)="onCreateJob()">
-      Create job
-    </button>
+    <div class="flex flex-wrap items-center gap-2">
+      <app-marketplace-browse-link kind="job" />
+      <button
+        type="button"
+        class="rounded-lg border border-accent-primary bg-accent-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+        (click)="onCreateJob()">
+        Create job
+      </button>
+    </div>
   </header>
 
   <app-job-filter-bar

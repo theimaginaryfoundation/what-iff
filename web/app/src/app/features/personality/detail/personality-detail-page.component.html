@@ -47,6 +47,7 @@
                 Default
               </span>
             }
+            <app-entity-marketplace-outlet kind="personality" [entityId]="personality.id" />
           </div>
         </div>
         <div class="flex flex-wrap gap-2">
@@ -87,7 +88,6 @@
               (click)="onExportCard('png')"
             >Export PNG card</button>
           }
-          <app-entity-marketplace-outlet kind="personality" [entityId]="personality.id" [entityName]="personality.name" layout="actions" />
           <button
             type="button"
             class="rounded-lg border border-(--color-border-default) px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-500/10"

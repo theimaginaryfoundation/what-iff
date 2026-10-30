@@ -72,12 +72,12 @@
                       : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'">
                     {{ server.status || 'active' }}
                   </span>
+                  <app-entity-marketplace-outlet class="ml-2 mt-2 align-middle" kind="connector" [entityId]="server.id" />
                   @if (server.status_reason) {
                     <p class="text-[11px] text-amber-700 dark:text-amber-300 mt-1">{{ server.status_reason }}</p>
                   }
                 </div>
                 <div class="flex flex-wrap items-start justify-end gap-2">
-                  <app-entity-marketplace-outlet kind="connector" [entityId]="server.id" [entityName]="server.name" layout="actions" />
                   @if ((server.auth_mode || 'header') === 'oauth') {
                     <button
                       (click)="authenticate(server)"

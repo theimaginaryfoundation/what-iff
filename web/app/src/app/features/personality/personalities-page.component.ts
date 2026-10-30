@@ -61,11 +61,14 @@ function cardImportNotes(outcome: PersonalityCardImportOutcome): string | null {
   return notes.length > 0 ? notes.join('\n\n') : null;
 }
 
+import { MarketplaceBrowseLinkComponent } from '../../extensions/marketplace-browse-link.component';
+
 @Component({
   selector: 'app-personalities-page',
   standalone: true,
   imports: [
     FormsModule,
+    MarketplaceBrowseLinkComponent,
     PersonalityCardGridComponent,
     ModalComponent,
     SparkleIconComponent,

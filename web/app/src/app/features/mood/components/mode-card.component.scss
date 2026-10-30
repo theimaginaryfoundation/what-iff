@@ -13,6 +13,13 @@
   gap: 12px;
 }
 
+.mode-card__title-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+}
+
 .mode-card__title-group h3 {
   margin: 0;
   font-size: 28px;

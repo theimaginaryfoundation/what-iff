@@ -14,6 +14,7 @@
     </div>
     <!-- The first-run welcome has its own, fuller start actions; don't show a second set here. -->
     <div class="flex flex-wrap items-center gap-2" [hidden]="showWelcome()">
+      <app-marketplace-browse-link kind="personality" />
       <button
         type="button"
         class="inline-flex items-center gap-1.5 rounded-lg border border-(--btn-secondary-border) bg-(--btn-secondary) px-3.5 py-[0.4375rem] text-[0.8125rem] font-semibold text-(--btn-secondary-text) hover:bg-(--color-surface-input) focus:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)"

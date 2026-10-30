@@ -14,10 +14,12 @@ export interface RemoteSyncWaiting {
  * personality-setup guard sends brand-new accounts). Explains what WhatIff is before asking the
  * user to make their first personality, and offers the three ways to start.
  */
+import { MarketplaceBrowseLinkComponent } from '../../../extensions/marketplace-browse-link.component';
+
 @Component({
   selector: 'app-personality-welcome',
   standalone: true,
-  imports: [SparkleIconComponent],
+  imports: [SparkleIconComponent, MarketplaceBrowseLinkComponent],
   templateUrl: './personality-welcome.component.html',
   styleUrl: './personality-welcome.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,

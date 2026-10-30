@@ -53,12 +53,15 @@ const PORTRAIT_EDITOR_WIDTH = 200;
 const PORTRAIT_EDITOR_HEIGHT = 267;
 const THUMBNAIL_PREVIEW_SIZE = 96;
 
+import { EntityMarketplaceOutletComponent } from '../../../extensions/entity-marketplace-outlet.component';
+
 @Component({
   selector: 'app-personality-edit-modal',
   standalone: true,
   imports: [
     AsyncPipe,
     AuthImagePipe,
+    EntityMarketplaceOutletComponent,
     FormsModule,
     ModalComponent,
     PersonalityAttachmentsListComponent,
@@ -73,7 +76,12 @@ const THUMBNAIL_PREVIEW_SIZE = 96;
   template: `
     <ui-modal [open]="open()" [labelledBy]="titleId" size="lg" (dismiss)="onModalDismiss($event)">
       <div modal-header class="flex min-w-0 flex-1 items-center justify-between gap-3">
-        <h2 [id]="titleId" class="text-base font-semibold text-(--color-text-primary)">Edit personality</h2>
+        <div class="flex min-w-0 flex-wrap items-center gap-2">
+          <h2 [id]="titleId" class="text-base font-semibold text-(--color-text-primary)">Edit personality</h2>
+          @if (personality(); as p) {
+            <app-entity-marketplace-outlet kind="personality" [entityId]="p.id" />
+          }
+        </div>
         <button
           type="button"
           class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-(--color-text-secondary) hover:bg-(--color-surface-elevated) hover:text-(--color-text-primary) focus:outline-none focus-visible:ring-2 focus-visible:ring-(--color-accent)"

@@ -1,16 +1,19 @@
 <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-    <div class="mb-6 text-center lg:text-left">
-      <h1 class="inline-flex items-center gap-1 text-2xl font-semibold text-gray-900 dark:text-white">
-        Tools
-        <ui-help-hint label="What are tools?" heading="Tools">
-          Connectors link outside services (MCP servers) that personalities can use in threads and skills. Webhook
-          tokens let another app post messages into your threads and read them back.
-        </ui-help-hint>
-      </h1>
-      <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
-        Configure connectors and webhook tokens available to your personalities.
-      </p>
+    <div class="mb-6 flex flex-col items-center gap-3 text-center lg:flex-row lg:items-end lg:justify-between lg:text-left">
+      <div>
+        <h1 class="inline-flex items-center gap-1 text-2xl font-semibold text-gray-900 dark:text-white">
+          Tools
+          <ui-help-hint label="What are tools?" heading="Tools">
+            Connectors link outside services (MCP servers) that personalities can use in threads and skills. Webhook
+            tokens let another app post messages into your threads and read them back.
+          </ui-help-hint>
+        </h1>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+          Configure connectors and webhook tokens available to your personalities.
+        </p>
+      </div>
+      <app-marketplace-browse-link kind="connector" />
     </div>
 
     @if (hasAccess()) {

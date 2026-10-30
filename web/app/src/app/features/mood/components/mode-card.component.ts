@@ -6,10 +6,12 @@ import { ModeAssociationPickerComponent } from './mode-association-picker.compon
 import { TooltipDirective } from '../../../shared/ui/tooltip/tooltip.directive';
 import { ModeCardVm, ModePersonalityVm } from '../helpers/mode-vm.helpers';
 
+import { EntityMarketplaceOutletComponent } from '../../../extensions/entity-marketplace-outlet.component';
+
 @Component({
   selector: 'app-mode-card',
   standalone: true,
-  imports: [CommonModule, AuthImagePipe, EditIconComponent, TrashIconComponent, ModeAssociationPickerComponent, TooltipDirective],
+  imports: [CommonModule, AuthImagePipe, EditIconComponent, TrashIconComponent, ModeAssociationPickerComponent, TooltipDirective, EntityMarketplaceOutletComponent],
   templateUrl: './mode-card.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./mode-card.component.scss'],

@@ -1,6 +1,9 @@
 import { Injectable, signal } from '@angular/core';
 
-export type ProfileSettingsTab = 'profile' | 'providers' | 'subscription' | 'usage' | 'billing';
+import type { ExtensionProfileSettingsTab } from '../../extensions/profile-settings-tabs';
+
+/** Base tabs plus any a build adds through `extensions/profile-settings-tabs.ts`. */
+export type ProfileSettingsTab = 'profile' | 'providers' | 'subscription' | 'usage' | 'billing' | ExtensionProfileSettingsTab;
 
 const BILLING_RELATED_TABS = new Set<ProfileSettingsTab>(['subscription', 'usage', 'billing']);
 

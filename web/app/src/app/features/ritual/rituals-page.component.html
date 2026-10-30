@@ -1,13 +1,16 @@
 <section class="skills-page mx-auto flex w-full max-w-4xl flex-col gap-4 p-4 md:p-6">
   <header class="skills-page__header">
-    <h1 class="skills-page__title">
-      Skills
-      <ui-help-hint label="What is a skill?" heading="Skills" guide="advanced">
-        A skill is a saved prompt. Calling it with '/' adds its content to your message and turns on its MCP servers for
-        that turn. Global skills work in every thread; personality skills only in that personality's threads.
-      </ui-help-hint>
-    </h1>
-    <p>Reusable prompt templates. Type / in chat to call a skill.</p>
+    <div>
+      <h1 class="skills-page__title">
+        Skills
+        <ui-help-hint label="What is a skill?" heading="Skills" guide="advanced">
+          A skill is a saved prompt. Calling it with '/' adds its content to your message and turns on its MCP servers for
+          that turn. Global skills work in every thread; personality skills only in that personality's threads.
+        </ui-help-hint>
+      </h1>
+      <p>Reusable prompt templates. Type / in chat to call a skill.</p>
+    </div>
+    <app-marketplace-browse-link kind="skill" />
   </header>
 
   <section class="skills-page__controls">
@@ -66,7 +69,10 @@
             </div>
 
             <div class="skills-page__card-copy">
-              <span class="skills-page__card-title">{{ row.name }}</span>
+              <span class="skills-page__card-title">
+                {{ row.name }}
+                <app-entity-marketplace-outlet class="skills-page__card-badge" kind="skill" [entityId]="row.id" />
+              </span>
               <div class="skills-page__card-description">{{ row.description }}</div>
               <div class="skills-page__card-meta">
                 <div>Created <span>{{ row.createdAt | date:'MMM d h:mm a' | uppercase }}</span></div>
@@ -134,6 +140,9 @@
         <h2 id="skill-editor-title" class="skills-editor-modal__title">
           {{ creating() ? 'Create Skill' : 'Edit Skill' }}
         </h2>
+        @if (editingRitual(); as editing) {
+          <app-entity-marketplace-outlet kind="skill" [entityId]="editing.id" />
+        }
       </div>
       <div class="skills-editor-modal__body">
         <app-ritual-form
