@@ -59,6 +59,14 @@
   &--current {
     border-left-color: var(--color-accent);
   }
+
+  &--done {
+    border-left-color: var(--color-success, #10b981);
+
+    .key-prompt__step-title {
+      color: var(--color-text-secondary);
+    }
+  }
 }
 
 .key-prompt__step-title {

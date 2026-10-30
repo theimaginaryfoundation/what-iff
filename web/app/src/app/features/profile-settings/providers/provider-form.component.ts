@@ -51,6 +51,8 @@ export class ProviderFormComponent {
   /** Emitted once a connection was added or changed. */
   readonly saved = output<ProviderConnected>();
   readonly closed = output<void>();
+  /** After connecting: go on to choose the connection's models. */
+  readonly chooseModels = output<ProviderConnection>();
 
   readonly presetId = signal('');
   readonly name = signal('');

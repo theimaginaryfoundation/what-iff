@@ -107,6 +107,9 @@ interface AssistantVisual {
             @if (errInfo.needsKey) {
               <button type="button" class="message-group__gen-error-retry" (click)="openProviderKeys()">Add key</button>
             }
+            @if (errInfo.needsModel) {
+              <button type="button" class="message-group__gen-error-retry" (click)="openModelChooser()">Choose models</button>
+            }
             <button
               type="button"
               class="message-group__gen-error-retry"
@@ -440,7 +443,7 @@ export class MessageGroupComponent {
   private readonly providerKeys = inject(ProviderKeysService);
   private readonly settings = inject(ProfileSettingsModalService);
 
-  readonly userGenerationError = computed((): { text: string; message: ChatMessage; needsKey: boolean } | null => {
+  readonly userGenerationError = computed((): { text: string; message: ChatMessage; needsKey: boolean; needsModel: boolean } | null => {
     if (this.origin() !== 'User') {
       return null;
     }
@@ -450,12 +453,22 @@ export class MessageGroupComponent {
     }
     // A missing key is the account's to fix only where accounts bring their own keys.
     const needsKey = target.last_error_code === 'provider_not_configured' && this.providerKeys.accountsSupplyKeys();
-    return { text: target.last_error_message.trim(), message: target, needsKey };
+    // No model yet (an install without a model catalog, ADR 0x027): say what to do, not only what happened.
+    const needsModel = target.last_error_code === 'no_model_selected';
+    const text = needsModel
+      ? "No model to reply with yet. Choose which of your providers' models to chat with, then retry."
+      : target.last_error_message.trim();
+    return { text, message: target, needsKey, needsModel };
   });
 
   /** Opens Profile & Settings on the Providers tab. */
   openProviderKeys(): void {
     this.settings.open('providers');
+  }
+
+  /** Opens the model chooser for the account's first connection. */
+  openModelChooser(): void {
+    this.settings.openModelChooser();
   }
 
   /** Shown after assistant bubbles when a post-turn checkpoint (scratchpad + summary) completed. */

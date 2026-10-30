@@ -485,13 +485,25 @@ func (h *Handler) handleModels(w http.ResponseWriter, r *http.Request) {
 	handlerutils.RespondWithJSON(w, h.logger, http.StatusOK, merged)
 }
 
-// withKnownCapabilities fills in what is known about a flavor where the
-// provider reported nothing: Anthropic-compatible servers take tools, and
-// Anthropic's own models take images too. Anything still unknown is left for
-// the account to confirm.
+// withKnownCapabilities fills in what is known where the provider reported
+// nothing: a built-in provider's models the app already knows (models.CatalogModel),
+// that Anthropic-compatible servers take tools, and that Anthropic's own models
+// take images too. Anything still unknown is left for the account to confirm.
 func withKnownCapabilities(preset Preset, flavor Flavor, listed []ListedModel) []ListedModel {
 	yes := true
 	for i := range listed {
+		// A built-in provider's model the app already knows: what it knows.
+		if preset.Builtin {
+			if cfg := models.CatalogModel(listed[i].ID); cfg != nil && string(cfg.Provider) == preset.ID {
+				tools, vision := cfg.ToolSupport, cfg.VisionSupport
+				if listed[i].ToolSupport == nil {
+					listed[i].ToolSupport = &tools
+				}
+				if listed[i].VisionSupport == nil {
+					listed[i].VisionSupport = &vision
+				}
+			}
+		}
 		if flavor == FlavorAnthropic && listed[i].ToolSupport == nil {
 			listed[i].ToolSupport = &yes
 		}

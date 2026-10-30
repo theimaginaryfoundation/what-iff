@@ -15,7 +15,17 @@
     <div class="providers__message providers__message--success" role="status">{{ notice() }}</div>
   }
 
-  @if (!needsOpenAI() && !loading() && onboarding()) {
+  @if (!needsOpenAI() && needsModels() && firstChoice(); as first) {
+    <div class="providers__callout" data-testid="providers-needs-models">
+      <div>
+        <strong>Choose the models you'll chat with</strong>
+        <small>Your key works. Pick which models show up in your model picker; the first one becomes your default.</small>
+      </div>
+      <button class="providers__button providers__button--primary" type="button" (click)="chooseModels(first)">
+        Choose {{ first.name }} models
+      </button>
+    </div>
+  } @else if (!needsOpenAI() && !loading() && onboarding()) {
     <div class="providers__callout" data-testid="providers-next">
       <div>
         <strong>You're set up</strong>
@@ -70,9 +80,25 @@
               } @else {
                 <small>No key</small>
               }
+              @if (row.models > 0) {
+                <small class="providers__models">· {{ row.models }} {{ row.models === 1 ? 'model' : 'models' }}</small>
+              } @else if (needsModels()) {
+                <small class="providers__models providers__models--none">· no models yet</small>
+              } @else {
+                <small class="providers__models">· no models</small>
+              }
             </div>
 
             <div class="providers__actions">
+              <!-- Urged only while the account has no model to chat with: an account on a catalog's
+                   models, or with its default elsewhere, chooses a connection's models when it likes. -->
+              @if (row.models === 0 && needsModels()) {
+                <button class="providers__button providers__button--primary" type="button" (click)="chooseModels(row.connection)">
+                  Choose models
+                </button>
+              } @else {
+                <button class="providers__button" type="button" (click)="chooseModels(row.connection)">Models</button>
+              }
               <button class="providers__button" type="button" (click)="edit(row.connection)">Edit</button>
               <button class="providers__link-button providers__link-button--danger" type="button" (click)="remove(row)">
                 Remove
@@ -97,5 +123,14 @@
     [initialPreset]="formPreset()"
     (saved)="onSaved($event)"
     (closed)="closeForm()"
+    (chooseModels)="chooseModels($event)"
+  />
+
+  <app-model-chooser
+    [open]="chooserConnection() !== null"
+    [connection]="chooserConnection()"
+    (saved)="onModelsSaved($event)"
+    (closed)="closeChooser()"
+    (changeDefault)="changeDefault()"
   />
 </section>
