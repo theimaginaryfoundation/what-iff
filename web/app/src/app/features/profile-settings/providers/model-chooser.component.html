@@ -68,32 +68,60 @@
               [checked]="row.enabled"
               (change)="toggle(row, $any($event.target).checked, $any($event.target))"
             />
-            <label class="chooser__label" [for]="'model-' + row.id">
-              <span class="chooser__name">
-                @for (p of parts(row.name); track $index) {
-                  @if (p.match) {
-                    <mark>{{ p.text }}</mark>
-                  } @else {
-                    <span>{{ p.text }}</span>
-                  }
-                }
-                @if (row.id === defaultModelId()) {
-                  <span class="chooser__default"><span class="sr-only">, </span>Default</span>
-                }
-              </span>
-              @if (row.name !== row.id) {
-                <span class="chooser__id">
-                  @for (p of parts(row.id); track $index) {
+            @if (renaming() === row.id) {
+              <div class="chooser__label">
+                <input
+                  #renameInput
+                  class="chooser__rename"
+                  type="text"
+                  maxlength="100"
+                  [value]="row.name"
+                  [attr.aria-label]="'Name for ' + row.id"
+                  (blur)="commitRename(row, $any($event.target).value)"
+                  (keydown.enter)="commitRename(row, $any($event.target).value)"
+                  (keydown.escape)="cancelRename($event)"
+                />
+                <span class="chooser__id">{{ row.id }}</span>
+              </div>
+            } @else {
+              <label class="chooser__label" [for]="'model-' + row.id">
+                <span class="chooser__name">
+                  @for (p of parts(row.name); track $index) {
                     @if (p.match) {
                       <mark>{{ p.text }}</mark>
                     } @else {
                       <span>{{ p.text }}</span>
                     }
                   }
+                  @if (row.id === defaultModelId()) {
+                    <span class="chooser__default"><span class="sr-only">, </span>Default</span>
+                  }
                 </span>
-              }
-            </label>
+                @if (row.name !== row.id) {
+                  <span class="chooser__id">
+                    @for (p of parts(row.id); track $index) {
+                      @if (p.match) {
+                        <mark>{{ p.text }}</mark>
+                      } @else {
+                        <span>{{ p.text }}</span>
+                      }
+                    }
+                  </span>
+                }
+              </label>
+            }
             <div class="chooser__caps">
+              @if (row.enabled && renaming() !== row.id) {
+                <button
+                  class="chooser__cap chooser__cap--icon"
+                  type="button"
+                  [attr.aria-label]="'Rename ' + row.name"
+                  title="Rename"
+                  (click)="startRename(row)"
+                >
+                  <ui-edit-icon [size]="12" />
+                </button>
+              }
               @for (cap of capabilities; track cap.id) {
                 @let value = row[cap.id];
                 <button

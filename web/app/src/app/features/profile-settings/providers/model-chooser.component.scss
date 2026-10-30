@@ -203,6 +203,18 @@
   overflow-wrap: anywhere;
 }
 
+.chooser__rename {
+  background: var(--bg-input, var(--bg-primary));
+  border: 1px solid color-mix(in srgb, var(--accent, #8c87ff) 55%, var(--border));
+  border-radius: 0.35rem;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  min-width: 0;
+  padding: 0.15rem 0.4rem;
+}
+
 .chooser__id {
   color: var(--text-muted, var(--text-secondary));
   font-family: ui-monospace, monospace;
@@ -244,6 +256,19 @@ mark {
       font-size: 0.45rem;
       margin-right: 0.3rem;
       vertical-align: 0.15rem;
+    }
+  }
+
+  &--icon {
+    align-items: center;
+    border-color: transparent;
+    display: inline-flex;
+    padding: 0.2rem 0.35rem;
+
+    &:hover,
+    &:focus-visible {
+      border-color: var(--border);
+      color: var(--text-primary);
     }
   }
 
