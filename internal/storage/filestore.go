@@ -77,6 +77,11 @@ func FileKeyForAgentFile(userID, objectID uuid.UUID, filename string) string {
 	return path.Join("users", userID.String(), "agent", filenameWithFallback(sanitizeFilename(filename), objectID.String()))
 }
 
+// AgentFileKeyPrefix is the key prefix every one of userID's agent files is stored under.
+func AgentFileKeyPrefix(userID uuid.UUID) string {
+	return path.Join("users", userID.String(), "agent") + "/"
+}
+
 // FileKeyForImageThumbnail constructs the S3 object key for a JPEG thumbnail.
 // Thumbnails are always stored as JPEG regardless of the original format.
 // Format: users/{userID}/images/thumbs/{attachmentID}.jpg

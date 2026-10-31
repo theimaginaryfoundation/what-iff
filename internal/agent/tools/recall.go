@@ -194,7 +194,8 @@ type RecallTool struct {
 	store     recallStore
 	embed     func(ctx context.Context, input string) ([]float32, error)
 	distiller RecallDistiller
-	// fileStore resolves image bytes for fetch-mode image attachments (see fetchImage).
+	// fileStore resolves image bytes for fetch-mode image attachments (see fetchImage) and the text
+	// of files that have no chunks (see fetchUnchunkedText).
 	fileStore storage.FileStore
 	logger    *zap.Logger
 }

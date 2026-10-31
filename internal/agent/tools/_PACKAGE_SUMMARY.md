@@ -19,7 +19,13 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
     A personality's documents stay attached to it; only the folder label changes.
   - `AgentFileTool` — `agent_file_write` and `agent_file_read` (ADR 0x034): loadable tools for an agent's own text files, stored as ordinary file attachments under `users/{uid}/agent/` and never chunked (`agent_files.go`, `agent_files_write.go`, `agent_files_read.go`, `agent_files_patch.go`; tests beside them).
     An agent may change only files its personality created (with no personality, its conversation); user uploads are read-only and can be copied.
+    The top-level `skills/` folder is reserved for skill bundles; agents cannot write into it.
+  - Shared file helpers (`user_files.go`): `ResolveUserFile` (an id or `folder/name` path, with one set of refusals), `ReadFileText`, `ReadableAsText`, `FilePath`, `SplitFilePath`, and `FileRefusal` / `AsFileRefusal` for refusals meant for the model.
+    Exported so other tools that take a user's file (the private build's `load_file_to_container`) do not copy them.
   - `EntityTool` — `entity_write` and `entity_get` (ADR 0x034): the entity wiki, exact lookup by normalized name, wiki-style `[[links]]` (`entity.go`; tests in `entity_test.go`).
+    `entity_get` also lists names by `prefix` (metadata only); `entity_write` action `delete` is exact-name and archives the page (the user can restore it).
+    Results name the scope `user` or `personality`.
+  - `agent_file_write` refuses a call whose fields do not match its action (`checkAgentFileWriteFields`; empty strings count as left out).
   - `RecallTool` — unified context retrieval (`recall.go`, `recall_modes.go`, `recall_memory_id.go`, `recall_time.go`; see ADR 0x017).
     Modes: `investigate`/`search`/`fetch`/`related`/`origin`/`conversation`/`lifecycle_events` (alias `merge_history`).
     `source_type=summaries` searches per-chat checkpoint Summary memories (via `datastore.GetRelatedSummaryMemories`); `lifecycle_events` lists the memory lifecycle audit trail (`datastore.ListMemoryMergeEvents`).
@@ -62,6 +68,8 @@ Provider-neutral function tool catalog plus concrete tool implementations, JSON 
 - **Agent file edits swap objects:** append and patch upload a new object and move the row's `s3_key` with `Datastore.SwapAgentFileObject` (a compare-and-swap on the old key), retrying on the fresh text when another writer won, then release the replaced object unless a reference row still uses it (`storage.ReleaseReplacedObject`).
   Patches are unified diffs located by their text, nearest the header's line number; counts are ignored, and all hunks apply or none do.
 - **`list` files by origin and as a tree:** `origin` (`agent`/`user`) filters on `FileAttachmentFilters.Origin`, agent rows carry `origin: "agent"`, and `view="tree"` replaces `items` with a `tree` drawing of the page's paths (`list_tree.go`).
+  A tree defaults to the largest page (200), since it only draws one page.
+- **`find_context` reads unchunked text directly:** fetch mode reads a text file with no chunks (`chunk_status` not `chunked`: agent files, uploads not chunked yet) from the object store through `ReadFileText`, capped at 24,000 characters; chunked files still page through chunks.
 - **`list` pagination:** Files/conversations/jobs (and personalities/skills) accept `page` + `limit`; results include `page`/`total_count`/`has_more` and a note that suggests `page=N+1` when more remain.
 - **Human vs agent descriptions:** Built-in user-toggleable tools provide `FunctionToolDefinition.HumanDescription` for presentation.
   `internal/agent.GetAvailableTools` trims and prefers that field, but falls back to `FunctionToolSpec.Description` when a runtime/external tool omits it or supplies only whitespace.
