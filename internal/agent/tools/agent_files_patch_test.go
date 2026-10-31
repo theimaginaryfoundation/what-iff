@@ -53,6 +53,12 @@ func TestApplyUnifiedDiff(t *testing.T) {
 			want:    "# Diary\n" + patchBase[len("# Journal\n"):],
 		},
 		{
+			name:    "blank lines between hunks are separators, not context",
+			content: "a\nb\nc\nd\ne\nf\n",
+			diff:    "@@ -1,2 +1,2 @@\n a\n-b\n+B\n\n\n@@ -5,2 +5,2 @@\n e\n-f\n+F\n",
+			want:    "a\nB\nc\nd\ne\nF\n",
+		},
+		{
 			name:    "two hunks keep their offsets",
 			content: "a\nb\nc\nd\ne\nf\n",
 			diff:    "@@ -1,2 +1,3 @@\n a\n+a2\n b\n@@ -5,2 +6,1 @@\n e\n-f\n",

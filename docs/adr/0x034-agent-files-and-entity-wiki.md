@@ -36,6 +36,8 @@ Four tools, grouped by intent so few schemas are loaded:
 
 All four are catalog entries with `Loadable: true`, `AgentDefault: true`, `UserToggleable: true` and `SandboxPolicy: SandboxNever`.
 The model sees them by name in the developer context and loads them with `load_tools` when it needs them; they unload at a checkpoint that did not use them.
+`agent_file_write` results (action, id, path and size; never the content) are carried into later turns of the conversation, because a file's effect is otherwise visible to the model only through `list`: without them, a recurring job would `create` the same file again and lose a turn to the refusal.
+`entity_write` results are not carried, and reads (`agent_file_read`, `entity_get`) are carried for 10 turns.
 **They are not called from pre- or post-processing.**
 Automatic saving (summarizers writing entities, extraction writing files) is deliberately later work, once we have seen how agents use the tools by hand.
 
@@ -70,6 +72,8 @@ An approval flow that lets an agent propose an edit to a user file is planned, a
 Append and patch upload the new content as a new object and then move the row's `s3_key` to it with a conditional update (`WHERE s3_key = <the key that was read>`).
 If another writer got there first, the upload is dropped and the edit is retried on the fresh content (three attempts), so two concurrent appends both land.
 The replaced object is deleted unless a reference copy (a `find_context` context row) still points at it.
+A swap that fails with an error (rather than losing the race) keeps the uploaded object: the update may have committed before the error surfaced, and an orphaned object is far better than a row pointing at a deleted one.
+Reading an agent file checks that its key is under the owner's `users/{uid}/agent/` prefix and refuses anything else, so a bad key written by some future bug can never read another object.
 There is no revision history: #262's history was never used, and the version a reference row keeps is enough for now.
 
 ### 5. Patches are unified diffs, matched by text
@@ -77,6 +81,7 @@ There is no revision history: #262's history was never used, and the version a r
 `patch` takes a single-file unified diff.
 Hunks are located by their context and removed lines, nearest the line number in the header; line counts are ignored and a header without numbers (`@@ @@`) is accepted, because models get those wrong.
 Trailing whitespace is tolerated in matching, and context lines keep the file's own text.
+Blank lines right before an `@@` header are separators, not context, since models often put one between hunks.
 All hunks apply or none do, and a hunk that does not match is refused with a message telling the agent to re-read the file.
 
 ### 6. Listing: extend `list`, no new tool

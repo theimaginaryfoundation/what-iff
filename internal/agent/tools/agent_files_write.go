@@ -334,11 +334,14 @@ func (t *AgentFileTool) rewrite(ctx context.Context, chat *models.Chat, file str
 			return agentFileWriteResult{}, err
 		}
 		swapped, err := t.store.SwapAgentFileObject(ctx, chat.UserID, att.ID, att.S3Key, key)
-		if err != nil || !swapped {
+		if err != nil {
+			// The swap may have committed before the error surfaced, leaving the row on key, so
+			// key is not dropped: an orphaned object beats a row pointing at a deleted one.
+			return agentFileWriteResult{}, err
+		}
+		if !swapped {
+			// Another writer won; key was never referenced.
 			t.dropObject(ctx, key)
-			if err != nil {
-				return agentFileWriteResult{}, err
-			}
 			continue
 		}
 		storage.ReleaseReplacedObject(context.WithoutCancel(ctx), t.logger, t.files, t.store, att.S3Key)

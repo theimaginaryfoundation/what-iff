@@ -136,6 +136,11 @@ func ReadFileText(ctx context.Context, logger *zap.Logger, files storage.FileSto
 	}
 	var raw []byte
 	if att.AgentAuthored() {
+		// Agent files only ever live under the owner's agent prefix (storage.FileKeyForAgentFile);
+		// refuse any other key rather than read an object the row should not point at.
+		if !strings.HasPrefix(att.S3Key, storage.AgentFileKeyPrefix(att.UserID)) {
+			return "", fileRefusalf("%q could not be read: its stored content is missing", FilePath(att))
+		}
 		data, err := files.DownloadFile(ctx, att.S3Key)
 		if err != nil {
 			return "", err

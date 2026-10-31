@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -35,6 +36,8 @@ type fakeAgentFileStore struct {
 	order  []uuid.UUID
 	// beforeSwap runs before each swap, to simulate a concurrent writer.
 	beforeSwap func(id uuid.UUID)
+	// swapErr, when set, is returned by a swap that has already committed.
+	swapErr error
 }
 
 func (f *fakeAgentFileStore) GetFileAttachment(_ context.Context, userID, id uuid.UUID) (*models.FileAttachment, error) {
@@ -72,6 +75,9 @@ func (f *fakeAgentFileStore) SwapAgentFileObject(_ context.Context, _, id uuid.U
 		return false, nil
 	}
 	r.S3Key = newKey
+	if f.swapErr != nil {
+		return false, f.swapErr
+	}
 	return true, nil
 }
 func (f *fakeAgentFileStore) MoveFileAttachmentsToFolder(_ context.Context, _ uuid.UUID, ids []uuid.UUID, folder string) (int, error) {
@@ -429,4 +435,32 @@ func TestAgentFiles_WriteFieldsFollowTheAction(t *testing.T) {
 	requireRefused(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "rename", "file": "a.md"}), "action must be one of")
 	// Empty strings for unused fields are fine: models often send every property.
 	requireOK(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "create", "path": "a.md", "content": "x", "file": "", "diff": ""}))
+}
+
+func TestAgentFiles_SwapErrorKeepsTheNewObject(t *testing.T) {
+	fx := newAgentFileFixture()
+	chat := fx.chat(uuid.New())
+	res := callJSON(t, fx.tool.Write, chat, map[string]any{"action": "create", "path": "log.md", "content": "a"})
+	requireOK(t, res)
+	id := uuid.MustParse(res["file"].(map[string]any)["id"].(string))
+
+	// The swap commits, then reports an error: the row now points at the new object, which must
+	// not be deleted.
+	fx.store.swapErr = errors.New("connection reset")
+	requireRefused(t, callJSON(t, fx.tool.Write, chat, map[string]any{"action": "append", "file": "log.md", "content": "b"}), "could not write")
+	fx.store.swapErr = nil
+	require.Contains(t, fx.objects.objs, fx.store.rows[id].S3Key)
+	require.Equal(t, "a\nb", fx.text(t, chat, "log.md"))
+}
+
+func TestReadFileText_RefusesAnAgentFileOutsideItsPrefix(t *testing.T) {
+	fx := newAgentFileFixture()
+	key := "users/" + uuid.NewString() + "/agent/x_secret.md"
+	fx.objects.objs[key] = []byte("someone else's")
+	att := &models.FileAttachment{ID: uuid.New(), UserID: fx.userID, Name: "x.md", FileType: "text/markdown", S3Key: key, Origin: models.FileOriginAgent}
+
+	_, err := ReadFileText(context.Background(), zap.NewNop(), fx.objects, att)
+	msg, ok := AsFileRefusal(err)
+	require.True(t, ok)
+	require.Contains(t, msg, "could not be read")
 }

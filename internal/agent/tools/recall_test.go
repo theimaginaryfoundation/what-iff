@@ -1438,13 +1438,15 @@ func TestConversationWindow_UsesCursorBounds(t *testing.T) {
 // A text file with no chunks (an agent file, or an upload not chunked yet) is read straight from the
 // object store; a chunked one still pages through chunks.
 func TestRecallFetchUnchunkedTextReadsTheObject(t *testing.T) {
-	agentFile := &models.FileAttachment{ID: uuid.New(), Name: "journal.md", FileType: "text/markdown", S3Key: "k/journal", Origin: models.FileOriginAgent}
+	userID := uuid.New()
+	journalKey := storage.AgentFileKeyPrefix(userID) + "journal.md"
+	agentFile := &models.FileAttachment{ID: uuid.New(), UserID: userID, Name: "journal.md", FileType: "text/markdown", S3Key: journalKey, Origin: models.FileOriginAgent}
 	pending := &models.FileAttachment{ID: uuid.New(), Name: "brief.txt", FileType: "text/plain", S3Key: "k/brief", ChunkStatus: "pending"}
 	rt := newTestRecallTool(&fakeRecallStore{
 		fileByID:     map[uuid.UUID]*models.FileAttachment{agentFile.ID: agentFile, pending.ID: pending},
 		chunksForAtt: []datastore.FileChunkResult{{FileName: "unexpected", Content: "chunk"}},
 	})
-	rt.fileStore = &memObjects{objs: map[string][]byte{"k/journal": []byte("# Journal\n"), "k/brief": []byte("Ship it.")}}
+	rt.fileStore = &memObjects{objs: map[string][]byte{journalKey: []byte("# Journal\n"), "k/brief": []byte("Ship it.")}}
 
 	for _, tc := range []struct {
 		fa   *models.FileAttachment
