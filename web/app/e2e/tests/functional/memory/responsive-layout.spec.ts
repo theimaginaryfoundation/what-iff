@@ -228,10 +228,12 @@ test.describe('memories responsive layout contract', () => {
 
 test.describe('jobs responsive layout contract', () => {
   test('keeps the mobile navigation clear of the Jobs header across narrow widths', async ({ page, userWithPersonality }) => {
+    await page.setViewportSize({ width: MOBILE_WIDTHS[0], height: VIEWPORT_HEIGHT });
+    await page.goto('/agent-jobs');
+
     for (const width of MOBILE_WIDTHS) {
       await test.step(`${width}px viewport`, async () => {
         await page.setViewportSize({ width, height: VIEWPORT_HEIGHT });
-        await page.goto('/agent-jobs');
 
         const heading = page.getByRole('heading', { name: 'Jobs', level: 1 });
         const createJobButton = page.getByRole('button', { name: 'Create job' }).first();

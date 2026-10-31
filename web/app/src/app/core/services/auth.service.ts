@@ -84,30 +84,34 @@ export class AuthService {
 
   private loadUserProfile(): void {
     // Use setTimeout to break the circular dependency by deferring the HTTP call
-    setTimeout(() => {
-      this.getUserProfile().subscribe({
-        next: (user) => {
-          this.setAuthState(user);
-        },
-        error: () => {
+    setTimeout(() => this.verifySession(), 0);
+  }
+
+  /**
+   * Loads the profile for the stored session, and signs out only when the
+   * server rejects it. A request the browser cancelled (the page navigating
+   * away mid-load) or a server error says nothing about the tokens; clearing
+   * them then signed people out on a reload. An expired access token is
+   * refreshed by the interceptor, which signs out itself if that fails.
+   */
+  private verifySession(): void {
+    this.http.get<UserResponse>(`${this.apiUrl}/profile`).subscribe({
+      next: (user) => this.setAuthState(user),
+      error: (error: unknown) => {
+        if (error instanceof HttpErrorResponse && (error.status === 401 || error.status === 403)) {
           this.clearAuthState();
+        } else {
+          this.logger.error('Could not load the profile; keeping the session', error);
         }
-      });
-    }, 0);
+      }
+    });
   }
 
   // Public method to manually check auth state when needed
   public checkAuthState(): void {
     const accessToken = this.getAccessToken();
     if (accessToken) {
-      this.getUserProfile().subscribe({
-        next: (user) => {
-          this.setAuthState(user);
-        },
-        error: () => {
-          this.clearAuthState();
-        }
-      });
+      this.verifySession();
     }
   }
 
