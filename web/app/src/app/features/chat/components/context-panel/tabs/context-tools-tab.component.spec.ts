@@ -7,6 +7,7 @@ import { ChatService } from '../../../../../core/services/chat.service';
 import { MCPServerService } from '../../../../../core/services/mcp-server.service';
 import { RightPanelService } from '../../../../../core/services/right-panel.service';
 import { ToolService } from '../../../../../core/services/tool.service';
+import { RitualService } from '../../../../../core/services/ritual.service';
 import { ContextPanelService } from '../../../services/context-panel.service';
 import { ContextToolsTabComponent } from './context-tools-tab.component';
 
@@ -43,11 +44,21 @@ describe('ContextToolsTabComponent', () => {
         mcpService.addToChat.mockReturnValue(of(void 0));
         mcpService.removeFromChat.mockReturnValue(of(void 0));
 
+        const ritualService = {
+            listLoadedSkills: vi.fn().mockName("RitualService.listLoadedSkills"),
+            unloadSkill: vi.fn().mockName("RitualService.unloadSkill"),
+        };
+        ritualService.listLoadedSkills.mockReturnValue(of([
+            { id: 'skill-1', slug: 'pdf-forms', name: 'PDF Forms', description: 'Fill PDF forms.' },
+        ]));
+        ritualService.unloadSkill.mockReturnValue(of(void 0));
+
         await TestBed.configureTestingModule({
             imports: [ContextToolsTabComponent],
             providers: [
                 provideZonelessChangeDetection(),
                 ContextPanelService,
+                { provide: RitualService, useValue: ritualService },
                 { provide: RightPanelService, useValue: {
                         setVisible: vi.fn().mockName("RightPanelService.setVisible")
                     } },
@@ -121,6 +132,24 @@ describe('ContextToolsTabComponent', () => {
 
         expect(toolService.listTools).not.toHaveBeenCalled();
         expect(fixture.nativeElement.textContent).not.toContain('Loading tools…');
+    });
+
+    it('lists the skills the agent loaded and unloads one on request', async () => {
+        const ritualService = TestBed.inject(RitualService) as unknown as { listLoadedSkills: ReturnType<typeof vi.fn>; unloadSkill: ReturnType<typeof vi.fn> };
+        expect(ritualService.listLoadedSkills).toHaveBeenCalledWith('chat-1');
+        expect(fixture.nativeElement.textContent).toContain('Loaded skills');
+        expect(fixture.nativeElement.textContent).toContain('PDF Forms');
+        expect(fixture.nativeElement.textContent).toContain('pdf-forms');
+
+        ritualService.listLoadedSkills.mockReturnValue(of([]));
+        const unload = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>).find(b => b.textContent?.trim() === 'Unload');
+        expect(unload).toBeDefined();
+        unload!.click();
+        await fixture.whenStable();
+        fixture.detectChanges();
+
+        expect(ritualService.unloadSkill).toHaveBeenCalledWith('chat-1', 'skill-1');
+        expect(fixture.nativeElement.textContent).toContain('No skills loaded in this thread.');
     });
 
     it('switches to loaded tool call history', () => {

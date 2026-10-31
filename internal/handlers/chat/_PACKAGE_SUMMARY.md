@@ -6,6 +6,8 @@ HTTP API for **chats** and **chat messages** — the primary surface for sending
 
 ## Responsibilities
 
+- **Loaded skills** (`skills.go`, ADR 0x035): `GET /chat/{chatId}/loaded-skills` lists the skills the agent loaded in the thread with `load_skill` (mode and message skills are not loaded state) and `DELETE /chat/{chatId}/loaded-skills/{ritualId}` unloads one, for the thread's Tools panel.
+
 - **`Handler`:** `RegisterRoutes` mounts `/api/chat/...` (under parent `/api` from server).
   Key routes: list/create/get/update/patch/delete chat, chat messages CRUD, `welcome-message`, `mark-read`, `mark-all-read` (all of the caller's chats, one all-or-nothing update), export, **`import`**, `available-rituals`, file attachments on a chat, `context` for debugging.
 - List chats accepts `search`, which the datastore applies to chat names and checkpoint summaries.

@@ -26,6 +26,9 @@ func (a *Agent) unloadToolsUnusedInSegment(ctx context.Context, userID, chatID u
 			zap.String("chat_id", chatID.String()), zap.Error(err))
 		return
 	}
+	// Loaded skills follow the same rule (ADR 0x035 §4); the skill step runs first so a skill's
+	// allowed_tools are judged by the segment's calls, not by what this sweep removes.
+	a.unloadSkillsUnusedInSegment(ctx, userID, chatID, segmentStart, used)
 	unloaded, err := a.ds.RetainChatLoadedTools(ctx, userID, chatID, used)
 	if err != nil {
 		a.logger.Warn("checkpoint: failed to unload unused tools",

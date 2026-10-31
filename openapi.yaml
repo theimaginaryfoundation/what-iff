@@ -7611,6 +7611,83 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /chat/{chatId}/loaded-skills:
+    get:
+      summary: List the skills the agent loaded in a thread
+      description: >-
+        The skills the agent loaded with `load_skill` (ADR 0x035), oldest load first. Skills a mode
+        or a message preloads are active for their turn only and are not listed. Loaded skills stay
+        until unloaded here, by the agent, or by a checkpoint that found them unused.
+      tags: [Chat Management]
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Loaded skills
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LoadedSkill'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Chat not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /chat/{chatId}/loaded-skills/{ritualId}:
+    delete:
+      summary: Unload a skill the agent loaded in a thread
+      description: Forgets the skill as loaded; its instructions leave the thread's context from the next turn.
+      tags: [Chat Management]
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: ritualId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Unloaded (or was not loaded)
+        '400':
+          description: Invalid skill ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Chat not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /mcp-servers:
     get:
       summary: List configured MCP servers
@@ -11812,6 +11889,21 @@ components:
         updated_at: "2024-01-01T00:00:00Z"
 
     # Memory Management Schemas
+    LoadedSkill:
+      type: object
+      description: A skill the agent loaded in a thread with load_skill (ADR 0x035).
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+      required: [id, slug, name, description]
+
     RitualImportResult:
       type: object
       properties:

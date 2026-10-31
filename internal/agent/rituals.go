@@ -1,31 +1,21 @@
 package agent
 
 import (
-	"context"
-	"fmt"
-
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/models"
 )
 
-func (a *Agent) EnrichUserMessageWithRituals(ctx context.Context, userID uuid.UUID, message *models.ChatMessage) (string, error) {
-	ritualIds := GetRitualIds(message.Rituals)
-
-	rituals, err := a.ds.GetRitualsByIDs(ctx, userID, ritualIds)
-	if err != nil {
-		return message.Message, err
-	}
-	message.Message += FormatRituals(rituals)
-	return message.Message, nil
-}
-
+// FormatRituals renders skills for a prompt that has no skills segment of its own (a sub-agent's
+// task): each skill's instructions in a <skill name="slug"> block, preceded by a blank line.
+// Empty when no skill has instructions.
 func FormatRituals(rituals []*models.Ritual) string {
-	ritualText := ""
-	for _, ritual := range rituals {
-		ritualText += fmt.Sprintf("\n\n%s", ritual.Content)
+	blocks := formatSkillBlocks(rituals)
+	if blocks == "" {
+		return ""
 	}
-	return ritualText
+	return "\n\n" + blocks
 }
+
 func GetRitualIds(rituals []*models.Ritual) []uuid.UUID {
 	ritualIds := make([]uuid.UUID, len(rituals))
 	for i, ritual := range rituals {

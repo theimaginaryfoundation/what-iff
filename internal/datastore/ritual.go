@@ -340,6 +340,7 @@ func (d *Datastore) ListRituals(ctx context.Context, userID uuid.UUID, pageNum, 
 	if filters.Query != nil && *filters.Query != "" {
 		query = query.Where(
 			entritual.Or(
+				entritual.SlugContainsFold(*filters.Query),
 				entritual.NameContainsFold(*filters.Query),
 				entritual.DescriptionContainsFold(*filters.Query),
 				entritual.ContentContainsFold(*filters.Query),

@@ -64,10 +64,14 @@ type messageContextBuildRequest struct {
 	Memories       []string
 	// UserNameLine is the entry of Memories that is the user-name profile line (empty when none),
 	// so it is persisted as its own context item type rather than recognised by its text.
-	UserNameLine       string
-	LiveMemories       []*models.Memory
-	ActiveMood         *models.Mood
-	ActiveMoodRituals  []*models.Ritual
+	UserNameLine      string
+	LiveMemories      []*models.Memory
+	ActiveMood        *models.Mood
+	ActiveMoodRituals []*models.Ritual
+	// ActiveSkills are the skills whose instructions this turn injects (loaded, mode, message);
+	// SkillsIndex is the rendered list of skills the model may load. Both from prepareTurnSkills.
+	ActiveSkills       []*models.Ritual
+	SkillsIndex        string
 	IsAutoMood         bool
 	MoodToolsAvailable bool
 	Attachments        []*models.FileAttachment
@@ -102,6 +106,7 @@ func (b *messageContextBuilder) build(ctx context.Context, req messageContextBui
 		IsAutoMood:         req.IsAutoMood,
 		MoodToolsAvailable: req.MoodToolsAvailable,
 	})
+	appendSkillsContext(modelCtx, req.ActiveSkills, req.SkillsIndex)
 	if req.ExpressionsEnabled {
 		b.appendPriorTurnExpressionContinuity(ctx, req.UserID, modelCtx, carryOver, history)
 	}

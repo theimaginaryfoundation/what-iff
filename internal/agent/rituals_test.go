@@ -45,17 +45,18 @@ func TestFormatRituals(t *testing.T) {
 
 	t.Run("single ritual", func(t *testing.T) {
 		content := "First ritual"
-		rituals := []*models.Ritual{{Content: content}}
+		rituals := []*models.Ritual{{Slug: "first", Content: content}}
 		result := agent.FormatRituals(rituals)
-		expected := fmt.Sprintf("\n\n%s", content)
+		expected := fmt.Sprintf("\n\n<skill name=\"first\">\n%s\n</skill>", content)
 		assert.Equal(t, expected, result)
 	})
 
 	t.Run("multiple rituals", func(t *testing.T) {
 		contents := []string{"First ritual", "Second ritual"}
-		rituals := []*models.Ritual{{Content: contents[0]}, {Content: contents[1]}}
+		rituals := []*models.Ritual{{Name: "First Skill", Content: contents[0]}, {Slug: "second", Content: contents[1]}}
 		result := agent.FormatRituals(rituals)
-		expected := fmt.Sprintf("\n\n%s\n\n%s", contents[0], contents[1])
+		// A skill with no slug yet is named from its display name.
+		expected := fmt.Sprintf("\n\n<skill name=\"first-skill\">\n%s\n</skill>\n\n<skill name=\"second\">\n%s\n</skill>", contents[0], contents[1])
 		assert.Equal(t, expected, result)
 	})
 }

@@ -118,6 +118,18 @@ func (f *fakeStore) SetFileAttachmentS3Key(ctx context.Context, userID, id uuid.
 func (f *fakeStore) GetAvailableRituals(ctx context.Context, userID, chatID uuid.UUID, pageNum, pageSize int, filters models.RitualFilters) (*models.PaginatedResponse, error) {
 	return nil, errors.New("not implemented")
 }
+func (f *fakeStore) ListChatLoadedSkillIDs(context.Context, uuid.UUID, uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+func (f *fakeStore) RemoveChatLoadedSkills(context.Context, uuid.UUID, uuid.UUID, []uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+func (f *fakeStore) GetRitualsByIDs(context.Context, uuid.UUID, []uuid.UUID) ([]*models.Ritual, error) {
+	return nil, nil
+}
+
 func (f *fakeStore) ListChatMCPServers(ctx context.Context, userID, chatID uuid.UUID) ([]*models.MCPServer, error) {
 	return nil, errors.New("not implemented")
 }

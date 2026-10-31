@@ -180,6 +180,8 @@ type listArgs struct {
 type listItem struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name,omitempty"`
+	Slug         string   `json:"slug,omitempty"`   // skills: the name load_skill takes
+	Loaded       *bool    `json:"loaded,omitempty"` // skills: loaded in this chat with load_skill
 	Description  string   `json:"description,omitempty"`
 	Provider     string   `json:"provider,omitempty"`      // models
 	ToolSupport  *bool    `json:"tool_support,omitempty"`  // models
@@ -226,15 +228,28 @@ type listPageMeta struct {
 // agrees with what load_tools can load and what the turn registers.
 type MCPScopeFunc func(ctx context.Context) ([]*models.MCPServer, error)
 
+// ListScope is what the agent knows about the turn that a listing reflects: the connectors in
+// scope (kind="mcp_servers") and the skills loaded in the chat (kind="skills").
+type ListScope struct {
+	MCPServers     MCPScopeFunc
+	LoadedSkillIDs []uuid.UUID
+}
+
 // List executes a list tool call, routing on `kind`. kind="mcp_servers" lists only the
-// connectors attached to the thread; use ListInMCPScope to include the active skills' connectors.
+// connectors attached to the thread; use ListWithScope to include the active skills' connectors.
 func (t *ListTool) List(ctx context.Context, chat *models.Chat, args []byte) (string, error) {
-	return t.ListInMCPScope(ctx, chat, args, nil)
+	return t.ListWithScope(ctx, chat, args, ListScope{})
 }
 
 // ListInMCPScope is List with an explicit resolver for the connectors in scope this turn
 // (kind="mcp_servers" only). A nil resolver falls back to the thread-attached connectors.
 func (t *ListTool) ListInMCPScope(ctx context.Context, chat *models.Chat, args []byte, mcpScope MCPScopeFunc) (string, error) {
+	return t.ListWithScope(ctx, chat, args, ListScope{MCPServers: mcpScope})
+}
+
+// ListWithScope is List with the turn's scope (see ListScope).
+func (t *ListTool) ListWithScope(ctx context.Context, chat *models.Chat, args []byte, scope ListScope) (string, error) {
+	mcpScope := scope.MCPServers
 	var a listArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return t.fail("", fmt.Sprintf("invalid arguments: %v", err))
@@ -250,7 +265,7 @@ func (t *ListTool) ListInMCPScope(ctx context.Context, chat *models.Chat, args [
 	case listKindPersonalities:
 		return t.listPersonalities(ctx, chat, a)
 	case listKindSkills:
-		return t.listSkills(ctx, chat, a)
+		return t.listSkills(ctx, chat, a, scope.LoadedSkillIDs)
 	case listKindFiles:
 		return t.listFiles(ctx, chat, a)
 	case listKindConversations:
