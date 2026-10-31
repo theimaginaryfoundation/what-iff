@@ -62,6 +62,17 @@ type FileAttachment struct {
 	// direct file attachment ownership and expression-image associations.
 	Personalities []FileAttachmentPersonalityRef `json:"personalities,omitempty"`
 	CreatedAt     time.Time                      `json:"created_at"`
+	// Origin says who wrote the file (ADR 0x034); "" reads as FileOriginUser. Only FileOriginAgent
+	// files can be changed by an agent, and only by the one that created them:
+	// CreatedByPersonalityID, or with no personality, CreatedByChatID.
+	Origin                 FileOrigin `json:"origin,omitempty"`
+	CreatedByPersonalityID *uuid.UUID `json:"created_by_personality_id,omitempty"`
+	CreatedByChatID        *uuid.UUID `json:"created_by_chat_id,omitempty"`
+	// UpdatedAt is when an agent last changed the content; nil for a file never changed.
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	// ChunkStatus is the search-chunking state ("pending", "chunked", "failed"); "" for a file
+	// never chunked, such as an agent file.
+	ChunkStatus string `json:"-"`
 	// Source is empty when the chat message edge was not loaded, so callers can
 	// tell "unknown" apart from a real classification.
 	Source FileAttachmentSource `json:"source,omitempty"`
@@ -73,6 +84,21 @@ type FileAttachmentPersonalityRef struct {
 	ID   uuid.UUID `json:"id"`
 	Name string    `json:"name"`
 }
+
+// AgentAuthored reports whether an agent's file tools wrote the file.
+func (f *FileAttachment) AgentAuthored() bool { return f.Origin == FileOriginAgent }
+
+// Chunked reports whether the file's text has been chunked for search.
+func (f *FileAttachment) Chunked() bool { return f.ChunkStatus == "chunked" }
+
+// FileOrigin says who wrote a file: an agent's file tools, or the user (uploads, imports and
+// everything generated for a reply). Stored as file_attachments.origin.
+type FileOrigin string
+
+const (
+	FileOriginAgent FileOrigin = "agent"
+	FileOriginUser  FileOrigin = "user"
+)
 
 // FileAttachmentFilters defines filters for listing file attachments
 type FileAttachmentFilters struct {
@@ -94,6 +120,8 @@ type FileAttachmentFilters struct {
 	// FolderPrefix matches that folder and everything beneath it ("charts" matches "charts" and
 	// "charts/oura", not "charts-old"). A normalized path; "" matches everything.
 	FolderPrefix *string `json:"folder_prefix,omitempty"`
+	// Origin narrows to files of that origin; empty applies no narrowing.
+	Origin FileOrigin `json:"origin,omitempty"`
 	// Kind narrows to images or to every other file; empty (or GalleryKindAll) applies no narrowing.
 	Kind    GalleryKind `json:"kind,omitempty"`
 	MinDate *time.Time  `json:"min_date,omitempty"`

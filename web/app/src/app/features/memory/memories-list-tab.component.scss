@@ -216,6 +216,12 @@
   box-shadow: inset 0 -2px 0 var(--color-accent);
 }
 
+.memories-list__status-tabs button.memories-list__status--entities.memories-list__status--active {
+  background: color-mix(in srgb, #0891b2 16%, transparent);
+  color: #0891b2;
+  box-shadow: inset 0 -2px 0 #0891b2;
+}
+
 .memories-list__status-tabs button.memories-list__status--summaries.memories-list__status--active {
   background: color-mix(in srgb, #d97706 16%, transparent);
   color: #d97706;

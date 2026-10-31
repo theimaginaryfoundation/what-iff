@@ -74,6 +74,22 @@ func (a *Agent) toolHandlers(chatCtx *chatContext) map[string]toolHandler {
 			out, err := a.moveFilesTool.Move(ctx, chatCtx.chat, input)
 			return out, nil, err
 		},
+		tools.EntityWriteToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.entityTool.Write(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
+		tools.EntityGetToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.entityTool.Get(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
+		tools.AgentFileWriteToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.agentFileTool.Write(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
+		tools.AgentFileReadToolSpec.Name: func(ctx context.Context, input []byte) (string, []*models.FileAttachment, error) {
+			out, err := a.agentFileTool.Read(ctx, chatCtx.chat, input)
+			return out, nil, err
+		},
 		tools.UpdatePlanToolSpec.Name: func(_ context.Context, input []byte) (string, []*models.FileAttachment, error) {
 			out, err := updatePlanTool(chatCtx, input)
 			return out, nil, err

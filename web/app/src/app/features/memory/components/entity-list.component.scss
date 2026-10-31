@@ -1,0 +1,232 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+
+.entity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.entity-list__summary {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.entity-list__hint,
+.entity-list__empty {
+  color: var(--color-text-muted);
+}
+
+.entity-list__empty {
+  font-size: 0.875rem;
+  margin: 1rem 0;
+}
+
+.entity-list__error {
+  color: var(--color-danger, #dc2626);
+  font-size: 0.8125rem;
+  margin: 0;
+}
+
+.entity-list__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.entity-list__search {
+  flex: 1 1 14rem;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-input);
+  color: var(--color-text-muted);
+}
+
+.entity-list__search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.entity-list__filter {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.entity-list__filter select {
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-input);
+  color: var(--color-text-primary);
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.8125rem;
+  max-width: 14rem;
+}
+
+.entity-list__items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.entity-card {
+  border: 1px solid var(--color-border-base);
+  border-radius: 0.75rem;
+  background: var(--color-surface-elevated);
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.entity-card__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.entity-card__title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.entity-card__scope {
+  --level-color: #0891b2;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  color: var(--level-color);
+  background: color-mix(in srgb, var(--level-color) 14%, transparent);
+}
+
+.entity-card__scope--pinned {
+  --level-color: var(--color-accent);
+}
+
+.entity-card__updated {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.entity-card__body {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+}
+
+// Only the entity's own text keeps its line breaks: template whitespace around the links must
+// not render.
+.entity-card__text {
+  white-space: pre-wrap;
+}
+
+.entity-card__link {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.entity-card__editor {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 8rem;
+  resize: vertical;
+  border: 1px solid var(--color-border-base);
+  border-radius: 0.5rem;
+  background: var(--color-surface-input);
+  color: var(--color-text-primary);
+  padding: 0.6rem 0.7rem;
+  font: inherit;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.entity-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.entity-card__actions button,
+.entity-list__pagination button {
+  border: 1px solid var(--color-border-base);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-secondary);
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.entity-card__actions button:disabled,
+.entity-list__pagination button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.entity-card__actions .entity-card__primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+}
+
+.entity-card__actions .entity-card__danger {
+  color: var(--color-danger, #dc2626);
+}
+
+.entity-card__count {
+  margin-right: auto;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.entity-card__count--over,
+.entity-card__confirm {
+  color: var(--color-danger, #dc2626);
+  font-size: 0.75rem;
+}
+
+.entity-list__pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}

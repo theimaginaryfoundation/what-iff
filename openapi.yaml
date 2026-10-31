@@ -4198,6 +4198,194 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /memory/entities:
+    get:
+      summary: List entity wiki pages
+      description: >
+        Lists the user's entity pages (ADR 0x034), most recently changed first. Agents write these
+        short pages about people, places and projects with the entity_write tool; global ones are
+        shared by every personality, and pinned ones (written by a personality with
+        auto_pin_memories on) by that personality only.
+      tags: [Memory Management]
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: query
+          in: query
+          description: Case-insensitive match on the name or text.
+          schema:
+            type: string
+        - name: personality_id
+          in: query
+          description: Only entities pinned to this personality.
+          schema:
+            type: string
+            format: uuid
+        - name: global_only
+          in: query
+          description: Only global entities.
+          schema:
+            type: boolean
+        - name: archived
+          in: query
+          description: >-
+            List the entities an agent deleted (archived) instead of the live ones. Archived
+            entities are hidden from agents and can be restored.
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Entities retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      results:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AgentEntity'
+        '400':
+          description: Invalid personality_id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /memory/entities/{id}:
+    patch:
+      summary: Edit an entity's text
+      description: Replaces the entity's text. The edit is the user's, so the agent provenance is cleared.
+      tags: [Memory Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body:
+                  type: string
+                  maxLength: 5000
+      responses:
+        '200':
+          description: Entity updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentEntity'
+        '400':
+          description: Missing body, or text over 5000 characters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Entity not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Delete an entity
+      description: Removes a live or archived entity for good.
+      tags: [Memory Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Entity deleted
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Entity not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /memory/entities/{id}/restore:
+    post:
+      summary: Restore an archived entity
+      description: >-
+        Brings back an entity an agent deleted (archived). The restore is the user's, so the agent
+        provenance is cleared.
+      tags: [Memory Management]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Entity restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentEntity'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No archived entity with this id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: A live entity in the same scope has taken the name since it was archived
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /memory/compaction-events:
     get:
       summary: List compaction (checkpoint) audit events
@@ -10780,7 +10968,28 @@ components:
             filter. `generated` = attached to an assistant message or produced by a
             generation pipeline (expression grid, portrait); `imported` = uploaded by
             the user (gallery import, personality upload, user chat message).
+            Agent-authored files are `generated`.
             Omitted when the server could not determine it.
+        origin:
+          type: string
+          enum: [user, agent]
+          description: >-
+            Who wrote the file (ADR 0x034). `user` = uploads, imports and reply outputs; `agent` =
+            written by an agent's file tools. Only `agent` files can be changed by an agent, and
+            only by the personality (or, with none, the thread) that created them. More values may
+            be added, so treat an unknown one like `user`.
+        created_by_personality_id:
+          type: string
+          format: uuid
+          description: Personality whose agent created the file (agent-authored files only).
+        created_by_chat_id:
+          type: string
+          format: uuid
+          description: Thread the agent created the file in, when it had no personality (agent-authored files only).
+        updated_at:
+          type: string
+          format: date-time
+          description: When an agent last changed the file's content. Omitted for files never changed.
       required:
         - id
         - user_id
@@ -11364,6 +11573,51 @@ components:
         updated_at: "2024-01-01T00:00:00Z"
 
     # Memory Management Schemas
+    AgentEntity:
+      type: object
+      description: One entity wiki page (ADR 0x034).
+      required: [id, user_id, key, title, body, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        key:
+          type: string
+          description: Normalized lookup key (lowercase, single spaces).
+        title:
+          type: string
+          description: The name as first written.
+        body:
+          type: string
+          maxLength: 5000
+        pinned_personality_id:
+          type: string
+          format: uuid
+          description: Set when only this personality sees the entity; absent for a global entity.
+        pinned_personality_name:
+          type: string
+        last_personality_id:
+          type: string
+          format: uuid
+          description: Personality whose agent last wrote it; absent when the user last edited it.
+        last_chat_id:
+          type: string
+          format: uuid
+          description: Conversation that last wrote it; absent when the user last edited it.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        archived_at:
+          type: string
+          format: date-time
+          description: When an agent deleted (archived) the entity; absent for a live entity.
+
     Memory:
       type: object
       properties:

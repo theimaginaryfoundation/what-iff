@@ -564,7 +564,7 @@ describe('MemoriesListTabComponent filters wiring', () => {
 });
 
 describe('MemoriesListTabComponent status tabs and Summaries read-only enforcement', () => {
-  it('drives the User, Thread, Summaries, and Archived views from their tabs', async () => {
+  it('drives the User, Thread, Entities, Summaries, and Archived views from their tabs', async () => {
     const { fixture, view } = await createComponent();
     const host = fixture.nativeElement as HTMLElement;
     const tabs = host.querySelectorAll('[role="tab"]');
@@ -576,9 +576,12 @@ describe('MemoriesListTabComponent status tabs and Summaries read-only enforceme
     expect(view.setFilters).toHaveBeenLastCalledWith({ status: 'active', scope: 'chat', level: 'all' });
 
     (tabs[2] as HTMLButtonElement).click();
-    expect(view.setFilters).toHaveBeenLastCalledWith({ status: 'summaries', scope: 'all', level: 'all' });
+    expect(view.setFilters).toHaveBeenLastCalledWith({ status: 'entities', scope: 'all', level: 'all' });
 
     (tabs[3] as HTMLButtonElement).click();
+    expect(view.setFilters).toHaveBeenLastCalledWith({ status: 'summaries', scope: 'all', level: 'all' });
+
+    (tabs[4] as HTMLButtonElement).click();
     expect(view.setFilters).toHaveBeenLastCalledWith({ status: 'inactive', scope: 'all', level: 'all' });
   });
 
@@ -594,11 +597,22 @@ describe('MemoriesListTabComponent status tabs and Summaries read-only enforceme
     view.selectAllAssociations.mockImplementation(() => callOrder.push('selectAllAssociations'));
 
     const host = fixture.nativeElement as HTMLElement;
-    (host.querySelectorAll('[role="tab"]')[2] as HTMLButtonElement).click();
+    (host.querySelectorAll('[role="tab"]')[3] as HTMLButtonElement).click();
 
     expect(callOrder).toEqual(['clearSelection', 'setFilters', 'selectAllAssociations']);
     expect(view.setSelectedPersonalityIds).not.toHaveBeenCalled();
     expect(component.focusedId()).toBeNull();
+  });
+
+  it('on Entities: shows the entity list in place of the memory search and grid', async () => {
+    const view = makeViewService({ filters: { status: 'entities' } });
+    const { fixture } = await createComponent({ view });
+    const host = fixture.nativeElement as HTMLElement;
+
+    expect(host.querySelector('app-entity-list')).not.toBeNull();
+    expect(host.querySelector('app-memory-card-grid')).toBeNull();
+    expect(host.querySelector('[aria-label="Search memories"]')).toBeNull();
+    expect(host.querySelector('[data-testid="memory-entities-tab"]')?.getAttribute('aria-selected')).toBe('true');
   });
 
   it('reflects the active status tab via aria-selected and the active class', async () => {
@@ -607,8 +621,8 @@ describe('MemoriesListTabComponent status tabs and Summaries read-only enforceme
     const host = fixture.nativeElement as HTMLElement;
     const tabs = Array.from(host.querySelectorAll('[role="tab"]')) as HTMLButtonElement[];
 
-    expect(tabs[3].getAttribute('aria-selected')).toBe('true');
-    expect(tabs[3].classList.contains('memories-list__status--active')).toBe(true);
+    expect(tabs[4].getAttribute('aria-selected')).toBe('true');
+    expect(tabs[4].classList.contains('memories-list__status--active')).toBe(true);
     expect(tabs[0].getAttribute('aria-selected')).toBe('false');
     expect(tabs[0].classList.contains('memories-list__status--active')).toBe(false);
   });

@@ -6859,6 +6859,259 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/entities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List entity wiki pages
+         * @description Lists the user's entity pages (ADR 0x034), most recently changed first. Agents write these short pages about people, places and projects with the entity_write tool; global ones are shared by every personality, and pinned ones (written by a personality with auto_pin_memories on) by that personality only.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    page?: number;
+                    limit?: number;
+                    /** @description Case-insensitive match on the name or text. */
+                    query?: string;
+                    /** @description Only entities pinned to this personality. */
+                    personality_id?: string;
+                    /** @description Only global entities. */
+                    global_only?: boolean;
+                    /** @description List the entities an agent deleted (archived) instead of the live ones. Archived entities are hidden from agents and can be restored. */
+                    archived?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Entities retrieved successfully */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PaginatedResponse"] & {
+                            results?: components["schemas"]["AgentEntity"][];
+                        };
+                    };
+                };
+                /** @description Invalid personality_id */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/entities/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete an entity
+         * @description Removes a live or archived entity for good.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Entity deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Entity not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Edit an entity's text
+         * @description Replaces the entity's text. The edit is the user's, so the agent provenance is cleared.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        body: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Entity updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentEntity"];
+                    };
+                };
+                /** @description Missing body, or text over 5000 characters */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Entity not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/memory/entities/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore an archived entity
+         * @description Brings back an entity an agent deleted (archived). The restore is the user's, so the agent provenance is cleared.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Entity restored */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentEntity"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No archived entity with this id */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A live entity in the same scope has taken the name since it was archived */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/compaction-events": {
         parameters: {
             query?: never;
@@ -14103,10 +14356,30 @@ export interface components {
              */
             created_at: string;
             /**
-             * @description Server-derived origin class used by the gallery's Generated/Imported filter. `generated` = attached to an assistant message or produced by a generation pipeline (expression grid, portrait); `imported` = uploaded by the user (gallery import, personality upload, user chat message). Omitted when the server could not determine it.
+             * @description Server-derived origin class used by the gallery's Generated/Imported filter. `generated` = attached to an assistant message or produced by a generation pipeline (expression grid, portrait); `imported` = uploaded by the user (gallery import, personality upload, user chat message). Agent-authored files are `generated`. Omitted when the server could not determine it.
              * @enum {string}
              */
             source?: "generated" | "imported";
+            /**
+             * @description Who wrote the file (ADR 0x034). `user` = uploads, imports and reply outputs; `agent` = written by an agent's file tools. Only `agent` files can be changed by an agent, and only by the personality (or, with none, the thread) that created them. More values may be added, so treat an unknown one like `user`.
+             * @enum {string}
+             */
+            origin?: "user" | "agent";
+            /**
+             * Format: uuid
+             * @description Personality whose agent created the file (agent-authored files only).
+             */
+            created_by_personality_id?: string;
+            /**
+             * Format: uuid
+             * @description Thread the agent created the file in, when it had no personality (agent-authored files only).
+             */
+            created_by_chat_id?: string;
+            /**
+             * Format: date-time
+             * @description When an agent last changed the file's content. Omitted for files never changed.
+             */
+            updated_at?: string;
         };
         FileAttachmentPersonality: {
             /** Format: uuid */
@@ -14430,6 +14703,43 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description One entity wiki page (ADR 0x034). */
+        AgentEntity: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            user_id: string;
+            /** @description Normalized lookup key (lowercase, single spaces). */
+            key: string;
+            /** @description The name as first written. */
+            title: string;
+            body: string;
+            /**
+             * Format: uuid
+             * @description Set when only this personality sees the entity; absent for a global entity.
+             */
+            pinned_personality_id?: string;
+            pinned_personality_name?: string;
+            /**
+             * Format: uuid
+             * @description Personality whose agent last wrote it; absent when the user last edited it.
+             */
+            last_personality_id?: string;
+            /**
+             * Format: uuid
+             * @description Conversation that last wrote it; absent when the user last edited it.
+             */
+            last_chat_id?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /**
+             * Format: date-time
+             * @description When an agent deleted (archived) the entity; absent for a live entity.
+             */
+            archived_at?: string;
         };
         /**
          * @example {

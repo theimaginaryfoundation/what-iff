@@ -94,6 +94,9 @@ func (Personality) Edges() []ent.Edge {
 		edge.To("card", PersonalityCard.Type).
 			Unique().
 			Annotations(entsql.OnDelete(entsql.Cascade)),
+		// Entities pinned to this personality (ADR 0x034) go with it; global ones stay.
+		edge.To("agent_entities", AgentEntity.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}
 }
 

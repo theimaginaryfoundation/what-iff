@@ -305,7 +305,8 @@ func expectCreatePersonalityAttachment(mock sqlmock.Sqlmock, uid, pid, attID uui
 }
 
 // expectCreatePersonalityAttachmentWithInsert is expectCreatePersonalityAttachment that also checks
-// the INSERT's arguments (name, file_type, folder, created_at, user, personality, id) when given.
+// the INSERT's arguments (name, file_type, folder, context_only, created_at, origin, user,
+// personality, id) when given.
 func expectCreatePersonalityAttachmentWithInsert(mock sqlmock.Sqlmock, uid, pid, attID uuid.UUID, insertArgs []driver.Value) {
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT .* FROM `users`").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(uid.String()))
@@ -332,7 +333,7 @@ func TestUploadExpressionCellAttachment_StoresImageAndThumbnail(t *testing.T) {
 	// The cell is filed in the personality's expressions folder, not left at the top of the gallery.
 	any := sqlmock.AnyArg()
 	expectCreatePersonalityAttachmentWithInsert(mock, uid, pid, attID,
-		[]driver.Value{"expression-smug.png", "image/png", "expressions/aster", false, any, any, any, any})
+		[]driver.Value{"expression-smug.png", "image/png", "expressions/aster", false, any, "user", any, any, any})
 	mock.ExpectExec("UPDATE `file_attachments`").WillReturnResult(sqlmock.NewResult(0, 1))
 
 	store := newRecordingFileStore()

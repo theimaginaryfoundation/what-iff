@@ -127,7 +127,17 @@ func (t *ListTool) listSandboxFiles(ctx context.Context, chat *models.Chat, a li
 }
 
 func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs) (string, error) {
-	limit := clampLimit(a.Limit, listDefaultLimit)
+	view := strings.ToLower(strings.TrimSpace(a.View))
+	if view != "" && view != listFileViewList && view != listFileViewTree {
+		return t.fail(listKindFiles, fmt.Sprintf("unknown view %q; use \"list\" or \"tree\"", a.View))
+	}
+	// A tree is drawn from one page, so it defaults to the largest page: one folder's whole tree
+	// in most libraries.
+	defLimit := listDefaultLimit
+	if view == listFileViewTree {
+		defLimit = listMaxLimit
+	}
+	limit := clampLimit(a.Limit, defLimit)
 	pageNum := clampPage(a.Page)
 	if chat.IsSandboxed() {
 		return t.listSandboxFiles(ctx, chat, a, limit, pageNum)
@@ -147,6 +157,14 @@ func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs)
 		if folder != "" { // "/" or "" would mean the top level, which is "no folder filter" here
 			filters.FolderPrefix = &folder
 		}
+	}
+
+	switch origin := models.FileOrigin(strings.ToLower(strings.TrimSpace(a.Origin))); origin {
+	case "":
+	case models.FileOriginAgent, models.FileOriginUser:
+		filters.Origin = origin
+	default:
+		return t.fail(listKindFiles, fmt.Sprintf("unknown origin %q; use \"agent\" or \"user\"", a.Origin))
 	}
 
 	switch normalizeFileScope(a.Scope) {
@@ -171,14 +189,24 @@ func (t *ListTool) listFiles(ctx context.Context, chat *models.Chat, a listArgs)
 		if !ok || fa == nil {
 			continue
 		}
-		items = append(items, listItem{
+		item := listItem{
 			ID:       fa.ID.String(),
 			Name:     fa.Name,
 			FileType: fa.FileType,
 			Folder:   fa.Folder,
-		})
+		}
+		if fa.Origin != "" && fa.Origin != models.FileOriginUser {
+			item.Origin = string(fa.Origin)
+		}
+		items = append(items, item)
 	}
 	meta := listPageMeta{Page: pageNum, Limit: limit, TotalCount: page.TotalCount}
+	if view == listFileViewTree {
+		res := pagedListResult(listKindFiles, items, listTruncationNote("files", meta, len(items)), meta)
+		res.Tree = renderFileTree(items)
+		res.Items = []listItem{}
+		return marshalToolResult(res, listToolName)
+	}
 	return t.okPaged(listKindFiles, items, listTruncationNote("files", meta, len(items)), meta)
 }
 

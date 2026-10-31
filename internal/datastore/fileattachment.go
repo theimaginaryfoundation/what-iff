@@ -45,10 +45,18 @@ func toFileAttachmentModel(e *ent.FileAttachment) *models.FileAttachment {
 		Folder:      e.Folder,
 		ContextOnly: e.ContextOnly,
 		CreatedAt:   e.CreatedAt,
+
+		Origin:                 models.FileOrigin(e.Origin),
+		CreatedByPersonalityID: e.CreatedByPersonalityID,
+		CreatedByChatID:        e.CreatedByChatID,
+		UpdatedAt:              e.UpdatedAt,
 	}
 
 	if e.FileID != "" {
 		fileAttachmentModel.FileID = &e.FileID
+	}
+	if e.ChunkStatus != nil {
+		fileAttachmentModel.ChunkStatus = string(*e.ChunkStatus)
 	}
 
 	if e.Edges.ChatMessage != nil {
@@ -97,6 +105,9 @@ func classifyFileAttachmentSource(e *ent.FileAttachment) models.FileAttachmentSo
 			return models.FileAttachmentSourceGenerated
 		}
 		return models.FileAttachmentSourceImported
+	}
+	if e.Origin == entfileattachment.OriginAgent {
+		return models.FileAttachmentSourceGenerated
 	}
 	if strings.HasPrefix(strings.ToLower(e.FileType), models.ImageMIMEPrefix) &&
 		generatedUnlinkedImageName.MatchString(strings.TrimSpace(e.Name)) {
@@ -223,6 +234,14 @@ func (d *Datastore) CreateFileAttachment(ctx context.Context, userID uuid.UUID, 
 
 	if fileAttachment.ContextOnly {
 		create.SetContextOnly(true)
+	}
+
+	if fileAttachment.Origin != "" {
+		create.SetOrigin(entfileattachment.Origin(fileAttachment.Origin))
+	}
+	if fileAttachment.AgentAuthored() {
+		create.SetNillableCreatedByPersonalityID(fileAttachment.CreatedByPersonalityID).
+			SetNillableCreatedByChatID(fileAttachment.CreatedByChatID)
 	}
 
 	entFileAttachment, err := create.Save(ctx)
@@ -483,6 +502,10 @@ func (d *Datastore) ListFileAttachments(ctx context.Context, userID uuid.UUID, p
 			entfileattachment.FolderEQ(*filters.FolderPrefix),
 			entfileattachment.FolderHasPrefix(*filters.FolderPrefix+"/"),
 		))
+	}
+
+	if filters.Origin != "" {
+		query = query.Where(entfileattachment.OriginEQ(entfileattachment.Origin(filters.Origin)))
 	}
 
 	if filters.ExcludeReferenceCopies {

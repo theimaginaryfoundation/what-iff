@@ -119,6 +119,32 @@ func ReleaseAttachmentObjects(ctx context.Context, logger *zap.Logger, store Fil
 	return res
 }
 
+// ReleaseReplacedObject deletes key, the object a still-existing row pointed at before its s3_key
+// was swapped to a new version (agent file edits, ADR 0x034), unless another row (a reference copy)
+// still stores it. Best effort, like ReleaseAttachmentObjects: it reports whether the object was
+// deleted and only logs failures.
+func ReleaseReplacedObject(ctx context.Context, logger *zap.Logger, store FileStore, refs AttachmentKeyRefs, key string) bool {
+	if store == nil || refs == nil || strings.TrimSpace(key) == "" {
+		return false
+	}
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	referenced, err := refs.ReferencedFileAttachmentKeys(ctx, []string{key})
+	if err != nil {
+		logger.Warn("attachment cleanup: reference check failed, keeping replaced object", zap.String("key", key), zap.Error(err))
+		return false
+	}
+	if referenced[key] {
+		return false
+	}
+	if err := store.DeleteFile(ctx, key); err != nil {
+		logger.Warn("attachment cleanup: replaced object delete failed", zap.String("key", key), zap.Error(err))
+		return false
+	}
+	return true
+}
+
 // PurgeUserObjects deletes everything stored for an account after it has been deleted: the
 // whole users/{userID}/ prefix (attachments, thumbnails, and anything else a feature keeps there)
 // and the account's export bundles under exports/{userID}/. Without an ObjectLister, or when

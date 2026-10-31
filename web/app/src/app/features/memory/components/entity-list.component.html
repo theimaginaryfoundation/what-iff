@@ -1,0 +1,137 @@
+<div class="entity-list">
+  <div class="entity-list__summary">
+    <span>{{ countLabel() }}</span>
+    @if (archived()) {
+      <span class="entity-list__hint">· pages an agent deleted; restore one to put it back</span>
+    } @else {
+      <span class="entity-list__hint">· pages your personalities keep about people, places and projects</span>
+    }
+  </div>
+
+  <div class="entity-list__controls">
+    <label class="entity-list__search">
+      <ui-search-icon [size]="14" />
+      <input
+        type="search"
+        placeholder="Search entities…"
+        aria-label="Search entities"
+        data-testid="entity-search"
+        [ngModel]="searchDraft()"
+        (ngModelChange)="searchDraft.set($event)"
+        (keydown.enter)="onSearchSubmit()"
+      />
+    </label>
+    <label class="entity-list__filter">
+      <span>Personality</span>
+      <select [value]="personalityFilter()" (change)="onPersonalityFilterChange($any($event.target).value)">
+        <option value="">Any personality</option>
+        <option [value]="globalPersonalityFilter">{{ globalScopeLabel }}</option>
+        @for (personality of personalities(); track personality.id) {
+          <option [value]="personality.id">{{ personality.label }}</option>
+        }
+      </select>
+    </label>
+    <label class="entity-list__filter">
+      <span>Show</span>
+      <select
+        aria-label="Show active or archived entities"
+        data-testid="entity-archived-filter"
+        [value]="archived() ? 'archived' : 'active'"
+        (change)="onArchivedChange($any($event.target).value === 'archived')"
+      >
+        <option value="active">Active</option>
+        <option value="archived">Archived</option>
+      </select>
+    </label>
+  </div>
+
+  @if (error(); as message) {
+    <p class="entity-list__error" role="alert">{{ message }}</p>
+  } @else if (loading() && items().length === 0) {
+    <p class="entity-list__empty">Loading entities…</p>
+  } @else if (items().length === 0) {
+    <p class="entity-list__empty">
+      @if (query()) {
+        No {{ archived() ? "archived " : "" }}entities match "{{ query() }}".
+      } @else if (archived()) {
+        No archived entities. When a personality deletes an entity, it lands here so you can restore it.
+      } @else {
+        No entities yet. Personalities write them with the entity tools as people, places and projects come up.
+      }
+    </p>
+  }
+
+  <ul class="entity-list__items" role="list">
+    @for (item of items(); track item.entity.id) {
+      <li class="entity-card" data-testid="entity-card">
+        <div class="entity-card__top">
+          <h3 class="entity-card__title">{{ item.entity.title }}</h3>
+          <span
+            class="entity-card__scope"
+            [class.entity-card__scope--pinned]="!!item.entity.pinned_personality_id"
+            [uiTooltip]="item.entity.pinned_personality_id ? 'Only this personality sees it' : 'Every personality sees it'"
+            >{{ item.scopeLabel }}</span
+          >
+          @if (item.entity.archived_at) {
+            <span class="entity-card__updated">Archived {{ item.entity.archived_at | date: "mediumDate" }}</span>
+          } @else {
+            <span class="entity-card__updated">Updated {{ item.entity.updated_at | date: "mediumDate" }}</span>
+          }
+        </div>
+
+        @if (editingId() === item.entity.id) {
+          <textarea
+            class="entity-card__editor"
+            aria-label="Entity text"
+            rows="8"
+            [ngModel]="draft()"
+            (ngModelChange)="draft.set($event)"
+          ></textarea>
+          <div class="entity-card__actions">
+            <span class="entity-card__count" [class.entity-card__count--over]="draftTooLong()">{{ draft().length }} / {{ maxChars }}</span>
+            <button type="button" (click)="cancelEdit()" [disabled]="saving()">Cancel</button>
+            <button type="button" class="entity-card__primary" (click)="saveEdit(item.entity)" [disabled]="saving() || draftTooLong()">
+              Save
+            </button>
+          </div>
+        } @else {
+          <p class="entity-card__body">
+            @for (segment of item.segments; track $index) {
+              @if (segment.link) {
+                <button type="button" class="entity-card__link" [uiTooltip]="'Find ' + segment.text" (click)="followLink(segment.text)">
+                  {{ segment.text }}
+                </button>
+              } @else {
+                <span class="entity-card__text">{{ segment.text }}</span>
+              }
+            }
+          </p>
+          <div class="entity-card__actions">
+            @if (confirmDeleteId() === item.entity.id) {
+              <span class="entity-card__confirm">{{ archived() ? "Delete this entity for good?" : "Delete this entity?" }}</span>
+              <button type="button" (click)="confirmDeleteId.set(null)" [disabled]="saving()">Keep</button>
+              <button type="button" class="entity-card__danger" (click)="delete(item.entity)" [disabled]="saving()">Delete</button>
+            } @else if (archived()) {
+              <button type="button" class="entity-card__primary" (click)="restore(item.entity)" [disabled]="saving()">Restore</button>
+              <button type="button" class="entity-card__danger" (click)="confirmDelete(item.entity)">Delete forever</button>
+            } @else {
+              <button type="button" (click)="startEdit(item.entity)">Edit</button>
+              <button type="button" class="entity-card__danger" (click)="confirmDelete(item.entity)">Delete</button>
+            }
+          </div>
+        }
+        @if (rowError()?.id === item.entity.id) {
+          <p class="entity-list__error" role="alert">{{ rowError()?.message }}</p>
+        }
+      </li>
+    }
+  </ul>
+
+  @if (totalPages() > 1) {
+    <nav class="entity-list__pagination" aria-label="Entity pages">
+      <button type="button" [disabled]="page() <= 1 || loading()" (click)="load(page() - 1)">Previous</button>
+      <span>Page {{ page() }} of {{ totalPages() }}</span>
+      <button type="button" [disabled]="page() >= totalPages() || loading()" (click)="load(page() + 1)">Next</button>
+    </nav>
+  }
+</div>

@@ -34,6 +34,15 @@ export class MemoryViewService {
 
   load(page: number = 1): void {
     const requestID = ++this.loadRequestID;
+    if (this.filters().status === 'entities') {
+      // The Entities tab lists entities itself (EntityListComponent); there are no memories to load.
+      this.memories.set([]);
+      this.totalCount.set(0);
+      this.selectedIds.set([]);
+      this.loading.set(false);
+      this.error.set(null);
+      return;
+    }
     this.loading.set(true);
     this.error.set(null);
     this.currentPage.set(page);

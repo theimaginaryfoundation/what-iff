@@ -69,6 +69,19 @@ func FileKeyForAttachment(userID, attachmentID uuid.UUID, filename, fileType str
 	return FileKeyFallback(userID, attachmentID, filename)
 }
 
+// FileKeyForAgentFile constructs the S3 object key for one version of an agent-authored file
+// (ADR 0x034). Each change is stored under a new objectID and the row's s3_key swapped to it, so a
+// reader never sees a half-written object and a reference copy keeps the version it was made from.
+// Format: users/{userID}/agent/{objectID_filename}
+func FileKeyForAgentFile(userID, objectID uuid.UUID, filename string) string {
+	return path.Join("users", userID.String(), "agent", filenameWithFallback(sanitizeFilename(filename), objectID.String()))
+}
+
+// AgentFileKeyPrefix is the key prefix every one of userID's agent files is stored under.
+func AgentFileKeyPrefix(userID uuid.UUID) string {
+	return path.Join("users", userID.String(), "agent") + "/"
+}
+
 // FileKeyForImageThumbnail constructs the S3 object key for a JPEG thumbnail.
 // Thumbnails are always stored as JPEG regardless of the original format.
 // Format: users/{userID}/images/thumbs/{attachmentID}.jpg

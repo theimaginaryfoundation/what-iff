@@ -25,6 +25,13 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
       Rows that fail to embed are logged by ID and passed over, so they cannot stall the rows behind them; when a whole page fails, a probe input decides between bad input (skip) and an unavailable provider (stop).
     `memory_merge.go`'s `ListMemoryMergeEvents` takes a `models.MemoryMergeEventFilters` (query/survivor-memory/date-range/exclude-reverted) for both the merge-audit HTTP endpoint and `find_context`'s `mode=lifecycle_events`.
   - Files: `fileattachment.go`, `fileattachment_folders.go`, `filechunk.go` (chunk storage + search).
+    `agentfile.go` backs the agent file tools (ADR 0x034): `FindFileAttachmentsAtPath` (folder + case-insensitive name, gallery rows only), `SwapAgentFileObject` (compare-and-swap of an agent-authored row's `s3_key`) and `CountAgentFiles`.
+    `file_attachments.origin` is a string enum (`user`, `agent`); `FileAttachmentFilters.Origin` narrows listings to one origin, and `toFileAttachmentModel` carries `chunk_status` as `FileAttachment.ChunkStatus`.
+  - Entity wiki: `agententity.go` (ADR 0x034) — `GetAgentEntity`, `CreateAgentEntity`, `UpdateAgentEntity` (compare-and-swap on the body, retried), `ListAgentEntities`, `SetAgentEntityBody`, `DeleteAgentEntity`.
+    Visibility follows memories: global entities plus those pinned to the active personality, the pinned one winning; a new entity is pinned when the writing personality has `auto_pin_memories` on.
+    `ListVisibleAgentEntities` lists what a conversation sees by key prefix (one row per key, the pinned one), without bodies.
+    `ArchiveAgentEntity` is the agent's delete: it sets `archived_at` and the writer, and every live query skips archived rows (`liveAgentEntities`); the unique indexes ignore them.
+    `ListAgentEntities` with `Archived` lists them for the Memories panel, `RestoreAgentEntity` brings one back (`ErrAgentEntityExists` when a live page has taken the name), and the UI's `DeleteAgentEntity` removes a row for good.
     **Gallery folders** are a normalized path string on `file_attachments.folder` (a label; the `s3_key` never changes), indexed with the owner.
     `FileAttachmentFilters.Folder` matches one folder exactly and `FolderPrefix` matches a folder and everything beneath it (the trailing `/` keeps `charts` from matching `charts-old`).
     `fileattachment_folders.go` holds `ListGalleryFolders` (files of one `models.GalleryKind` directly in each folder), `MoveFileAttachmentsToFolder` and `MoveGalleryFolder` (a rename that carries every folder beneath it).

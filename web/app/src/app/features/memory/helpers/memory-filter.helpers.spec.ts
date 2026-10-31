@@ -31,6 +31,10 @@ describe('memory-filter.helpers', () => {
     expect(parsed.level).toBe('all');
   });
 
+  it('keeps the Entities status tab from the URL', () => {
+    expect(parseQueryParams({ status: 'entities' }).status).toBe('entities');
+  });
+
   it('serializes non-default filters', () => {
     const params = serializeFilters({
       ...DEFAULT_MEMORY_VIEW_FILTERS,

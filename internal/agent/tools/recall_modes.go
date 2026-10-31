@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/theimaginaryfoundation/what-iff/internal/datastore"
@@ -409,13 +410,49 @@ func (t *RecallTool) fetchSummary(ctx context.Context, chat *models.Chat, chatID
 }
 
 // fetchFile resolves fetch mode for a resolved file attachment. Images are attached directly to
-// the model's context (see fetchImage) instead of being chunked; every other file type returns
-// paginated text chunks as before.
+// the model's context (see fetchImage) instead of being chunked; a text file with no chunks (an
+// agent file, or one whose chunking has not finished) is read straight from the object store; every
+// other file returns paginated text chunks as before.
 func (t *RecallTool) fetchFile(ctx context.Context, userID uuid.UUID, fa *models.FileAttachment, token string, maxChunks int) (string, []*models.Memory, []*models.FileAttachment, error) {
 	if strings.HasPrefix(fa.FileType, models.ImageMIMEPrefix) {
 		return t.fetchImage(ctx, userID, fa)
 	}
+	if !fa.Chunked() && ReadableAsText(fa) {
+		return t.fetchUnchunkedText(ctx, fa)
+	}
 	return t.fetchFileChunks(ctx, fa.ID, fa.Name, token, maxChunks)
+}
+
+// recallUnchunkedMaxChars caps an unchunked file's text in one fetch; agent_file_read pages further.
+const recallUnchunkedMaxChars = 24000
+
+// fetchUnchunkedText returns a text file's text from the object store, for files that have no
+// chunks to page through (agent files are never chunked, ADR 0x034).
+func (t *RecallTool) fetchUnchunkedText(ctx context.Context, fa *models.FileAttachment) (string, []*models.Memory, []*models.FileAttachment, error) {
+	var text string
+	if t.fileStore != nil {
+		var err error
+		if text, err = ReadFileText(ctx, t.logger, t.fileStore, fa); err != nil {
+			t.logger.Warn("find_context: unchunked file read failed", zap.String("file_attachment_id", fa.ID.String()), zap.Error(err))
+		}
+	}
+	if text == "" {
+		return t.ok(recallResult{Mode: recallModeFetch, Note: fmt.Sprintf("Found %q but it is empty or could not be loaded.", fa.Name)}, nil, nil)
+	}
+	note := ""
+	if len(text) > recallUnchunkedMaxChars {
+		cut := recallUnchunkedMaxChars
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		text = text[:cut]
+		note = fmt.Sprintf("Showing the start of %q; read the rest with agent_file_read (action \"read\").", fa.Name)
+	}
+	return t.ok(recallResult{
+		Mode:   recallModeFetch,
+		Chunks: []recallChunk{{SourceType: "file", Name: fa.Name, AttachmentID: fa.ID.String(), Text: text}},
+		Note:   note,
+	}, nil, nil)
 }
 
 // fetchImage loads an image attachment's bytes and returns it as a tool-result attachment,
