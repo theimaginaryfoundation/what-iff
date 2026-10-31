@@ -39,6 +39,24 @@ type AgentEntity struct {
 	LastChatID            *uuid.UUID `json:"last_chat_id,omitempty"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
+	// ArchivedAt is set when an agent deleted the entity: it is archived, hidden from agents, and
+	// the user can restore it. Live entities have nil.
+	ArchivedAt *time.Time `json:"archived_at,omitempty"`
+}
+
+// EntityScope names who sees an entity, in the tool results: EntityScopeUser for every
+// personality of the account, EntityScopePersonality for the one it is pinned to.
+const (
+	EntityScopeUser        = "user"
+	EntityScopePersonality = "personality"
+)
+
+// Scope is the entity's EntityScope.
+func (e *AgentEntity) Scope() string {
+	if e.PinnedPersonalityID != nil {
+		return EntityScopePersonality
+	}
+	return EntityScopeUser
 }
 
 // AgentEntityWriter says who is writing an entity. ActivePersonalityID is the personality of the
@@ -56,12 +74,14 @@ type AgentEntityFilters struct {
 	Query *string
 	// PinnedPersonalityID: nil applies no narrowing; uuid.Nil keeps global entities only.
 	PinnedPersonalityID *uuid.UUID
-	Limit               int
-	Offset              int
+	// Archived lists archived entities instead of live ones.
+	Archived bool
+	Limit    int
+	Offset   int
 }
 
-// NormalizeEntityKey lowercases key, trims it and collapses inner whitespace, so "Chris  Smith" and
-// "chris smith" name the same entity. Matching is exact after this; fuzzier matching is later work.
+// NormalizeEntityKey lowercases key, trims it and collapses inner whitespace, so "Alex  Rivera" and
+// "alex rivera" name the same entity. Matching is exact after this; fuzzier matching is later work.
 func NormalizeEntityKey(key string) (string, error) {
 	norm := strings.ToLower(strings.Join(strings.Fields(key), " "))
 	if norm == "" || utf8.RuneCountInString(norm) > MaxEntityKeyRunes {

@@ -33,8 +33,17 @@ func parseUnifiedDiff(diff string) ([]diffHunk, error) {
 	}
 	var hunks []diffHunk
 	var cur *diffHunk
+	// bareBlanks counts the bare blank lines that end cur so far. Models often put a blank line
+	// between hunks; before an "@@" those are separators, not context, so they are dropped.
+	bareBlanks := 0
 	for i, line := range lines {
 		if strings.HasPrefix(line, "@@") {
+			if cur != nil && bareBlanks > 0 {
+				cur.old = cur.old[:len(cur.old)-bareBlanks]
+				cur.new = cur.new[:len(cur.new)-bareBlanks]
+				cur.ops = cur.ops[:len(cur.ops)-bareBlanks]
+			}
+			bareBlanks = 0
 			// Any other "@@" line ("@@ @@", "@@ section @@") is a hunk without a line number.
 			h := diffHunk{}
 			if m := hunkHeaderPattern.FindStringSubmatch(line); m != nil {
@@ -49,11 +58,16 @@ func parseUnifiedDiff(diff string) ([]diffHunk, error) {
 			// Preamble before the first hunk: file headers and any commentary.
 			continue
 		}
+		if line == "" {
+			bareBlanks++
+		} else {
+			bareBlanks = 0
+		}
 		switch {
 		case strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") || strings.HasPrefix(line, "diff --git"):
 			return nil, fmt.Errorf("line %d: a patch may change only one file", i+1)
 		case line == "":
-			// A blank context line whose leading space was dropped.
+			// A blank context line whose leading space was dropped (or a separator; see bareBlanks).
 			cur.old = append(cur.old, "")
 			cur.new = append(cur.new, "")
 			cur.ops = append(cur.ops, ' ')

@@ -48,6 +48,10 @@ func (AgentEntity) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			Comment("Conversation that last wrote the entity; null when the user edited it."),
+		field.Time("archived_at").
+			Optional().
+			Nillable().
+			Comment("Set when an agent deleted the entity: it is archived, hidden from agents' reads and lists, and the user can restore it from Memories > Entities. last_personality_id/last_chat_id say who archived it. A user's delete removes the row."),
 	}
 }
 
@@ -68,16 +72,17 @@ func (AgentEntity) Edges() []ent.Edge {
 // Indexes of the AgentEntity.
 func (AgentEntity) Indexes() []ent.Index {
 	return []ent.Index{
-		// One global entity per key, and one per key for each personality. Two partial indexes
-		// because a plain unique index treats every null pinned_personality_id as distinct.
+		// One live global entity per key, and one per key for each personality; archived entities
+		// do not count. Two partial indexes because a plain unique index treats every null
+		// pinned_personality_id as distinct.
 		index.Fields("key").
 			Edges("owner").
 			Unique().
-			Annotations(entsql.IndexWhere("pinned_personality_id IS NULL")),
+			Annotations(entsql.IndexWhere("pinned_personality_id IS NULL AND archived_at IS NULL")),
 		index.Fields("key", "pinned_personality_id").
 			Edges("owner").
 			Unique().
-			Annotations(entsql.IndexWhere("pinned_personality_id IS NOT NULL")),
+			Annotations(entsql.IndexWhere("pinned_personality_id IS NOT NULL AND archived_at IS NULL")),
 		index.Edges("owner"),
 	}
 }

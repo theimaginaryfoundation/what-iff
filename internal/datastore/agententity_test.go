@@ -26,11 +26,12 @@ func createAgentEntityTestSchema(t *testing.T, db *sql.DB) {
 			body text NOT NULL DEFAULT '',
 			last_personality_id uuid,
 			last_chat_id uuid,
+			archived_at datetime,
 			pinned_personality_id uuid REFERENCES personalities(id) ON DELETE CASCADE,
 			user_agent_entities uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE
 		)`,
-		`CREATE UNIQUE INDEX agententity_key_user_agent_entities ON agent_entities(key, user_agent_entities) WHERE pinned_personality_id IS NULL`,
-		`CREATE UNIQUE INDEX agententity_key_pinned_personality_id_user_agent_entities ON agent_entities(key, pinned_personality_id, user_agent_entities) WHERE pinned_personality_id IS NOT NULL`,
+		`CREATE UNIQUE INDEX agententity_key_user_agent_entities ON agent_entities(key, user_agent_entities) WHERE pinned_personality_id IS NULL AND archived_at IS NULL`,
+		`CREATE UNIQUE INDEX agententity_key_pinned_personality_id_user_agent_entities ON agent_entities(key, pinned_personality_id, user_agent_entities) WHERE pinned_personality_id IS NOT NULL AND archived_at IS NULL`,
 	} {
 		_, err := db.Exec(stmt)
 		require.NoError(t, err)
@@ -77,26 +78,26 @@ func TestAgentEntity_GlobalCreateGetAndNormalizedKey(t *testing.T) {
 	other := insertEntityTestPersonality(t, db, userID, "Other", false)
 	chatID := uuid.New()
 
-	created, err := ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: shared, ChatID: chatID}, "  Chris   Smith ", "Works on [[Project Y]].")
+	created, err := ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: shared, ChatID: chatID}, "  Alex   Rivera ", "Works on [[Project Orchard]].")
 	require.NoError(t, err)
-	require.Equal(t, "chris smith", created.Key)
-	require.Equal(t, "Chris Smith", created.Title)
+	require.Equal(t, "alex rivera", created.Key)
+	require.Equal(t, "Alex Rivera", created.Title)
 	require.Nil(t, created.PinnedPersonalityID, "auto_pin_memories off: the entity is global")
 	require.Equal(t, &shared, created.LastPersonalityID)
 	require.Equal(t, &chatID, created.LastChatID)
 
-	got, err := ds.GetAgentEntity(ctx, userID, other, "CHRIS SMITH")
+	got, err := ds.GetAgentEntity(ctx, userID, other, "ALEX RIVERA")
 	require.NoError(t, err)
 	require.Equal(t, created.ID, got.ID, "a global entity is visible to every personality")
 
-	got, err = ds.GetAgentEntity(ctx, userID, uuid.Nil, "chris smith")
+	got, err = ds.GetAgentEntity(ctx, userID, uuid.Nil, "alex rivera")
 	require.NoError(t, err)
 	require.Equal(t, created.ID, got.ID, "and to conversations with no personality")
 
-	_, err = ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: other}, "chris smith", "dup")
+	_, err = ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: other}, "alex rivera", "dup")
 	require.ErrorIs(t, err, ErrAgentEntityExists)
 
-	_, err = ds.GetAgentEntity(ctx, insertEntityTestUser(t, db), uuid.Nil, "chris smith")
+	_, err = ds.GetAgentEntity(ctx, insertEntityTestUser(t, db), uuid.Nil, "alex rivera")
 	require.ErrorIs(t, err, ErrAgentEntityNotFound, "another user's entity is not visible")
 }
 
@@ -238,4 +239,95 @@ func TestAgentEntity_UserEditListAndDelete(t *testing.T) {
 	require.NoError(t, ds.DeleteAgentEntity(ctx, userID, pinned.ID))
 	_, err = ds.GetAgentEntity(ctx, userID, pinner, "rex")
 	require.ErrorIs(t, err, ErrAgentEntityNotFound)
+}
+
+func TestAgentEntity_PrefixListShowsWhatAReadSees(t *testing.T) {
+	ds, db, cleanup := newAgentEntityTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := insertEntityTestUser(t, db)
+	pinner := insertEntityTestPersonality(t, db, userID, "Pinner", true)
+	other := insertEntityTestPersonality(t, db, userID, "Other", false)
+
+	_, err := ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: pinner}, "Project Alpha", "pinned")
+	require.NoError(t, err)
+	shared, err := ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: other}, "Project Alpha", "shared")
+	require.NoError(t, err)
+	_, err = ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: other}, "Project Beta", "x")
+	require.NoError(t, err)
+	_, err = ds.CreateAgentEntity(ctx, userID, models.AgentEntityWriter{ActivePersonalityID: other}, "Alex", "x")
+	require.NoError(t, err)
+
+	list, total, err := ds.ListVisibleAgentEntities(ctx, userID, pinner, "  PROJECT ", 10)
+	require.NoError(t, err)
+	require.Equal(t, 2, total, "the shadowed global page is listed once")
+	require.Equal(t, "Project Alpha", list[0].Title)
+	require.Equal(t, models.EntityScopePersonality, list[0].Scope(), "as the pinned page a read returns")
+	require.Equal(t, "Project Beta", list[1].Title)
+
+	list, total, err = ds.ListVisibleAgentEntities(ctx, userID, other, "", 1)
+	require.NoError(t, err)
+	require.Equal(t, 3, total)
+	require.Len(t, list, 1)
+	require.Equal(t, "Alex", list[0].Title)
+
+	// The other personality sees only the shared Project Alpha.
+	list, _, err = ds.ListVisibleAgentEntities(ctx, userID, other, "project a", 10)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	require.Equal(t, shared.ID, list[0].ID)
+}
+
+func TestAgentEntity_ArchiveHidesFreesTheKeyAndRestores(t *testing.T) {
+	ds, db, cleanup := newAgentEntityTestDatastore(t)
+	defer cleanup()
+	ctx := context.Background()
+	userID := insertEntityTestUser(t, db)
+	persona := insertEntityTestPersonality(t, db, userID, "Vix", false)
+	chatID := uuid.New()
+	w := models.AgentEntityWriter{ActivePersonalityID: persona, ChatID: chatID}
+
+	created, err := ds.CreateAgentEntity(ctx, userID, w, "Old Car", "Sold in 2025.")
+	require.NoError(t, err)
+
+	archived, err := ds.ArchiveAgentEntity(ctx, userID, w, "old car")
+	require.NoError(t, err)
+	require.Equal(t, created.ID, archived.ID)
+	require.NotNil(t, archived.ArchivedAt)
+	require.Equal(t, "Sold in 2025.", archived.Body, "an archived page keeps its text")
+	require.Equal(t, &chatID, archived.LastChatID, "and who archived it")
+
+	_, err = ds.GetAgentEntity(ctx, userID, persona, "old car")
+	require.ErrorIs(t, err, ErrAgentEntityNotFound)
+	_, err = ds.ArchiveAgentEntity(ctx, userID, w, "old car")
+	require.ErrorIs(t, err, ErrAgentEntityNotFound)
+	_, err = ds.UpdateAgentEntity(ctx, userID, w, "old car", appendTo("x"))
+	require.ErrorIs(t, err, ErrAgentEntityNotFound)
+	_, total, err := ds.ListAgentEntities(ctx, userID, models.AgentEntityFilters{})
+	require.NoError(t, err)
+	require.Zero(t, total, "the live list leaves archived pages out")
+	list, total, err := ds.ListAgentEntities(ctx, userID, models.AgentEntityFilters{Archived: true})
+	require.NoError(t, err)
+	require.Equal(t, 1, total, "the archived list has them")
+	require.Equal(t, created.ID, list[0].ID)
+	_, err = ds.SetAgentEntityBody(ctx, userID, created.ID, "edit")
+	require.ErrorIs(t, err, ErrAgentEntityNotFound)
+
+	// While the name is taken again by a new page, the archived one cannot come back.
+	again, err := ds.CreateAgentEntity(ctx, userID, w, "Old Car", "A new page.")
+	require.NoError(t, err, "the key is free once the old page is archived")
+	_, err = ds.RestoreAgentEntity(ctx, userID, created.ID)
+	require.ErrorIs(t, err, ErrAgentEntityExists)
+
+	require.NoError(t, ds.DeleteAgentEntity(ctx, userID, again.ID))
+	restored, err := ds.RestoreAgentEntity(ctx, userID, created.ID)
+	require.NoError(t, err)
+	require.Nil(t, restored.ArchivedAt)
+	require.Nil(t, restored.LastChatID, "the restore is the user's")
+	got, err := ds.GetAgentEntity(ctx, userID, persona, "old car")
+	require.NoError(t, err)
+	require.Equal(t, "Sold in 2025.", got.Body)
+
+	_, err = ds.RestoreAgentEntity(ctx, userID, created.ID)
+	require.ErrorIs(t, err, ErrAgentEntityNotFound, "only archived entities restore")
 }
