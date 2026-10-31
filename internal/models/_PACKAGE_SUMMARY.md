@@ -49,6 +49,8 @@
   `sandbox_tools.go` is the registry of tools a new sandbox starts with switched off (`RegisterSandboxDefaultDisabledTool`, `SandboxDefaultDisabledTools`); the tool catalog and other builds fill it from `init()`, and `datastore.CreateChat` reads it.
   `AdditionalContextTypeUserName` tags the first-message line naming the user, so a sandboxed chat can drop it when it replays persisted context.
   `MemoryMergeEventFilters.OnlyChatID` limits merge history to folds of memories created in one chat.
+- **Agent memory archive (ADR 0x036):** `MemoryMergeTypeArchive` is the merge-event type for an `archive_memory` archive, and `MemoryArchival` (personality, conversation, reason; `MaxMemoryArchiveReasonRunes`) is carried on the event as `Archival`.
+  `Memory.ArchivedAt` / `ArchivedByPersonalityID` / `ArchivedByChatID` are set while an agent's archive stands (the memory is then inactive).
 - **Memory provenance:** `provenance.go` defines `MemoryProvenance` (`user`, the default, or `external`: learned from people outside the account in a Discord relay thread, unverified) and `MemoryOrigin` (provenance plus the Discord speaker).
   `Memory.Provenance` / `Memory.SourceSpeaker` carry it; an empty value reads as `user`, an unknown non-empty one as `external`.
   `MergeOrigins` combines folded members: external when any member is, a speaker only when every member names the same one.

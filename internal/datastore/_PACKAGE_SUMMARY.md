@@ -147,6 +147,13 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
   Undo restores the survivor's content and embedding only while it still holds the fold's text (`event.Content`); a later edit or fold wins, and the rest of the fold is still undone.
   Legacy events (snapshot `Version` 0) take the absorbed set from `source_members` in the survivor's scope (the old fold never absorbed cross-scope members), reactivating only rows still inactive.
   Their embeddings were hard-deleted by the old fold, so undo logs that they need a re-embed backfill.
+- **Agent memory archive (`memory_archive.go`, ADR 0x036):** `ArchiveMemory` is the `archive_memory` tool's write, and it archives exactly as a merge retires a memory: the row, content and embedding stay and the status becomes inactive; nothing is deleted.
+  Under a row lock it also sets `archived_at` and the archiving personality and conversation, and writes an `archive` merge event carrying them and the reason in the snapshot (`MemoryMergeEvent.Archival`).
+  It refuses (`ErrMemoryNotArchivable`, text meant for the model) a memory already inactive (archived by an agent, the user or a merge), a checkpoint summary, a starred memory, or a reason over 500 characters; which memories a conversation may see is the tool's check.
+  `UndoMemoryMergeEvent` on an `archive` event restores the memory (`ErrMemoryNotFound` when the user deleted it since).
+  `UpdateMemory` setting it active (the Archived view's Unarchive) also restores it: it clears the archive columns and closes the open archive event, so that event cannot be undone over a later archive.
+  `ActiveMemoryIDs` backs the agent's re-check of memory lines replayed from earlier turns, and `MemoryIDsCreatedInChat` (the sandbox re-check) requires an active memory too, so an archived memory is not replayed.
+  No agent path deletes a memory; the user's own `DeleteMemory` is unchanged.
 - **Memory scope versus source chat:** `Memory.Scope` controls retrieval scope (`User`, `Chat`, or `Summary`); the optional `chat` edge records a memory's source conversation and is valid for User-scoped Global and Personality memories too.
   Moves preserve that provenance edge.
   **`MoveMemoryScope`** (`memory_scope_move.go`) moves one memory to global, any of the user's personalities, or any of their threads, from any level (thread to thread included).
@@ -229,6 +236,7 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 - `memory_import_metrics_test.go` — memory import stage timings and item counts, including a failed embed stage.
 - `compaction_event_test.go`, `memory_merge_test.go`, `memory_merge_fold_test.go` — SQLite harness mirrors ent FK semantics (`memory_merge_events.compaction_event_id` → `compaction_events` ON DELETE SET NULL); compaction tests cover content-addressed snapshots, merge grouping, page-size cap, and FK null-on-delete.
   `memory_merge_fold_test.go` covers the fold rewrite rule (same content, rewrite, starred) and exact fold undo, including legacy events.
+  `memory_archive_test.go` covers the agent archive: the archive and its event, the Archived listing, each refusal, undo, Unarchive closing the event, undo after a user delete, and the replay lookups skipping archived memories.
   `TestAutoPin_AppliesToEveryMemoryCreationPath` covers the auto-pin rule on each creation path.
 - `memory_scope_move_test.go` — scope moves: record moved not copied, source thread and embedding kept, audit row, moves across personalities and threads, the sandbox rule, ownership, and that `relatedMemoryReadable` follows each move.
 - `accountbackup_test.go` — backup JSONL parsing edge cases such as large records and optional sections.
@@ -244,3 +252,4 @@ Application **repository layer** over Ent: CRUD, ownership checks, pagination, v
 ## Related documentation
 
 - [Architecture summary](../../docs/ARCHITECTURE_SUMMARY.md) — **Data layer**, **Data Access & Ent**.
+- [ADR 0x036](../../docs/adr/0x036-agent-memory-archive.md) — agents archive memories (inactive, kept, restorable) with an undoable `archive` event.

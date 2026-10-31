@@ -4163,7 +4163,7 @@ paths:
     post:
       summary: Undo a memory merge event
       description: >
-        Reverts one merge log entry. Undoing a fold_live restores the survivor's prior confidence, chain metadata and, when the fold rewrote it, its content and embedding, and returns every absorbed memory to its prior status. Undoing a link withdraws the cross-reference; undoing a legacy create deletes the created survivor.
+        Reverts one merge log entry. Undoing a fold_live restores the survivor's prior confidence, chain metadata and, when the fold rewrote it, its content and embedding, and returns every absorbed memory to its prior status. Undoing a link withdraws the cross-reference; undoing a legacy create deletes the created survivor. Undoing an archive restores the memory an agent archived (404 when the user has since deleted it).
       tags: [Memory Management]
       parameters:
         - name: id
@@ -11401,7 +11401,25 @@ components:
         status:
           type: string
           enum: [active, inactive]
-          description: Lifecycle status (inactive rows are retired merge sources)
+          description: Lifecycle status (inactive rows are archived by the user, retired merge sources, or archived by an agent; see archived_at)
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            Set while an agent's archive_memory archive stands (ADR 0x036). The memory is then
+            inactive and kept. Setting the memory active again (PATCH status, the Archived view's
+            Unarchive) restores it, clears these fields and closes its archive event.
+        archived_by_personality_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: The personality of the conversation that archived the memory, if it had one.
+        archived_by_chat_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: The conversation that archived the memory.
         provenance:
           $ref: '#/components/schemas/MemoryProvenance'
         source_speaker:
@@ -12603,11 +12621,13 @@ components:
           format: uuid
         merge_type:
           type: string
-          enum: [create, fold_live, link]
+          enum: [create, fold_live, link, archive]
           description: >
             create = new survivor row from a merge; fold_live = updated an existing live
             memory in place and retired absorbers; link = cross-referenced related-but-distinct
-            memories under a shared link_group_id without deleting or de-indexing any rows.
+            memories under a shared link_group_id without deleting or de-indexing any rows;
+            archive = an agent archived survivor_memory_id with archive_memory (the row is kept,
+            inactive, and restorable; see archival).
         content:
           type: string
         duplicates_folded:
@@ -12625,6 +12645,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/MemoryMergeSourceMember'
+        archival:
+          $ref: '#/components/schemas/MemoryArchival'
         reverted_at:
           type: string
           format: date-time
@@ -12643,6 +12665,25 @@ components:
         - duplicates_folded
         - created_at
         - updated_at
+
+    MemoryArchival:
+      type: object
+      nullable: true
+      description: Set on an archive event (ADR 0x036) — where an agent archived the memory from, and why.
+      properties:
+        personality_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: The personality of the archiving conversation; absent when it had none.
+        chat_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: The conversation that archived the memory.
+        reason:
+          type: string
+          description: The reason the agent gave, if any (at most 500 characters).
 
     MemoryMergeSourceMember:
       type: object

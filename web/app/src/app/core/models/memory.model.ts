@@ -29,6 +29,10 @@ export interface Memory {
   link_group_id?: string | null;
   starred: boolean;
   pinned_personality_id?: string | null;
+  /** Set while an agent's archive_memory archive stands (the memory is then inactive, in the Archived view). */
+  archived_at?: string | null;
+  archived_by_personality_id?: string | null;
+  archived_by_chat_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -135,7 +139,7 @@ export interface MemoryImportResult {
   skipped_missing_personality_count: number;
 }
 
-export type MemoryMergeType = 'create' | 'fold_live' | 'link';
+export type MemoryMergeType = 'create' | 'fold_live' | 'link' | 'archive';
 
 export interface MemoryMergeSourceMember {
   content: string;
@@ -143,6 +147,13 @@ export interface MemoryMergeSourceMember {
   confidence?: 'low' | 'medium' | 'high';
   memory_id?: string | null;
   is_new: boolean;
+}
+
+/** An agent's archive_memory archive (ADR 0x036). */
+export interface MemoryArchival {
+  personality_id?: string | null;
+  chat_id?: string | null;
+  reason?: string;
 }
 
 export interface MemoryMergeEvent {
@@ -156,6 +167,8 @@ export interface MemoryMergeEvent {
   /** The compaction (checkpoint) that produced this merge event, if any. */
   compaction_event_id?: string | null;
   source_members?: MemoryMergeSourceMember[];
+  /** Set for archive events: where an agent archived the memory from, and why. */
+  archival?: MemoryArchival | null;
   reverted_at?: string | null;
   created_at: string;
   updated_at: string;

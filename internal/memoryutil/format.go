@@ -26,6 +26,9 @@ import (
 //   - source=external(…) — the memory was learned from someone outside the account in a public
 //     Discord relay thread (models.MemoryProvenanceExternal): unverified, and attributed to its
 //     speaker when known.
+//   - archived(…) — the memory is inactive: archived by the user, retired by a merge, or archived
+//     by an agent with archive_memory (then with the time, ADR 0x036). Only a fetch by id reaches
+//     an archived memory; it is not recalled until the user restores it.
 func FormatMemoryForContext(mem *models.Memory) string {
 	if mem == nil {
 		return ""
@@ -44,6 +47,11 @@ func FormatMemoryForContext(mem *models.Memory) string {
 	}
 	if mem.Provenance.IsExternal() {
 		meta += " " + ExternalProvenanceNote(mem.SourceSpeaker)
+	}
+	if mem.ArchivedAt != nil {
+		meta += fmt.Sprintf(" archived=%s(by an agent; not in active memory until the user restores it)", mem.ArchivedAt.UTC().Format(time.RFC3339))
+	} else if mem.Status == models.MemoryStatusInactive {
+		meta += " archived(not in active memory until the user restores it)"
 	}
 	return fmt.Sprintf("%s [%s]", mem.Content, meta)
 }
