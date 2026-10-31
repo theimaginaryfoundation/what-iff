@@ -290,6 +290,45 @@ func TestLoadSkillTool_ListsBundleFilesAndLoadsFileRead(t *testing.T) {
 	_ = plain
 }
 
+func TestLoadSkillTool_ScriptsNoteWithoutARunner(t *testing.T) {
+	a, ds, _, userID, chat := newSkillsAgentFixture(t)
+	ctx := context.Background()
+	scripted := createTestSkill(t, ds, userID, models.Ritual{Name: "Scripted", Compatibility: strPtr("needs python")})
+	folder, name, err := datastore.SkillFileFolder(scripted.Slug, "scripts/run.py")
+	require.NoError(t, err)
+	_, err = ds.CreateSkillFile(ctx, userID, scripted.ID, folder, name, "text/x-python", "users/u/skills/s/run.py")
+	require.NoError(t, err)
+
+	chatCtx := &chatContext{userID: userID, chat: chat}
+	a.prepareTurnSkills(ctx, userID, chatCtx, &models.ChatMessage{ChatID: chat.ID})
+	chatCtx.setOfferedTools(gatedOffered(agenttools.LoadSkillToolSpec.Name))
+
+	prev := skillScriptsRunnableForChat
+	t.Cleanup(func() { skillScriptsRunnableForChat = prev })
+	skillScriptsRunnableForChat = nil
+	out, err := a.loadSkillTool(ctx, chatCtx, []byte(`{"skills":["scripted"]}`))
+	require.NoError(t, err)
+	var res skillLifecycleResult
+	require.NoError(t, json.Unmarshal([]byte(out), &res))
+	require.Len(t, res.Loaded, 1)
+	require.Equal(t, skillScriptsNote, res.Loaded[0].Note)
+	require.Equal(t, "needs python", res.Loaded[0].Compatibility)
+
+	// A build that runs scripts says nothing.
+	_, err = a.unloadSkillTool(ctx, chatCtx, []byte(`{"skills":["scripted"]}`))
+	require.NoError(t, err)
+	skillScriptsRunnableForChat = func(*Agent, *models.Chat) bool { return true }
+	out, err = a.loadSkillTool(ctx, chatCtx, []byte(`{"skills":["scripted"]}`))
+	require.NoError(t, err)
+	res = skillLifecycleResult{}
+	require.NoError(t, json.Unmarshal([]byte(out), &res))
+	require.Empty(t, res.Loaded[0].Note)
+
+	// Tool handlers see the turn's chat context.
+	require.Nil(t, turnChatContextFrom(ctx))
+	require.Same(t, chatCtx, turnChatContextFrom(withTurnChatContext(ctx, chatCtx)))
+}
+
 func TestSkillSlugsFromFileReadInputs(t *testing.T) {
 	require.Equal(t, []string{"pdf-forms", "notes"}, skillSlugsFromFileReadInputs([]string{
 		`{"file":"skills/pdf-forms/references/FORMS.md"}`,

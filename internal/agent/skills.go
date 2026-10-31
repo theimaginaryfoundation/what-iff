@@ -334,6 +334,34 @@ func shortenDescription(desc string, limit int) string {
 	return strings.TrimRight(string(runes[:limit-1]), " ,;:") + "…"
 }
 
+// --- seams for builds that run skill scripts -------------------------------------------------
+
+// turnChatContextKey carries the turn's chatContext on the context tool handlers receive, so a
+// tool contributed through extraToolHandlersForChat (a build's shell_exec, say) can read the turn's
+// active skills and hydrate their bundles (ADR 0x035 §5).
+type turnChatContextKey struct{}
+
+func withTurnChatContext(ctx context.Context, chatCtx *chatContext) context.Context {
+	if chatCtx == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, turnChatContextKey{}, chatCtx)
+}
+
+// turnChatContextFrom returns the turn's chatContext, or nil outside a tool dispatch.
+func turnChatContextFrom(ctx context.Context) *chatContext {
+	c, _ := ctx.Value(turnChatContextKey{}).(*chatContext)
+	return c
+}
+
+// skillScriptsRunnableForChat, when set, says whether this build can run a skill's scripts for the
+// chat (a build with a per-conversation container sets it). Nil means no: load_skill then tells the
+// model that a skill's scripts cannot run here.
+var skillScriptsRunnableForChat func(a *Agent, chat *models.Chat) bool
+
+// skillScriptsNote is what load_skill says about scripts in a build that cannot run them.
+const skillScriptsNote = "Scripts in this skill cannot run in this deployment; follow the instructions by other means and tell the user what the skill expected."
+
 // --- load_skill / unload_skill ---------------------------------------------------------------
 
 type skillLifecycleArgs struct {
@@ -355,6 +383,8 @@ type loadedSkillResult struct {
 	// Resources are the bundle's files (reference documents, scripts, assets) by path; read text
 	// ones with agent_file_read. Nothing here is in context until read.
 	Resources []string `json:"resources,omitempty"`
+	// Note is set when the deployment cannot run the skill's scripts.
+	Note string `json:"note,omitempty"`
 }
 
 // skillConnectorInventory is a skill connector's tool inventory, the list(kind="mcp_servers")
@@ -477,6 +507,9 @@ func (a *Agent) loadSkillTool(ctx context.Context, chatCtx *chatContext, input [
 		}
 		item.Connectors = a.skillConnectorInventories(ctx, chatCtx, r)
 		item.Resources = a.skillResourcePaths(ctx, chatCtx, r)
+		if hasScripts(item.Resources) && (skillScriptsRunnableForChat == nil || !skillScriptsRunnableForChat(a, chatCtx.chat)) {
+			item.Note = skillScriptsNote
+		}
 		allowed := r.AllowedToolList()
 		if len(item.Resources) > 0 {
 			// References can be read without a second load_tools round trip (ADR 0x035 §2).
@@ -496,6 +529,16 @@ func (a *Agent) loadSkillTool(ctx context.Context, chatCtx *chatContext, input [
 		res.Note += fmt.Sprintf(" Ignored slugs that are not loadable skills here: %s.", strings.Join(res.Unknown, ", "))
 	}
 	return marshalSkillLifecycleResult(res)
+}
+
+// hasScripts reports whether any bundle path sits under a scripts/ directory.
+func hasScripts(paths []string) bool {
+	for _, p := range paths {
+		if strings.Contains(p, "/scripts/") {
+			return true
+		}
+	}
+	return false
 }
 
 // skillResourcePaths lists the skill's bundle files by their gallery paths (skills/<slug>/…).
